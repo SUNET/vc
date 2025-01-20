@@ -90,6 +90,8 @@ func (c *Client) VerifyCredential(ctx context.Context, request *Credential) (*Ve
 		return c.createInvalidReply(MsgNoCredentialProvided, errors.New(MsgNoCredentialProvided))
 	}
 
+	//TODO: impl verify for openid4vp here...
+
 	jwtHeader, err := extractAndDecodeJWTHeader(request.Credential)
 	if err != nil {
 		return c.createInvalidReply(MsgNotAJwt, err)
