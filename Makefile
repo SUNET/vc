@@ -111,6 +111,7 @@ DOCKER_TAG_MOCKAS 		:= docker.sunet.se/dc4eu/mockas:$(VERSION)
 DOCKER_TAG_ISSUER 		:= docker.sunet.se/dc4eu/issuer:$(VERSION)
 DOCKER_TAG_UI 			:= docker.sunet.se/dc4eu/ui:$(VERSION)
 DOCKER_TAG_WALLET 		:= docker.sunet.se/dc4eu/wallet:$(VERSION)
+DOCKER_TAG_DEV_SP 		:= docker.sunet.se/dc4eu/dev-sp:$(VERSION)
 
 
 build: proto build-verifier build-registry build-persistent build-mockas build-apigw build-ui build-vc20-test-server
@@ -189,7 +190,7 @@ test-all-tags:
 	$(info Testing with all build tags)
 	go test -tags "saml,oidcrp,vc20,pkcs11" -v ./...
 
-docker-build: docker-build-verifier docker-build-registry docker-build-persistent docker-build-mockas docker-build-apigw docker-build-issuer docker-build-ui
+docker-build: docker-build-verifier docker-build-registry docker-build-persistent docker-build-mockas docker-build-apigw docker-build-issuer docker-build-ui docker-build-dev-sp
 
 docker-build-gobuild:
 	$(info Docker Building gobuild with tag: $(VERSION))
@@ -226,6 +227,10 @@ docker-build-ui:
 docker-build-wallet:
 	$(info Docker building wallet with tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=wallet --tag $(DOCKER_TAG_WALLET) --file dockerfiles/worker .
+
+docker-build-dev-sp:
+	$(info Docker building dev-sp with tag: $(VERSION))
+	docker build --tag $(DOCKER_TAG_DEV_SP) --file dockerfiles/dev_sp .
 
 # Docker build targets with build tags
 # Usage: make docker-build-apigw-saml VERSION=1.0.0
@@ -284,7 +289,11 @@ docker-push-ui:
 	$(info Pushing docker images)
 	docker push $(DOCKER_TAG_UI)
 
-docker-push: docker-push-verifier docker-push-registry docker-push-persistent docker-push-apigw docker-push-issuer docker-push-ui docker-push-mockas
+docker-push-dev-sp:
+	$(info Pushing docker images)
+	docker push $(DOCKER_TAG_DEV_SP)
+
+docker-push: docker-push-verifier docker-push-registry docker-push-persistent docker-push-apigw docker-push-issuer docker-push-ui docker-push-mockas docker-push-dev-sp
 	$(info Pushing docker images)
 
 docker-tag-apigw:

@@ -278,6 +278,17 @@ services:
 #      vc-dev-net:
 #        ipv4_address: 172.16.50.70
 
+  dev-sp:
+    container_name: "vc_dev_sp"
+    hostname: "dev-sp.vc.docker"
+    image: docker.sunet.se/dc4eu/dev-sp:latest
+    restart: always
+    networks:
+      vc-dev-net:
+        ipv4_address: 172.16.50.80
+    ports:
+      - "777:80"
+
 networks:
   vc-dev-net:
     driver: bridge
