@@ -1,6 +1,6 @@
 # VC
 
-Since 2026-01-22 this repository is archived, please use <https://github.com/SUNET/vc> instead.
+TEST
 
 This repository consists of the source code for the VC EU project, but also tools and make targets that's making sense for developers, please do not use for anything else.
 
