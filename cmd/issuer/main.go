@@ -32,6 +32,10 @@ func main() {
 		panic(err)
 	}
 
+	if cfg.Issuer == nil {
+		panic("issuer configuration is required but not found in config file")
+	}
+
 	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
 	if err != nil {
 		panic(err)
