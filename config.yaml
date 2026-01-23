@@ -223,6 +223,12 @@ apigw:
   identifier: "SUNET_v1"
   api_server:
     addr: :8080
+    cors:
+      allowed_origins:
+        - "https://dc4eu.wwwallet.org"
+        - "https://demo.wwwallet.org"
+        - "https://dev.wallet.sunet.se"
+        - "https://sunetwallet-dev.app.siros.org"
     basic_auth:
     enabled: false
     users:

@@ -109,13 +109,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRoot.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"https://dc4eu.wwwallet.org", "https://demo.wwwallet.org", "https://dev.wallet.sunet.se", "https://sunetwallet-dev.app.siros.org/"},
+	// Configure CORS from config
+	corsConfig := cors.Config{
+		AllowOrigins:     s.cfg.APIGW.APIServer.CORS.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
-	}))
+	}
+
+	rgRoot.Use(cors.New(corsConfig))
 
 	rgRestricted, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
 	if err != nil {
