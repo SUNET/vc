@@ -84,18 +84,17 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	go c.ephemeralEncryptionKeyCache.Start()
 	go c.requestObjectCache.Start()
 
-	if c.cfg.Verifier.OAuthServer.Metadata.Path != "" {
-		c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.LoadOAuth2Metadata(ctx)
-		if err != nil {
-			return nil, err
-		}
+	// Load or generate OAuth2 metadata from configuration
+	// If Metadata.Path is empty, metadata will be generated at runtime
+	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.Metadata.LoadAndSign(ctx, c.cfg.Verifier.ExternalServerURL, c.cfg.Verifier.OAuthServer.TokenEndpoint)
+	if err != nil {
+		return nil, err
 	}
 
-	if c.cfg.Verifier.IssuerMetadata.Path != "" {
-		_, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.Verifier.IssuerMetadata.LoadAndSign(ctx)
-		if err != nil {
-			return nil, err
-		}
+	// Generate issuer metadata at runtime
+	_, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.Verifier.IssuerMetadata.LoadAndSign(ctx, c.cfg.Verifier.ExternalServerURL, cfg.CredentialConstructor)
+	if err != nil {
+		return nil, err
 	}
 
 	// Load OIDC signing key if configured
@@ -131,8 +130,8 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 
 // loadOIDCSigningKey loads the OIDC signing key from the configured path
 func (c *Client) loadOIDCSigningKey() error {
-	// Check if VerifierProxy config exists and has OIDC settings
-	keyPath := c.cfg.VerifierProxy.OIDC.SigningKeyPath
+	// Check if OIDC config exists
+	keyPath := c.cfg.Verifier.OIDC.SigningKeyPath
 	if keyPath == "" {
 		return fmt.Errorf("oidc signing_key_path not configured")
 	}
@@ -162,7 +161,7 @@ func (c *Client) loadOIDCSigningKey() error {
 	}
 
 	c.oidcSigningKey = privateKey
-	c.oidcSigningAlg = c.cfg.VerifierProxy.OIDC.SigningAlg
+	c.oidcSigningAlg = c.cfg.Verifier.OIDC.SigningAlg
 	if c.oidcSigningAlg == "" {
 		c.oidcSigningAlg = "RS256"
 	}
@@ -172,7 +171,7 @@ func (c *Client) loadOIDCSigningKey() error {
 // loadPresentationTemplates loads presentation request templates from configured directory
 func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Check if templates directory is configured
-	templatesDir := c.cfg.VerifierProxy.OpenID4VP.PresentationRequestsDir
+	templatesDir := c.cfg.Verifier.OpenID4VP.PresentationRequestsDir
 	if templatesDir == "" {
 		c.log.Info("Presentation requests directory not configured, using legacy scope mapping")
 		return nil
@@ -225,19 +224,19 @@ func (c *Client) generateRefreshToken() string {
 // generateSubjectIdentifier creates a subject identifier for the user
 // This can be either public (same across all RPs) or pairwise (different per RP)
 func (c *Client) generateSubjectIdentifier(walletID string, clientID string) string {
-	subjectType := c.cfg.VerifierProxy.OIDC.SubjectType
+	subjectType := c.cfg.Verifier.OIDC.SubjectType
 
 	switch subjectType {
 	case "pairwise":
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(clientID))
-		hash.Write([]byte(c.cfg.VerifierProxy.OIDC.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	default:
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
-		hash.Write([]byte(c.cfg.VerifierProxy.OIDC.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	}
 }

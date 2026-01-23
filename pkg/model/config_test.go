@@ -482,7 +482,7 @@ func TestLoadFile(t *testing.T) {
 	}
 }
 
-func TestLoadAndSign(t *testing.T) {
+func TestIssuerMetadataLoadAndSign(t *testing.T) {
 	// Setup test PKI files
 	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
 
@@ -493,56 +493,24 @@ func TestLoadAndSign(t *testing.T) {
 		errContains string
 	}{
 		{
-			name: "Valid JSON metadata with valid RSA keys and chain",
+			name: "Valid runtime generation with RSA keys and chain",
 			metadata: IssuerMetadata{
-				Path:             "./testdata/test_issuer_metadata.json",
 				SigningKeyPath:   rsaKeyPath,
 				SigningChainPath: rsaCertPath,
 			},
 			wantErr: false,
 		},
 		{
-			name: "Valid YAML metadata with valid RSA keys and chain",
+			name: "Valid runtime generation with EC keys and chain",
 			metadata: IssuerMetadata{
-				Path:             "./testdata/test_issuer_metadata.yaml",
-				SigningKeyPath:   rsaKeyPath,
-				SigningChainPath: rsaCertPath,
-			},
-			wantErr: false,
-		},
-		{
-			name: "Valid JSON metadata with valid EC keys and chain",
-			metadata: IssuerMetadata{
-				Path:             "./testdata/test_issuer_metadata.json",
 				SigningKeyPath:   ecKeyPath,
 				SigningChainPath: ecCertPath,
 			},
 			wantErr: false,
 		},
 		{
-			name: "Metadata file does not exist",
-			metadata: IssuerMetadata{
-				Path:             "./testdata/nonexistent.json",
-				SigningKeyPath:   rsaKeyPath,
-				SigningChainPath: rsaCertPath,
-			},
-			wantErr:     true,
-			errContains: "no such file or directory",
-		},
-		{
-			name: "Unsupported file type",
-			metadata: IssuerMetadata{
-				Path:             "./testdata/invalid_metadata.txt",
-				SigningKeyPath:   rsaKeyPath,
-				SigningChainPath: rsaCertPath,
-			},
-			wantErr:     true,
-			errContains: "unsupported file type",
-		},
-		{
 			name: "Signing key file does not exist",
 			metadata: IssuerMetadata{
-				Path:             "./testdata/test_issuer_metadata.json",
 				SigningKeyPath:   "./testdata/nonexistent.pem",
 				SigningChainPath: rsaCertPath,
 			},
@@ -552,7 +520,6 @@ func TestLoadAndSign(t *testing.T) {
 		{
 			name: "Certificate chain file does not exist",
 			metadata: IssuerMetadata{
-				Path:             "./testdata/test_issuer_metadata.json",
 				SigningKeyPath:   rsaKeyPath,
 				SigningChainPath: "./testdata/nonexistent.crt",
 			},
@@ -564,7 +531,7 @@ func TestLoadAndSign(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx)
+			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx, "https://issuer.example.com", nil)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -581,82 +548,57 @@ func TestLoadAndSign(t *testing.T) {
 				assert.NotNil(t, privateKey)
 				assert.NotNil(t, cert)
 				assert.NotEmpty(t, chain)
-				assert.Equal(t, "", metadata.SignedMetadata, "SignedMetadata should be empty")
+				assert.NotEmpty(t, metadata.SignedMetadata, "SignedMetadata should be populated with signed JWT")
 			}
 		})
 	}
 }
 
-func TestLoadOAuth2Metadata(t *testing.T) {
+func TestOAuthServerLoadAndSign(t *testing.T) {
 	// Setup test PKI files
 	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	tests := []struct {
 		name        string
 		server      OAuthServer
+		issuerURL   string
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name: "Valid JSON metadata with valid RSA keys and chain",
+			name: "Runtime-generated metadata with RSA keys",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					Path:             "./testdata/test_oauth2_metadata.json",
 					SigningKeyPath:   rsaKeyPath,
 					SigningChainPath: rsaCertPath,
 				},
 			},
-			wantErr: false,
+			issuerURL: "https://test.oauth.example.com",
+			wantErr:   false,
 		},
 		{
-			name: "Valid JSON metadata with valid EC keys and chain",
+			name: "Runtime-generated metadata with EC keys",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					Path:             "./testdata/test_oauth2_metadata.json",
 					SigningKeyPath:   ecKeyPath,
 					SigningChainPath: ecCertPath,
 				},
 			},
-			wantErr: false,
-		},
-		{
-			name: "Metadata file does not exist",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-				Metadata: OAuthMetadata{
-					Path:             "./testdata/nonexistent.json",
-					SigningKeyPath:   rsaKeyPath,
-					SigningChainPath: rsaCertPath,
-				},
-			},
-			wantErr:     true,
-			errContains: "no such file or directory",
-		},
-		{
-			name: "Unsupported file type",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-				Metadata: OAuthMetadata{
-					Path:             "./testdata/invalid_metadata.txt",
-					SigningKeyPath:   rsaKeyPath,
-					SigningChainPath: rsaCertPath,
-				},
-			},
-			wantErr:     true,
-			errContains: "unsupported file type",
+			issuerURL: "https://test.oauth.example.com",
+			wantErr:   false,
 		},
 		{
 			name: "Signing key file does not exist",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					Path:             "./testdata/test_oauth2_metadata.json",
 					SigningKeyPath:   "./testdata/nonexistent.pem",
 					SigningChainPath: rsaCertPath,
 				},
 			},
+			issuerURL:   "https://test.oauth.example.com",
 			wantErr:     true,
 			errContains: "no such file or directory",
 		},
@@ -665,11 +607,11 @@ func TestLoadOAuth2Metadata(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					Path:             "./testdata/test_oauth2_metadata.json",
 					SigningKeyPath:   rsaKeyPath,
 					SigningChainPath: "./testdata/nonexistent.crt",
 				},
 			},
+			issuerURL:   "https://test.oauth.example.com",
 			wantErr:     true,
 			errContains: "no such file or directory",
 		},
@@ -678,7 +620,7 @@ func TestLoadOAuth2Metadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			metadata, privateKey, chain, err := tt.server.LoadOAuth2Metadata(ctx)
+			metadata, privateKey, chain, err := tt.server.Metadata.LoadAndSign(ctx, tt.issuerURL, tt.server.TokenEndpoint)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -693,7 +635,12 @@ func TestLoadOAuth2Metadata(t *testing.T) {
 				assert.NotNil(t, metadata)
 				assert.NotNil(t, privateKey)
 				assert.NotEmpty(t, chain)
-				assert.Equal(t, "", metadata.SignedMetadata, "SignedMetadata should be empty")
+				assert.NotEmpty(t, metadata.SignedMetadata, "SignedMetadata should be populated after signing")
+				// Verify metadata has expected fields
+				assert.NotEmpty(t, metadata.Issuer)
+				assert.Equal(t, tt.issuerURL, metadata.Issuer)
+				assert.NotEmpty(t, metadata.AuthorizationEndpoint)
+				assert.NotEmpty(t, metadata.TokenEndpoint)
 			}
 		})
 	}

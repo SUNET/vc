@@ -20,42 +20,52 @@ credential_constructor:
     vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
     auth_method: basic
     vct: "urn:eudi:pid:arf-1.5:1"
+    format: "vc+sd-jwt"
   pid_1_8:
     vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
     auth_method: basic
     vct: "urn:eudi:pid:arf-1.8:1"
+    format: "vc+sd-jwt"
   ehic:
     vct: "urn:eudi:ehic:1"
     vctm_file_path: "/metadata/vctm_ehic.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   pda1:
     vct: "urn:eudi:pda1:1"
     vctm_file_path: "/metadata/vctm_pda1.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   elm:
     vct: "urn:eudi:elm:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   diploma:
     vct: "urn:eudi:diploma:1"
     vctm_file_path: "/metadata/vctm_diploma.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   micro_credential:
     vct: "urn:eudi:micro_credential:1"
     vctm_file_path: "/metadata/vctm_microcredential.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   openbadge_complete:
     vct: "urn:eudi:openbadge_complete:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   openbadge_basic:
     vct: "urn:eudi:openbadge_basic:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
   openbadge_endorsements:
     vct: "urn:eudi:openbadge_endorsements:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "vc+sd-jwt"
 
 kafka:
   enabled: false
@@ -134,7 +144,6 @@ verifier:
   oauth_server:
     token_endpoint: "http://verifier.vc.docker:8080/token"
     metadata:
-      path: /metadata/oauth2_metadata.json
       signing_key_path: "/pki/signing_ec_private.pem"
       signing_chain_path: "/pki/signing_ec_chain.pem"
     clients:
@@ -147,19 +156,12 @@ verifier:
           - "ehic"
           - "pda1"
           - "elm"
-
-verifier_proxy:
-  api_server:
-    addr: :8080
-    tls:
-      enabled: false
-  external_url: "http://verifier_proxy.vc.docker:8080"
   oidc:
     # OIDC Provider identifier (issuer of ID tokens and access tokens)
-    # This identifies the verifier-proxy as an OpenID Provider
+    # This identifies the verifier as an OpenID Provider
     # NOT related to verifiable credential issuance (see cmd/issuer/)
     # Must match the 'iss' claim in ID tokens sent to relying parties
-    issuer: "http://verifier_proxy.vc.docker:8080"
+    issuer: "http://verifier.vc.docker:8080"
     signing_key_path: "/pki/signing_rsa_private.pem"
     signing_alg: "RS256"                 # Signing algorithm for ID tokens (RS256, RS384, RS512, ES256, ES384, ES512)
     session_duration: 900                # Session duration in seconds (15 minutes)
@@ -263,7 +265,6 @@ apigw:
   oauth_server:
     token_endpoint: "http://apigw.vc.docker:8080/token"
     metadata:
-      path: /metadata/oauth2_metadata.json
       signing_key_path: "/pki/signing_ec_private.pem"
       signing_chain_path: "/pki/signing_ec_chain.pem"
     clients:
@@ -277,9 +278,43 @@ apigw:
           - "pda1"
           - "elm"
   issuer_metadata:
-    path: "/metadata/issuer_metadata.json"
     signing_key_path: "/pki/signing_ec_private.pem"
     signing_chain_path: "/pki/signing_ec_chain.pem"
+    # Optional: Authorization servers (if different from credential issuer)
+    # authorization_servers:
+    #   - "https://oauth.example.com"
+    # Optional: Additional endpoints
+    # deferred_credential_endpoint: "http://apigw.vc.docker:8080/deferred"
+    # notification_endpoint: "http://apigw.vc.docker:8080/notification"
+    # Optional: Cryptographic binding methods (defaults to ["jwk"])
+    # cryptographic_binding_methods_supported:
+    #   - "jwk"
+    #   - "did:key"
+    # Optional: Credential signing algorithms (defaults to ["ES256", "ES384"])
+    # credential_signing_alg_values_supported:
+    #   - "ES256"
+    #   - "ES384"
+    #   - "ES512"
+    # Optional: Proof signing algorithms (defaults to ["ES256", "ES384", "ES512"])
+    # proof_signing_alg_values_supported:
+    #   - "ES256"
+    #   - "ES384"
+    #   - "ES512"
+    # Optional: Credential response encryption
+    # credential_response_encryption:
+    #   alg_values_supported: ["ECDH-ES", "ECDH-ES+A128KW"]
+    #   enc_values_supported: ["A256GCM", "A128GCM"]
+    #   encryption_required: false
+    # Optional: Batch credential issuance
+    # batch_credential_issuance:
+    #   batch_size: 10
+    # Optional: Issuer display information
+    # display:
+    #   - name: "SUNET Credential Issuer"
+    #     locale: "en-US"
+    #     logo:
+    #       uri: "http://apigw.vc.docker:8080/logo.png"
+    #       alt_text: "SUNET Logo"
   # OIDC Relying Party configuration for issuing credentials via external OIDC Providers
   # Requires building with -tags oidcrp
   oidcrp:
