@@ -18,7 +18,7 @@ func (s *Service) SendWebHook(ctx context.Context, inData any) error {
 		return err
 	}
 
-	as, ok := s.cfg.AuthenticSources["SUNET_v1"]
+	as, ok := s.cfg.AuthenticSources[s.cfg.Issuer.Identifier]
 	if !ok {
 		return errors.New("authentic source not found")
 	}
