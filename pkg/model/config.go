@@ -24,6 +24,12 @@ type APIServer struct {
 	PublicKeys   map[string]string `yaml:"public_keys"`
 	TLS          TLS               `yaml:"tls" validate:"omitempty"`
 	BasicAuth    BasicAuth         `yaml:"basic_auth"`
+	CORS         *CORS             `yaml:"cors,omitempty" validate:"omitempty"`
+}
+
+// CORS holds the CORS configuration
+type CORS struct {
+	AllowedOrigins []string `yaml:"allowed_origins" validate:"omitempty"`
 }
 
 // TLS holds the tls configuration
