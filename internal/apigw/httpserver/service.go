@@ -109,16 +109,17 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	// Configure CORS from config
-	corsConfig := cors.Config{
-		AllowOrigins:     s.cfg.APIGW.APIServer.CORS.AllowedOrigins,
-		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-		AllowHeaders:     []string{"Content-Type", "Authorization"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
+	// Configure CORS from config if present and has origins
+	if s.cfg.APIGW.APIServer.CORS != nil && len(s.cfg.APIGW.APIServer.CORS.AllowedOrigins) > 0 {
+		corsConfig := cors.Config{
+			AllowOrigins:     s.cfg.APIGW.APIServer.CORS.AllowedOrigins,
+			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+			AllowHeaders:     []string{"Content-Type", "Authorization"},
+			AllowCredentials: true,
+			MaxAge:           12 * time.Hour,
+		}
+		rgRoot.Use(cors.New(corsConfig))
 	}
-
-	rgRoot.Use(cors.New(corsConfig))
 
 	rgRestricted, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
 	if err != nil {

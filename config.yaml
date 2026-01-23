@@ -230,9 +230,9 @@ apigw:
         - "https://dev.wallet.sunet.se"
         - "https://sunetwallet-dev.app.siros.org"
     basic_auth:
-    enabled: false
-    users:
-      admin: "secret123"
+      enabled: false
+      users:
+        admin: "secret123"
   external_server_url: "http://apigw.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
