@@ -20,52 +20,52 @@ credential_constructor:
     vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
     auth_method: basic
     vct: "urn:eudi:pid:arf-1.5:1"
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   pid_1_8:
     vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
     auth_method: basic
     vct: "urn:eudi:pid:arf-1.8:1"
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   ehic:
     vct: "urn:eudi:ehic:1"
     vctm_file_path: "/metadata/vctm_ehic.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   pda1:
     vct: "urn:eudi:pda1:1"
     vctm_file_path: "/metadata/vctm_pda1.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   elm:
     vct: "urn:eudi:elm:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   diploma:
     vct: "urn:eudi:diploma:1"
     vctm_file_path: "/metadata/vctm_diploma.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   micro_credential:
     vct: "urn:eudi:micro_credential:1"
     vctm_file_path: "/metadata/vctm_microcredential.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   openbadge_complete:
     vct: "urn:eudi:openbadge_complete:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   openbadge_basic:
     vct: "urn:eudi:openbadge_basic:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
   openbadge_endorsements:
     vct: "urn:eudi:openbadge_endorsements:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
-    format: "vc+sd-jwt"
+    format: "dc+sd-jwt"
 
 kafka:
   enabled: false

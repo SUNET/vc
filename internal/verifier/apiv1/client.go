@@ -85,7 +85,6 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	go c.requestObjectCache.Start()
 
 	// Load or generate OAuth2 metadata from configuration
-	// If Metadata.Path is empty, metadata will be generated at runtime
 	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.Metadata.LoadAndSign(ctx, c.cfg.Verifier.ExternalServerURL, c.cfg.Verifier.OAuthServer.TokenEndpoint)
 	if err != nil {
 		return nil, err
