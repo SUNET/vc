@@ -1,6 +1,6 @@
 //go:build !pkcs11
 
-package signing
+package pki
 
 import (
 	"context"

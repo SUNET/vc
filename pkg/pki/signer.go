@@ -1,6 +1,6 @@
-// Package signing provides interfaces and implementations for cryptographic signing operations.
+// Package pki provides interfaces and implementations for cryptographic signing operations.
 // It supports multiple backends including software keys and PKCS#11 hardware security modules.
-package signing
+package pki
 
 import "context"
 

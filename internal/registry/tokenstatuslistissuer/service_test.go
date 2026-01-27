@@ -25,6 +25,7 @@ import (
 	"vc/internal/registry/db"
 	"vc/pkg/logger"
 	"vc/pkg/model"
+	"vc/pkg/pki"
 	"vc/pkg/tokenstatuslist"
 	"vc/pkg/trace"
 )
@@ -146,8 +147,10 @@ func (s *testSuite) initializeConfiguration() {
 		Registry: &model.Registry{
 			ExternalServerURL: "https://registry.example.com",
 			TokenStatusLists: model.TokenStatusLists{
-				SigningKeyPath:       s.keyPath,
-				TokenRefreshInterval: 600,   // 10 minutes for testing (must be > 5 min buffer)
+				KeyConfig: pki.KeyConfig{
+					PrivateKeyPath: s.keyPath,
+				},
+				TokenRefreshInterval: 600, // 10 minutes for testing (must be > 5 min buffer)
 				SectionSize:          10000, // Use smaller section size for faster tests
 			},
 		},
@@ -261,7 +264,7 @@ func TestNew_Success(t *testing.T) {
 	// Verify service is properly initialized
 	assert.NotNil(t, service.jwtCache)
 	assert.NotNil(t, service.cwtCache)
-	assert.NotNil(t, service.signingKey)
+	assert.NotNil(t, service.signer)
 	assert.Equal(t, suite.cfg, service.cfg)
 
 	// Clean up
@@ -274,7 +277,7 @@ func TestNew_InvalidKeyPath(t *testing.T) {
 	defer suite.cleanup()
 
 	// Use invalid key path
-	suite.cfg.Registry.TokenStatusLists.SigningKeyPath = "/nonexistent/path/to/key.pem"
+	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = "/nonexistent/path/to/key.pem"
 
 	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
 	assert.Error(t, err)
@@ -288,7 +291,7 @@ func TestNew_RSAKeyRejected(t *testing.T) {
 
 	// Generate an RSA key (should be rejected - only ECDSA P-256 is supported)
 	rsaKeyPath := generateRSAKeyFile(t)
-	suite.cfg.Registry.TokenStatusLists.SigningKeyPath = rsaKeyPath
+	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = rsaKeyPath
 
 	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
 	assert.Error(t, err)

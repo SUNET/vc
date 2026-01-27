@@ -15,6 +15,7 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
@@ -32,7 +33,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 	rsaPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	assert.NoError(t, err)
 
-	// Write RSA private key to file in PKCS8 format (required by pki.ParseKeyFromFile)
+	// Write RSA private key to file in PKCS8 format
 	rsaKeyPath = filepath.Join(tmpDir, "test_rsa_key.pem")
 	rsaKeyFile, err := os.Create(rsaKeyPath)
 	assert.NoError(t, err)
@@ -495,24 +496,30 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 		{
 			name: "Valid runtime generation with RSA keys and chain",
 			metadata: IssuerMetadata{
-				SigningKeyPath:   rsaKeyPath,
-				SigningChainPath: rsaCertPath,
+				KeyConfig: pki.KeyConfig{
+					PrivateKeyPath:  rsaKeyPath,
+					ChainPath: rsaCertPath,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "Valid runtime generation with EC keys and chain",
 			metadata: IssuerMetadata{
-				SigningKeyPath:   ecKeyPath,
-				SigningChainPath: ecCertPath,
+				KeyConfig: pki.KeyConfig{
+					PrivateKeyPath:  ecKeyPath,
+					ChainPath: ecCertPath,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "Signing key file does not exist",
 			metadata: IssuerMetadata{
-				SigningKeyPath:   "./testdata/nonexistent.pem",
-				SigningChainPath: rsaCertPath,
+				KeyConfig: pki.KeyConfig{
+					PrivateKeyPath:  "./testdata/nonexistent.pem",
+					ChainPath: rsaCertPath,
+				},
 			},
 			wantErr:     true,
 			errContains: "no such file or directory",
@@ -520,8 +527,10 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 		{
 			name: "Certificate chain file does not exist",
 			metadata: IssuerMetadata{
-				SigningKeyPath:   rsaKeyPath,
-				SigningChainPath: "./testdata/nonexistent.crt",
+				KeyConfig: pki.KeyConfig{
+					PrivateKeyPath:  rsaKeyPath,
+					ChainPath: "./testdata/nonexistent.crt",
+				},
 			},
 			wantErr:     true,
 			errContains: "no such file or directory",
@@ -570,8 +579,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					SigningKeyPath:   rsaKeyPath,
-					SigningChainPath: rsaCertPath,
+					KeyConfig: pki.KeyConfig{
+						PrivateKeyPath:  rsaKeyPath,
+						ChainPath: rsaCertPath,
+					},
 				},
 			},
 			issuerURL: "https://test.oauth.example.com",
@@ -582,8 +593,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					SigningKeyPath:   ecKeyPath,
-					SigningChainPath: ecCertPath,
+					KeyConfig: pki.KeyConfig{
+						PrivateKeyPath:  ecKeyPath,
+						ChainPath: ecCertPath,
+					},
 				},
 			},
 			issuerURL: "https://test.oauth.example.com",
@@ -594,8 +607,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					SigningKeyPath:   "./testdata/nonexistent.pem",
-					SigningChainPath: rsaCertPath,
+					KeyConfig: pki.KeyConfig{
+						PrivateKeyPath:  "./testdata/nonexistent.pem",
+						ChainPath: rsaCertPath,
+					},
 				},
 			},
 			issuerURL:   "https://test.oauth.example.com",
@@ -607,8 +622,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					SigningKeyPath:   rsaKeyPath,
-					SigningChainPath: "./testdata/nonexistent.crt",
+					KeyConfig: pki.KeyConfig{
+						PrivateKeyPath:  rsaKeyPath,
+						ChainPath: "./testdata/nonexistent.crt",
+					},
 				},
 			},
 			issuerURL:   "https://test.oauth.example.com",

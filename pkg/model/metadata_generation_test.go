@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,8 +25,10 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 
 	// Setup test configuration matching the reference
 	cfg := &IssuerMetadata{
-		SigningKeyPath:   ecKeyPath,
-		SigningChainPath: ecCertPath,
+		KeyConfig: pki.KeyConfig{
+			PrivateKeyPath:  ecKeyPath,
+			ChainPath: ecCertPath,
+		},
 	}
 
 	// Setup credential constructors

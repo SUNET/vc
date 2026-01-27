@@ -92,7 +92,6 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	}
 
 	// Load or generate OAuth2 metadata from configuration
-	// If Metadata.Path is empty, metadata will be generated at runtime
 	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.Metadata.LoadAndSign(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.OauthServer.TokenEndpoint)
 	if err != nil {
 		return nil, err

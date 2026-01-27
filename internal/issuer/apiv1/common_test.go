@@ -9,7 +9,7 @@ import (
 	"vc/internal/issuer/auditlog"
 	"vc/pkg/logger"
 	"vc/pkg/model"
-	"vc/pkg/signing"
+	"vc/pkg/pki"
 	"vc/pkg/trace"
 
 	"github.com/stretchr/testify/assert"
@@ -89,10 +89,12 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 			},
 		},
 		Issuer: &model.Issuer{
-			APIServer:      model.APIServer{},
-			Identifier:     "",
-			GRPCServer:     model.GRPCServer{},
-			SigningKeyPath: "testdata/signing_test.key",
+			APIServer:  model.APIServer{},
+			Identifier: "",
+			GRPCServer: model.GRPCServer{},
+			KeyConfig: pki.KeyConfig{
+				PrivateKeyPath: "testdata/signing_test.key",
+			},
 			JWTAttribute: model.JWTAttribute{
 				Issuer:                   "https://test-issuer.sunet.se",
 				EnableNotBefore:          false,
@@ -132,7 +134,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		client.privateKey = rsaKey
 		client.publicKey = &rsaKey.PublicKey
 		// Also update the signer to use RSA
-		signer, err := signing.NewSoftwareSigner(rsaKey, "test-rsa-kid")
+	signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
 		assert.NoError(t, err)
 		client.signer = signer
 	}

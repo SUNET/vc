@@ -117,13 +117,19 @@ issuer:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
-  signing_key_path: "/pki/signing_ec_private.pem"
-  #pkcs11:
-  #  module_path: /usr/lib/softhsm/libsofthsm2.so
-  #  slot_id: 0
-  #  pin: "1234"
-  #  key_label: "issuer-key"
-  #  key_id: "issuer-key-1"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+    # For PKCS#11/HSM/PKCS#11, uncomment and configure:
+    # pkcs11:
+    #   module_path: /usr/lib/softhsm/libsofthsm2.so
+    #   slot_id: 0
+    #   pin: "1234"
+    #   key_label: "issuer-key"
+    # Optional: configure fallback and priority
+    # priority: ["hsm", "file"]
+    # enable_hsm: true
+    # enable_file: true
   jwt_attribute:
     issuer: https://issuer.sunet.se
     enable_not_before: true
@@ -144,8 +150,9 @@ verifier:
   oauth_server:
     token_endpoint: "http://verifier.vc.docker:8080/token"
     metadata:
-      signing_key_path: "/pki/signing_ec_private.pem"
-      signing_chain_path: "/pki/signing_ec_chain.pem"
+      key_config:
+        private_key_path: "/pki/signing_ec_private.pem"
+        chain_path: "/pki/signing_ec_chain.pem"
     clients:
       "1003":
         type: "confidential"
@@ -162,7 +169,14 @@ verifier:
     # NOT related to verifiable credential issuance (see cmd/issuer/)
     # Must match the 'iss' claim in ID tokens sent to relying parties
     issuer: "http://verifier.vc.docker:8080"
-    signing_key_path: "/pki/signing_rsa_private.pem"
+    key_config:
+      private_key_path: "/pki/signing_rsa_private.pem"
+      chain_path: "/pki/signing_rsa_chain.pem"
+      # pkcs11:
+      #   module_path: /usr/lib/softhsm/libsofthsm2.so
+      #   slot_id: 0
+      #   pin: "1234"
+      #   key_label: "verifier-oidc-key"
     signing_alg: "RS256"                 # Signing algorithm for ID tokens (RS256, RS384, RS512, ES256, ES384, ES512)
     session_duration: 900                # Session duration in seconds (15 minutes)
     code_duration: 600                   # Authorization code duration in seconds (10 minutes)
@@ -172,6 +186,15 @@ verifier:
     subject_type: "pairwise"
     subject_salt: "change-this-in-production"
   openid4vp:
+    # Signing key for OpenID4VP request objects
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+      # pkcs11:
+      #   module_path: /usr/lib/softhsm/libsofthsm2.so
+      #   slot_id: 0
+      #   pin: "1234"
+      #   key_label: "verifier-vp-key"
     presentation_timeout: 300
     # Template-based presentation requests (optional)
     # When configured, DCQL queries are loaded from YAML templates
@@ -209,7 +232,14 @@ registry:
     #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
   # Token Status Lists configuration per draft-ietf-oauth-status-list
   token_status_lists:
-    signing_key_path: "/pki/signing_ec_private.pem"
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+      # pkcs11:
+      #   module_path: /usr/lib/softhsm/libsofthsm2.so
+      #   slot_id: 0
+      #   pin: "1234"
+      #   key_label: "registry-tsl-key"
   # Admin GUI configuration (optional)
   admin_gui:
     enabled: true
@@ -265,8 +295,14 @@ apigw:
   oauth_server:
     token_endpoint: "http://apigw.vc.docker:8080/token"
     metadata:
-      signing_key_path: "/pki/signing_ec_private.pem"
-      signing_chain_path: "/pki/signing_ec_chain.pem"
+      key_config:
+        private_key_path: "/pki/signing_ec_private.pem"
+        chain_path: "/pki/signing_ec_chain.pem"
+        # pkcs11:
+        #   module_path: /usr/lib/softhsm/libsofthsm2.so
+        #   slot_id: 0
+        #   pin: "1234"
+        #   key_label: "apigw-oauth-key"
     clients:
       "1003":
         type: "confidential"
@@ -278,8 +314,14 @@ apigw:
           - "pda1"
           - "elm"
   issuer_metadata:
-    signing_key_path: "/pki/signing_ec_private.pem"
-    signing_chain_path: "/pki/signing_ec_chain.pem"
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+      # pkcs11:
+      #   module_path: /usr/lib/softhsm/libsofthsm2.so
+      #   slot_id: 0
+      #   pin: "1234"
+      #   key_label: "apigw-issuer-metadata-key"
     # Optional: Authorization servers (if different from credential issuer)
     # authorization_servers:
     #   - "https://oauth.example.com"

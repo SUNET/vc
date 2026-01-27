@@ -2,18 +2,13 @@ package openid4vci
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"crypto/x509"
 	"vc/pkg/pki"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // MetadataConfig holds the configuration parameters needed to generate and sign issuer metadata
 type MetadataConfig struct {
-	SigningKeyPath                       string
-	SigningChainPath                     string
+	KeyConfig                            *pki.KeyConfig
 	CredentialIssuer                     string
 	CredentialEndpoint                   string
 	AuthorizationServers                 []string
@@ -80,40 +75,18 @@ func LoadAndSign(ctx context.Context, cfg *MetadataConfig) (*CredentialIssuerMet
 	// Ensure signed_metadata is empty before signing
 	metadata.SignedMetadata = ""
 
-	// Load signing key
-	privateKey, err := pki.ParseKeyFromFile(cfg.SigningKeyPath)
+	// Use centralized KeyLoader
+	keyLoader := pki.NewKeyLoader()
+	km, err := keyLoader.LoadKeyMaterial(cfg.KeyConfig)
 	if err != nil {
 		return nil, nil, nil, nil, err
-	}
-
-	// Load certificate chain
-	cert, chain, err := pki.ParseX509CertificateFromFile(cfg.SigningChainPath)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	// Encode chain to base64
-	chainBase64Encoded := []string{}
-	for _, c := range chain {
-		chainBase64Encoded = append(chainBase64Encoded, pki.Base64EncodeCertificate(c))
-	}
-
-	// Determine signing method from key type
-	var signingMethod jwt.SigningMethod
-	switch privateKey.(type) {
-	case *ecdsa.PrivateKey:
-		signingMethod = jwt.SigningMethodES256
-	case *rsa.PrivateKey:
-		signingMethod = jwt.SigningMethodRS256
-	default:
-		signingMethod = jwt.SigningMethodRS256
 	}
 
 	// Sign the metadata
-	signedMetadata, err := metadata.Sign(signingMethod, privateKey, chainBase64Encoded)
+	signedMetadata, err := metadata.Sign(km.SigningMethod, km.PrivateKey, km.Chain)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	return signedMetadata, privateKey, cert, chainBase64Encoded, nil
+	return signedMetadata, km.PrivateKey, km.Cert, km.Chain, nil
 }

@@ -1,0 +1,122 @@
+package pki
+
+import (
+	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
+	"fmt"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// KeyMaterialSigner implements the Signer interface using KeyMaterial.
+// It provides a concrete implementation for services that need signing capabilities.
+type KeyMaterialSigner struct {
+	km    *KeyMaterial
+	keyID string
+}
+
+// NewKeyMaterialSigner creates a new Signer from KeyMaterial.
+// The keyID is automatically determined from the certificate if available,
+// or generated from the public key hash.
+func NewKeyMaterialSigner(km *KeyMaterial) *KeyMaterialSigner {
+	keyID := determineKeyID(km)
+	return &KeyMaterialSigner{
+		km:    km,
+		keyID: keyID,
+	}
+}
+
+// Sign signs the provided data using the private key.
+func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, error) {
+	hash := sha256.Sum256(data)
+
+	switch key := s.km.PrivateKey.(type) {
+	case *ecdsa.PrivateKey:
+		return ecdsa.SignASN1(rand.Reader, key, hash[:])
+	case *rsa.PrivateKey:
+		return rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hash[:])
+	default:
+		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
+	}
+}
+
+// Algorithm returns the JWT algorithm name based on the key type.
+func (s *KeyMaterialSigner) Algorithm() string {
+	return s.km.SigningMethod.Alg()
+}
+
+// KeyID returns the key identifier for JWT headers.
+func (s *KeyMaterialSigner) KeyID() string {
+	return s.keyID
+}
+
+// PublicKey returns the public key for verification.
+func (s *KeyMaterialSigner) PublicKey() any {
+	switch key := s.km.PrivateKey.(type) {
+	case *ecdsa.PrivateKey:
+		return key.Public()
+	case *rsa.PrivateKey:
+		return key.Public()
+	default:
+		return nil
+	}
+}
+
+// PrivateKey returns the underlying private key.
+// This is useful when integrating with libraries that need the raw crypto.PrivateKey.
+func (s *KeyMaterialSigner) PrivateKey() crypto.PrivateKey {
+	return s.km.PrivateKey
+}
+
+// determineKeyID extracts or generates a key identifier.
+func determineKeyID(km *KeyMaterial) string {
+	// Use certificate CN if available
+	if km.Cert != nil {
+		return km.Cert.Subject.CommonName
+	}
+
+	// Generate key ID from public key hash
+	var pubKey crypto.PublicKey
+	switch key := km.PrivateKey.(type) {
+	case *ecdsa.PrivateKey:
+		pubKey = key.Public()
+	case *rsa.PrivateKey:
+		pubKey = key.Public()
+	default:
+		return "default-key"
+	}
+
+	pubBytes, err := x509.MarshalPKIXPublicKey(pubKey)
+	if err != nil {
+		return "default-key"
+	}
+
+	hash := sha256.Sum256(pubBytes)
+	return hex.EncodeToString(hash[:8])
+}
+
+// SigningMethod returns the JWT signing method for this key material.
+func (s *KeyMaterialSigner) SigningMethod() jwt.SigningMethod {
+	return s.km.SigningMethod
+}
+
+// GetPrivateKey returns the underlying private key (for legacy compatibility).
+func (s *KeyMaterialSigner) GetPrivateKey() crypto.PrivateKey {
+	return s.km.PrivateKey
+}
+
+// GetCertificate returns the certificate if available.
+func (s *KeyMaterialSigner) GetCertificate() *x509.Certificate {
+	return s.km.Cert
+}
+
+// GetCertificateChain returns the certificate chain if available.
+func (s *KeyMaterialSigner) GetCertificateChain() []string {
+	return s.km.Chain
+}

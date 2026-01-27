@@ -10,6 +10,7 @@ import (
 	"time"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
+	"vc/pkg/pki"
 	"vc/pkg/sdjwtvc"
 )
 
@@ -350,8 +351,7 @@ type Issuer struct {
 	APIServer      APIServer     `yaml:"api_server" validate:"required"`
 	Identifier     string        `yaml:"identifier" validate:"required"`
 	GRPCServer     GRPCServer    `yaml:"grpc_server" validate:"required"`
-	SigningKeyPath string        `yaml:"signing_key_path" validate:"required_without=PKCS11"`
-	PKCS11         *PKCS11       `yaml:"pkcs11" validate:"omitempty"`
+	KeyConfig      pki.KeyConfig `yaml:"key_config" validate:"required"`
 	JWTAttribute   JWTAttribute  `yaml:"jwt_attribute" validate:"required"`
 	IssuerURL      string        `yaml:"issuer_url" validate:"required"`
 	WalletURL      string        `yaml:"wallet_url"`
@@ -420,7 +420,6 @@ type Verifier struct {
 	GRPCServer           GRPCServer                 `yaml:"grpc_server" validate:"required"`
 	ExternalServerURL    string                     `yaml:"external_server_url" validate:"required"`
 	OAuthServer          OAuthServer                `yaml:"oauth_server" validate:"omitempty"`
-	IssuerMetadata       IssuerMetadata             `yaml:"issuer_metadata" validate:"omitempty"`
 	SupportedWallets     map[string]string          `yaml:"supported_wallets" validate:"omitempty"`
 	OIDC                 OIDCConfig                 `yaml:"oidc" validate:"omitempty"`
 	OpenID4VP            OpenID4VPConfig            `yaml:"openid4vp" validate:"omitempty"`
@@ -475,20 +474,20 @@ type OIDCConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier-proxy itself as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
-	Issuer               string `yaml:"issuer" validate:"required"`
-	SigningKeyPath       string `yaml:"signing_key_path" validate:"required"`
-	SigningAlg           string `yaml:"signing_alg" validate:"required,oneof=RS256 RS384 RS512 ES256 ES384 ES512"`
-	SessionDuration      int    `yaml:"session_duration" validate:"required"`       // in seconds
-	CodeDuration         int    `yaml:"code_duration" validate:"required"`          // in seconds
-	AccessTokenDuration  int    `yaml:"access_token_duration" validate:"required"`  // in seconds
-	IDTokenDuration      int    `yaml:"id_token_duration" validate:"required"`      // in seconds
-	RefreshTokenDuration int    `yaml:"refresh_token_duration" validate:"required"` // in seconds
-	SubjectType          string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
-	SubjectSalt          string `yaml:"subject_salt" validate:"required"`
+	Issuer               string        `yaml:"issuer" validate:"required"`
+	KeyConfig            pki.KeyConfig `yaml:"key_config" validate:"required"`
+	SessionDuration      int           `yaml:"session_duration" validate:"required"`       // in seconds
+	CodeDuration         int           `yaml:"code_duration" validate:"required"`          // in seconds
+	AccessTokenDuration  int           `yaml:"access_token_duration" validate:"required"`  // in seconds
+	IDTokenDuration      int           `yaml:"id_token_duration" validate:"required"`      // in seconds
+	RefreshTokenDuration int           `yaml:"refresh_token_duration" validate:"required"` // in seconds
+	SubjectType          string        `yaml:"subject_type" validate:"required,oneof=public pairwise"`
+	SubjectSalt          string        `yaml:"subject_salt" validate:"required"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
+	KeyConfig               pki.KeyConfig               `yaml:"key_config" validate:"required"`
 	PresentationTimeout     int                         `yaml:"presentation_timeout" validate:"required"`
 	SupportedCredentials    []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	PresentationRequestsDir string                      `yaml:"presentation_requests_dir,omitempty"` // Optional: directory with presentation request templates
@@ -592,8 +591,7 @@ type BasicAuth struct {
 }
 
 type IssuerMetadata struct {
-	SigningKeyPath                       string                                           `yaml:"signing_key_path" validate:"required"`
-	SigningChainPath                     string                                           `yaml:"signing_chain_path" validate:"required"`
+	KeyConfig                            pki.KeyConfig                                    `yaml:"key_config" validate:"required"`
 	AuthorizationServers                 []string                                         `yaml:"authorization_servers" validate:"omitempty"`
 	DeferredCredentialEndpoint           string                                           `yaml:"deferred_credential_endpoint" validate:"omitempty"`
 	NotificationEndpoint                 string                                           `yaml:"notification_endpoint" validate:"omitempty"`
@@ -630,8 +628,8 @@ type APIGW struct {
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
 type TokenStatusLists struct {
-	// SigningKeyPath is the path to the ECDSA P-256 private key for signing Token Status List tokens.
-	SigningKeyPath string `yaml:"signing_key_path" validate:"required"`
+	// KeyConfig holds the key configuration for signing Token Status List tokens.
+	KeyConfig pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// TokenRefreshInterval is how often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours)
 	TokenRefreshInterval int64 `yaml:"token_refresh_interval" default:"43200"`
 	// SectionSize is the number of entries (decoys) per section. Default: 1000000 (1 million)
@@ -655,8 +653,7 @@ type OAuthServer struct {
 }
 
 type OAuthMetadata struct {
-	SigningKeyPath   string `yaml:"signing_key_path" validate:"required"`
-	SigningChainPath string `yaml:"signing_chain_path" validate:"required"`
+	KeyConfig pki.KeyConfig `yaml:"key_config" validate:"required"`
 }
 
 // UI holds the user-interface configuration
@@ -840,6 +837,18 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 			credConfig.CryptographicBindingMethodsSupported = []string{"jwk"}
 		}
 
+		// Auto-detect algorithm from key if needed for defaults
+		var detectedAlg string
+		needsAutoDetect := len(cfg.CredentialSigningAlgValuesSupported) == 0 || len(cfg.ProofSigningAlgValuesSupported) == 0
+		if needsAutoDetect {
+			keyLoader := pki.NewKeyLoader()
+			km, err := keyLoader.LoadKeyMaterial(&cfg.KeyConfig)
+			if err == nil {
+				signer := pki.NewKeyMaterialSigner(km)
+				detectedAlg = signer.Algorithm()
+			}
+		}
+
 		// Set credential signing algorithms
 		if len(cfg.CredentialSigningAlgValuesSupported) > 0 {
 			credConfig.CredentialSigningAlgValuesSupported = make([]any, len(cfg.CredentialSigningAlgValuesSupported))
@@ -847,13 +856,23 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 				credConfig.CredentialSigningAlgValuesSupported[i] = alg
 			}
 		} else {
-			credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384"}
+			if detectedAlg != "" {
+				credConfig.CredentialSigningAlgValuesSupported = []any{detectedAlg}
+			} else {
+				// Fallback if key loading fails
+				credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
+			}
 		}
 
 		// Set proof types supported
 		proofAlgs := cfg.ProofSigningAlgValuesSupported
 		if len(proofAlgs) == 0 {
-			proofAlgs = []string{"ES256", "ES384", "ES512"}
+			if detectedAlg != "" {
+				proofAlgs = []string{detectedAlg}
+			} else {
+				// Fallback if key loading fails
+				proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
+			}
 		}
 		credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
 			"jwt": {
@@ -865,8 +884,7 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 	}
 
 	return openid4vci.LoadAndSign(ctx, &openid4vci.MetadataConfig{
-		SigningKeyPath:                       cfg.SigningKeyPath,
-		SigningChainPath:                     cfg.SigningChainPath,
+		KeyConfig:                            &cfg.KeyConfig,
 		CredentialIssuer:                     externalServerURL,
 		CredentialEndpoint:                   externalServerURL + "/credential",
 		AuthorizationServers:                 cfg.AuthorizationServers,
@@ -886,9 +904,8 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 // All generation and signing is delegated to the oauth2 library.
 func (cfg *OAuthMetadata) LoadAndSign(ctx context.Context, issuerURL string, tokenEndpoint string) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
 	return oauth2.GenerateAndSign(&oauth2.MetadataConfig{
-		IssuerURL:        issuerURL,
-		TokenEndpoint:    tokenEndpoint,
-		SigningKeyPath:   cfg.SigningKeyPath,
-		SigningChainPath: cfg.SigningChainPath,
+		IssuerURL:     issuerURL,
+		TokenEndpoint: tokenEndpoint,
+		KeyConfig:     &cfg.KeyConfig,
 	})
 }

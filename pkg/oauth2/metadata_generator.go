@@ -1,19 +1,14 @@
 package oauth2
 
 import (
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"vc/pkg/pki"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // MetadataConfig holds the configuration parameters needed to generate OAuth2 Authorization Server Metadata
 type MetadataConfig struct {
-	IssuerURL        string
-	TokenEndpoint    string
-	SigningKeyPath   string
-	SigningChainPath string
+	IssuerURL     string
+	TokenEndpoint string
+	KeyConfig     *pki.KeyConfig
 }
 
 // GenerateMetadata creates OAuth2 Authorization Server Metadata from configuration.
@@ -38,40 +33,18 @@ func GenerateAndSign(cfg *MetadataConfig) (*AuthorizationServerMetadata, any, []
 	// Generate metadata
 	metadata := GenerateMetadata(cfg)
 
-	// Load signing key
-	privateKey, err := pki.ParseKeyFromFile(cfg.SigningKeyPath)
+	// Use centralized KeyLoader
+	keyLoader := pki.NewKeyLoader()
+	km, err := keyLoader.LoadKeyMaterial(cfg.KeyConfig)
 	if err != nil {
 		return nil, nil, nil, err
-	}
-
-	// Load certificate chain
-	_, chain, err := pki.ParseX509CertificateFromFile(cfg.SigningChainPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// Encode chain to base64
-	chainBase64Encoded := []string{}
-	for _, c := range chain {
-		chainBase64Encoded = append(chainBase64Encoded, pki.Base64EncodeCertificate(c))
-	}
-
-	// Determine signing method from key type
-	var signingMethod jwt.SigningMethod
-	switch privateKey.(type) {
-	case *ecdsa.PrivateKey:
-		signingMethod = jwt.SigningMethodES256
-	case *rsa.PrivateKey:
-		signingMethod = jwt.SigningMethodRS256
-	default:
-		signingMethod = jwt.SigningMethodRS256
 	}
 
 	// Sign the metadata
-	signedMetadata, err := metadata.Sign(signingMethod, privateKey, chainBase64Encoded)
+	signedMetadata, err := metadata.Sign(km.SigningMethod, km.PrivateKey, km.Chain)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	return signedMetadata, privateKey, chainBase64Encoded, nil
+	return signedMetadata, km.PrivateKey, km.Chain, nil
 }

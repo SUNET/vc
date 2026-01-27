@@ -6,6 +6,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	"vc/pkg/pki"
 	"vc/pkg/tokenstatuslist"
 )
 
@@ -29,7 +30,7 @@ func (s *Service) GenerateStatusListTokenJWT(ctx context.Context, cfg TokenConfi
 
 	// Generate JWT using tokenstatuslist package
 	jwtCfg := tokenstatuslist.JWTSigningConfig{
-		SigningKey:    s.signingKey,
+		SigningKey:    s.signer.(*pki.KeyMaterialSigner).PrivateKey(),
 		SigningMethod: cfg.SigningMethod,
 	}
 
@@ -48,7 +49,7 @@ func (s *Service) GenerateStatusListTokenCWT(ctx context.Context, cfg TokenConfi
 
 	// Generate CWT using tokenstatuslist package
 	cwtCfg := tokenstatuslist.CWTSigningConfig{
-		SigningKey: s.signingKey,
+		SigningKey: s.signer.(*pki.KeyMaterialSigner).PrivateKey(),
 		Algorithm:  tokenstatuslist.CoseAlgES256,
 	}
 
