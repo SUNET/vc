@@ -150,7 +150,7 @@ func (s *testSuite) initializeConfiguration() {
 				KeyConfig: pki.KeyConfig{
 					PrivateKeyPath: s.keyPath,
 				},
-				TokenRefreshInterval: 600, // 10 minutes for testing (must be > 5 min buffer)
+				TokenRefreshInterval: 600,   // 10 minutes for testing (must be > 5 min buffer)
 				SectionSize:          10000, // Use smaller section size for faster tests
 			},
 		},
@@ -285,18 +285,18 @@ func TestNew_InvalidKeyPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to load Token Status List signing key")
 }
 
-func TestNew_RSAKeyRejected(t *testing.T) {
+func TestNew_RSAKeySupported(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	// Generate an RSA key (should be rejected - only ECDSA P-256 is supported)
+	// Generate an RSA key (should be accepted - both RSA and ECDSA are supported per OAuth Status List spec)
 	rsaKeyPath := generateRSAKeyFile(t)
 	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = rsaKeyPath
 
 	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
-	assert.Error(t, err)
-	assert.Nil(t, service)
-	assert.Contains(t, err.Error(), "not a valid ECDSA private key")
+	require.NoError(t, err)
+	require.NotNil(t, service)
+	assert.Contains(t, service.signer.Algorithm(), "RS") // RS256, RS384, or RS512
 }
 
 func TestNew_DefaultRefreshInterval(t *testing.T) {
