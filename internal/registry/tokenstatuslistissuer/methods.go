@@ -2,6 +2,7 @@ package tokenstatuslistissuer
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -28,9 +29,15 @@ func (s *Service) GenerateStatusListTokenJWT(ctx context.Context, cfg TokenConfi
 	sl.KeyID = cfg.KeyID
 	sl.AggregationURI = cfg.AggregationURI
 
+	// Check that signer is a KeyMaterialSigner
+	kmSigner, ok := s.signer.(*pki.KeyMaterialSigner)
+	if !ok {
+		return "", fmt.Errorf("signer must be a *pki.KeyMaterialSigner, got %T", s.signer)
+	}
+
 	// Generate JWT using tokenstatuslist package
 	jwtCfg := tokenstatuslist.JWTSigningConfig{
-		SigningKey:    s.signer.(*pki.KeyMaterialSigner).PrivateKey(),
+		SigningKey:    kmSigner.PrivateKey(),
 		SigningMethod: cfg.SigningMethod,
 	}
 
@@ -47,9 +54,15 @@ func (s *Service) GenerateStatusListTokenCWT(ctx context.Context, cfg TokenConfi
 	sl.KeyID = cfg.KeyID
 	sl.AggregationURI = cfg.AggregationURI
 
+	// Check that signer is a KeyMaterialSigner
+	kmSigner, ok := s.signer.(*pki.KeyMaterialSigner)
+	if !ok {
+		return nil, fmt.Errorf("signer must be a *pki.KeyMaterialSigner, got %T", s.signer)
+	}
+
 	// Generate CWT using tokenstatuslist package
 	cwtCfg := tokenstatuslist.CWTSigningConfig{
-		SigningKey: s.signer.(*pki.KeyMaterialSigner).PrivateKey(),
+		SigningKey: kmSigner.PrivateKey(),
 		Algorithm:  tokenstatuslist.CoseAlgES256,
 	}
 
