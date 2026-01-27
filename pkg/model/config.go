@@ -778,6 +778,8 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 
 // LoadAndSign generates and signs issuer metadata at runtime from configuration.
 // All generation and signing is delegated to the openid4vci library.
+// Note: The KeyConfig in IssuerMetadata is for signing the metadata JWT itself (APIGW).
+// The credential_signing_alg_values_supported should reflect the Issuer service's capabilities, not APIGW's key.
 func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL string, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
@@ -837,42 +839,24 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 			credConfig.CryptographicBindingMethodsSupported = []string{"jwk"}
 		}
 
-		// Auto-detect algorithm from key if needed for defaults
-		var detectedAlg string
-		needsAutoDetect := len(cfg.CredentialSigningAlgValuesSupported) == 0 || len(cfg.ProofSigningAlgValuesSupported) == 0
-		if needsAutoDetect {
-			keyLoader := pki.NewKeyLoader()
-			km, err := keyLoader.LoadKeyMaterial(&cfg.KeyConfig)
-			if err == nil {
-				signer := pki.NewKeyMaterialSigner(km)
-				detectedAlg = signer.Algorithm()
-			}
-		}
-
-		// Set credential signing algorithms
+		// Set credential signing algorithms from configuration
+		// These must be explicitly configured to match the Issuer service's capabilities
 		if len(cfg.CredentialSigningAlgValuesSupported) > 0 {
 			credConfig.CredentialSigningAlgValuesSupported = make([]any, len(cfg.CredentialSigningAlgValuesSupported))
 			for i, alg := range cfg.CredentialSigningAlgValuesSupported {
 				credConfig.CredentialSigningAlgValuesSupported[i] = alg
 			}
 		} else {
-			if detectedAlg != "" {
-				credConfig.CredentialSigningAlgValuesSupported = []any{detectedAlg}
-			} else {
-				// Fallback if key loading fails
-				credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
-			}
+			// Default to common algorithms if not configured
+			credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
 		}
 
-		// Set proof types supported
+		// Set proof types supported from configuration
+		// These must be explicitly configured to match what the Issuer service accepts
 		proofAlgs := cfg.ProofSigningAlgValuesSupported
 		if len(proofAlgs) == 0 {
-			if detectedAlg != "" {
-				proofAlgs = []string{detectedAlg}
-			} else {
-				// Fallback if key loading fails
-				proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
-			}
+			// Default to common algorithms if not configured
+			proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
 		}
 		credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
 			"jwt": {
