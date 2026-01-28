@@ -25,20 +25,23 @@ func NewSoftwareSigner(privateKey crypto.PrivateKey, keyID string) (*SoftwareSig
 		return nil, err
 	}
 
-	s := &SoftwareSigner{
-		privateKey: privateKey,
-		keyID:      keyID,
-		algorithm:  method.Alg(),
-	}
-
-	// Extract public key
+	// Extract public key before creating the signer
+	var publicKey any
 	switch key := privateKey.(type) {
 	case *rsa.PrivateKey:
-		s.publicKey = &key.PublicKey
+		publicKey = &key.PublicKey
 	case *ecdsa.PrivateKey:
-		s.publicKey = &key.PublicKey
+		publicKey = &key.PublicKey
 	default:
 		return nil, fmt.Errorf("unsupported key type for public key extraction: %T", privateKey)
+	}
+
+	// Create signer only after all validation passes
+	s := &SoftwareSigner{
+		privateKey: privateKey,
+		publicKey:  publicKey,
+		keyID:      keyID,
+		algorithm:  method.Alg(),
 	}
 
 	return s, nil
