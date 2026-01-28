@@ -34,19 +34,23 @@ func NewKeyMaterialSigner(km *KeyMaterial) *KeyMaterialSigner {
 
 // Sign signs the provided data using the private key.
 func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, error) {
-	hash := sha256.Sum256(data)
+	// Use the correct hash algorithm based on the signing method
+	hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
+	h := hash.New()
+	h.Write(data)
+	hashed := h.Sum(nil)
 
 	switch key := s.km.PrivateKey.(type) {
 	case *ecdsa.PrivateKey:
 		// Sign using ECDSA
-		r, s, err := ecdsa.Sign(rand.Reader, key, hash[:])
+		r, sigS, err := ecdsa.Sign(rand.Reader, key, hashed)
 		if err != nil {
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation) as required by JWT RFC 7518
-		return encodeECDSASignature(r, s, key.Curve)
+		return encodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
-		return rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hash[:])
+		return rsa.SignPKCS1v15(rand.Reader, key, hash, hashed)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}

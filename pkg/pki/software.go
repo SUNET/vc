@@ -54,12 +54,12 @@ func (s *SoftwareSigner) Sign(ctx context.Context, data []byte) ([]byte, error) 
 		return rsa.SignPKCS1v15(rand.Reader, key, hash, hashed)
 	case *ecdsa.PrivateKey:
 		// Sign using ECDSA
-		r, s, err := ecdsa.Sign(rand.Reader, key, hashed)
+		r, sigS, err := ecdsa.Sign(rand.Reader, key, hashed)
 		if err != nil {
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation) as required by JWT RFC 7518
-		return encodeECDSASignature(r, s, key.Curve)
+		return encodeECDSASignature(r, sigS, key.Curve)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.privateKey)
 	}
