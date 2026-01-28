@@ -97,13 +97,13 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
-	c.issuerMetadata, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.APIGW.IssuerMetadata.LoadAndSign(ctx, c.cfg.APIGW.ExternalServerURL, cfg.CredentialConstructor)
+	c.issuerMetadata, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.APIGW.IssuerMetadata.LoadAndSign(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.KeyConfig, cfg.CredentialConstructor)
 	if err != nil {
 		return nil, err
 	}
 
 	// Load or generate OAuth2 metadata from configuration
-	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.LoadAndSignMetadata(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.IssuerMetadata.KeyConfig)
+	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.LoadAndSignMetadata(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.KeyConfig)
 	if err != nil {
 		return nil, err
 	}

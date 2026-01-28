@@ -13,10 +13,9 @@ import (
 
 func TestIssuerMetadataLoadAndSign_CustomFormat(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
 
-	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-	}
+	cfg := &IssuerMetadata{}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
@@ -27,7 +26,7 @@ func TestIssuerMetadataLoadAndSign_CustomFormat(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
@@ -42,8 +41,9 @@ func TestIssuerMetadataLoadAndSign_CustomFormat(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	// Test that display must come from VCTM, not from constructor
@@ -57,7 +57,7 @@ func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
@@ -71,8 +71,9 @@ func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	// Mock VCTM with display
@@ -98,7 +99,7 @@ func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
@@ -115,8 +116,9 @@ func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_CustomCryptoBindingMethods(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		CryptographicBindingMethodsSupported: []string{"jwk", "did:key"},
 	}
@@ -129,7 +131,7 @@ func TestIssuerMetadataLoadAndSign_CustomCryptoBindingMethods(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 
@@ -140,8 +142,9 @@ func TestIssuerMetadataLoadAndSign_CustomCryptoBindingMethods(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_CustomSigningAlgorithms(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		CredentialSigningAlgValuesSupported: []string{"ES256", "ES512"},
 	}
@@ -154,7 +157,7 @@ func TestIssuerMetadataLoadAndSign_CustomSigningAlgorithms(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 
@@ -167,8 +170,9 @@ func TestIssuerMetadataLoadAndSign_CustomSigningAlgorithms(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_CustomProofAlgorithms(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		ProofSigningAlgValuesSupported: []string{"ES256", "RS256"},
 	}
@@ -181,7 +185,7 @@ func TestIssuerMetadataLoadAndSign_CustomProofAlgorithms(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 
@@ -193,8 +197,9 @@ func TestIssuerMetadataLoadAndSign_CustomProofAlgorithms(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_OptionalEndpoints(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		AuthorizationServers:       []string{"https://oauth.example.com"},
 		DeferredCredentialEndpoint: "https://issuer.example.com/deferred",
@@ -209,7 +214,7 @@ func TestIssuerMetadataLoadAndSign_OptionalEndpoints(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://oauth.example.com"}, metadata.AuthorizationServers)
@@ -220,8 +225,9 @@ func TestIssuerMetadataLoadAndSign_OptionalEndpoints(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		CredentialResponseEncryption: &openid4vci.MetadataCredentialResponseEncryption{
 			AlgValuesSupported: []string{"ECDH-ES", "ECDH-ES+A128KW"},
@@ -238,7 +244,7 @@ func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	require.NotNil(t, metadata.CredentialResponseEncryption)
@@ -250,8 +256,9 @@ func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_BatchCredentialIssuance(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		BatchCredentialIssuance: &openid4vci.BatchCredentialIssuance{
 			BatchSize: 10,
@@ -266,7 +273,7 @@ func TestIssuerMetadataLoadAndSign_BatchCredentialIssuance(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	require.NotNil(t, metadata.BatchCredentialIssuance)
@@ -276,8 +283,9 @@ func TestIssuerMetadataLoadAndSign_BatchCredentialIssuance(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		Display: []openid4vci.MetadataDisplay{
 			{
@@ -299,7 +307,7 @@ func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	require.Len(t, metadata.Display, 1)
@@ -311,8 +319,9 @@ func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_NilConstructor(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
@@ -324,7 +333,7 @@ func TestIssuerMetadataLoadAndSign_NilConstructor(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 
@@ -339,12 +348,13 @@ func TestIssuerMetadataLoadAndSign_NilConstructor(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_EmptyConstructors(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", map[string]*CredentialConstructor{})
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, map[string]*CredentialConstructor{})
 
 	require.NoError(t, err)
 	assert.Empty(t, metadata.CredentialConfigurationsSupported)
@@ -353,8 +363,9 @@ func TestIssuerMetadataLoadAndSign_EmptyConstructors(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 
 		// All optional fields omitted to test defaults
 	}
@@ -369,7 +380,7 @@ func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 
@@ -390,8 +401,9 @@ func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 func TestIssuerMetadataLoadAndSign_MultipleCredentials(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
+	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
+
 	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
@@ -413,7 +425,7 @@ func TestIssuerMetadataLoadAndSign_MultipleCredentials(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
 
 	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)

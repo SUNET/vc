@@ -14,6 +14,10 @@ import (
 func TestMetadataGenerationAgainstReference(t *testing.T) {
 	// Setup test PKI
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
+	keyConfig := &pki.KeyConfig{
+		PrivateKeyPath: ecKeyPath,
+		ChainPath:      ecCertPath,
+	}
 
 	// Load reference metadata
 	referenceData, err := os.ReadFile("../../metadata/issuer_metadata.json")
@@ -24,12 +28,7 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 	require.NoError(t, err, "Failed to unmarshal reference metadata")
 
 	// Setup test configuration matching the reference
-	cfg := &IssuerMetadata{
-		KeyConfig: &pki.KeyConfig{
-			PrivateKeyPath: ecKeyPath,
-			ChainPath:      ecCertPath,
-		},
-	}
+	cfg := &IssuerMetadata{}
 
 	// Setup credential constructors
 	credentialConstructors := map[string]*CredentialConstructor{
@@ -67,7 +66,7 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 	}
 
 	// Generate metadata
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "http://vc_dev_apigw:8080", credentialConstructors)
+	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "http://vc_dev_apigw:8080", keyConfig, credentialConstructors)
 	require.NoError(t, err, "Failed to generate metadata")
 
 	// Marshal to JSON for comparison

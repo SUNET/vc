@@ -591,7 +591,6 @@ type BasicAuth struct {
 }
 
 type IssuerMetadata struct {
-	KeyConfig                            *pki.KeyConfig                                   `yaml:"key_config" validate:"required"`
 	AuthorizationServers                 []string                                         `yaml:"authorization_servers" validate:"omitempty"`
 	DeferredCredentialEndpoint           string                                           `yaml:"deferred_credential_endpoint" validate:"omitempty"`
 	NotificationEndpoint                 string                                           `yaml:"notification_endpoint" validate:"omitempty"`
@@ -616,6 +615,7 @@ type CredentialOffers struct {
 // APIGW holds the datastore configuration
 type APIGW struct {
 	APIServer           APIServer        `yaml:"api_server" validate:"required"`
+	KeyConfig           *pki.KeyConfig   `yaml:"key_config" validate:"required"`
 	CredentialOffers    CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
 	OauthServer         OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
 	IssuerMetadata      IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
@@ -774,9 +774,9 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 
 // LoadAndSign generates and signs issuer metadata at runtime from configuration.
 // All generation and signing is delegated to the openid4vci library.
-// Note: The KeyConfig in IssuerMetadata is for signing the metadata JWT itself (APIGW).
+// Note: The keyConfig parameter is for signing the metadata JWT itself (APIGW).
 // The credential_signing_alg_values_supported should reflect the Issuer service's capabilities, not APIGW's key.
-func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL string, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
+func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL string, keyConfig *pki.KeyConfig, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
 	for scope, constructor := range credentialConstructors {
@@ -864,7 +864,7 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 	}
 
 	return openid4vci.LoadAndSign(ctx, &openid4vci.MetadataConfig{
-		KeyConfig:                            cfg.KeyConfig,
+		KeyConfig:                            keyConfig,
 		CredentialIssuer:                     externalServerURL,
 		CredentialEndpoint:                   externalServerURL + "/credential",
 		AuthorizationServers:                 cfg.AuthorizationServers,

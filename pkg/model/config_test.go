@@ -490,47 +490,44 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 	tests := []struct {
 		name        string
 		metadata    IssuerMetadata
+		keyConfig   *pki.KeyConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name: "Valid runtime generation with RSA keys and chain",
-			metadata: IssuerMetadata{
-				KeyConfig: &pki.KeyConfig{
-					PrivateKeyPath: rsaKeyPath,
-					ChainPath:      rsaCertPath,
-				},
+			name:     "Valid runtime generation with RSA keys and chain",
+			metadata: IssuerMetadata{},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: rsaKeyPath,
+				ChainPath:      rsaCertPath,
 			},
 			wantErr: false,
 		},
 		{
-			name: "Valid runtime generation with EC keys and chain",
-			metadata: IssuerMetadata{
-				KeyConfig: &pki.KeyConfig{
-					PrivateKeyPath: ecKeyPath,
-					ChainPath:      ecCertPath,
-				},
+			name:     "Valid runtime generation with EC keys and chain",
+			metadata: IssuerMetadata{},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: ecKeyPath,
+				ChainPath:      ecCertPath,
 			},
 			wantErr: false,
 		},
 		{
-			name: "Signing key file does not exist",
-			metadata: IssuerMetadata{
-				KeyConfig: &pki.KeyConfig{
-					PrivateKeyPath: "./testdata/nonexistent.pem",
-					ChainPath:      rsaCertPath,
-				},
+			name:     "Signing key file does not exist",
+			metadata: IssuerMetadata{},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: "./testdata/nonexistent.pem",
+				ChainPath:      rsaCertPath,
 			},
 			wantErr:     true,
 			errContains: "no such file or directory",
 		},
 		{
-			name: "Certificate chain file does not exist",
-			metadata: IssuerMetadata{
-				KeyConfig: &pki.KeyConfig{
-					PrivateKeyPath: rsaKeyPath,
-					ChainPath:      "./testdata/nonexistent.crt",
-				},
+			name:     "Certificate chain file does not exist",
+			metadata: IssuerMetadata{},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: rsaKeyPath,
+				ChainPath:      "./testdata/nonexistent.crt",
 			},
 			wantErr:     true,
 			errContains: "no such file or directory",
@@ -540,7 +537,7 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx, "https://issuer.example.com", nil)
+			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx, "https://issuer.example.com", tt.keyConfig, nil)
 
 			if tt.wantErr {
 				assert.Error(t, err)
