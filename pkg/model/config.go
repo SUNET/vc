@@ -804,25 +804,25 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 				}
 
 				// Map rendering information from VCTM to OpenID4VCI format
-				if vctmDisplay.Rendering != nil {
-					if vctmDisplay.Rendering.Simple.BackgroundColor != "" {
-						display.BackgroundColor = vctmDisplay.Rendering.Simple.BackgroundColor
-					}
-					if vctmDisplay.Rendering.Simple.TextColor != "" {
-						display.TextColor = vctmDisplay.Rendering.Simple.TextColor
-					}
-					if vctmDisplay.Rendering.Simple.Logo.URI != "" {
-						display.Logo = openid4vci.MetadataLogo{
-							URI:     vctmDisplay.Rendering.Simple.Logo.URI,
-							AltText: vctmDisplay.Rendering.Simple.Logo.AltText,
-						}
-					}
-					if vctmDisplay.Rendering.Simple.BackgroundImage != nil && vctmDisplay.Rendering.Simple.BackgroundImage.URI != "" {
-						display.BackgroundImage = openid4vci.MetadataBackgroundImage{
-							URI: vctmDisplay.Rendering.Simple.BackgroundImage.URI,
-						}
+			if vctmDisplay.Rendering != nil {
+				if vctmDisplay.Rendering.Simple.BackgroundColor != "" {
+					display.BackgroundColor = vctmDisplay.Rendering.Simple.BackgroundColor
+				}
+				if vctmDisplay.Rendering.Simple.TextColor != "" {
+					display.TextColor = vctmDisplay.Rendering.Simple.TextColor
+				}
+				if vctmDisplay.Rendering.Simple.Logo.URI != "" {
+					display.Logo = openid4vci.MetadataLogo{
+						URI:     vctmDisplay.Rendering.Simple.Logo.URI,
+						AltText: vctmDisplay.Rendering.Simple.Logo.AltText,
 					}
 				}
+				if vctmDisplay.Rendering.Simple.BackgroundImage != nil && vctmDisplay.Rendering.Simple.BackgroundImage.URI != "" {
+					display.BackgroundImage = openid4vci.MetadataBackgroundImage{
+						URI: vctmDisplay.Rendering.Simple.BackgroundImage.URI,
+					}
+				}
+			}
 
 				credConfig.Display[i] = display
 			}
