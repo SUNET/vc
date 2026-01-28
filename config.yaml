@@ -177,7 +177,6 @@ verifier:
       #   slot_id: 0
       #   pin: "1234"
       #   key_label: "verifier-oidc-key"
-    signing_alg: "RS256"                 # Signing algorithm for ID tokens (RS256, RS384, RS512, ES256, ES384, ES512)
     session_duration: 900                # Session duration in seconds (15 minutes)
     code_duration: 600                   # Authorization code duration in seconds (10 minutes)
     access_token_duration: 3600          # Access token duration in seconds (1 hour)
