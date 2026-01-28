@@ -46,6 +46,10 @@ test-verifier:
 	$(info Testing verifier)
 	go test -v ./cmd/verifier/... ./internal/verifier/...
 
+test-env:
+	$(info Setting up test environment)
+	sudo apt-get update && sudo apt-get install -y softhsm2 opensc
+
 # W3C VC 2.0 Test Suite targets
 create-w3c-test-suite:
 	$(info Creating W3C test suite in $(W3C_TEST_SUITE_DIR))
