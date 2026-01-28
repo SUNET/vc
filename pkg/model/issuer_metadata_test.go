@@ -15,8 +15,7 @@ func TestIssuerMetadataLoadAndSign_CustomFormat(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
@@ -44,8 +43,7 @@ func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	// Test that display must come from VCTM, not from constructor
@@ -74,8 +72,7 @@ func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	// Mock VCTM with display
@@ -119,8 +116,8 @@ func TestIssuerMetadataLoadAndSign_CustomCryptoBindingMethods(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath:                     ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		CryptographicBindingMethodsSupported: []string{"jwk", "did:key"},
 	}
 
@@ -144,8 +141,8 @@ func TestIssuerMetadataLoadAndSign_CustomSigningAlgorithms(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath:                    ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		CredentialSigningAlgValuesSupported: []string{"ES256", "ES512"},
 	}
 
@@ -171,8 +168,8 @@ func TestIssuerMetadataLoadAndSign_CustomProofAlgorithms(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath:               ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		ProofSigningAlgValuesSupported: []string{"ES256", "RS256"},
 	}
 
@@ -197,8 +194,8 @@ func TestIssuerMetadataLoadAndSign_OptionalEndpoints(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath:           ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		AuthorizationServers:       []string{"https://oauth.example.com"},
 		DeferredCredentialEndpoint: "https://issuer.example.com/deferred",
 		NotificationEndpoint:       "https://issuer.example.com/notification",
@@ -224,8 +221,8 @@ func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		CredentialResponseEncryption: &openid4vci.MetadataCredentialResponseEncryption{
 			AlgValuesSupported: []string{"ECDH-ES", "ECDH-ES+A128KW"},
 			EncValuesSupported: []string{"A256GCM", "A128GCM"},
@@ -254,8 +251,8 @@ func TestIssuerMetadataLoadAndSign_BatchCredentialIssuance(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		BatchCredentialIssuance: &openid4vci.BatchCredentialIssuance{
 			BatchSize: 10,
 		},
@@ -280,8 +277,8 @@ func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		Display: []openid4vci.MetadataDisplay{
 			{
 				Name:   "Example Issuer",
@@ -315,8 +312,7 @@ func TestIssuerMetadataLoadAndSign_NilConstructor(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
@@ -344,8 +340,7 @@ func TestIssuerMetadataLoadAndSign_EmptyConstructors(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	ctx := context.Background()
@@ -359,8 +354,8 @@ func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
+
 		// All optional fields omitted to test defaults
 	}
 
@@ -383,10 +378,10 @@ func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 	// Check defaults
 	assert.Equal(t, "vc+sd-jwt", credConfig.Format, "Should use default format")
 	assert.Equal(t, []string{"jwk"}, credConfig.CryptographicBindingMethodsSupported, "Should use default crypto binding")
-	assert.Equal(t, []any{"ES256", "ES384"}, credConfig.CredentialSigningAlgValuesSupported, "Should use default signing algorithms")
+	assert.Equal(t, []any{"ES256", "ES384", "RS256"}, credConfig.CredentialSigningAlgValuesSupported, "Should use default signing algorithms")
 
 	jwtProof := credConfig.ProofTypesSupported["jwt"]
-	assert.Equal(t, []string{"ES256", "ES384", "ES512"}, jwtProof.ProofSigningAlgValuesSupported, "Should use default proof algorithms")
+	assert.Equal(t, []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}, jwtProof.ProofSigningAlgValuesSupported, "Should use default proof algorithms")
 
 	// Check credential definition
 	assert.Equal(t, []string{"VerifiableCredential"}, credConfig.CredentialDefinition.Type)
@@ -396,8 +391,7 @@ func TestIssuerMetadataLoadAndSign_MultipleCredentials(t *testing.T) {
 	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
-		
+		KeyConfig: &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{

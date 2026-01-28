@@ -9,11 +9,11 @@ import (
 
 // PKCS11Config holds configuration for PKCS#11 HSM connection.
 type PKCS11Config struct {
-	ModulePath string
-	SlotID     uint
-	PIN        string
-	KeyLabel   string
-	KeyID      string
+	ModulePath string `yaml:"module_path"`
+	SlotID     uint   `yaml:"slot_id"`
+	PIN        string `yaml:"pin"`
+	KeyLabel   string `yaml:"key_label"`
+	KeyID      string `yaml:"key_id"`
 }
 
 // PKCS11Signer is a stub when PKCS#11 support is not compiled in.

@@ -37,25 +37,25 @@ const (
 // Supports both file-based and HSM-based keys with explicit control.
 type KeyConfig struct {
 	// File-based configuration
-	PrivateKeyPath string // Path to PEM key file
-	ChainPath      string // Path to certificate chain (optional)
+	PrivateKeyPath string `yaml:"private_key_path" validate:"required_without=PKCS11"` // Path to PEM key file
+	ChainPath      string `yaml:"chain_path"`                                          // Path to certificate chain (optional)
 
 	// HSM-based configuration
-	PKCS11 *PKCS11Config // PKCS#11 HSM config (optional)
+	PKCS11 *PKCS11Config `yaml:"pkcs11" validate:"required_without=PrivateKeyPath"` // PKCS#11 HSM config (optional)
 
 	// Source selection (determines which config to use)
 	// If empty, tries in order: File (if FilePath set), then HSM (if HSM set)
-	Source KeySource
+	Source KeySource `yaml:"source"`
 
 	// EnableFile enables file-based key loading (default: true if FilePath set)
-	EnableFile bool
+	EnableFile bool `yaml:"enable_file"`
 	// EnableHSM enables HSM-based key loading (default: true if HSM set)
-	EnableHSM bool
+	EnableHSM bool `yaml:"enable_hsm"`
 
 	// Priority defines fallback order when both are enabled
 	// Example: []KeySource{KeySourceHSM, KeySourceFile} tries HSM first, falls back to file
 	// If nil, uses Source field or auto-detects based on what's configured
-	Priority []KeySource
+	Priority []KeySource `yaml:"priority"`
 }
 
 // KeyLoader provides centralized key and certificate loading functionality.

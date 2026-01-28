@@ -348,15 +348,15 @@ type AttributeConfig struct {
 
 // Issuer holds the issuer configuration
 type Issuer struct {
-	APIServer      APIServer     `yaml:"api_server" validate:"required"`
-	Identifier     string        `yaml:"identifier" validate:"required"`
-	GRPCServer     GRPCServer    `yaml:"grpc_server" validate:"required"`
-	KeyConfig      pki.KeyConfig `yaml:"key_config" validate:"required"`
-	JWTAttribute   JWTAttribute  `yaml:"jwt_attribute" validate:"required"`
-	IssuerURL      string        `yaml:"issuer_url" validate:"required"`
-	WalletURL      string        `yaml:"wallet_url"`
-	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
-	MDoc           *MDocConfig   `yaml:"mdoc" validate:"omitempty"` // mDL/mdoc configuration
+	APIServer      APIServer      `yaml:"api_server" validate:"required"`
+	Identifier     string         `yaml:"identifier" validate:"required"`
+	GRPCServer     GRPCServer     `yaml:"grpc_server" validate:"required"`
+	KeyConfig      *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	JWTAttribute   JWTAttribute   `yaml:"jwt_attribute" validate:"required"`
+	IssuerURL      string         `yaml:"issuer_url" validate:"required"`
+	WalletURL      string         `yaml:"wallet_url"`
+	RegistryClient GRPCClientTLS  `yaml:"registry_client" validate:"omitempty"`
+	MDoc           *MDocConfig    `yaml:"mdoc" validate:"omitempty"` // mDL/mdoc configuration
 }
 
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
@@ -474,20 +474,20 @@ type OIDCConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier-proxy itself as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
-	Issuer               string        `yaml:"issuer" validate:"required"`
-	KeyConfig            pki.KeyConfig `yaml:"key_config" validate:"required"`
-	SessionDuration      int           `yaml:"session_duration" validate:"required"`       // in seconds
-	CodeDuration         int           `yaml:"code_duration" validate:"required"`          // in seconds
-	AccessTokenDuration  int           `yaml:"access_token_duration" validate:"required"`  // in seconds
-	IDTokenDuration      int           `yaml:"id_token_duration" validate:"required"`      // in seconds
-	RefreshTokenDuration int           `yaml:"refresh_token_duration" validate:"required"` // in seconds
-	SubjectType          string        `yaml:"subject_type" validate:"required,oneof=public pairwise"`
-	SubjectSalt          string        `yaml:"subject_salt" validate:"required"`
+	Issuer               string         `yaml:"issuer" validate:"required"`
+	KeyConfig            *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	SessionDuration      int            `yaml:"session_duration" validate:"required"`       // in seconds
+	CodeDuration         int            `yaml:"code_duration" validate:"required"`          // in seconds
+	AccessTokenDuration  int            `yaml:"access_token_duration" validate:"required"`  // in seconds
+	IDTokenDuration      int            `yaml:"id_token_duration" validate:"required"`      // in seconds
+	RefreshTokenDuration int            `yaml:"refresh_token_duration" validate:"required"` // in seconds
+	SubjectType          string         `yaml:"subject_type" validate:"required,oneof=public pairwise"`
+	SubjectSalt          string         `yaml:"subject_salt" validate:"required"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
-	KeyConfig               pki.KeyConfig               `yaml:"key_config" validate:"required"`
+	KeyConfig               *pki.KeyConfig              `yaml:"key_config" validate:"required"`
 	PresentationTimeout     int                         `yaml:"presentation_timeout" validate:"required"`
 	SupportedCredentials    []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	PresentationRequestsDir string                      `yaml:"presentation_requests_dir,omitempty"` // Optional: directory with presentation request templates
@@ -591,7 +591,7 @@ type BasicAuth struct {
 }
 
 type IssuerMetadata struct {
-	KeyConfig                            pki.KeyConfig                                    `yaml:"key_config" validate:"required"`
+	KeyConfig                            *pki.KeyConfig                                   `yaml:"key_config" validate:"required"`
 	AuthorizationServers                 []string                                         `yaml:"authorization_servers" validate:"omitempty"`
 	DeferredCredentialEndpoint           string                                           `yaml:"deferred_credential_endpoint" validate:"omitempty"`
 	NotificationEndpoint                 string                                           `yaml:"notification_endpoint" validate:"omitempty"`
@@ -615,21 +615,22 @@ type CredentialOffers struct {
 
 // APIGW holds the datastore configuration
 type APIGW struct {
-	APIServer         APIServer        `yaml:"api_server" validate:"required"`
-	CredentialOffers  CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
-	OauthServer       OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
-	IssuerMetadata    IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
-	ExternalServerURL string           `yaml:"external_server_url" validate:"required"`
-	SAML              SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
-	OIDCRP            OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
-	IssuerClient      GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
-	RegistryClient    GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
+	APIServer           APIServer        `yaml:"api_server" validate:"required"`
+	CredentialOffers    CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
+	OauthServer         OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
+	IssuerMetadata      IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
+	ExternalServerURL   string           `yaml:"external_server_url" validate:"required"`
+	RegistryExternalURL string           `yaml:"registry_external_url" validate:"required"` // External URL of the registry service for constructing status list URIs
+	SAML                SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
+	OIDCRP              OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	IssuerClient        GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
+	RegistryClient      GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
 type TokenStatusLists struct {
 	// KeyConfig holds the key configuration for signing Token Status List tokens.
-	KeyConfig pki.KeyConfig `yaml:"key_config" validate:"required"`
+	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// TokenRefreshInterval is how often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours)
 	TokenRefreshInterval int64 `yaml:"token_refresh_interval" default:"43200"`
 	// SectionSize is the number of entries (decoys) per section. Default: 1000000 (1 million)
@@ -653,7 +654,7 @@ type OAuthServer struct {
 }
 
 type OAuthMetadata struct {
-	KeyConfig pki.KeyConfig `yaml:"key_config" validate:"required"`
+	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 }
 
 // UI holds the user-interface configuration
@@ -868,7 +869,7 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 	}
 
 	return openid4vci.LoadAndSign(ctx, &openid4vci.MetadataConfig{
-		KeyConfig:                            &cfg.KeyConfig,
+		KeyConfig:                            cfg.KeyConfig,
 		CredentialIssuer:                     externalServerURL,
 		CredentialEndpoint:                   externalServerURL + "/credential",
 		AuthorizationServers:                 cfg.AuthorizationServers,
@@ -890,6 +891,6 @@ func (cfg *OAuthMetadata) LoadAndSign(ctx context.Context, issuerURL string, tok
 	return oauth2.GenerateAndSign(&oauth2.MetadataConfig{
 		IssuerURL:     issuerURL,
 		TokenEndpoint: tokenEndpoint,
-		KeyConfig:     &cfg.KeyConfig,
+		KeyConfig:     cfg.KeyConfig,
 	})
 }

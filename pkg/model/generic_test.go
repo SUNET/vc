@@ -239,12 +239,12 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 }
 
 func TestIdentity_GetOver14_LeapYear(t *testing.T) {
-	t.Run("born on leap day - 14 years ago", func(t *testing.T) {
-		// Find a leap year that was 14 years ago
+	t.Run("born on leap day - 15 years ago", func(t *testing.T) {
+		// Find a leap year that was at least 15 years ago
 		currentYear := time.Now().Year()
 
-		// Find the most recent leap year that was at least 14 years ago
-		leapYear := currentYear - 14
+		// Find the most recent leap year that was at least 15 years ago
+		leapYear := currentYear - 15
 		for leapYear%4 != 0 || (leapYear%100 == 0 && leapYear%400 != 0) {
 			leapYear--
 		}

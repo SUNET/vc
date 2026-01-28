@@ -496,9 +496,9 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 		{
 			name: "Valid runtime generation with RSA keys and chain",
 			metadata: IssuerMetadata{
-				KeyConfig: pki.KeyConfig{
-					PrivateKeyPath:  rsaKeyPath,
-					ChainPath: rsaCertPath,
+				KeyConfig: &pki.KeyConfig{
+					PrivateKeyPath: rsaKeyPath,
+					ChainPath:      rsaCertPath,
 				},
 			},
 			wantErr: false,
@@ -506,9 +506,9 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 		{
 			name: "Valid runtime generation with EC keys and chain",
 			metadata: IssuerMetadata{
-				KeyConfig: pki.KeyConfig{
-					PrivateKeyPath:  ecKeyPath,
-					ChainPath: ecCertPath,
+				KeyConfig: &pki.KeyConfig{
+					PrivateKeyPath: ecKeyPath,
+					ChainPath:      ecCertPath,
 				},
 			},
 			wantErr: false,
@@ -516,9 +516,9 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 		{
 			name: "Signing key file does not exist",
 			metadata: IssuerMetadata{
-				KeyConfig: pki.KeyConfig{
-					PrivateKeyPath:  "./testdata/nonexistent.pem",
-					ChainPath: rsaCertPath,
+				KeyConfig: &pki.KeyConfig{
+					PrivateKeyPath: "./testdata/nonexistent.pem",
+					ChainPath:      rsaCertPath,
 				},
 			},
 			wantErr:     true,
@@ -527,9 +527,9 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 		{
 			name: "Certificate chain file does not exist",
 			metadata: IssuerMetadata{
-				KeyConfig: pki.KeyConfig{
-					PrivateKeyPath:  rsaKeyPath,
-					ChainPath: "./testdata/nonexistent.crt",
+				KeyConfig: &pki.KeyConfig{
+					PrivateKeyPath: rsaKeyPath,
+					ChainPath:      "./testdata/nonexistent.crt",
 				},
 			},
 			wantErr:     true,
@@ -579,9 +579,9 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					KeyConfig: pki.KeyConfig{
-						PrivateKeyPath:  rsaKeyPath,
-						ChainPath: rsaCertPath,
+					KeyConfig: &pki.KeyConfig{
+						PrivateKeyPath: rsaKeyPath,
+						ChainPath:      rsaCertPath,
 					},
 				},
 			},
@@ -593,9 +593,9 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					KeyConfig: pki.KeyConfig{
-						PrivateKeyPath:  ecKeyPath,
-						ChainPath: ecCertPath,
+					KeyConfig: &pki.KeyConfig{
+						PrivateKeyPath: ecKeyPath,
+						ChainPath:      ecCertPath,
 					},
 				},
 			},
@@ -607,9 +607,9 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					KeyConfig: pki.KeyConfig{
-						PrivateKeyPath:  "./testdata/nonexistent.pem",
-						ChainPath: rsaCertPath,
+					KeyConfig: &pki.KeyConfig{
+						PrivateKeyPath: "./testdata/nonexistent.pem",
+						ChainPath:      rsaCertPath,
 					},
 				},
 			},
@@ -622,9 +622,9 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
 				Metadata: OAuthMetadata{
-					KeyConfig: pki.KeyConfig{
-						PrivateKeyPath:  rsaKeyPath,
-						ChainPath: "./testdata/nonexistent.crt",
+					KeyConfig: &pki.KeyConfig{
+						PrivateKeyPath: rsaKeyPath,
+						ChainPath:      "./testdata/nonexistent.crt",
 					},
 				},
 			},

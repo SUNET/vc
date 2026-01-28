@@ -25,7 +25,7 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 
 	// Setup test configuration matching the reference
 	cfg := &IssuerMetadata{
-		KeyConfig: pki.KeyConfig{
+		KeyConfig: &pki.KeyConfig{
 			PrivateKeyPath: ecKeyPath,
 			ChainPath:      ecCertPath,
 		},
