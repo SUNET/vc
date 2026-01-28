@@ -47,15 +47,9 @@
   ```yaml
   apigw:
     registry_external_url: "http://registry.example.com:8080"  # New required field
-    oauth_server:
-      metadata:
-        key_config:
-          private_key_path: "/pki/signing_ec_private.pem"
-          chain_path: "/pki/signing_ec_chain.pem"
-    issuer_metadata:
-      key_config:
-        private_key_path: "/pki/signing_ec_private.pem"
-        chain_path: "/pki/signing_ec_chain.pem"
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
   ```
   
   See complete examples in [config.yaml](config.yaml).
