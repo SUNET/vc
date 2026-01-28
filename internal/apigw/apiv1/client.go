@@ -92,7 +92,7 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	}
 
 	// Load or generate OAuth2 metadata from configuration
-	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.Metadata.LoadAndSign(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.OauthServer.TokenEndpoint)
+	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.LoadAndSignMetadata(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.IssuerMetadata.KeyConfig)
 	if err != nil {
 		return nil, err
 	}

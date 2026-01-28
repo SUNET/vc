@@ -563,13 +563,14 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 	}
 }
 
-func TestOAuthServerLoadAndSign(t *testing.T) {
+func TestOAuthServerLoadAndSignMetadata(t *testing.T) {
 	// Setup test PKI files
 	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
 
 	tests := []struct {
 		name        string
 		server      OAuthServer
+		keyConfig   *pki.KeyConfig
 		issuerURL   string
 		wantErr     bool
 		errContains string
@@ -578,12 +579,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			name: "Runtime-generated metadata with RSA keys",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
-				Metadata: OAuthMetadata{
-					KeyConfig: &pki.KeyConfig{
-						PrivateKeyPath: rsaKeyPath,
-						ChainPath:      rsaCertPath,
-					},
-				},
+			},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: rsaKeyPath,
+				ChainPath:      rsaCertPath,
 			},
 			issuerURL: "https://test.oauth.example.com",
 			wantErr:   false,
@@ -592,12 +591,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			name: "Runtime-generated metadata with EC keys",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
-				Metadata: OAuthMetadata{
-					KeyConfig: &pki.KeyConfig{
-						PrivateKeyPath: ecKeyPath,
-						ChainPath:      ecCertPath,
-					},
-				},
+			},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: ecKeyPath,
+				ChainPath:      ecCertPath,
 			},
 			issuerURL: "https://test.oauth.example.com",
 			wantErr:   false,
@@ -606,12 +603,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			name: "Signing key file does not exist",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
-				Metadata: OAuthMetadata{
-					KeyConfig: &pki.KeyConfig{
-						PrivateKeyPath: "./testdata/nonexistent.pem",
-						ChainPath:      rsaCertPath,
-					},
-				},
+			},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: "./testdata/nonexistent.pem",
+				ChainPath:      rsaCertPath,
 			},
 			issuerURL:   "https://test.oauth.example.com",
 			wantErr:     true,
@@ -621,12 +616,10 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 			name: "Certificate chain file does not exist",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
-				Metadata: OAuthMetadata{
-					KeyConfig: &pki.KeyConfig{
-						PrivateKeyPath: rsaKeyPath,
-						ChainPath:      "./testdata/nonexistent.crt",
-					},
-				},
+			},
+			keyConfig: &pki.KeyConfig{
+				PrivateKeyPath: rsaKeyPath,
+				ChainPath:      "./testdata/nonexistent.crt",
 			},
 			issuerURL:   "https://test.oauth.example.com",
 			wantErr:     true,
@@ -637,7 +630,7 @@ func TestOAuthServerLoadAndSign(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			metadata, privateKey, chain, err := tt.server.Metadata.LoadAndSign(ctx, tt.issuerURL, tt.server.TokenEndpoint)
+			metadata, privateKey, chain, err := tt.server.LoadAndSignMetadata(ctx, tt.issuerURL, tt.keyConfig)
 
 			if tt.wantErr {
 				assert.Error(t, err)

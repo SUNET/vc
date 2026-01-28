@@ -419,6 +419,7 @@ type Verifier struct {
 	APIServer            APIServer                  `yaml:"api_server" validate:"required"`
 	GRPCServer           GRPCServer                 `yaml:"grpc_server" validate:"required"`
 	ExternalServerURL    string                     `yaml:"external_server_url" validate:"required"`
+	KeyConfig            *pki.KeyConfig             `yaml:"key_config" validate:"required"`
 	OAuthServer          OAuthServer                `yaml:"oauth_server" validate:"omitempty"`
 	SupportedWallets     map[string]string          `yaml:"supported_wallets" validate:"omitempty"`
 	OIDC                 OIDCConfig                 `yaml:"oidc" validate:"omitempty"`
@@ -470,24 +471,23 @@ type TrustPolicyConfig struct {
 // OIDCConfig holds OIDC-specific configuration for the verifier-proxy's role as an OpenID Provider.
 // This configures how the verifier-proxy issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
+// The signing key is shared from the parent Verifier.KeyConfig.
 type OIDCConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier-proxy itself as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
-	Issuer               string         `yaml:"issuer" validate:"required"`
-	KeyConfig            *pki.KeyConfig `yaml:"key_config" validate:"required"`
-	SessionDuration      int            `yaml:"session_duration" validate:"required"`       // in seconds
-	CodeDuration         int            `yaml:"code_duration" validate:"required"`          // in seconds
-	AccessTokenDuration  int            `yaml:"access_token_duration" validate:"required"`  // in seconds
-	IDTokenDuration      int            `yaml:"id_token_duration" validate:"required"`      // in seconds
-	RefreshTokenDuration int            `yaml:"refresh_token_duration" validate:"required"` // in seconds
-	SubjectType          string         `yaml:"subject_type" validate:"required,oneof=public pairwise"`
-	SubjectSalt          string         `yaml:"subject_salt" validate:"required"`
+	Issuer               string `yaml:"issuer" validate:"required"`
+	SessionDuration      int    `yaml:"session_duration" validate:"required"`       // in seconds
+	CodeDuration         int    `yaml:"code_duration" validate:"required"`          // in seconds
+	AccessTokenDuration  int    `yaml:"access_token_duration" validate:"required"`  // in seconds
+	IDTokenDuration      int    `yaml:"id_token_duration" validate:"required"`      // in seconds
+	RefreshTokenDuration int    `yaml:"refresh_token_duration" validate:"required"` // in seconds
+	SubjectType          string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
+	SubjectSalt          string `yaml:"subject_salt" validate:"required"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
-	KeyConfig               *pki.KeyConfig              `yaml:"key_config" validate:"required"`
 	PresentationTimeout     int                         `yaml:"presentation_timeout" validate:"required"`
 	SupportedCredentials    []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	PresentationRequestsDir string                      `yaml:"presentation_requests_dir,omitempty"` // Optional: directory with presentation request templates
@@ -650,11 +650,6 @@ type OTEL struct {
 type OAuthServer struct {
 	TokenEndpoint string         `yaml:"token_endpoint" validate:"required"`
 	Clients       oauth2.Clients `yaml:"clients" validate:"required"`
-	Metadata      OAuthMetadata  `yaml:"metadata" validate:"required"`
-}
-
-type OAuthMetadata struct {
-	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 }
 
 // UI holds the user-interface configuration
@@ -885,12 +880,12 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 	})
 }
 
-// LoadAndSign generates and signs OAuth2 metadata at runtime from configuration.
+// LoadAndSignMetadata generates and signs OAuth2 metadata at runtime from configuration.
 // All generation and signing is delegated to the oauth2 library.
-func (cfg *OAuthMetadata) LoadAndSign(ctx context.Context, issuerURL string, tokenEndpoint string) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
+func (cfg *OAuthServer) LoadAndSignMetadata(ctx context.Context, issuerURL string, keyConfig *pki.KeyConfig) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
 	return oauth2.GenerateAndSign(&oauth2.MetadataConfig{
 		IssuerURL:     issuerURL,
-		TokenEndpoint: tokenEndpoint,
-		KeyConfig:     cfg.KeyConfig,
+		TokenEndpoint: cfg.TokenEndpoint,
+		KeyConfig:     keyConfig,
 	})
 }

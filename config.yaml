@@ -145,14 +145,25 @@ verifier:
     addr: verifier.vc.docker:8090
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
   external_server_url: "http://verifier.vc.docker:8080"
+  # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+    # Optional: HSM/PKCS#11 configuration (alternative to file-based keys)
+    # pkcs11:
+    #   module_path: /usr/lib/softhsm/libsofthsm2.so
+    #   slot_id: 0
+    #   pin: "1234"
+    #   key_label: "verifier-key"
+    # Optional: Key source selection and priority
+    # source: "file"  # Options: "file", "hsm"
+    # enable_file: true
+    # enable_hsm: false
+    # priority: ["file", "hsm"]  # Fallback order
   supported_wallets:
     "SUNET dev": "https://dev.wallet.sunet.se/cb"
   oauth_server:
     token_endpoint: "http://verifier.vc.docker:8080/token"
-    metadata:
-      key_config:
-        private_key_path: "/pki/signing_ec_private.pem"
-        chain_path: "/pki/signing_ec_chain.pem"
     clients:
       "1003":
         type: "confidential"
@@ -169,14 +180,6 @@ verifier:
     # NOT related to verifiable credential issuance (see cmd/issuer/)
     # Must match the 'iss' claim in ID tokens sent to relying parties
     issuer: "http://verifier.vc.docker:8080"
-    key_config:
-      private_key_path: "/pki/signing_rsa_private.pem"
-      chain_path: "/pki/signing_rsa_chain.pem"
-      # pkcs11:
-      #   module_path: /usr/lib/softhsm/libsofthsm2.so
-      #   slot_id: 0
-      #   pin: "1234"
-      #   key_label: "verifier-oidc-key"
     session_duration: 900                # Session duration in seconds (15 minutes)
     code_duration: 600                   # Authorization code duration in seconds (10 minutes)
     access_token_duration: 3600          # Access token duration in seconds (1 hour)
@@ -185,15 +188,6 @@ verifier:
     subject_type: "pairwise"
     subject_salt: "change-this-in-production"
   openid4vp:
-    # Signing key for OpenID4VP request objects
-    key_config:
-      private_key_path: "/pki/signing_ec_private.pem"
-      chain_path: "/pki/signing_ec_chain.pem"
-      # pkcs11:
-      #   module_path: /usr/lib/softhsm/libsofthsm2.so
-      #   slot_id: 0
-      #   pin: "1234"
-      #   key_label: "verifier-vp-key"
     presentation_timeout: 300
     # Template-based presentation requests (optional)
     # When configured, DCQL queries are loaded from YAML templates
