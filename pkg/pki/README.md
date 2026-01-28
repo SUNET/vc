@@ -69,7 +69,7 @@ signerConfig := pki.NewSignerConfig(&pki.KeyConfig{
     PrivateKeyPath: "my-signing-key", // HSM label
     HSM: &pki.PKCS11Config{
         ModulePath: "/usr/lib/softhsm/libsofthsm2.so",
-        Pin:        "1234",
+        PIN:        "1234",
         TokenLabel: "MyToken",
         KeyLabel:   "signing-key",
     },
@@ -88,7 +88,7 @@ signerConfig := pki.NewSignerConfig(&pki.KeyConfig{
     ChainPath: "/backup/chain.pem",
     HSM: &pki.PKCS11Config{
         ModulePath: "/usr/lib/softhsm/libsofthsm2.so",
-        Pin:        "1234",
+        PIN:        "1234",
         TokenLabel: "MyToken",
         KeyLabel:   "signing-key",
     },

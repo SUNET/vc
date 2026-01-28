@@ -1,5 +1,65 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Configuration Refactoring**: Migrated to centralized `key_config` using `pki.KeyConfig` across all services. All signing key configurations now use the unified PKI package structure. Existing configurations will fail validation without these updates.
+  
+  **Migration:** Update your configuration files with the new `key_config` structure:
+  
+  **Issuer** ([config.yaml#L120-L122](config.yaml#L120-L122)):
+  ```yaml
+  issuer:
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+  ```
+  
+  **Verifier** ([config.yaml#L151-L189](config.yaml#L151-L189)):
+  ```yaml
+  verifier:
+    oauth_server:
+      metadata:
+        key_config:
+          private_key_path: "/pki/signing_ec_private.pem"
+          chain_path: "/pki/signing_ec_chain.pem"
+    oidc:
+      key_config:
+        private_key_path: "/pki/signing_rsa_private.pem"
+        chain_path: "/pki/signing_rsa_chain.pem"
+    openid4vp:
+      key_config:
+        private_key_path: "/pki/signing_ec_private.pem"
+        chain_path: "/pki/signing_ec_chain.pem"
+  ```
+  
+  **Registry** ([config.yaml#L234-L236](config.yaml#L234-L236)):
+  ```yaml
+  registry:
+    token_status_lists:
+      key_config:
+        private_key_path: "/pki/signing_ec_private.pem"
+        chain_path: "/pki/signing_ec_chain.pem"
+  ```
+  
+  **APIGW** ([config.yaml#L268](config.yaml#L268), [config.yaml#L298-L300](config.yaml#L298-L300), [config.yaml#L317-L319](config.yaml#L317-L319)):
+  ```yaml
+  apigw:
+    registry_external_url: "http://registry.example.com:8080"  # New required field
+    oauth_server:
+      metadata:
+        key_config:
+          private_key_path: "/pki/signing_ec_private.pem"
+          chain_path: "/pki/signing_ec_chain.pem"
+    issuer_metadata:
+      key_config:
+        private_key_path: "/pki/signing_ec_private.pem"
+        chain_path: "/pki/signing_ec_chain.pem"
+  ```
+  
+  See complete examples in [config.yaml](config.yaml).
+
 ## [0.3.2] - 2024-04-29
 
 ### Change

@@ -240,7 +240,8 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 
 func TestIdentity_GetOver14_LeapYear(t *testing.T) {
 	t.Run("born on leap day - 15 years ago", func(t *testing.T) {
-		// Find a leap year that was at least 15 years ago
+		// Testing over-14 age verification with a person born 15 years ago
+		// Using 15 years ensures the person is definitively over the 14-year threshold
 		currentYear := time.Now().Year()
 
 		// Find the most recent leap year that was at least 15 years ago
