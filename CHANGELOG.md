@@ -19,19 +19,10 @@
   **Verifier** (see `verifier` section in [config.yaml](config.yaml)):
   ```yaml
   verifier:
-    oauth_server:
-      metadata:
-        key_config:
-          private_key_path: "/pki/signing_ec_private.pem"
-          chain_path: "/pki/signing_ec_chain.pem"
-    oidc:
-      key_config:
-        private_key_path: "/pki/signing_rsa_private.pem"
-        chain_path: "/pki/signing_rsa_chain.pem"
-    openid4vp:
-      key_config:
-        private_key_path: "/pki/signing_ec_private.pem"
-        chain_path: "/pki/signing_ec_chain.pem"
+    # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
   ```
   
   **Registry** (see `registry.token_status_lists` section in [config.yaml](config.yaml)):
