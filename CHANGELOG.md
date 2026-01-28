@@ -8,7 +8,7 @@
   
   **Migration:** Update your configuration files with the new `key_config` structure:
   
-  **Issuer** ([config.yaml#L120-L122](config.yaml#L120-L122)):
+  **Issuer** (see `issuer` section in [config.yaml](config.yaml)):
   ```yaml
   issuer:
     key_config:
@@ -16,7 +16,7 @@
       chain_path: "/pki/signing_ec_chain.pem"
   ```
   
-  **Verifier** ([config.yaml#L151-L189](config.yaml#L151-L189)):
+  **Verifier** (see `verifier` section in [config.yaml](config.yaml)):
   ```yaml
   verifier:
     oauth_server:
@@ -34,7 +34,7 @@
         chain_path: "/pki/signing_ec_chain.pem"
   ```
   
-  **Registry** ([config.yaml#L234-L236](config.yaml#L234-L236)):
+  **Registry** (see `registry.token_status_lists` section in [config.yaml](config.yaml)):
   ```yaml
   registry:
     token_status_lists:
@@ -43,7 +43,7 @@
         chain_path: "/pki/signing_ec_chain.pem"
   ```
   
-  **APIGW** ([config.yaml#L268](config.yaml#L268), [config.yaml#L298-L300](config.yaml#L298-L300), [config.yaml#L317-L319](config.yaml#L317-L319)):
+  **APIGW** (see `apigw` section in [config.yaml](config.yaml)):
   ```yaml
   apigw:
     registry_external_url: "http://registry.example.com:8080"  # New required field
