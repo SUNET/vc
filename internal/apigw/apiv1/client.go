@@ -76,13 +76,24 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 
 	var err error
 	// CRITICAL: Load VCTM data first - issuer metadata generation depends on it
+	// All credential constructors must load successfully for the service to start properly
+	var loadErrors []error
 	for scope, credentialInfo := range cfg.CredentialConstructor {
 		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
-			c.log.Error(err, "Failed to load credential constructor", "scope", scope)
-			return nil, err
+			c.log.Error(err, "Failed to load VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT, "vctm_file", credentialInfo.VCTMFilePath)
+			loadErrors = append(loadErrors, err)
+			continue
 		}
 
 		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
+		c.log.Info("Successfully loaded VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT)
+	}
+
+	// If any credential constructor failed to load, fail fast with detailed error information
+	// This ensures the service doesn't start with incomplete credential configurations
+	if len(loadErrors) > 0 {
+		c.log.Error(nil, "Failed to load one or more credential constructors", "failed_count", len(loadErrors), "total_count", len(cfg.CredentialConstructor))
+		return nil, loadErrors[0] // Return the first error for backward compatibility
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
