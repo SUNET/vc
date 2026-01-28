@@ -5,6 +5,8 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"time"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
@@ -81,7 +83,7 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	for scope, credentialInfo := range cfg.CredentialConstructor {
 		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
 			c.log.Error(err, "Failed to load VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT, "vctm_file", credentialInfo.VCTMFilePath)
-			loadErrors = append(loadErrors, err)
+			loadErrors = append(loadErrors, fmt.Errorf("scope %s (vct=%s, file=%s): %w", scope, credentialInfo.VCT, credentialInfo.VCTMFilePath, err))
 			continue
 		}
 
@@ -92,8 +94,10 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	// If any credential constructor failed to load, fail fast with detailed error information
 	// This ensures the service doesn't start with incomplete credential configurations
 	if len(loadErrors) > 0 {
+		// Log summary before returning combined error
 		c.log.Error(nil, "Failed to load one or more credential constructors", "failed_count", len(loadErrors), "total_count", len(cfg.CredentialConstructor))
-		return nil, loadErrors[0] // Return the first error for backward compatibility
+		// Return a combined error that preserves all failure information
+		return nil, errors.Join(loadErrors...)
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
