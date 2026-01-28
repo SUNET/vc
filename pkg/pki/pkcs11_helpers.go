@@ -9,10 +9,12 @@ import (
 )
 
 // bytesToUint converts a byte slice to uint (helper for PKCS11)
+// PKCS#11 attributes are typically in platform-native byte order (little-endian on x86)
 func bytesToUint(b []byte) uint {
 	var result uint
-	for _, v := range b {
-		result = result<<8 | uint(v)
+	// Read in little-endian order
+	for i := len(b) - 1; i >= 0; i-- {
+		result = result<<8 | uint(b[i])
 	}
 	return result
 }

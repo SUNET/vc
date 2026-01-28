@@ -222,7 +222,7 @@ func (kl *KeyLoader) LoadKeyMaterial(config *KeyConfig) (*KeyMaterial, error) {
 			if !enableHSM || config.PKCS11 == nil {
 				continue
 			}
-			km, err = kl.loadKeyMaterialFromHSMWithConfig(config.PrivateKeyPath, config.PKCS11)
+			km, err = kl.loadKeyMaterialFromHSMWithConfig(config.PKCS11)
 
 		default:
 			return nil, fmt.Errorf("unknown key source: %d", source)
