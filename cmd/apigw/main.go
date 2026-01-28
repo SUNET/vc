@@ -28,7 +28,7 @@ func main() {
 		serviceName string = "apigw"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.NewForService(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
