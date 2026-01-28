@@ -30,6 +30,30 @@ import (
 	"vc/pkg/trace"
 )
 
+// isDockerAvailable checks if Docker is accessible
+func isDockerAvailable() bool {
+	// Check if the Docker socket exists and is accessible
+	dockerSocket := "/var/run/docker.sock"
+	info, err := os.Stat(dockerSocket)
+	if err != nil {
+		return false
+	}
+	
+	// Check if it's a socket
+	if info.Mode()&os.ModeSocket == 0 {
+		return false
+	}
+	
+	// Try to open it (this will fail if we don't have permission)
+	f, err := os.Open(dockerSocket)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	
+	return true
+}
+
 // testSuite holds the test infrastructure
 type testSuite struct {
 	t              *testing.T
@@ -45,6 +69,11 @@ type testSuite struct {
 
 // newTestSuite creates a new test suite with MongoDB testcontainer
 func newTestSuite(t *testing.T) *testSuite {
+	// Check if Docker is available
+	if !isDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 
 	suite := &testSuite{
@@ -147,7 +176,7 @@ func (s *testSuite) initializeConfiguration() {
 		Registry: &model.Registry{
 			ExternalServerURL: "https://registry.example.com",
 			TokenStatusLists: model.TokenStatusLists{
-				KeyConfig: pki.KeyConfig{
+				KeyConfig: &pki.KeyConfig{
 					PrivateKeyPath: s.keyPath,
 				},
 				TokenRefreshInterval: 600,   // 10 minutes for testing (must be > 5 min buffer)
@@ -230,6 +259,11 @@ func (s *testSuite) cleanup() {
 
 // newTestSuiteWithSectionSize creates a test suite with a custom section size
 func newTestSuiteWithSectionSize(t *testing.T, sectionSize int64) *testSuite {
+	// Check if Docker is available
+	if !isDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 
 	suite := &testSuite{

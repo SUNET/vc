@@ -18,11 +18,11 @@ import (
 
 // Service is the token status list issuer service
 type Service struct {
-	cfg                        *model.Cfg
-	tokenStatusListColl        db.TokenStatusListStore
-	tokenStatusListMetadata    db.TokenStatusListMetadataStore
-	signer                     pki.Signer
-	log                        *logger.Log
+	cfg                     *model.Cfg
+	tokenStatusListColl     db.TokenStatusListStore
+	tokenStatusListMetadata db.TokenStatusListMetadataStore
+	signer                  pki.Signer
+	log                     *logger.Log
 
 	// Caches for JWT and CWT tokens keyed by section (as string)
 	jwtCache *ttlcache.Cache[string, string]
@@ -50,25 +50,25 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, log *logger
 	tokenValidity := refreshInterval - (5 * time.Minute)
 
 	s := &Service{
-		cfg:                         cfg,
-		tokenStatusListColl:         dbService.TokenStatusListColl,
-		tokenStatusListMetadata:     dbService.TokenStatusListMetadata,
-		log:                         log.New("token_status_list_issuer"),
-		jwtCache:                    ttlcache.New(ttlcache.WithTTL[string, string](tokenValidity)),
-		cwtCache:                    ttlcache.New(ttlcache.WithTTL[string, []byte](tokenValidity)),
-		refreshInterval:             refreshInterval,
-		tokenValidity:      tokenValidity,
-		ttl:                refreshSeconds,
-		stopCh:             make(chan struct{}),
+		cfg:                     cfg,
+		tokenStatusListColl:     dbService.TokenStatusListColl,
+		tokenStatusListMetadata: dbService.TokenStatusListMetadata,
+		log:                     log.New("token_status_list_issuer"),
+		jwtCache:                ttlcache.New(ttlcache.WithTTL[string, string](tokenValidity)),
+		cwtCache:                ttlcache.New(ttlcache.WithTTL[string, []byte](tokenValidity)),
+		refreshInterval:         refreshInterval,
+		tokenValidity:           tokenValidity,
+		ttl:                     refreshSeconds,
+		stopCh:                  make(chan struct{}),
 	}
 
 	// Load signing key using KeyLoader
 	keyLoader := pki.NewKeyLoader()
-	km, err := keyLoader.LoadKeyMaterial(&cfg.Registry.TokenStatusLists.KeyConfig)
+	km, err := keyLoader.LoadKeyMaterial(cfg.Registry.TokenStatusLists.KeyConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load Token Status List signing key: %w", err)
 	}
-	
+
 	// Create signer that supports any key type (RSA, ECDSA)
 	signer := pki.NewKeyMaterialSigner(km)
 	s.signer = signer

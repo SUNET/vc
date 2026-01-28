@@ -92,7 +92,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 			APIServer:  model.APIServer{},
 			Identifier: "",
 			GRPCServer: model.GRPCServer{},
-			KeyConfig: pki.KeyConfig{
+			KeyConfig: &pki.KeyConfig{
 				PrivateKeyPath: "testdata/signing_test.key",
 			},
 			JWTAttribute: model.JWTAttribute{

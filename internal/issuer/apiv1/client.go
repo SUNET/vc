@@ -86,7 +86,7 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 func (c *Client) initSigner(ctx context.Context) error {
 	// Load key material using KeyConfig (supports both file and HSM)
 	keyLoader := pki.NewKeyLoader()
-	km, err := keyLoader.LoadKeyMaterial(&c.cfg.Issuer.KeyConfig)
+	km, err := keyLoader.LoadKeyMaterial(c.cfg.Issuer.KeyConfig)
 	if err != nil {
 		c.log.Error(err, "Failed to load signing key")
 		return fmt.Errorf("failed to load signing key: %w", err)
@@ -94,7 +94,7 @@ func (c *Client) initSigner(ctx context.Context) error {
 
 	// Create signer from key material
 	c.signer = pki.NewKeyMaterialSigner(km)
-	
+
 	// Store private key for mDL issuer and JWK generation
 	c.privateKey = km.PrivateKey
 	c.publicKey = c.signer.PublicKey()

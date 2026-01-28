@@ -130,7 +130,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 // This key is used for signing request objects in OpenID4VP flows
 func (c *Client) loadVerifierSigningKey() error {
 	// Use centralized KeyLoader with KeyConfig from configuration
-	km, err := c.keyLoader.LoadKeyMaterial(&c.cfg.Verifier.OpenID4VP.KeyConfig)
+	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.OpenID4VP.KeyConfig)
 	if err != nil {
 		return fmt.Errorf("failed to load verifier signing key: %w", err)
 	}
@@ -145,7 +145,7 @@ func (c *Client) loadVerifierSigningKey() error {
 // loadOIDCSigningKey loads the OIDC signing key from the configured path
 func (c *Client) loadOIDCSigningKey() error {
 	// Use centralized KeyLoader with KeyConfig from configuration
-	km, err := c.keyLoader.LoadKeyMaterial(&c.cfg.Verifier.OIDC.KeyConfig)
+	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.OIDC.KeyConfig)
 	if err != nil {
 		return fmt.Errorf("failed to load OIDC signing key: %w", err)
 	}
