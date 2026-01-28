@@ -443,9 +443,7 @@ vscode:
 	sudo apt-get update && sudo apt-get install -y \
 		protobuf-compiler \
 		netcat-openbsd \
-		plantuml \
-		docker.io \
-		docker-compose
+		plantuml
 	$(info Install act for local GitHub Actions testing)
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
 	$(info Install go packages)
