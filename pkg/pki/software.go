@@ -37,6 +37,8 @@ func NewSoftwareSigner(privateKey crypto.PrivateKey, keyID string) (*SoftwareSig
 		s.publicKey = &key.PublicKey
 	case *ecdsa.PrivateKey:
 		s.publicKey = &key.PublicKey
+	default:
+		return nil, fmt.Errorf("unsupported key type for public key extraction: %T", privateKey)
 	}
 
 	return s, nil
