@@ -34,7 +34,7 @@ func main() {
 		serviceName string = "verifier"
 	)
 
-	cfg, err := configuration.NewForService(ctx, serviceName)
+	cfg, err := configuration.New(ctx)
 	if err != nil {
 		panic(err)
 	}

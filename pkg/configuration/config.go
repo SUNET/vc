@@ -21,12 +21,6 @@ type envVars struct {
 
 // New parses config file from VC_CONFIG_YAML environment variable
 func New(ctx context.Context) (*model.Cfg, error) {
-	return NewForService(ctx, "")
-}
-
-// NewForService parses config file and validates only the specified service's configuration
-// serviceName can be: "apigw", "issuer", "verifier", "registry", "persistent", "mockas", "ui", or "" for full validation
-func NewForService(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	log := logger.NewSimple("Configuration")
 	log.Info("Read environmental variable")
 
@@ -61,32 +55,7 @@ func NewForService(ctx context.Context, serviceName string) (*model.Cfg, error) 
 		return nil, err
 	}
 
-	// Validate only the relevant service configuration
-	var toValidate any = cfg
-	if serviceName != "" {
-		switch serviceName {
-		case "apigw":
-			toValidate = cfg.APIGW
-		case "issuer":
-			toValidate = cfg.Issuer
-		case "verifier":
-			toValidate = cfg.Verifier
-		case "registry":
-			toValidate = cfg.Registry
-		case "persistent":
-			toValidate = cfg.Persistent
-		case "mockas":
-			toValidate = cfg.MockAS
-		case "ui":
-			toValidate = cfg.UI
-		}
-		// Always validate Common config as it's shared
-		if err := helpers.Check(ctx, cfg, cfg.Common, log); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := helpers.Check(ctx, cfg, toValidate, log); err != nil {
+	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
 		return nil, err
 	}
 
