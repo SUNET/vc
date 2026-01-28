@@ -8,12 +8,16 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// ErrPKCS11NotSupported is returned when PKCS#11 support is not compiled in.
+var ErrPKCS11NotSupported = errors.New("PKCS#11 support not compiled in; rebuild with -tags=pkcs11")
 
 // KeyMaterial holds a private key with its optional certificate and chain
 type KeyMaterial struct {
