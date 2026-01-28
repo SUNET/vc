@@ -38,19 +38,19 @@ func isDockerAvailable() bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Check if it's a socket
 	if info.Mode()&os.ModeSocket == 0 {
 		return false
 	}
-	
+
 	// Try to open it (this will fail if we don't have permission)
 	f, err := os.Open(dockerSocket)
 	if err != nil {
 		return false
 	}
 	f.Close()
-	
+
 	return true
 }
 
@@ -129,7 +129,7 @@ func encodeECPrivateKeyToPKCS8PEM(key *ecdsa.PrivateKey) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-// generateRSAKeyFile creates a temporary RSA key file for testing (should be rejected)
+// generateRSAKeyFile creates a temporary RSA key file for testing
 func generateRSAKeyFile(t *testing.T) string {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
