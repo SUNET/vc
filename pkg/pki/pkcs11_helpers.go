@@ -37,5 +37,3 @@ func parseCurveOID(oid []byte) (elliptic.Curve, error) {
 		return nil, fmt.Errorf("unsupported curve OID: %x", oid)
 	}
 }
-
-
