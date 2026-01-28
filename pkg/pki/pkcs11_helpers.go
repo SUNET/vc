@@ -3,6 +3,7 @@
 package pki
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"fmt"
 )
@@ -24,26 +25,15 @@ func parseCurveOID(oid []byte) (elliptic.Curve, error) {
 	p521OID := []byte{0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23}
 
 	switch {
-	case bytesEqual(oid, p256OID):
+	case bytes.Equal(oid, p256OID):
 		return elliptic.P256(), nil
-	case bytesEqual(oid, p384OID):
+	case bytes.Equal(oid, p384OID):
 		return elliptic.P384(), nil
-	case bytesEqual(oid, p521OID):
+	case bytes.Equal(oid, p521OID):
 		return elliptic.P521(), nil
 	default:
 		return nil, fmt.Errorf("unsupported curve OID: %x", oid)
 	}
 }
 
-// bytesEqual compares two byte slices
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+
