@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,26 +31,16 @@ import (
 	"vc/pkg/trace"
 )
 
-// isDockerAvailable checks if Docker is accessible
+// isDockerAvailable checks if Docker is accessible by running 'docker version'
+// This approach is portable across platforms (Linux, macOS, Windows)
 func isDockerAvailable() bool {
-	// Check if the Docker socket exists and is accessible
-	dockerSocket := "/var/run/docker.sock"
-	info, err := os.Stat(dockerSocket)
-	if err != nil {
-		return false
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Check if it's a socket
-	if info.Mode()&os.ModeSocket == 0 {
+	cmd := exec.CommandContext(ctx, "docker", "version")
+	if err := cmd.Run(); err != nil {
 		return false
 	}
-
-	// Try to open it (this will fail if we don't have permission)
-	f, err := os.Open(dockerSocket)
-	if err != nil {
-		return false
-	}
-	f.Close()
 
 	return true
 }
