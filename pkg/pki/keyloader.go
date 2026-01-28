@@ -64,21 +64,6 @@ type KeyLoader struct {
 	// Future: add caching, file watching, KMS support
 }
 
-// Algorithm detection mappings for optimal performance
-var (
-	ecdsaSigningMethods = map[int]jwt.SigningMethod{
-		256: jwt.SigningMethodES256,
-		384: jwt.SigningMethodES384,
-		521: jwt.SigningMethodES512,
-	}
-
-	rsaSigningMethods = map[int]jwt.SigningMethod{
-		2048: jwt.SigningMethodRS256,
-		3072: jwt.SigningMethodRS384,
-		4096: jwt.SigningMethodRS512,
-	}
-)
-
 // NewKeyLoader creates a new KeyLoader instance
 func NewKeyLoader() *KeyLoader {
 	return &KeyLoader{}
@@ -318,7 +303,7 @@ func getSigningMethod(key crypto.PrivateKey) (jwt.SigningMethod, error) {
 	switch k := key.(type) {
 	case *ecdsa.PrivateKey:
 		bits := getCurveBits(k.Curve)
-		if method, ok := ecdsaSigningMethods[bits]; ok {
+		if method := getECSigningMethod(bits); method != nil {
 			return method, nil
 		}
 		return nil, fmt.Errorf("unsupported ECDSA curve: %s (%d bits)", k.Curve.Params().Name, bits)
@@ -354,5 +339,19 @@ func getRSASigningMethod(bits int) jwt.SigningMethod {
 		return jwt.SigningMethodRS384
 	default:
 		return jwt.SigningMethodRS256
+	}
+}
+
+// getECSigningMethod selects appropriate ECDSA signing method based on curve size
+func getECSigningMethod(bits int) jwt.SigningMethod {
+	switch bits {
+	case 256:
+		return jwt.SigningMethodES256
+	case 384:
+		return jwt.SigningMethodES384
+	case 521:
+		return jwt.SigningMethodES512
+	default:
+		return nil
 	}
 }
