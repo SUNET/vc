@@ -120,7 +120,7 @@ issuer:
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
-    # For PKCS#11/HSM/PKCS#11, uncomment and configure:
+    # For HSM with PKCS#11 support, uncomment and configure:
     # pkcs11:
     #   module_path: /usr/lib/softhsm/libsofthsm2.so
     #   slot_id: 0
