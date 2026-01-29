@@ -19,7 +19,8 @@ func TestCreateCodeVerifier(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CreateCodeVerifier()
+			got, err := CreateCodeVerifier()
+			assert.NoError(t, err)
 			fmt.Println("got: ", got)
 
 			assert.GreaterOrEqual(t, len(got), 43)

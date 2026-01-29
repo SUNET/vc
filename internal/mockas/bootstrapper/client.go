@@ -128,7 +128,8 @@ func (c *Client) makeIdentities(sourceFilePath string) error {
 	// Get value from cell by given worksheet name and cell reference.
 	pidRows, err := fs.GetRows("PID")
 	if err != nil {
-		panic(err)
+		c.log.Error(err, "failed to get PID rows from spreadsheet")
+		return err
 	}
 
 	for _, row := range pidRows {

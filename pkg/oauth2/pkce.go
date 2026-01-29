@@ -32,12 +32,12 @@ var (
 )
 
 // CreateCodeVerifier creates a code verifier. 4.1 Client Creates a Code Verifier
-func CreateCodeVerifier() string {
+func CreateCodeVerifier() (string, error) {
 	data := make([]byte, 32)
 	if _, err := rand.Read(data); err != nil {
-		panic(err)
+		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(data)
+	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
 // CreateCodeChallenge creates a code challenge. 4.2 Client Creates a Code Challenge

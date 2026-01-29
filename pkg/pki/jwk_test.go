@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func mockRSAKey() ([]byte, []byte) {
+func mockRSAKey(t *testing.T) ([]byte, []byte) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		panic(err)
+		t.Fatalf("failed to generate RSA key: %v", err)
 	}
 
 	privatePEM := pem.EncodeToMemory(
@@ -37,7 +37,7 @@ func mockRSAKey() ([]byte, []byte) {
 }
 
 func TestPEM2jwk(t *testing.T) {
-	_, publicKey := mockRSAKey()
+	_, publicKey := mockRSAKey(t)
 
 	got, err := PEM2jwk(publicKey)
 	assert.NoError(t, err, "PEM to JWK conversion should not return an error")
