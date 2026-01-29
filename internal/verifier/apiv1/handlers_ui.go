@@ -103,10 +103,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		State:        authorizationContext.State,
 		Nonce:        authorizationContext.Nonce,
 		ClientMetadata: &openid4vp.ClientMetadata{
-			VPFormats: map[string]map[string][]string{
-				"vc+sd-jwt": {
-					"sd-jwt_alg_values": {"ES256"},
-					"kb-jwt_alg_values": {"ES256"}},
+			VPFormats: &openid4vp.VPFormatsSupported{
+				SDJWT: &openid4vp.SDJWTVCFormat{
+					SDJWTAlgValues: []string{"ES256"},
+					KBJWTAlgValues: []string{"ES256"},
+				},
 			},
 			JWKS: &openid4vp.Keys{
 				Keys: []jwk.Key{ephemeralPublicJWK},

@@ -11,6 +11,7 @@ import (
 	"time"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
+	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
 	"vc/pkg/sdjwtvc"
 
@@ -429,7 +430,8 @@ type Verifier struct {
 	APIServer         APIServer         `yaml:"api_server" validate:"required"`
 	GRPCServer        GRPCServer        `yaml:"grpc_server" validate:"required"`
 	ExternalServerURL string            `yaml:"external_server_url" validate:"required"`
-	OAuthServer       OAuthServer       `yaml:"oauth_server" validate:"omitempty"`
+	OAuthServer       OAuthServer       `yaml:"oauth_server" validate:"omitempty"`     // For acting as OAuth2 AS for RPs
+	OAuthClient       OAuthClient       `yaml:"oauth_client" validate:"omitempty"`     // For acting as OpenID4VP client
 	IssuerMetadata    IssuerMetadata    `yaml:"issuer_metadata" validate:"omitempty"`
 	SupportedWallets  map[string]string `yaml:"supported_wallets" validate:"omitempty"`
 }
@@ -660,6 +662,91 @@ type OAuthServer struct {
 	TokenEndpoint string         `yaml:"token_endpoint" validate:"required"`
 	Clients       oauth2.Clients `yaml:"clients" validate:"required"`
 	Metadata      OAuthMetadata  `yaml:"metadata" validate:"required"`
+}
+
+// OAuthClient holds OAuth 2.0 client configuration for OpenID4VP
+// This is for when the verifier acts as a client requesting presentations
+type OAuthClient struct {
+	ClientID             string   `yaml:"client_id" validate:"required"`
+	ClientName           string   `yaml:"client_name,omitempty"`
+	ClientURI            string   `yaml:"client_uri,omitempty"`
+	LogoURI              string   `yaml:"logo_uri,omitempty"`
+	RedirectURIs         []string `yaml:"redirect_uris,omitempty"`
+	PreferredVPFormats   []string `yaml:"preferred_vp_formats,omitempty"` // e.g., ["dc+sd-jwt", "mso_mdoc"]
+	SigningKeyPath       string   `yaml:"signing_key_path,omitempty"`
+	SigningChainPath     string   `yaml:"signing_chain_path,omitempty"`
+}
+
+// LoadAndSign loads OAuth client metadata and signs it
+func (o *OAuthClient) LoadAndSign(ctx context.Context) (*oauth2.ClientMetadata, any, *x509.Certificate, []string, error) {
+	metadata := &oauth2.ClientMetadata{
+		ClientID:     o.ClientID,
+		ClientName:   o.ClientName,
+		ClientURI:    o.ClientURI,
+		LogoURI:      o.LogoURI,
+		RedirectURIs: o.RedirectURIs,
+		ResponseTypes: []string{"vp_token"},
+		Scope:        "openid",
+	}
+
+	// Build VP formats from preferred formats
+	if len(o.PreferredVPFormats) > 0 {
+		metadata.VPFormatsSupported = buildVPFormatsFromPreferences(o.PreferredVPFormats)
+	}
+
+	// Load signing key and chain if provided
+	var signingKey any
+	var signingCert *x509.Certificate
+	var chainBase64 []string
+
+	if o.SigningKeyPath != "" {
+		var err error
+		signingKey, err = pki.ParseKeyFromFile(o.SigningKeyPath)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
+
+	if o.SigningChainPath != "" {
+		cert, chain, err := pki.ParseX509CertificateFromFile(o.SigningChainPath)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+
+		signingCert = cert
+		chainBase64 = make([]string, len(chain))
+		for i, c := range chain {
+			chainBase64[i] = pki.Base64EncodeCertificate(c)
+		}
+	}
+
+	return metadata, signingKey, signingCert, chainBase64, nil
+}
+
+// buildVPFormatsFromPreferences creates VPFormatsSupported from format preferences
+func buildVPFormatsFromPreferences(formats []string) *openid4vp.VPFormatsSupported {
+	result := &openid4vp.VPFormatsSupported{}
+
+	for _, format := range formats {
+		switch format {
+		case "dc+sd-jwt", "vc+sd-jwt":
+			if result.SDJWT == nil {
+				result.SDJWT = &openid4vp.SDJWTVCFormat{
+					SDJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+					KBJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+				}
+			}
+		case "mso_mdoc":
+			if result.MsoMdoc == nil {
+				result.MsoMdoc = &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-7, -35, -36}, // ES256, ES384, ES512
+					DeviceAuthAlgValues: []int{-7, -35, -36},
+				}
+			}
+		}
+	}
+
+	return result
 }
 
 type OAuthMetadata struct {

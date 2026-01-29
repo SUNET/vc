@@ -19,32 +19,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
-var vpFormats = []byte(
-	`{
-      "vc+sd-jwt": {
-        "sd-jwt_alg_values": [
-          "ES256"
-        ],
-        "kb-jwt_alg_values": [
-          "ES256"
-        ]
-      },
-      "dc+sd-jwt": {
-        "sd-jwt_alg_values": [
-          "ES256"
-        ],
-        "kb-jwt_alg_values": [
-          "ES256"
-        ]
-      },
-      "mso_mdoc": {
-        "alg": [
-          "ES256"
-        ]
-      }
-    }
-`)
-
 type VerificationRequestObjectRequest struct {
 	ID string `form:"id" uri:"id"`
 }
@@ -96,10 +70,8 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		},
 	}
 
-	vf := map[string]map[string][]string{}
-	if err := json.Unmarshal(vpFormats, &vf); err != nil {
-		return "", err
-	}
+	// Derive VP formats from issuer metadata
+	vf := deriveVPFormatsFromMetadata(c.issuerMetadata)
 
 	_, ephemeralPublicJWK, err := c.EphemeralEncryptionKey(authorizationContext.EphemeralEncryptionKeyID)
 	if err != nil {

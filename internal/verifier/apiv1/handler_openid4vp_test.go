@@ -151,9 +151,14 @@ func TestBuildVPFormats(t *testing.T) {
 
 			assert.NotNil(t, vpFormats)
 			for _, format := range tt.expectedFormats {
-				assert.Contains(t, vpFormats, format)
-				assert.Contains(t, vpFormats[format], "alg")
-				assert.NotEmpty(t, vpFormats[format]["alg"])
+				switch format {
+				case "dc+sd-jwt", "vc+sd-jwt":
+					assert.NotNil(t, vpFormats.SDJWT, "SDJWT format should be present")
+					assert.NotEmpty(t, vpFormats.SDJWT.SDJWTAlgValues, "SD-JWT alg values should not be empty")
+				case "mso_mdoc":
+					assert.NotNil(t, vpFormats.MsoMdoc, "MsoMdoc format should be present")
+					assert.NotEmpty(t, vpFormats.MsoMdoc.IssuerAuthAlgValues, "IssuerAuth alg values should not be empty")
+				}
 			}
 		})
 	}

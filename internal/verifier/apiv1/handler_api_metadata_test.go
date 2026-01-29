@@ -257,7 +257,7 @@ func TestGetJWKS(t *testing.T) {
 
 // BenchmarkGetDiscoveryMetadata benchmarks discovery metadata generation
 func BenchmarkGetDiscoveryMetadata(b *testing.B) {
-	ctx := t.Context()
+	ctx := b.Context()
 
 	cfg := &model.Cfg{
 		VerifierProxy: &model.VerifierProxy{
@@ -302,7 +302,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx := t.Context()
+		ctx := b.Context()
 		_, _ = client.GetJWKS(ctx)
 	}
 }

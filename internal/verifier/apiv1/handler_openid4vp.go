@@ -40,7 +40,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	// Add vp_formats to client_metadata if Digital Credentials API is enabled
 	if c.cfg.VerifierProxy.DigitalCredentials.Enabled {
 		vpFormats := c.buildVPFormats()
-		if len(vpFormats) > 0 {
+		if vpFormats.SDJWT != nil || vpFormats.MsoMdoc != nil {
 			requestObject.ClientMetadata = &openid4vp.ClientMetadata{
 				VPFormats: vpFormats,
 			}
@@ -61,8 +61,8 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 }
 
 // buildVPFormats constructs the vp_formats object based on configured preferred formats
-func (c *Client) buildVPFormats() map[string]map[string][]string {
-	vpFormats := make(map[string]map[string][]string)
+func (c *Client) buildVPFormats() *openid4vp.VPFormatsSupported {
+	result := &openid4vp.VPFormatsSupported{}
 
 	preferredFormats := c.cfg.VerifierProxy.DigitalCredentials.PreferredFormats
 	if len(preferredFormats) == 0 {
@@ -74,18 +74,24 @@ func (c *Client) buildVPFormats() map[string]map[string][]string {
 		switch format {
 		case "vc+sd-jwt", "dc+sd-jwt":
 			// SD-JWT format with supported algorithms
-			vpFormats[format] = map[string][]string{
-				"alg": {"ES256", "ES384", "ES512", "RS256"},
+			if result.SDJWT == nil {
+				result.SDJWT = &openid4vp.SDJWTVCFormat{
+					SDJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+					KBJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+				}
 			}
 		case "mso_mdoc":
-			// mdoc format with supported algorithms
-			vpFormats["mso_mdoc"] = map[string][]string{
-				"alg": {"ES256", "ES384", "ES512"},
+			// mdoc format with COSE algorithm identifiers
+			if result.MsoMdoc == nil {
+				result.MsoMdoc = &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-7, -35, -36}, // ES256, ES384, ES512
+					DeviceAuthAlgValues: []int{-7, -35, -36},
+				}
 			}
 		}
 	}
 
-	return vpFormats
+	return result
 }
 
 // GetRequestObject retrieves a request object by session ID

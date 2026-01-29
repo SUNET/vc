@@ -84,7 +84,7 @@ type ClientMetadata struct {
 	//JWKS Keys `json:"jwks,omitempty" bson:"jwks,omitempty" validate:"omitempty"`
 	//
 	// vp_formats: REQUIRED when not available to the Wallet via another mechanism. As defined in Section 11.1.
-	VPFormats map[string]map[string][]string `json:"vp_formats,omitempty" bson:"vp_formats,omitempty"`
+	VPFormats *VPFormatsSupported `json:"vp_formats,omitempty" bson:"vp_formats,omitempty"`
 	// authorization_signed_response_alg: OPTIONAL. As defined in [JARM].
 	AuthorizationSignedResponseALG string `json:"authorization_signed_response_alg,omitempty" bson:"authorization_signed_response_alg,omitempty" validate:"omitempty,oneof=RS256 ES256 PS256 EdDSA"`
 	// authorization_encrypted_response_alg: OPTIONAL. As defined in [JARM].
