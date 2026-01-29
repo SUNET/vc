@@ -389,19 +389,19 @@ type SearchDocumentsReply struct {
 
 // SearchDocumentsRequest the request to search for documents
 type SearchDocumentsRequest struct {
-	AuthenticSource string `json:"authentic_source,omitempty"`
-	VCT             string `json:"vct,omitempty"`
-	DocumentID      string `json:"document_id,omitempty"`
-	CollectID       string `json:"collect_id,omitempty"`
+	AuthenticSource string `json:"authentic_source,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
+	VCT             string `json:"vct,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
+	DocumentID      string `json:"document_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
+	CollectID       string `json:"collect_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 
-	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 
-	FamilyName string `json:"family_name,omitempty"`
-	GivenName  string `json:"given_name,omitempty"`
-	BirthDate  string `json:"birth_date,omitempty"`
-	BirthPlace string `json:"birth_place,omitempty"`
+	FamilyName string `json:"family_name,omitempty" validate:"omitempty,max=597,excludesall=${}[]"`
+	GivenName  string `json:"given_name,omitempty" validate:"omitempty,max=1019,excludesall=${}[]"`
+	BirthDate  string `json:"birth_date,omitempty" validate:"omitempty,datetime=2006-01-02"`
+	BirthPlace string `json:"birth_place,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 
-	Limit      int64          `json:"limit,omitempty"`
-	Fields     []string       `json:"fields,omitempty"`
-	SortFields map[string]int `json:"sort_fields,omitempty"`
+	Limit      int64          `json:"limit,omitempty" validate:"omitempty,min=0,max=1000"`
+	Fields     []string       `json:"fields,omitempty" validate:"omitempty,dive,max=100,excludesall=${}[]"`
+	SortFields map[string]int `json:"sort_fields,omitempty" validate:"omitempty,dive,keys,max=100,endkeys,oneof=1 -1"`
 }
