@@ -125,6 +125,10 @@ EOF
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = vc_dev_signing_rsa
 EOF
 
         # Generate CSR and sign with rootCA
@@ -170,6 +174,10 @@ EOF
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = vc_dev_signing_ec
 EOF
 
         # Generate CSR and sign with rootCA
