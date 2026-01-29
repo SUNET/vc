@@ -20,42 +20,52 @@ credential_constructor:
     vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
     auth_method: basic
     vct: "urn:eudi:pid:arf-1.5:1"
+    format: "dc+sd-jwt"
   pid_1_8:
     vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
     auth_method: basic
     vct: "urn:eudi:pid:arf-1.8:1"
+    format: "dc+sd-jwt"
   ehic:
     vct: "urn:eudi:ehic:1"
     vctm_file_path: "/metadata/vctm_ehic.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   pda1:
     vct: "urn:eudi:pda1:1"
     vctm_file_path: "/metadata/vctm_pda1.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   elm:
     vct: "urn:eudi:elm:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   diploma:
     vct: "urn:eudi:diploma:1"
     vctm_file_path: "/metadata/vctm_diploma.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   micro_credential:
     vct: "urn:eudi:micro_credential:1"
     vctm_file_path: "/metadata/vctm_microcredential.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   openbadge_complete:
     vct: "urn:eudi:openbadge_complete:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   openbadge_basic:
     vct: "urn:eudi:openbadge_basic:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
   openbadge_endorsements:
     vct: "urn:eudi:openbadge_endorsements:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
+    format: "dc+sd-jwt"
 
 kafka:
   enabled: false
@@ -73,19 +83,25 @@ issuer:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
-  signing_key_path: "/pki/signing_ec_private.pem"
   audit_log:
     enabled: true
     destinations:
       - "console"
       - "/var/log/vc/audit.log"
       - "http://apigw.vc.docker:8080/api/v1/audit/notify"
-  #pkcs11:
-  #  module_path: /usr/lib/softhsm/libsofthsm2.so
-  #  slot_id: 0
-  #  pin: "1234"
-  #  key_label: "issuer-key"
-  #  key_id: "issuer-key-1"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+    # For HSM with PKCS#11 support, uncomment and configure:
+    # pkcs11:
+    #   module_path: /usr/lib/softhsm/libsofthsm2.so
+    #   slot_id: 0
+    #   pin: "1234"
+    #   key_label: "issuer-key"
+    # Optional: configure fallback and priority
+    # priority: ["hsm", "file"]
+    # enable_hsm: true
+    # enable_file: true
   jwt_attribute:
     issuer: https://issuer.sunet.se
     enable_not_before: true
@@ -101,14 +117,25 @@ verifier:
     addr: verifier.vc.docker:8090
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
   external_server_url: "http://verifier.vc.docker:8080"
+  # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+    # Optional: HSM/PKCS#11 configuration (alternative to file-based keys)
+    # pkcs11:
+    #   module_path: /usr/lib/softhsm/libsofthsm2.so
+    #   slot_id: 0
+    #   pin: "1234"
+    #   key_label: "verifier-key"
+    # Optional: Key source selection and priority
+    # source: "file"  # Options: "file", "hsm"
+    # enable_file: true
+    # enable_hsm: false
+    # priority: ["file", "hsm"]  # Fallback order
   supported_wallets:
     "SUNET dev": "https://dev.wallet.sunet.se/cb"
   oauth_server:
     token_endpoint: "http://verifier.vc.docker:8080/token"
-    metadata:
-      path: /metadata/oauth2_metadata.json
-      signing_key_path: "/pki/signing_ec_private.pem"
-      signing_chain_path: "/pki/signing_ec_chain.pem"
     clients:
       "1003":
         type: "confidential"
@@ -119,21 +146,12 @@ verifier:
           - "ehic"
           - "pda1"
           - "elm"
-
-verifier_proxy:
-  api_server:
-    addr: :8080
-    tls:
-      enabled: false
-  external_url: "http://verifier_proxy.vc.docker:8080"
   oidc:
     # OIDC Provider identifier (issuer of ID tokens and access tokens)
-    # This identifies the verifier-proxy as an OpenID Provider
+    # This identifies the verifier as an OpenID Provider
     # NOT related to verifiable credential issuance (see cmd/issuer/)
     # Must match the 'iss' claim in ID tokens sent to relying parties
-    issuer: "http://verifier_proxy.vc.docker:8080"
-    signing_key_path: "/pki/signing_rsa_private.pem"
-    signing_alg: "RS256"                 # Signing algorithm for ID tokens (RS256, RS384, RS512, ES256, ES384, ES512)
+    issuer: "http://verifier.vc.docker:8080"
     session_duration: 900                # Session duration in seconds (15 minutes)
     code_duration: 600                   # Authorization code duration in seconds (10 minutes)
     access_token_duration: 3600          # Access token duration in seconds (1 hour)
@@ -179,7 +197,14 @@ registry:
     #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
   # Token Status Lists configuration per draft-ietf-oauth-status-list
   token_status_lists:
-    signing_key_path: "/pki/signing_ec_private.pem"
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+      # pkcs11:
+      #   module_path: /usr/lib/softhsm/libsofthsm2.so
+      #   slot_id: 0
+      #   pin: "1234"
+      #   key_label: "registry-tsl-key"
   # Admin GUI configuration (optional)
   admin_gui:
     enabled: true
@@ -189,6 +214,14 @@ registry:
 
 apigw:
   identifier: "SUNET_v1"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+    # pkcs11:
+    #   module_path: /usr/lib/softhsm/libsofthsm2.so
+    #   slot_id: 0
+    #   pin: "1234"
+    #   key_label: "apigw-key"
   api_server:
     addr: :8080
     cors:
@@ -202,6 +235,7 @@ apigw:
       users:
         admin: "secret123"
   external_server_url: "http://apigw.vc.docker:8080"
+  registry_external_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
@@ -245,9 +279,41 @@ apigw:
           - "pda1"
           - "elm"
   issuer_metadata:
-    path: "/metadata/issuer_metadata.json"
-    signing_key_path: "/pki/signing_ec_private.pem"
-    signing_chain_path: "/pki/signing_ec_chain.pem"
+    # Optional: Authorization servers (if different from credential issuer)
+    # authorization_servers:
+    #   - "https://oauth.example.com"
+    # Optional: Additional endpoints
+    # deferred_credential_endpoint: "http://apigw.vc.docker:8080/deferred"
+    # notification_endpoint: "http://apigw.vc.docker:8080/notification"
+    # Optional: Cryptographic binding methods (defaults to ["jwk"])
+    # cryptographic_binding_methods_supported:
+    #   - "jwk"
+    #   - "did:key"
+    # Optional: Credential signing algorithms (defaults to ["ES256", "ES384"])
+    # credential_signing_alg_values_supported:
+    #   - "ES256"
+    #   - "ES384"
+    #   - "ES512"
+    # Optional: Proof signing algorithms (defaults to ["ES256", "ES384", "ES512"])
+    # proof_signing_alg_values_supported:
+    #   - "ES256"
+    #   - "ES384"
+    #   - "ES512"
+    # Optional: Credential response encryption
+    # credential_response_encryption:
+    #   alg_values_supported: ["ECDH-ES", "ECDH-ES+A128KW"]
+    #   enc_values_supported: ["A256GCM", "A128GCM"]
+    #   encryption_required: false
+    # Optional: Batch credential issuance
+    # batch_credential_issuance:
+    #   batch_size: 10
+    # Optional: Issuer display information
+    # display:
+    #   - name: "SUNET Credential Issuer"
+    #     locale: "en-US"
+    #     logo:
+    #       uri: "http://apigw.vc.docker:8080/logo.png"
+    #       alt_text: "SUNET Logo"
   # OIDC Relying Party configuration for issuing credentials via external OIDC Providers
   # Requires building with -tags oidcrp
   oidcrp:

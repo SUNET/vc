@@ -88,7 +88,7 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 
 	// User confirmed - issue authorization code
 	code := c.generateAuthorizationCode()
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.VerifierProxy.OIDC.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 
 	session.Status = db.SessionStatusCodeIssued
 	session.Tokens.AuthorizationCode = code
@@ -161,11 +161,11 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 		ClientID:          session.OIDCRequest.ClientID,
 		RedirectURI:       session.OIDCRequest.RedirectURI,
 		State:             session.OIDCRequest.State,
-		ShowRawCredential: c.cfg.VerifierProxy.CredentialDisplay.ShowRawCredential,
-		ShowClaims:        c.cfg.VerifierProxy.CredentialDisplay.ShowClaims,
-		PrimaryColor:      c.cfg.VerifierProxy.AuthorizationPageCSS.PrimaryColor,
-		SecondaryColor:    c.cfg.VerifierProxy.AuthorizationPageCSS.SecondaryColor,
-		CustomCSS:         c.cfg.VerifierProxy.AuthorizationPageCSS.CustomCSS,
+		ShowRawCredential: c.cfg.Verifier.CredentialDisplay.ShowRawCredential,
+		ShowClaims:        c.cfg.Verifier.CredentialDisplay.ShowClaims,
+		PrimaryColor:      c.cfg.Verifier.AuthorizationPageCSS.PrimaryColor,
+		SecondaryColor:    c.cfg.Verifier.AuthorizationPageCSS.SecondaryColor,
+		CustomCSS:         c.cfg.Verifier.AuthorizationPageCSS.CustomCSS,
 	}
 
 	// Set defaults

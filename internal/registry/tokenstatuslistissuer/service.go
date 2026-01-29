@@ -2,7 +2,6 @@ package tokenstatuslistissuer
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"strconv"
 	"time"
@@ -19,11 +18,11 @@ import (
 
 // Service is the token status list issuer service
 type Service struct {
-	cfg                        *model.Cfg
-	tokenStatusListColl        db.TokenStatusListStore
-	tokenStatusListMetadata    db.TokenStatusListMetadataStore
-	signingKey                 any // Can be *ecdsa.PrivateKey or *rsa.PrivateKey
-	log                        *logger.Log
+	cfg                     *model.Cfg
+	tokenStatusListColl     db.TokenStatusListStore
+	tokenStatusListMetadata db.TokenStatusListMetadataStore
+	signer                  pki.Signer
+	log                     *logger.Log
 
 	// Caches for JWT and CWT tokens keyed by section (as string)
 	jwtCache *ttlcache.Cache[string, string]
@@ -51,29 +50,29 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, log *logger
 	tokenValidity := refreshInterval - (5 * time.Minute)
 
 	s := &Service{
-		cfg:                         cfg,
-		tokenStatusListColl:         dbService.TokenStatusListColl,
-		tokenStatusListMetadata:     dbService.TokenStatusListMetadata,
-		log:                         log.New("token_status_list_issuer"),
-		jwtCache:                    ttlcache.New(ttlcache.WithTTL[string, string](tokenValidity)),
-		cwtCache:                    ttlcache.New(ttlcache.WithTTL[string, []byte](tokenValidity)),
-		refreshInterval:             refreshInterval,
-		tokenValidity:      tokenValidity,
-		ttl:                refreshSeconds,
-		stopCh:             make(chan struct{}),
+		cfg:                     cfg,
+		tokenStatusListColl:     dbService.TokenStatusListColl,
+		tokenStatusListMetadata: dbService.TokenStatusListMetadata,
+		log:                     log.New("token_status_list_issuer"),
+		jwtCache:                ttlcache.New(ttlcache.WithTTL[string, string](tokenValidity)),
+		cwtCache:                ttlcache.New(ttlcache.WithTTL[string, []byte](tokenValidity)),
+		refreshInterval:         refreshInterval,
+		tokenValidity:           tokenValidity,
+		ttl:                     refreshSeconds,
+		stopCh:                  make(chan struct{}),
 	}
 
-	// Load signing key
-	key, err := pki.ParseKeyFromFile(cfg.Registry.TokenStatusLists.SigningKeyPath)
+	// Load signing key using KeyLoader
+	keyLoader := pki.NewKeyLoader()
+	km, err := keyLoader.LoadKeyMaterial(cfg.Registry.TokenStatusLists.KeyConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load Token Status List signing key: %w", err)
 	}
-	privateKey, ok := key.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("Token Status List signing key is not a valid ECDSA private key, path: %s", cfg.Registry.TokenStatusLists.SigningKeyPath)
-	}
-	s.signingKey = privateKey
-	s.log.Info("Loaded Token Status List signing key", "path", cfg.Registry.TokenStatusLists.SigningKeyPath)
+
+	// Create signer that supports any key type (RSA, ECDSA)
+	signer := pki.NewKeyMaterialSigner(km)
+	s.signer = signer
+	s.log.Info("Loaded Token Status List signing key", "algorithm", signer.Algorithm())
 
 	// Initialize database if empty
 	if err := s.tokenStatusListColl.InitializeIfEmpty(ctx); err != nil {
@@ -177,6 +176,9 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 	subject := baseURL + "/statuslists/" + key
 	issuer := baseURL
 
+	// Get signing method from the signer
+	signingMethod := jwt.GetSigningMethod(s.signer.Algorithm())
+
 	// Token config
 	tokenCfg := TokenConfig{
 		TokenConfig: tokenstatuslist.TokenConfig{
@@ -186,7 +188,7 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 			TTL:       s.ttl,
 			ExpiresIn: s.tokenValidity,
 		},
-		SigningMethod: jwt.SigningMethodES256,
+		SigningMethod: signingMethod,
 	}
 
 	// Generate and cache JWT

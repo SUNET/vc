@@ -7,15 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
 	"vc/pkg/sdjwtvc"
-
-	"gopkg.in/yaml.v2"
 )
 
 // APIServer holds the api server configuration
@@ -355,8 +352,7 @@ type Issuer struct {
 	APIServer      APIServer     `yaml:"api_server" validate:"required"`
 	Identifier     string        `yaml:"identifier" validate:"required"`
 	GRPCServer     GRPCServer    `yaml:"grpc_server" validate:"required"`
-	SigningKeyPath string        `yaml:"signing_key_path" validate:"required_without=PKCS11"`
-	PKCS11         *PKCS11       `yaml:"pkcs11" validate:"omitempty"`
+        KeyConfig      *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	JWTAttribute   JWTAttribute  `yaml:"jwt_attribute" validate:"required"`
 	IssuerURL      string        `yaml:"issuer_url" validate:"required"`
 	WalletURL      string        `yaml:"wallet_url"`
@@ -427,21 +423,14 @@ type MockAS struct {
 
 // Verifier holds the verifier configuration
 type Verifier struct {
-	APIServer         APIServer         `yaml:"api_server" validate:"required"`
-	GRPCServer        GRPCServer        `yaml:"grpc_server" validate:"required"`
-	ExternalServerURL string            `yaml:"external_server_url" validate:"required"`
-	OAuthServer       OAuthServer       `yaml:"oauth_server" validate:"omitempty"`     // For acting as OAuth2 AS for RPs
-	OAuthClient       OAuthClient       `yaml:"oauth_client" validate:"omitempty"`     // For acting as OpenID4VP client
-	IssuerMetadata    IssuerMetadata    `yaml:"issuer_metadata" validate:"omitempty"`
-	SupportedWallets  map[string]string `yaml:"supported_wallets" validate:"omitempty"`
-}
-
-// VerifierProxy holds the verifier proxy configuration
-type VerifierProxy struct {
 	APIServer            APIServer                  `yaml:"api_server" validate:"required"`
-	ExternalURL          string                     `yaml:"external_url" validate:"required"`
-	OIDC                 OIDCConfig                 `yaml:"oidc" validate:"required"`
-	OpenID4VP            OpenID4VPConfig            `yaml:"openid4vp" validate:"required"`
+	GRPCServer           GRPCServer                 `yaml:"grpc_server" validate:"required"`
+	ExternalServerURL    string                     `yaml:"external_server_url" validate:"required"`
+	KeyConfig            *pki.KeyConfig             `yaml:"key_config" validate:"required"`
+	OAuthServer          OAuthServer                `yaml:"oauth_server" validate:"omitempty"`
+	SupportedWallets     map[string]string          `yaml:"supported_wallets" validate:"omitempty"`
+	OIDC                 OIDCConfig                 `yaml:"oidc" validate:"omitempty"`
+	OpenID4VP            OpenID4VPConfig            `yaml:"openid4vp" validate:"omitempty"`
 	DigitalCredentials   DigitalCredentialsConfig   `yaml:"digital_credentials,omitempty"`
 	AuthorizationPageCSS AuthorizationPageCSSConfig `yaml:"authorization_page_css,omitempty"`
 	CredentialDisplay    CredentialDisplayConfig    `yaml:"credential_display,omitempty"`
@@ -489,13 +478,12 @@ type TrustPolicyConfig struct {
 // OIDCConfig holds OIDC-specific configuration for the verifier-proxy's role as an OpenID Provider.
 // This configures how the verifier-proxy issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
+// The signing key is shared from the parent Verifier.KeyConfig.
 type OIDCConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier-proxy itself as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
 	Issuer               string `yaml:"issuer" validate:"required"`
-	SigningKeyPath       string `yaml:"signing_key_path" validate:"required"`
-	SigningAlg           string `yaml:"signing_alg" validate:"required,oneof=RS256 RS384 RS512 ES256 ES384 ES512"`
 	SessionDuration      int    `yaml:"session_duration" validate:"required"`       // in seconds
 	CodeDuration         int    `yaml:"code_duration" validate:"required"`          // in seconds
 	AccessTokenDuration  int    `yaml:"access_token_duration" validate:"required"`  // in seconds
@@ -610,9 +598,15 @@ type BasicAuth struct {
 }
 
 type IssuerMetadata struct {
-	Path             string `yaml:"path" validate:"required"`
-	SigningKeyPath   string `yaml:"signing_key_path" validate:"required"`
-	SigningChainPath string `yaml:"signing_chain_path" validate:"required"`
+	AuthorizationServers                 []string                                         `yaml:"authorization_servers" validate:"omitempty"`
+	DeferredCredentialEndpoint           string                                           `yaml:"deferred_credential_endpoint" validate:"omitempty"`
+	NotificationEndpoint                 string                                           `yaml:"notification_endpoint" validate:"omitempty"`
+	CryptographicBindingMethodsSupported []string                                         `yaml:"cryptographic_binding_methods_supported" validate:"omitempty"`
+	CredentialSigningAlgValuesSupported  []string                                         `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
+	ProofSigningAlgValuesSupported       []string                                         `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
+	CredentialResponseEncryption         *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
+	BatchCredentialIssuance              *openid4vci.BatchCredentialIssuance              `yaml:"batch_credential_issuance" validate:"omitempty"`
+	Display                              []openid4vci.MetadataDisplay                     `yaml:"display" validate:"omitempty"`
 }
 
 type CredentialOfferWallets struct {
@@ -627,21 +621,23 @@ type CredentialOffers struct {
 
 // APIGW holds the datastore configuration
 type APIGW struct {
-	APIServer         APIServer        `yaml:"api_server" validate:"required"`
-	CredentialOffers  CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
-	OauthServer       OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
-	IssuerMetadata    IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
-	ExternalServerURL string           `yaml:"external_server_url" validate:"required"`
-	SAML              SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
-	OIDCRP            OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
-	IssuerClient      GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
-	RegistryClient    GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
+	APIServer           APIServer        `yaml:"api_server" validate:"required"`
+	KeyConfig           *pki.KeyConfig   `yaml:"key_config" validate:"required"`
+	CredentialOffers    CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
+	OauthServer         OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
+	IssuerMetadata      IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
+	ExternalServerURL   string           `yaml:"external_server_url" validate:"required"`
+	RegistryExternalURL string           `yaml:"registry_external_url" validate:"required"` // External URL of the registry service for constructing status list URIs
+	SAML                SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
+	OIDCRP              OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	IssuerClient        GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
+	RegistryClient      GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
 type TokenStatusLists struct {
-	// SigningKeyPath is the path to the ECDSA P-256 private key for signing Token Status List tokens.
-	SigningKeyPath string `yaml:"signing_key_path" validate:"required"`
+	// KeyConfig holds the key configuration for signing Token Status List tokens.
+	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// TokenRefreshInterval is how often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours)
 	TokenRefreshInterval int64 `yaml:"token_refresh_interval" default:"43200"`
 	// SectionSize is the number of entries (decoys) per section. Default: 1000000 (1 million)
@@ -850,6 +846,7 @@ type CredentialConstructor struct {
 	VCT          string                         `yaml:"vct" json:"vct" validate:"required"`
 	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
+	Format       string                         `yaml:"format" json:"format" validate:"required"`
 	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic pid_auth"`
 	Attributes   map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 }
@@ -873,93 +870,120 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 	return nil
 }
 
-// LoadAndSign loads and signs metadata the issuing metadata from
-func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
-	fileByte, err := os.ReadFile(cfg.Path)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	metadata := &openid4vci.CredentialIssuerMetadataParameters{}
-
-	switch filepath.Ext(cfg.Path) {
-	case ".json":
-		if err := json.Unmarshal(fileByte, &metadata); err != nil {
-			return nil, nil, nil, nil, err
+// LoadAndSign generates and signs issuer metadata at runtime from configuration.
+// All generation and signing is delegated to the openid4vci library.
+// Note: The keyConfig parameter is for signing the metadata JWT itself (APIGW).
+// The credential_signing_alg_values_supported should reflect the Issuer service's capabilities, not APIGW's key.
+func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL string, keyConfig *pki.KeyConfig, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
+	// Convert CredentialConstructor to CredentialConfigurationsSupported
+	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
+	for scope, constructor := range credentialConstructors {
+		if constructor == nil {
+			continue
 		}
 
-	case ".yaml", ".yml":
-		if err := yaml.Unmarshal(fileByte, &metadata); err != nil {
-			return nil, nil, nil, nil, err
+		credConfig := openid4vci.CredentialConfigurationsSupported{
+			Format: constructor.Format,
+			Scope:  scope,
+			VCT:    constructor.VCT,
+			CredentialDefinition: openid4vci.CredentialDefinition{
+				Type: []string{"VerifiableCredential"},
+			},
 		}
 
-	default:
-		return nil, nil, nil, nil, errors.New("unsupported file type")
+		// Use VCTM display information
+		if constructor.VCTM != nil && len(constructor.VCTM.Display) > 0 {
+			credConfig.Display = make([]openid4vci.CredentialMetadataDisplay, len(constructor.VCTM.Display))
+			for i, vctmDisplay := range constructor.VCTM.Display {
+				display := openid4vci.CredentialMetadataDisplay{
+					Name:        vctmDisplay.Name,
+					Locale:      vctmDisplay.Lang,
+					Description: vctmDisplay.Description,
+				}
+
+				// Map rendering information from VCTM to OpenID4VCI format
+				if vctmDisplay.Rendering != nil {
+					if vctmDisplay.Rendering.Simple.BackgroundColor != "" {
+						display.BackgroundColor = vctmDisplay.Rendering.Simple.BackgroundColor
+					}
+					if vctmDisplay.Rendering.Simple.TextColor != "" {
+						display.TextColor = vctmDisplay.Rendering.Simple.TextColor
+					}
+					if vctmDisplay.Rendering.Simple.Logo.URI != "" {
+						display.Logo = openid4vci.MetadataLogo{
+							URI:     vctmDisplay.Rendering.Simple.Logo.URI,
+							AltText: vctmDisplay.Rendering.Simple.Logo.AltText,
+						}
+					}
+					if vctmDisplay.Rendering.Simple.BackgroundImage != nil && vctmDisplay.Rendering.Simple.BackgroundImage.URI != "" {
+						display.BackgroundImage = openid4vci.MetadataBackgroundImage{
+							URI: vctmDisplay.Rendering.Simple.BackgroundImage.URI,
+						}
+					}
+				}
+
+				credConfig.Display[i] = display
+			}
+		}
+
+		// Set cryptographic binding methods
+		if len(cfg.CryptographicBindingMethodsSupported) > 0 {
+			credConfig.CryptographicBindingMethodsSupported = cfg.CryptographicBindingMethodsSupported
+		} else {
+			credConfig.CryptographicBindingMethodsSupported = []string{"jwk"}
+		}
+
+		// Set credential signing algorithms from configuration
+		// These must be explicitly configured to match the Issuer service's capabilities
+		if len(cfg.CredentialSigningAlgValuesSupported) > 0 {
+			credConfig.CredentialSigningAlgValuesSupported = make([]any, len(cfg.CredentialSigningAlgValuesSupported))
+			for i, alg := range cfg.CredentialSigningAlgValuesSupported {
+				credConfig.CredentialSigningAlgValuesSupported[i] = alg
+			}
+		} else {
+			// Default to common algorithms if not configured
+			credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
+		}
+
+		// Set proof types supported from configuration
+		// These must be explicitly configured to match what the Issuer service accepts
+		proofAlgs := cfg.ProofSigningAlgValuesSupported
+		if len(proofAlgs) == 0 {
+			// Default to common algorithms if not configured
+			proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
+		}
+		credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
+			"jwt": {
+				ProofSigningAlgValuesSupported: proofAlgs,
+			},
+		}
+
+		credentialConfigs[scope] = credConfig
 	}
 
-	// ensure that the metadata is empty, should be procured/signed by the request or other automated process
-	metadata.SignedMetadata = ""
-
-	privateKey, err := pki.ParseKeyFromFile(cfg.SigningKeyPath)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	cert, chain, err := pki.ParseX509CertificateFromFile(cfg.SigningChainPath)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	chainBase64Encoded := []string{}
-	for _, c := range chain {
-		chainBase64Encoded = append(chainBase64Encoded, pki.Base64EncodeCertificate(c))
-	}
-
-	return metadata, privateKey, cert, chainBase64Encoded, nil
+	return openid4vci.LoadAndSign(ctx, &openid4vci.MetadataConfig{
+		KeyConfig:                            keyConfig,
+		CredentialIssuer:                     externalServerURL,
+		CredentialEndpoint:                   externalServerURL + "/credential",
+		AuthorizationServers:                 cfg.AuthorizationServers,
+		DeferredCredentialEndpoint:           cfg.DeferredCredentialEndpoint,
+		NotificationEndpoint:                 cfg.NotificationEndpoint,
+		CryptographicBindingMethodsSupported: cfg.CryptographicBindingMethodsSupported,
+		CredentialSigningAlgValuesSupported:  cfg.CredentialSigningAlgValuesSupported,
+		ProofSigningAlgValuesSupported:       cfg.ProofSigningAlgValuesSupported,
+		CredentialResponseEncryption:         cfg.CredentialResponseEncryption,
+		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
+		Display:                              cfg.Display,
+		CredentialConfigurationsSupported:    credentialConfigs,
+	})
 }
 
-// LoadOAuth2Metadata loads OAuth2 metadata from file
-func (cfg *OAuthServer) LoadOAuth2Metadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
-	fileByte, err := os.ReadFile(cfg.Metadata.Path)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	metadata := &oauth2.AuthorizationServerMetadata{}
-
-	switch filepath.Ext(cfg.Metadata.Path) {
-	case ".json":
-		if err := json.Unmarshal(fileByte, &metadata); err != nil {
-			return nil, nil, nil, err
-		}
-
-	// Not implemented yet
-	//case "yaml", ".yml":
-	//	if err := yaml.Unmarshal(fileByte, &metadata); err != nil {
-	//		return nil, nil, nil, err
-	//	}
-
-	default:
-		return nil, nil, nil, errors.New("unsupported file type")
-	}
-
-	// ensure that the metadata is empty, should be procured/signed by the request or other automated process
-	metadata.SignedMetadata = ""
-
-	privateKey, err := pki.ParseKeyFromFile(cfg.Metadata.SigningKeyPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	_, chain, err := pki.ParseX509CertificateFromFile(cfg.Metadata.SigningChainPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	chainBase64Encoded := []string{}
-	for _, c := range chain {
-		chainBase64Encoded = append(chainBase64Encoded, pki.Base64EncodeCertificate(c))
-	}
-
-	return metadata, privateKey, chainBase64Encoded, nil
+// LoadAndSignMetadata generates and signs OAuth2 metadata at runtime from configuration.
+// All generation and signing is delegated to the oauth2 library.
+func (cfg *OAuthServer) LoadAndSignMetadata(ctx context.Context, issuerURL string, keyConfig *pki.KeyConfig) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
+	return oauth2.GenerateAndSign(&oauth2.MetadataConfig{
+		IssuerURL:     issuerURL,
+		TokenEndpoint: cfg.TokenEndpoint,
+		KeyConfig:     keyConfig,
+	})
 }

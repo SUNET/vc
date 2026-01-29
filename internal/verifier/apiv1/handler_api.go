@@ -121,10 +121,10 @@ type JWK struct {
 
 // GetDiscoveryMetadata returns OpenID Provider configuration
 func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
-	baseURL := c.cfg.VerifierProxy.ExternalURL
+	baseURL := c.cfg.Verifier.ExternalServerURL
 
 	metadata := &DiscoveryMetadata{
-		Issuer:                           c.cfg.VerifierProxy.OIDC.Issuer,
+		Issuer:                           c.cfg.Verifier.OIDC.Issuer,
 		AuthorizationEndpoint:            baseURL + "/authorize",
 		TokenEndpoint:                    baseURL + "/token",
 		UserInfoEndpoint:                 baseURL + "/userinfo",
@@ -144,7 +144,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	// Add configured credential scopes
-	for _, cred := range c.cfg.VerifierProxy.OpenID4VP.SupportedCredentials {
+	for _, cred := range c.cfg.Verifier.OpenID4VP.SupportedCredentials {
 		for _, scope := range cred.Scopes {
 			metadata.ScopesSupported = append(metadata.ScopesSupported, scope)
 		}
@@ -322,7 +322,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Info("Redirecting to credential display page", "session_id", session.ID)
 
 		return &DirectPostResponse{
-			RedirectURI: fmt.Sprintf("%s/verification/display/%s", c.cfg.VerifierProxy.ExternalURL, session.ID),
+			RedirectURI: fmt.Sprintf("%s/verification/display/%s", c.cfg.Verifier.ExternalServerURL, session.ID),
 		}, nil
 	}
 
@@ -330,7 +330,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	session.Status = db.SessionStatusCodeIssued
 
 	code := c.generateAuthorizationCode()
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.VerifierProxy.OIDC.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 
 	session.Tokens.AuthorizationCode = code
 	session.Tokens.CodeExpiresAt = codeExpiry
@@ -499,12 +499,12 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 
 // createAuthorizationRequestURI creates the OpenID4VP authorization request URI
 func (c *Client) createAuthorizationRequestURI(sessionID string) (string, error) {
-	baseURL := c.cfg.VerifierProxy.ExternalURL
+	baseURL := c.cfg.Verifier.ExternalServerURL
 	requestURI := fmt.Sprintf("%s/verification/request-object/%s", baseURL, sessionID)
 
 	// Build authorization request URI per OpenID4VP spec
 	authReqURI := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s",
-		c.cfg.VerifierProxy.OIDC.Issuer,
+		c.cfg.Verifier.OIDC.Issuer,
 		requestURI,
 	)
 

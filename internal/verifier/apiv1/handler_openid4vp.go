@@ -15,9 +15,9 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 
 	// Determine response mode based on Digital Credentials API configuration
 	responseMode := "direct_post"
-	if c.cfg.VerifierProxy.DigitalCredentials.Enabled {
-		if c.cfg.VerifierProxy.DigitalCredentials.ResponseMode != "" {
-			responseMode = c.cfg.VerifierProxy.DigitalCredentials.ResponseMode
+	if c.cfg.Verifier.DigitalCredentials.Enabled {
+		if c.cfg.Verifier.DigitalCredentials.ResponseMode != "" {
+			responseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 		} else {
 			responseMode = "dc_api.jwt" // Default for DC API
 		}
@@ -25,20 +25,20 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 
 	// Create request object
 	requestObject := &openid4vp.RequestObject{
-		ISS:          c.cfg.VerifierProxy.OIDC.Issuer,
+		ISS:          c.cfg.Verifier.OIDC.Issuer,
 		AUD:          "https://self-issued.me/v2",
 		IAT:          time.Now().Unix(),
 		ResponseType: "vp_token",
-		ClientID:     c.cfg.VerifierProxy.OIDC.Issuer,
+		ClientID:     c.cfg.Verifier.OIDC.Issuer,
 		Nonce:        nonce,
 		ResponseMode: responseMode,
-		ResponseURI:  c.cfg.VerifierProxy.ExternalURL + "/verification/direct_post",
+		ResponseURI:  c.cfg.Verifier.ExternalServerURL + "/verification/direct_post",
 		State:        sessionID,
 		DCQLQuery:    dcqlQuery,
 	}
 
 	// Add vp_formats to client_metadata if Digital Credentials API is enabled
-	if c.cfg.VerifierProxy.DigitalCredentials.Enabled {
+	if c.cfg.Verifier.DigitalCredentials.Enabled {
 		vpFormats := c.buildVPFormats()
 		if vpFormats.SDJWT != nil || vpFormats.MsoMdoc != nil {
 			requestObject.ClientMetadata = &openid4vp.ClientMetadata{
@@ -64,7 +64,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 func (c *Client) buildVPFormats() *openid4vp.VPFormatsSupported {
 	result := &openid4vp.VPFormatsSupported{}
 
-	preferredFormats := c.cfg.VerifierProxy.DigitalCredentials.PreferredFormats
+	preferredFormats := c.cfg.Verifier.DigitalCredentials.PreferredFormats
 	if len(preferredFormats) == 0 {
 		// Default to SD-JWT if no preferences specified
 		preferredFormats = []string{"vc+sd-jwt"}
@@ -144,7 +144,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	// Generate authorization code
 	authCode := c.generateAuthorizationCode()
 	session.Tokens.AuthorizationCode = authCode
-	session.Tokens.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.VerifierProxy.OIDC.CodeDuration) * time.Second)
+	session.Tokens.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 	session.Status = "code_issued"
 
 	// Update session

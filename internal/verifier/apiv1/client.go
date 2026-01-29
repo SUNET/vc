@@ -2,10 +2,12 @@ package apiv1
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
+	"vc/pkg/pki"
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/trace"
 
@@ -37,12 +40,13 @@ type Client struct {
 	oauth2Metadata             *oauth2.AuthorizationServerMetadata
 	oauth2MetadataSigningKey   any
 	oauth2MetadataSigningChain []string
-	issuerMetadataSigningKey   any
-	issuerMetadataSigningCert  *x509.Certificate
-	issuerMetadataSigningChain []string
+	verifierSigningKey         any
+	verifierSigningCert        *x509.Certificate
+	verifierSigningChain       []string
 	openid4vp                  *openid4vp.Client
 	credentialCache            *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
 	trustService               *openid4vp.TrustService
+	keyLoader                  *pki.KeyLoader
 
 	// OIDC Provider fields (from verifier-proxy merge)
 	tracer                      *trace.Tracer
@@ -76,6 +80,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 		tracer:                      tracer,
 		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
 		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
+		keyLoader:                   pki.NewKeyLoader(),
 	}
 
 	// Start caches
@@ -83,18 +88,15 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	go c.ephemeralEncryptionKeyCache.Start()
 	go c.requestObjectCache.Start()
 
-	if c.cfg.Verifier.OAuthServer.Metadata.Path != "" {
-		c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.LoadOAuth2Metadata(ctx)
-		if err != nil {
-			return nil, err
-		}
+	// Load or generate OAuth2 metadata from configuration
+	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.LoadAndSignMetadata(ctx, c.cfg.Verifier.ExternalServerURL, c.cfg.Verifier.KeyConfig)
+	if err != nil {
+		return nil, err
 	}
 
-	if c.cfg.Verifier.IssuerMetadata.Path != "" {
-		_, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.Verifier.IssuerMetadata.LoadAndSign(ctx)
-		if err != nil {
-			return nil, err
-		}
+	// Load verifier signing key and chain for request object signing
+	if err := c.loadVerifierSigningKey(); err != nil {
+		c.log.Info("Verifier signing key not loaded", "error", err)
 	}
 
 	// Load OIDC signing key if configured
@@ -128,50 +130,42 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	return c, nil
 }
 
+// loadVerifierSigningKey loads the verifier signing key and chain from configured paths
+// This key is used for signing request objects in OpenID4VP flows
+func (c *Client) loadVerifierSigningKey() error {
+	// Use centralized KeyLoader with KeyConfig from configuration
+	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.KeyConfig)
+	if err != nil {
+		return fmt.Errorf("failed to load verifier signing key: %w", err)
+	}
+
+	c.verifierSigningKey = km.PrivateKey
+	c.verifierSigningCert = km.Cert
+	c.verifierSigningChain = km.Chain
+
+	return nil
+}
+
 // loadOIDCSigningKey loads the OIDC signing key from the configured path
 func (c *Client) loadOIDCSigningKey() error {
-	// Check if VerifierProxy config exists and has OIDC settings
-	keyPath := c.cfg.VerifierProxy.OIDC.SigningKeyPath
-	if keyPath == "" {
-		return fmt.Errorf("oidc signing_key_path not configured")
-	}
-
-	keyData, err := os.ReadFile(keyPath)
+	// Use centralized KeyLoader with KeyConfig from configuration
+	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.KeyConfig)
 	if err != nil {
-		return fmt.Errorf("failed to read key file: %w", err)
+		return fmt.Errorf("failed to load OIDC signing key: %w", err)
 	}
 
-	block, _ := pem.Decode(keyData)
-	if block == nil {
-		return fmt.Errorf("failed to parse PEM block")
-	}
+	// Create signer to determine algorithm
+	signer := pki.NewKeyMaterialSigner(km)
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		// Try PKCS8 format
-		key, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err2 != nil {
-			return fmt.Errorf("failed to parse private key (tried PKCS1 and PKCS8): %w", err)
-		}
-		var ok bool
-		privateKey, ok = key.(*rsa.PrivateKey)
-		if !ok {
-			return fmt.Errorf("key is not RSA private key")
-		}
-	}
-
-	c.oidcSigningKey = privateKey
-	c.oidcSigningAlg = c.cfg.VerifierProxy.OIDC.SigningAlg
-	if c.oidcSigningAlg == "" {
-		c.oidcSigningAlg = "RS256"
-	}
+	c.oidcSigningKey = km.PrivateKey
+	c.oidcSigningAlg = signer.Algorithm()
 	return nil
 }
 
 // loadPresentationTemplates loads presentation request templates from configured directory
 func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Check if templates directory is configured
-	templatesDir := c.cfg.VerifierProxy.OpenID4VP.PresentationRequestsDir
+	templatesDir := c.cfg.Verifier.OpenID4VP.PresentationRequestsDir
 	if templatesDir == "" {
 		c.log.Info("Presentation requests directory not configured, using legacy scope mapping")
 		return nil
@@ -195,6 +189,15 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 		"dir", templatesDir)
 
 	return nil
+}
+
+// generateSessionID creates a cryptographically random session identifier
+func (c *Client) generateSessionID() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return oauth2.GenerateCryptographicNonceFixedLength(32)
+	}
+	return hex.EncodeToString(b)
 }
 
 // generateAuthorizationCode creates a cryptographically random authorization code
@@ -230,19 +233,19 @@ func (c *Client) generateRefreshToken() string {
 // generateSubjectIdentifier creates a subject identifier for the user
 // This can be either public (same across all RPs) or pairwise (different per RP)
 func (c *Client) generateSubjectIdentifier(walletID string, clientID string) string {
-	subjectType := c.cfg.VerifierProxy.OIDC.SubjectType
+	subjectType := c.cfg.Verifier.OIDC.SubjectType
 
 	switch subjectType {
 	case "pairwise":
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(clientID))
-		hash.Write([]byte(c.cfg.VerifierProxy.OIDC.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	default:
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
-		hash.Write([]byte(c.cfg.VerifierProxy.OIDC.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	}
 }

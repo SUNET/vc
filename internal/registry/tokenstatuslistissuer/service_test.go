@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,9 +26,24 @@ import (
 	"vc/internal/registry/db"
 	"vc/pkg/logger"
 	"vc/pkg/model"
+	"vc/pkg/pki"
 	"vc/pkg/tokenstatuslist"
 	"vc/pkg/trace"
 )
+
+// isDockerAvailable checks if Docker is accessible by running 'docker version'
+// This approach is portable across platforms (Linux, macOS, Windows)
+func isDockerAvailable() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "version")
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+
+	return true
+}
 
 // testSuite holds the test infrastructure
 type testSuite struct {
@@ -44,6 +60,11 @@ type testSuite struct {
 
 // newTestSuite creates a new test suite with MongoDB testcontainer
 func newTestSuite(t *testing.T) *testSuite {
+	// Check if Docker is available
+	if !isDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+
 	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 
 	suite := &testSuite{
@@ -99,7 +120,7 @@ func encodeECPrivateKeyToPKCS8PEM(key *ecdsa.PrivateKey) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-// generateRSAKeyFile creates a temporary RSA key file for testing (should be rejected)
+// generateRSAKeyFile creates a temporary RSA key file for testing
 func generateRSAKeyFile(t *testing.T) string {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -146,7 +167,9 @@ func (s *testSuite) initializeConfiguration() {
 		Registry: &model.Registry{
 			ExternalServerURL: "https://registry.example.com",
 			TokenStatusLists: model.TokenStatusLists{
-				SigningKeyPath:       s.keyPath,
+				KeyConfig: &pki.KeyConfig{
+					PrivateKeyPath: s.keyPath,
+				},
 				TokenRefreshInterval: 600,   // 10 minutes for testing (must be > 5 min buffer)
 				SectionSize:          10000, // Use smaller section size for faster tests
 			},
@@ -227,6 +250,11 @@ func (s *testSuite) cleanup() {
 
 // newTestSuiteWithSectionSize creates a test suite with a custom section size
 func newTestSuiteWithSectionSize(t *testing.T, sectionSize int64) *testSuite {
+	// Check if Docker is available
+	if !isDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+
 	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 
 	suite := &testSuite{
@@ -261,7 +289,7 @@ func TestNew_Success(t *testing.T) {
 	// Verify service is properly initialized
 	assert.NotNil(t, service.jwtCache)
 	assert.NotNil(t, service.cwtCache)
-	assert.NotNil(t, service.signingKey)
+	assert.NotNil(t, service.signer)
 	assert.Equal(t, suite.cfg, service.cfg)
 
 	// Clean up
@@ -274,7 +302,7 @@ func TestNew_InvalidKeyPath(t *testing.T) {
 	defer suite.cleanup()
 
 	// Use invalid key path
-	suite.cfg.Registry.TokenStatusLists.SigningKeyPath = "/nonexistent/path/to/key.pem"
+	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = "/nonexistent/path/to/key.pem"
 
 	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
 	assert.Error(t, err)
@@ -282,18 +310,18 @@ func TestNew_InvalidKeyPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to load Token Status List signing key")
 }
 
-func TestNew_RSAKeyRejected(t *testing.T) {
+func TestNew_RSAKeySupported(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	// Generate an RSA key (should be rejected - only ECDSA P-256 is supported)
+	// Generate an RSA key (should be accepted - both RSA and ECDSA are supported per OAuth Status List spec)
 	rsaKeyPath := generateRSAKeyFile(t)
-	suite.cfg.Registry.TokenStatusLists.SigningKeyPath = rsaKeyPath
+	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = rsaKeyPath
 
 	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
-	assert.Error(t, err)
-	assert.Nil(t, service)
-	assert.Contains(t, err.Error(), "not a valid ECDSA private key")
+	require.NoError(t, err)
+	require.NotNil(t, service)
+	assert.Contains(t, service.signer.Algorithm(), "RS") // RS256, RS384, or RS512
 }
 
 func TestNew_DefaultRefreshInterval(t *testing.T) {

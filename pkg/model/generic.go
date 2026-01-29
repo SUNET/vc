@@ -291,13 +291,34 @@ type Identity struct {
 	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty"`
 }
 
+// isLeapYear checks if a year is a leap year
+func isLeapYear(year int) bool {
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
+}
+
+// ageThresholdDate calculates the date when someone reaches a certain age,
+// handling leap year birthdays (Feb 29) by treating Feb 28 as their birthday in non-leap years
+func ageThresholdDate(birthDate time.Time, years int) time.Time {
+	targetYear := birthDate.Year() + years
+	month := birthDate.Month()
+	day := birthDate.Day()
+	
+	// Handle leap year birthday (Feb 29) in non-leap target year
+	if month == 2 && day == 29 && !isLeapYear(targetYear) {
+		// Use Feb 28 instead of letting Go normalize to March 1
+		return time.Date(targetYear, 2, 28, 0, 0, 0, 0, birthDate.Location())
+	}
+	
+	return birthDate.AddDate(years, 0, 0)
+}
+
 func (i *Identity) GetOver14() (bool, error) {
 	birthDay, err := time.Parse("2006-01-02", i.BirthDate)
 	if err != nil {
 		return false, err
 	}
-	birthDay = birthDay.AddDate(14, 0, 0)
-	return time.Now().After(birthDay), nil
+	threshold := ageThresholdDate(birthDay, 14)
+	return !time.Now().Before(threshold), nil
 }
 
 func (i *Identity) GetOver16() (bool, error) {
@@ -305,8 +326,8 @@ func (i *Identity) GetOver16() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	birthDay = birthDay.AddDate(16, 0, 0)
-	return time.Now().After(birthDay), nil
+	threshold := ageThresholdDate(birthDay, 16)
+	return !time.Now().Before(threshold), nil
 }
 
 func (i *Identity) GetOver18() (bool, error) {
@@ -314,8 +335,8 @@ func (i *Identity) GetOver18() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	birthDay = birthDay.AddDate(18, 0, 0)
-	return time.Now().After(birthDay), nil
+	threshold := ageThresholdDate(birthDay, 18)
+	return !time.Now().Before(threshold), nil
 }
 
 func (i *Identity) GetOver21() (bool, error) {
@@ -323,8 +344,8 @@ func (i *Identity) GetOver21() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	birthDay = birthDay.AddDate(21, 0, 0)
-	return time.Now().After(birthDay), nil
+	threshold := ageThresholdDate(birthDay, 21)
+	return !time.Now().Before(threshold), nil
 }
 
 func (i *Identity) GetOver65() (bool, error) {
@@ -332,8 +353,8 @@ func (i *Identity) GetOver65() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	birthDay = birthDay.AddDate(65, 0, 0)
-	return time.Now().After(birthDay), nil
+	threshold := ageThresholdDate(birthDay, 65)
+	return !time.Now().Before(threshold), nil
 }
 
 func (i *Identity) GetAgeInYears() (int, error) {

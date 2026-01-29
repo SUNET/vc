@@ -52,8 +52,8 @@ func TestClient_generateRefreshToken(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.VerifierProxy.OIDC.SubjectType = "public"
-	client.cfg.VerifierProxy.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDC.SubjectType = "public"
+	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
 
 	walletID := "wallet-123"
 	clientID1 := "client-1"
@@ -70,8 +70,8 @@ func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.VerifierProxy.OIDC.SubjectType = "pairwise"
-	client.cfg.VerifierProxy.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDC.SubjectType = "pairwise"
+	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
 
 	walletID := "wallet-123"
 	clientID1 := "client-1"
@@ -92,8 +92,8 @@ func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_DifferentWallets(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.VerifierProxy.OIDC.SubjectType = "pairwise"
-	client.cfg.VerifierProxy.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDC.SubjectType = "pairwise"
+	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
 
 	walletID1 := "wallet-1"
 	walletID2 := "wallet-2"
