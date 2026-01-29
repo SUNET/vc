@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 	"vc/internal/verifier/db"
+	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
@@ -320,12 +321,11 @@ func TestGetUserInfo(t *testing.T) {
 
 // TestGenerateNonce tests nonce generation
 func TestGenerateNonce(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
 	// Generate multiple nonces and verify they're unique
 	nonces := make(map[string]bool)
 	for i := 0; i < 100; i++ {
-		nonce := client.generateNonce()
+		nonce, err := crypto.GenerateSecureToken(32, 0)
+		assert.NoError(t, err)
 		assert.NotEmpty(t, nonce)
 		assert.False(t, nonces[nonce], "nonce should be unique")
 		nonces[nonce] = true
@@ -784,23 +784,6 @@ func TestProcessDirectPost(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestGenerateSessionID tests the session ID generator
-func TestGenerateSessionID(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple session IDs and verify they're unique
-	ids := make(map[string]bool)
-	for i := 0; i < 50; i++ {
-		id := client.generateSessionID()
-		assert.NotEmpty(t, id)
-		assert.False(t, ids[id], "session ID should be unique")
-		ids[id] = true
-
-		// Hex encoded 32 bytes should be 64 characters
-		assert.Len(t, id, 64, "session ID should be 64 hex characters")
 	}
 }
 

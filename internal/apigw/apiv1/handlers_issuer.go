@@ -9,6 +9,7 @@ import (
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
 	"vc/internal/gen/registry/apiv1_registry"
+	"vc/pkg/crypto"
 	"vc/pkg/helpers"
 	"vc/pkg/jose"
 	"vc/pkg/mdoc"
@@ -25,7 +26,7 @@ func (c *Client) OIDCCredentialOffer(ctx context.Context, req *openid4vci.Creden
 
 // OIDCNonce https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
 func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, error) {
-	nonce, err := openid4vci.GenerateNonce(0)
+	nonce, err := crypto.GenerateSecureToken(0, 43)
 	if err != nil {
 		return nil, err
 	}

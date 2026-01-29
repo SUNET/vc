@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"vc/pkg/crypto"
 	"vc/pkg/helpers"
 	"vc/pkg/jose"
 	"vc/pkg/model"
@@ -31,28 +32,37 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	c.log.Debug("PAR", "state", req.State)
 
 	azt := model.AuthorizationContext{
-		SessionID:                uuid.NewString(),
-		Code:                     uuid.NewString(),
-		RequestURI:               requestURI,
-		Scope:                    []string{req.Scope},
-		IsUsed:                   false,
-		CodeChallenge:            req.CodeChallenge,
-		CodeChallengeMethod:      req.CodeChallengeMethod,
-		State:                    req.State,
-		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.ExternalServerURL, "https://")),
-		WalletURI:                req.RedirectURI,
-		ExpiresAt:                time.Now().Add(60 * time.Second).Unix(),
-		Nonce:                    oauth2.GenerateCryptographicNonceFixedLength(32),
-		EphemeralEncryptionKeyID: oauth2.GenerateCryptographicNonceFixedLength(32),
-		VerifierResponseCode:     oauth2.GenerateCryptographicNonceFixedLength(32),
+		SessionID:           uuid.NewString(),
+		Code:                uuid.NewString(),
+		RequestURI:          requestURI,
+		Scope:               []string{req.Scope},
+		IsUsed:              false,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		State:               req.State,
+		ClientID:            fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.ExternalServerURL, "https://")),
+		WalletURI:           req.RedirectURI,
+		ExpiresAt:           time.Now().Add(60 * time.Second).Unix(),
+	}
+
+	azt.Nonce, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	azt.EphemeralEncryptionKeyID, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
+	}
+
+	azt.VerifierResponseCode, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response code: %w", err)
 	}
 
 	if err := c.authContextStore.Save(ctx, &azt); err != nil {
-		c.log.Error(err, "authorizationContext not saved")
 		return nil, err
 	}
-
-	c.log.Debug("authorizationContext saved")
 
 	response := &openid4vci.ParResponse{
 		RequestURI: requestURI,
@@ -112,7 +122,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	c.log.Debug("Token", "state", authorizationContext.State)
 
 	// generating a new access token
-	accessToken := oauth2.GenerateCryptographicNonceFixedLength(32)
+	accessToken, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
 	c.log.Debug("Generated access token", "access_token", accessToken)
 
 	// Bind the public key to the generated access token

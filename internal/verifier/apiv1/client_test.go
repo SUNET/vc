@@ -12,19 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClient_generateSessionID(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple session IDs and verify they're unique
-	ids := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		id := client.generateSessionID()
-		assert.NotEmpty(t, id)
-		assert.False(t, ids[id], "session ID should be unique")
-		ids[id] = true
-	}
-}
-
 func TestClient_generateAuthorizationCode(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
 

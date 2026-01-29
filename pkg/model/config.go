@@ -360,8 +360,8 @@ type Issuer struct {
 	IssuerURL      string        `yaml:"issuer_url" validate:"required"`
 	WalletURL      string        `yaml:"wallet_url"`
 	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
-	MDoc           *MDocConfig   `yaml:"mdoc" validate:"omitempty"` // mDL/mdoc configuration
-	AuditLog       *AuditLog     `yaml:"audit_log" validate:"omitempty"`  // Audit log webhook configuration
+	MDoc           *MDocConfig   `yaml:"mdoc" validate:"omitempty"`      // mDL/mdoc configuration
+	AuditLog       *AuditLog     `yaml:"audit_log" validate:"omitempty"` // Audit log webhook configuration
 }
 
 // AuditLog holds audit log configuration for multiple destinations
@@ -726,15 +726,15 @@ type AuthenticSource struct {
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common   *Common                    `yaml:"common"`
-	APIGW    *APIGW                     `yaml:"apigw" validate:"omitempty"`
-	Issuer   *Issuer                    `yaml:"issuer" validate:"omitempty"`
-	Verifier *Verifier                  `yaml:"verifier" validate:"omitempty"`
-	VerifierProxy    *VerifierProxy             `yaml:"verifier_proxy" validate:"omitempty"`
-	Datastore        *Datastore                 `yaml:"datastore" validate:"omitempty"`
-	Registry         *Registry                  `yaml:"registry" validate:"omitempty"`
-	MockAS           *MockAS                    `yaml:"mock_as" validate:"omitempty"`
-	UI               *UI                        `yaml:"ui" validate:"omitempty"`
+	Common        *Common        `yaml:"common"`
+	APIGW         *APIGW         `yaml:"apigw" validate:"omitempty"`
+	Issuer        *Issuer        `yaml:"issuer" validate:"omitempty"`
+	Verifier      *Verifier      `yaml:"verifier" validate:"omitempty"`
+	VerifierProxy *VerifierProxy `yaml:"verifier_proxy" validate:"omitempty"`
+	Datastore     *Datastore     `yaml:"datastore" validate:"omitempty"`
+	Registry      *Registry      `yaml:"registry" validate:"omitempty"`
+	MockAS        *MockAS        `yaml:"mock_as" validate:"omitempty"`
+	UI            *UI            `yaml:"ui" validate:"omitempty"`
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
 	// The constructor contains the VCT URN and other configuration for issuing that credential type

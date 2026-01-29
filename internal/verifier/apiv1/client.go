@@ -2,12 +2,10 @@ package apiv1
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -16,6 +14,7 @@ import (
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
 	"vc/pkg/configuration"
+	"vc/pkg/crypto"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
@@ -198,28 +197,34 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	return nil
 }
 
-// generateSessionID creates a cryptographically random session identifier
-func (c *Client) generateSessionID() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return oauth2.GenerateCryptographicNonceFixedLength(32)
-	}
-	return hex.EncodeToString(b)
-}
-
 // generateAuthorizationCode creates a cryptographically random authorization code
 func (c *Client) generateAuthorizationCode() string {
-	return oauth2.GenerateCryptographicNonceFixedLength(32)
+	token, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate authorization code")
+		return ""
+	}
+	return token
 }
 
 // generateAccessToken creates a cryptographically random access token
 func (c *Client) generateAccessToken() string {
-	return oauth2.GenerateCryptographicNonceFixedLength(32)
+	token, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate access token")
+		return ""
+	}
+	return token
 }
 
 // generateRefreshToken creates a cryptographically random refresh token
 func (c *Client) generateRefreshToken() string {
-	return oauth2.GenerateCryptographicNonceFixedLength(32)
+	token, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate refresh token")
+		return ""
+	}
+	return token
 }
 
 // generateSubjectIdentifier creates a subject identifier for the user

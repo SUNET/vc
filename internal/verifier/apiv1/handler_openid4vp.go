@@ -2,8 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"time"
 	"vc/pkg/openid4vp"
 
@@ -170,13 +168,6 @@ func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string, s
 	}
 
 	return claims, nil
-}
-
-// generateNonce creates a cryptographically random nonce
-func (c *Client) generateNonce() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // GetPollStatus returns the current status of a session for polling

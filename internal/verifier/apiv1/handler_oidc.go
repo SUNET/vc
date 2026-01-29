@@ -8,6 +8,7 @@ import (
 	"time"
 	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
+	"vc/pkg/crypto"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -95,7 +96,10 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Create session
-	sessionID := c.generateSessionID()
+	sessionID, err := crypto.GenerateSecureToken(0, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session ID: %w", err)
+	}
 	session := &db.Session{
 		ID:        sessionID,
 		CreatedAt: time.Now(),

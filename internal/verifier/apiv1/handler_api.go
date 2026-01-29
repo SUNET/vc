@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"time"
 	"vc/internal/verifier/db"
+	"vc/pkg/crypto"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -222,7 +223,11 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 	}
 
 	// Generate nonce for this request
-	nonce := c.generateNonce()
+	nonce, err := crypto.GenerateSecureToken(32, 0)
+	if err != nil {
+		c.log.Error(err, "Failed to generate nonce")
+		return nil, ErrServerError
+	}
 	session.OpenID4VP.RequestObjectNonce = nonce
 	if err := c.db.Sessions.Update(ctx, session); err != nil {
 		c.log.Error(err, "Failed to update session with nonce")

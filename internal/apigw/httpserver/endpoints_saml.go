@@ -4,14 +4,12 @@ package httpserver
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
-	"time"
 
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
+	"vc/pkg/crypto"
 	"vc/pkg/grpchelpers"
 	"vc/pkg/openid4vci"
 
@@ -274,12 +272,18 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	defer span.End()
 
 	// Build credential offer parameters
+	// Generate pre-authorized code
+	preAuthCode, err := crypto.GenerateSecureToken(32, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
+	}
+
 	params := openid4vci.CredentialOfferParameters{
 		CredentialIssuer:           s.cfg.Common.CredentialOffer.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]interface{}{
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]interface{}{
-				"pre-authorized_code": generatePreAuthCode(),
+				"pre-authorized_code": preAuthCode,
 				"tx_code":             nil, // Optional transaction code
 			},
 		},
@@ -303,12 +307,4 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	}
 
 	return offerData, nil
-}
-
-// generatePreAuthCode generates a pre-authorized code for the credential offer
-// In production, this should be cryptographically secure and stored in the database
-func generatePreAuthCode() string {
-	// TODO: Replace with secure random generation and database storage
-	// For now, use a simple UUID-like string
-	return fmt.Sprintf("%d-%d", time.Now().Unix(), rand.Int63())
 }

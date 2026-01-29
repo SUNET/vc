@@ -3,15 +3,16 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"time"
 	"vc/internal/apigw/apiv1"
 	"vc/internal/apigw/staticembed"
+	"vc/pkg/crypto"
 	"vc/pkg/httphelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
-	"vc/pkg/oauth2"
 	"vc/pkg/trace"
 
 	"github.com/gin-contrib/sessions"
@@ -58,8 +59,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		samlService:     samlService,
 		oidcrpService:   oidcrpService,
 		sessionsName:    "oauth_user_session",
-		sessionsAuthKey: oauth2.GenerateCryptographicNonceFixedLength(32),
-		sessionsEncKey:  oauth2.GenerateCryptographicNonceFixedLength(32),
 		sessionsOptions: sessions.Options{
 			Path:     "/",
 			Domain:   "",
@@ -75,10 +74,22 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}
 
+	// Generate session keys
 	var err error
-	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
+	s.sessionsAuthKey, err = crypto.GenerateSecureToken(0, 32)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to generate session auth key: %w", err)
+	}
+
+	s.sessionsEncKey, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session encryption key: %w", err)
+	}
+
+	var httpHelpersErr error
+	s.httpHelpers, httpHelpersErr = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
+	if httpHelpersErr != nil {
+		return nil, httpHelpersErr
 	}
 
 	// Used in development to avoid bundling static files in the executable.
