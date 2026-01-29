@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -171,7 +170,7 @@ func TestMakeSDJWT(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			log := logger.NewSimple("test")
 			client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -237,7 +236,7 @@ func TestMakeSDJWT(t *testing.T) {
 }
 
 func TestMakeSDJWT_WithRSAKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "rsa", log)
 
@@ -275,7 +274,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 }
 
 func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -337,7 +336,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 }
 
 func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -418,7 +417,7 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			log := logger.NewSimple("test")
 			client := mockNewClient(ctx, t, "ecdsa", log)
 

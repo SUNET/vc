@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"testing"
@@ -15,7 +14,7 @@ import (
 
 // TestCreateRequestObject tests the CreateRequestObject handler
 func TestCreateRequestObject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name                 string
@@ -162,7 +161,7 @@ func TestBuildVPFormats(t *testing.T) {
 
 // TestGetRequestObject tests the GetRequestObject handler
 func TestGetRequestObject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -213,7 +212,7 @@ func TestGetRequestObject(t *testing.T) {
 
 // TestHandleDirectPost tests the HandleDirectPost handler
 func TestHandleDirectPost(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name                   string
@@ -286,7 +285,7 @@ func TestHandleDirectPost(t *testing.T) {
 
 // TestGetPollStatus tests the GetPollStatus handler
 func TestGetPollStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name         string
@@ -378,7 +377,7 @@ func createTestDCQLForVP(t *testing.T) *openid4vp.DCQL {
 
 // TestExtractClaimsFromVPToken tests the extractClaimsFromVPToken helper
 func TestExtractClaimsFromVPToken(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name           string

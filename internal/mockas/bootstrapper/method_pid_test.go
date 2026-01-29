@@ -1,7 +1,6 @@
 package bootstrapper
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -80,7 +79,7 @@ func TestMakeSourceData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Create temporary directory for test files
 			tempDir := t.TempDir()
@@ -132,7 +131,7 @@ func TestMakeSourceData(t *testing.T) {
 }
 
 func TestMakeSourceData_InvalidFile(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	client, err := NewPIDClient(ctx, nil)
 	require.NoError(t, err)
@@ -144,7 +143,7 @@ func TestMakeSourceData_InvalidFile(t *testing.T) {
 }
 
 func TestMakeSourceData_InvalidJSON(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create temporary directory for test files
 	tempDir := t.TempDir()
@@ -164,7 +163,7 @@ func TestMakeSourceData_InvalidJSON(t *testing.T) {
 }
 
 func TestSave2Disk(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create pidClient
 	client, err := NewPIDClient(ctx, nil)

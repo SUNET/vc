@@ -50,7 +50,7 @@ func mockClient() *Client {
 }
 
 func TestCreateJSONSourceFiles(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	c := mockClient()
 	err := c.makeIdentities("testdata/users_paris.xlsx")
 	assert.NoError(t, err)
@@ -238,7 +238,7 @@ func TestUserUpload(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Setup logger
 			log, err := logger.New("test", "", false)
@@ -671,7 +671,7 @@ func TestDocumentUploader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Setup logger
 			log, err := logger.New("test", "", false)

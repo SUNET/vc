@@ -14,7 +14,7 @@ import (
 )
 
 func TestNew_Disabled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -32,12 +32,12 @@ func TestNew_Disabled(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestNew_ConsoleDestination(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -62,12 +62,12 @@ func TestNew_ConsoleDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestNew_FileDestination(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -96,12 +96,12 @@ func TestNew_FileDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestNew_WebhookDestination(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -129,12 +129,12 @@ func TestNew_WebhookDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestNew_MultipleDestinations(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -162,12 +162,12 @@ func TestNew_MultipleDestinations(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestNew_InvalidFileDestination(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -188,7 +188,7 @@ func TestNew_InvalidFileDestination(t *testing.T) {
 }
 
 func TestParseDestinations_EmptyStrings(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -216,12 +216,12 @@ func TestParseDestinations_EmptyStrings(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestAddAuditLog(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -258,12 +258,12 @@ func TestAddAuditLog(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestClose(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -285,7 +285,7 @@ func TestClose(t *testing.T) {
 	// Cancel context and close
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 
 	// File should be closed
@@ -299,7 +299,7 @@ func TestClose(t *testing.T) {
 }
 
 func TestDestinationWorker(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -336,7 +336,7 @@ func TestDestinationWorker(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
@@ -374,7 +374,7 @@ func TestDestinationType_String(t *testing.T) {
 }
 
 func TestSendToDestination_UnknownType(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -397,12 +397,12 @@ func TestSendToDestination_UnknownType(t *testing.T) {
 	}
 
 	jsonBytes := []byte(`{"test":"data"}`)
-	err = service.sendToDestination(context.Background(), dest, jsonBytes)
+	err = service.sendToDestination(t.Context(), dest, jsonBytes)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown destination type")
 
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }

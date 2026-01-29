@@ -14,7 +14,7 @@ import (
 )
 
 func TestAddAuditLog_GeneratesID(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -53,11 +53,11 @@ func TestAddAuditLog_GeneratesID(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestAddAuditLog_ComplexMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -101,11 +101,11 @@ func TestAddAuditLog_ComplexMessage(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestProcessAuditLog_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "audit.log")
@@ -138,12 +138,12 @@ func TestProcessAuditLog_ContextCancellation(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Close service
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestProcessAuditLog_ErrorHandling(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Use invalid webhook URL to trigger errors
@@ -174,11 +174,11 @@ func TestProcessAuditLog_ErrorHandling(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestProcessAuditLog_MultipleMessages(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -217,11 +217,11 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestAddAuditLog_NilMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -255,5 +255,5 @@ func TestAddAuditLog_NilMessage(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }

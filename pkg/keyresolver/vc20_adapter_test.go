@@ -4,7 +4,6 @@
 package keyresolver
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -74,7 +73,7 @@ func TestVC20ResolverAdapter_ResolveKey_ECDSA(t *testing.T) {
 	}
 	adapter := NewVC20ResolverAdapter(mock)
 
-	key, err := adapter.ResolveKey(context.Background(), "did:example:issuer#key-1")
+	key, err := adapter.ResolveKey(t.Context(), "did:example:issuer#key-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,7 +101,7 @@ func TestVC20ResolverAdapter_ResolveKey_Ed25519(t *testing.T) {
 	}
 	adapter := NewVC20ResolverAdapter(mock)
 
-	key, err := adapter.ResolveKey(context.Background(), "did:example:issuer#key-1")
+	key, err := adapter.ResolveKey(t.Context(), "did:example:issuer#key-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,7 +131,7 @@ func TestVC20ResolverAdapter_ResolveKey_ECDSAFallsBackToEd25519(t *testing.T) {
 	}
 	adapter := NewVC20ResolverAdapter(mock)
 
-	key, err := adapter.ResolveKey(context.Background(), "did:example:issuer#key-1")
+	key, err := adapter.ResolveKey(t.Context(), "did:example:issuer#key-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestVC20ResolverAdapter_ResolveKey_BothFail(t *testing.T) {
 	}
 	adapter := NewVC20ResolverAdapter(mock)
 
-	_, err := adapter.ResolveKey(context.Background(), "did:example:issuer#key-1")
+	_, err := adapter.ResolveKey(t.Context(), "did:example:issuer#key-1")
 	if err == nil {
 		t.Error("expected error when both key types fail")
 	}
@@ -175,7 +174,7 @@ func TestECDSAOnlyAdapter(t *testing.T) {
 	}
 	adapter := NewECDSAOnlyAdapter(mock)
 
-	key, err := adapter.ResolveKey(context.Background(), "did:example:issuer#key-1")
+	key, err := adapter.ResolveKey(t.Context(), "did:example:issuer#key-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +201,7 @@ func TestEd25519OnlyAdapter(t *testing.T) {
 	}
 	adapter := NewEd25519OnlyAdapter(mock)
 
-	key, err := adapter.ResolveKey(context.Background(), "did:example:issuer#key-1")
+	key, err := adapter.ResolveKey(t.Context(), "did:example:issuer#key-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -235,7 +234,7 @@ func TestCompositeVC20Resolver(t *testing.T) {
 
 		composite := NewCompositeVC20Resolver(resolver1, resolver2)
 
-		key, err := composite.ResolveKey(context.Background(), "did:example:issuer#key-1")
+		key, err := composite.ResolveKey(t.Context(), "did:example:issuer#key-1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -251,7 +250,7 @@ func TestCompositeVC20Resolver(t *testing.T) {
 
 		composite := NewCompositeVC20Resolver(resolver1, resolver2)
 
-		key, err := composite.ResolveKey(context.Background(), "did:example:issuer#key-1")
+		key, err := composite.ResolveKey(t.Context(), "did:example:issuer#key-1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -267,7 +266,7 @@ func TestCompositeVC20Resolver(t *testing.T) {
 
 		composite := NewCompositeVC20Resolver(resolver1, resolver2)
 
-		_, err := composite.ResolveKey(context.Background(), "did:example:issuer#key-1")
+		_, err := composite.ResolveKey(t.Context(), "did:example:issuer#key-1")
 		if err == nil {
 			t.Error("expected error when all resolvers fail")
 		}
@@ -276,7 +275,7 @@ func TestCompositeVC20Resolver(t *testing.T) {
 	t.Run("no resolvers configured", func(t *testing.T) {
 		composite := NewCompositeVC20Resolver()
 
-		_, err := composite.ResolveKey(context.Background(), "did:example:issuer#key-1")
+		_, err := composite.ResolveKey(t.Context(), "did:example:issuer#key-1")
 		if err == nil {
 			t.Error("expected error when no resolvers configured")
 		}
@@ -299,7 +298,7 @@ func TestTypedKeyResolver(t *testing.T) {
 		inner := NewECDSAOnlyAdapter(&mockResolver{ecdsaKey: &ecdsaKey.PublicKey})
 		typed := NewTypedKeyResolver(inner)
 
-		key, err := typed.ResolveECDSAKey(context.Background(), "did:example:issuer#key-1")
+		key, err := typed.ResolveECDSAKey(t.Context(), "did:example:issuer#key-1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -312,7 +311,7 @@ func TestTypedKeyResolver(t *testing.T) {
 		inner := NewEd25519OnlyAdapter(&ed25519OnlyMockResolver{key: ed25519PubKey})
 		typed := NewTypedKeyResolver(inner)
 
-		_, err := typed.ResolveECDSAKey(context.Background(), "did:example:issuer#key-1")
+		_, err := typed.ResolveECDSAKey(t.Context(), "did:example:issuer#key-1")
 		if err == nil {
 			t.Error("expected error when resolving Ed25519 key as ECDSA")
 		}
@@ -322,7 +321,7 @@ func TestTypedKeyResolver(t *testing.T) {
 		inner := NewEd25519OnlyAdapter(&ed25519OnlyMockResolver{key: ed25519PubKey})
 		typed := NewTypedKeyResolver(inner)
 
-		key, err := typed.ResolveEd25519Key(context.Background(), "did:example:issuer#key-1")
+		key, err := typed.ResolveEd25519Key(t.Context(), "did:example:issuer#key-1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -335,7 +334,7 @@ func TestTypedKeyResolver(t *testing.T) {
 		inner := NewECDSAOnlyAdapter(&mockResolver{ecdsaKey: &ecdsaKey.PublicKey})
 		typed := NewTypedKeyResolver(inner)
 
-		_, err := typed.ResolveEd25519Key(context.Background(), "did:example:issuer#key-1")
+		_, err := typed.ResolveEd25519Key(t.Context(), "did:example:issuer#key-1")
 		if err == nil {
 			t.Error("expected error when resolving ECDSA key as Ed25519")
 		}
@@ -345,7 +344,7 @@ func TestTypedKeyResolver(t *testing.T) {
 		inner := NewEd25519OnlyAdapter(&ed25519OnlyMockResolver{key: ed25519PubKey})
 		typed := NewTypedKeyResolver(inner)
 
-		key, err := typed.ResolveKey(context.Background(), "did:example:issuer#key-1")
+		key, err := typed.ResolveKey(t.Context(), "did:example:issuer#key-1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -369,7 +368,7 @@ func TestVC20ResolverAdapter_WithLocalResolver(t *testing.T) {
 	_ = ed25519PubKey // Will be used in actual did:jwk test
 
 	// Test with invalid DID - should return error
-	_, err = adapter.ResolveKey(context.Background(), "did:example:unknown")
+	_, err = adapter.ResolveKey(t.Context(), "did:example:unknown")
 	if err == nil {
 		t.Error("expected error for unsupported DID method")
 	}
@@ -401,7 +400,7 @@ func TestVC20ResolverAdapter_WithSmartResolver(t *testing.T) {
 	adapter := NewVC20ResolverAdapter(smartResolver)
 
 	// Test resolution of non-local DID (should use mock remote)
-	key, err := adapter.ResolveKey(context.Background(), "did:web:example.com#key-1")
+	key, err := adapter.ResolveKey(t.Context(), "did:web:example.com#key-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

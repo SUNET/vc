@@ -1,7 +1,6 @@
 package openid4vp
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"testing"
@@ -90,7 +89,7 @@ func TestGenerateQRV2(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GenerateQRV2(context.Background(), tt.data)
+			got, err := GenerateQRV2(t.Context(), tt.data)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})

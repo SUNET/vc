@@ -3,7 +3,6 @@
 package saml
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,7 +37,7 @@ func TestMDQClient_GetIDPMetadata_Success(t *testing.T) {
 
 	client := NewMDQClient(server.URL, 3600, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	metadata, err := client.GetIDPMetadata(ctx, "https://idp.example.com/idp")
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
@@ -66,7 +65,7 @@ func TestMDQClient_GetIDPMetadata_Caching(t *testing.T) {
 
 	client := NewMDQClient(server.URL, 3600, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	entityID := "https://idp.example.com/idp"
 
 	// First request - should hit server
@@ -102,7 +101,7 @@ func TestMDQClient_GetIDPMetadata_CacheExpiration(t *testing.T) {
 	// Very short cache TTL (1 second)
 	client := NewMDQClient(server.URL, 1, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	entityID := "https://idp.example.com/idp"
 
 	// First request
@@ -131,7 +130,7 @@ func TestMDQClient_GetIDPMetadata_HTTPError(t *testing.T) {
 
 	client := NewMDQClient(server.URL, 3600, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err = client.GetIDPMetadata(ctx, "https://nonexistent.idp.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "404")
@@ -150,7 +149,7 @@ func TestMDQClient_GetIDPMetadata_InvalidXML(t *testing.T) {
 
 	client := NewMDQClient(server.URL, 3600, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err = client.GetIDPMetadata(ctx, "https://idp.example.com/idp")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "parse")
@@ -176,7 +175,7 @@ func TestMDQClient_GetIDPMetadata_NoIDPDescriptor(t *testing.T) {
 
 	client := NewMDQClient(server.URL, 3600, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err = client.GetIDPMetadata(ctx, "https://sp.example.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "IdP")
@@ -200,7 +199,7 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 
 	client := NewMDQClient(server.URL, 3600, log)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	entityID := "https://idp.example.com/idp"
 
 	// Make multiple concurrent requests

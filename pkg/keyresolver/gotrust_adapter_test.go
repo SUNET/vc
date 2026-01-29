@@ -3,7 +3,6 @@
 package keyresolver
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -211,7 +210,7 @@ func TestGoTrustResolver_EvaluateTrustEd25519(t *testing.T) {
 	defer server.Close()
 
 	resolver := NewGoTrustResolver(server.URL)
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -244,7 +243,7 @@ func TestGoTrustResolver_EvaluateTrustECDSA(t *testing.T) {
 	defer server.Close()
 
 	resolver := NewGoTrustResolver(server.URL)
-	trusted, err := resolver.EvaluateTrustECDSA(context.Background(), "did:web:example.com", &privKey.PublicKey, "")
+	trusted, err := resolver.EvaluateTrustECDSA(t.Context(), "did:web:example.com", &privKey.PublicKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -410,7 +409,7 @@ func TestNewGoTrustResolverWithDiscovery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver, err := NewGoTrustResolverWithDiscovery(context.Background(), server.URL)
+	resolver, err := NewGoTrustResolverWithDiscovery(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("failed to create resolver with discovery: %v", err)
 	}
@@ -425,7 +424,7 @@ func TestNewGoTrustResolverWithDiscovery_Failure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewGoTrustResolverWithDiscovery(context.Background(), server.URL)
+	_, err := NewGoTrustResolverWithDiscovery(t.Context(), server.URL)
 	if err == nil {
 		t.Fatal("expected error when discovery fails")
 	}

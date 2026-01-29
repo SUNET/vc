@@ -1,14 +1,13 @@
 package openid4vp
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateAuthorizationRequestURI(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	authRequest := &RequestObject{
 		ClientID: "x509_san_dns:vc-interops-3.sunet.se",

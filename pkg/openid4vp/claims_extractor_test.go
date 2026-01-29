@@ -1,7 +1,6 @@
 package openid4vp
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -612,7 +611,7 @@ func TestClaimsExtractor_IsInternalClaim(t *testing.T) {
 
 func TestClaimsExtractor_ExtractAndMapClaims_Integration(t *testing.T) {
 	ce := NewClaimsExtractor()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("complete pipeline - PID basic", func(t *testing.T) {
 		// Simulate a simple SD-JWT VP token (would normally come from sdjwtvc.CredentialParser)
@@ -723,7 +722,7 @@ func TestClaimsExtractor_ExtractAndMapClaims_Integration(t *testing.T) {
 
 func TestClaimsExtractor_ExtractClaimsFromVPToken_MDocFormat(t *testing.T) {
 	ce := NewClaimsExtractor()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a minimal mdoc DeviceResponse
 	deviceResponse := struct {

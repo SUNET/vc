@@ -1,7 +1,6 @@
 package openid4vci
 
 import (
-	"context"
 	"testing"
 	"vc/internal/gen/issuer/apiv1_issuer"
 
@@ -46,7 +45,7 @@ func TestCredentialValidation(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
+			ctx := t.Context()
 			got := tt.credentialRequest.Validate(ctx, tt.tokenResponse)
 			assert.NoError(t, got)
 		})

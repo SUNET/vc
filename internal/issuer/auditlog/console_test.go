@@ -12,7 +12,7 @@ import (
 )
 
 func TestConsole_SendToDestination(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -31,17 +31,17 @@ func TestConsole_SendToDestination(t *testing.T) {
 	dest := service.destinations[0]
 	jsonBytes := []byte(`{"test":"data"}`)
 
-	err = service.sendToDestination(context.Background(), dest, jsonBytes)
+	err = service.sendToDestination(t.Context(), dest, jsonBytes)
 	assert.NoError(t, err)
 
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestConsole_DestinationParsing(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -66,12 +66,12 @@ func TestConsole_DestinationParsing(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestConsole_MessageDelivery(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -101,11 +101,11 @@ func TestConsole_MessageDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestConsole_InvalidJSON(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -123,11 +123,11 @@ func TestConsole_InvalidJSON(t *testing.T) {
 
 	// Channel that cannot be marshalled to JSON
 	invalidData := make(chan int)
-	err = service.SendWebHook(context.Background(), invalidData)
+	err = service.SendWebHook(t.Context(), invalidData)
 	assert.Error(t, err)
 
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }

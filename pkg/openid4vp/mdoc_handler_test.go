@@ -1,7 +1,6 @@
 package openid4vp
 
 import (
-	"context"
 	"encoding/base64"
 	"testing"
 
@@ -240,7 +239,7 @@ func TestMDocHandler_VerifyAndExtract_InvalidToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := h.VerifyAndExtract(context.Background(), tt.vpToken)
+			_, err := h.VerifyAndExtract(t.Context(), tt.vpToken)
 			if err == nil {
 				t.Error("VerifyAndExtract() should fail")
 			}

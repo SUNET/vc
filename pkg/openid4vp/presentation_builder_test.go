@@ -1,14 +1,13 @@
 package openid4vp_test
 
 import (
-	"context"
 	"testing"
 	"vc/pkg/configuration"
 	"vc/pkg/openid4vp"
 )
 
 func TestPresentationBuilder_BuildFromScopes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Load test templates
 	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/multi_template.yaml")
@@ -96,7 +95,7 @@ func TestPresentationBuilder_BuildFromScopes(t *testing.T) {
 }
 
 func TestPresentationBuilder_BuildFromTemplate(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/multi_template.yaml")
 	if err != nil {
@@ -161,7 +160,7 @@ func TestPresentationBuilder_BuildFromTemplate(t *testing.T) {
 }
 
 func TestPresentationBuilder_BuildDCQLQuery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/multi_template.yaml")
 	if err != nil {
@@ -270,7 +269,7 @@ func TestPresentationBuilder_BuildDCQLQuery(t *testing.T) {
 }
 
 func TestPresentationBuilder_ListTemplates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/multi_template.yaml")
 	if err != nil {
@@ -291,7 +290,7 @@ func TestPresentationBuilder_ListTemplates(t *testing.T) {
 }
 
 func TestPresentationBuilder_GetTemplate(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/multi_template.yaml")
 	if err != nil {

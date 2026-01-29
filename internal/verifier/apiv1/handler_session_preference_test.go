@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"testing"
 	"time"
 	"vc/internal/verifier/db"
@@ -12,7 +11,7 @@ import (
 
 // TestUpdateSessionPreference tests the UpdateSessionPreference handler
 func TestUpdateSessionPreference(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
@@ -80,7 +79,7 @@ func TestUpdateSessionPreference(t *testing.T) {
 
 // TestConfirmCredentialDisplay tests the ConfirmCredentialDisplay handler
 func TestConfirmCredentialDisplay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name              string
@@ -181,7 +180,7 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 
 // TestGetCredentialDisplayData tests the GetCredentialDisplayData handler
 func TestGetCredentialDisplayData(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string

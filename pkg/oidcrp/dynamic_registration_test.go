@@ -3,7 +3,6 @@
 package oidcrp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -138,7 +137,7 @@ func TestRegister_Success(t *testing.T) {
 	req := BuildRegistrationRequest(cfg)
 
 	// Perform registration
-	ctx := context.Background()
+	ctx := t.Context()
 	resp, err := client.Register(ctx, mockServer.URL, req, "")
 
 	if err != nil {
@@ -196,7 +195,7 @@ func TestRegister_WithInitialAccessToken(t *testing.T) {
 	req := BuildRegistrationRequest(cfg)
 
 	// Perform registration with initial access token
-	ctx := context.Background()
+	ctx := t.Context()
 	resp, err := client.Register(ctx, mockServer.URL, req, expectedToken)
 
 	if err != nil {
@@ -228,7 +227,7 @@ func TestRegister_ServerError(t *testing.T) {
 	req := &RegistrationRequest{}
 
 	// Perform registration (should fail)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := client.Register(ctx, mockServer.URL, req, "")
 
 	if err == nil {
@@ -254,7 +253,7 @@ func TestRegister_InvalidEndpoint(t *testing.T) {
 	req := BuildRegistrationRequest(cfg)
 
 	// Perform registration with invalid endpoint
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := client.Register(ctx, "http://invalid-endpoint-that-does-not-exist.local", req, "")
 
 	if err == nil {

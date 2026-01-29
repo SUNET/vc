@@ -111,7 +111,7 @@ type testEnvironment struct {
 
 // setupTestEnvironment creates a complete test environment with mock IdP
 func setupTestEnvironment(t *testing.T) *testEnvironment {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create logger
 	log, err := logger.New("test", "", false)

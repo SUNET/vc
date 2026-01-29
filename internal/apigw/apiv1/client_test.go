@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"vc/pkg/logger"
@@ -12,7 +11,7 @@ import (
 )
 
 func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a test client with sample credential constructors and wallet configs
 	client := &Client{
@@ -142,7 +141,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 }
 
 func TestCreateCredentialOfferLookupMetadata_EmptyConfig(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a client with no credential constructors or wallets
 	client := &Client{
@@ -170,7 +169,7 @@ func TestCreateCredentialOfferLookupMetadata_EmptyConfig(t *testing.T) {
 }
 
 func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a test client matching the expected output format
 	client := &Client{

@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -18,7 +17,7 @@ import (
 
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Create a test session
@@ -77,7 +76,7 @@ func TestGetQRCode(t *testing.T) {
 
 // TestPollSession tests session polling
 func TestPollSession(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Create test sessions with different statuses
@@ -163,7 +162,7 @@ func TestPollSession(t *testing.T) {
 
 // TestGetUserInfo tests the UserInfo endpoint
 func TestGetUserInfo(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Create a session with verified claims
@@ -337,7 +336,7 @@ func TestGenerateNonce(t *testing.T) {
 
 // TestGetOIDCRequestObject tests the GetOIDCRequestObject handler
 func TestGetOIDCRequestObject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name         string
@@ -435,7 +434,7 @@ func TestGetOIDCRequestObject(t *testing.T) {
 
 // TestProcessCallback tests the ProcessCallback handler
 func TestProcessCallback(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name             string
@@ -531,7 +530,7 @@ func TestProcessCallback(t *testing.T) {
 
 // TestGetJWKS_KeyTypes tests the GetJWKS handler with different key types
 func TestGetJWKS_KeyTypes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -617,7 +616,7 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 
 // TestProcessDirectPost tests the ProcessDirectPost handler
 func TestProcessDirectPost(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name                   string

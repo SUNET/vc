@@ -1,7 +1,6 @@
 package bootstrapper
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -14,7 +13,7 @@ import (
 )
 
 func TestPIDClient_makeSourceData(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a temporary directory for test files
 	tmpDir, err := os.MkdirTemp("", "pid-test-*")
@@ -234,7 +233,7 @@ func TestPIDClient_makeSourceData(t *testing.T) {
 }
 
 func TestPIDClient_makeSourceData_InvalidFile(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := NewPIDClient(ctx, nil)
 	require.NoError(t, err)
 
@@ -245,7 +244,7 @@ func TestPIDClient_makeSourceData_InvalidFile(t *testing.T) {
 }
 
 func TestPIDClient_makeSourceData_InvalidJSON(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a temporary directory for test files
 	tmpDir, err := os.MkdirTemp("", "pid-test-invalid-*")
@@ -267,7 +266,7 @@ func TestPIDClient_makeSourceData_InvalidJSON(t *testing.T) {
 }
 
 func TestPIDClient_makeSourceData_EmptyData(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a temporary directory for test files
 	tmpDir, err := os.MkdirTemp("", "pid-test-empty-*")

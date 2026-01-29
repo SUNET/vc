@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
@@ -246,7 +245,7 @@ func TestClient_getSigningMethod(t *testing.T) {
 }
 
 func TestClient_Health(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
 
 	// Note: Health requires db to be set, which may fail in mock
@@ -456,7 +455,7 @@ func ptrString(s string) *string {
 }
 
 func TestClient_createDCQLQuery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name                  string

@@ -15,7 +15,7 @@ import (
 )
 
 func TestHTTP_SendWebHook_NoDestinations(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: nil,
@@ -23,18 +23,18 @@ func TestHTTP_SendWebHook_NoDestinations(t *testing.T) {
 	}
 
 	log := logger.NewSimple("test")
-	service, err := New(context.Background(), cfg, log)
+	service, err := New(t.Context(), cfg, log)
 	require.NoError(t, err)
 
 	err = service.SendWebHook(ctx, map[string]string{"test": "data"})
 	assert.NoError(t, err)
 
 	// Clean up
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_SendToDestination_Webhook_Success(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Create test server
@@ -67,17 +67,17 @@ func TestHTTP_SendToDestination_Webhook_Success(t *testing.T) {
 	dest := service.destinations[0]
 	jsonBytes := []byte(`{"test":"data"}`)
 
-	err = service.sendToDestination(context.Background(), dest, jsonBytes)
+	err = service.sendToDestination(t.Context(), dest, jsonBytes)
 	assert.NoError(t, err)
 
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_SendToDestination_Webhook_Failure(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Create test server that returns error
@@ -102,17 +102,17 @@ func TestHTTP_SendToDestination_Webhook_Failure(t *testing.T) {
 	dest := service.destinations[0]
 	jsonBytes := []byte(`{"test":"data"}`)
 
-	err = service.sendToDestination(context.Background(), dest, jsonBytes)
+	err = service.sendToDestination(t.Context(), dest, jsonBytes)
 	assert.Error(t, err)
 
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -135,11 +135,11 @@ func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_SendWebhook_Timeout(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Create test server that delays response
@@ -169,11 +169,11 @@ func TestHTTP_SendWebhook_Timeout(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_DestinationParsing(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -201,7 +201,7 @@ func TestHTTP_DestinationParsing(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_MessageDelivery(t *testing.T) {
@@ -212,7 +212,7 @@ func TestHTTP_MessageDelivery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -241,11 +241,11 @@ func TestHTTP_MessageDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestHTTP_QueueFull(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +268,7 @@ func TestHTTP_QueueFull(t *testing.T) {
 
 	// Fill the queue beyond capacity
 	for i := 0; i < 150; i++ { // More than buffer size of 100
-		err = service.SendWebHook(context.Background(), map[string]int{"iteration": i})
+		err = service.SendWebHook(t.Context(), map[string]int{"iteration": i})
 		// Should not error even when queue is full (messages are dropped)
 		assert.NoError(t, err)
 	}
@@ -276,5 +276,5 @@ func TestHTTP_QueueFull(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }

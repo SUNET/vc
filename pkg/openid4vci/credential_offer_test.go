@@ -1,7 +1,6 @@
 package openid4vci
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -600,7 +599,7 @@ func TestUnpackCredentialOffer(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.offer.Unpack(context.TODO())
+			got, err := tt.offer.Unpack(t.Context())
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.want, got)

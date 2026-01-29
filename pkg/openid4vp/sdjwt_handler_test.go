@@ -130,7 +130,7 @@ func TestExtractSDJWTClaims_Empty(t *testing.T) {
 func TestSDJWTHandler_VerifyAndExtract_EmptyToken(t *testing.T) {
 	h, _ := NewSDJWTHandler()
 
-	_, err := h.VerifyAndExtract(context.Background(), "")
+	_, err := h.VerifyAndExtract(t.Context(), "")
 	if err == nil {
 		t.Error("VerifyAndExtract() should fail for empty token")
 	}
@@ -143,7 +143,7 @@ func TestSDJWTHandler_VerifyAndExtract_NoKeyResolver(t *testing.T) {
 	// This will fail at key resolution
 	token := createTestSDJWT(t)
 
-	_, err := h.VerifyAndExtract(context.Background(), token)
+	_, err := h.VerifyAndExtract(t.Context(), token)
 	if err == nil {
 		t.Error("VerifyAndExtract() should fail without key resolver")
 	}
@@ -160,7 +160,7 @@ func TestSDJWTHandler_VerifyAndExtract_UntrustedIssuer(t *testing.T) {
 	// Create SD-JWT with different issuer
 	token := createTestSDJWT(t)
 
-	_, err := h.VerifyAndExtract(context.Background(), token)
+	_, err := h.VerifyAndExtract(t.Context(), token)
 	if err == nil {
 		t.Error("VerifyAndExtract() should fail for untrusted issuer")
 	}
@@ -233,7 +233,7 @@ func TestStaticKeyResolver(t *testing.T) {
 	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	resolver := &StaticKeyResolver{Key: &privateKey.PublicKey}
 
-	key, err := resolver.ResolveKey(context.Background(), "any-issuer", "any-kid")
+	key, err := resolver.ResolveKey(t.Context(), "any-issuer", "any-kid")
 	if err != nil {
 		t.Fatalf("ResolveKey() error = %v", err)
 	}
@@ -245,7 +245,7 @@ func TestStaticKeyResolver(t *testing.T) {
 func TestStaticKeyResolver_NilKey(t *testing.T) {
 	resolver := &StaticKeyResolver{}
 
-	_, err := resolver.ResolveKey(context.Background(), "any-issuer", "any-kid")
+	_, err := resolver.ResolveKey(t.Context(), "any-issuer", "any-kid")
 	if err == nil {
 		t.Error("ResolveKey() should fail with nil key")
 	}
@@ -417,7 +417,7 @@ func TestSDJWTHandler_VerifyAndExtract_Valid(t *testing.T) {
 	}
 
 	// Verify and extract
-	result, err := h.VerifyAndExtract(context.Background(), token)
+	result, err := h.VerifyAndExtract(t.Context(), token)
 	if err != nil {
 		t.Fatalf("VerifyAndExtract() error = %v", err)
 	}

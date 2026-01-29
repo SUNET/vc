@@ -221,7 +221,7 @@ func (m *MockDBService) ToDBService() *db.Service {
 
 // CreateTestClientWithMock creates a test Client with a mock database for testing handlers
 func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if cfg == nil {
 		cfg = &model.Cfg{

@@ -139,7 +139,7 @@ func TestSingaporeIssuers_RealDIDWebResolution(t *testing.T) {
 	defer srv.Close()
 
 	resolver := NewGoTrustResolver(srv.URL())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	testCases := []struct {
 		name               string
@@ -214,7 +214,7 @@ func TestSingaporeIssuers_DirectDIDWebResolution(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
 			// Resolve the DID document directly via HTTP
@@ -477,7 +477,7 @@ func TestSingaporeCredentials_EdDSA_Verify(t *testing.T) {
 			}
 
 			// Resolve the public key using real did:web resolution
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
 			pubKey, err := resolver.ResolveEd25519WithContext(ctx, proof.VerificationMethod)
@@ -549,7 +549,7 @@ func TestSingaporeCredentials_EdDSA_DirectVerify(t *testing.T) {
 			}
 
 			// Resolve the issuer's DID document via direct HTTP
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
 			didDoc, err := resolveDIDWebDocument(ctx, tc.did)
@@ -771,7 +771,7 @@ func base64URLDecode(s string) ([]byte, error) {
 func resolveSingaporeEd25519Key(t *testing.T, did, verificationMethod string) ed25519.PublicKey {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	didDoc, err := resolveDIDWebDocument(ctx, did)

@@ -3,7 +3,6 @@
 package keyresolver
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -46,7 +45,7 @@ func TestGoTrustResolver_WithTestServer_Discovery(t *testing.T) {
 	defer srv.Close()
 
 	// Test discovery workflow - creates resolver by fetching .well-known/authzen-configuration
-	resolver, err := NewGoTrustResolverWithDiscovery(context.Background(), srv.URL())
+	resolver, err := NewGoTrustResolverWithDiscovery(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to create resolver with discovery: %v", err)
 	}
@@ -74,7 +73,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustEd25519_Accepted(t *testing
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -93,7 +92,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustEd25519_Rejected(t *testing
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:untrusted.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:untrusted.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -112,7 +111,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustECDSA_Accepted(t *testing.T
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustECDSA(context.Background(), "did:web:example.com", &privKey.PublicKey, "verifier")
+	trusted, err := resolver.EvaluateTrustECDSA(t.Context(), "did:web:example.com", &privKey.PublicKey, "verifier")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -131,7 +130,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustECDSA_Rejected(t *testing.T
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustECDSA(context.Background(), "did:web:untrusted.com", &privKey.PublicKey, "")
+	trusted, err := resolver.EvaluateTrustECDSA(t.Context(), "did:web:untrusted.com", &privKey.PublicKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -177,7 +176,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_BySubjectID(t *testing.T
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Test trusted DID
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:trusted-issuer.example.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:trusted-issuer.example.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -186,7 +185,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_BySubjectID(t *testing.T
 	}
 
 	// Test untrusted DID
-	trusted, err = resolver.EvaluateTrustEd25519(context.Background(), "did:web:unknown.org", pubKey, "")
+	trusted, err = resolver.EvaluateTrustEd25519(t.Context(), "did:web:unknown.org", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -226,25 +225,25 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_ByRole(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Test allowed role
-	trusted, _ := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "issuer")
+	trusted, _ := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "issuer")
 	if !trusted {
 		t.Error("expected 'issuer' role to be trusted")
 	}
 
 	// Test another allowed role
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "verifier")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "verifier")
 	if !trusted {
 		t.Error("expected 'verifier' role to be trusted")
 	}
 
 	// Test disallowed role
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "attacker")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "attacker")
 	if trusted {
 		t.Error("expected 'attacker' role to be rejected")
 	}
 
 	// Test no role (should be allowed)
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	if !trusted {
 		t.Error("expected empty role to be trusted")
 	}
@@ -306,7 +305,7 @@ func TestGoTrustEvaluator_WithTestServer_Discovery(t *testing.T) {
 	srv := testserver.New(testserver.WithAcceptAll())
 	defer srv.Close()
 
-	evaluator, err := NewGoTrustEvaluatorWithDiscovery(context.Background(), srv.URL())
+	evaluator, err := NewGoTrustEvaluatorWithDiscovery(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to create evaluator with discovery: %v", err)
 	}
@@ -603,7 +602,7 @@ func TestIntegration_IssuerCredentialFlow(t *testing.T) {
 	}
 
 	// Step 2: Validate trust in issuer
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), issuerDID, issuerKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), issuerDID, issuerKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -612,7 +611,7 @@ func TestIntegration_IssuerCredentialFlow(t *testing.T) {
 	}
 
 	// Step 3: Verify untrusted role is rejected
-	trusted, err = resolver.EvaluateTrustEd25519(context.Background(), issuerDID, issuerKey, "admin")
+	trusted, err = resolver.EvaluateTrustEd25519(t.Context(), issuerDID, issuerKey, "admin")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -694,7 +693,7 @@ func TestGoTrustResolver_WithTestServer_ServerError(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	// The server error should either return an error OR return false (not trusted)
 	// Either behavior is acceptable for error handling
 	if err == nil && trusted {
@@ -706,7 +705,7 @@ func TestGoTrustResolver_WithTestServer_InvalidServerURL(t *testing.T) {
 	resolver := NewGoTrustResolver("http://localhost:99999") // Invalid port
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
-	_, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	_, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	if err == nil {
 		t.Fatal("expected error for invalid server URL")
 	}
@@ -748,7 +747,7 @@ func TestNewGoTrustResolverWithClient_FromTestServer(t *testing.T) {
 	defer srv.Close()
 
 	// Create client via discovery
-	client, err := authzenclient.Discover(context.Background(), srv.URL())
+	client, err := authzenclient.Discover(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to discover: %v", err)
 	}
@@ -757,7 +756,7 @@ func TestNewGoTrustResolverWithClient_FromTestServer(t *testing.T) {
 	resolver := NewGoTrustResolverWithClient(client)
 
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -788,7 +787,7 @@ func TestGoTrustEvaluator_WithTestServer_WithClient(t *testing.T) {
 	defer srv.Close()
 
 	// Create client manually
-	client, err := authzenclient.Discover(context.Background(), srv.URL())
+	client, err := authzenclient.Discover(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to discover: %v", err)
 	}
@@ -914,7 +913,7 @@ func TestGoTrustEvaluator_WithTestServer_ContextMethods(t *testing.T) {
 
 	// Test Ed25519 with context
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
-	ctx := context.Background()
+	ctx := t.Context()
 	trusted, err := evaluator.EvaluateTrustWithContext(ctx, "did:web:example.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust with context: %v", err)
@@ -1258,7 +1257,7 @@ func TestDIDWeb_Resolution_BasicDomain(t *testing.T) {
 	}
 
 	// Test trust evaluation
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -1417,7 +1416,7 @@ func TestDIDWeb_TrustEvaluation_TrustedIssuer(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Trusted DID should be accepted
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -1426,7 +1425,7 @@ func TestDIDWeb_TrustEvaluation_TrustedIssuer(t *testing.T) {
 	}
 
 	// Untrusted DID should be rejected
-	trusted, err = resolver.EvaluateTrustEd25519(context.Background(), "did:web:untrusted.com", pubKey, "issuer")
+	trusted, err = resolver.EvaluateTrustEd25519(t.Context(), "did:web:untrusted.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -1485,18 +1484,18 @@ func TestDIDWeb_TrustEvaluation_RoleBased(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Test allowed role
-	trusted, _ := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, _ := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if !trusted {
 		t.Error("expected 'issuer' role to be trusted")
 	}
 
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "verifier")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "verifier")
 	if !trusted {
 		t.Error("expected 'verifier' role to be trusted")
 	}
 
 	// Test disallowed role
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "admin")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "admin")
 	if trusted {
 		t.Error("expected 'admin' role to be rejected")
 	}
@@ -2177,7 +2176,7 @@ func TestRealDIDWeb_TrustEvaluation(t *testing.T) {
 
 	// The did:web registry validates that the key is in the DID document
 	// This is the "trust" aspect - if the key matches, it's trusted
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -2304,7 +2303,7 @@ func TestRealDIDWeb_Integration_CredentialVerificationFlow(t *testing.T) {
 
 	// Step 4: Validate trust in the issuer (the did:web registry does this
 	// by verifying the key is in the DID document at the expected domain)
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), issuerDID, issuerKey, "assertionMethod")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), issuerDID, issuerKey, "assertionMethod")
 	if err != nil {
 		t.Fatalf("Trust evaluation failed: %v", err)
 	}

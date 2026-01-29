@@ -3,7 +3,6 @@
 package keyresolver
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -70,7 +69,7 @@ func TestGoTrustEvaluator_EvaluateTrustWithContext(t *testing.T) {
 	defer server.Close()
 
 	evaluator := NewGoTrustEvaluator(server.URL)
-	trusted, err := evaluator.EvaluateTrustWithContext(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, err := evaluator.EvaluateTrustWithContext(t.Context(), "did:web:example.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}

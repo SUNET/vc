@@ -1,7 +1,6 @@
 package vcclient
 
 import (
-	"context"
 	"crypto/tls"
 	"net/http"
 	"testing"
@@ -57,7 +56,7 @@ func TestAuthorize(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
+			ctx := t.Context()
 			httpServer := mockHappyHttServer(t)
 			defer httpServer.Close()
 
@@ -105,7 +104,7 @@ func TestPar(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
+			ctx := t.Context()
 			httpServer := mockHappyHttServer(t)
 			defer httpServer.Close()
 

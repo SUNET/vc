@@ -130,7 +130,7 @@ func TestGet(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			httpServer := mockHappyHttServer(t)
 			defer httpServer.Close()

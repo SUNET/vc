@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"testing"
@@ -111,7 +110,7 @@ func createTestJWEWithNonStringKID() string {
 
 // TestVerificationCallback tests the VerificationCallback handler
 func TestVerificationCallback(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name              string

@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"testing"
 	"vc/pkg/logger"
 
@@ -35,14 +34,14 @@ func TestCreateJWK(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
+			ctx := t.Context()
 			keyType := tt.keyType
 			if keyType == "" {
 				keyType = "ecdsa" // default for backward compatibility
 			}
 			client := mockNewClient(ctx, t, keyType, logger.NewSimple("testing_apiv1"))
 
-			err := client.createJWK(context.Background())
+			err := client.createJWK(ctx)
 			assert.NoError(t, err)
 
 			if diff := cmp.Diff(tt.want, client.jwkClaim); diff != "" {
@@ -53,10 +52,10 @@ func TestCreateJWK(t *testing.T) {
 }
 
 func TestCreateJWK_RSA(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 	client := mockNewClient(ctx, t, "rsa", logger.NewSimple("testing_apiv1"))
 
-	err := client.createJWK(context.Background())
+	err := client.createJWK(ctx)
 	assert.NoError(t, err)
 
 	// Verify JWK structure for RSA
@@ -75,13 +74,13 @@ func TestCreateJWK_RSA(t *testing.T) {
 }
 
 func TestCreateJWK_KidFromConfig(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 	client := mockNewClient(ctx, t, "ecdsa", logger.NewSimple("testing_apiv1"))
 
 	// Set custom kid in config
 	client.cfg.Issuer.JWTAttribute.Kid = "custom-key-id-123"
 
-	err := client.createJWK(context.Background())
+	err := client.createJWK(ctx)
 	assert.NoError(t, err)
 
 	assert.Equal(t, "custom-key-id-123", client.kid)

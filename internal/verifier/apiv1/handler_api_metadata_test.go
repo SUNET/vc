@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"testing"
 	"vc/pkg/model"
 
@@ -10,7 +9,7 @@ import (
 
 // TestGetDiscoveryMetadata tests the OIDC discovery metadata endpoint
 func TestGetDiscoveryMetadata(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		VerifierProxy: &model.VerifierProxy{
@@ -85,7 +84,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 
 // TestGetDiscoveryMetadata_NoCredentials tests discovery metadata with no configured credentials
 func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		VerifierProxy: &model.VerifierProxy{
@@ -115,7 +114,7 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 
 // TestGetDiscoveryMetadata_CustomExternalURL tests with different base URLs
 func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name           string
@@ -170,7 +169,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 
 // TestGetJWKS tests the JWKS endpoint
 func TestGetJWKS(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		VerifierProxy: &model.VerifierProxy{
@@ -258,7 +257,7 @@ func TestGetJWKS(t *testing.T) {
 
 // BenchmarkGetDiscoveryMetadata benchmarks discovery metadata generation
 func BenchmarkGetDiscoveryMetadata(b *testing.B) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		VerifierProxy: &model.VerifierProxy{
@@ -303,7 +302,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx := context.Background()
+		ctx := t.Context()
 		_, _ = client.GetJWKS(ctx)
 	}
 }

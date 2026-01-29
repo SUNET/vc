@@ -50,7 +50,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Configure audit log to send to test server
@@ -100,7 +100,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 // TestIntegration_MultipleWebhooks tests sending to multiple webhook endpoints
@@ -143,7 +143,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	}))
 	defer server2.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Configure audit log with both servers
@@ -185,7 +185,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 // TestIntegration_HighVolumeWebhooks tests sending many webhooks rapidly
@@ -201,7 +201,7 @@ func TestIntegration_HighVolumeWebhooks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -245,7 +245,7 @@ func TestIntegration_HighVolumeWebhooks(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 // TestIntegration_WebhookRetryOnFailure tests behavior when webhook fails
@@ -271,7 +271,7 @@ func TestIntegration_WebhookRetryOnFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -308,7 +308,7 @@ func TestIntegration_WebhookRetryOnFailure(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 // TestIntegration_WebhookPayloadStructure verifies the exact webhook payload format
@@ -322,7 +322,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -371,7 +371,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 // TestIntegration_MixedDestinations tests console, file, and webhook together
@@ -387,7 +387,7 @@ func TestIntegration_MixedDestinations(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -433,5 +433,5 @@ func TestIntegration_MixedDestinations(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }

@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"testing"
@@ -394,7 +393,7 @@ func TestClientRegistration_applyRegistrationDefaults(t *testing.T) {
 
 // TestAuthenticateClient tests client authentication
 func TestAuthenticateClient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Create a test client with a known secret hash
@@ -457,7 +456,7 @@ func TestAuthenticateClient(t *testing.T) {
 
 // TestRegisterClient tests the dynamic client registration endpoint
 func TestRegisterClient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -582,7 +581,7 @@ func TestRegisterClient(t *testing.T) {
 
 // TestGetClientInformation tests retrieving client configuration
 func TestGetClientInformation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
@@ -664,7 +663,7 @@ func TestGetClientInformation(t *testing.T) {
 
 // TestDeleteClient tests client deletion
 func TestDeleteClient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
@@ -737,7 +736,7 @@ func TestDeleteClient(t *testing.T) {
 
 // TestUpdateClient tests client configuration update
 func TestUpdateClient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string

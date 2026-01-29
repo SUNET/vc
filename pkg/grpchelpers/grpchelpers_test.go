@@ -412,7 +412,7 @@ func TestNewServerOptions_WithFingerprints(t *testing.T) {
 
 // TestVerifyClientFingerprint_NoPeer tests verification with no peer info
 func TestVerifyClientFingerprint_NoPeer(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	allowedFingerprints := map[string]string{"abc123": "test"}
 
 	err := verifyClientFingerprint(ctx, allowedFingerprints)
@@ -427,7 +427,7 @@ func TestVerifyClientFingerprint_NoPeer(t *testing.T) {
 // TestVerifyClientFingerprint_NoTLSInfo tests verification with no TLS info
 func TestVerifyClientFingerprint_NoTLSInfo(t *testing.T) {
 	// Create context with peer but no TLS info
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
 		Addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 	})
 	allowedFingerprints := map[string]string{"abc123": "test"}
@@ -449,7 +449,7 @@ func TestVerifyClientFingerprint_NoCert(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{},
 		},
 	}
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
 		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 		AuthInfo: tlsInfo,
 	})
@@ -474,7 +474,7 @@ func TestVerifyClientFingerprint_NotAllowed(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		},
 	}
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
 		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 		AuthInfo: tlsInfo,
 	})
@@ -502,7 +502,7 @@ func TestVerifyClientFingerprint_Allowed(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		},
 	}
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
 		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 		AuthInfo: tlsInfo,
 	})
@@ -528,7 +528,7 @@ func TestFingerprintUnaryInterceptor(t *testing.T) {
 				PeerCertificates: []*x509.Certificate{cert},
 			},
 		}
-		ctx := peer.NewContext(context.Background(), &peer.Peer{
+		ctx := peer.NewContext(t.Context(), &peer.Peer{
 			Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 			AuthInfo: tlsInfo,
 		})
@@ -554,7 +554,7 @@ func TestFingerprintUnaryInterceptor(t *testing.T) {
 				PeerCertificates: []*x509.Certificate{otherCert},
 			},
 		}
-		ctx := peer.NewContext(context.Background(), &peer.Peer{
+		ctx := peer.NewContext(t.Context(), &peer.Peer{
 			Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 			AuthInfo: tlsInfo,
 		})
@@ -808,7 +808,7 @@ func TestIntegration_mTLS_FingerprintNotInAllowlist(t *testing.T) {
 	defer conn.Close()
 
 	// Make an RPC call to any method - the interceptor will reject it
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	// Use EmptyCall style invocation (nil request/response is fine for unknown handler)
@@ -900,7 +900,7 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	defer conn.Close()
 
 	// Make an RPC call - fingerprint check should pass and handler should be called
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
@@ -986,7 +986,7 @@ func TestIntegration_mTLS_InvalidClientCert(t *testing.T) {
 	defer conn.Close()
 
 	// Make an RPC call - should fail at TLS handshake level
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	err = conn.Invoke(ctx, "/test.Service/Method", nil, nil)

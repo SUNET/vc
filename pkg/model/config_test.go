@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -162,7 +161,7 @@ func TestCredentialConstructor(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
+			ctx := t.Context()
 
 			for scope, cc := range tt.have {
 				err := cc.LoadVCTMetadata(ctx, scope)
@@ -466,7 +465,7 @@ func TestLoadFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			err := tt.constructor.LoadVCTMetadata(ctx, "test_scope")
 
 			if tt.wantErr {
@@ -563,7 +562,7 @@ func TestLoadAndSign(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx)
 
 			if tt.wantErr {
@@ -677,7 +676,7 @@ func TestLoadOAuth2Metadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			metadata, privateKey, chain, err := tt.server.LoadOAuth2Metadata(ctx)
 
 			if tt.wantErr {

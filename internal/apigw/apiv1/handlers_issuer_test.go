@@ -161,7 +161,7 @@ func TestOIDCNonce(t *testing.T) {
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	resp, err := client.OIDCNonce(ctx)
 
 	assert.NoError(t, err)
@@ -182,7 +182,7 @@ func TestOIDCCredential_InvalidDPoP(t *testing.T) {
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.CredentialRequest{
 		DPoP:          "invalid.jwt.token",
 		Authorization: "DPoP test-access-token",
@@ -203,7 +203,7 @@ func TestOIDCDeferredCredential(t *testing.T) {
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.DeferredCredentialRequest{
 		TransactionID: "test-transaction-123",
 	}
@@ -221,7 +221,7 @@ func TestOIDCCredentialOffer(t *testing.T) {
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.CredentialOfferParameters{
 		CredentialIssuer: "https://issuer.example.com",
 	}
@@ -239,7 +239,7 @@ func TestOIDCNotification(t *testing.T) {
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.NotificationRequest{
 		NotificationID: "test-notification-123",
 	}
@@ -255,7 +255,7 @@ func TestOIDCNotification(t *testing.T) {
 // for credential issuance, demonstrating the complete flow even though full integration
 // requires dependency injection for the gRPC client.
 func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup test data
 	accessToken := "test-access-token-12345"

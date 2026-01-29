@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -90,7 +89,7 @@ func TestValidateFromFile(t *testing.T) {
 			if i == 4 {
 				fmt.Println(tt.payload.DocumentData)
 			}
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.remoteRef {
 				serverURL, err := url.Parse(server.URL)
 				assert.NoError(t, err)

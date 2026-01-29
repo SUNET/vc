@@ -14,7 +14,7 @@ import (
 )
 
 func TestFile_SendToDestination(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -36,7 +36,7 @@ func TestFile_SendToDestination(t *testing.T) {
 	dest := service.destinations[0]
 	jsonBytes := []byte(`{"test":"data"}`)
 
-	err = service.sendToDestination(context.Background(), dest, jsonBytes)
+	err = service.sendToDestination(t.Context(), dest, jsonBytes)
 	assert.NoError(t, err)
 
 	// Verify file content
@@ -48,11 +48,11 @@ func TestFile_SendToDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestFile_DestinationParsing(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -81,12 +81,12 @@ func TestFile_DestinationParsing(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestFile_InvalidPath(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -107,7 +107,7 @@ func TestFile_InvalidPath(t *testing.T) {
 }
 
 func TestFile_WriteToFile_NilFile(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	cfg := &model.Cfg{
@@ -137,11 +137,11 @@ func TestFile_WriteToFile_NilFile(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestFile_MultipleWrites(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -177,11 +177,11 @@ func TestFile_MultipleWrites(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }
 
 func TestFile_MessageDelivery(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -216,12 +216,12 @@ func TestFile_MessageDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	err = service.Close(context.Background())
+	err = service.Close(t.Context())
 	assert.NoError(t, err)
 }
 
 func TestFile_ConcurrentWrites(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	tmpDir := t.TempDir()
@@ -259,5 +259,5 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(context.Background())
+	service.Close(t.Context())
 }

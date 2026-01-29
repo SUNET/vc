@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"testing"
 	"time"
 	"vc/internal/verifier/apiv1/utils"
@@ -352,7 +351,7 @@ func TestStandardClaims(t *testing.T) {
 // TestAuthorize_ClientValidation tests client validation in the Authorize handler
 // Note: Full Authorize flow requires CredentialConstructor config which is complex to mock
 func TestAuthorize_ClientValidation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Add a test client to the mock
@@ -415,7 +414,7 @@ func TestAuthorize_ClientValidation(t *testing.T) {
 
 // TestAuthorize_PKCEValidation tests PKCE enforcement in the Authorize handler
 func TestAuthorize_PKCEValidation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Add a client that requires PKCE
@@ -441,7 +440,7 @@ func TestAuthorize_PKCEValidation(t *testing.T) {
 
 // TestMockClientCollection tests the mock client collection
 func TestMockClientCollection(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	mock := NewMockClientCollection()
 
 	// Test Create
@@ -482,7 +481,7 @@ func TestMockClientCollection(t *testing.T) {
 
 // TestMockSessionCollection tests the mock session collection
 func TestMockSessionCollection(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	mock := NewMockSessionCollection()
 
 	// Test Create
@@ -540,7 +539,7 @@ func TestMockSessionCollection(t *testing.T) {
 
 // TestToken_AuthorizationCodeGrant tests the Token endpoint with authorization_code grant
 func TestToken_AuthorizationCodeGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
@@ -951,7 +950,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 
 // TestToken_RefreshTokenGrant tests the refresh token grant (currently unimplemented)
 func TestToken_RefreshTokenGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
 
 	req := &TokenRequest{
@@ -1089,7 +1088,7 @@ func TestAuthenticateOIDCClient(t *testing.T) {
 
 // TestAuthorize_FullFlow tests the complete Authorize endpoint flow
 func TestAuthorize_FullFlow(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
@@ -1333,7 +1332,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 
 // TestAuthorize_DigitalCredentialsDisabled tests the authorization flow when Digital Credentials API is disabled
 func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.VerifierProxy.ExternalURL = "https://verifier.example.com"

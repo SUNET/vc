@@ -44,7 +44,7 @@ type testSuite struct {
 
 // newTestSuite creates a new test suite with MongoDB testcontainer
 func newTestSuite(t *testing.T) *testSuite {
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 
 	suite := &testSuite{
 		t:      t,
@@ -227,7 +227,7 @@ func (s *testSuite) cleanup() {
 
 // newTestSuiteWithSectionSize creates a test suite with a custom section size
 func newTestSuiteWithSectionSize(t *testing.T, sectionSize int64) *testSuite {
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 
 	suite := &testSuite{
 		t:      t,

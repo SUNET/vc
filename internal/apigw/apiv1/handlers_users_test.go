@@ -124,7 +124,7 @@ func (m *mockUsersStore) GetHashedPassword(ctx context.Context, username string)
 // TestUserLookup_BasicAuth tests the UserLookup function with basic username/password authentication.
 // This simulates the traditional authentication flow (not PID auth).
 func TestUserLookup_BasicAuth(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
@@ -194,7 +194,7 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 // TestUserLookup_PIDAuth tests the UserLookup function with PID authentication (OpenID4VP).
 // This simulates authentication using verifiable credentials presented by the wallet.
 func TestUserLookup_PIDAuth(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
@@ -315,7 +315,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 
 // TestUserLookup_PIDAuth_NoDocuments tests error handling when no documents are found in cache for PID auth.
 func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
@@ -362,7 +362,7 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 }
 
 func TestUserLookup_UnsupportedAuthMethod(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
