@@ -215,10 +215,6 @@ registry:
     password: "admin_1234"  # Change this in production!
     session_secret: "change-this-to-a-random-32-byte-secret"
 
-persistent:
-  api_server:
-    addr: :8080
-
 apigw:
   identifier: "SUNET_v1"
   api_server:

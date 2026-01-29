@@ -58,7 +58,6 @@ jobs:
             - apigw_${{ steps.set_tag.outputs.release_tag }}
             - verifier_${{ steps.set_tag.outputs.release_tag }}
             - registry_${{ steps.set_tag.outputs.release_tag }}
-            - persistent_${{ steps.set_tag.outputs.release_tag }}
             - mockas_${{ steps.set_tag.outputs.release_tag }}
             - issuer_${{ steps.set_tag.outputs.release_tag }}
             - ui_${{ steps.set_tag.outputs.release_tag }}

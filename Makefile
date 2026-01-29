@@ -4,7 +4,7 @@ NAME 					:= vc
 LDFLAGS                 := -ldflags "-w -s --extldflags '-static'"
 LDFLAGS_DYNAMIC			:= -ldflags "-w -s"
 CURRENT_BRANCH 			:= $(shell git rev-parse --abbrev-ref HEAD)
-SERVICES 				:= verifier registry persistent mockas apigw issuer ui wallet
+SERVICES 				:= verifier registry mockas apigw issuer ui wallet
 PORT                    := 8888
 W3C_TEST_SUITE_DIR      := /tmp/w3c-test-suite
 
@@ -16,7 +16,7 @@ pki-clean:
 	$(info Cleaning PKI material)
 	rm -rf developer_tools/pki
 
-test: test-apigw test-issuer test-mockas test-persistent test-registry test-ui test-verifier
+test: test-apigw test-issuer test-mockas test-registry test-ui test-verifier
 
 test-apigw:
 	$(info Testing apigw)
@@ -30,9 +30,7 @@ test-mockas:
 	$(info Testing mockas)
 	go test -v ./cmd/mockas/... ./internal/mockas/...
 
-test-persistent:
-	$(info Testing persistent)
-	go test -v ./cmd/persistent/... ./internal/persistent/...
+
 
 test-registry:
 	$(info Testing registry)
@@ -105,7 +103,7 @@ endif
 DOCKER_TAG_APIGW 		:= docker.sunet.se/dc4eu/apigw:$(VERSION)
 DOCKER_TAG_VERIFIER		:= docker.sunet.se/dc4eu/verifier:$(VERSION)
 DOCKER_TAG_REGISTRY 	:= docker.sunet.se/dc4eu/registry:$(VERSION)
-DOCKER_TAG_PERSISTENT 	:= docker.sunet.se/dc4eu/persistent:$(VERSION)
+
 DOCKER_TAG_GOBUILD 		:= docker.sunet.se/dc4eu/gobuild:$(VERSION)
 DOCKER_TAG_MOCKAS 		:= docker.sunet.se/dc4eu/mockas:$(VERSION)
 DOCKER_TAG_ISSUER 		:= docker.sunet.se/dc4eu/issuer:$(VERSION)
@@ -113,7 +111,7 @@ DOCKER_TAG_UI 			:= docker.sunet.se/dc4eu/ui:$(VERSION)
 DOCKER_TAG_WALLET 		:= docker.sunet.se/dc4eu/wallet:$(VERSION)
 
 
-build: proto build-verifier build-registry build-persistent build-mockas build-apigw build-ui build-vc20-test-server
+build: proto build-verifier build-registry build-mockas build-apigw build-ui build-vc20-test-server
 
 build-verifier:
 	$(info Building verifier)
@@ -127,9 +125,7 @@ build-registry:
 	$(info Building registry)
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_registry ${LDFLAGS_DYNAMIC} ./cmd/registry/main.go
 
-build-persistent:
-	$(info Building persistent)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_persistent ${LDFLAGS} ./cmd/persistent/main.go
+
 
 build-mockas:
 	$(info Building mockas)
@@ -189,7 +185,7 @@ test-all-tags:
 	$(info Testing with all build tags)
 	go test -tags "saml,oidcrp,vc20,pkcs11" -v ./...
 
-docker-build: docker-build-verifier docker-build-registry docker-build-persistent docker-build-mockas docker-build-apigw docker-build-issuer docker-build-ui
+docker-build: docker-build-verifier docker-build-registry docker-build-mockas docker-build-apigw docker-build-issuer docker-build-ui
 
 docker-build-gobuild:
 	$(info Docker Building gobuild with tag: $(VERSION))
@@ -203,9 +199,7 @@ docker-build-registry:
 	$(info Docker Building registry with tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=registry --tag $(DOCKER_TAG_REGISTRY) --file dockerfiles/worker .
 
-docker-build-persistent:
-	$(info Docker Building persistent with tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=persistent --tag $(DOCKER_TAG_PERSISTENT) --file dockerfiles/worker .
+
 
 docker-build-mockas:
 	$(info Docker Building mockas with tag: $(VERSION))
@@ -268,10 +262,6 @@ docker-push-mockas:
 	$(info Pushing docker images)
 	docker push $(DOCKER_TAG_MOCKAS)
 
-docker-push-persistent:
-	$(info Pushing docker images)
-	docker push $(DOCKER_TAG_PERSISTENT)
-
 docker-push-apigw:
 	$(info Pushing docker images)
 	docker push $(DOCKER_TAG_APIGW)
@@ -284,7 +274,7 @@ docker-push-ui:
 	$(info Pushing docker images)
 	docker push $(DOCKER_TAG_UI)
 
-docker-push: docker-push-verifier docker-push-registry docker-push-persistent docker-push-apigw docker-push-issuer docker-push-ui docker-push-mockas
+docker-push: docker-push-verifier docker-push-registry docker-push-apigw docker-push-issuer docker-push-ui docker-push-mockas
 	$(info Pushing docker images)
 
 docker-tag-apigw:
@@ -303,10 +293,6 @@ docker-tag-registry:
 	$(info Tagging docker images)
 	docker tag $(DOCKER_TAG_REGISTRY) docker.sunet.se/dc4eu/registry:$(NEWTAG)
 
-docker-tag-persistent:
-	$(info Tagging docker images)
-	docker tag $(DOCKER_TAG_PERSISTENT) docker.sunet.se/dc4eu/persistent:$(NEWTAG)
-
 docker-tag-mockas:
 	$(info Tagging docker images)
 	docker tag $(DOCKER_TAG_MOCKAS) docker.sunet.se/dc4eu/mockas:$(NEWTAG)
@@ -315,7 +301,7 @@ docker-tag-ui:
 	$(info Tagging docker images)
 	docker tag $(DOCKER_TAG_UI) docker.sunet.se/dc4eu/ui:$(NEWTAG)
 
-docker-tag: docker-tag-apigw docker-tag-issuer docker-tag-verifier docker-tag-registry docker-tag-persistent docker-tag-mockas docker-tag-ui
+docker-tag: docker-tag-apigw docker-tag-issuer docker-tag-verifier docker-tag-registry docker-tag-mockas docker-tag-ui
 	$(info Tagging docker images)
 
 check_current_branch:

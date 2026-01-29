@@ -406,11 +406,6 @@ type AdminGUI struct {
 	SessionSecret string `yaml:"session_secret" validate:"required_if=Enabled true"` // Secret for session cookies
 }
 
-// Persistent holds the persistent storage configuration
-type Persistent struct {
-	APIServer APIServer `yaml:"api_server" validate:"required"`
-}
-
 // MockAS holds the mock as configuration
 type MockAS struct {
 	APIServer      APIServer `yaml:"api_server" validate:"required"`
@@ -728,7 +723,6 @@ type Cfg struct {
 	VerifierProxy    *VerifierProxy             `yaml:"verifier_proxy" validate:"omitempty"`
 	Datastore        *Datastore                 `yaml:"datastore" validate:"omitempty"`
 	Registry         *Registry                  `yaml:"registry" validate:"omitempty"`
-	Persistent       *Persistent                `yaml:"persistent" validate:"omitempty"`
 	MockAS           *MockAS                    `yaml:"mock_as" validate:"omitempty"`
 	UI               *UI                        `yaml:"ui" validate:"omitempty"`
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
