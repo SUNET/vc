@@ -361,6 +361,17 @@ type Issuer struct {
 	WalletURL      string        `yaml:"wallet_url"`
 	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
 	MDoc           *MDocConfig   `yaml:"mdoc" validate:"omitempty"` // mDL/mdoc configuration
+	AuditLog       *AuditLog     `yaml:"audit_log" validate:"omitempty"`  // Audit log webhook configuration
+}
+
+// AuditLog holds audit log configuration for multiple destinations
+type AuditLog struct {
+	Enabled      bool     `yaml:"enabled"`
+	Destinations []string `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	// Destinations can be:
+	//   - "console" or "stdout": write to standard output
+	//   - File path (e.g., "/var/log/audit.log"): write to file
+	//   - URL (http:// or https://): send webhook POST request
 }
 
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
@@ -715,11 +726,10 @@ type AuthenticSource struct {
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common           *Common                    `yaml:"common"`
-	AuthenticSources map[string]AuthenticSource `yaml:"authentic_sources" validate:"omitempty"`
-	APIGW            *APIGW                     `yaml:"apigw" validate:"omitempty"`
-	Issuer           *Issuer                    `yaml:"issuer" validate:"omitempty"`
-	Verifier         *Verifier                  `yaml:"verifier" validate:"omitempty"`
+	Common   *Common                    `yaml:"common"`
+	APIGW    *APIGW                     `yaml:"apigw" validate:"omitempty"`
+	Issuer   *Issuer                    `yaml:"issuer" validate:"omitempty"`
+	Verifier *Verifier                  `yaml:"verifier" validate:"omitempty"`
 	VerifierProxy    *VerifierProxy             `yaml:"verifier_proxy" validate:"omitempty"`
 	Datastore        *Datastore                 `yaml:"datastore" validate:"omitempty"`
 	Registry         *Registry                  `yaml:"registry" validate:"omitempty"`

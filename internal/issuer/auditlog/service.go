@@ -2,10 +2,31 @@ package auditlog
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
+
+// DestinationType represents the type of audit log destination
+type DestinationType int
+
+const (
+	DestinationConsole DestinationType = iota
+	DestinationFile
+	DestinationWebhook
+)
+
+// Destination represents a parsed audit log destination
+type Destination struct {
+	Type    DestinationType
+	Target  string             // file path or webhook URL
+	File    *os.File           // open file handle for file destinations
+	msgChan chan []byte        // message queue for this destination
+	cancel  context.CancelFunc // cancel function to stop worker
+}
 
 // AuditLog holds the request data for the SendWebHook method
 type AuditLog struct {
@@ -21,6 +42,8 @@ type Service struct {
 	log          *logger.Log
 	auditLogChan chan *AuditLog
 	wg           sync.WaitGroup
+	destinations []*Destination // pre-parsed destinations
+	mu           sync.Mutex     // mutex for file operations
 }
 
 // New creates a new auditlog service
@@ -28,7 +51,28 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 	service := &Service{
 		cfg:          cfg,
 		log:          log.New("auditlog"),
-		auditLogChan: make(chan *AuditLog),
+		auditLogChan: make(chan *AuditLog, 100), // buffered channel
+	}
+
+	// Parse and prepare destinations
+	if cfg.Issuer != nil && cfg.Issuer.AuditLog != nil && cfg.Issuer.AuditLog.Enabled {
+		var err error
+		service.destinations, err = service.parseDestinations(cfg.Issuer.AuditLog.Destinations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse audit log destinations: %w", err)
+		}
+		service.log.Info("Audit log enabled", "destinations", len(service.destinations))
+
+		// Start worker for each destination
+		for _, dest := range service.destinations {
+			workerCtx, cancel := context.WithCancel(ctx)
+			dest.cancel = cancel
+			dest.msgChan = make(chan []byte, 100) // buffered channel per destination
+			service.wg.Add(1)
+			go service.destinationWorker(workerCtx, dest)
+		}
+	} else {
+		service.log.Info("Audit log disabled")
 	}
 
 	service.wg.Add(1)
@@ -39,11 +83,106 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 	return service, nil
 }
 
+// parseDestinations parses destination strings into Destination structs
+func (s *Service) parseDestinations(dests []string) ([]*Destination, error) {
+	var destinations []*Destination
+
+	for _, dest := range dests {
+		dest = strings.TrimSpace(dest)
+		if dest == "" {
+			continue
+		}
+
+		// Console
+		if dest == "console" {
+			destinations = append(destinations, &Destination{
+				Type:   DestinationConsole,
+				Target: "console",
+			})
+			s.log.Info("Audit log destination: console")
+			continue
+		}
+
+		// Webhook (HTTP/HTTPS)
+		if strings.HasPrefix(dest, "http://") || strings.HasPrefix(dest, "https://") {
+			destinations = append(destinations, &Destination{
+				Type:   DestinationWebhook,
+				Target: dest,
+			})
+			s.log.Info("Audit log destination: webhook", "url", dest)
+			continue
+		}
+
+		// File path
+		// Open file in append mode, create if not exists
+		f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open audit log file %s: %w", dest, err)
+		}
+		destinations = append(destinations, &Destination{
+			Type:   DestinationFile,
+			Target: dest,
+			File:   f,
+		})
+		s.log.Info("Audit log destination: file", "path", dest)
+	}
+
+	return destinations, nil
+}
+
+// destinationWorker processes messages for a specific destination
+func (s *Service) destinationWorker(ctx context.Context, dest *Destination) {
+	defer s.wg.Done()
+
+	var destType string
+	switch dest.Type {
+	case DestinationConsole:
+		destType = "console"
+	case DestinationFile:
+		destType = "file"
+	case DestinationWebhook:
+		destType = "webhook"
+	}
+
+	s.log.Info("Destination worker started", "type", destType, "target", dest.Target)
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.log.Info("Destination worker stopping", "type", destType, "target", dest.Target)
+			return
+		case msg := <-dest.msgChan:
+			if err := s.sendToDestination(ctx, dest, msg); err != nil {
+				s.log.Error(err, "Failed to send audit log", "type", destType, "target", dest.Target)
+			}
+		}
+	}
+}
+
 // Close closes the auditlog service
 func (s *Service) Close(ctx context.Context) error {
+	// Stop all destination workers
+	for _, dest := range s.destinations {
+		if dest.cancel != nil {
+			dest.cancel()
+		}
+		if dest.msgChan != nil {
+			close(dest.msgChan)
+		}
+	}
+
 	ctx.Done()
 	s.wg.Done()
 	s.wg.Wait()
+
+	// Close all file destinations
+	for _, dest := range s.destinations {
+		if dest.Type == DestinationFile && dest.File != nil {
+			if err := dest.File.Close(); err != nil {
+				s.log.Error(err, "Failed to close audit log file", "path", dest.Target)
+			}
+		}
+	}
 
 	s.log.Info("Stopped")
 

@@ -5,32 +5,66 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
 )
 
-// SendWebHook calls the audit log notification endpoint (hook)
+// SendWebHook sends audit log data to all configured destinations via worker queues
 func (s *Service) SendWebHook(ctx context.Context, inData any) error {
+	// If no destinations configured
+	if len(s.destinations) == 0 {
+		s.log.Debug("audit log event (no destinations configured)", "data", inData)
+		return nil
+	}
+
 	jsonBytes, err := json.Marshal(inData)
 	if err != nil {
 		return err
 	}
 
-	as, ok := s.cfg.AuthenticSources[s.cfg.Issuer.Identifier]
-	if !ok {
-		return errors.New("authentic source not found")
+	// Send to all destination queues (non-blocking)
+	for _, dest := range s.destinations {
+		select {
+		case dest.msgChan <- jsonBytes:
+			// Message queued successfully
+		default:
+			s.log.Error(nil, "destination queue full, dropping message", "target", dest.Target)
+		}
 	}
 
-	// Prepare the webhook request
-	req, err := http.NewRequest("POST", as.NotificationEndpoint.URL, bytes.NewBuffer(jsonBytes))
+	return nil
+}
+
+// sendToDestination sends audit log data to a specific destination
+func (s *Service) sendToDestination(ctx context.Context, dest *Destination, jsonBytes []byte) error {
+	// Add timestamp prefix to all destinations
+	prefix := fmt.Sprintf("[AUDIT %s] ", time.Now().UTC().Format(time.RFC3339))
+	messageWithPrefix := append([]byte(prefix), jsonBytes...)
+
+	switch dest.Type {
+	case DestinationConsole:
+		log.Println(string(messageWithPrefix))
+		return nil
+	case DestinationWebhook:
+		return s.sendWebhook(dest.Target, jsonBytes)
+	case DestinationFile:
+		return s.writeToFile(dest, messageWithPrefix)
+	default:
+		return errors.New("unknown destination type")
+	}
+}
+
+// sendWebhook sends audit log data via HTTP POST
+func (s *Service) sendWebhook(url string, jsonBytes []byte) error {
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Send the webhook request
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -44,17 +78,34 @@ func (s *Service) SendWebHook(ctx context.Context, inData any) error {
 		}
 	}(resp.Body)
 
-	// Determine the status based on the response code
-	status := "failed"
-	if resp.StatusCode == http.StatusOK {
-		status = "delivered"
+	if resp.StatusCode != http.StatusOK {
+		return errors.New("webhook returned non-200 status")
 	}
 
-	s.log.Debug("webhook status", "status", status)
+	s.log.Debug("webhook delivered", "url", url)
+	return nil
+}
 
-	if status == "failed" {
-		return errors.New(status)
+// writeToFile appends audit log data to a file
+func (s *Service) writeToFile(dest *Destination, jsonBytes []byte) error {
+	if dest.File == nil {
+		return errors.New("file handle is nil")
 	}
 
+	// Use mutex to protect concurrent writes
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Write JSON with newline
+	if _, err := dest.File.Write(append(jsonBytes, '\n')); err != nil {
+		return err
+	}
+
+	// Sync to ensure data is written to disk
+	if err := dest.File.Sync(); err != nil {
+		return err
+	}
+
+	s.log.Debug("audit log written to file", "file", dest.Target)
 	return nil
 }

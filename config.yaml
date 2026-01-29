@@ -63,40 +63,6 @@ kafka:
     - "kafka0:9092"
     - "kafka1:9092"
 
-authentic_sources:
-  SUNET_v1:
-    country_code: "SE"
-    notification_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/notify"
-    authentic_source_endpoint:
-      url: "http://apigw.vc.docker:8080"
-    signature_service_endpoint:
-      url: "http://issuer.vc.docker:8080"
-    revocation_service_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/revok"
-    credential_types:
-      EHIC:
-        profile: "SD-JWT"
-      PDA1:
-        profile: "SD-JWT"
-  SUNET_v2:
-    country_code: "SE"
-    notification_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/notify"
-    authentic_source_endpoint:
-      url: "http://mockas.vc.docker:8080"
-    signature_service_endpoint:
-      url: "http://issuer.vc.docker:8080"
-    revocation_service_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/revok"
-    datastore_service_endpoint:
-      url: "http://apigw.vc.docker:8080"
-    credential_types:
-      EHIC:
-        profile: "SD-JWT"
-      PDA1:
-        profile: "SD-JWT"
-
 issuer:
   issuer_url: "http://apigw.vc.docker:8080"
   wallet_url: ""
@@ -108,6 +74,12 @@ issuer:
   registry_client:
     addr: registry.vc.docker:8090
   signing_key_path: "/pki/signing_ec_private.pem"
+  audit_log:
+    enabled: true
+    destinations:
+      - "console"
+      - "/var/log/vc/audit.log"
+      - "http://apigw.vc.docker:8080/api/v1/audit/notify"
   #pkcs11:
   #  module_path: /usr/lib/softhsm/libsofthsm2.so
   #  slot_id: 0
