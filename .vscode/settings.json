@@ -74,6 +74,7 @@
         "qrcode",
         "rpcclient",
         "SAMLACS",
+        "samlmetadata",
         "sarama",
         "Satosa",
         "SATOSAV",
