@@ -260,8 +260,8 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				if len(tt.x5c) > 0 {
 					x5cHeader, exists := token.Header["x5c"]
 					assert.True(t, exists, "x5c should be present in header")
-					// JWT library returns x5c as []interface{}
-					x5cSlice, ok := x5cHeader.([]interface{})
+					// JWT library returns x5c as []any
+					x5cSlice, ok := x5cHeader.([]any)
 					assert.True(t, ok, "x5c should be a slice")
 					assert.Len(t, x5cSlice, len(tt.x5c))
 					for i, cert := range tt.x5c {

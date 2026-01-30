@@ -77,10 +77,10 @@ func TestAddAuditLog_ComplexMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add audit log with complex message
-	message := map[string]interface{}{
+	message := map[string]any{
 		"user":   "john_doe",
 		"action": "credential_issued",
-		"details": map[string]interface{}{
+		"details": map[string]any{
 			"type": "diploma",
 			"id":   "12345",
 		},
@@ -199,7 +199,7 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 
 	// Add multiple audit logs rapidly
 	for i := 0; i < 20; i++ {
-		service.AddAuditLog(ctx, "rapid_event", map[string]interface{}{
+		service.AddAuditLog(ctx, "rapid_event", map[string]any{
 			"sequence": i,
 			"data":     "test data",
 		})

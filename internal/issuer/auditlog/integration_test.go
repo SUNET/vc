@@ -21,7 +21,7 @@ import (
 func TestIntegration_WebhookDelivery(t *testing.T) {
 	// Track received webhooks
 	var mu sync.Mutex
-	var receivedPayloads []map[string]interface{}
+	var receivedPayloads []map[string]any
 
 	// Create test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +34,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Parse JSON
-		var payload map[string]interface{}
+		var payload map[string]any
 		err = json.Unmarshal(body, &payload)
 		assert.NoError(t, err)
 
@@ -70,7 +70,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send test audit log
-	testMessage := map[string]interface{}{
+	testMessage := map[string]any{
 		"user":   "test_user",
 		"action": "test_action",
 		"data":   "test_data",
@@ -91,7 +91,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 	assert.NotEmpty(t, payload["id"])
 	assert.NotEmpty(t, payload["date"])
 
-	message, ok := payload["message"].(map[string]interface{})
+	message, ok := payload["message"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "test_user", message["user"])
 	assert.Equal(t, "test_action", message["action"])
@@ -108,7 +108,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	// Track received webhooks per server
 	type serverData struct {
 		mu       sync.Mutex
-		payloads []map[string]interface{}
+		payloads []map[string]any
 	}
 
 	server1Data := &serverData{}
@@ -117,7 +117,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	// Create two test servers
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var payload map[string]interface{}
+		var payload map[string]any
 		json.Unmarshal(body, &payload)
 
 		server1Data.mu.Lock()
@@ -131,7 +131,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var payload map[string]interface{}
+		var payload map[string]any
 		json.Unmarshal(body, &payload)
 
 		server2Data.mu.Lock()
@@ -313,7 +313,7 @@ func TestIntegration_WebhookRetryOnFailure(t *testing.T) {
 
 // TestIntegration_WebhookPayloadStructure verifies the exact webhook payload format
 func TestIntegration_WebhookPayloadStructure(t *testing.T) {
-	var receivedPayload map[string]interface{}
+	var receivedPayload map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -339,7 +339,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send audit log with specific structure
-	testMessage := map[string]interface{}{
+	testMessage := map[string]any{
 		"user_id":     "user-123",
 		"action_type": "credential_issued",
 		"details": map[string]string{
@@ -358,12 +358,12 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	assert.NotEmpty(t, receivedPayload["date"], "Should have RFC3339 timestamp")
 
 	// Verify message structure
-	message, ok := receivedPayload["message"].(map[string]interface{})
+	message, ok := receivedPayload["message"].(map[string]any)
 	require.True(t, ok, "Message should be an object")
 	assert.Equal(t, "user-123", message["user_id"])
 	assert.Equal(t, "credential_issued", message["action_type"])
 
-	details, ok := message["details"].(map[string]interface{})
+	details, ok := message["details"].(map[string]any)
 	require.True(t, ok, "Details should be an object")
 	assert.Equal(t, "diploma", details["credential_type"])
 	assert.Equal(t, "cred-456", details["credential_id"])

@@ -329,7 +329,7 @@ func (l *LocalResolver) resolveDidJwkECDSA(didJwk string) (*ecdsa.PublicKey, err
 }
 
 // parseDidJwk extracts and decodes the JWK from a did:jwk identifier.
-func (l *LocalResolver) parseDidJwk(didJwk string) (map[string]interface{}, error) {
+func (l *LocalResolver) parseDidJwk(didJwk string) (map[string]any, error) {
 	// did:jwk format: did:jwk:<base64url-encoded-JWK>#<optional-fragment>
 	// Remove "did:jwk:" prefix
 	withoutPrefix := strings.TrimPrefix(didJwk, "did:jwk:")
@@ -353,7 +353,7 @@ func (l *LocalResolver) parseDidJwk(didJwk string) (map[string]interface{}, erro
 	}
 
 	// Parse JSON into map
-	var jwk map[string]interface{}
+	var jwk map[string]any
 	if err := json.Unmarshal(jwkBytes, &jwk); err != nil {
 		return nil, fmt.Errorf("failed to parse JWK JSON: %w", err)
 	}

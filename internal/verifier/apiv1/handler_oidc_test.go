@@ -1005,7 +1005,7 @@ func TestGenerateIDToken(t *testing.T) {
 	assert.NotEmpty(t, idToken)
 
 	// Parse and verify token
-	token, err := jwt.Parse(idToken, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(idToken, func(token *jwt.Token) (any, error) {
 		return &key.PublicKey, nil
 	})
 	assert.NoError(t, err)

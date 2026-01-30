@@ -128,7 +128,7 @@ func (e *GoTrustEvaluator) buildJWKRequest(req *EvaluationRequest) (*authzen.Eva
 		Resource: authzen.Resource{
 			Type: "jwk",
 			ID:   req.SubjectID,
-			Key:  []interface{}{jwk},
+			Key:  []any{jwk},
 		},
 	}
 
@@ -159,8 +159,8 @@ func (e *GoTrustEvaluator) buildX5CRequest(req *EvaluationRequest) (*authzen.Eva
 		return nil, fmt.Errorf("invalid key type for x5c: %T", req.Key)
 	}
 
-	// Convert to []interface{} for AuthZEN
-	keys := make([]interface{}, len(certStrings))
+	// Convert to []any for AuthZEN
+	keys := make([]any, len(certStrings))
 	for i, cert := range certStrings {
 		keys[i] = cert
 	}
@@ -222,7 +222,7 @@ func (e *GoTrustEvaluator) addContextOptions(req *authzen.EvaluationRequest, opt
 
 	// Initialize context if needed
 	if req.Context == nil {
-		req.Context = make(map[string]interface{})
+		req.Context = make(map[string]any)
 	}
 
 	// Map TrustOptions to go-trust context keys

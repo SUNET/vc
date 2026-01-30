@@ -21,10 +21,10 @@ import (
 //	@Produce		json
 //	@Param			request	body		apiv1.OIDCRPInitiateRequest	true	"OIDC RP initiate request"
 //	@Success		200		{object}	apiv1.OIDCRPInitiateResponse
-//	@Failure		400		{object}	map[string]interface{}	"Bad request"
-//	@Failure		500		{object}	map[string]interface{}	"Internal server error"
+//	@Failure		400		{object}	map[string]any	"Bad request"
+//	@Failure		500		{object}	map[string]any	"Internal server error"
 //	@Router			/oidcrp/initiate [post]
-func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (interface{}, error) {
+func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCRPInitiate")
 	defer span.End()
 
@@ -54,10 +54,10 @@ func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (i
 //	@Param			code	query		string					true	"Authorization code"
 //	@Param			state	query		string					true	"OAuth2 state parameter"
 //	@Success		200		{object}	apiv1.OIDCRPCallbackResponse
-//	@Failure		400		{object}	map[string]interface{}	"Bad request"
-//	@Failure		500		{object}	map[string]interface{}	"Internal server error"
+//	@Failure		400		{object}	map[string]any	"Bad request"
+//	@Failure		500		{object}	map[string]any	"Internal server error"
 //	@Router			/oidcrp/callback [get]
-func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (interface{}, error) {
+func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCRPCallback")
 	defer span.End()
 

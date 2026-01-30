@@ -201,7 +201,7 @@ func TestMakeSDJWT(t *testing.T) {
 			headerBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[0])
 			require.NoError(t, err, "should decode JWT header")
 
-			var header map[string]interface{}
+			var header map[string]any
 			err = json.Unmarshal(headerBytes, &header)
 			require.NoError(t, err, "should parse JWT header JSON")
 
@@ -213,7 +213,7 @@ func TestMakeSDJWT(t *testing.T) {
 			payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
 			require.NoError(t, err, "should decode JWT payload")
 
-			var payload map[string]interface{}
+			var payload map[string]any
 			err = json.Unmarshal(payloadBytes, &payload)
 			require.NoError(t, err, "should parse JWT payload JSON")
 
@@ -265,7 +265,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 	headerBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[0])
 	require.NoError(t, err)
 
-	var header map[string]interface{}
+	var header map[string]any
 	err = json.Unmarshal(headerBytes, &header)
 	require.NoError(t, err)
 
@@ -301,7 +301,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
 	require.NoError(t, err)
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	err = json.Unmarshal(payloadBytes, &payload)
 	require.NoError(t, err)
 
@@ -313,13 +313,13 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	}
 
 	// Check nested objects recursively
-	var checkForSD func(m map[string]interface{}) bool
-	checkForSD = func(m map[string]interface{}) bool {
+	var checkForSD func(m map[string]any) bool
+	checkForSD = func(m map[string]any) bool {
 		for k, v := range m {
 			if k == "_sd" {
 				return true
 			}
-			if nested, ok := v.(map[string]interface{}); ok {
+			if nested, ok := v.(map[string]any); ok {
 				if checkForSD(nested) {
 					return true
 				}

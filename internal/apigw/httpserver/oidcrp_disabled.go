@@ -3,4 +3,4 @@
 package httpserver
 
 // OIDCRPService is a stub type when OIDC RP is not enabled
-type OIDCRPService interface{}
+type OIDCRPService any

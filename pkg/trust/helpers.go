@@ -14,7 +14,7 @@ import (
 )
 
 // ecdsaToJWK converts an ECDSA public key to JWK format.
-func ecdsaToJWK(publicKey *ecdsa.PublicKey) (map[string]interface{}, error) {
+func ecdsaToJWK(publicKey *ecdsa.PublicKey) (map[string]any, error) {
 	if publicKey == nil {
 		return nil, fmt.Errorf("public key is nil")
 	}
@@ -43,7 +43,7 @@ func ecdsaToJWK(publicKey *ecdsa.PublicKey) (map[string]interface{}, error) {
 	copy(xPadded[byteLen-len(xBytes):], xBytes)
 	copy(yPadded[byteLen-len(yBytes):], yBytes)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"kty": "EC",
 		"crv": crv,
 		"x":   base64.RawURLEncoding.EncodeToString(xPadded),
@@ -52,8 +52,8 @@ func ecdsaToJWK(publicKey *ecdsa.PublicKey) (map[string]interface{}, error) {
 }
 
 // ed25519ToJWK converts an Ed25519 public key to JWK format.
-func ed25519ToJWK(publicKey ed25519.PublicKey) map[string]interface{} {
-	return map[string]interface{}{
+func ed25519ToJWK(publicKey ed25519.PublicKey) map[string]any {
+	return map[string]any{
 		"kty": "OKP",
 		"crv": "Ed25519",
 		"x":   base64.RawURLEncoding.EncodeToString(publicKey),
@@ -61,7 +61,7 @@ func ed25519ToJWK(publicKey ed25519.PublicKey) map[string]interface{} {
 }
 
 // jwkToECDSA extracts an ECDSA public key from a JWK.
-func jwkToECDSA(jwk map[string]interface{}) (*ecdsa.PublicKey, error) {
+func jwkToECDSA(jwk map[string]any) (*ecdsa.PublicKey, error) {
 	kty, ok := jwk["kty"].(string)
 	if !ok || kty != "EC" {
 		return nil, fmt.Errorf("invalid key type, expected EC, got %v", jwk["kty"])
@@ -122,7 +122,7 @@ func jwkToECDSA(jwk map[string]interface{}) (*ecdsa.PublicKey, error) {
 }
 
 // jwkToEd25519 extracts an Ed25519 public key from a JWK.
-func jwkToEd25519(jwk map[string]interface{}) (ed25519.PublicKey, error) {
+func jwkToEd25519(jwk map[string]any) (ed25519.PublicKey, error) {
 	kty, ok := jwk["kty"].(string)
 	if !ok || kty != "OKP" {
 		return nil, fmt.Errorf("invalid key type, expected OKP, got %v", jwk["kty"])
@@ -151,7 +151,7 @@ func jwkToEd25519(jwk map[string]interface{}) (ed25519.PublicKey, error) {
 }
 
 // extractKeyFromMetadata extracts a public key from trust metadata (DID document).
-func extractKeyFromMetadata(metadata interface{}, verificationMethod string) (crypto.PublicKey, error) {
+func extractKeyFromMetadata(metadata any, verificationMethod string) (crypto.PublicKey, error) {
 	doc, ok := metadata.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid trust metadata format")

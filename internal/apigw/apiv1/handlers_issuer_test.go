@@ -95,7 +95,7 @@ func createValidDPoPJWT(t *testing.T, accessToken string) (string, *ecdsa.Privat
 	jwkJSON, err := json.Marshal(publicJWK)
 	require.NoError(t, err)
 
-	var jwkMap map[string]interface{}
+	var jwkMap map[string]any
 	err = json.Unmarshal(jwkJSON, &jwkMap)
 	require.NoError(t, err)
 	token.Header["jwk"] = jwkMap
@@ -136,7 +136,7 @@ func createValidProofJWT(t *testing.T, nonce string) (string, *ecdsa.PrivateKey,
 	token.Header["typ"] = "openid4vci-proof+jwt"
 
 	// Add JWK to header
-	var jwkMap map[string]interface{}
+	var jwkMap map[string]any
 	err = json.Unmarshal(jwkJSON, &jwkMap)
 	require.NoError(t, err)
 	token.Header["jwk"] = jwkMap
@@ -369,7 +369,7 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 	require.NoError(t, err)
 
 	// Parse JWK to extract fields
-	var jwkData map[string]interface{}
+	var jwkData map[string]any
 	err = json.Unmarshal(proofJWK, &jwkData)
 	require.NoError(t, err)
 

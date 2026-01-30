@@ -105,7 +105,7 @@ func TestResponseParameters_ToJSON(t *testing.T) {
 			assert.NotNil(t, data)
 
 			// Verify it's valid JSON
-			var decoded map[string]interface{}
+			var decoded map[string]any
 			err = json.Unmarshal(data, &decoded)
 			require.NoError(t, err)
 		})

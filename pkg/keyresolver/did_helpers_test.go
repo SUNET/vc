@@ -15,11 +15,11 @@ func TestExtractEd25519FromMetadata_JWK(t *testing.T) {
 		t.Fatalf("failed to generate key: %v", err)
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -53,11 +53,11 @@ func TestExtractEd25519FromMetadata_Multibase(t *testing.T) {
 	// Encode as base58-btc with 'z' prefix
 	multikey := encodeMultibase(multikeyBytes)
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":                 "did:web:example.com#key-1",
 				"type":               "Ed25519VerificationKey2020",
 				"controller":         "did:web:example.com",
@@ -119,11 +119,11 @@ func TestExtractEd25519FromMetadata_FragmentMatch(t *testing.T) {
 	}
 
 	// Test when verification method ID is just a fragment
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -143,11 +143,11 @@ func TestExtractEd25519FromMetadata_FragmentMatch(t *testing.T) {
 }
 
 func TestExtractEd25519FromMetadata_NotFound(t *testing.T) {
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":   "did:web:example.com#other-key",
 				"type": "JsonWebKey2020",
 			},
@@ -168,7 +168,7 @@ func TestExtractEd25519FromMetadata_InvalidFormat(t *testing.T) {
 }
 
 func TestExtractEd25519FromMetadata_NoVerificationMethods(t *testing.T) {
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
 	}
@@ -186,14 +186,14 @@ func TestExtractEd25519FromMetadata_OpenIDFederation(t *testing.T) {
 	}
 
 	// OpenID Federation entity configuration format
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"iss": "https://op.example.com",
-		"metadata": map[string]interface{}{
-			"openid_provider": map[string]interface{}{
+		"metadata": map[string]any{
+			"openid_provider": map[string]any{
 				"issuer": "https://op.example.com",
-				"jwks": map[string]interface{}{
-					"keys": []interface{}{
-						map[string]interface{}{
+				"jwks": map[string]any{
+					"keys": []any{
+						map[string]any{
 							"kid": "key-1",
 							"kty": "OKP",
 							"crv": "Ed25519",

@@ -39,7 +39,7 @@ func TestMakeJWT(t *testing.T) {
 		assert.NotEmpty(t, signedToken)
 
 		// Verify the token can be parsed
-		token, err := jwt.Parse(signedToken, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.Parse(signedToken, func(token *jwt.Token) (any, error) {
 			return &ecKey.PublicKey, nil
 		})
 		require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestMakeJWT(t *testing.T) {
 		assert.NotEmpty(t, signedToken)
 
 		// Verify the token can be parsed
-		token, err := jwt.Parse(signedToken, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.Parse(signedToken, func(token *jwt.Token) (any, error) {
 			return &rsaKey.PublicKey, nil
 		})
 		require.NoError(t, err)

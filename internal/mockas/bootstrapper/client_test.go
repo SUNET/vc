@@ -275,7 +275,7 @@ func TestUserUpload(t *testing.T) {
 				// Return proper JSON response expected by vcclient
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				json.NewEncoder(w).Encode(map[string]any{
 					"status": "ok",
 					"data": map[string]string{
 						"message": "user created successfully",
@@ -708,7 +708,7 @@ func TestDocumentUploader(t *testing.T) {
 				// Return proper JSON response expected by vcclient
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				json.NewEncoder(w).Encode(map[string]any{
 					"status": "ok",
 					"data": map[string]string{
 						"message": "document uploaded successfully",

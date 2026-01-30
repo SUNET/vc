@@ -103,7 +103,7 @@ func TestClaimTransformer(t *testing.T) {
 	transformer := &ClaimTransformer{Mappings: mappings}
 
 	// Test claims
-	inputClaims := map[string]interface{}{
+	inputClaims := map[string]any{
 		"given_name":  "John",
 		"family_name": "Doe",
 		"email":       "JOHN.DOE@EXAMPLE.COM",
@@ -116,7 +116,7 @@ func TestClaimTransformer(t *testing.T) {
 	}
 
 	// Verify nested structure
-	identity, ok := result["identity"].(map[string]interface{})
+	identity, ok := result["identity"].(map[string]any)
 	if !ok {
 		t.Fatal("Expected 'identity' to be a map")
 	}
@@ -158,7 +158,7 @@ func TestClaimTransformerMissingRequired(t *testing.T) {
 	transformer := &ClaimTransformer{Mappings: mappings}
 
 	// Missing required claim
-	inputClaims := map[string]interface{}{}
+	inputClaims := map[string]any{}
 
 	_, err := transformer.TransformClaims("pid", inputClaims)
 	if err == nil {
@@ -193,7 +193,7 @@ func TestClaimTransformerTransformations(t *testing.T) {
 
 	transformer := &ClaimTransformer{Mappings: mappings}
 
-	inputClaims := map[string]interface{}{
+	inputClaims := map[string]any{
 		"lowercase_field": "HELLO WORLD",
 		"uppercase_field": "hello world",
 		"trim_field":      "  spaced  ",
@@ -204,7 +204,7 @@ func TestClaimTransformerTransformations(t *testing.T) {
 		t.Fatalf("Failed to transform claims: %v", err)
 	}
 
-	resultMap, ok := result["result"].(map[string]interface{})
+	resultMap, ok := result["result"].(map[string]any)
 	if !ok {
 		t.Fatal("Expected 'result' to be a map")
 	}
@@ -319,7 +319,7 @@ func BenchmarkClaimTransform(b *testing.B) {
 
 	transformer := &ClaimTransformer{Mappings: mappings}
 
-	claims := map[string]interface{}{
+	claims := map[string]any{
 		"given_name":  "John",
 		"family_name": "Doe",
 		"email":       "john@example.com",

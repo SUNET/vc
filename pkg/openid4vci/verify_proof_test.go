@@ -36,7 +36,7 @@ func createValidJWTProof(t *testing.T, privateKey *ecdsa.PrivateKey, aud string)
 	// Create token with proper headers
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
-	token.Header["jwk"] = map[string]interface{}{
+	token.Header["jwk"] = map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 		"x":   "test-x",
@@ -207,7 +207,7 @@ func TestVerifyJWTProof(t *testing.T) {
 		claims := jwtv5.MapClaims{"aud": "test", "iat": time.Now().Unix()}
 		token := jwtv5.NewWithClaims(jwtv5.SigningMethodNone, claims)
 		token.Header["typ"] = "openid4vci-proof+jwt"
-		token.Header["jwk"] = map[string]interface{}{"kty": "EC"}
+		token.Header["jwk"] = map[string]any{"kty": "EC"}
 		jwtStr, _ := token.SignedString(jwtv5.UnsafeAllowNoneSignatureType)
 		jwt := ProofJWTToken(jwtStr)
 
@@ -221,7 +221,7 @@ func TestVerifyJWTProof(t *testing.T) {
 		claims := jwtv5.MapClaims{"aud": "test", "iat": time.Now().Unix()}
 		token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 		// Not setting typ header
-		token.Header["jwk"] = map[string]interface{}{"kty": "EC"}
+		token.Header["jwk"] = map[string]any{"kty": "EC"}
 		jwtStr, _ := token.SignedString(privateKey)
 		jwt := ProofJWTToken(jwtStr)
 
@@ -234,7 +234,7 @@ func TestVerifyJWTProof(t *testing.T) {
 		claims := jwtv5.MapClaims{"aud": "test", "iat": time.Now().Unix()}
 		token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 		token.Header["typ"] = "wrong-type"
-		token.Header["jwk"] = map[string]interface{}{"kty": "EC"}
+		token.Header["jwk"] = map[string]any{"kty": "EC"}
 		jwtStr, _ := token.SignedString(privateKey)
 		jwt := ProofJWTToken(jwtStr)
 
@@ -247,7 +247,7 @@ func TestVerifyJWTProof(t *testing.T) {
 		claims := jwtv5.MapClaims{"aud": "test", "iat": time.Now().Unix()}
 		token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 		token.Header["typ"] = "openid4vci-proof+jwt"
-		token.Header["jwk"] = map[string]interface{}{
+		token.Header["jwk"] = map[string]any{
 			"kty": "EC",
 			"crv": "P-256",
 			"x":   "test",
@@ -270,7 +270,7 @@ func TestVerifyJWTProof(t *testing.T) {
 		}
 		token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 		token.Header["typ"] = "openid4vci-proof+jwt"
-		token.Header["jwk"] = map[string]interface{}{"kty": "EC", "crv": "P-256", "x": "test", "y": "test"}
+		token.Header["jwk"] = map[string]any{"kty": "EC", "crv": "P-256", "x": "test", "y": "test"}
 		jwtStr, _ := token.SignedString(privateKey)
 		jwt := ProofJWTToken(jwtStr)
 

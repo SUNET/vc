@@ -242,7 +242,7 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 
 	// Send multiple audit logs concurrently
 	for i := 0; i < 20; i++ {
-		service.AddAuditLog(ctx, "concurrent_test", map[string]interface{}{
+		service.AddAuditLog(ctx, "concurrent_test", map[string]any{
 			"iteration": i,
 		})
 	}

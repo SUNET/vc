@@ -495,8 +495,8 @@ func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Unmarshal both to maps for comparison (to ignore field ordering)
-	var originalMap map[string]interface{}
-	var marshaledMap map[string]interface{}
+	var originalMap map[string]any
+	var marshaledMap map[string]any
 
 	err = json.Unmarshal(originalData, &originalMap)
 	require.NoError(t, err)
@@ -509,8 +509,8 @@ func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {
 	assert.Equal(t, originalMap["credential_endpoint"], marshaledMap["credential_endpoint"])
 
 	// Verify credential configurations are preserved
-	originalConfigs := originalMap["credential_configurations_supported"].(map[string]interface{})
-	marshaledConfigs := marshaledMap["credential_configurations_supported"].(map[string]interface{})
+	originalConfigs := originalMap["credential_configurations_supported"].(map[string]any)
+	marshaledConfigs := marshaledMap["credential_configurations_supported"].(map[string]any)
 	assert.Equal(t, len(originalConfigs), len(marshaledConfigs), "Should have same number of configurations")
 }
 

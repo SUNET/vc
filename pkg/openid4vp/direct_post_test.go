@@ -212,7 +212,7 @@ func TestDirectPostResponse(t *testing.T) {
 		require.NoError(t, err)
 
 		// Should not include redirect_uri field when empty (omitempty)
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		err = json.Unmarshal(data, &decoded)
 		require.NoError(t, err)
 
@@ -245,7 +245,7 @@ func TestDirectPostJWTResponse(t *testing.T) {
 		data, err := json.Marshal(response)
 		require.NoError(t, err)
 
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		err = json.Unmarshal(data, &decoded)
 		require.NoError(t, err)
 

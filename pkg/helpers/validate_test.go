@@ -79,7 +79,7 @@ func TestValidationIdentity(t *testing.T) {
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]interface{}{
+				Err: []map[string]any{
 					{
 						"field":           "birth_date",
 						"namespace":       "birth_date",
@@ -126,7 +126,7 @@ func TestStruct(t *testing.T) {
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]interface{}{
+				Err: []map[string]any{
 					{
 						"field":           "Last",
 						"namespace":       "Names[0].Last",
@@ -188,7 +188,7 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]interface{}{{
+				Err: []map[string]any{{
 					"field":           "birth_date",
 					"namespace":       "ID[0].birth_date",
 					"type":            "string",

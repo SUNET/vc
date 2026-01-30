@@ -62,8 +62,8 @@ type Apiv1 interface {
 	SVGTemplateReply(ctx context.Context, req *apiv1.SVGTemplateRequest) (*apiv1.SVGTemplateReply, error)
 
 	// OIDC RP endpoints
-	OIDCRPInitiate(ctx context.Context, req *apiv1.OIDCRPInitiateRequest, oidcrpService interface{}) (*apiv1.OIDCRPInitiateResponse, error)
-	OIDCRPCallback(ctx context.Context, req *apiv1.OIDCRPCallbackRequest, oidcrpService interface{}) (*apiv1.OIDCRPCallbackResponse, error)
+	OIDCRPInitiate(ctx context.Context, req *apiv1.OIDCRPInitiateRequest, oidcrpService any) (*apiv1.OIDCRPInitiateResponse, error)
+	OIDCRPCallback(ctx context.Context, req *apiv1.OIDCRPCallbackRequest, oidcrpService any) (*apiv1.OIDCRPCallbackResponse, error)
 
 	// misc endpoints
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)

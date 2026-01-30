@@ -181,7 +181,7 @@ type AuthResponse struct {
 	IDToken      *oidc.IDToken
 	AccessToken  string
 	RefreshToken string
-	Claims       map[string]interface{}
+	Claims       map[string]any
 	SessionID    string
 }
 
@@ -218,7 +218,7 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 	}
 
 	// Verify nonce
-	var claims map[string]interface{}
+	var claims map[string]any
 	if err := idToken.Claims(&claims); err != nil {
 		s.sessionStore.Delete(state)
 		return nil, fmt.Errorf("failed to parse ID token claims: %w", err)
@@ -283,7 +283,7 @@ func (s *Service) GetUserInfo(ctx context.Context, accessToken string) (map[stri
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
 
-	var claims map[string]interface{}
+	var claims map[string]any
 	if err := userInfo.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("failed to parse user info claims: %w", err)
 	}

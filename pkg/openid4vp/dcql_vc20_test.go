@@ -822,7 +822,7 @@ func TestTrustedAuthorityJSONSerialization(t *testing.T) {
 	}
 
 	// Verify JSON structure matches OpenID4VP spec
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestTrustedAuthorityJSONSerialization(t *testing.T) {
 		t.Errorf("Expected type 'aki', got %v", parsed["type"])
 	}
 
-	values, ok := parsed["values"].([]interface{})
+	values, ok := parsed["values"].([]any)
 	if !ok || len(values) != 1 {
 		t.Errorf("Expected values array with 1 element")
 	}

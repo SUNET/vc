@@ -320,7 +320,7 @@ func TestDestinationWorker(t *testing.T) {
 
 	// Send multiple messages
 	for i := 0; i < 5; i++ {
-		service.AddAuditLog(ctx, "test_event", map[string]interface{}{
+		service.AddAuditLog(ctx, "test_event", map[string]any{
 			"iteration": i,
 		})
 	}

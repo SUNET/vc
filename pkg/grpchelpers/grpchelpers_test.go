@@ -534,7 +534,7 @@ func TestFingerprintUnaryInterceptor(t *testing.T) {
 		})
 
 		handlerCalled := false
-		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handler := func(ctx context.Context, req any) (any, error) {
 			handlerCalled = true
 			return "response", nil
 		}
@@ -560,7 +560,7 @@ func TestFingerprintUnaryInterceptor(t *testing.T) {
 		})
 
 		handlerCalled := false
-		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handler := func(ctx context.Context, req any) (any, error) {
 			handlerCalled = true
 			return "response", nil
 		}
@@ -776,7 +776,7 @@ func TestIntegration_mTLS_FingerprintNotInAllowlist(t *testing.T) {
 
 	// Add an unknown service handler that always succeeds
 	// This allows any method call to reach the interceptor
-	unknownHandler := func(srv interface{}, stream grpc.ServerStream) error {
+	unknownHandler := func(srv any, stream grpc.ServerStream) error {
 		return nil
 	}
 	serverOpts = append(serverOpts, grpc.UnknownServiceHandler(unknownHandler))
@@ -867,7 +867,7 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	handlerCalled := false
 
 	// Add an unknown service handler that tracks if it was called
-	unknownHandler := func(srv interface{}, stream grpc.ServerStream) error {
+	unknownHandler := func(srv any, stream grpc.ServerStream) error {
 		handlerCalled = true
 		return nil
 	}
