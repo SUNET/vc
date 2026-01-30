@@ -84,6 +84,13 @@ func TestCreateRequestObject(t *testing.T) {
 			}
 			if tt.dcPreferredFormats != nil {
 				client.cfg.Verifier.DigitalCredentials.PreferredFormats = tt.dcPreferredFormats
+				// Setup VP formats configuration
+				client.cfg.Verifier.PreferredVPFormats = &openid4vp.VPFormatsSupported{
+					SDJWT: &openid4vp.SDJWTVCFormat{
+						SDJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+						KBJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+					},
+				}
 			}
 
 			signedJWT, err := client.CreateRequestObject(ctx, tt.sessionID, tt.dcqlQuery, tt.nonce)
@@ -106,7 +113,7 @@ func TestCreateRequestObject(t *testing.T) {
 				// Verify client metadata for DC API
 				if tt.dcEnabled && tt.dcPreferredFormats != nil {
 					assert.NotNil(t, cachedObj.ClientMetadata)
-					assert.NotEmpty(t, cachedObj.ClientMetadata.VPFormats)
+					assert.NotEmpty(t, cachedObj.ClientMetadata.VPFormatsSupported)
 				}
 			}
 		})

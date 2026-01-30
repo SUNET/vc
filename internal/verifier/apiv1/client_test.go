@@ -11,45 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClient_generateAuthorizationCode(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple codes and verify they're unique
-	codes := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		code := client.generateAuthorizationCode()
-		assert.NotEmpty(t, code)
-		assert.False(t, codes[code], "authorization code should be unique")
-		codes[code] = true
-	}
-}
-
-func TestClient_generateAccessToken(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple tokens and verify they're unique
-	tokens := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		token := client.generateAccessToken()
-		assert.NotEmpty(t, token)
-		assert.False(t, tokens[token], "access token should be unique")
-		tokens[token] = true
-	}
-}
-
-func TestClient_generateRefreshToken(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple tokens and verify they're unique
-	tokens := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		token := client.generateRefreshToken()
-		assert.NotEmpty(t, token)
-		assert.False(t, tokens[token], "refresh token should be unique")
-		tokens[token] = true
-	}
-}
-
 func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.OIDC.SubjectType = "public"

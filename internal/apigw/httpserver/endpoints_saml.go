@@ -4,6 +4,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -267,7 +268,7 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 }
 
 // generateCredentialOffer creates an OpenID4VCI credential offer
-func (s *Service) generateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]interface{}, error) {
+func (s *Service) generateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:generateCredentialOffer")
 	defer span.End()
 
@@ -282,7 +283,7 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 		CredentialIssuer:           s.cfg.Common.CredentialOffer.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]interface{}{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]interface{}{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
 				"pre-authorized_code": preAuthCode,
 				"tx_code":             nil, // Optional transaction code
 			},

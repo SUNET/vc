@@ -146,6 +146,15 @@ verifier:
           - "ehic"
           - "pda1"
           - "elm"
+  # Preferred VP formats - informs wallets what formats/algorithms the verifier supports
+  # Note: Per OpenID4VP spec, this is informational only and not enforced during verification
+  preferred_vp_formats:
+    "dc+sd-jwt":
+      sd-jwt_alg_values: ["ES256", "ES384", "ES512", "RS256"]
+      kb-jwt_alg_values: ["ES256", "ES384", "ES512", "RS256"]
+    mso_mdoc:
+      issuerauth_alg_values: [-7, -35, -36]  # ES256, ES384, ES512
+      deviceauth_alg_values: [-7, -35, -36]
   oidc:
     # OIDC Provider identifier (issuer of ID tokens and access tokens)
     # This identifies the verifier as an OpenID Provider
@@ -264,10 +273,6 @@ apigw:
       - "https://example.com/trust_anchor.pem"
   oauth_server:
     token_endpoint: "http://apigw.vc.docker:8080/token"
-    metadata:
-      path: /metadata/oauth2_metadata.json
-      signing_key_path: "/pki/signing_ec_private.pem"
-      signing_chain_path: "/pki/signing_ec_chain.pem"
     clients:
       "1003":
         type: "confidential"

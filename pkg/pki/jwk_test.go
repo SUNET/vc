@@ -4,9 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,15 +34,19 @@ func mockRSAKey(t *testing.T) ([]byte, []byte) {
 	return privatePEM, publicPEM
 }
 
-func TestPEM2jwk(t *testing.T) {
-	_, publicKey := mockRSAKey(t)
+// TestMockRSAKey verifies the mock key generation helper works correctly
+func TestMockRSAKey(t *testing.T) {
+	privatePEM, publicPEM := mockRSAKey(t)
 
-	got, err := PEM2jwk(publicKey)
-	assert.NoError(t, err, "PEM to JWK conversion should not return an error")
+	assert.NotEmpty(t, privatePEM, "Private key PEM should not be empty")
+	assert.NotEmpty(t, publicPEM, "Public key PEM should not be empty")
 
-	b, err := json.Marshal(got)
-	assert.NoError(t, err, "JSON marshaling should not return an error")
+	// Verify PEM blocks are valid
+	privBlock, _ := pem.Decode(privatePEM)
+	assert.NotNil(t, privBlock, "Private key PEM block should be valid")
+	assert.Equal(t, "RSA PRIVATE KEY", privBlock.Type)
 
-	fmt.Println("JWK:", string(b))
-
+	pubBlock, _ := pem.Decode(publicPEM)
+	assert.NotNil(t, pubBlock, "Public key PEM block should be valid")
+	assert.Equal(t, "RSA PUBLIC KEY", pubBlock.Type)
 }

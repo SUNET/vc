@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"time"
+	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -37,13 +38,10 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		DCQLQuery:    dcqlQuery,
 	}
 
-	// Add vp_formats to client_metadata if Digital Credentials API is enabled
-	if c.cfg.Verifier.DigitalCredentials.Enabled {
-		vpFormats := c.buildVPFormats()
-		if vpFormats.SDJWT != nil || vpFormats.MsoMdoc != nil {
-			requestObject.ClientMetadata = &openid4vp.ClientMetadata{
-				VPFormats: vpFormats,
-			}
+	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled
+	if c.cfg.Verifier.DigitalCredentials.Enabled && c.cfg.Verifier.PreferredVPFormats != nil {
+		requestObject.ClientMetadata = &openid4vp.ClientMetadata{
+			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
 		}
 	}
 
@@ -142,7 +140,11 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	session.VerifiedClaims = claims
 
 	// Generate authorization code
-	authCode := c.generateAuthorizationCode()
+	authCode, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate authorization code")
+		return err
+	}
 	session.Tokens.AuthorizationCode = authCode
 	session.Tokens.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 	session.Status = "code_issued"

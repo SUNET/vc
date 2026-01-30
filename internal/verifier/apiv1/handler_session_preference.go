@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 	"vc/internal/verifier/db"
+	"vc/pkg/crypto"
 )
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference
@@ -87,7 +88,11 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 	}
 
 	// User confirmed - issue authorization code
-	code := c.generateAuthorizationCode()
+	code, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate authorization code")
+		return nil, ErrServerError
+	}
 	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 
 	session.Status = db.SessionStatusCodeIssued

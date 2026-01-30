@@ -300,8 +300,16 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	session.Tokens.AuthorizationCodeUsed = true
 
 	// Generate tokens
-	accessToken := c.generateAccessToken()
-	refreshToken := c.generateRefreshToken()
+	accessToken, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate access token")
+		return nil, ErrServerError
+	}
+	refreshToken, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate refresh token")
+		return nil, ErrServerError
+	}
 
 	// Generate ID token
 	idToken, err := c.generateIDToken(session, client)

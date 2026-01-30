@@ -2,21 +2,15 @@ package apiv1
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
-	"encoding/pem"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
 	"vc/pkg/configuration"
-	"vc/pkg/crypto"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
@@ -102,8 +96,8 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	// Load OIDC signing key if configured
 	if err := c.loadOIDCSigningKey(); err != nil {
 		c.log.Info("OIDC signing key not loaded - OIDC provider features disabled", "error", err)
+		c.oidcSigningAlg = "RS256" // Default algorithm when key not loaded
 	}
-	c.oidcSigningAlg = "RS256" // Default algorithm
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
@@ -189,45 +183,6 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 		"dir", templatesDir)
 
 	return nil
-}
-
-// generateSessionID creates a cryptographically random session identifier
-func (c *Client) generateSessionID() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return oauth2.GenerateCryptographicNonceFixedLength(32)
-	}
-	return hex.EncodeToString(b)
-}
-
-// generateAuthorizationCode creates a cryptographically random authorization code
-func (c *Client) generateAuthorizationCode() string {
-	token, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate authorization code")
-		return ""
-	}
-	return token
-}
-
-// generateAccessToken creates a cryptographically random access token
-func (c *Client) generateAccessToken() string {
-	token, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate access token")
-		return ""
-	}
-	return token
-}
-
-// generateRefreshToken creates a cryptographically random refresh token
-func (c *Client) generateRefreshToken() string {
-	token, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate refresh token")
-		return ""
-	}
-	return token
 }
 
 // generateSubjectIdentifier creates a subject identifier for the user

@@ -89,7 +89,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		Nonce:        authorizationContext.Nonce,
 		DCQLQuery:    dcql,
 		ClientMetadata: &openid4vp.ClientMetadata{
-			VPFormats: vf,
+			VPFormatsSupported: vf,
 			JWKS: &openid4vp.Keys{
 				Keys: []jwk.Key{ephemeralPublicJWK},
 			},
