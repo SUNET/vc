@@ -79,12 +79,12 @@ func TestCreateRequestObject(t *testing.T) {
 			client.SetSigningKeyForTesting(key, "RS256")
 
 			// Configure Digital Credentials API
-			client.cfg.VerifierProxy.DigitalCredentials.Enabled = tt.dcEnabled
+			client.cfg.Verifier.DigitalCredentials.Enabled = tt.dcEnabled
 			if tt.dcResponseMode != "" {
-				client.cfg.VerifierProxy.DigitalCredentials.ResponseMode = tt.dcResponseMode
+				client.cfg.Verifier.DigitalCredentials.ResponseMode = tt.dcResponseMode
 			}
 			if tt.dcPreferredFormats != nil {
-				client.cfg.VerifierProxy.DigitalCredentials.PreferredFormats = tt.dcPreferredFormats
+				client.cfg.Verifier.DigitalCredentials.PreferredFormats = tt.dcPreferredFormats
 			}
 
 			signedJWT, err := client.CreateRequestObject(ctx, tt.sessionID, tt.dcqlQuery, tt.nonce)
@@ -146,7 +146,7 @@ func TestBuildVPFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, _ := CreateTestClientWithMock(nil)
-			client.cfg.VerifierProxy.DigitalCredentials.PreferredFormats = tt.preferredFormats
+			client.cfg.Verifier.DigitalCredentials.PreferredFormats = tt.preferredFormats
 
 			vpFormats := client.buildVPFormats()
 

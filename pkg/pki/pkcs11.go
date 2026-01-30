@@ -1,12 +1,11 @@
 //go:build pkcs11
 
-package signing
+package pki
 
 import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rsa"
 	"fmt"
 	"math/big"
@@ -17,15 +16,15 @@ import (
 // PKCS11Config holds configuration for PKCS#11 HSM connection.
 type PKCS11Config struct {
 	// ModulePath is the path to the PKCS#11 library (e.g., /usr/lib/softhsm/libsofthsm2.so)
-	ModulePath string
+	ModulePath string `yaml:"module_path"`
 	// SlotID is the HSM slot ID
-	SlotID uint
+	SlotID uint `yaml:"slot_id"`
 	// PIN is the user PIN for the slot
-	PIN string
+	PIN string `yaml:"pin"`
 	// KeyLabel is the label of the key to use
-	KeyLabel string
+	KeyLabel string `yaml:"key_label"`
 	// KeyID is the identifier for the JWT kid header
-	KeyID string
+	KeyID string `yaml:"key_id"`
 }
 
 // PKCS11Signer implements Signer using a PKCS#11 HSM.
@@ -319,45 +318,4 @@ func (s *PKCS11Signer) ecdsaMechanism() (*pkcs11.Mechanism, crypto.Hash) {
 	default:
 		return pkcs11.NewMechanism(pkcs11.CKM_ECDSA, nil), crypto.SHA256
 	}
-}
-
-// bytesToUint converts a byte slice to uint.
-func bytesToUint(b []byte) uint {
-	var result uint
-	for _, v := range b {
-		result = result<<8 | uint(v)
-	}
-	return result
-}
-
-// parseCurveOID parses the curve from DER-encoded OID.
-func parseCurveOID(oid []byte) (elliptic.Curve, error) {
-	// Common curve OIDs
-	p256OID := []byte{0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07}
-	p384OID := []byte{0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22}
-	p521OID := []byte{0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23}
-
-	switch {
-	case bytesEqual(oid, p256OID):
-		return elliptic.P256(), nil
-	case bytesEqual(oid, p384OID):
-		return elliptic.P384(), nil
-	case bytesEqual(oid, p521OID):
-		return elliptic.P521(), nil
-	default:
-		return nil, fmt.Errorf("unsupported curve OID: %x", oid)
-	}
-}
-
-// bytesEqual compares two byte slices.
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

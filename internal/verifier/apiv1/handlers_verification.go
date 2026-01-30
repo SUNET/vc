@@ -41,8 +41,8 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", errors.New("request object not found")
 	}
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.issuerMetadataSigningKey)
-	signedJWT, err := requestObject.Sign(signingMethod, c.issuerMetadataSigningKey, c.issuerMetadataSigningChain)
+	signingMethod, _ := jose.GetSigningMethodFromKey(c.verifierSigningKey)
+	signedJWT, err := requestObject.Sign(signingMethod, c.verifierSigningKey, c.verifierSigningChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err

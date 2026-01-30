@@ -100,7 +100,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		ID:        sessionID,
 		CreatedAt: time.Now(),
 		// Session expires after the configured duration
-		ExpiresAt: time.Now().Add(time.Duration(c.cfg.VerifierProxy.OIDC.SessionDuration) * time.Second),
+		ExpiresAt: time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.SessionDuration) * time.Second),
 		Status:    db.SessionStatusPending,
 		OIDCRequest: db.OIDCRequest{
 			ClientID:            req.ClientID,
@@ -138,8 +138,8 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 	// Generate OpenID4VP authorization request
 	authzReqURL := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s/verification/request-object/%s",
-		c.cfg.VerifierProxy.ExternalURL,
-		c.cfg.VerifierProxy.ExternalURL,
+		c.cfg.Verifier.ExternalServerURL,
+		c.cfg.Verifier.ExternalServerURL,
 		sessionID,
 	)
 
@@ -153,10 +153,10 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Add Digital Credentials API configuration
-	if c.cfg.VerifierProxy.DigitalCredentials.Enabled {
-		response.PreferredFormats = c.cfg.VerifierProxy.DigitalCredentials.PreferredFormats
-		response.UseJAR = c.cfg.VerifierProxy.DigitalCredentials.UseJAR
-		response.ResponseMode = c.cfg.VerifierProxy.DigitalCredentials.ResponseMode
+	if c.cfg.Verifier.DigitalCredentials.Enabled {
+		response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
+		response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
+		response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 	} else {
 		// Defaults
 		response.PreferredFormats = []string{"vc+sd-jwt"}
@@ -165,7 +165,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Add CSS customization configuration
-	cssConfig := c.cfg.VerifierProxy.AuthorizationPageCSS
+	cssConfig := c.cfg.Verifier.AuthorizationPageCSS
 	response.Title = cssConfig.Title
 	if response.Title == "" {
 		response.Title = "Credential Verification"
@@ -308,10 +308,10 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Update session with tokens
 	session.Tokens.AccessToken = accessToken
-	session.Tokens.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.VerifierProxy.OIDC.AccessTokenDuration) * time.Second)
+	session.Tokens.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.AccessTokenDuration) * time.Second)
 	session.Tokens.IDToken = idToken
 	session.Tokens.RefreshToken = refreshToken
-	session.Tokens.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.VerifierProxy.OIDC.RefreshTokenDuration) * time.Second)
+	session.Tokens.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second)
 	session.Tokens.TokenType = "Bearer"
 	session.Status = db.SessionStatusTokenIssued
 
@@ -323,7 +323,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.VerifierProxy.OIDC.AccessTokenDuration,
+		ExpiresIn:    c.cfg.Verifier.OIDC.AccessTokenDuration,
 		RefreshToken: refreshToken,
 		IDToken:      idToken,
 		Scope:        session.OIDCRequest.Scope,
@@ -344,10 +344,10 @@ func (c *Client) generateIDToken(session *db.Session, client *db.Client) (string
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
-	idTokenTTL := time.Duration(c.cfg.VerifierProxy.OIDC.IDTokenDuration) * time.Second
+	idTokenTTL := time.Duration(c.cfg.Verifier.OIDC.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.VerifierProxy.OIDC.Issuer,
+		"iss":   c.cfg.Verifier.OIDC.Issuer,
 		"sub":   sub,
 		"aud":   client.ClientID,
 		"exp":   now.Add(idTokenTTL).Unix(),

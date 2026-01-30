@@ -13,8 +13,8 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &model.Cfg{
-		VerifierProxy: &model.VerifierProxy{
-			ExternalURL: "https://verifier.example.com",
+		Verifier: &model.Verifier{
+			ExternalServerURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -88,8 +88,8 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &model.Cfg{
-		VerifierProxy: &model.VerifierProxy{
-			ExternalURL: "https://verifier.example.com",
+		Verifier: &model.Verifier{
+			ExternalServerURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -142,8 +142,8 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
-				VerifierProxy: &model.VerifierProxy{
-					ExternalURL: tt.externalURL,
+				Verifier: &model.Verifier{
+					ExternalServerURL: tt.externalURL,
 					OIDC: model.OIDCConfig{
 						Issuer:      tt.externalURL,
 						SubjectType: "public",
@@ -173,8 +173,8 @@ func TestGetJWKS(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &model.Cfg{
-		VerifierProxy: &model.VerifierProxy{
-			ExternalURL: "https://verifier.example.com",
+		Verifier: &model.Verifier{
+			ExternalServerURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -261,8 +261,8 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	ctx := context.Background()
 
 	cfg := &model.Cfg{
-		VerifierProxy: &model.VerifierProxy{
-			ExternalURL: "https://verifier.example.com",
+		Verifier: &model.Verifier{
+			ExternalServerURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -289,8 +289,8 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 // BenchmarkGetJWKS benchmarks JWKS generation
 func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
-		VerifierProxy: &model.VerifierProxy{
-			ExternalURL: "https://verifier.example.com",
+		Verifier: &model.Verifier{
+			ExternalServerURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",

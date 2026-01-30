@@ -5,6 +5,8 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"time"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
@@ -75,18 +77,39 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	go c.documentCache.Start()
 
 	var err error
-	if c.cfg.APIGW.IssuerMetadata.Path != "" {
-		c.issuerMetadata, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.APIGW.IssuerMetadata.LoadAndSign(ctx)
-		if err != nil {
-			return nil, err
+	// CRITICAL: Load VCTM data first - issuer metadata generation depends on it
+	// All credential constructors must load successfully for the service to start properly
+	var loadErrors []error
+	for scope, credentialInfo := range cfg.CredentialConstructor {
+		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
+			c.log.Error(err, "Failed to load VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT, "vctm_file", credentialInfo.VCTMFilePath)
+			loadErrors = append(loadErrors, fmt.Errorf("scope %s (vct=%s, file=%s): %w", scope, credentialInfo.VCT, credentialInfo.VCTMFilePath, err))
+			continue
 		}
+
+		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
+		c.log.Info("Successfully loaded VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT)
 	}
 
-	if c.cfg.APIGW.OauthServer.Metadata.Path != "" {
-		c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.LoadOAuth2Metadata(ctx)
-		if err != nil {
-			return nil, err
-		}
+	// If any credential constructor failed to load, fail fast with detailed error information
+	// This ensures the service doesn't start with incomplete credential configurations
+	if len(loadErrors) > 0 {
+		// Log summary before returning combined error
+		c.log.Error(nil, "Failed to load one or more credential constructors", "failed_count", len(loadErrors), "total_count", len(cfg.CredentialConstructor))
+		// Return a combined error that preserves all failure information
+		return nil, errors.Join(loadErrors...)
+	}
+
+	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
+	c.issuerMetadata, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.APIGW.IssuerMetadata.LoadAndSign(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.KeyConfig, cfg.CredentialConstructor)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load or generate OAuth2 metadata from configuration
+	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.LoadAndSignMetadata(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.KeyConfig)
+	if err != nil {
+		return nil, err
 	}
 
 	// Initialize gRPC client for issuer service
@@ -104,15 +127,6 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 		return nil, err
 	}
 	c.registryClient = apiv1_registry.NewRegistryServiceClient(registryConn)
-
-	for scope, credentialInfo := range cfg.CredentialConstructor {
-		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
-			c.log.Error(err, "Failed to load credential constructor", "scope", scope)
-			return nil, err
-		}
-
-		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
-	}
 
 	if err := c.CreateCredentialOfferLookupMetadata(ctx); err != nil {
 		return nil, err

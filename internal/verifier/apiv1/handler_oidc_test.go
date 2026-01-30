@@ -972,10 +972,10 @@ func TestToken_RefreshTokenGrant(t *testing.T) {
 // TestGenerateIDToken tests ID token generation
 func TestGenerateIDToken(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.VerifierProxy.OIDC.Issuer = "https://issuer.example.com"
-	client.cfg.VerifierProxy.OIDC.IDTokenDuration = 3600
-	client.cfg.VerifierProxy.OIDC.SubjectType = "public"
-	client.cfg.VerifierProxy.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDC.Issuer = "https://issuer.example.com"
+	client.cfg.Verifier.OIDC.IDTokenDuration = 3600
+	client.cfg.Verifier.OIDC.SubjectType = "public"
+	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
@@ -1265,14 +1265,14 @@ func TestAuthorize_FullFlow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			client.cfg.VerifierProxy.ExternalURL = "https://verifier.example.com"
-			client.cfg.VerifierProxy.OIDC.SessionDuration = 900
-			client.cfg.VerifierProxy.DigitalCredentials.Enabled = true
-			client.cfg.VerifierProxy.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
-			client.cfg.VerifierProxy.DigitalCredentials.UseJAR = true
-			client.cfg.VerifierProxy.DigitalCredentials.ResponseMode = "direct_post.jwt"
-			client.cfg.VerifierProxy.AuthorizationPageCSS.Title = "Test Verifier"
-			client.cfg.VerifierProxy.AuthorizationPageCSS.Theme = "dark"
+			client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
+			client.cfg.Verifier.OIDC.SessionDuration = 900
+			client.cfg.Verifier.DigitalCredentials.Enabled = true
+			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
+			client.cfg.Verifier.DigitalCredentials.UseJAR = true
+			client.cfg.Verifier.DigitalCredentials.ResponseMode = "direct_post.jwt"
+			client.cfg.Verifier.AuthorizationPageCSS.Title = "Test Verifier"
+			client.cfg.Verifier.AuthorizationPageCSS.Theme = "dark"
 
 			// Add presentation template for DCQL query generation
 			template := createSimplePresentationTemplate(t, []string{"openid", "profile", "email", "address"})
@@ -1336,13 +1336,13 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	ctx := context.Background()
 
 	client, mockDB := CreateTestClientWithMock(nil)
-	client.cfg.VerifierProxy.ExternalURL = "https://verifier.example.com"
-	client.cfg.VerifierProxy.OIDC.SessionDuration = 900
+	client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
+	client.cfg.Verifier.OIDC.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
-	client.cfg.VerifierProxy.DigitalCredentials.Enabled = false
+	client.cfg.Verifier.DigitalCredentials.Enabled = false
 	// Clear CSS title to test default fallback
-	client.cfg.VerifierProxy.AuthorizationPageCSS.Title = ""
-	client.cfg.VerifierProxy.AuthorizationPageCSS.Subtitle = ""
+	client.cfg.Verifier.AuthorizationPageCSS.Title = ""
+	client.cfg.Verifier.AuthorizationPageCSS.Subtitle = ""
 
 	// Add presentation template
 	template := createSimplePresentationTemplate(t, []string{"openid", "profile"})

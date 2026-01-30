@@ -544,7 +544,7 @@ func TestRegisterClient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			client.cfg.VerifierProxy.ExternalURL = "https://verifier.example.com"
+			client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
 
 			resp, err := client.RegisterClient(ctx, tt.request)
 
@@ -640,7 +640,7 @@ func TestGetClientInformation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			client.cfg.VerifierProxy.ExternalURL = "https://verifier.example.com"
+			client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
 
@@ -885,7 +885,7 @@ func TestUpdateClient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			client.cfg.VerifierProxy.ExternalURL = "https://verifier.example.com"
+			client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
 

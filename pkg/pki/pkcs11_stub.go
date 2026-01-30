@@ -1,26 +1,22 @@
 //go:build !pkcs11
 
-package signing
+package pki
 
 import (
 	"context"
-	"errors"
 )
 
 // PKCS11Config holds configuration for PKCS#11 HSM connection.
 type PKCS11Config struct {
-	ModulePath string
-	SlotID     uint
-	PIN        string
-	KeyLabel   string
-	KeyID      string
+	ModulePath string `yaml:"module_path"`
+	SlotID     uint   `yaml:"slot_id"`
+	PIN        string `yaml:"pin"`
+	KeyLabel   string `yaml:"key_label"`
+	KeyID      string `yaml:"key_id"`
 }
 
 // PKCS11Signer is a stub when PKCS#11 support is not compiled in.
 type PKCS11Signer struct{}
-
-// ErrPKCS11NotSupported is returned when PKCS#11 support is not compiled in.
-var ErrPKCS11NotSupported = errors.New("PKCS#11 support not compiled in; rebuild with -tags=pkcs11")
 
 // NewPKCS11Signer returns an error when PKCS#11 support is not compiled in.
 func NewPKCS11Signer(config *PKCS11Config) (*PKCS11Signer, error) {
