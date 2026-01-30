@@ -349,16 +349,16 @@ type AttributeConfig struct {
 
 // Issuer holds the issuer configuration
 type Issuer struct {
-	APIServer      APIServer     `yaml:"api_server" validate:"required"`
-	Identifier     string        `yaml:"identifier" validate:"required"`
-	GRPCServer     GRPCServer    `yaml:"grpc_server" validate:"required"`
-        KeyConfig      *pki.KeyConfig `yaml:"key_config" validate:"required"`
-	JWTAttribute   JWTAttribute  `yaml:"jwt_attribute" validate:"required"`
-	IssuerURL      string        `yaml:"issuer_url" validate:"required"`
-	WalletURL      string        `yaml:"wallet_url"`
-	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
-	MDoc           *MDocConfig   `yaml:"mdoc" validate:"omitempty"`      // mDL/mdoc configuration
-	AuditLog       *AuditLog     `yaml:"audit_log" validate:"omitempty"` // Audit log webhook configuration
+	APIServer      APIServer      `yaml:"api_server" validate:"required"`
+	Identifier     string         `yaml:"identifier" validate:"required"`
+	GRPCServer     GRPCServer     `yaml:"grpc_server" validate:"required"`
+	KeyConfig      *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	JWTAttribute   JWTAttribute   `yaml:"jwt_attribute" validate:"required"`
+	IssuerURL      string         `yaml:"issuer_url" validate:"required"`
+	WalletURL      string         `yaml:"wallet_url"`
+	RegistryClient GRPCClientTLS  `yaml:"registry_client" validate:"omitempty"`
+	MDoc           *MDocConfig    `yaml:"mdoc" validate:"omitempty"`      // mDL/mdoc configuration
+	AuditLog       *AuditLog      `yaml:"audit_log" validate:"omitempty"` // Audit log webhook configuration
 }
 
 // AuditLog holds audit log configuration for multiple destinations
@@ -423,19 +423,19 @@ type MockAS struct {
 
 // Verifier holds the verifier configuration
 type Verifier struct {
-	APIServer            APIServer                  `yaml:"api_server" validate:"required"`
-	GRPCServer           GRPCServer                 `yaml:"grpc_server" validate:"required"`
-	ExternalServerURL    string                     `yaml:"external_server_url" validate:"required"`
-	KeyConfig            *pki.KeyConfig                 `yaml:"key_config" validate:"required"`
-	OAuthServer          OAuthServer                    `yaml:"oauth_server" validate:"required"`
-	PreferredVPFormats   *openid4vp.VPFormatsSupported  `yaml:"preferred_vp_formats,omitempty"` // Informational: tells wallets what formats/algorithms are supported
-	SupportedWallets     map[string]string              `yaml:"supported_wallets" validate:"omitempty"`
-	OIDC                 OIDCConfig                     `yaml:"oidc" validate:"omitempty"`
-	OpenID4VP            OpenID4VPConfig            `yaml:"openid4vp" validate:"omitempty"`
-	DigitalCredentials   DigitalCredentialsConfig   `yaml:"digital_credentials,omitempty"`
-	AuthorizationPageCSS AuthorizationPageCSSConfig `yaml:"authorization_page_css,omitempty"`
-	CredentialDisplay    CredentialDisplayConfig    `yaml:"credential_display,omitempty"`
-	Trust                TrustConfig                `yaml:"trust,omitempty"`
+	APIServer            APIServer                     `yaml:"api_server" validate:"required"`
+	GRPCServer           GRPCServer                    `yaml:"grpc_server" validate:"required"`
+	ExternalServerURL    string                        `yaml:"external_server_url" validate:"required"`
+	KeyConfig            *pki.KeyConfig                `yaml:"key_config" validate:"required"`
+	OAuthServer          OAuthServer                   `yaml:"oauth_server" validate:"required"`
+	PreferredVPFormats   *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"` // Informational: tells wallets what formats/algorithms are supported
+	SupportedWallets     map[string]string             `yaml:"supported_wallets" validate:"omitempty"`
+	OIDC                 OIDCConfig                    `yaml:"oidc" validate:"omitempty"`
+	OpenID4VP            OpenID4VPConfig               `yaml:"openid4vp" validate:"omitempty"`
+	DigitalCredentials   DigitalCredentialsConfig      `yaml:"digital_credentials,omitempty"`
+	AuthorizationPageCSS AuthorizationPageCSSConfig    `yaml:"authorization_page_css,omitempty"`
+	CredentialDisplay    CredentialDisplayConfig       `yaml:"credential_display,omitempty"`
+	Trust                TrustConfig                   `yaml:"trust,omitempty"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
@@ -586,12 +586,6 @@ type SupportedCredentialConfig struct {
 	Scopes []string `yaml:"scopes" validate:"required"`
 }
 
-// Datastore holds the datastore configuration
-type Datastore struct {
-	APIServer  APIServer  `yaml:"api_server" validate:"required"`
-	GRPCServer GRPCServer `yaml:"grpc_server" validate:"required"`
-}
-
 // BasicAuth holds the basic auth configuration
 type BasicAuth struct {
 	Users   map[string]string `yaml:"users"`
@@ -718,14 +712,13 @@ type AuthenticSource struct {
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common    *Common    `yaml:"common"`
-	APIGW     *APIGW     `yaml:"apigw" validate:"omitempty"`
-	Issuer    *Issuer    `yaml:"issuer" validate:"omitempty"`
-	Verifier  *Verifier  `yaml:"verifier" validate:"omitempty"`
-	Datastore *Datastore `yaml:"datastore" validate:"omitempty"`
-	Registry  *Registry  `yaml:"registry" validate:"omitempty"`
-	MockAS    *MockAS    `yaml:"mock_as" validate:"omitempty"`
-	UI        *UI        `yaml:"ui" validate:"omitempty"`
+	Common   *Common   `yaml:"common"`
+	APIGW    *APIGW    `yaml:"apigw" validate:"omitempty"`
+	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
+	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
+	Registry *Registry `yaml:"registry" validate:"omitempty"`
+	MockAS   *MockAS   `yaml:"mock_as" validate:"omitempty"`
+	UI       *UI       `yaml:"ui" validate:"omitempty"`
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
 	// The constructor contains the VCT URN and other configuration for issuing that credential type
