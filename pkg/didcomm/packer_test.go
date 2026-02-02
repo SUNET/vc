@@ -13,7 +13,7 @@ func TestPackPlaintext(t *testing.T) {
 	msg := message.New(
 		message.WithType("https://example.com/protocols/1.0/test"),
 		message.WithFrom("did:example:alice"),
-		message.WithTo([]string{"did:example:bob"}),
+		message.WithTo("did:example:bob"),
 		message.WithBody(map[string]any{"hello": "world"}),
 	)
 
@@ -93,7 +93,7 @@ func TestUnpack_Plaintext(t *testing.T) {
 	msg := message.New(
 		message.WithType("https://example.com/protocols/1.0/test"),
 		message.WithFrom("did:example:alice"),
-		message.WithTo([]string{"did:example:bob"}),
+		message.WithTo("did:example:bob"),
 		message.WithBody(map[string]any{"hello": "world"}),
 	)
 

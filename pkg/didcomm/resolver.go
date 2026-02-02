@@ -196,11 +196,11 @@ func ecdsaPublicKeyToECDH(ecPub *ecdsa.PublicKey) (*ecdh.PublicKey, error) {
 // DIDDocument represents a W3C DID Document.
 // This is a subset of the full DID Document structure, containing fields relevant to DIDComm.
 type DIDDocument struct {
-	Context            []string            `json:"@context,omitempty"`
-	ID                 string              `json:"id"`
+	Context            []string             `json:"@context,omitempty"`
+	ID                 string               `json:"id"`
 	VerificationMethod []VerificationMethod `json:"verificationMethod,omitempty"`
-	KeyAgreement       []any               `json:"keyAgreement,omitempty"`
-	Service            []Service           `json:"service,omitempty"`
+	KeyAgreement       []any                `json:"keyAgreement,omitempty"`
+	Service            []Service            `json:"service,omitempty"`
 }
 
 // VerificationMethod represents a verification method in a DID Document.

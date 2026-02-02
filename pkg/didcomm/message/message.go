@@ -97,7 +97,7 @@ func WithFrom(from string) Option {
 }
 
 // WithTo sets the recipient DIDs.
-func WithTo(to []string) Option {
+func WithTo(to ...string) Option {
 	return func(m *Message) {
 		m.To = to
 	}
@@ -159,6 +159,31 @@ func (m *Message) AddAttachment(a Attachment) {
 	m.Attachments = append(m.Attachments, a)
 }
 
+// SetBody sets the message body from a struct.
+func (m *Message) SetBody(body any) error {
+	m.Body = body
+	return nil
+}
+
+// GetBody unmarshals the message body into the given struct.
+func (m *Message) GetBody(v any) error {
+	if m.Body == nil {
+		return nil
+	}
+
+	// If body is already the correct type, we need to marshal and unmarshal
+	data, err := json.Marshal(m.Body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal body: %w", err)
+	}
+
+	if err := json.Unmarshal(data, v); err != nil {
+		return fmt.Errorf("failed to unmarshal body: %w", err)
+	}
+
+	return nil
+}
+
 // ThreadID returns the effective thread ID.
 // If thid is set, returns it; otherwise returns the message id.
 func (m *Message) ThreadID() string {
@@ -181,7 +206,7 @@ func (m *Message) IsExpired() bool {
 func (m *Message) Reply(typ string, body any) *Message {
 	return New(
 		WithType(typ),
-		WithTo([]string{m.From}),
+		WithTo(m.From),
 		WithThreadID(m.ThreadID()),
 		WithBody(body),
 	)

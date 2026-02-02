@@ -12,7 +12,7 @@ func TestNew(t *testing.T) {
 	msg := New(
 		WithType("https://example.com/protocols/1.0/test"),
 		WithFrom("did:example:alice"),
-		WithTo([]string{"did:example:bob"}),
+		WithTo("did:example:bob"),
 		WithBody(map[string]any{"hello": "world"}),
 	)
 
@@ -124,7 +124,7 @@ func TestMessage_JSON(t *testing.T) {
 		WithID("test-123"),
 		WithType("https://example.com/protocols/1.0/test"),
 		WithFrom("did:example:alice"),
-		WithTo([]string{"did:example:bob", "did:example:carol"}),
+		WithTo("did:example:bob", "did:example:carol"),
 		WithThreadID("thread-456"),
 		WithBody(map[string]any{"message": "hello"}),
 	)
