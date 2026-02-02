@@ -120,7 +120,6 @@ issuer:
 verifier:
   api_server:
     addr: :8080
-    external_port: :8080
   grpc_server:
     addr: verifier.vc.docker:8090
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
