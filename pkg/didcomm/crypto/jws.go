@@ -133,29 +133,29 @@ func determineSigningAlgorithm(key jwk.Key, hint string) (jwa.SignatureAlgorithm
 		return parseSigningAlgorithm(hint)
 	}
 
-	// Infer from key type
-	var kty string
-	if err := key.Get("kty", &kty); err != nil {
-		return jwa.EdDSA(), fmt.Errorf("%w: key missing kty", ErrInvalidKey)
-	}
+	// Infer from key type using KeyType() method (jwa.KeyType, not string)
+	kty := key.KeyType()
 
 	switch kty {
-	case "OKP":
+	case jwa.OKP():
 		// Assume Ed25519 for OKP keys
 		return jwa.EdDSA(), nil
-	case "EC":
-		var crv string
+	case jwa.EC():
+		// Get curve - use jwa.EllipticCurveAlgorithm type
+		var crv jwa.EllipticCurveAlgorithm
 		if err := key.Get("crv", &crv); err != nil {
 			return jwa.ES256(), fmt.Errorf("%w: EC key missing crv", ErrInvalidKey)
 		}
 		switch crv {
-		case "P-256":
+		case jwa.P256():
 			return jwa.ES256(), nil
-		case "P-384":
+		case jwa.P384():
 			return jwa.ES384(), nil
-		case "secp256k1":
-			return jwa.ES256K(), nil
 		default:
+			// Check string representation for secp256k1 (requires jwx_es256k build tag)
+			if crv.String() == "secp256k1" {
+				return jwa.ES256K(), nil
+			}
 			return jwa.ES256(), fmt.Errorf("%w: unsupported curve %s", ErrUnsupportedAlgorithm, crv)
 		}
 	default:
