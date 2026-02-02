@@ -712,17 +712,18 @@ type AuthenticSource struct {
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common   *Common   `yaml:"common"`
-	APIGW    *APIGW    `yaml:"apigw" validate:"omitempty"`
-	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
-	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
-	Registry *Registry `yaml:"registry" validate:"omitempty"`
-	MockAS   *MockAS   `yaml:"mock_as" validate:"omitempty"`
-	UI       *UI       `yaml:"ui" validate:"omitempty"`
+	Common      *Common                `yaml:"common"`
+	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,dive"`
+	APIGW       *APIGW                 `yaml:"apigw" validate:"omitempty"`
+	Issuer      *Issuer                `yaml:"issuer" validate:"omitempty"`
+	Verifier    *Verifier              `yaml:"verifier" validate:"omitempty"`
+	Registry    *Registry              `yaml:"registry" validate:"omitempty"`
+	MockAS      *MockAS                `yaml:"mock_as" validate:"omitempty"`
+	UI          *UI                    `yaml:"ui" validate:"omitempty"`
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
 	// The constructor contains the VCT URN and other configuration for issuing that credential type
-	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty"`
+	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
 }
 
 // GetCredentialConstructorAuthMethod returns the auth method for the given credential type or "basic" if not found
@@ -748,11 +749,21 @@ type CredentialConstructor struct {
 	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
 	Format       string                         `yaml:"format" json:"format" validate:"required"`
-	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic pid_auth"`
+	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,auth_method_exists"`
 	Attributes   map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 }
 
-// LoadVCTMetadata loads and parses the Verifiable Credential Type Metadata (VCTM) file.
+// AuthMethod defines the authentication method configuration for credential issuance
+// This specifies what credentials the wallet must present for authentication
+type AuthMethod struct {
+	// VCTs is the list of acceptable Verifiable Credential Type URNs for authentication
+	VCTs []string `yaml:"vcts" json:"vcts" validate:"required,min=1"`
+	// Format is the credential format (e.g., "dc+sd-jwt", "ldp_vc", "mso_mdoc")
+	Format string `yaml:"format" json:"format" validate:"required"`
+	// Claims are the identity claims to extract from the authentication credential
+	Claims []string `yaml:"claims" json:"claims" validate:"required,min=1"`
+}
+
 // The scope parameter is used only for error messages.
 func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope string) error {
 	if c.VCTMFilePath == "" {

@@ -34,29 +34,37 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
+	// Get credential constructor to determine auth method
+	credentialConstructor := c.cfg.GetCredentialConstructor(authorizationContext.Scope[0])
+	if credentialConstructor == nil {
+		c.log.Error(nil, "credential constructor not found for scope", "scope", authorizationContext.Scope[0])
+		return "", errors.New("credential constructor not found for scope: " + authorizationContext.Scope[0])
+	}
+
+	// Get auth method configuration (guaranteed to exist by config validation)
+	authMethod := c.cfg.AuthMethods[credentialConstructor.AuthMethod]
+
+	// Build DCQL claims from auth method configuration
+	claimQueries := make([]openid4vp.ClaimQuery, 0, len(authMethod.Claims))
+	for _, claim := range authMethod.Claims {
+		claimQueries = append(claimQueries, openid4vp.ClaimQuery{
+			Path: []string{claim},
+		})
+	}
+
 	dcql := &openid4vp.DCQL{
 		Credentials: []openid4vp.CredentialQuery{
 			{
 				ID:       authorizationContext.Scope[0],
-				Format:   "dc+sd-jwt",
+				Format:   authMethod.Format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
-					VCTValues: []string{model.CredentialTypeUrnEudiPidARF151, model.CredentialTypeUrnEudiPidARG181},
+					VCTValues: authMethod.VCTs,
 				},
 				TrustedAuthorities:                []openid4vp.TrustedAuthority{},
 				RequireCryptographicHolderBinding: false,
-				Claims: []openid4vp.ClaimQuery{
-					{
-						Path: []string{"given_name"},
-					},
-					{
-						Path: []string{"birthdate"},
-					},
-					{
-						Path: []string{"family_name"},
-					},
-				},
-				ClaimSet: []string{},
+				Claims:                            claimQueries,
+				ClaimSet:                          []string{},
 			},
 		},
 		CredentialSets: []openid4vp.CredentialSetQuery{
@@ -112,10 +120,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 	return signedJWT, nil
 }
-
 type VerificationDirectPostRequest struct {
 	Response string `json:"response" form:"response"`
 }
+
 
 func (v *VerificationDirectPostRequest) GetKID() (string, error) {
 	header := strings.Split(v.Response, ".")[0]

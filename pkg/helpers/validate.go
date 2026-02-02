@@ -28,6 +28,43 @@ func NewValidator() (*validator.Validate, error) {
 		return name
 	})
 
+	// Register custom validation for auth_method_exists
+	err := validate.RegisterValidation("auth_method_exists", func(fl validator.FieldLevel) bool {
+		authMethod := fl.Field().String()
+
+		// "basic" is a special built-in auth method that doesn't require configuration
+		if authMethod == "basic" {
+			return true
+		}
+
+		// Navigate up the struct hierarchy to get the Cfg
+		// CredentialConstructor -> map value -> map[string]*CredentialConstructor -> Cfg
+		top := fl.Top()
+		if top.Kind() == reflect.Ptr {
+			top = top.Elem()
+		}
+
+		if top.Type().Name() != "Cfg" {
+			// If not in Cfg context, fail validation
+			return false
+		}
+
+		// Get AuthMethods field from Cfg
+		authMethodsField := top.FieldByName("AuthMethods")
+		if !authMethodsField.IsValid() || authMethodsField.IsNil() {
+			return false
+		}
+
+		// Check if the auth method exists in the map
+		authMethodsMap := authMethodsField.Interface().(map[string]*model.AuthMethod)
+		_, exists := authMethodsMap[authMethod]
+
+		return exists
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return validate, nil
 }
 

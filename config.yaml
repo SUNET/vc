@@ -15,6 +15,17 @@ common:
       recovery_level: 2
       size: 256
 
+auth_methods:
+  pid_auth:
+    vcts:
+      - "urn:eudi:pid:arf-1.5:1"
+      - "urn:eudi:pid:arf-1.8:1"
+    format: "dc+sd-jwt"
+    claims:
+      - "given_name"
+      - "birthdate"
+      - "family_name"
+
 credential_constructor:
   pid_1_5:
     vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
@@ -76,7 +87,6 @@ kafka:
 issuer:
   issuer_url: "http://apigw.vc.docker:8080"
   wallet_url: ""
-  identifier: "SUNET_v1"
   api_server:
     addr: :8080
   grpc_server:
@@ -222,7 +232,6 @@ registry:
     session_secret: "change-this-to-a-random-32-byte-secret"
 
 apigw:
-  identifier: "SUNET_v1"
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
