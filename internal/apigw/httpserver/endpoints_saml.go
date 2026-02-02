@@ -280,7 +280,7 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	}
 
 	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           s.cfg.Common.CredentialOffer.IssuerURL,
+		CredentialIssuer:           s.cfg.APIGW.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]any{
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{

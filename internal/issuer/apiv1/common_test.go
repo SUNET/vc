@@ -90,7 +90,6 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		},
 		Issuer: &model.Issuer{
 			APIServer:  model.APIServer{},
-			Identifier: "",
 			GRPCServer: model.GRPCServer{},
 			KeyConfig: &pki.KeyConfig{
 				PrivateKeyPath: "testdata/signing_test.key",
@@ -134,7 +133,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		client.privateKey = rsaKey
 		client.publicKey = &rsaKey.PublicKey
 		// Also update the signer to use RSA
-	signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
+		signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
 		assert.NoError(t, err)
 		client.signer = signer
 	}

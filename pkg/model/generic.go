@@ -47,11 +47,6 @@ type CredentialOffer struct {
 	Grants                     map[string]map[string]string `json:"grants"`
 }
 
-// Marshal marshals the CredentialOffer
-func (c *CredentialOfferConfig) Marshal() ([]byte, error) {
-	return json.Marshal(c)
-}
-
 // Consent is a generic type for consent
 type Consent struct {
 	// required: true

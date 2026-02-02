@@ -57,14 +57,15 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	}
 
 	var qr *openid4vci.QR
-	switch c.cfg.Common.CredentialOffer.Type {
+	switch c.cfg.Common.CredentialOfferQR.Type {
 	case "credential_offer":
 		credentialOffer, err := credentialOfferParameter.CredentialOffer()
 		if err != nil {
 			return err
 		}
 
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOffer.QR.RecoveryLevel, c.cfg.Common.CredentialOffer.QR.Size, c.cfg.Common.CredentialOffer.WalletURL)
+		// Empty string defaults to "openid-credential-offer://" protocol handler
+		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "")
 		if err != nil {
 			return err
 		}
@@ -75,7 +76,8 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 			return err
 		}
 
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOffer.QR.RecoveryLevel, c.cfg.Common.CredentialOffer.QR.Size, c.cfg.Common.CredentialOffer.WalletURL, c.cfg.Common.CredentialOffer.IssuerURL)
+		// Empty string defaults to "openid-credential-offer://" protocol handler
+		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.CredentialOffers.IssuerURL)
 		if err != nil {
 			return err
 		}

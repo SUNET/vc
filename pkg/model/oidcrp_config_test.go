@@ -3,7 +3,9 @@ package model
 import (
 	"testing"
 
+	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOIDCRPConfig_Validate(t *testing.T) {
@@ -40,7 +42,7 @@ func TestOIDCRPConfig_Validate(t *testing.T) {
 				ClientSecret: "test-secret",
 				RedirectURI:  "https://example.com/callback",
 				IssuerURL:    "https://issuer.example.com",
-				Scopes:       []string{}, // Empty, should get defaults
+				// Scopes: nil (zero value) will get defaults applied
 			},
 			wantErr: false,
 		},
@@ -110,7 +112,11 @@ func TestOIDCRPConfig_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
+			// Apply defaults before validation
+			err := defaults.Set(&tt.config)
+			require.NoError(t, err)
+
+			err = tt.config.Validate()
 
 			if tt.wantErr {
 				assert.Error(t, err)
