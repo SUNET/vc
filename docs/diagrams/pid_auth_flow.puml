@@ -6,10 +6,10 @@ wallet -> issuer: /op/par
 wallet -> issuer: /authorize
 issuer -> issuer: /authorization/consent
 user -> issuer: selects to use PID as authorization method
-issuer -> wallet: http://demo.wwwallet.org/cb?client_id=wallet-enterprise-acme-verifier&request_uri=http%3A%2F%2Fwallet-enterprise-acme-verifier%3A8005%2Fverification%2Frequest-object%3Fid%3D1e19dbd2-af2e-4842-aa2f-3680e777db7e
-wallet -> verifier: /verification/request-object/?id=1e19dbd2-af2e-4842-aa2f-3680e777db7e
+issuer -> wallet: callback with request_uri
+wallet -> verifier: /verification/request-object
 verifier -> wallet: Authorization Request as signed JWT 
-// wallet gui
+note right: wallet gui
 wallet -> verifier: Authorization Response as JWE
 user -> issuer: consenting to use pid
 
