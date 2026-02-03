@@ -12,6 +12,7 @@ import (
 	"time"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
+	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/openid4vci"
@@ -25,11 +26,11 @@ import (
 
 // mockAuthContextColl mocks the authorization context collection
 type mockAuthContextColl struct {
-	authContext *model.AuthorizationContext
+	authContext *cache.AuthorizationContext
 	err         error
 }
 
-func (m *mockAuthContextColl) GetWithAccessToken(ctx context.Context, accessToken string) (*model.AuthorizationContext, error) {
+func (m *mockAuthContextColl) GetWithAccessToken(ctx context.Context, accessToken string) (*cache.AuthorizationContext, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -274,7 +275,7 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 
 	// Create mock authorization context matching the actual structure
 	mockAuthCtx := &mockAuthContextColl{
-		authContext: &model.AuthorizationContext{
+		authContext: &cache.AuthorizationContext{
 			SessionID: "session-123",
 			Scope:     []string{"pid"},
 			Identity: &model.Identity{
@@ -284,7 +285,7 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 				BirthDate:               "1990-01-01",
 				Schema:                  &model.IdentitySchema{},
 			},
-			Token: &model.Token{
+			Token: &cache.Token{
 				AccessToken: accessToken,
 				ExpiresAt:   time.Now().Add(time.Hour).Unix(),
 			},

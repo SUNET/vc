@@ -63,7 +63,7 @@ func (c *Client) OIDCCredential(ctx context.Context, req *openid4vci.CredentialR
 
 	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
 
-	authContext, err := c.authContextStore.GetWithAccessToken(ctx, accessToken)
+	authContext, err := c.authContextCache.GetWithAccessToken(ctx, accessToken)
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
 		return nil, err

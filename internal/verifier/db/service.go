@@ -22,9 +22,6 @@ type Service struct {
 	tracer     *trace.Tracer
 	probeStore *apiv1_status.StatusProbeStore
 
-	// Legacy authorization context collection (for backward compatibility)
-	AuthorizationContextColl AuthorizationContextStore
-
 	// OIDC session and client collections (from verifier-proxy)
 	// Using interfaces to allow mocking in tests
 	Sessions SessionStore
@@ -44,14 +41,6 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	defer cancel()
 
 	if err := service.connect(ctx); err != nil {
-		return nil, err
-	}
-
-	// Initialize verifier database (legacy)
-	var err error
-	service.AuthorizationContextColl, err = NewAuthorizationContextColl(ctx, "verifier_authorization_context", service, log.New("verifier_authorization_context"))
-	if err != nil {
-		service.log.Error(err, "failed to create authorization context collection")
 		return nil, err
 	}
 

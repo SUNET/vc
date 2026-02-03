@@ -10,6 +10,7 @@ import (
 	"time"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
+	"vc/pkg/cache"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -28,7 +29,7 @@ import (
 type Client struct {
 	cfg                        *model.Cfg
 	db                         *db.Service
-	authContextStore           db.AuthorizationContextStore
+	authContextCache           *cache.AuthContextCache
 	log                        *logger.Log
 	notify                     *notify.Service
 	oauth2Metadata             *oauth2.AuthorizationServerMetadata
@@ -66,7 +67,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	c := &Client{
 		cfg:                         cfg,
 		db:                          db,
-		authContextStore:            db.AuthorizationContextColl,
+		authContextCache:            cache.NewAuthContextCache(10 * time.Minute),
 		log:                         log.New("apiv1"),
 		notify:                      notify,
 		openid4vp:                   openid4vpClient,

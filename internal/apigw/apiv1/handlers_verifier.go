@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"vc/internal/apigw/db"
+	"vc/pkg/cache"
 	"vc/pkg/jose"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
@@ -26,7 +27,7 @@ type VerificationRequestObjectRequest struct {
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
 	c.log.Debug("Verification request object", "req", req)
 
-	authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{
+	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
 		VerifierResponseCode: req.ID,
 	})
 	if err != nil {
@@ -189,7 +190,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Get authorization context
-	authCtx, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{EphemeralEncryptionKeyID: kid})
+	authCtx, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{EphemeralEncryptionKeyID: kid})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err

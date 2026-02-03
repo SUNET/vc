@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"vc/pkg/cache"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 
@@ -64,24 +65,22 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		scopes = append(scopes, credential.ID)
 	}
 
-	authorizationContext := &model.AuthorizationContext{
+	authorizationContext := &cache.AuthorizationContext{
 		SessionID:                sessionID,
 		Scope:                    scopes,
 		Code:                     "",
 		RequestURI:               "",
 		WalletURI:                "",
-		IsUsed:                   false,
+		Forfeited:                false,
 		State:                    state,
 		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.ExternalServerURL, "https://")),
 		ExpiresAt:                0,
 		CodeChallenge:            "",
 		CodeChallengeMethod:      "",
-		LastUsed:                 0,
-		SavedAt:                  0,
 		Consent:                  false,
 		AuthenticSource:          "",
 		Identity:                 &model.Identity{},
-		Token:                    &model.Token{},
+		Token:                    &cache.Token{},
 		Nonce:                    nonce,
 		EphemeralEncryptionKeyID: uuid.NewString(),
 		VerifierResponseCode:     "",
@@ -120,7 +119,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		VerifierInfo:     []openid4vp.VerifierInfo{},
 	}
 
-	if err := c.authContextStore.Save(ctx, authorizationContext); err != nil {
+	if err := c.authContextCache.Save(ctx, authorizationContext); err != nil {
 		return nil, err
 	}
 

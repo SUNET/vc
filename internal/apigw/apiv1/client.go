@@ -11,6 +11,7 @@ import (
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
 	"vc/internal/gen/registry/apiv1_registry"
+	"vc/pkg/cache"
 	"vc/pkg/grpchelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -30,7 +31,7 @@ import (
 type Client struct {
 	cfg                           *model.Cfg
 	db                            *db.Service
-	authContextStore              db.AuthorizationContextStore
+	authContextCache              *cache.AuthContextCache
 	usersStore                    db.UsersStore
 	credentialOfferStore          db.CredentialOfferStore
 	datastoreStore                db.DatastoreStore
@@ -56,7 +57,7 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
-		authContextStore:              db.VCAuthorizationContextColl,
+		authContextCache:              cache.NewAuthContextCache(10 * time.Minute), // Short-lived authorization contexts
 		usersStore:                    db.VCUsersColl,
 		credentialOfferStore:          db.VCCredentialOfferColl,
 		datastoreStore:                db.VCDatastoreColl,

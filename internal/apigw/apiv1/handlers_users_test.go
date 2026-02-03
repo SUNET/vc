@@ -3,7 +3,8 @@ package apiv1
 import (
 	"context"
 	"testing"
-	"vc/internal/apigw/db"
+	"time"
+	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/sdjwtvc"
@@ -14,72 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockAuthContextStore mocks the authorization context store
-type mockAuthContextStore struct {
-	authContexts map[string]*model.AuthorizationContext
-	err          error
-}
-
-func newMockAuthContextStore() *mockAuthContextStore {
-	return &mockAuthContextStore{
-		authContexts: make(map[string]*model.AuthorizationContext),
-	}
-}
-
-func (m *mockAuthContextStore) Save(ctx context.Context, doc *model.AuthorizationContext) error {
-	if m.err != nil {
-		return m.err
-	}
-	// Index by request_uri and verifier_response_code for lookups
-	if doc.RequestURI != "" {
-		m.authContexts["request_uri:"+doc.RequestURI] = doc
-	}
-	if doc.VerifierResponseCode != "" {
-		m.authContexts["response_code:"+doc.VerifierResponseCode] = doc
-	}
-	return nil
-}
-
-func (m *mockAuthContextStore) Get(ctx context.Context, query *model.AuthorizationContext) (*model.AuthorizationContext, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	if query.RequestURI != "" {
-		if doc, ok := m.authContexts["request_uri:"+query.RequestURI]; ok {
-			return doc, nil
-		}
-	}
-	if query.VerifierResponseCode != "" {
-		if doc, ok := m.authContexts["response_code:"+query.VerifierResponseCode]; ok {
-			return doc, nil
-		}
-	}
-	return nil, db.ErrNoDocuments
-}
-
-func (m *mockAuthContextStore) GetWithAccessToken(ctx context.Context, token string) (*model.AuthorizationContext, error) {
-	return nil, nil
-}
-
-func (m *mockAuthContextStore) ForfeitAuthorizationCode(ctx context.Context, query *model.AuthorizationContext) (*model.AuthorizationContext, error) {
-	return nil, nil
-}
-
-func (m *mockAuthContextStore) Consent(ctx context.Context, query *model.AuthorizationContext) error {
-	return nil
-}
-
-func (m *mockAuthContextStore) AddToken(ctx context.Context, code string, token *model.Token) error {
-	return nil
-}
-
-func (m *mockAuthContextStore) SetAuthenticSource(ctx context.Context, query *model.AuthorizationContext, authenticSource string) error {
-	return nil
-}
-
-func (m *mockAuthContextStore) AddIdentity(ctx context.Context, query *model.AuthorizationContext, input *model.AuthorizationContext) error {
-	return nil
-}
+var ErrNoDocuments = cache.ErrNoDocuments
 
 // mockUsersStore mocks the users store
 type mockUsersStore struct {
@@ -108,7 +44,7 @@ func (m *mockUsersStore) GetUser(ctx context.Context, username string) (*model.O
 	if user, ok := m.users[username]; ok {
 		return user, nil
 	}
-	return nil, db.ErrNoDocuments
+	return nil, ErrNoDocuments
 }
 
 func (m *mockUsersStore) GetHashedPassword(ctx context.Context, username string) (string, error) {
@@ -128,7 +64,7 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextStore := newMockAuthContextStore()
+	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
 	usersStore := newMockUsersStore()
 
 	// Insert test user
@@ -148,7 +84,7 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	// Insert authorization context
-	testAuthContext := &model.AuthorizationContext{
+	testAuthContext := &cache.AuthorizationContext{
 		SessionID:           "session-123",
 		RequestURI:          "https://issuer.example.com/request/123",
 		Code:                "auth-code-123",
@@ -160,12 +96,12 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 		ExpiresAt:           1735000000,
 		VCT:                 "urn:eudi:pid:1",
 	}
-	err = authContextStore.Save(ctx, testAuthContext)
+	err = authContextCache.Save(ctx, testAuthContext)
 	require.NoError(t, err)
 
 	client := &Client{
 		log:              log,
-		authContextStore: authContextStore,
+		authContextCache: authContextCache,
 		usersStore:       usersStore,
 	}
 
@@ -198,10 +134,10 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextStore := newMockAuthContextStore()
+	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
 
 	// Insert authorization context for PID auth
-	testAuthContext := &model.AuthorizationContext{
+	testAuthContext := &cache.AuthorizationContext{
 		SessionID:            "session-456",
 		VerifierResponseCode: "response-code-xyz",
 		Code:                 "auth-code-789",
@@ -215,7 +151,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 		VCT:                  "urn:eudi:pid:1",
 		AuthenticSource:      "test-source",
 	}
-	err := authContextStore.Save(ctx, testAuthContext)
+	err := authContextCache.Save(ctx, testAuthContext)
 	require.NoError(t, err)
 
 	// Create document cache with test data
@@ -258,7 +194,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	client := &Client{
 		log:              log,
 		documentCache:    cache,
-		authContextStore: authContextStore,
+		authContextCache: authContextCache,
 	}
 
 	// Create VCTM with claims
@@ -319,10 +255,10 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextStore := newMockAuthContextStore()
+	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
 
 	// Insert authorization context
-	testAuthContext := &model.AuthorizationContext{
+	testAuthContext := &cache.AuthorizationContext{
 		SessionID:            "session-no-docs",
 		VerifierResponseCode: "response-code-123",
 		Code:                 "auth-code",
@@ -335,7 +271,7 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 		RequestURI:           "https://issuer.example.com/request/789",
 		VCT:                  "urn:eudi:pid:1",
 	}
-	err := authContextStore.Save(ctx, testAuthContext)
+	err := authContextCache.Save(ctx, testAuthContext)
 	require.NoError(t, err)
 
 	// Create empty document cache
@@ -344,7 +280,7 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 	client := &Client{
 		log:              log,
 		documentCache:    cache,
-		authContextStore: authContextStore,
+		authContextCache: authContextCache,
 	}
 
 	req := &vcclient.UserLookupRequest{
@@ -366,10 +302,10 @@ func TestUserLookup_UnsupportedAuthMethod(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextStore := newMockAuthContextStore()
+	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
 
 	// Insert authorization context
-	testAuthContext := &model.AuthorizationContext{
+	testAuthContext := &cache.AuthorizationContext{
 		SessionID:           "session-999",
 		RequestURI:          "https://issuer.example.com/request/999",
 		Code:                "auth-code",
@@ -381,12 +317,12 @@ func TestUserLookup_UnsupportedAuthMethod(t *testing.T) {
 		ExpiresAt:           1735000000,
 		VCT:                 "urn:eudi:pid:1",
 	}
-	err := authContextStore.Save(ctx, testAuthContext)
+	err := authContextCache.Save(ctx, testAuthContext)
 	require.NoError(t, err)
 
 	client := &Client{
 		log:              log,
-		authContextStore: authContextStore,
+		authContextCache: authContextCache,
 	}
 
 	req := &vcclient.UserLookupRequest{

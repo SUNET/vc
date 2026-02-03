@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/helpers"
 	"vc/pkg/jose"
-	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
 
@@ -31,12 +31,12 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	c.log.Debug("PAR", "state", req.State)
 
-	azt := model.AuthorizationContext{
+	azt := cache.AuthorizationContext{
 		SessionID:           uuid.NewString(),
 		Code:                uuid.NewString(),
 		RequestURI:          requestURI,
 		Scope:               []string{req.Scope},
-		IsUsed:              false,
+		Forfeited:           false,
 		CodeChallenge:       req.CodeChallenge,
 		CodeChallengeMethod: req.CodeChallengeMethod,
 		State:               req.State,
@@ -60,7 +60,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, fmt.Errorf("failed to generate response code: %w", err)
 	}
 
-	if err := c.authContextStore.Save(ctx, &azt); err != nil {
+	if err := c.authContextCache.Save(ctx, &azt); err != nil {
 		return nil, err
 	}
 
@@ -74,11 +74,11 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error) {
 	c.log.Debug("Authorize", "req", req)
-	query := &model.AuthorizationContext{
+	query := &cache.AuthorizationContext{
 		RequestURI: req.RequestURI,
 		ClientID:   fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.ExternalServerURL, "https://")),
 	}
-	authorizationContext, err := c.authContextStore.Get(ctx, query)
+	authorizationContext, err := c.authContextCache.Get(ctx, query)
 	c.log.Debug("Get authorization", "query", query, "authorization", authorizationContext)
 	if err != nil {
 		c.log.Error(err, "get error")
@@ -86,7 +86,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	}
 	c.log.Debug("Authorization", "state", authorizationContext.State)
 
-	if authorizationContext.IsUsed {
+	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
 	}
@@ -112,7 +112,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	c.log.Debug("OIDCToken", "req", req)
 
-	authorizationContext, err := c.authContextStore.ForfeitAuthorizationCode(ctx, &model.AuthorizationContext{
+	authorizationContext, err := c.authContextCache.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 		Code: req.Code,
 	})
 	if err != nil {
@@ -141,12 +141,12 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{},
 	}
 
-	tokenDoc := &model.Token{
+	tokenDoc := &cache.Token{
 		AccessToken: accessToken,
 		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
 	}
 
-	if err := c.authContextStore.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
+	if err := c.authContextCache.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
 		c.log.Error(err, "failed to add token")
 		return nil, err
 	}
@@ -204,7 +204,7 @@ type OAuthAuthorizationConsentResponse struct {
 }
 
 func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthorizationConsentRequest) (*OAuthAuthorizationConsentResponse, error) {
-	authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{SessionID: req.SessionID})
+	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{SessionID: req.SessionID})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
