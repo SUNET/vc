@@ -283,10 +283,6 @@ endef
 
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
-docker-build-gobuild: ## Build gobuild Docker image
-	$(info Docker Building gobuild with tag: $(VERSION))
-	docker build --tag $(call docker-tag,gobuild,$(VERSION)) --file dockerfiles/gobuild .
-
 # Docker builds with optional features
 docker-build-apigw-saml: ## Build apigw Docker image with SAML support
 	$(info Docker building apigw with SAML support, tag: $(VERSION))
@@ -332,10 +328,6 @@ endef
 
 $(foreach service,$(SERVICES),$(eval $(call DOCKER_PUSH_TEMPLATE,$(service))))
 
-docker-push-gobuild: ## Push gobuild Docker image
-	$(info Pushing docker image gobuild)
-	docker push $(call docker-tag,gobuild,$(VERSION))
-
 # ==============================================================================
 # Docker Tag Targets
 # ==============================================================================
@@ -379,17 +371,17 @@ check-protoc: ## Check if protoc is installed
 		&& $(error protoc not installed. Install via: apt-get install protobuf-compiler (Ubuntu/Debian) or brew install protobuf (macOS) or download from https://github.com/protocolbuffers/protobuf/releases. Then install Go plugins: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest))
 	@protoc --version
 
-proto: check-protoc proto-status proto-registry proto-issuer ## Generate all protobuf files
+proto: proto-status proto-registry proto-issuer ## Generate all protobuf files
 
 PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=vc --go-grpc_out=. --go_opt=module=vc --go_out=.
 
-proto-registry: check-protoc ## Generate registry protobuf
+proto-registry: ## Generate registry protobuf
 	protoc $(PROTO_OPTS) ./proto/v1-registry.proto
 
-proto-status: check-protoc ## Generate status protobuf
+proto-status: ## Generate status protobuf
 	protoc $(PROTO_OPTS) ./proto/v1-status-model.proto
 
-proto-issuer: check-protoc ## Generate issuer protobuf
+proto-issuer: ## Generate issuer protobuf
 	protoc $(PROTO_OPTS) ./proto/v1-issuer.proto
 
 # ==============================================================================
