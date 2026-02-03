@@ -428,7 +428,7 @@ clean-apt-cache:
 	$(info Cleaning apt cache)
 	rm -rf /var/lib/apt/lists/*
 
-vscode:
+vscode: test-env
 	$(info Install APT packages)
 	sudo apt-get update && sudo apt-get install -y \
 		protobuf-compiler \
