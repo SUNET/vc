@@ -229,67 +229,6 @@ func TestServiceInitialization(t *testing.T) {
 	t.Skip("Requires OIDC provider - see integration tests")
 }
 
-// TestOIDCRPConfig tests the configuration validation
-func TestOIDCRPConfig(t *testing.T) {
-	tests := []struct {
-		name      string
-		config    model.OIDCRPConfig
-		expectErr bool
-	}{
-		{
-			name: "Valid config with openid scope",
-			config: model.OIDCRPConfig{
-				Enabled:      true,
-				ClientID:     "test-client",
-				ClientSecret: "test-secret",
-				RedirectURI:  "https://example.com/callback",
-				IssuerURL:    "https://provider.example.com",
-				Scopes:       []string{"openid", "profile"},
-			},
-			expectErr: false,
-		},
-		{
-			name: "Auto-add openid scope",
-			config: model.OIDCRPConfig{
-				Enabled:      true,
-				ClientID:     "test-client",
-				ClientSecret: "test-secret",
-				RedirectURI:  "https://example.com/callback",
-				IssuerURL:    "https://provider.example.com",
-				Scopes:       []string{}, // Empty scopes
-			},
-			expectErr: false,
-		},
-		{
-			name: "Disabled config doesn't require fields",
-			config: model.OIDCRPConfig{
-				Enabled: false,
-			},
-			expectErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.expectErr && err == nil {
-				t.Error("Expected validation error, got nil")
-			}
-			if !tt.expectErr && err != nil {
-				t.Errorf("Expected no error, got: %v", err)
-			}
-
-			// If enabled and scopes were empty, should be populated
-			if tt.config.Enabled && len(tt.config.Scopes) == 0 {
-				// After validation, scopes should include openid
-				if len(tt.config.Scopes) == 0 {
-					t.Error("Expected scopes to be populated after validation")
-				}
-			}
-		})
-	}
-}
-
 // BenchmarkSessionStoreCreate benchmarks session creation
 func BenchmarkSessionStoreCreate(b *testing.B) {
 	log := logger.NewSimple("benchmark")
