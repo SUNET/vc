@@ -119,33 +119,33 @@ build: proto build-verifier build-registry build-mockas build-apigw build-ui bui
 
 build-verifier:
 	$(info Building verifier)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_verifier ${LDFLAGS} ./cmd/verifier/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_verifier ${LDFLAGS} ./cmd/verifier/
 
 build-vc20-test-server:
 	$(info Building vc20-test-server)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags vc20 -v -o ./bin/$(NAME)_vc20-test-server ${LDFLAGS} ./cmd/vc20-test-server/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags vc20 -v -o ./bin/$(NAME)_vc20-test-server ${LDFLAGS} ./cmd/vc20-test-server/
 
 build-registry:
 	$(info Building registry)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_registry ${LDFLAGS_DYNAMIC} ./cmd/registry/main.go
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_registry ${LDFLAGS_DYNAMIC} ./cmd/registry/
 
 
 
 build-mockas:
 	$(info Building mockas)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_mockas ${LDFLAGS} ./cmd/mockas/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_mockas ${LDFLAGS} ./cmd/mockas/
 
 build-apigw:
 	$(info Building apigw)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_apigw ${LDFLAGS} ./cmd/apigw/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_apigw ${LDFLAGS} ./cmd/apigw/
 
 build-ui:
 	$(info Building ui)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_ui ${LDFLAGS} ./cmd/ui/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_ui ${LDFLAGS} ./cmd/ui/
 
 build-wallet:
 	$(info Building wallet)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_wallet ${LDFLAGS} ./cmd/wallet/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ./bin/$(NAME)_wallet ${LDFLAGS} ./cmd/wallet/
 
 # Build targets with optional features (build tags)
 # Usage: make build-issuer-hsm  (builds issuer with PKCS#11 HSM support)
@@ -154,19 +154,19 @@ build-wallet:
 
 build-issuer-hsm:
 	$(info Building issuer with PKCS#11 HSM support)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags pkcs11 -v -o ./bin/$(NAME)_issuer-hsm ${LDFLAGS_DYNAMIC} ./cmd/issuer/main.go
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags pkcs11 -v -o ./bin/$(NAME)_issuer-hsm ${LDFLAGS_DYNAMIC} ./cmd/issuer/
 
 build-apigw-saml:
 	$(info Building apigw with SAML support)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags saml -v -o ./bin/$(NAME)_apigw-saml ${LDFLAGS} ./cmd/apigw/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags saml -v -o ./bin/$(NAME)_apigw-saml ${LDFLAGS} ./cmd/apigw/
 
 build-apigw-oidcrp:
 	$(info Building apigw with OIDC RP support)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags oidcrp -v -o ./bin/$(NAME)_apigw-oidcrp ${LDFLAGS} ./cmd/apigw/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags oidcrp -v -o ./bin/$(NAME)_apigw-oidcrp ${LDFLAGS} ./cmd/apigw/
 
 build-apigw-all:
 	$(info Building apigw with all optional features - SAML and OIDC RP)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags "saml,oidcrp" -v -o ./bin/$(NAME)_apigw-all ${LDFLAGS} ./cmd/apigw/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags "saml,oidcrp" -v -o ./bin/$(NAME)_apigw-all ${LDFLAGS} ./cmd/apigw/
 
 # Test targets with build tags
 test-saml:
