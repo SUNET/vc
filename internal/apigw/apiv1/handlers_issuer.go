@@ -18,14 +18,16 @@ import (
 	"vc/pkg/openid4vci"
 )
 
-// OIDCCredentialOffer https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-offer-endpoint
-func (c *Client) OIDCCredentialOffer(ctx context.Context, req *openid4vci.CredentialOfferParameters) (*openid4vci.CredentialOfferParameters, error) {
+// VCICredentialOffer implements OpenID4VCI credential offer endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-offer-endpoint
+func (c *Client) VCICredentialOffer(ctx context.Context, req *openid4vci.CredentialOfferParameters) (*openid4vci.CredentialOfferParameters, error) {
 	c.log.Debug("credential offer")
 	return nil, nil
 }
 
-// OIDCNonce https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
-func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, error) {
+// VCINonce implements OpenID4VCI nonce endpoint for DPoP proof freshness
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
+func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error) {
 	nonce, err := crypto.GenerateSecureToken(0, 43)
 	if err != nil {
 		return nil, err
@@ -36,9 +38,9 @@ func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, erro
 	return response, nil
 }
 
-// OIDCCredential makes a credential
+// VCICredential implements OpenID4VCI credential issuance endpoint
 //
-//	@Summary		OIDCCredential
+//	@Summary		VCICredential
 //	@ID				create-credential
 //	@Description	Create credential endpoint
 //	@Tags			dc4eu
@@ -48,7 +50,7 @@ func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, erro
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
-func (c *Client) OIDCCredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPoP)
 	if err != nil {
 		c.log.Error(err, "failed to validate DPoP JWT")
@@ -401,15 +403,17 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 	return coseKey.Bytes()
 }
 
-// OIDCDeferredCredential https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
-func (c *Client) OIDCDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
+// VCIDeferredCredential implements OpenID4VCI deferred credential endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
+func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
-	// run the same code as OIDCCredential
+	// run the same code as VCICredential
 	return nil, nil
 }
 
-// OIDCredentialOfferURI https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-14.html#name-sending-credential-offer-by-
-func (c *Client) OIDCredentialOfferURI(ctx context.Context, req *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error) {
+// VCICredentialOfferURI implements OpenID4VCI credential offer URI endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-14.html#name-sending-credential-offer-by-
+func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error) {
 	c.log.Debug("credential offer uri", "req", req.CredentialOfferUUID)
 	doc, err := c.credentialOfferStore.Get(ctx, req.CredentialOfferUUID)
 	if err != nil {
@@ -420,14 +424,15 @@ func (c *Client) OIDCredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 	return &doc.CredentialOfferParameters, nil
 }
 
-// OIDCNotification https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
-func (c *Client) OIDCNotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
+// VCINotification implements OpenID4VCI notification endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
+func (c *Client) VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
 	c.log.Debug("notification", "req", req)
 	return nil
 }
 
-// OIDCMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
-func (c *Client) OIDCMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
+// VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
+func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	c.log.Debug("metadata request")
 
 	signingMethod, _ := jose.GetSigningMethodFromKey(c.issuerMetadataSigningKey)

@@ -254,11 +254,11 @@ func (s *Service) endpointHealth(ctx context.Context, c *gin.Context) (any, erro
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
-func (s *Service) endpointOIDCNonce(ctx context.Context, c *gin.Context) (any, error) {
+func (s *Service) endpointVCINonce(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointNonce")
 	defer span.End()
 
-	reply, err := s.apiv1.OIDCNonce(ctx)
+	reply, err := s.apiv1.VCINonce(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -267,7 +267,7 @@ func (s *Service) endpointOIDCNonce(ctx context.Context, c *gin.Context) (any, e
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-14.html#name-sending-credential-offer-by-
-func (s *Service) endpointOIDCredentialOfferURI(ctx context.Context, c *gin.Context) (any, error) {
+func (s *Service) endpointVCICredentialOfferURI(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointCredential")
 	defer span.End()
 
@@ -276,7 +276,7 @@ func (s *Service) endpointOIDCredentialOfferURI(ctx context.Context, c *gin.Cont
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	reply, err := s.apiv1.OIDCredentialOfferURI(ctx, request)
+	reply, err := s.apiv1.VCICredentialOfferURI(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -285,8 +285,8 @@ func (s *Service) endpointOIDCredentialOfferURI(ctx context.Context, c *gin.Cont
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-endpoint
-func (s *Service) endpointOIDCCredential(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCredential")
+func (s *Service) endpointVCICredential(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointVCICredential")
 	defer span.End()
 
 	request := &openid4vci.CredentialRequest{}
@@ -296,9 +296,9 @@ func (s *Service) endpointOIDCCredential(ctx context.Context, c *gin.Context) (a
 		return nil, err
 	}
 
-	reply, err := s.apiv1.OIDCCredential(ctx, request)
+	reply, err := s.apiv1.VCICredential(ctx, request)
 	if err != nil {
-		s.log.Error(err, "OIDCCredential error")
+		s.log.Error(err, "VCICredential error")
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (s *Service) endpointOIDCCredential(ctx context.Context, c *gin.Context) (a
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoint
-func (s *Service) endpointOIDCDeferredCredential(ctx context.Context, c *gin.Context) (any, error) {
+func (s *Service) endpointVCIDeferredCredential(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDeferredCredential")
 	defer span.End()
 
@@ -315,7 +315,7 @@ func (s *Service) endpointOIDCDeferredCredential(ctx context.Context, c *gin.Con
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	reply, err := s.apiv1.OIDCDeferredCredential(ctx, request)
+	reply, err := s.apiv1.VCIDeferredCredential(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -324,7 +324,7 @@ func (s *Service) endpointOIDCDeferredCredential(ctx context.Context, c *gin.Con
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
-func (s *Service) endpointOIDCNotification(ctx context.Context, c *gin.Context) (any, error) {
+func (s *Service) endpointVCINotification(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointNotification")
 	defer span.End()
 
@@ -333,7 +333,7 @@ func (s *Service) endpointOIDCNotification(ctx context.Context, c *gin.Context) 
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	err := s.apiv1.OIDCNotification(ctx, request)
+	err := s.apiv1.VCINotification(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -343,11 +343,11 @@ func (s *Service) endpointOIDCNotification(ctx context.Context, c *gin.Context) 
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
-func (s *Service) endpointOIDCMetadata(ctx context.Context, c *gin.Context) (any, error) {
+func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointMetadata")
 	defer span.End()
 
-	reply, err := s.apiv1.OIDCMetadata(ctx)
+	reply, err := s.apiv1.VCIMetadata(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err

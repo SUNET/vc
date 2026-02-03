@@ -17,7 +17,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// OIDCAuth  https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
+// OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
 	allow, err := c.cfg.APIGW.OauthServer.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
@@ -108,9 +109,10 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	return response, nil
 }
 
-// OIDCToken https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-token-endpoint
+// OAuthToken implements OAuth 2.0 token endpoint for credential issuance
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-token-endpoint
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
-	c.log.Debug("OIDCToken", "req", req)
+	c.log.Debug("OAuthToken", "req", req)
 
 	authorizationContext, err := c.authContextCache.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 		Code: req.Code,

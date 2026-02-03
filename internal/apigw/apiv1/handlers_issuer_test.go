@@ -149,12 +149,12 @@ func createValidProofJWT(t *testing.T, nonce string) (string, *ecdsa.PrivateKey,
 	return signed, privateKey, jwkJSON
 }
 
-// TestOIDCNonce tests the nonce generation endpoint
+// TestVCINonce tests the nonce generation endpoint
 // Verifies that:
 // - Nonce is generated successfully
 // - Nonce has reasonable length
 // - Each call generates a unique nonce
-func TestOIDCNonce(t *testing.T) {
+func TestVCINonce(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
@@ -163,7 +163,7 @@ func TestOIDCNonce(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	resp, err := client.OIDCNonce(ctx)
+	resp, err := client.VCINonce(ctx)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -171,13 +171,13 @@ func TestOIDCNonce(t *testing.T) {
 	assert.Greater(t, len(resp.CNonce), 10, "Nonce should be reasonably long")
 
 	// Test that multiple calls generate different nonces
-	resp2, err2 := client.OIDCNonce(ctx)
+	resp2, err2 := client.VCINonce(ctx)
 	assert.NoError(t, err2)
 	assert.NotNil(t, resp2)
 	assert.NotEqual(t, resp.CNonce, resp2.CNonce, "Each call should generate a unique nonce")
 }
 
-func TestOIDCCredential_InvalidDPoP(t *testing.T) {
+func TestVCICredential_InvalidDPoP(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
@@ -192,13 +192,13 @@ func TestOIDCCredential_InvalidDPoP(t *testing.T) {
 		},
 	}
 
-	resp, err := client.OIDCCredential(ctx, req)
+	resp, err := client.VCICredential(ctx, req)
 
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 }
 
-func TestOIDCDeferredCredential(t *testing.T) {
+func TestVCIDeferredCredential(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
@@ -209,14 +209,14 @@ func TestOIDCDeferredCredential(t *testing.T) {
 		TransactionID: "test-transaction-123",
 	}
 
-	resp, err := client.OIDCDeferredCredential(ctx, req)
+	resp, err := client.VCIDeferredCredential(ctx, req)
 
 	// Current implementation returns nil, nil
 	assert.NoError(t, err)
 	assert.Nil(t, resp)
 }
 
-func TestOIDCCredentialOffer(t *testing.T) {
+func TestVCICredentialOffer(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
@@ -227,14 +227,14 @@ func TestOIDCCredentialOffer(t *testing.T) {
 		CredentialIssuer: "https://issuer.example.com",
 	}
 
-	resp, err := client.OIDCCredentialOffer(ctx, req)
+	resp, err := client.VCICredentialOffer(ctx, req)
 
 	// Current implementation returns nil, nil
 	assert.NoError(t, err)
 	assert.Nil(t, resp)
 }
 
-func TestOIDCNotification(t *testing.T) {
+func TestVCINotification(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
@@ -245,17 +245,17 @@ func TestOIDCNotification(t *testing.T) {
 		NotificationID: "test-notification-123",
 	}
 
-	err := client.OIDCNotification(ctx, req)
+	err := client.VCINotification(ctx, req)
 
 	// Current implementation returns nil
 	assert.NoError(t, err)
 }
 
-// TestOIDCCredential_SuccessfulIssuance tests the complete credential issuance flow
+// TestVCICredential_SuccessfulIssuance tests the complete credential issuance flow
 // This test verifies that all components (DPoP JWT, Proof JWT, mocks) are properly structured
 // for credential issuance, demonstrating the complete flow even though full integration
 // requires dependency injection for the gRPC client.
-func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
+func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	ctx := t.Context()
 
 	// Setup test data
@@ -415,5 +415,5 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 	t.Log("Full integration test requires dependency injection to:")
 	t.Log("  1. Inject mock db collections (auth context, datastore)")
 	t.Log("  2. Inject mock gRPC client factory")
-	t.Log("  3. Then call client.OIDCCredential(ctx, req) and verify response")
+	t.Log("  3. Then call client.VCICredential(ctx, req) and verify response")
 }

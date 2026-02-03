@@ -35,12 +35,12 @@ type Apiv1 interface {
 	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
 
 	// OpenID4VCI endpoints
-	OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, error)
-	OIDCCredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error)
-	OIDCredentialOfferURI(ctx context.Context, req *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error)
-	OIDCDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error)
-	OIDCNotification(ctx context.Context, req *openid4vci.NotificationRequest) error
-	OIDCMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error)
+	VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error)
+	VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error)
+	VCICredentialOfferURI(ctx context.Context, req *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error)
+	VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error)
+	VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error
+	VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error)
 
 	OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error)
 	OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error)
