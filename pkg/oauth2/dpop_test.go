@@ -184,6 +184,26 @@ func TestUnmarshal(t *testing.T) {
 			claims:  jwt.MapClaims{},
 			wantErr: false,
 		},
+		{
+			name: "claims with ath",
+			claims: jwt.MapClaims{
+				"jti": "test-jti-2",
+				"htm": "GET",
+				"htu": "https://api.example.com/resource",
+				"ath": "test-access-token-hash",
+			},
+			wantErr: false,
+		},
+		{
+			name: "claims with iat as float64",
+			claims: jwt.MapClaims{
+				"jti": "test-jti-3",
+				"htm": "POST",
+				"htu": "https://example.com/token",
+				"iat": float64(1234567890),
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -193,6 +213,19 @@ func TestUnmarshal(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+				// Verify fields are set
+				if jti, ok := tt.claims["jti"].(string); ok {
+					assert.Equal(t, jti, d.JTI)
+				}
+				if htm, ok := tt.claims["htm"].(string); ok {
+					assert.Equal(t, htm, d.HTM)
+				}
+				if htu, ok := tt.claims["htu"].(string); ok {
+					assert.Equal(t, htu, d.HTU)
+				}
+				if ath, ok := tt.claims["ath"].(string); ok {
+					assert.Equal(t, ath, d.ATH)
+				}
 			}
 		})
 	}
@@ -212,6 +245,16 @@ func TestParseDpopJWK_Errors(t *testing.T) {
 		{
 			name:    "empty JWK",
 			jwk:     `{}`,
+			wantErr: true,
+		},
+		{
+			name:    "null bytes",
+			jwk:     "",
+			wantErr: true,
+		},
+		{
+			name:    "malformed JWK",
+			jwk:     `{"kty":"EC"}`,
 			wantErr: true,
 		},
 	}

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"vc/pkg/cache"
-	"vc/pkg/jose"
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
 
@@ -41,8 +40,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", errors.New("request object not found")
 	}
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.verifierSigningKey)
-	signedJWT, err := requestObject.Sign(signingMethod, c.verifierSigningKey, c.verifierSigningChain)
+	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err

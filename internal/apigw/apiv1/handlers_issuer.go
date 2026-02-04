@@ -11,7 +11,6 @@ import (
 	"vc/internal/gen/registry/apiv1_registry"
 	"vc/pkg/crypto"
 	"vc/pkg/helpers"
-	"vc/pkg/jose"
 	"vc/pkg/mdoc"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
@@ -435,8 +434,7 @@ func (c *Client) VCINotification(ctx context.Context, req *openid4vci.Notificati
 func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	c.log.Debug("metadata request")
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.issuerMetadataSigningKey)
-	signedMetadata, err := c.issuerMetadata.Sign(signingMethod, c.issuerMetadataSigningKey, c.issuerMetadataSigningChain)
+	signedMetadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		return nil, err
 	}

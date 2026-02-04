@@ -26,6 +26,31 @@ func TestCreateCodeVerifier(t *testing.T) {
 			assert.GreaterOrEqual(t, len(got), 43)
 		})
 	}
+
+	// Test uniqueness - multiple calls should produce different verifiers
+	t.Run("generates unique verifiers", func(t *testing.T) {
+		verifier1, err := CreateCodeVerifier()
+		assert.NoError(t, err)
+		
+		verifier2, err := CreateCodeVerifier()
+		assert.NoError(t, err)
+		
+		assert.NotEqual(t, verifier1, verifier2, "consecutive verifiers should be unique")
+	})
+
+	// Test that generated verifier works with challenge creation
+	t.Run("verifier works with challenge creation", func(t *testing.T) {
+		verifier, err := CreateCodeVerifier()
+		assert.NoError(t, err)
+		
+		challenge := CreateCodeChallenge(CodeChallengeMethodS256, verifier)
+		assert.NotEmpty(t, challenge)
+		assert.NotEqual(t, verifier, challenge, "S256 challenge should differ from verifier")
+		
+		// Verify the challenge can be validated
+		err = ValidatePKCE(verifier, challenge, CodeChallengeMethodS256)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCreateCodeChallenge(t *testing.T) {
@@ -52,6 +77,28 @@ func TestCreateCodeChallenge(t *testing.T) {
 			assert.NotEmpty(t, got)
 		})
 	}
+
+	// Test S256 produces deterministic output
+	t.Run("S256 is deterministic", func(t *testing.T) {
+		verifier := "test_verifier_123"
+		challenge1 := CreateCodeChallenge(CodeChallengeMethodS256, verifier)
+		challenge2 := CreateCodeChallenge(CodeChallengeMethodS256, verifier)
+		assert.Equal(t, challenge1, challenge2, "same verifier should produce same S256 challenge")
+	})
+
+	// Test plain method returns verifier as-is
+	t.Run("plain returns verifier unchanged", func(t *testing.T) {
+		verifier := "my_plain_verifier"
+		challenge := CreateCodeChallenge(CodeChallengeMethodPlain, verifier)
+		assert.Equal(t, verifier, challenge, "plain method should return verifier unchanged")
+	})
+
+	// Test empty challenge method defaults to plain
+	t.Run("empty method behaves as plain", func(t *testing.T) {
+		verifier := "test_verifier"
+		challenge := CreateCodeChallenge("", verifier)
+		assert.Equal(t, verifier, challenge, "empty method should behave like plain")
+	})
 }
 
 func TestValidatePKCE(t *testing.T) {

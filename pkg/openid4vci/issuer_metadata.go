@@ -1,8 +1,11 @@
 package openid4vci
 
 import (
+	"context"
 	"encoding/json"
 	"time"
+	"vc/pkg/jose"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -52,10 +55,10 @@ func (c *CredentialIssuerMetadataParameters) Marshal() (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// Sign signs the jwt
-func (c *CredentialIssuerMetadataParameters) Sign(signingMethod jwt.SigningMethod, signingKey any, x5c []string) (*CredentialIssuerMetadataParameters, error) {
-	header := map[string]any{
-		"alg": signingMethod.Alg(),
+// Sign creates a signed JWT of the metadata using pki.Signer.
+// The pki.Signer interface supports both software keys and HSM.
+func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pki.Signer, x5c []string) (*CredentialIssuerMetadataParameters, error) {
+	header := jwt.MapClaims{
 		"typ": "JWT",
 		"x5c": x5c,
 	}
@@ -72,10 +75,7 @@ func (c *CredentialIssuerMetadataParameters) Sign(signingMethod jwt.SigningMetho
 	body["iss"] = c.CredentialIssuer
 	body["sub"] = c.CredentialIssuer
 
-	token := jwt.NewWithClaims(signingMethod, body)
-	token.Header = header
-
-	reply, err := token.SignedString(signingKey)
+	reply, err := jose.MakeJWT(ctx, header, body, signer)
 	if err != nil {
 		return nil, err
 	}

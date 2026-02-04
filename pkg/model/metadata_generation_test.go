@@ -5,20 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
-	"vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMetadataGenerationAgainstReference(t *testing.T) {
-	// Setup test PKI
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-	keyConfig := &pki.KeyConfig{
-		PrivateKeyPath: ecKeyPath,
-		ChainPath:      ecCertPath,
-	}
-
 	// Load reference metadata
 	referenceData, err := os.ReadFile("../../metadata/issuer_metadata.json")
 	require.NoError(t, err, "Failed to read reference metadata")
@@ -66,8 +58,7 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 	}
 
 	// Generate metadata
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "http://vc_dev_apigw:8080", keyConfig, credentialConstructors)
-	require.NoError(t, err, "Failed to generate metadata")
+	metadata := cfg.Generate(ctx, "http://vc_dev_apigw:8080", credentialConstructors)
 
 	// Marshal to JSON for comparison
 	generatedData, err := json.MarshalIndent(metadata, "", "  ")

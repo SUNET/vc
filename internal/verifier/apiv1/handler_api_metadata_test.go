@@ -2,9 +2,11 @@ package apiv1
 
 import (
 	"testing"
+	"vc/pkg/jose"
 	"vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGetDiscoveryMetadata tests the OIDC discovery metadata endpoint
@@ -187,10 +189,10 @@ func TestGetJWKS(t *testing.T) {
 
 		// Set signing key for testing
 		privateKey := generateTestRSAKey(t)
-		client.SetSigningKeyForTesting(privateKey, "RS256")
+		require.NoError(t, client.SetSigningKeyForTesting(privateKey))
 
 		// Test getting JWKS
-		jwks, err := client.GetJWKS(ctx)
+		jwks, err := jose.CreateJWKSFromSigner(client.pkiSigner, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, jwks)
 
@@ -211,7 +213,7 @@ func TestGetJWKS(t *testing.T) {
 
 		// Set ECDSA signing key for testing
 		privateKey := generateTestECDSAKey(t)
-		client.SetSigningKeyForTesting(privateKey, "ES256")
+		require.NoError(t, client.SetSigningKeyForTesting(privateKey))
 
 		// Test getting JWKS
 		jwks, err := client.GetJWKS(ctx)
@@ -234,12 +236,10 @@ func TestGetJWKS(t *testing.T) {
 		client, _ := CreateTestClientWithMock(cfg)
 
 		// Set an unsupported key type (string instead of crypto key)
-		client.SetSigningKeyForTesting("not-a-crypto-key", "HS256")
+		err := client.SetSigningKeyForTesting("not-a-crypto-key")
 
-		// Test getting JWKS should error
-		jwks, err := client.GetJWKS(ctx)
+		// Should error on setting invalid key
 		assert.Error(t, err)
-		assert.Nil(t, jwks)
 		assert.Contains(t, err.Error(), "unsupported key type")
 	})
 

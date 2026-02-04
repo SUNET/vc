@@ -1,9 +1,12 @@
 package oauth2
 
 import (
+	"context"
 	"encoding/json"
 	"time"
+	"vc/pkg/jose"
 	"vc/pkg/openid4vp"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -65,24 +68,22 @@ func (c *ClientMetadata) Marshal() (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// Sign creates a signed JWT of the client metadata
-func (c *ClientMetadata) Sign(method jwt.SigningMethod, privateKey any, chain []string) (string, error) {
+// Sign creates a signed JWT of the client metadata using pki.Signer.
+// The pki.Signer interface supports both software keys and HSM.
+func (c *ClientMetadata) Sign(ctx context.Context, signer pki.Signer, chain []string) (string, error) {
 	claims, err := c.Marshal()
 	if err != nil {
 		return "", err
 	}
 
-	token := jwt.NewWithClaims(method, claims)
+	header := jwt.MapClaims{
+		"typ": "JWT",
+	}
 
 	// Add x5c header if chain provided
 	if len(chain) > 0 {
-		token.Header["x5c"] = chain
+		header["x5c"] = chain
 	}
 
-	signedToken, err := token.SignedString(privateKey)
-	if err != nil {
-		return "", err
-	}
-
-	return signedToken, nil
+	return jose.MakeJWT(ctx, header, claims, signer)
 }

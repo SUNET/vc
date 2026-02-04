@@ -4,6 +4,7 @@ import (
 	"context"
 	"vc/internal/gen/status/apiv1_status"
 	"vc/internal/verifier/apiv1"
+	"vc/pkg/jose"
 	"vc/pkg/oauth2"
 )
 
@@ -25,7 +26,7 @@ type Apiv1 interface {
 
 	// OIDC Provider (from verifier-proxy merge)
 	GetDiscoveryMetadata(ctx context.Context) (*apiv1.DiscoveryMetadata, error)
-	GetJWKS(ctx context.Context) (*apiv1.JWKS, error)
+	GetJWKS(ctx context.Context) (*jose.JWKS, error)
 	Authorize(ctx context.Context, req *apiv1.AuthorizeRequest) (*apiv1.AuthorizeResponse, error)
 	Token(ctx context.Context, req *apiv1.TokenRequest) (*apiv1.TokenResponse, error)
 	GetUserInfo(ctx context.Context, req *apiv1.UserInfoRequest) (apiv1.UserInfoResponse, error)

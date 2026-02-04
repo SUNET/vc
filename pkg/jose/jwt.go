@@ -1,27 +1,59 @@
 package jose
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"maps"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// MakeJWT creates a signed JWT with the given header, body, signing method, and key.
-// The header parameter is merged with default headers set by the signing method.
-func MakeJWT(header, body jwt.MapClaims, signingMethod jwt.SigningMethod, signingKey any) (string, error) {
-	token := jwt.NewWithClaims(signingMethod, body)
-
-	// Merge provided header fields with defaults (provided values override defaults)
-	maps.Copy(token.Header, header)
-
-	signedToken, err := token.SignedString(signingKey)
-	if err != nil {
-		return "", err
+// MakeJWT creates a signed JWT using pki.Signer.
+// The pki.Signer interface supports both software keys and HSM.
+func MakeJWT(ctx context.Context, header, body jwt.MapClaims, signer pki.Signer) (string, error) {
+	if signer == nil {
+		return "", fmt.Errorf("signer cannot be nil")
 	}
 
-	return signedToken, nil
+	// Build header with algorithm and key ID from signer
+	headerCopy := make(jwt.MapClaims)
+	maps.Copy(headerCopy, header)
+	headerCopy["alg"] = signer.Algorithm()
+	headerCopy["kid"] = signer.KeyID()
+
+	// Encode header
+	headerJSON, err := json.Marshal(headerCopy)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal header: %w", err)
+	}
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+
+	// Encode payload
+	payloadJSON, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	// Create signing input
+	signingInput := headerB64 + "." + payloadB64
+
+	// Sign using the signer interface
+	signature, err := signer.Sign(ctx, []byte(signingInput))
+	if err != nil {
+		return "", fmt.Errorf("failed to sign: %w", err)
+	}
+
+	// Encode signature
+	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
+
+	// Return complete JWT
+	return signingInput + "." + signatureB64, nil
 }
 
 // GetSigningMethodFromKey determines the JWT signing method and algorithm name from the private key

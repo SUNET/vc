@@ -151,60 +151,6 @@ func TestClient_parseScopes(t *testing.T) {
 	}
 }
 
-func TestClient_getSigningMethod(t *testing.T) {
-	tests := []struct {
-		name        string
-		signingAlg  string
-		expectedAlg string
-	}{
-		{
-			name:        "RS256",
-			signingAlg:  "RS256",
-			expectedAlg: "RS256",
-		},
-		{
-			name:        "RS384",
-			signingAlg:  "RS384",
-			expectedAlg: "RS384",
-		},
-		{
-			name:        "RS512",
-			signingAlg:  "RS512",
-			expectedAlg: "RS512",
-		},
-		{
-			name:        "ES256",
-			signingAlg:  "ES256",
-			expectedAlg: "ES256",
-		},
-		{
-			name:        "ES384",
-			signingAlg:  "ES384",
-			expectedAlg: "ES384",
-		},
-		{
-			name:        "ES512",
-			signingAlg:  "ES512",
-			expectedAlg: "ES512",
-		},
-		{
-			name:        "unknown defaults to RS256",
-			signingAlg:  "unknown",
-			expectedAlg: "RS256",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
-			client.oidcSigningAlg = tt.signingAlg
-			method := client.getSigningMethod()
-			require.NotNil(t, method)
-			assert.Equal(t, tt.expectedAlg, method.Alg())
-		})
-	}
-}
-
 func TestClient_Health(t *testing.T) {
 	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)

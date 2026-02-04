@@ -254,7 +254,7 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 		db:                          dbService,
 		log:                         log.New("apiv1"),
 		tracer:                      tracer,
-		oidcSigningAlg:              "RS256",
+
 		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
 		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
 		credentialCache:             ttlcache.New(ttlcache.WithTTL[string, []sdjwtvc.CredentialCache](5 * time.Minute)),

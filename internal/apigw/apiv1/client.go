@@ -17,6 +17,7 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
+	"vc/pkg/pki"
 	"vc/pkg/trace"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -29,27 +30,35 @@ import (
 
 // Client holds the public api object
 type Client struct {
-	cfg                           *model.Cfg
-	db                            *db.Service
-	authContextCache              *cache.AuthContextCache
-	usersStore                    db.UsersStore
-	credentialOfferStore          db.CredentialOfferStore
-	datastoreStore                db.DatastoreStore
-	log                           *logger.Log
-	tracer                        *trace.Tracer
-	issuerClient                  apiv1_issuer.IssuerServiceClient
-	registryClient                apiv1_registry.RegistryServiceClient
-	issuerMetadata                *openid4vci.CredentialIssuerMetadataParameters
-	issuerMetadataSigningKey      any
-	issuerMetadataSigningCert     *x509.Certificate
-	issuerMetadataSigningChain    []string
+	cfg    *model.Cfg
+	db     *db.Service
+	log    *logger.Log
+	tracer *trace.Tracer
+
+	// database collections
+	usersStore           db.UsersStore
+	credentialOfferStore db.CredentialOfferStore
+	datastoreStore       db.DatastoreStore
+
+	// gRPC clients
+	issuerClient   apiv1_issuer.IssuerServiceClient
+	registryClient apiv1_registry.RegistryServiceClient
+
+	// Signing key and chain for signing metadata
+	pkiSigner      pki.Signer
+	pkiSigningCert *x509.Certificate
+	pkiSignerChain []string
+
+	// Metadata
 	oauth2Metadata                *oauth2.AuthorizationServerMetadata
-	oauth2MetadataSigningKey      any
-	oauth2MetadataSigningChain    []string
+	issuerMetadata                *openid4vci.CredentialIssuerMetadataParameters
 	CredentialOfferLookupMetadata *CredentialOfferLookupMetadata
-	ephemeralEncryptionKeyCache   *ttlcache.Cache[string, jwk.Key]
-	svgTemplateCache              *ttlcache.Cache[string, SVGTemplateReply]
-	documentCache                 *ttlcache.Cache[string, map[string]*model.CompleteDocument]
+
+	// Caches
+	authContextCache            *cache.AuthContextCache
+	ephemeralEncryptionKeyCache *ttlcache.Cache[string, jwk.Key]
+	svgTemplateCache            *ttlcache.Cache[string, SVGTemplateReply]
+	documentCache               *ttlcache.Cache[string, map[string]*model.CompleteDocument]
 }
 
 // New creates a new instance of the public api
@@ -102,15 +111,16 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
-	c.issuerMetadata, c.issuerMetadataSigningKey, c.issuerMetadataSigningCert, c.issuerMetadataSigningChain, err = c.cfg.APIGW.IssuerMetadata.LoadAndSign(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.KeyConfig, cfg.CredentialConstructor)
-	if err != nil {
-		return nil, err
-	}
+	// Unsigned metadata will be signed on-demand in the handler for freshness
+	c.issuerMetadata = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.ExternalServerURL, cfg.CredentialConstructor)
 
-	// Load or generate OAuth2 metadata from configuration
-	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.APIGW.OauthServer.LoadAndSignMetadata(ctx, c.cfg.APIGW.ExternalServerURL, c.cfg.APIGW.KeyConfig)
+	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand if needed)
+	c.oauth2Metadata = c.cfg.APIGW.OauthServer.GenerateMetadata(ctx, c.cfg.APIGW.ExternalServerURL)
+
+	// Load PKI signing key and chain for metadata signing
+	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
 	if err != nil {
-		return nil, err
+		c.log.Info("PKI signing key not loaded", "error", err)
 	}
 
 	// Initialize gRPC client for issuer service

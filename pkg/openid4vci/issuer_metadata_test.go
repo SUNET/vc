@@ -1,11 +1,13 @@
 package openid4vci
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -221,7 +223,11 @@ func TestSignIssuerMetadata(t *testing.T) {
 			signingKey, cert := mockGenerateECDSAKey(t)
 			pubKey := signingKey.Public()
 
-			metadataWithSignature, err := metadata.Sign(jwt.SigningMethodES256, signingKey, []string{cert})
+			// Create pki.Signer
+			signer, err := pki.NewSoftwareSigner(signingKey, "test-key-id")
+			require.NoError(t, err)
+
+			metadataWithSignature, err := metadata.Sign(context.Background(), signer, []string{cert})
 			assert.NoError(t, err)
 
 			assert.NotEmpty(t, metadataWithSignature)

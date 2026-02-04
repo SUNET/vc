@@ -5,8 +5,6 @@ import (
 	"time"
 	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // CreateRequestObject creates and signs an OpenID4VP request object
@@ -46,7 +44,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Sign the request object
-	signedJWT, err := requestObject.Sign(jwt.SigningMethodRS256, c.oidcSigningKey, nil)
+	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, nil)
 	if err != nil {
 		c.log.Error(err, "Failed to sign request object")
 		return "", err
@@ -126,7 +124,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	session.OpenID4VP.PresentationSubmission = presentationSubmission
 
 	// Extract claims from VP token
-	claims, err := c.extractClaimsFromVPToken(ctx, vpToken, session.OIDCRequest.Scope)
+	claims, err := c.extractClaimsFromVPToken(ctx, vpToken)
 	if err != nil {
 		c.log.Error(err, "Failed to extract claims from VP token")
 		session.Status = "error"
@@ -159,7 +157,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 }
 
 // extractClaimsFromVPToken extracts and maps claims from the VP token
-func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string, scope string) (map[string]any, error) {
+func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string) (map[string]any, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:extract_claims")
 	defer span.End()
 

@@ -10,7 +10,6 @@ import (
 	"time"
 	"vc/internal/apigw/db"
 	"vc/pkg/cache"
-	"vc/pkg/jose"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 
@@ -110,8 +109,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 	c.log.Debug("Authorization request", "request", authorizationRequest)
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.issuerMetadataSigningKey)
-	signedJWT, err := authorizationRequest.Sign(signingMethod, c.issuerMetadataSigningKey, c.issuerMetadataSigningChain)
+	signedJWT, err := authorizationRequest.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err
@@ -121,10 +119,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 	return signedJWT, nil
 }
+
 type VerificationDirectPostRequest struct {
 	Response string `json:"response" form:"response"`
 }
-
 
 func (v *VerificationDirectPostRequest) GetKID() (string, error) {
 	header := strings.Split(v.Response, ".")[0]

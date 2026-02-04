@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"os"
 	"testing"
+	"vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,45 +78,54 @@ func TestParseSigningKey(t *testing.T) {
 	})
 }
 
-func TestCreateJWK(t *testing.T) {
-	t.Run("creates JWK from EC key", func(t *testing.T) {
-		keyPath := createTestECKey(t)
-
-		jwk, privateKey, err := CreateJWK(keyPath)
-		require.NoError(t, err)
-
-		assert.Equal(t, "EC", jwk.KTY)
-		assert.Equal(t, "P-256", jwk.CRV)
-		assert.NotEmpty(t, jwk.X)
-		assert.NotEmpty(t, jwk.Y)
-		assert.Empty(t, jwk.N)
-		assert.Empty(t, jwk.E)
-		assert.NotNil(t, privateKey)
-	})
-
-	t.Run("creates JWK from RSA key", func(t *testing.T) {
+func TestCreateJWKSFromSigner(t *testing.T) {
+	t.Run("creates JWKS from RSA signer", func(t *testing.T) {
 		keyPath := createTestRSAKey(t)
-
-		jwk, privateKey, err := CreateJWK(keyPath)
+		privateKey, err := ParseSigningKey(keyPath)
 		require.NoError(t, err)
 
-		assert.Equal(t, "RSA", jwk.KTY)
-		assert.Empty(t, jwk.CRV)
-		assert.Empty(t, jwk.X)
-		assert.Empty(t, jwk.Y)
-		assert.NotEmpty(t, jwk.N)
-		assert.NotEmpty(t, jwk.E)
-		assert.NotNil(t, privateKey)
+		signer, err := pki.NewSoftwareSigner(privateKey, "test-key-id")
+		require.NoError(t, err)
+
+		jwks, err := CreateJWKSFromSigner(signer, "")
+		require.NoError(t, err)
+		require.NotNil(t, jwks)
+		require.Len(t, jwks.Keys, 1)
+
+		key := jwks.Keys[0]
+		assert.Equal(t, "RSA", key.Kty)
+		assert.Equal(t, "sig", key.Use)
+		assert.Equal(t, "test-key-id", key.Kid)
+		assert.Equal(t, "RS256", key.Alg)
+		assert.NotEmpty(t, key.N)
+		assert.NotEmpty(t, key.E)
+		assert.Empty(t, key.Crv)
+		assert.Empty(t, key.X)
+		assert.Empty(t, key.Y)
 	})
 
-	t.Run("returns error for non-existent file", func(t *testing.T) {
-		_, _, err := CreateJWK("/non/existent/path.pem")
-		assert.Error(t, err)
-	})
+	t.Run("creates JWKS from ECDSA signer", func(t *testing.T) {
+		keyPath := createTestECKey(t)
+		privateKey, err := ParseSigningKey(keyPath)
+		require.NoError(t, err)
 
-	t.Run("returns error for invalid key", func(t *testing.T) {
-		keyPath := createInvalidKeyFile(t)
-		_, _, err := CreateJWK(keyPath)
-		assert.Error(t, err)
+		signer, err := pki.NewSoftwareSigner(privateKey, "ec-key-id")
+		require.NoError(t, err)
+
+		jwks, err := CreateJWKSFromSigner(signer, "")
+		require.NoError(t, err)
+		require.NotNil(t, jwks)
+		require.Len(t, jwks.Keys, 1)
+
+		key := jwks.Keys[0]
+		assert.Equal(t, "EC", key.Kty)
+		assert.Equal(t, "sig", key.Use)
+		assert.Equal(t, "ec-key-id", key.Kid)
+		assert.Equal(t, "ES256", key.Alg)
+		assert.Equal(t, "P-256", key.Crv)
+		assert.NotEmpty(t, key.X)
+		assert.NotEmpty(t, key.Y)
+		assert.Empty(t, key.N)
+		assert.Empty(t, key.E)
 	})
 }

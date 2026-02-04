@@ -1,6 +1,7 @@
 package openid4vp
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+
+	"vc/pkg/pki"
 )
 
 func mockRSAPrivateKey(t *testing.T, bits int) crypto.PrivateKey {
@@ -30,6 +33,15 @@ func mockECPrivateKey(t *testing.T, curve elliptic.Curve) crypto.PrivateKey {
 	return privKey
 }
 
+func mockSigner(t *testing.T, privateKey crypto.PrivateKey) pki.Signer {
+	t.Helper()
+
+	signer, err := pki.NewSoftwareSigner(privateKey, "")
+	assert.NoError(t, err)
+
+	return signer
+}
+
 func TestAuthorizationRequestSign(t *testing.T) {
 	rsaKey := mockRSAPrivateKey(t, 2048)
 	ecP256Key := mockECPrivateKey(t, elliptic.P256())
@@ -39,11 +51,11 @@ func TestAuthorizationRequestSign(t *testing.T) {
 	tts := []struct {
 		name          string
 		authorization *RequestObject
-		signingMethod jwt.SigningMethod
-		signingKey    any
+		signer        pki.Signer
 		x5c           []string
 		expectError   bool
 		errorContains string
+		expectedAlg   string
 	}{
 		{
 			name: "valid RS256 with x5c",
@@ -55,10 +67,10 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				Nonce:        "n-0S6_WzA2Mj",
 				ResponseURI:  "https://verifier.example.com/response",
 			},
-			signingMethod: jwt.GetSigningMethod("RS256"),
-			signingKey:    rsaKey,
-			x5c:           []string{"MIICertificateData..."},
-			expectError:   false,
+			signer:      mockSigner(t, rsaKey),
+			x5c:         []string{"MIICertificateData..."},
+			expectError: false,
+			expectedAlg: "RS256",
 		},
 		{
 			name: "valid RS256 without x5c",
@@ -70,10 +82,10 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				Nonce:        "n-0S6_WzA2Mj",
 				ResponseURI:  "https://verifier.example.com/response",
 			},
-			signingMethod: jwt.GetSigningMethod("RS256"),
-			signingKey:    rsaKey,
-			x5c:           nil,
-			expectError:   false,
+			signer:      mockSigner(t, rsaKey),
+			x5c:         nil,
+			expectError: false,
+			expectedAlg: "RS256",
 		},
 		{
 			name: "valid ES256 (P-256) - recommended for OpenID4VP",
@@ -93,10 +105,10 @@ func TestAuthorizationRequestSign(t *testing.T) {
 					},
 				},
 			},
-			signingMethod: jwt.GetSigningMethod("ES256"),
-			signingKey:    ecP256Key,
-			x5c:           []string{"MIIB...EC256Cert"},
-			expectError:   false,
+			signer:      mockSigner(t, ecP256Key),
+			x5c:         []string{"MIIB...EC256Cert"},
+			expectError: false,
+			expectedAlg: "ES256",
 		},
 		{
 			name: "valid ES384 (P-384)",
@@ -108,10 +120,10 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				Nonce:        "n-0S6_WzA2Mj",
 				ResponseURI:  "https://verifier.example.com/response",
 			},
-			signingMethod: jwt.GetSigningMethod("ES384"),
-			signingKey:    ecP384Key,
-			x5c:           []string{"MIIB...EC384Cert"},
-			expectError:   false,
+			signer:      mockSigner(t, ecP384Key),
+			x5c:         []string{"MIIB...EC384Cert"},
+			expectError: false,
+			expectedAlg: "ES384",
 		},
 		{
 			name: "valid ES512 (P-521) with DCQL",
@@ -134,13 +146,13 @@ func TestAuthorizationRequestSign(t *testing.T) {
 					},
 				},
 			},
-			signingMethod: jwt.GetSigningMethod("ES512"),
-			signingKey:    ecP521Key,
-			x5c:           nil,
-			expectError:   false,
+			signer:      mockSigner(t, ecP521Key),
+			x5c:         nil,
+			expectError: false,
+			expectedAlg: "ES512",
 		},
 		{
-			name: "valid PS256 (RSA-PSS)",
+			name: "valid RS256 (RSA)",
 			authorization: &RequestObject{
 				ISS:          "https://verifier.example.com",
 				AUD:          "https://wallet.example.com",
@@ -149,43 +161,29 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				Nonce:        "n-0S6_WzA2Mj",
 				ResponseURI:  "https://verifier.example.com/response",
 			},
-			signingMethod: jwt.GetSigningMethod("PS256"),
-			signingKey:    rsaKey,
-			x5c:           []string{"MIIC...PS256Cert"},
-			expectError:   false,
+			signer:      mockSigner(t, rsaKey),
+			x5c:         []string{"MIIC...RS256Cert"},
+			expectError: false,
+			expectedAlg: "RS256",
 		},
 		{
 			name:          "nil request object",
 			authorization: nil,
-			signingMethod: jwt.GetSigningMethod("RS256"),
-			signingKey:    rsaKey,
+			signer:        mockSigner(t, rsaKey),
 			x5c:           []string{"cert"},
 			expectError:   true,
 			errorContains: "request object cannot be nil",
 		},
 		{
-			name: "nil signing method",
+			name: "nil signer",
 			authorization: &RequestObject{
 				ISS:   "https://verifier.example.com",
 				Nonce: "n-0S6_WzA2Mj",
 			},
-			signingMethod: nil,
-			signingKey:    rsaKey,
+			signer:        nil,
 			x5c:           []string{"cert"},
 			expectError:   true,
-			errorContains: "signing method cannot be nil",
-		},
-		{
-			name: "nil signing key",
-			authorization: &RequestObject{
-				ISS:   "https://verifier.example.com",
-				Nonce: "n-0S6_WzA2Mj",
-			},
-			signingMethod: jwt.GetSigningMethod("ES256"),
-			signingKey:    nil,
-			x5c:           []string{"cert"},
-			expectError:   true,
-			errorContains: "signing key cannot be nil",
+			errorContains: "signer cannot be nil",
 		},
 		{
 			name: "empty x5c array should not include x5c in header",
@@ -197,48 +195,17 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				Nonce:        "n-0S6_WzA2Mj",
 				ResponseURI:  "https://verifier.example.com/response",
 			},
-			signingMethod: jwt.GetSigningMethod("ES256"),
-			signingKey:    ecP256Key,
-			x5c:           []string{},
-			expectError:   false,
+			signer:      mockSigner(t, ecP256Key),
+			x5c:         []string{},
+			expectError: false,
+			expectedAlg: "ES256",
 		},
-		{
-			name: "mismatched key type - RSA key with ES256",
-			authorization: &RequestObject{
-				ISS:          "https://verifier.example.com",
-				AUD:          "https://wallet.example.com",
-				ResponseType: "code",
-				ClientID:     "client123",
-				Nonce:        "n-0S6_WzA2Mj",
-				ResponseURI:  "https://verifier.example.com/response",
-			},
-			signingMethod: jwt.GetSigningMethod("ES256"),
-			signingKey:    rsaKey,
-			x5c:           []string{"cert"},
-			expectError:   true,
-			errorContains: "failed to sign JWT",
-		},
-		{
-			name: "mismatched key type - EC key with RS256",
-			authorization: &RequestObject{
-				ISS:          "https://verifier.example.com",
-				AUD:          "https://wallet.example.com",
-				ResponseType: "code",
-				ClientID:     "client123",
-				Nonce:        "n-0S6_WzA2Mj",
-				ResponseURI:  "https://verifier.example.com/response",
-			},
-			signingMethod: jwt.GetSigningMethod("RS256"),
-			signingKey:    ecP256Key,
-			x5c:           []string{"cert"},
-			expectError:   true,
-			errorContains: "failed to sign JWT",
-		},
+
 	}
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			signed, err := tt.authorization.Sign(tt.signingMethod, tt.signingKey, tt.x5c)
+			signed, err := tt.authorization.Sign(context.Background(), tt.signer, tt.x5c)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -254,7 +221,7 @@ func TestAuthorizationRequestSign(t *testing.T) {
 				token, _, err := jwt.NewParser().ParseUnverified(signed, jwt.MapClaims{})
 				assert.NoError(t, err)
 				assert.Equal(t, "oauth-authz-req+jwt", token.Header["typ"])
-				assert.Equal(t, tt.signingMethod.Alg(), token.Header["alg"])
+				assert.Equal(t, tt.expectedAlg, token.Header["alg"])
 
 				// Verify x5c is only present when provided and non-empty
 				if len(tt.x5c) > 0 {

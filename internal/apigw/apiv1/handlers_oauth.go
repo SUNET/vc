@@ -10,7 +10,6 @@ import (
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/helpers"
-	"vc/pkg/jose"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
 
@@ -123,6 +122,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
+	// Verify PKCE code_challenge
+	if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
+		c.log.Error(err, "PKCE validation failed")
+		return nil, fmt.Errorf("PKCE validation failed: %w", err)
+	}
+	c.log.Debug("PKCE validation successful")
+
 	// generating a new access token
 	accessToken, err := crypto.GenerateSecureToken(0, 32)
 	if err != nil {
@@ -168,8 +174,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
 
-	//base64(sha256(code_verifier)) == stored code_challenge
-
 	//c.db.VCAuthColl.Grant(ctx, req.ClientID, req.Code)
 
 	// Check if ClientID and Code match
@@ -181,8 +185,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
 	c.log.Debug("metadata request")
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.oauth2MetadataSigningKey)
-	signedMetadata, err := c.oauth2Metadata.Sign(signingMethod, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain)
+	signedMetadata, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		return nil, err
 	}

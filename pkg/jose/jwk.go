@@ -6,16 +6,25 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
-// JWK is a JSON Web Key supporting EC and RSA key types
-type JWK struct {
-	KTY string `json:"kty"`
+// JWKS represents a JSON Web Key Set
+type JWKS struct {
+	Keys []JWKWithMetadata `json:"keys"`
+}
+
+// JWKWithMetadata includes additional fields like alg, use, kid
+type JWKWithMetadata struct {
+	Kty string `json:"kty"`
+	Use string `json:"use,omitempty"`
+	Kid string `json:"kid,omitempty"`
+	Alg string `json:"alg,omitempty"`
 	// EC key fields
-	CRV string `json:"crv,omitempty"`
+	Crv string `json:"crv,omitempty"`
 	X   string `json:"x,omitempty"`
 	Y   string `json:"y,omitempty"`
 	// RSA key fields
@@ -44,28 +53,45 @@ func ParseSigningKey(signingKeyPath string) (crypto.PrivateKey, error) {
 	return nil, errors.New("unsupported key type: expected EC or RSA private key in PEM format")
 }
 
-// CreateJWK creates a JWK from a signing key file (supports EC and RSA)
-func CreateJWK(signingKeyPath string) (*JWK, crypto.PrivateKey, error) {
-	privateKey, err := ParseSigningKey(signingKeyPath)
-	if err != nil {
-		return nil, nil, err
+// CreateJWKSFromSigner creates a JWKS from a pki.Signer
+// keyUsage defaults to "sig" if empty string is provided
+func CreateJWKSFromSigner(signer pki.Signer, keyUsage string) (*JWKS, error) {
+	// Default keyUsage to "sig" if not provided
+	if keyUsage == "" {
+		keyUsage = "sig"
 	}
 
-	key, err := jwk.Import(privateKey)
+	// Import public key using jwx library
+	key, err := jwk.Import(signer.PublicKey())
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// Marshal to JSON and unmarshal to our JWK struct
+	// Set additional fields
+	if err := key.Set(jwk.AlgorithmKey, signer.Algorithm()); err != nil {
+		return nil, err
+	}
+	if err := key.Set(jwk.KeyUsageKey, keyUsage); err != nil {
+		return nil, err
+	}
+	if err := key.Set(jwk.KeyIDKey, signer.KeyID()); err != nil {
+		return nil, err
+	}
+
+	// Marshal to JSON and unmarshal to our JWKS struct
 	jwkJSON, err := json.Marshal(key)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	result := &JWK{}
-	if err := json.Unmarshal(jwkJSON, result); err != nil {
-		return nil, nil, err
+	var jwkWithMetadata JWKWithMetadata
+	if err := json.Unmarshal(jwkJSON, &jwkWithMetadata); err != nil {
+		return nil, err
 	}
 
-	return result, privateKey, nil
+	jwks := &JWKS{
+		Keys: []JWKWithMetadata{jwkWithMetadata},
+	}
+
+	return jwks, nil
 }

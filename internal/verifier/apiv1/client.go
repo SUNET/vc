@@ -20,33 +20,33 @@ import (
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/trace"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // Client holds the public api object
 type Client struct {
-	cfg                        *model.Cfg
-	db                         *db.Service
-	authContextCache           *cache.AuthContextCache
-	log                        *logger.Log
-	notify                     *notify.Service
-	oauth2Metadata             *oauth2.AuthorizationServerMetadata
-	oauth2MetadataSigningKey   any
-	oauth2MetadataSigningChain []string
-	verifierSigningKey         any
-	verifierSigningCert        *x509.Certificate
-	verifierSigningChain       []string
-	openid4vp                  *openid4vp.Client
-	credentialCache            *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
-	trustService               *openid4vp.TrustService
-	keyLoader                  *pki.KeyLoader
+	cfg    *model.Cfg
+	db     *db.Service
+	log    *logger.Log
+	tracer *trace.Tracer
+	notify *notify.Service
 
-	// OIDC Provider fields (from verifier-proxy merge)
-	tracer                      *trace.Tracer
-	oidcSigningKey              any
-	oidcSigningAlg              string
+	// Metadata
+	oauth2Metadata  *oauth2.AuthorizationServerMetadata
+	credentialCache *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
+
+	// PKI for signing
+	pkiSigner      pki.Signer
+	pkiSigningCert *x509.Certificate
+	pkiSignerChain []string
+	openid4vp      *openid4vp.Client
+	trustService   *openid4vp.TrustService
+
+	// Cache
+	authContextCache *cache.AuthContextCache
+
+	// OIDC related
 	ephemeralEncryptionKeyCache *ttlcache.Cache[string, jwk.Key]
 	requestObjectCache          *ttlcache.Cache[string, *openid4vp.RequestObject]
 	presentationBuilder         *openid4vp.PresentationBuilder
@@ -75,7 +75,6 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 		tracer:                      tracer,
 		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
 		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
-		keyLoader:                   pki.NewKeyLoader(),
 	}
 
 	// Start caches
@@ -83,22 +82,14 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	go c.ephemeralEncryptionKeyCache.Start()
 	go c.requestObjectCache.Start()
 
-	// Load or generate OAuth2 metadata from configuration
-	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.LoadAndSignMetadata(ctx, c.cfg.Verifier.ExternalServerURL, c.cfg.Verifier.KeyConfig)
+	// Load PKI signing key and chain for request object signing and OIDC
+	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.Verifier.KeyConfig)
 	if err != nil {
-		return nil, err
+		c.log.Info("PKI signing key not loaded", "error", err)
 	}
 
-	// Load verifier signing key and chain for request object signing
-	if err := c.loadVerifierSigningKey(); err != nil {
-		c.log.Info("Verifier signing key not loaded", "error", err)
-	}
-
-	// Load OIDC signing key if configured
-	if err := c.loadOIDCSigningKey(); err != nil {
-		c.log.Info("OIDC signing key not loaded - OIDC provider features disabled", "error", err)
-		c.oidcSigningAlg = "RS256" // Default algorithm when key not loaded
-	}
+	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
+	c.oauth2Metadata = c.cfg.Verifier.OAuthServer.GenerateMetadata(ctx, c.cfg.Verifier.ExternalServerURL)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
@@ -123,38 +114,6 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	c.log.Info("Started")
 
 	return c, nil
-}
-
-// loadVerifierSigningKey loads the verifier signing key and chain from configured paths
-// This key is used for signing request objects in OpenID4VP flows
-func (c *Client) loadVerifierSigningKey() error {
-	// Use centralized KeyLoader with KeyConfig from configuration
-	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.KeyConfig)
-	if err != nil {
-		return fmt.Errorf("failed to load verifier signing key: %w", err)
-	}
-
-	c.verifierSigningKey = km.PrivateKey
-	c.verifierSigningCert = km.Cert
-	c.verifierSigningChain = km.Chain
-
-	return nil
-}
-
-// loadOIDCSigningKey loads the OIDC signing key from the configured path
-func (c *Client) loadOIDCSigningKey() error {
-	// Use centralized KeyLoader with KeyConfig from configuration
-	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.KeyConfig)
-	if err != nil {
-		return fmt.Errorf("failed to load OIDC signing key: %w", err)
-	}
-
-	// Create signer to determine algorithm
-	signer := pki.NewKeyMaterialSigner(km)
-
-	c.oidcSigningKey = km.PrivateKey
-	c.oidcSigningAlg = signer.Algorithm()
-	return nil
 }
 
 // loadPresentationTemplates loads presentation request templates from configured directory
@@ -203,26 +162,6 @@ func (c *Client) generateSubjectIdentifier(walletID string, clientID string) str
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
-	}
-}
-
-// getSigningMethod returns the JWT signing method based on the configured algorithm
-func (c *Client) getSigningMethod() jwt.SigningMethod {
-	switch c.oidcSigningAlg {
-	case "RS256":
-		return jwt.SigningMethodRS256
-	case "RS384":
-		return jwt.SigningMethodRS384
-	case "RS512":
-		return jwt.SigningMethodRS512
-	case "ES256":
-		return jwt.SigningMethodES256
-	case "ES384":
-		return jwt.SigningMethodES384
-	case "ES512":
-		return jwt.SigningMethodES512
-	default:
-		return jwt.SigningMethodRS256
 	}
 }
 

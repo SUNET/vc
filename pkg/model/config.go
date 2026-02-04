@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -718,11 +717,9 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 	return nil
 }
 
-// LoadAndSign generates and signs issuer metadata at runtime from configuration.
-// All generation and signing is delegated to the openid4vci library.
-// Note: The keyConfig parameter is for signing the metadata JWT itself (APIGW).
-// The credential_signing_alg_values_supported should reflect the Issuer service's capabilities, not APIGW's key.
-func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL string, keyConfig *pki.KeyConfig, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
+// Generate generates issuer metadata from configuration.
+// Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
+func (cfg *IssuerMetadata) Generate(ctx context.Context, externalServerURL string, credentialConstructors map[string]*CredentialConstructor) *openid4vci.CredentialIssuerMetadataParameters {
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
 	for scope, constructor := range credentialConstructors {
@@ -809,8 +806,7 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 		credentialConfigs[scope] = credConfig
 	}
 
-	return openid4vci.LoadAndSign(ctx, &openid4vci.MetadataConfig{
-		KeyConfig:                            keyConfig,
+	metadataConfig := &openid4vci.MetadataConfig{
 		CredentialIssuer:                     externalServerURL,
 		CredentialEndpoint:                   externalServerURL + "/credential",
 		AuthorizationServers:                 cfg.AuthorizationServers,
@@ -823,15 +819,20 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,
-	})
+	}
+
+	metadata := metadataConfig.GenerateIssuerMetadata(ctx)
+
+	return metadata
 }
 
-// LoadAndSignMetadata generates and signs OAuth2 metadata at runtime from configuration.
-// All generation and signing is delegated to the oauth2 library.
-func (cfg *OAuthServer) LoadAndSignMetadata(ctx context.Context, issuerURL string, keyConfig *pki.KeyConfig) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
-	return oauth2.GenerateAndSign(&oauth2.MetadataConfig{
+// GenerateMetadata generates OAuth2 metadata from configuration.
+// Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
 		IssuerURL:     issuerURL,
 		TokenEndpoint: cfg.TokenEndpoint,
-		KeyConfig:     keyConfig,
 	})
+
+	return metadata
 }

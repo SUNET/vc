@@ -388,7 +388,7 @@ func TestGetOIDCRequestObject(t *testing.T) {
 			// Generate RSA key for signing
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
 			require.NoError(t, err)
-			client.SetSigningKeyForTesting(key, "RS256")
+			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Setup session if needed
 			if tt.sessionSetup != nil {
@@ -534,16 +534,16 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		setupKey    func() (any, string)
+		setupKey    func() any
 		expectError bool
 		expectKty   string
 		expectAlg   string
 	}{
 		{
 			name: "RSA key",
-			setupKey: func() (any, string) {
+			setupKey: func() any {
 				key, _ := rsa.GenerateKey(rand.Reader, 2048)
-				return key, "RS256"
+				return key
 			},
 			expectError: false,
 			expectKty:   "RSA",
@@ -551,9 +551,9 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 		},
 		{
 			name: "EC P-256 key",
-			setupKey: func() (any, string) {
+			setupKey: func() any {
 				key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				return key, "ES256"
+				return key
 			},
 			expectError: false,
 			expectKty:   "EC",
@@ -561,9 +561,9 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 		},
 		{
 			name: "EC P-384 key",
-			setupKey: func() (any, string) {
+			setupKey: func() any {
 				key, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-				return key, "ES384"
+				return key
 			},
 			expectError: false,
 			expectKty:   "EC",
@@ -571,9 +571,9 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 		},
 		{
 			name: "EC P-521 key",
-			setupKey: func() (any, string) {
+			setupKey: func() any {
 				key, _ := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-				return key, "ES512"
+				return key
 			},
 			expectError: false,
 			expectKty:   "EC",
@@ -581,8 +581,8 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 		},
 		{
 			name: "no key configured",
-			setupKey: func() (any, string) {
-				return nil, ""
+			setupKey: func() any {
+				return nil
 			},
 			expectError: true,
 		},
@@ -593,9 +593,9 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup key
-			key, alg := tt.setupKey()
+			key := tt.setupKey()
 			if key != nil {
-				client.SetSigningKeyForTesting(key, alg)
+				require.NoError(t, client.SetSigningKeyForTesting(key))
 			}
 
 			jwks, err := client.GetJWKS(ctx)

@@ -75,7 +75,7 @@ func TestCreateRequestObject(t *testing.T) {
 			// Generate RSA key for signing
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
 			require.NoError(t, err)
-			client.SetSigningKeyForTesting(key, "RS256")
+			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Configure Digital Credentials API
 			client.cfg.Verifier.DigitalCredentials.Enabled = tt.dcEnabled
@@ -203,7 +203,7 @@ func TestGetRequestObject(t *testing.T) {
 			if tt.setupCache {
 				key, err := rsa.GenerateKey(rand.Reader, 2048)
 				require.NoError(t, err)
-				client.SetSigningKeyForTesting(key, "RS256")
+				require.NoError(t, client.SetSigningKeyForTesting(key))
 				_, err = client.CreateRequestObject(ctx, tt.sessionID, createTestDCQLForVP(t), "test-nonce")
 				require.NoError(t, err)
 			}
@@ -394,28 +394,24 @@ func TestExtractClaimsFromVPToken(t *testing.T) {
 	tests := []struct {
 		name           string
 		vpToken        string
-		scope          string
 		expectedClaims int
 		expectError    bool
 	}{
 		{
 			name:           "nil claims extractor returns empty claims",
 			vpToken:        "test.vp.token",
-			scope:          "openid",
 			expectedClaims: 0,
 			expectError:    false,
 		},
 		{
-			name:           "nil claims extractor with profile scope",
+			name:           "nil claims extractor with valid token",
 			vpToken:        "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
-			scope:          "openid profile",
 			expectedClaims: 0,
 			expectError:    false,
 		},
 		{
-			name:           "nil claims extractor with empty scope",
+			name:           "nil claims extractor with another token",
 			vpToken:        "eyJhbGciOiJFUzI1NiJ9.payload.sig",
-			scope:          "",
 			expectedClaims: 0,
 			expectError:    false,
 		},
@@ -426,7 +422,7 @@ func TestExtractClaimsFromVPToken(t *testing.T) {
 			client, _ := CreateTestClientWithMock(nil)
 
 			// Test with nil claims extractor (which is the default for test client)
-			claims, err := client.extractClaimsFromVPToken(ctx, tt.vpToken, tt.scope)
+			claims, err := client.extractClaimsFromVPToken(ctx, tt.vpToken)
 
 			if tt.expectError {
 				assert.Error(t, err)

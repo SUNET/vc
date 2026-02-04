@@ -15,7 +15,6 @@ import (
 	"slices"
 	"testing"
 	"time"
-	"vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
@@ -484,171 +483,53 @@ func TestLoadFile(t *testing.T) {
 }
 
 func TestIssuerMetadataLoadAndSign(t *testing.T) {
-	// Setup test PKI files
-	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
-
 	tests := []struct {
-		name        string
-		metadata    IssuerMetadata
-		keyConfig   *pki.KeyConfig
-		wantErr     bool
-		errContains string
+		name     string
+		metadata IssuerMetadata
 	}{
 		{
-			name:     "Valid runtime generation with RSA keys and chain",
+			name:     "Valid runtime generation",
 			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      rsaCertPath,
-			},
-			wantErr: false,
-		},
-		{
-			name:     "Valid runtime generation with EC keys and chain",
-			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: ecKeyPath,
-				ChainPath:      ecCertPath,
-			},
-			wantErr: false,
-		},
-		{
-			name:     "Signing key file does not exist",
-			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: "./testdata/nonexistent.pem",
-				ChainPath:      rsaCertPath,
-			},
-			wantErr:     true,
-			errContains: "no such file or directory",
-		},
-		{
-			name:     "Certificate chain file does not exist",
-			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      "./testdata/nonexistent.crt",
-			},
-			wantErr:     true,
-			errContains: "no such file or directory",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx, "https://issuer.example.com", tt.keyConfig, nil)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.errContains != "" {
-					assert.Contains(t, err.Error(), tt.errContains)
-				}
-				assert.Nil(t, metadata)
-				assert.Nil(t, privateKey)
-				assert.Nil(t, cert)
-				assert.Nil(t, chain)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, metadata)
-				assert.NotNil(t, privateKey)
-				assert.NotNil(t, cert)
-				assert.NotEmpty(t, chain)
-				assert.NotEmpty(t, metadata.SignedMetadata, "SignedMetadata should be populated with signed JWT")
-			}
+			metadata := tt.metadata.Generate(ctx, "https://issuer.example.com", nil)
+			assert.NotNil(t, metadata)
+			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty until Sign() is called")
 		})
 	}
 }
 
 func TestOAuthServerLoadAndSignMetadata(t *testing.T) {
-	// Setup test PKI files
-	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
-
 	tests := []struct {
-		name        string
-		server      OAuthServer
-		keyConfig   *pki.KeyConfig
-		issuerURL   string
-		wantErr     bool
-		errContains string
+		name      string
+		server    OAuthServer
+		issuerURL string
 	}{
 		{
-			name: "Runtime-generated metadata with RSA keys",
+			name: "Runtime-generated metadata",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      rsaCertPath,
 			},
 			issuerURL: "https://test.oauth.example.com",
-			wantErr:   false,
-		},
-		{
-			name: "Runtime-generated metadata with EC keys",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: ecKeyPath,
-				ChainPath:      ecCertPath,
-			},
-			issuerURL: "https://test.oauth.example.com",
-			wantErr:   false,
-		},
-		{
-			name: "Signing key file does not exist",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: "./testdata/nonexistent.pem",
-				ChainPath:      rsaCertPath,
-			},
-			issuerURL:   "https://test.oauth.example.com",
-			wantErr:     true,
-			errContains: "no such file or directory",
-		},
-		{
-			name: "Certificate chain file does not exist",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      "./testdata/nonexistent.crt",
-			},
-			issuerURL:   "https://test.oauth.example.com",
-			wantErr:     true,
-			errContains: "no such file or directory",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			metadata, privateKey, chain, err := tt.server.LoadAndSignMetadata(ctx, tt.issuerURL, tt.keyConfig)
+			metadata := tt.server.GenerateMetadata(ctx, tt.issuerURL)
 
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.errContains != "" {
-					assert.Contains(t, err.Error(), tt.errContains)
-				}
-				assert.Nil(t, metadata)
-				assert.Nil(t, privateKey)
-				assert.Nil(t, chain)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, metadata)
-				assert.NotNil(t, privateKey)
-				assert.NotEmpty(t, chain)
-				assert.NotEmpty(t, metadata.SignedMetadata, "SignedMetadata should be populated after signing")
-				// Verify metadata has expected fields
-				assert.NotEmpty(t, metadata.Issuer)
-				assert.Equal(t, tt.issuerURL, metadata.Issuer)
-				assert.NotEmpty(t, metadata.AuthorizationEndpoint)
-				assert.NotEmpty(t, metadata.TokenEndpoint)
-			}
+			assert.NotNil(t, metadata)
+			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty before signing")
+			// Verify metadata has expected fields
+			assert.NotEmpty(t, metadata.Issuer)
+			assert.Equal(t, tt.issuerURL, metadata.Issuer)
+			assert.NotEmpty(t, metadata.AuthorizationEndpoint)
+			assert.NotEmpty(t, metadata.TokenEndpoint)
 		})
 	}
 }

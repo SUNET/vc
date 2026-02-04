@@ -913,7 +913,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 
 			// Set up test signing key
 			key := generateTestRSAKey(t)
-			client.SetSigningKeyForTesting(key, "RS256")
+			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Execute
 			resp, err := client.Token(ctx, tt.request)
@@ -970,6 +970,8 @@ func TestToken_RefreshTokenGrant(t *testing.T) {
 
 // TestGenerateIDToken tests ID token generation
 func TestGenerateIDToken(t *testing.T) {
+	ctx := t.Context()
+
 	client, _ := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.OIDC.Issuer = "https://issuer.example.com"
 	client.cfg.Verifier.OIDC.IDTokenDuration = 3600
@@ -978,7 +980,7 @@ func TestGenerateIDToken(t *testing.T) {
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
-	client.SetSigningKeyForTesting(key, "RS256")
+	require.NoError(t, client.SetSigningKeyForTesting(key))
 
 	session := &db.Session{
 		ID: "session-1",
@@ -999,7 +1001,7 @@ func TestGenerateIDToken(t *testing.T) {
 		ClientID: "test-client",
 	}
 
-	idToken, err := client.generateIDToken(session, dbClient)
+	idToken, err := client.generateIDToken(ctx, session, dbClient)
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, idToken)

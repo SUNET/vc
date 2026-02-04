@@ -3,16 +3,13 @@ package apiv1
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/rsa"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image/png"
-	"math/big"
 	"time"
 	"vc/internal/verifier/db"
 	"vc/pkg/crypto"
+	"vc/pkg/jose"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -101,24 +98,6 @@ type DiscoveryMetadata struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 }
 
-// JWKS represents a JSON Web Key Set
-type JWKS struct {
-	Keys []JWK `json:"keys"`
-}
-
-// JWK represents a single JSON Web Key
-type JWK struct {
-	Kty string `json:"kty"`
-	Use string `json:"use"`
-	Kid string `json:"kid"`
-	Alg string `json:"alg"`
-	N   string `json:"n,omitempty"`
-	E   string `json:"e,omitempty"`
-	Crv string `json:"crv,omitempty"`
-	X   string `json:"x,omitempty"`
-	Y   string `json:"y,omitempty"`
-}
-
 // GetDiscoveryMetadata returns OpenID Provider configuration
 func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
 	baseURL := c.cfg.Verifier.ExternalServerURL
@@ -154,56 +133,12 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 }
 
 // GetJWKS returns the JSON Web Key Set
-func (c *Client) GetJWKS(ctx context.Context) (*JWKS, error) {
-	if c.oidcSigningKey == nil {
+func (c *Client) GetJWKS(ctx context.Context) (*jose.JWKS, error) {
+	if c.pkiSigner == nil {
 		return nil, fmt.Errorf("signing key not loaded")
 	}
 
-	switch key := c.oidcSigningKey.(type) {
-	case *rsa.PrivateKey:
-		publicKey := &key.PublicKey
-		n := base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes())
-		e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes())
-
-		jwk := JWK{
-			Kty: "RSA",
-			Use: "sig",
-			Kid: "default",
-			Alg: c.oidcSigningAlg,
-			N:   n,
-			E:   e,
-		}
-		return &JWKS{Keys: []JWK{jwk}}, nil
-
-	case *ecdsa.PrivateKey:
-		publicKey := &key.PublicKey
-		x := base64.RawURLEncoding.EncodeToString(publicKey.X.Bytes())
-		y := base64.RawURLEncoding.EncodeToString(publicKey.Y.Bytes())
-
-		crv := ""
-		switch publicKey.Curve.Params().BitSize {
-		case 256:
-			crv = "P-256"
-		case 384:
-			crv = "P-384"
-		case 521:
-			crv = "P-521"
-		}
-
-		jwk := JWK{
-			Kty: "EC",
-			Use: "sig",
-			Kid: "default",
-			Alg: c.oidcSigningAlg,
-			Crv: crv,
-			X:   x,
-			Y:   y,
-		}
-		return &JWKS{Keys: []JWK{jwk}}, nil
-
-	default:
-		return nil, fmt.Errorf("unsupported key type: %T", c.oidcSigningKey)
-	}
+	return jose.CreateJWKSFromSigner(c.pkiSigner, "")
 }
 
 // GetOIDCRequestObject generates and returns a signed JWT request object for OpenID4VP

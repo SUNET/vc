@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
 	"vc/pkg/crypto"
+	"vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -312,7 +314,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 
 	// Generate ID token
-	idToken, err := c.generateIDToken(session, client)
+	idToken, err := c.generateIDToken(ctx, session, client)
 	if err != nil {
 		c.log.Error(err, "Failed to generate ID token")
 		return nil, ErrServerError
@@ -348,7 +350,7 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, req *TokenRequest)
 }
 
 // generateIDToken creates a signed ID token
-func (c *Client) generateIDToken(session *db.Session, client *db.Client) (string, error) {
+func (c *Client) generateIDToken(ctx context.Context, session *db.Session, client *db.Client) (string, error) {
 	now := time.Now()
 
 	// Generate subject identifier
@@ -368,16 +370,13 @@ func (c *Client) generateIDToken(session *db.Session, client *db.Client) (string
 	}
 
 	// Add verified claims
-	for k, v := range session.VerifiedClaims {
-		claims[k] = v
+	maps.Copy(claims, session.VerifiedClaims)
+
+	// Use jose.MakeJWT to sign with pki.Signer
+	header := jwt.MapClaims{
+		"typ": "JWT",
 	}
-
-	// Get signing method from config
-	signingMethod := c.getSigningMethod()
-	token := jwt.NewWithClaims(signingMethod, claims)
-
-	// Sign token
-	tokenString, err := token.SignedString(c.oidcSigningKey)
+	tokenString, err := jose.MakeJWT(ctx, header, claims, c.pkiSigner)
 	if err != nil {
 		return "", err
 	}
