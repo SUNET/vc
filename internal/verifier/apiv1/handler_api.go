@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/png"
+	"net/url"
 	"time"
 	"vc/internal/verifier/db"
 	"vc/pkg/crypto"
@@ -100,13 +101,34 @@ type DiscoveryMetadata struct {
 
 // GetDiscoveryMetadata returns OpenID Provider configuration
 func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
+	authorizationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/authorize")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct authorization endpoint URL: %w", err)
+	}
+	tokenEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/token")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct token endpoint URL: %w", err)
+	}
+	userInfoEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/userinfo")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct userinfo endpoint URL: %w", err)
+	}
+	jwksURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/jwks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct jwks URI: %w", err)
+	}
+	registrationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/register")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct registration endpoint URL: %w", err)
+	}
+
 	metadata := &DiscoveryMetadata{
 		Issuer:                           c.cfg.Verifier.OIDC.Issuer,
-		AuthorizationEndpoint:            c.cfg.Verifier.PublicURL + "/authorize",
-		TokenEndpoint:                    c.cfg.Verifier.PublicURL + "/token",
-		UserInfoEndpoint:                 c.cfg.Verifier.PublicURL + "/userinfo",
-		JwksURI:                          c.cfg.Verifier.PublicURL + "/jwks",
-		RegistrationEndpoint:             c.cfg.Verifier.PublicURL + "/register",
+		AuthorizationEndpoint:            authorizationEndpoint,
+		TokenEndpoint:                    tokenEndpoint,
+		UserInfoEndpoint:                 userInfoEndpoint,
+		JwksURI:                          jwksURI,
+		RegistrationEndpoint:             registrationEndpoint,
 		ResponseTypesSupported:           []string{"code", "id_token", "token id_token"},
 		SubjectTypesSupported:            []string{"public", "pairwise"},
 		IDTokenSigningAlgValuesSupported: []string{"RS256", "ES256"},

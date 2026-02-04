@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"net/url"
 	"time"
 	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
@@ -23,6 +24,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Create request object
+	responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/direct_post")
+	if err != nil {
+		c.log.Error(err, "Failed to construct response URI")
+		return "", err
+	}
 	requestObject := &openid4vp.RequestObject{
 		ISS:          c.cfg.Verifier.OIDC.Issuer,
 		AUD:          "https://self-issued.me/v2",
@@ -31,7 +37,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		ClientID:     c.cfg.Verifier.OIDC.Issuer,
 		Nonce:        nonce,
 		ResponseMode: responseMode,
-		ResponseURI:  c.cfg.Verifier.PublicURL + "/verification/direct_post",
+		ResponseURI:  responseURI,
 		State:        sessionID,
 		DCQLQuery:    dcqlQuery,
 	}

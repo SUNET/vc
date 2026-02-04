@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 	"gotest.tools/v3/golden"
 )
@@ -496,7 +497,8 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			metadata := tt.metadata.Generate(ctx, "https://issuer.example.com", nil)
+			metadata, err := tt.metadata.Generate(ctx, "https://issuer.example.com", nil)
+			require.NoError(t, err)
 			assert.NotNil(t, metadata)
 			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty until Sign() is called")
 		})

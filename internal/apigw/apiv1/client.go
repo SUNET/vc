@@ -112,7 +112,10 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
 	// Unsigned metadata will be signed on-demand in the handler for freshness
-	c.issuerMetadata = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.PublicURL, cfg.CredentialConstructor)
+	c.issuerMetadata, err = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.PublicURL, cfg.CredentialConstructor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate issuer metadata: %w", err)
+	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand if needed)
 	c.oauth2Metadata = c.cfg.APIGW.OauthServer.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)

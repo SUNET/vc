@@ -2,8 +2,8 @@ package vcclient
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"net/url"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -44,9 +44,13 @@ type DocumentListQuery struct {
 func (s *documentHandler) List(ctx context.Context, query *DocumentListQuery) ([]model.DocumentList, *http.Response, error) {
 	s.log.Info("List")
 
-	url := fmt.Sprintf("%s/%s", s.serviceBaseURL, "list")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "list")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, nil, err
+	}
 	reply := []model.DocumentList{}
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, nil, reply, true)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, nil, reply, true)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -70,9 +74,13 @@ func (s *documentHandler) CollectID(ctx context.Context, query *DocumentCollectI
 	s.log.Info("CollectID")
 	s.log.Debug("CollectID", "query", query)
 
-	url := fmt.Sprintf("%s/%s", s.serviceBaseURL, "collect_id")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "collect_id")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, nil, err
+	}
 	reply := &model.Document{}
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, query, reply, true)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, query, reply, true)
 	if err != nil {
 		s.log.Error(err, "failed to call CollectID")
 		return nil, resp, err
@@ -83,11 +91,15 @@ func (s *documentHandler) CollectID(ctx context.Context, query *DocumentCollectI
 func (s *documentHandler) Search(ctx context.Context, query *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, *http.Response, error) {
 	s.log.Debug("Search (Documents)")
 
-	url := fmt.Sprintf("%s/%s", s.serviceBaseURL, "search")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "search")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, nil, err
+	}
 	reply := &model.SearchDocumentsReply{
 		Documents: []*model.CompleteDocument{},
 	}
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, query, reply, false)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, query, reply, false)
 	if err != nil {
 		return nil, resp, err
 	}

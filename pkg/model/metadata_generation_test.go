@@ -58,7 +58,8 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 	}
 
 	// Generate metadata
-	metadata := cfg.Generate(ctx, "http://vc_dev_apigw:8080", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "http://vc_dev_apigw:8080", credentialConstructors)
+	require.NoError(t, err, "Failed to generate metadata")
 
 	// Marshal to JSON for comparison
 	generatedData, err := json.MarshalIndent(metadata, "", "  ")

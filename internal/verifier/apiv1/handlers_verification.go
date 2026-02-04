@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"vc/pkg/cache"
 	"vc/pkg/openid4vp"
@@ -132,7 +133,20 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Generate response code
 	responseCode := uuid.NewString()
-	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": fmt.Sprintf(c.cfg.Verifier.PublicURL+"/verification/callback?response_code=%s", responseCode)})
+	callbackURL, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/callback")
+	if err != nil {
+		c.log.Error(err, "Failed to construct callback URL")
+		return nil, fmt.Errorf("failed to construct callback URL: %w", err)
+	}
+	u, err := url.Parse(callbackURL)
+	if err != nil {
+		c.log.Error(err, "Failed to parse callback URL")
+		return nil, fmt.Errorf("failed to parse callback URL: %w", err)
+	}
+	q := u.Query()
+	q.Set("response_code", responseCode)
+	u.RawQuery = q.Encode()
+	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": u.String()})
 
 	// Process all VP tokens for the requested scopes
 	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scope))
@@ -201,7 +215,20 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
 
-	redirectURI := fmt.Sprintf(c.cfg.Verifier.PublicURL+"/verification/callback?response_code=%s", responseCode)
+	callbackURL2, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/callback")
+	if err != nil {
+		c.log.Error(err, "Failed to construct callback URL")
+		return nil, fmt.Errorf("failed to construct callback URL: %w", err)
+	}
+	u2, err := url.Parse(callbackURL2)
+	if err != nil {
+		c.log.Error(err, "Failed to parse callback URL")
+		return nil, fmt.Errorf("failed to parse callback URL: %w", err)
+	}
+	q2 := u2.Query()
+	q2.Set("response_code", responseCode)
+	u2.RawQuery = q2.Encode()
+	redirectURI := u2.String()
 
 	reply := &VerificationDirectPostResponse{}
 

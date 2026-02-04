@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"vc/internal/apigw/db"
@@ -86,8 +87,12 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
+	responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
+	if err != nil {
+		return "", fmt.Errorf("failed to construct response URI: %w", err)
+	}
 	authorizationRequest := openid4vp.RequestObject{
-		ResponseURI:  c.cfg.APIGW.PublicURL + "/verification/direct_post",
+		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
 		ISS:          authorizationContext.ClientID,
 		ClientID:     authorizationContext.ClientID,
@@ -288,8 +293,22 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 
+	callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
+	if err != nil {
+		c.log.Error(nil, "Failed to construct callback URL", "error", err)
+		return nil, errors.New("failed to construct callback URL")
+	}
+	u, err := url.Parse(callbackURL)
+	if err != nil {
+		c.log.Error(nil, "Failed to parse callback URL", "error", err)
+		return nil, errors.New("failed to parse callback URL")
+	}
+	q := u.Query()
+	q.Set("response_code", authCtx.VerifierResponseCode)
+	u.RawQuery = q.Encode()
+
 	reply := &VerificationDirectPostResponse{
-		RedirectURI: c.cfg.APIGW.PublicURL + "/authorization/consent/callback/?response_code=" + authCtx.VerifierResponseCode,
+		RedirectURI: u.String(),
 	}
 	return reply, nil
 }

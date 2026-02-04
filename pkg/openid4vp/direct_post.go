@@ -18,27 +18,33 @@ type DirectPostJWTResponse struct {
 
 // BuildDirectPostURL creates a URL-encoded form data string for direct_post
 func BuildDirectPostURL(baseURL string, response *ResponseParameters) (string, error) {
-	data := url.Values{}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse base URL: %w", err)
+	}
+
+	q := u.Query()
 
 	if response.VPToken != "" {
-		data.Set("vp_token", response.VPToken)
+		q.Set("vp_token", response.VPToken)
 	}
 	if response.State != "" {
-		data.Set("state", response.State)
+		q.Set("state", response.State)
 	}
 	if response.Code != "" {
-		data.Set("code", response.Code)
+		q.Set("code", response.Code)
 	}
 	if response.IDToken != "" {
-		data.Set("id_token", response.IDToken)
+		q.Set("id_token", response.IDToken)
 	}
 	if response.PresentationSubmission != nil {
 		psJSON, err := json.Marshal(response.PresentationSubmission)
 		if err != nil {
 			return "", fmt.Errorf("failed to marshal presentation_submission: %w", err)
 		}
-		data.Set("presentation_submission", string(psJSON))
+		q.Set("presentation_submission", string(psJSON))
 	}
 
-	return baseURL + "?" + data.Encode(), nil
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }

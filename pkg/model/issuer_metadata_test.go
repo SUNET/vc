@@ -22,8 +22,8 @@ func TestIssuerMetadata_Generate_CustomFormat(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	require.NotNil(t, metadata)
 	assert.Equal(t, "https://issuer.example.com", metadata.CredentialIssuer)
 
@@ -47,8 +47,8 @@ func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	require.NotNil(t, metadata)
 
 	credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -83,8 +83,8 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	require.NotNil(t, metadata)
 
 	credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -109,7 +109,8 @@ func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 	assert.Equal(t, []string{"jwk", "did:key"}, credConfig.CryptographicBindingMethodsSupported)
@@ -128,7 +129,8 @@ func TestIssuerMetadata_Generate_CustomSigningAlgorithms(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 	require.Len(t, credConfig.CredentialSigningAlgValuesSupported, 2)
@@ -149,7 +151,8 @@ func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 	jwtProof := credConfig.ProofTypesSupported["jwt"]
@@ -171,7 +174,8 @@ func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	assert.Equal(t, []string{"https://oauth.example.com"}, metadata.AuthorizationServers)
 	assert.Equal(t, "https://issuer.example.com/deferred", metadata.DeferredCredentialEndpoint)
 	assert.Equal(t, "https://issuer.example.com/notification", metadata.NotificationEndpoint)
@@ -194,7 +198,8 @@ func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	require.NotNil(t, metadata.CredentialResponseEncryption)
 	assert.Equal(t, []string{"ECDH-ES", "ECDH-ES+A128KW"}, metadata.CredentialResponseEncryption.AlgValuesSupported)
 	assert.Equal(t, []string{"A256GCM", "A128GCM"}, metadata.CredentialResponseEncryption.EncValuesSupported)
@@ -216,7 +221,8 @@ func TestIssuerMetadata_Generate_BatchCredentialIssuance(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	require.NotNil(t, metadata.BatchCredentialIssuance)
 	assert.Equal(t, 10, metadata.BatchCredentialIssuance.BatchSize)
 }
@@ -243,7 +249,8 @@ func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	require.Len(t, metadata.Display, 1)
 	assert.Equal(t, "Example Issuer", metadata.Display[0].Name)
 	assert.Equal(t, "en-US", metadata.Display[0].Locale)
@@ -262,7 +269,8 @@ func TestIssuerMetadata_Generate_NilConstructor(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 
 	// Should only have test_cred2
 	_, exists1 := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -276,7 +284,8 @@ func TestIssuerMetadata_Generate_EmptyConstructors(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", map[string]*CredentialConstructor{})
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", map[string]*CredentialConstructor{})
+	require.NoError(t, err)
 	assert.Empty(t, metadata.CredentialConfigurationsSupported)
 }
 
@@ -295,7 +304,8 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 
@@ -333,7 +343,8 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)
 
 	// Verify each credential

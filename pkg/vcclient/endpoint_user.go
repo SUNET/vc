@@ -3,6 +3,7 @@ package vcclient
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/sdjwtvc"
@@ -23,8 +24,12 @@ type AddPIDRequest struct {
 }
 
 func (s *userHandler) AddPID(ctx context.Context, body *AddPIDRequest) (*http.Response, error) {
-	url := s.serviceBaseURL + "/pid"
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, body, nil, false)
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "/pid")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, err
+	}
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, body, nil, false)
 	if err != nil {
 		s.log.Error(err, "AddPID call failed")
 		return resp, err
@@ -42,8 +47,12 @@ type LoginPIDUserRequest struct {
 }
 
 func (s *userHandler) LoginPIDUser(ctx context.Context, body *LoginPIDUserRequest) (*http.Response, error) {
-	url := s.serviceBaseURL + "/pid/login"
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, body, nil, false)
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "/pid/login")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, err
+	}
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, body, nil, false)
 	if err != nil {
 		s.log.Error(err, "LoginPIDUser call failed")
 		return resp, err

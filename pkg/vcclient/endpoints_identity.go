@@ -2,8 +2,8 @@ package vcclient
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"net/url"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -25,9 +25,13 @@ type IdentityMappingQuery struct {
 func (s *identityHandler) Mapping(ctx context.Context, query *IdentityMappingQuery) (string, *http.Response, error) {
 	s.log.Info("Mapping")
 
-	url := fmt.Sprintf("%s/%s", s.serviceBaseURL, "mapping")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "mapping")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return "", nil, err
+	}
 	reply := ""
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, nil, reply, true)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, nil, reply, true)
 	if err != nil {
 		return "", resp, err
 	}

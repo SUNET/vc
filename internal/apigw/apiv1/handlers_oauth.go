@@ -218,7 +218,12 @@ func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthor
 
 	c.log.Debug("OAuthAuthorizationConsent request")
 
-	verifierRequestURI, err := url.Parse(c.cfg.APIGW.PublicURL + "/verification/request-object")
+	verifierRequestURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/request-object")
+	if err != nil {
+		c.log.Error(err, "failed to construct request URI URL")
+		return nil, err
+	}
+	requestURL, err := url.Parse(verifierRequestURI)
 	if err != nil {
 		c.log.Error(err, "failed to parse request URI URL")
 		return nil, err
@@ -228,22 +233,23 @@ func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthor
 		"id": []string{authorizationContext.VerifierResponseCode},
 	}
 
-	verifierRequestURI.RawQuery = requestURI.Encode()
+	requestURL.RawQuery = requestURI.Encode()
+	finalRequestURI := requestURL.String()
 
-	u, err := url.Parse(authorizationContext.WalletURI)
+	walletURL, err := url.Parse(authorizationContext.WalletURI)
 	if err != nil {
-		c.log.Error(err, "failed to parse URL")
+		c.log.Error(err, "failed to parse wallet URL")
 		return nil, err
 	}
 	values := url.Values{
 		"client_id":   []string{authorizationContext.ClientID},
-		"request_uri": []string{verifierRequestURI.String()},
+		"request_uri": []string{finalRequestURI},
 	}
 
-	u.RawQuery = values.Encode()
+	walletURL.RawQuery = values.Encode()
 
 	reply := &OAuthAuthorizationConsentResponse{
-		RedirectURL:       u.String(),
+		RedirectURL:       walletURL.String(),
 		VerifierContextID: authorizationContext.VerifierResponseCode,
 	}
 

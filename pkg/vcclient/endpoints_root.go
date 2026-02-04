@@ -2,8 +2,8 @@ package vcclient
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"net/url"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -30,9 +30,13 @@ func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Re
 		s.log.Info("Uploading PID document", "body", body)
 	}
 
-	url := fmt.Sprintf("%s/%s", s.serviceBaseURL, "upload")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "upload")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, err
+	}
 
-	resp, err := s.client.call(ctx, http.MethodPost, url, s.defaultContentType, body, nil, false)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, body, nil, false)
 	if err != nil {
 		s.log.Error(err, "Upload call failed")
 		return resp, err

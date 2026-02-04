@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"strings"
 	"time"
 	"vc/internal/verifier/apiv1/utils"
@@ -143,19 +144,43 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Generate OpenID4VP authorization request
-	authzReqURL := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s/verification/request-object/%s",
-		c.cfg.Verifier.PublicURL,
-		c.cfg.Verifier.PublicURL,
-		sessionID,
-	)
+	requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", sessionID)
+	if err != nil {
+		c.log.Error(err, "Failed to construct request object path")
+		return nil, ErrServerError
+	}
+	
+	// Construct OpenID4VP authorization request URL with query parameters
+	authzReq, err := url.Parse("openid4vp://")
+	if err != nil {
+		c.log.Error(err, "Failed to parse openid4vp URL")
+		return nil, ErrServerError
+	}
+	q := authzReq.Query()
+	q.Set("client_id", c.cfg.Verifier.PublicURL)
+	q.Set("request_uri", requestObjectPath)
+	authzReq.RawQuery = q.Encode()
+	authzReqURL := authzReq.String()
+
+	qrCodeImageURL, err := url.JoinPath("/qr", sessionID)
+	if err != nil {
+		c.log.Error(err, "Failed to construct QR code image URL")
+		return nil, ErrServerError
+	}
+	
+	pollURL, err := url.JoinPath("/poll", sessionID)
+	if err != nil {
+		c.log.Error(err, "Failed to construct poll URL")
+		return nil, ErrServerError
+	}
 
 	// Build response with DC API configuration
 	response := &AuthorizeResponse{
 		SessionID:      sessionID,
 		QRCodeData:     authzReqURL,
-		QRCodeImageURL: fmt.Sprintf("/qr/%s", sessionID),
+		QRCodeImageURL: qrCodeImageURL,
 		DeepLinkURL:    authzReqURL,
-		PollURL:        fmt.Sprintf("/poll/%s", sessionID),
+		PollURL:        pollURL,
 	}
 
 	// Add Digital Credentials API configuration

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 	"vc/pkg/logger"
 	"vc/pkg/trace"
@@ -168,7 +169,17 @@ func (c *VCBaseClient) DoGetJSON(endpoint string) (*map[string]any, error) {
 }
 
 func (c *VCBaseClient) url(path string) string {
-	return c.baseUrl + path
+	baseURL, err := url.Parse(c.baseUrl)
+	if err != nil {
+		c.logger.Error(err, "failed to parse base URL")
+		return c.baseUrl + path // fallback to old behavior
+	}
+	fullURL, err := url.JoinPath(baseURL.String(), path)
+	if err != nil {
+		c.logger.Error(err, "failed to join URL path")
+		return c.baseUrl + path // fallback to old behavior
+	}
+	return fullURL
 }
 
 func (c *VCBaseClient) closeBody(resp *http.Response) {

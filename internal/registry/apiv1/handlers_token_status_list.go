@@ -2,6 +2,8 @@ package apiv1
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"strconv"
 	"vc/internal/registry/db"
 	"vc/pkg/tokenstatuslist"
@@ -123,7 +125,11 @@ func (c *Client) TokenStatusListAggregation(ctx context.Context) (*TokenStatusLi
 	statusLists := make([]string, 0, len(sections))
 
 	for _, section := range sections {
-		uri := c.cfg.Registry.PublicURL + "/statuslists/" + strconv.FormatInt(section, 10)
+		uri, err := url.JoinPath(c.cfg.Registry.PublicURL, "/statuslists", strconv.FormatInt(section, 10))
+		if err != nil {
+			c.log.Error(err, "failed to construct status list URI")
+			return nil, fmt.Errorf("failed to construct status list URI: %w", err)
+		}
 		statusLists = append(statusLists, uri)
 	}
 

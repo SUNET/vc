@@ -3,6 +3,7 @@ package tokenstatuslistissuer
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -175,9 +176,14 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 	signingMethod := jwt.GetSigningMethod(s.signer.Algorithm())
 
 	// Token config
+	subject, err := url.JoinPath(s.cfg.Registry.PublicURL, "/statuslists", key)
+	if err != nil {
+		s.log.Error(err, "Failed to construct subject URL", "section", section)
+		return
+	}
 	tokenCfg := TokenConfig{
 		TokenConfig: tokenstatuslist.TokenConfig{
-			Subject:   s.cfg.Registry.PublicURL + "/statuslists/" + key,
+			Subject:   subject,
 			Issuer:    s.cfg.Registry.PublicURL,
 			Statuses:  statuses,
 			TTL:       s.ttl,
