@@ -123,7 +123,7 @@ verifier:
   grpc_server:
     addr: verifier.vc.docker:8090
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
-  external_server_url: "http://verifier.vc.docker:8080"
+  public_url: "http://verifier.vc.docker:8080"
   # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
@@ -203,7 +203,7 @@ verifier:
 registry:
   api_server:
     addr: :8080
-  external_server_url: "http://localhost:8080"
+  public_url: "http://localhost:8080"
   grpc_server:
     addr: :8090
     # mTLS configuration (optional)
@@ -252,7 +252,7 @@ apigw:
       enabled: false
       users:
         admin: "secret123"
-  external_server_url: "http://apigw.vc.docker:8080"
+  public_url: "http://apigw.vc.docker:8080"
   registry_external_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090

@@ -104,7 +104,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 			},
 		},
 		Registry: &model.Registry{
-			ExternalServerURL: "https://test-registry.sunet.se",
+			PublicURL: "https://test-registry.sunet.se",
 		},
 	}
 

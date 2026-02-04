@@ -144,8 +144,8 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 	// Generate OpenID4VP authorization request
 	authzReqURL := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s/verification/request-object/%s",
-		c.cfg.Verifier.ExternalServerURL,
-		c.cfg.Verifier.ExternalServerURL,
+		c.cfg.Verifier.PublicURL,
+		c.cfg.Verifier.PublicURL,
 		sessionID,
 	)
 

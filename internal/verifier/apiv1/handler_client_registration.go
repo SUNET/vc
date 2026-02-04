@@ -193,7 +193,7 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 	}
 
 	// Build response
-	registrationClientURI := fmt.Sprintf("%s/register/%s", c.cfg.Verifier.ExternalServerURL, clientID)
+	registrationClientURI := fmt.Sprintf("%s/register/%s", c.cfg.Verifier.PublicURL, clientID)
 
 	response := &ClientRegistrationResponse{
 		ClientID:                clientID,
@@ -274,7 +274,7 @@ func (c *Client) GetClientInformation(ctx context.Context, clientID string, regi
 			JWKS:                    client.JWKS,
 			SoftwareID:              client.SoftwareID,
 			SoftwareVersion:         client.SoftwareVersion,
-			RegistrationClientURI:   fmt.Sprintf("%s/register/%s", c.cfg.Verifier.ExternalServerURL, clientID),
+			RegistrationClientURI:   fmt.Sprintf("%s/register/%s", c.cfg.Verifier.PublicURL, clientID),
 			ApplicationType:         client.ApplicationType,
 			SectorIdentifierURI:     client.SectorIdentifierURI,
 			SubjectType:             client.SubjectType,
@@ -418,7 +418,7 @@ func (c *Client) UpdateClient(ctx context.Context, clientID string, registration
 		JWKS:                    client.JWKS,
 		SoftwareID:              client.SoftwareID,
 		SoftwareVersion:         client.SoftwareVersion,
-		RegistrationClientURI:   fmt.Sprintf("%s/register/%s", c.cfg.Verifier.ExternalServerURL, clientID),
+	RegistrationClientURI:   fmt.Sprintf("%s/register/%s", c.cfg.Verifier.PublicURL, clientID),
 		ApplicationType:         client.ApplicationType,
 		SectorIdentifierURI:     client.SectorIdentifierURI,
 		SubjectType:             client.SubjectType,

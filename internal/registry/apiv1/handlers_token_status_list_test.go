@@ -86,7 +86,7 @@ func newTestClient() (*Client, *mockTokenStatusListIssuer) {
 	client := &Client{
 		cfg: &model.Cfg{
 			Registry: &model.Registry{
-				ExternalServerURL: "https://example.com",
+				PublicURL: "https://example.com",
 			},
 		},
 		log:                   logger.NewSimple("test"),
@@ -424,7 +424,7 @@ func TestTokenStatusListAggregation_DifferentBaseURLs(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mock := newTestClient()
-			client.cfg.Registry.ExternalServerURL = tt.baseURL
+			client.cfg.Registry.PublicURL = tt.baseURL
 			mock.SetSections([]int64{1})
 
 			ctx := t.Context()
@@ -699,7 +699,7 @@ func TestNew(t *testing.T) {
 	ctx := t.Context()
 	cfg := &model.Cfg{
 		Registry: &model.Registry{
-			ExternalServerURL: "https://example.com",
+			PublicURL: "https://example.com",
 		},
 	}
 	log := logger.NewSimple("test")

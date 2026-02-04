@@ -100,15 +100,13 @@ type DiscoveryMetadata struct {
 
 // GetDiscoveryMetadata returns OpenID Provider configuration
 func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
-	baseURL := c.cfg.Verifier.ExternalServerURL
-
 	metadata := &DiscoveryMetadata{
 		Issuer:                           c.cfg.Verifier.OIDC.Issuer,
-		AuthorizationEndpoint:            baseURL + "/authorize",
-		TokenEndpoint:                    baseURL + "/token",
-		UserInfoEndpoint:                 baseURL + "/userinfo",
-		JwksURI:                          baseURL + "/jwks",
-		RegistrationEndpoint:             baseURL + "/register",
+		AuthorizationEndpoint:            c.cfg.Verifier.PublicURL + "/authorize",
+		TokenEndpoint:                    c.cfg.Verifier.PublicURL + "/token",
+		UserInfoEndpoint:                 c.cfg.Verifier.PublicURL + "/userinfo",
+		JwksURI:                          c.cfg.Verifier.PublicURL + "/jwks",
+		RegistrationEndpoint:             c.cfg.Verifier.PublicURL + "/register",
 		ResponseTypesSupported:           []string{"code", "id_token", "token id_token"},
 		SubjectTypesSupported:            []string{"public", "pairwise"},
 		IDTokenSigningAlgValuesSupported: []string{"RS256", "ES256"},
@@ -257,7 +255,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Info("Redirecting to credential display page", "session_id", session.ID)
 
 		return &DirectPostResponse{
-			RedirectURI: fmt.Sprintf("%s/verification/display/%s", c.cfg.Verifier.ExternalServerURL, session.ID),
+			RedirectURI: fmt.Sprintf("%s/verification/display/%s", c.cfg.Verifier.PublicURL, session.ID),
 		}, nil
 	}
 
@@ -438,8 +436,7 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 
 // createAuthorizationRequestURI creates the OpenID4VP authorization request URI
 func (c *Client) createAuthorizationRequestURI(sessionID string) (string, error) {
-	baseURL := c.cfg.Verifier.ExternalServerURL
-	requestURI := fmt.Sprintf("%s/verification/request-object/%s", baseURL, sessionID)
+	requestURI := fmt.Sprintf("%s/verification/request-object/%s", c.cfg.Verifier.PublicURL, sessionID)
 
 	// Build authorization request URI per OpenID4VP spec
 	authReqURI := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s",

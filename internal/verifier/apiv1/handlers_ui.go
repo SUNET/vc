@@ -73,7 +73,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		WalletURI:                "",
 		Forfeited:                false,
 		State:                    state,
-		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.ExternalServerURL, "https://")),
+		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")),
 		ExpiresAt:                0,
 		CodeChallenge:            "",
 		CodeChallengeMethod:      "",
@@ -93,9 +93,9 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	}
 
 	requestObject := &openid4vp.RequestObject{
-		ResponseURI:  fmt.Sprintf("%s/verification/direct_post", c.cfg.Verifier.ExternalServerURL),
+		ResponseURI:  fmt.Sprintf("%s/verification/direct_post", c.cfg.Verifier.PublicURL),
 		AUD:          "https://self-issued.me/v2",
-		ISS:          strings.TrimLeft(c.cfg.Verifier.ExternalServerURL, "https://"),
+		ISS:          strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"),
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post.jwt",
@@ -127,7 +127,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 
 	reply := &UIInteractionReply{}
 
-	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.ExternalServerURL, requestObjectID)
+	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, requestObjectID)
 	if err != nil {
 		return nil, err
 	}

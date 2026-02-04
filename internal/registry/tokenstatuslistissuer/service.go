@@ -171,19 +171,14 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 
 	key := strconv.FormatInt(section, 10)
 
-	// Build URIs using registry's external server URL
-	baseURL := s.cfg.Registry.ExternalServerURL
-	subject := baseURL + "/statuslists/" + key
-	issuer := baseURL
-
 	// Get signing method from the signer
 	signingMethod := jwt.GetSigningMethod(s.signer.Algorithm())
 
 	// Token config
 	tokenCfg := TokenConfig{
 		TokenConfig: tokenstatuslist.TokenConfig{
-			Subject:   subject,
-			Issuer:    issuer,
+			Subject:   s.cfg.Registry.PublicURL + "/statuslists/" + key,
+			Issuer:    s.cfg.Registry.PublicURL,
 			Statuses:  statuses,
 			TTL:       s.ttl,
 			ExpiresIn: s.tokenValidity,

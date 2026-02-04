@@ -371,9 +371,9 @@ type PKCS11 struct {
 
 // Registry holds the registry configuration
 type Registry struct {
-	APIServer         APIServer        `yaml:"api_server" validate:"required"`
-	ExternalServerURL string           `yaml:"external_server_url" validate:"required"`
-	GRPCServer        GRPCServer       `yaml:"grpc_server" validate:"required"`
+	APIServer  APIServer        `yaml:"api_server" validate:"required"`
+	PublicURL  string           `yaml:"public_url" validate:"required"`
+	GRPCServer GRPCServer       `yaml:"grpc_server" validate:"required"`
 	TokenStatusLists  TokenStatusLists `yaml:"token_status_lists,omitempty" validate:"omitempty"`
 	AdminGUI          AdminGUI         `yaml:"admin_gui,omitempty" validate:"omitempty"`
 }
@@ -395,10 +395,10 @@ type MockAS struct {
 
 // Verifier holds the verifier configuration
 type Verifier struct {
-	APIServer            APIServer                     `yaml:"api_server" validate:"required"`
-	GRPCServer           GRPCServer                    `yaml:"grpc_server" validate:"required"`
-	ExternalServerURL    string                        `yaml:"external_server_url" validate:"required"`
-	KeyConfig            *pki.KeyConfig                `yaml:"key_config" validate:"required"`
+	APIServer APIServer                     `yaml:"api_server" validate:"required"`
+	GRPCServer GRPCServer                    `yaml:"grpc_server" validate:"required"`
+	PublicURL string                        `yaml:"public_url" validate:"required"`
+	KeyConfig *pki.KeyConfig                `yaml:"key_config" validate:"required"`
 	OAuthServer          OAuthServer                   `yaml:"oauth_server" validate:"required"`
 	PreferredVPFormats   *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"` // Informational: tells wallets what formats/algorithms are supported
 	SupportedWallets     map[string]string             `yaml:"supported_wallets" validate:"omitempty"`
@@ -592,7 +592,7 @@ type APIGW struct {
 	CredentialOffers    CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
 	OauthServer         OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
 	IssuerMetadata      IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
-	ExternalServerURL   string           `yaml:"external_server_url" validate:"required"`
+	PublicURL           string           `yaml:"public_url" validate:"required"`
 	RegistryExternalURL string           `yaml:"registry_external_url" validate:"required"` // External URL of the registry service for constructing status list URIs
 	SAML                SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
 	OIDCRP              OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
@@ -719,7 +719,7 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 
 // Generate generates issuer metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *IssuerMetadata) Generate(ctx context.Context, externalServerURL string, credentialConstructors map[string]*CredentialConstructor) *openid4vci.CredentialIssuerMetadataParameters {
+func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentialConstructors map[string]*CredentialConstructor) *openid4vci.CredentialIssuerMetadataParameters {
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
 	for scope, constructor := range credentialConstructors {
@@ -807,8 +807,8 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, externalServerURL strin
 	}
 
 	metadataConfig := &openid4vci.MetadataConfig{
-		CredentialIssuer:                     externalServerURL,
-		CredentialEndpoint:                   externalServerURL + "/credential",
+		CredentialIssuer:                     publicURL,
+		CredentialEndpoint:                   publicURL + "/credential",
 		AuthorizationServers:                 cfg.AuthorizationServers,
 		DeferredCredentialEndpoint:           cfg.DeferredCredentialEndpoint,
 		NotificationEndpoint:                 cfg.NotificationEndpoint,

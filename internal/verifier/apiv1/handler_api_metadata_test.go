@@ -15,7 +15,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -90,7 +90,7 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -144,7 +144,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
-					ExternalServerURL: tt.externalURL,
+					PublicURL: tt.externalURL,
 					OIDC: model.OIDCConfig{
 						Issuer:      tt.externalURL,
 						SubjectType: "public",
@@ -175,7 +175,7 @@ func TestGetJWKS(t *testing.T) {
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -261,7 +261,7 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -289,7 +289,7 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",

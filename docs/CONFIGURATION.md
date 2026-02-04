@@ -194,7 +194,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `credential_offers` | `object` | Credential offer wallet configurations | - | No |
 | `oauth_server` | `object` | OAuth2 server configuration | - | No |
 | `issuer_metadata` | `object` | OpenID4VCI issuer metadata | - | No |
-| `external_server_url` | `string` | Public URL of this service | - | Yes |
+| `public_url` | `string` | Public URL of this service | - | Yes |
 | `registry_external_url` | `string` | Public URL of registry service | - | Yes |
 | `saml` | `object` | SAML Service Provider configuration | - | No |
 | `oidcrp` | `object` | OIDC Relying Party configuration | - | No |
@@ -245,7 +245,7 @@ apigw:
     cors:
       allowed_origins:
         - "https://wallet.example.com"
-  external_server_url: "https://issuer.example.com"
+  public_url: "https://issuer.example.com"
   registry_external_url: "https://registry.example.com"
 ```
 
@@ -556,7 +556,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 |-------|------|-------------|---------|----------|
 | `api_server` | `object` | HTTP API server configuration | - | Yes |
 | `grpc_server` | `object` | gRPC server configuration | - | Yes |
-| `external_server_url` | `string` | Public URL of this service | - | Yes |
+| `public_url` | `string` | Public URL of this service | - | Yes |
 | `key_config` | `object` | Signing key configuration | - | Yes |
 | `oauth_server` | `object` | OAuth2 server configuration | - | Yes |
 | `preferred_vp_formats` | `object` | Preferred VP formats | - | No |
@@ -699,7 +699,7 @@ Configuration for the Registry service that manages credential status.
 | Field | Type | Description | Default | Required |
 |-------|------|-------------|---------|----------|
 | `api_server` | `object` | HTTP API server configuration | - | Yes |
-| `external_server_url` | `string` | Public URL of this service | - | Yes |
+| `public_url` | `string` | Public URL of this service | - | Yes |
 | `grpc_server` | `object` | gRPC server configuration | - | Yes |
 | `token_status_lists` | `object` | Token Status List configuration | - | No |
 | `admin_gui` | `object` | Admin GUI configuration | - | No |
@@ -801,7 +801,7 @@ credential_constructor:
 apigw:
   api_server:
     addr: ":8080"
-  external_server_url: "https://issuer.example.com"
+  public_url: "https://issuer.example.com"
   registry_external_url: "https://registry.example.com"
   key_config:
     private_key_path: "/pki/apigw.key"
@@ -827,7 +827,7 @@ verifier:
     addr: ":8080"
   grpc_server:
     addr: ":8090"
-  external_server_url: "https://verifier.example.com"
+  public_url: "https://verifier.example.com"
   key_config:
     private_key_path: "/pki/verifier.key"
   oauth_server:
@@ -849,7 +849,7 @@ registry:
     addr: ":8080"
   grpc_server:
     addr: ":8090"
-  external_server_url: "https://registry.example.com"
+  public_url: "https://registry.example.com"
 ```
 
 ---
@@ -901,7 +901,7 @@ apigw:
       enabled: true
       cert_file_path: "/pki/api_server.crt"
       key_file_path: "/pki/api_server.key"
-  external_server_url: "https://issuer.example.com"
+  public_url: "https://issuer.example.com"
   registry_external_url: "https://registry.example.com"
   issuer_client:
     addr: "issuer:8090"
@@ -933,7 +933,7 @@ verifier:
     addr: ":8080"
   grpc_server:
     addr: ":8090"
-  external_server_url: "https://verifier.example.com"
+  public_url: "https://verifier.example.com"
   oidc:
     issuer: "https://verifier.example.com"
     session_duration: 3600
@@ -954,7 +954,7 @@ registry:
     addr: ":8080"
   grpc_server:
     addr: ":8090"
-  external_server_url: "https://registry.example.com"
+  public_url: "https://registry.example.com"
   admin_gui:
     enabled: true
     username: "admin"

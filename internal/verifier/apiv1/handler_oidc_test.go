@@ -1266,7 +1266,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
+			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 			client.cfg.Verifier.OIDC.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enabled = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
@@ -1337,7 +1337,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	ctx := t.Context()
 
 	client, mockDB := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.OIDC.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enabled = false

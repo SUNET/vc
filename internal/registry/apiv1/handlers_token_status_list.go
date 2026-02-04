@@ -121,10 +121,9 @@ func (c *Client) TokenStatusListAggregation(ctx context.Context) (*TokenStatusLi
 
 	// Build the list of Status List Token URIs
 	statusLists := make([]string, 0, len(sections))
-	baseURL := c.cfg.Registry.ExternalServerURL + "/statuslists/"
 
 	for _, section := range sections {
-		uri := baseURL + strconv.FormatInt(section, 10)
+		uri := c.cfg.Registry.PublicURL + "/statuslists/" + strconv.FormatInt(section, 10)
 		statusLists = append(statusLists, uri)
 	}
 

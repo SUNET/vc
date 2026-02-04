@@ -31,7 +31,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		ClientID:     c.cfg.Verifier.OIDC.Issuer,
 		Nonce:        nonce,
 		ResponseMode: responseMode,
-		ResponseURI:  c.cfg.Verifier.ExternalServerURL + "/verification/direct_post",
+		ResponseURI:  c.cfg.Verifier.PublicURL + "/verification/direct_post",
 		State:        sessionID,
 		DCQLQuery:    dcqlQuery,
 	}

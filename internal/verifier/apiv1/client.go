@@ -89,7 +89,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
-	c.oauth2Metadata = c.cfg.Verifier.OAuthServer.GenerateMetadata(ctx, c.cfg.Verifier.ExternalServerURL)
+	c.oauth2Metadata = c.cfg.Verifier.OAuthServer.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {

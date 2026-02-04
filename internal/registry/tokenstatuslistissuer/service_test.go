@@ -165,7 +165,7 @@ func (s *testSuite) initializeConfiguration() {
 			},
 		},
 		Registry: &model.Registry{
-			ExternalServerURL: "https://registry.example.com",
+			PublicURL: "https://registry.example.com",
 			TokenStatusLists: model.TokenStatusLists{
 				KeyConfig: &pki.KeyConfig{
 					PrivateKeyPath: s.keyPath,

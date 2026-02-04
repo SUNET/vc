@@ -132,7 +132,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Generate response code
 	responseCode := uuid.NewString()
-	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": fmt.Sprintf(c.cfg.Verifier.ExternalServerURL+"/verification/callback?response_code=%s", responseCode)})
+	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": fmt.Sprintf(c.cfg.Verifier.PublicURL+"/verification/callback?response_code=%s", responseCode)})
 
 	// Process all VP tokens for the requested scopes
 	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scope))
@@ -201,7 +201,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
 
-	redirectURI := fmt.Sprintf(c.cfg.Verifier.ExternalServerURL+"/verification/callback?response_code=%s", responseCode)
+	redirectURI := fmt.Sprintf(c.cfg.Verifier.PublicURL+"/verification/callback?response_code=%s", responseCode)
 
 	reply := &VerificationDirectPostResponse{}
 

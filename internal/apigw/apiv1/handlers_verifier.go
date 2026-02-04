@@ -87,7 +87,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	authorizationRequest := openid4vp.RequestObject{
-		ResponseURI:  c.cfg.APIGW.ExternalServerURL + "/verification/direct_post",
+		ResponseURI:  c.cfg.APIGW.PublicURL + "/verification/direct_post",
 		AUD:          "https://self-issued.me/v2",
 		ISS:          authorizationContext.ClientID,
 		ClientID:     authorizationContext.ClientID,
@@ -289,7 +289,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 
 	reply := &VerificationDirectPostResponse{
-		RedirectURI: c.cfg.APIGW.ExternalServerURL + "/authorization/consent/callback/?response_code=" + authCtx.VerifierResponseCode,
+		RedirectURI: c.cfg.APIGW.PublicURL + "/authorization/consent/callback/?response_code=" + authCtx.VerifierResponseCode,
 	}
 	return reply, nil
 }
