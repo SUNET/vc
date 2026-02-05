@@ -86,10 +86,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, fmt.Errorf("failed to generate session encryption key: %w", err)
 	}
 
-	var httpHelpersErr error
-	s.httpHelpers, httpHelpersErr = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
-	if httpHelpersErr != nil {
-		return nil, httpHelpersErr
+	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
+	if err != nil {
+		return nil, err
 	}
 
 	// Used in development to avoid bundling static files in the executable.
