@@ -2,6 +2,7 @@ package jose
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"encoding/base64"
@@ -11,6 +12,7 @@ import (
 	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // MakeJWT creates a signed JWT using pki.Signer.
@@ -90,4 +92,97 @@ func GetSigningMethodFromKey(privateKey any) (jwt.SigningMethod, string) {
 
 	// Default to ES256 if key type is unknown
 	return jwt.SigningMethodES256, "ES256"
+}
+
+// ExtractClaim extracts a specific claim from a JWT without validation
+func ExtractClaim(token string, claimName string) (any, error) {
+	if token == "" {
+		return nil, fmt.Errorf("token is empty")
+	}
+
+	claims := jwt.MapClaims{}
+	_, _, err := jwt.NewParser().ParseUnverified(token, claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JWT: %w", err)
+	}
+
+	value, ok := claims[claimName]
+	if !ok {
+		return nil, fmt.Errorf("claim %q not found", claimName)
+	}
+
+	return value, nil
+}
+
+// ParseJWTWithJWKHeader parses and validates a JWT where the public key is embedded in the JWT header as a JWK
+// Returns the parsed claims, the token header, the JWK header, the key thumbprint, and any error
+func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[string]any, string, error) {
+	if token == "" {
+		return nil, nil, nil, "", fmt.Errorf("token is empty")
+	}
+
+	claims := jwt.MapClaims{}
+	var jwkHeader map[string]any
+	var tokenHeader map[string]any
+	var thumbprint string
+
+	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+		// Capture the full header
+		tokenHeader = t.Header
+
+		// Extract JWK from header
+		jwkClaim, ok := t.Header["jwk"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("missing or invalid jwk in token header")
+		}
+		jwkHeader = jwkClaim
+
+		// Parse JWK and get signing key
+		jwkBytes, err := json.Marshal(jwkClaim)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JWK: %w", err)
+		}
+
+		keySet, err := jwk.Parse(jwkBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse JWK: %w", err)
+		}
+
+		key, ok := keySet.Key(0)
+		if !ok {
+			return nil, fmt.Errorf("no key found in JWK set")
+		}
+
+		// Calculate thumbprint
+		tp, err := key.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate key thumbprint: %w", err)
+		}
+		thumbprint = fmt.Sprintf("%x", tp)
+
+		// Export key for signature verification
+		alg := t.Header["alg"]
+		switch jwt.GetSigningMethod(alg.(string)).(type) {
+		case *jwt.SigningMethodECDSA:
+			var ecKey ecdsa.PublicKey
+			if err := jwk.Export(key, &ecKey); err != nil {
+				return nil, fmt.Errorf("failed to export ECDSA key: %w", err)
+			}
+			return &ecKey, nil
+		case *jwt.SigningMethodRSA:
+			var rsaKey rsa.PublicKey
+			if err := jwk.Export(key, &rsaKey); err != nil {
+				return nil, fmt.Errorf("failed to export RSA key: %w", err)
+			}
+			return &rsaKey, nil
+		default:
+			return nil, fmt.Errorf("unsupported signing method: %v", alg)
+		}
+	})
+
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
+
+	return claims, tokenHeader, jwkHeader, thumbprint, nil
 }

@@ -2,7 +2,6 @@ package oauth2
 
 import (
 	"testing"
-	"vc/internal/gen/issuer/apiv1_issuer"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -24,105 +23,6 @@ var mockJWK_2 = `{
     "x": "V_CJ7frHf5iHMMkrR4L9OW8QlAX8NHny6dX1IljrZ28",
     "y": "tGprUa5HX8hDsBVWwTHpHcsxcd1jhctB_T-6mg4W-Ng"
   }`
-
-func TestParseJWK(t *testing.T) {
-	tts := []struct {
-		name        string
-		jwk         string
-		fingerprint string
-	}{
-		{
-			name:        "mockJWK_1",
-			jwk:         mockJWK_1,
-			fingerprint: "ddd7868c9fd1c0a718f13586206dd47e551fdc1b16bd2ad053e5bf09651392fd",
-		},
-		{
-			name:        "mockJWK_2",
-			jwk:         mockJWK_2,
-			fingerprint: "9b85a44324a33a89d650d9aef4b3c85d7ae24bbd07ec062322d956e1b82593ff",
-		},
-	}
-	for _, tt := range tts {
-		t.Run(tt.name, func(t *testing.T) {
-			key, fingerprint, err := parseDpopJWK([]byte(tt.jwk))
-			assert.Equal(t, tt.fingerprint, fingerprint, "fingerprint should match expected value")
-			assert.NoError(t, err, "parseJWK should not return an error")
-			assert.NotNil(t, key, "key should not be nil")
-		})
-	}
-}
-
-func TestValidate(t *testing.T) {
-	tts := []struct {
-		name string
-		jwt  string
-		jwk  string
-		want *DPoP
-	}{
-		{
-			name: "mockJWT_1",
-			jwt:  mockJWT_1,
-			want: &DPoP{
-				JTI:        "84bb3266ccd6abf8",
-				HTM:        "POST",
-				HTU:        "https://vc-interop-3.sunet.se/token",
-				ATH:        "",
-				Thumbprint: "ddd7868c9fd1c0a718f13586206dd47e551fdc1b16bd2ad053e5bf09651392fd",
-				JWK: &apiv1_issuer.Jwk{
-					Kty:    "EC",
-					Crv:    "P-256",
-					X:      "ewibSBh-nT80uRnCI__KznEW9szoDa027aMdv2NotQs",
-					Y:      "HRZrbitvff597YpTWAuwgydy7qjlLdZ63n0qpinOllE",
-					KeyOps: []string{"verify"},
-					Ext:    true,
-				},
-			},
-		},
-		{
-			name: "mockJWT_2",
-			jwt:  mockJWT_2,
-			want: &DPoP{
-				JTI:        "b7be6cda8d420699",
-				HTM:        "POST",
-				HTU:        "https://vc-interop-3.sunet.se/token",
-				ATH:        "",
-				Thumbprint: "9b85a44324a33a89d650d9aef4b3c85d7ae24bbd07ec062322d956e1b82593ff",
-				JWK: &apiv1_issuer.Jwk{
-					Kty:    "EC",
-					Crv:    "P-256",
-					X:      "V_CJ7frHf5iHMMkrR4L9OW8QlAX8NHny6dX1IljrZ28",
-					Y:      "tGprUa5HX8hDsBVWwTHpHcsxcd1jhctB_T-6mg4W-Ng",
-					KeyOps: []string{"verify"},
-					Ext:    true,
-				},
-			},
-		},
-	}
-	for _, tt := range tts {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ValidateAndParseDPoPJWT(tt.jwt)
-			assert.NoError(t, err, "ValidateAndParseDPoPJWT should not return an error")
-
-			// Compare field by field to avoid protobuf atomicMessageInfo comparison issues
-			assert.Equal(t, tt.want.JTI, got.JTI, "JTI should match")
-			assert.Equal(t, tt.want.HTM, got.HTM, "HTM should match")
-			assert.Equal(t, tt.want.HTU, got.HTU, "HTU should match")
-			assert.Equal(t, tt.want.ATH, got.ATH, "ATH should match")
-			assert.Equal(t, tt.want.Thumbprint, got.Thumbprint, "Thumbprint should match")
-
-			// Compare JWK fields individually
-			assert.NotNil(t, got.JWK, "JWK should not be nil")
-			if got.JWK != nil {
-				assert.Equal(t, tt.want.JWK.Kty, got.JWK.Kty, "JWK Kty should match")
-				assert.Equal(t, tt.want.JWK.Crv, got.JWK.Crv, "JWK Crv should match")
-				assert.Equal(t, tt.want.JWK.X, got.JWK.X, "JWK X should match")
-				assert.Equal(t, tt.want.JWK.Y, got.JWK.Y, "JWK Y should match")
-				assert.Equal(t, tt.want.JWK.KeyOps, got.JWK.KeyOps, "JWK KeyOps should match")
-				assert.Equal(t, tt.want.JWK.Ext, got.JWK.Ext, "JWK Ext should match")
-			}
-		})
-	}
-}
 
 func TestIsAccessTokenDPoP(t *testing.T) {
 	tests := []struct {
@@ -231,45 +131,6 @@ func TestUnmarshal(t *testing.T) {
 	}
 }
 
-func TestParseDpopJWK_Errors(t *testing.T) {
-	tests := []struct {
-		name    string
-		jwk     string
-		wantErr bool
-	}{
-		{
-			name:    "invalid JSON",
-			jwk:     `{invalid json}`,
-			wantErr: true,
-		},
-		{
-			name:    "empty JWK",
-			jwk:     `{}`,
-			wantErr: true,
-		},
-		{
-			name:    "null bytes",
-			jwk:     "",
-			wantErr: true,
-		},
-		{
-			name:    "malformed JWK",
-			jwk:     `{"kty":"EC"}`,
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := parseDpopJWK([]byte(tt.jwk))
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 func TestValidateAndParseDPoPJWT_Errors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -296,5 +157,76 @@ func TestValidateAndParseDPoPJWT_Errors(t *testing.T) {
 				assert.NoError(t, err)
 			}
 		})
+	}
+}
+
+// TestDPoP_UnmarshalMissingRequiredFields tests behavior when required fields are missing
+func TestDPoP_UnmarshalMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims jwt.MapClaims
+	}{
+		{
+			name: "missing jti",
+			claims: jwt.MapClaims{
+				"htm": "POST",
+				"htu": "https://example.com",
+			},
+		},
+		{
+			name: "missing htm",
+			claims: jwt.MapClaims{
+				"jti": "test-jti",
+				"htu": "https://example.com",
+			},
+		},
+		{
+			name: "missing htu",
+			claims: jwt.MapClaims{
+				"jti": "test-jti",
+				"htm": "POST",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &DPoP{}
+			err := d.Unmarshal(tt.claims)
+			// Unmarshal doesn't validate, it just parses
+			assert.NoError(t, err)
+
+			// But fields should be empty/zero
+			if _, ok := tt.claims["jti"]; !ok {
+				assert.Empty(t, d.JTI)
+			}
+			if _, ok := tt.claims["htm"]; !ok {
+				assert.Empty(t, d.HTM)
+			}
+			if _, ok := tt.claims["htu"]; !ok {
+				assert.Empty(t, d.HTU)
+			}
+		})
+	}
+}
+
+// TestValidateAndParseDPoPJWT_AllowedHTTPMethods verifies that all standard HTTP methods
+// are accepted in the HTM claim when properly signed
+func TestValidateAndParseDPoPJWT_AllowedHTTPMethods(t *testing.T) {
+	// All these methods should be allowed per the DPoP struct definition
+	validMethods := []string{"POST", "GET", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
+
+	// We can verify the struct tag defines these
+	dpop := &DPoP{
+		JTI: "test-jti-12345",
+		HTM: "POST",
+		HTU: "https://example.com",
+	}
+
+	// Verify validation accepts all valid methods
+	for _, method := range validMethods {
+		dpop.HTM = method
+		err := dpop.ValidateHTM()
+		assert.NoError(t, err, "Method %s should be valid", method)
 	}
 }

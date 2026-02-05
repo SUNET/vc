@@ -95,3 +95,19 @@ func CreateJWKSFromSigner(signer pki.Signer, keyUsage string) (*JWKS, error) {
 
 	return jwks, nil
 }
+
+// ParseJWK converts a JWK map (e.g., from a JWT header) to a JWKWithMetadata struct
+// This is commonly used for DPoP and similar protocols where JWK is embedded in JWT headers
+func ParseJWK(jwkMap map[string]any) (*JWKWithMetadata, error) {
+	jwkBytes, err := json.Marshal(jwkMap)
+	if err != nil {
+		return nil, err
+	}
+
+	var jwk JWKWithMetadata
+	if err := json.Unmarshal(jwkBytes, &jwk); err != nil {
+		return nil, err
+	}
+
+	return &jwk, nil
+}

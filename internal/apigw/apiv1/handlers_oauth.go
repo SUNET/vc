@@ -14,6 +14,7 @@ import (
 	"vc/pkg/openid4vci"
 
 	"github.com/google/uuid"
+	"github.com/jellydator/ttlcache/v3"
 )
 
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
@@ -159,17 +160,33 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
+	jti, err := oauth2.ExtractJTI(req.DPOP)
+	if err != nil {
+		c.log.Error(err, "failed to extract JTI from DPoP")
+		return nil, err
+	}
+
+	if c.dpopJTICache.Has(jti) {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
+		return nil, oauth2.ErrJTIReplay
+	}
+
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
 	if err != nil {
 		c.log.Error(err, "dpop validation error")
 		return nil, err
 	}
 
+	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
+
+	// Validate HTU matches token endpoint
 	if dpop.HTU != c.cfg.APIGW.OauthServer.TokenEndpoint {
-		return nil, fmt.Errorf("invalid HTU in DPoP claims: %s", dpop.HTU)
+		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.OauthServer.TokenEndpoint, dpop.HTU)
 	}
+
+	// Validate HTM is POST (token endpoint only accepts POST)
 	if dpop.HTM != "POST" {
-		return nil, fmt.Errorf("invalid HTM in DPoP claims: %s", dpop.HTM)
+		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
 	}
 
 	c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
@@ -15,6 +16,8 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
+
+	"github.com/jellydator/ttlcache/v3"
 )
 
 // VCICredentialOffer implements OpenID4VCI credential offer endpoint
@@ -50,15 +53,36 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
 func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+	jti, err := oauth2.ExtractJTI(req.DPoP)
+	if err != nil {
+		c.log.Error(err, "failed to extract JTI from DPoP")
+		return nil, err
+	}
+
+	if c.dpopJTICache.Has(jti) {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
+		return nil, oauth2.ErrJTIReplay
+	}
+
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPoP)
 	if err != nil {
 		c.log.Error(err, "failed to validate DPoP JWT")
 		return nil, err
 	}
 
-	requestATH := req.HashAuthorizeToken()
+	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
 
-	if !dpop.IsAccessTokenDPoP(requestATH) {
+	// Validate HTU matches credential endpoint
+	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
+		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.issuerMetadata.CredentialEndpoint, dpop.HTU)
+	}
+
+	// Validate HTM is POST (credential endpoint only accepts POST)
+	if dpop.HTM != "POST" {
+		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
+	}
+
+	if !dpop.IsAccessTokenDPoP(req.HashAuthorizeToken()) {
 		return nil, errors.New("invalid DPoP token")
 	}
 
@@ -77,7 +101,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	document := &model.CompleteDocument{}
 
-	// TODO(masv): make this flexible, use config.yaml credential constructor
 	switch authContext.Scope[0] {
 	case "ehic", "pda1", "diploma":
 		docs := c.documentCache.Get(authContext.SessionID).Value()
