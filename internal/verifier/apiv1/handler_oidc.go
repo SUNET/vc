@@ -151,16 +151,10 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 	
 	// Construct OpenID4VP authorization request URL with query parameters
-	authzReq, err := url.Parse("openid4vp://")
-	if err != nil {
-		c.log.Error(err, "Failed to parse openid4vp URL")
-		return nil, ErrServerError
-	}
-	q := authzReq.Query()
+	q := url.Values{}
 	q.Set("client_id", c.cfg.Verifier.PublicURL)
 	q.Set("request_uri", requestObjectPath)
-	authzReq.RawQuery = q.Encode()
-	authzReqURL := authzReq.String()
+	authzReqURL := "openid4vp://?" + q.Encode()
 
 	qrCodeImageURL, err := url.JoinPath("/qr", sessionID)
 	if err != nil {
