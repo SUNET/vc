@@ -101,8 +101,35 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	document := &model.CompleteDocument{}
 
-	switch authContext.Scope[0] {
-	case "ehic", "pda1", "diploma":
+	// Retrieve document based on scope configuration from credential constructor
+	scope := authContext.Scope[0]
+	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
+	if credentialConstructor == nil {
+		c.log.Error(nil, "unsupported scope", "scope", scope)
+		return nil, errors.New("unsupported scope: " + scope)
+	}
+
+	// Determine retrieval strategy based on auth method
+	// - "basic": Identity-based authentication → retrieve from datastore
+	// - Other methods defined in auth_methods (e.g., "pid_auth"): Session-based → retrieve from cache
+	authMethod := credentialConstructor.AuthMethod
+	switch authMethod {
+	case model.AuthMethodBasic:
+		// Basic auth: retrieve from datastore using identity
+		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
+			Meta: &model.MetaData{
+				AuthenticSource: authContext.AuthenticSource,
+				VCT:             credentialConstructor.VCT,
+			},
+			Identity: authContext.Identity,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+	default:
+		// Auth methods from config (e.g., pid_auth): retrieve from session cache
+		// These credentials require presenting another credential for authentication
 		docs := c.documentCache.Get(authContext.SessionID).Value()
 		if docs == nil {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
@@ -112,34 +139,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 			document = doc
 			break
 		}
-
-	case "pid_1_5":
-		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-			Meta: &model.MetaData{
-				AuthenticSource: authContext.AuthenticSource,
-				VCT:             model.CredentialTypeUrnEudiPidARF151,
-			},
-			Identity: authContext.Identity,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-	case "pid_1_8":
-		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-			Meta: &model.MetaData{
-				AuthenticSource: authContext.AuthenticSource,
-				VCT:             model.CredentialTypeUrnEudiPidARG181,
-			},
-			Identity: authContext.Identity,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-	default:
-		c.log.Error(nil, "unsupported scope", "scope", authContext.Scope)
-		return nil, errors.New("unsupported scope")
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)
@@ -166,7 +165,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := c.resolveCredentialFormat(req)
+	format, err := req.ResolveCredentialFormat(c.issuerMetadata)
 	if err != nil {
 		c.log.Error(err, "failed to resolve credential format")
 		return nil, err
@@ -188,39 +187,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
 		return nil, errors.New("unsupported or missing credential format: " + format)
 	}
-}
-
-// resolveCredentialFormat determines the credential format from the request.
-// According to OpenID4VCI spec, the format is derived from the credential_configuration_id
-// which maps to a credential configuration in the issuer metadata.
-func (c *Client) resolveCredentialFormat(req *openid4vci.CredentialRequest) (string, error) {
-	// Use credential_configuration_id to look up the format from issuer metadata
-	if req.CredentialConfigurationID != "" {
-		if c.issuerMetadata != nil && c.issuerMetadata.CredentialConfigurationsSupported != nil {
-			if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
-				return config.Format, nil
-			}
-		}
-		return "", errors.New("unknown credential_configuration_id: " + req.CredentialConfigurationID)
-	}
-
-	// Use credential_identifier to look up the format
-	// The credential_identifier maps to a credential configuration via authorization_details from the token response
-	// For now, we'll attempt to find a matching configuration by identifier
-	if req.CredentialIdentifier != "" {
-		if c.issuerMetadata != nil && c.issuerMetadata.CredentialConfigurationsSupported != nil {
-			// Try to match by credential identifier (may be same as configuration ID in some cases)
-			if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialIdentifier]; ok {
-				return config.Format, nil
-			}
-			// If not found directly, we need the authorization context to resolve credential_identifier
-			// For now, default to dc+sd-jwt as a fallback
-			return "dc+sd-jwt", nil
-		}
-		return "", errors.New("unknown credential_identifier: " + req.CredentialIdentifier)
-	}
-
-	return "", errors.New("either credential_configuration_id or credential_identifier must be provided")
 }
 
 // issueSDJWT issues an SD-JWT credential
