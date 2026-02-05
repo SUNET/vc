@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
-	apiv1_apigw "vc/internal/apigw/apiv1"
 	"vc/internal/gen/status/apiv1_status"
-	apiv1_mockas "vc/internal/mockas/apiv1"
 	"vc/internal/ui/apiv1"
 	"vc/pkg/model"
 	"vc/pkg/vcclient"
@@ -117,7 +115,7 @@ func (s *Service) endpointHealthMockAS(ctx context.Context, c *gin.Context) (any
 }
 
 func (s *Service) endpointDocumentList(ctx context.Context, c *gin.Context) (any, error) {
-	request := &apiv1.DocumentListRequest{}
+	request := &vcclient.DocumentListQuery{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err
 	}
@@ -135,15 +133,15 @@ func (s *Service) endpointUpload(ctx context.Context, c *gin.Context) (any, erro
 		return nil, err
 	}
 
-	reply, err := s.apiv1.Upload(ctx, request)
+	err := s.apiv1.Upload(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	return reply, nil
+	return nil, nil
 }
 
 func (s *Service) endpointGetDocument(ctx context.Context, c *gin.Context) (any, error) {
-	request := &apiv1.GetDocumentRequest{}
+	request := &vcclient.DocumentGetQuery{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err
 	}
@@ -155,7 +153,7 @@ func (s *Service) endpointGetDocument(ctx context.Context, c *gin.Context) (any,
 }
 
 func (s *Service) endpointNotification(ctx context.Context, c *gin.Context) (any, error) {
-	request := &apiv1.NotificationRequest{}
+	request := &vcclient.NotificationRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err
 	}
@@ -167,7 +165,7 @@ func (s *Service) endpointNotification(ctx context.Context, c *gin.Context) (any
 }
 
 func (s *Service) endpointMockNext(ctx context.Context, c *gin.Context) (any, error) {
-	request := &apiv1_mockas.MockNextRequest{}
+	request := &vcclient.MockNextRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err
 	}
@@ -193,7 +191,7 @@ func (s *Service) endpointSearchDocuments(ctx context.Context, c *gin.Context) (
 }
 
 func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (any, error) {
-	request := &apiv1_apigw.DeleteDocumentRequest{}
+	request := &vcclient.DocumentDeleteQuery{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err
 	}

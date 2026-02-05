@@ -61,7 +61,7 @@ func TestAuthorize(t *testing.T) {
 			defer httpServer.Close()
 
 			client := mockClient(ctx, t, httpServer.URL)
-			got, httpResp, err := client.APIGW.OIDC.Authorize(ctx, tt.req)
+			got, httpResp, err := client.APIGW.OAuth.Authorize(ctx, tt.req)
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.wantResponse, got)
@@ -109,7 +109,7 @@ func TestPar(t *testing.T) {
 			defer httpServer.Close()
 
 			client := mockClient(ctx, t, httpServer.URL)
-			got, httpResp, err := client.APIGW.OIDC.Par(ctx, tt.req)
+			got, httpResp, err := client.APIGW.OAuth.Par(ctx, tt.req)
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.wantResponse, got)

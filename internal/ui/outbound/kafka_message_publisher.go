@@ -10,8 +10,7 @@ import (
 	"vc/pkg/messagebroker/kafka"
 	"vc/pkg/model"
 	"vc/pkg/trace"
-
-	apiv1_mockas "vc/internal/mockas/apiv1"
+	"vc/pkg/vcclient"
 
 	"github.com/IBM/sarama"
 )
@@ -33,7 +32,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 }
 
 // MockNext publish a MockNext message to a Kafka topic
-func (s *kafkaMessageProducer) MockNext(mockNextRequest *apiv1_mockas.MockNextRequest) error {
+func (s *kafkaMessageProducer) MockNext(mockNextRequest *vcclient.MockNextRequest) error {
 	if mockNextRequest == nil {
 		return errors.New("param mockNextRequest is nil")
 	}

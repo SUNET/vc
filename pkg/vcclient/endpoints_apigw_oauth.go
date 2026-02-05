@@ -8,14 +8,14 @@ import (
 	"vc/pkg/openid4vci"
 )
 
-type oidcHandler struct {
+type oauthHandler struct {
 	client             *Client
 	baseURL            string
 	log                *logger.Log
 	defaultContentType string
 }
 
-func (s *oidcHandler) Authorize(ctx context.Context, body *openid4vci.PARRequest) (*openid4vci.AuthorizationResponse, *http.Response, error) {
+func (s *oauthHandler) Authorize(ctx context.Context, body *openid4vci.PARRequest) (*openid4vci.AuthorizationResponse, *http.Response, error) {
 	s.log.Info("Authorize")
 
 	reply := &openid4vci.AuthorizationResponse{}
@@ -27,7 +27,7 @@ func (s *oidcHandler) Authorize(ctx context.Context, body *openid4vci.PARRequest
 	return reply, resp, nil
 }
 
-func (s *oidcHandler) Par(ctx context.Context, body *openid4vci.PARRequest) (*openid4vci.AuthorizationResponse, *http.Response, error) {
+func (s *oauthHandler) Par(ctx context.Context, body *openid4vci.PARRequest) (*openid4vci.AuthorizationResponse, *http.Response, error) {
 	s.log.Info("par")
 
 	reply := &openid4vci.AuthorizationResponse{}
@@ -39,7 +39,7 @@ func (s *oidcHandler) Par(ctx context.Context, body *openid4vci.PARRequest) (*op
 	return reply, httpResp, nil
 }
 
-func (s *oidcHandler) IssuerMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, *http.Response, error) {
+func (s *oauthHandler) IssuerMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, *http.Response, error) {
 	s.log.Info("IssuerMetadata")
 
 	reply := &openid4vci.CredentialIssuerMetadataParameters{}

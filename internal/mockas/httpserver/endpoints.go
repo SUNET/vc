@@ -3,7 +3,7 @@ package httpserver
 import (
 	"context"
 	"vc/internal/gen/status/apiv1_status"
-	"vc/internal/mockas/apiv1"
+	"vc/pkg/vcclient"
 
 	"go.opentelemetry.io/otel/codes"
 
@@ -14,7 +14,7 @@ func (s *Service) endpointMockNext(ctx context.Context, c *gin.Context) (any, er
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointMockNext")
 	defer span.End()
 
-	request := &apiv1.MockNextRequest{}
+	request := &vcclient.MockNextRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -31,7 +31,7 @@ func (s *Service) endpointMockBulk(ctx context.Context, c *gin.Context) (any, er
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointMockBulk")
 	defer span.End()
 
-	request := &apiv1.MockBulkRequest{}
+	request := &vcclient.MockBulkRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err

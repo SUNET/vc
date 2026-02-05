@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"vc/internal/gen/status/apiv1_status"
 	"vc/pkg/logger"
 	"vc/pkg/model"
+	"vc/pkg/openid4vci"
 )
 
 type rootHandler struct {
@@ -54,7 +56,7 @@ type NotificationRequest struct {
 
 // NotificationReply is the reply for Notification
 type NotificationReply struct {
-	Data any `json:"data"`
+	Data *openid4vci.QR `json:"data"`
 }
 
 // Notification gets QR code and DeepLink for a document
@@ -77,17 +79,17 @@ func (s *rootHandler) Notification(ctx context.Context, body *NotificationReques
 }
 
 // Health checks the health of the APIGW service
-func (s *rootHandler) Health(ctx context.Context) (map[string]any, *http.Response, error) {
+func (s *rootHandler) Health(ctx context.Context) (*apiv1_status.StatusReply, *http.Response, error) {
 	s.log.Debug("Health")
 
-	fullURL, err := url.Parse("/health")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "health")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, nil, err
 	}
 
-	reply := make(map[string]any)
-	resp, err := s.client.call(ctx, http.MethodGet, fullURL.String(), s.defaultContentType, nil, &reply, false, s.baseURL)
+	reply := &apiv1_status.StatusReply{}
+	resp, err := s.client.call(ctx, http.MethodGet, fullURL, "", nil, reply, false, s.baseURL)
 	if err != nil {
 		s.log.Error(err, "Health call failed")
 		return nil, resp, err

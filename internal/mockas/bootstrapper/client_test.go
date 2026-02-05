@@ -285,7 +285,7 @@ func TestUserUpload(t *testing.T) {
 			defer mockServer.Close()
 
 			// Create client with mock vcClient
-			vcClient, err := vcclient.New(&vcclient.Config{ApigwFQDN: mockServer.URL}, log)
+			vcClient, err := vcclient.New(&vcclient.Config{ApigwURL: mockServer.URL}, log)
 			require.NoError(t, err)
 
 			client := &Client{
@@ -718,7 +718,7 @@ func TestDocumentUploader(t *testing.T) {
 			defer mockServer.Close()
 
 			// Create client with mock vcClient
-			vcClient, err := vcclient.New(&vcclient.Config{ApigwFQDN: mockServer.URL}, log)
+			vcClient, err := vcclient.New(&vcclient.Config{ApigwURL: mockServer.URL}, log)
 			require.NoError(t, err)
 
 			client := &Client{

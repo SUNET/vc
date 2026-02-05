@@ -9,6 +9,7 @@ import (
 	"vc/pkg/messagebroker/kafka"
 	"vc/pkg/model"
 	"vc/pkg/trace"
+	"vc/pkg/vcclient"
 
 	"github.com/IBM/sarama"
 )
@@ -63,7 +64,7 @@ func newMockNextMessageHandler(log *logger.Log, apiv1 *apiv1.Client, tracer *tra
 
 // HandleMessage handles Kafka message of type MockNextRequest
 func (h *MockNextMessageHandler) HandleMessage(ctx context.Context, message *sarama.ConsumerMessage) error {
-	var mockNextRequest apiv1.MockNextRequest
+	var mockNextRequest vcclient.MockNextRequest
 	if err := json.Unmarshal(message.Value, &mockNextRequest); err != nil {
 		h.log.Error(err, "Failed to unmarshal message.Value from Kafka")
 		return err

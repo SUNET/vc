@@ -13,9 +13,6 @@ type Client struct {
 	cfg            *model.Cfg
 	tracer         *trace.Tracer
 	log            *logger.Log
-	apigwClient    *APIGWClient
-	mockasClient   *MockASClient
-	verifierClient *VerifierClient
 	eventPublisher EventPublisher
 
 	vcClient *vcclient.Client
@@ -27,14 +24,13 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, eventPublish
 		cfg:            cfg,
 		tracer:         tracer,
 		log:            log.New("apiv1"),
-		apigwClient:    NewAPIGWClient(cfg, tracer, log.New("apiwg_client")),
-		mockasClient:   NewMockASClient(cfg, tracer, log.New("mockas_client")),
-		verifierClient: NewVerifierClient(cfg, tracer, log.New("verifier_client")),
 		eventPublisher: eventPublisher,
 	}
 
 	vcClientConfig := &vcclient.Config{
-		ApigwFQDN: cfg.UI.Services.APIGW.BaseURL,
+		ApigwURL:    cfg.UI.Services.APIGW.BaseURL,
+		MockASURL:   cfg.UI.Services.MockAS.BaseURL,
+		VerifierURL: cfg.UI.Services.Verifier.BaseURL,
 	}
 
 	var err error

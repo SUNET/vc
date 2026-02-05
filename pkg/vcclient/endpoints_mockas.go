@@ -1,49 +1,40 @@
 package vcclient
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
+	"vc/internal/gen/status/apiv1_status"
+	"vc/pkg/logger"
 )
 
+type mockasRootHandler struct {
+	client  *Client
+	baseURL string
+	log     *logger.Log
+}
+
+type mockHandler struct {
+	client             *Client
+	serviceBaseURL     string
+	baseURL            string
+	log                *logger.Log
+	defaultContentType string
+}
+
 // Health checks the health of the MockAS service
-func (s *MockASClient) Health(ctx context.Context) (map[string]any, *http.Response, error) {
+func (s *mockasRootHandler) Health(ctx context.Context) (*apiv1_status.StatusReply, *http.Response, error) {
 	s.log.Debug("Health (MockAS)")
 
-	fullURL, err := url.JoinPath(s.baseURL, "/health")
+	fullURL, err := url.JoinPath("/health")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	jsonResp := &apiv1_status.StatusReply{}
+	resp, err := s.client.call(ctx, "GET", fullURL, "", nil, jsonResp, false, s.baseURL)
 	if err != nil {
-		return nil, nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := s.client.httpClient.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, resp, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	var jsonResp map[string]any
-	if err := json.Unmarshal(body, &jsonResp); err != nil {
 		return nil, resp, err
 	}
 
@@ -51,48 +42,66 @@ func (s *MockASClient) Health(ctx context.Context) (map[string]any, *http.Respon
 }
 
 // MockNextRequest is the request for MockNext
-type MockNextRequest map[string]any
+type MockNextRequest struct {
+	VCT                     string `json:"vct"`
+	DocumentID              string `json:"document_id"`
+	AuthenticSource         string `json:"authentic_source"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id"`
+	GivenName               string `json:"given_name"`
+	FamilyName              string `json:"family_name"`
+	BirthDate               string `json:"birth_date"`
+	CollectID               string `json:"collect_id"`
+	IdentitySchemaName      string `json:"identity_schema_name"`
+}
 
-// MockNext sends a mock action request
-func (s *MockASClient) MockNext(ctx context.Context, req MockNextRequest) (map[string]any, *http.Response, error) {
-	s.log.Debug("MockNext (MockAS)")
+// MockNextReply is the reply for MockNext
+type MockNextReply struct {
+	Upload map[string]any `json:"upload"`
+}
 
-	fullURL, err := url.JoinPath(s.baseURL, "/api/v1/mock/next")
+// Next sends a mock action request
+func (s *mockHandler) Next(ctx context.Context, req *MockNextRequest) (*MockNextReply, *http.Response, error) {
+	s.log.Debug("Next (MockAS)")
+
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "next")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, nil, err
 	}
 
-	reqBodyJSON, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(reqBodyJSON))
-	if err != nil {
-		return nil, nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
-
-	resp, err := s.client.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, resp, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	body, err := io.ReadAll(resp.Body)
+	jsonResp := &MockNextReply{}
+	resp, err := s.client.call(ctx, "POST", fullURL, s.defaultContentType, req, jsonResp, false, s.baseURL)
 	if err != nil {
 		return nil, resp, err
 	}
 
-	var jsonResp map[string]any
-	if err := json.Unmarshal(body, &jsonResp); err != nil {
+	return jsonResp, resp, nil
+}
+
+// MockBulkRequest is the request for MockBulk
+type MockBulkRequest struct {
+	MockNextRequest
+	N int `form:"n" json:"n"`
+}
+
+// MockBulkReply is the reply for MockBulk
+type MockBulkReply struct {
+	DocumentIDS []string `json:"document_ids"`
+}
+
+// Bulk sends N mock uploads to the datastore
+func (s *mockHandler) Bulk(ctx context.Context, req *MockBulkRequest) (*MockBulkReply, *http.Response, error) {
+	s.log.Debug("Bulk (MockAS)")
+
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "bulk")
+	if err != nil {
+		s.log.Error(err, "failed to construct URL")
+		return nil, nil, err
+	}
+
+	jsonResp := &MockBulkReply{}
+	resp, err := s.client.call(ctx, "POST", fullURL, s.defaultContentType, req, jsonResp, false, s.baseURL)
+	if err != nil {
 		return nil, resp, err
 	}
 

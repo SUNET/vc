@@ -11,6 +11,7 @@ import (
 	"vc/internal/verifier/db"
 	"vc/pkg/crypto"
 	"vc/pkg/jose"
+	"vc/pkg/openid4vp"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -367,7 +368,10 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 	}
 
 	// Generate authorization request URI
-	authReqURI, err := c.createAuthorizationRequestURI(req.SessionID)
+	requestObject := &openid4vp.RequestObject{
+		ClientID: c.cfg.Verifier.OIDC.Issuer,
+	}
+	authReqURI, err := requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
 	}
@@ -454,17 +458,4 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 	}
 
 	return response, nil
-}
-
-// createAuthorizationRequestURI creates the OpenID4VP authorization request URI
-func (c *Client) createAuthorizationRequestURI(sessionID string) (string, error) {
-	requestURI := fmt.Sprintf("%s/verification/request-object/%s", c.cfg.Verifier.PublicURL, sessionID)
-
-	// Build authorization request URI per OpenID4VP spec
-	authReqURI := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s",
-		c.cfg.Verifier.OIDC.Issuer,
-		requestURI,
-	)
-
-	return authReqURI, nil
 }

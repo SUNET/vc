@@ -7,10 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"vc/internal/gen/status/apiv1_status"
 )
 
 // Health checks the health of the Verifier service
-func (s *VerifierClient) Health(ctx context.Context) (map[string]any, *http.Response, error) {
+func (s *VerifierClient) Health(ctx context.Context) (*apiv1_status.StatusReply, *http.Response, error) {
 	s.log.Debug("Health (Verifier)")
 
 	fullURL, err := url.JoinPath(s.baseURL, "/health")
@@ -41,8 +42,8 @@ func (s *VerifierClient) Health(ctx context.Context) (map[string]any, *http.Resp
 		return nil, resp, err
 	}
 
-	var jsonResp map[string]any
-	if err := json.Unmarshal(body, &jsonResp); err != nil {
+	jsonResp := &apiv1_status.StatusReply{}
+	if err := json.Unmarshal(body, jsonResp); err != nil {
 		return nil, resp, err
 	}
 

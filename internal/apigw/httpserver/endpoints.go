@@ -45,7 +45,7 @@ func (s *Service) endpointNotification(ctx context.Context, c *gin.Context) (any
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointNotification")
 	defer span.End()
 
-	request := &apiv1.NotificationRequest{}
+	request := &vcclient.NotificationRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err

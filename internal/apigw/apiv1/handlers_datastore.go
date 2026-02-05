@@ -141,18 +141,6 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	return nil
 }
 
-// NotificationRequest is the request for Notification
-type NotificationRequest struct {
-	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
-	DocumentID      string `json:"document_id" validate:"required"`
-}
-
-// NotificationReply is the reply for a Notification
-type NotificationReply struct {
-	Data *openid4vci.QR `json:"data"`
-}
-
 // Notification return QR code and DeepLink for a document
 //
 //	@Summary		Notification
@@ -161,11 +149,11 @@ type NotificationReply struct {
 //	@Tags			dc4eu
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	NotificationReply		"Success"
+//	@Success		200	{object}	vcclient.NotificationReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		NotificationRequest		true	" "
+//	@Param			req	body		vcclient.NotificationRequest		true	" "
 //	@Router			/notification [post]
-func (c *Client) Notification(ctx context.Context, req *NotificationRequest) (*NotificationReply, error) {
+func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
 		VCT:             req.VCT,
@@ -175,7 +163,7 @@ func (c *Client) Notification(ctx context.Context, req *NotificationRequest) (*N
 		return nil, err
 	}
 
-	reply := &NotificationReply{
+	reply := &vcclient.NotificationReply{
 		Data: qrCode,
 	}
 	return reply, nil

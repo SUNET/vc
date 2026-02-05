@@ -41,7 +41,7 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Client, error) 
 		cfg:        cfg,
 		identities: map[string]*vcclient.UploadRequest{},
 		vcClientConfig: &vcclient.Config{
-			ApigwFQDN: cfg.MockAS.DatastoreURL,
+			ApigwURL: cfg.MockAS.DatastoreURL,
 		},
 		log: log.New("bootstrapper"),
 	}
@@ -189,7 +189,7 @@ func (c *Client) documentUploader(ctx context.Context, jsonPath string) error {
 
 	for id, request := range requests {
 		if c.shouldUpload(id) {
-			resp, err := c.vcClient.Root.Upload(ctx, request)
+			resp, err := c.vcClient.APIGW.Root.Upload(ctx, request)
 			if err != nil {
 				c.log.Error(err, "Upload", "resp", resp)
 				return err
@@ -219,7 +219,7 @@ func (c *Client) userUpload(ctx context.Context, jsonPath string) error {
 
 	for id, request := range requests {
 		if c.shouldUpload(id) {
-			resp, err := c.vcClient.User.AddPID(ctx, request)
+			resp, err := c.vcClient.APIGW.User.AddPID(ctx, request)
 			if err != nil {
 				c.log.Error(err, "User Upload", "resp", resp)
 				return err

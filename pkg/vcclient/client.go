@@ -25,10 +25,11 @@ type Client struct {
 type APIGWClient struct {
 	client   *Client
 	baseURL  string
+	log      *logger.Log
 	Document *documentHandler
 	Identity *identityHandler
 	Root     *rootHandler
-	OIDC     *oidcHandler
+	OAuth    *oauthHandler
 	User     *userHandler
 }
 
@@ -37,6 +38,8 @@ type MockASClient struct {
 	client  *Client
 	baseURL string
 	log     *logger.Log
+	Root    *mockasRootHandler
+	Mock    *mockHandler
 }
 
 // VerifierClient handles Verifier endpoints
@@ -48,7 +51,7 @@ type VerifierClient struct {
 
 // Config is the configuration for the client
 type Config struct {
-	ApigwURL    string `validate:"required"`
+	ApigwURL    string `validate:""`
 	MockASURL   string `validate:""`
 	VerifierURL string `validate:""`
 }
@@ -67,16 +70,19 @@ func New(config *Config, log *logger.Log) (*Client, error) {
 
 	defaultContentType := "application/json"
 
-	// Initialize APIGW client
-	c.APIGW = &APIGWClient{
-		client:  c,
-		baseURL: config.ApigwURL,
+	// Initialize APIGW client if configured
+	if config.ApigwURL != "" {
+		c.APIGW = &APIGWClient{
+			client:  c,
+			baseURL: config.ApigwURL,
+			log:     c.log.New("apigw"),
+		}
+		c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/document", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
+		c.APIGW.Identity = &identityHandler{client: c, serviceBaseURL: "api/v1/identity", defaultContentType: defaultContentType, log: c.log.New("apigw.identity"), baseURL: config.ApigwURL}
+		c.APIGW.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("apigw.root"), baseURL: config.ApigwURL}
+		c.APIGW.OAuth = &oauthHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("apigw.oauth"), baseURL: config.ApigwURL}
+		c.APIGW.User = &userHandler{client: c, serviceBaseURL: "api/v1/user", defaultContentType: defaultContentType, log: c.log.New("apigw.user"), baseURL: config.ApigwURL}
 	}
-	c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/document", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
-	c.APIGW.Identity = &identityHandler{client: c, serviceBaseURL: "api/v1/identity", defaultContentType: defaultContentType, log: c.log.New("apigw.identity"), baseURL: config.ApigwURL}
-	c.APIGW.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("apigw.root"), baseURL: config.ApigwURL}
-	c.APIGW.OIDC = &oidcHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("apigw.oidc"), baseURL: config.ApigwURL}
-	c.APIGW.User = &userHandler{client: c, serviceBaseURL: "api/v1/user", defaultContentType: defaultContentType, log: c.log.New("apigw.user"), baseURL: config.ApigwURL}
 
 	// Initialize MockAS client if configured
 	if config.MockASURL != "" {
@@ -85,6 +91,8 @@ func New(config *Config, log *logger.Log) (*Client, error) {
 			baseURL: config.MockASURL,
 			log:     c.log.New("mockas"),
 		}
+		c.MockAS.Root = &mockasRootHandler{client: c, baseURL: config.MockASURL, log: c.log.New("mockas.root")}
+		c.MockAS.Mock = &mockHandler{client: c, serviceBaseURL: "api/v1/mock", defaultContentType: defaultContentType, log: c.log.New("mockas.mock"), baseURL: config.MockASURL}
 	}
 
 	// Initialize Verifier client if configured
