@@ -34,12 +34,12 @@ func (r *RequestObject) CreateAuthorizationRequestURI(ctx context.Context, verif
 }
 
 func (r *RequestObject) createRequestURI(ctx context.Context, verifierHost, id string) (string, error) {
-	_, cancel := context.WithTimeout(ctx, 1*time.Second)
-	defer cancel()
-
 	if verifierHost == "" {
 		return "", ErrInvalidVerifierHost
 	}
+
+	_, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
 
 	baseURL, err := url.Parse(verifierHost)
 	if err != nil {
