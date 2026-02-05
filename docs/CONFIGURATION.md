@@ -188,14 +188,14 @@ Configuration for the API Gateway service that handles credential issuance reque
 ### APIGW
 
 | Field | Type | Description | Default | Required |
-|-------|------|-------------|---------|----------|
+|-------|------|-------------|---------|----------|  
 | `api_server` | `object` | HTTP API server configuration | - | Yes |
 | `key_config` | `object` | Signing key configuration | - | Yes |
 | `credential_offers` | `object` | Credential offer wallet configurations | - | No |
 | `oauth_server` | `object` | OAuth2 server configuration | - | No |
 | `issuer_metadata` | `object` | OpenID4VCI issuer metadata | - | No |
-| `public_url` | `string` | Public URL of this service | - | Yes |
-| `registry_external_url` | `string` | Public URL of registry service | - | Yes |
+| `public_url` | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | - | Yes |
+| `registry_public_url` | `string` | Public URL of registry service for status list URIs (must be valid HTTP/HTTPS URL) | - | Yes |
 | `saml` | `object` | SAML Service Provider configuration | - | No |
 | `oidcrp` | `object` | OIDC Relying Party configuration | - | No |
 | `issuer_client` | `object` | gRPC client config for issuer | - | Yes |
@@ -246,7 +246,7 @@ apigw:
       allowed_origins:
         - "https://wallet.example.com"
   public_url: "https://issuer.example.com"
-  registry_external_url: "https://registry.example.com"
+  registry_public_url: "https://registry.example.com"
 ```
 
 ### CredentialOffers
@@ -556,7 +556,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 |-------|------|-------------|---------|----------|
 | `api_server` | `object` | HTTP API server configuration | - | Yes |
 | `grpc_server` | `object` | gRPC server configuration | - | Yes |
-| `public_url` | `string` | Public URL of this service | - | Yes |
+| `public_url` | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | - | Yes |
 | `key_config` | `object` | Signing key configuration | - | Yes |
 | `oauth_server` | `object` | OAuth2 server configuration | - | Yes |
 | `preferred_vp_formats` | `object` | Preferred VP formats | - | No |
@@ -699,7 +699,7 @@ Configuration for the Registry service that manages credential status.
 | Field | Type | Description | Default | Required |
 |-------|------|-------------|---------|----------|
 | `api_server` | `object` | HTTP API server configuration | - | Yes |
-| `public_url` | `string` | Public URL of this service | - | Yes |
+| `public_url` | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | - | Yes |
 | `grpc_server` | `object` | gRPC server configuration | - | Yes |
 | `token_status_lists` | `object` | Token Status List configuration | - | No |
 | `admin_gui` | `object` | Admin GUI configuration | - | No |
@@ -802,7 +802,7 @@ apigw:
   api_server:
     addr: ":8080"
   public_url: "https://issuer.example.com"
-  registry_external_url: "https://registry.example.com"
+  registry_public_url: "https://registry.example.com"
   key_config:
     private_key_path: "/pki/apigw.key"
   issuer_client:
@@ -902,7 +902,7 @@ apigw:
       cert_file_path: "/pki/api_server.crt"
       key_file_path: "/pki/api_server.key"
   public_url: "https://issuer.example.com"
-  registry_external_url: "https://registry.example.com"
+  registry_public_url: "https://registry.example.com"
   issuer_client:
     addr: "issuer:8090"
     tls: true

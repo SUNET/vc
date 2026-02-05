@@ -253,7 +253,7 @@ apigw:
       users:
         admin: "secret123"
   public_url: "http://apigw.vc.docker:8080"
-  registry_external_url: "http://registry.vc.docker:8080"
+  registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
