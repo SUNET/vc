@@ -9,10 +9,9 @@ import (
 	"vc/pkg/logger"
 	"vc/pkg/model"
 
+	"github.com/creasty/defaults"
 	"github.com/kelseyhightower/envconfig"
 	"gopkg.in/yaml.v2"
-
-	"github.com/creasty/defaults"
 )
 
 type envVars struct {

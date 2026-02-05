@@ -373,7 +373,7 @@ type PKCS11 struct {
 // Registry holds the registry configuration
 type Registry struct {
 	APIServer        APIServer        `yaml:"api_server" validate:"required"`
-	PublicURL        string           `yaml:"public_url" validate:"required,url"`
+	PublicURL        string           `yaml:"public_url" validate:"required,httpurl"`
 	GRPCServer       GRPCServer       `yaml:"grpc_server" validate:"required"`
 	TokenStatusLists TokenStatusLists `yaml:"token_status_lists,omitempty" validate:"omitempty"`
 	AdminGUI         AdminGUI         `yaml:"admin_gui,omitempty" validate:"omitempty"`
@@ -398,7 +398,7 @@ type MockAS struct {
 type Verifier struct {
 	APIServer            APIServer                     `yaml:"api_server" validate:"required"`
 	GRPCServer           GRPCServer                    `yaml:"grpc_server" validate:"required"`
-	PublicURL            string                        `yaml:"public_url" validate:"required,url"`
+	PublicURL            string                        `yaml:"public_url" validate:"required,httpurl"`
 	KeyConfig            *pki.KeyConfig                `yaml:"key_config" validate:"required"`
 	OAuthServer          OAuthServer                   `yaml:"oauth_server" validate:"required"`
 	PreferredVPFormats   *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"` // Informational: tells wallets what formats/algorithms are supported
@@ -588,17 +588,17 @@ type CredentialOffers struct {
 
 // APIGW holds the datastore configuration
 type APIGW struct {
-	APIServer           APIServer        `yaml:"api_server" validate:"required"`
-	KeyConfig           *pki.KeyConfig   `yaml:"key_config" validate:"required"`
-	CredentialOffers    CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
-	OauthServer         OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
-	IssuerMetadata      IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
-	PublicURL          string         `yaml:"public_url" validate:"required,url"`
-	RegistryPublicURL  string         `yaml:"registry_public_url" validate:"required,url"` // Public URL of the registry service for constructing status list URIs
-	SAML               SAMLConfig     `yaml:"saml,omitempty" validate:"omitempty"`
-	OIDCRP              OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
-	IssuerClient        GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
-	RegistryClient      GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
+	APIServer         APIServer        `yaml:"api_server" validate:"required"`
+	KeyConfig         *pki.KeyConfig   `yaml:"key_config" validate:"required"`
+	CredentialOffers  CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
+	OauthServer       OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
+	IssuerMetadata    IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
+	PublicURL         string           `yaml:"public_url" validate:"required,httpurl"`
+	RegistryPublicURL string           `yaml:"registry_public_url" validate:"required,httpurl"` // Public URL of the registry service for constructing status list URIs
+	SAML              SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
+	OIDCRP            OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	IssuerClient      GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
+	RegistryClient    GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list

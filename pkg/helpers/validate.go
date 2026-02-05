@@ -3,6 +3,7 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -60,6 +61,35 @@ func NewValidator() (*validator.Validate, error) {
 		_, exists := authMethodsMap[authMethod]
 
 		return exists
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for httpurl - validates URLs with http or https scheme
+	err = validate.RegisterValidation("httpurl", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		// Ensure scheme is either http or https
+		scheme := strings.ToLower(parsedURL.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return false
+		}
+
+		// Ensure host is present (url.Parse accepts "http://" without host)
+		if parsedURL.Host == "" {
+			return false
+		}
+
+		return true
 	})
 	if err != nil {
 		return nil, err

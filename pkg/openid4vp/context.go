@@ -2,9 +2,13 @@ package openid4vp
 
 import (
 	"context"
+	"errors"
 	"net/url"
+	"path"
 	"time"
 )
+
+var ErrInvalidVerifierHost = errors.New("verifier host is invalid or empty")
 
 func (r *RequestObject) CreateAuthorizationRequestURI(ctx context.Context, verifierHost, id string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
@@ -33,18 +37,20 @@ func (r *RequestObject) createRequestURI(ctx context.Context, verifierHost, id s
 	_, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
 
-	requestObjectURL, err := url.JoinPath(verifierHost, "verification", "request-object")
-	if err != nil {
-		return "", err
+	if verifierHost == "" {
+		return "", ErrInvalidVerifierHost
 	}
-	requestObjectURLQuery, err := url.Parse(requestObjectURL)
+
+	baseURL, err := url.Parse(verifierHost)
 	if err != nil {
 		return "", err
 	}
 
-	q := requestObjectURLQuery.Query()
+	baseURL.Path = path.Join(baseURL.Path, "verification", "request-object")
+
+	q := baseURL.Query()
 	q.Set("id", id)
-	requestObjectURLQuery.RawQuery = q.Encode()
+	baseURL.RawQuery = q.Encode()
 
-	return requestObjectURLQuery.String(), nil
+	return baseURL.String(), nil
 }
