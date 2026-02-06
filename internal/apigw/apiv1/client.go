@@ -96,13 +96,13 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	var loadErrors []error
 	for scope, credentialInfo := range cfg.CredentialConstructor {
 		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
-			c.log.Error(err, "Failed to load VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT, "vctm_file", credentialInfo.VCTMFilePath)
-			loadErrors = append(loadErrors, fmt.Errorf("scope %s (vct=%s, file=%s): %w", scope, credentialInfo.VCT, credentialInfo.VCTMFilePath, err))
+			c.log.Error(err, "Failed to load VCTM for credential constructor", "scope", scope, "vct", credentialInfo.GetVCT(), "vctm_file", credentialInfo.VCTMFilePath)
+			loadErrors = append(loadErrors, fmt.Errorf("scope %s (vct=%s, file=%s): %w", scope, credentialInfo.GetVCT(), credentialInfo.VCTMFilePath, err))
 			continue
 		}
 
 		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
-		c.log.Info("Successfully loaded VCTM for credential constructor", "scope", scope, "vct", credentialInfo.VCT)
+		c.log.Info("Successfully loaded VCTM for credential constructor", "scope", scope, "vct", credentialInfo.GetVCT())
 	}
 
 	// If any credential constructor failed to load, fail fast with detailed error information

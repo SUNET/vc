@@ -15,7 +15,7 @@ func TestIssuerMetadata_Generate_CustomFormat(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "dc+sd-jwt", // Custom format
 			AuthMethod: "basic",
 		},
@@ -39,7 +39,7 @@ func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
 	// Test that display must come from VCTM, not from constructor
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "vc+sd-jwt",
 			AuthMethod: "basic",
 			// Display comes from VCTM, not from constructor
@@ -76,7 +76,6 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
 			AuthMethod: "basic",
 			VCTM:       mockVCTM,
 		},
@@ -103,7 +102,7 @@ func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -123,7 +122,7 @@ func TestIssuerMetadata_Generate_CustomSigningAlgorithms(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -145,7 +144,7 @@ func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -168,7 +167,7 @@ func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -192,7 +191,7 @@ func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -215,7 +214,7 @@ func TestIssuerMetadata_Generate_BatchCredentialIssuance(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -243,7 +242,7 @@ func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -263,7 +262,7 @@ func TestIssuerMetadata_Generate_NilConstructor(t *testing.T) {
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": nil, // Nil constructor should be skipped
 		"test_cred2": {
-			VCT:        "urn:test:2",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:2"},
 			AuthMethod: "basic",
 		},
 	}
@@ -296,7 +295,7 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "vc+sd-jwt",
 			AuthMethod: "basic",
 			// No custom crypto methods, etc. - testing defaults
@@ -326,17 +325,17 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"pid": {
-			VCT:        "urn:eudi:pid:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 			AuthMethod: "basic",
 			Format:     "dc+sd-jwt",
 		},
 		"ehic": {
-			VCT:        "urn:eudi:ehic:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 			AuthMethod: "pid_auth",
 			Format:     "vc+sd-jwt",
 		},
 		"diploma": {
-			VCT:        "urn:eudi:diploma:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
 			AuthMethod: "basic",
 			Format:     "vc+sd-jwt",
 		},

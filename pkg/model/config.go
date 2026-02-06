@@ -54,7 +54,7 @@ type Log struct {
 
 // Common holds the common configuration
 type Common struct {
-	Production        bool                    `yaml:"production"`
+	Production        bool                    `yaml:"production" default:"true"`
 	Log               Log                     `yaml:"log"`
 	Mongo             Mongo                   `yaml:"mongo" validate:"omitempty"`
 	Tracing           OTEL                    `yaml:"tracing" validate:"required"`
@@ -85,7 +85,7 @@ type GRPCTLS struct {
 	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.crt"` // Server certificate
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enabled true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" validate:"required_if=Enabled true"`                   // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                         // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
 }
 
 // JWTAttribute holds the jwt attribute configuration.
@@ -363,11 +363,11 @@ type GRPCClientTLS struct {
 
 // PKCS11 holds PKCS#11 HSM configuration
 type PKCS11 struct {
-	ModulePath string `yaml:"module_path" validate:"required" default:"/usr/lib/softhsm/libsofthsm2.so"`
+	ModulePath string `yaml:"module_path" default:"/usr/lib/softhsm/libsofthsm2.so"`
 	SlotID     uint   `yaml:"slot_id" default:"0"`
-	PIN        string `yaml:"pin" validate:"required" default:"1234"`
-	KeyLabel   string `yaml:"key_label" validate:"required" default:"vc_key"`
-	KeyID      string `yaml:"key_id" validate:"required" default:"vc_key_id"`
+	PIN        string `yaml:"pin" validate:"required"`
+	KeyLabel   string `yaml:"key_label" validate:"required"`
+	KeyID      string `yaml:"key_id" validate:"required"`
 }
 
 // Registry holds the registry configuration
@@ -649,7 +649,7 @@ type UI struct {
 // Cfg is the main configuration structure for this application
 type Cfg struct {
 	Common      *Common                `yaml:"common"`
-	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,dive"`
+	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,vcts_exist,dive"`
 	APIGW       *APIGW                 `yaml:"apigw" validate:"omitempty"`
 	Issuer      *Issuer                `yaml:"issuer" validate:"omitempty"`
 	Verifier    *Verifier              `yaml:"verifier" validate:"omitempty"`
@@ -680,8 +680,18 @@ func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
 	return nil
 }
 
+// GetFormatForVCT returns the format for a given VCT by looking it up in credential constructors
+// Returns empty string if not found
+func (c *Cfg) GetFormatForVCT(vct string) string {
+	for _, constructor := range c.CredentialConstructor {
+		if constructor != nil && constructor.GetVCT() == vct {
+			return constructor.Format
+		}
+	}
+	return ""
+}
+
 type CredentialConstructor struct {
-	VCT          string                         `yaml:"vct" json:"vct" validate:"required"`
 	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
 	Format       string                         `yaml:"format" json:"format" validate:"required"`
@@ -691,11 +701,10 @@ type CredentialConstructor struct {
 
 // AuthMethod defines the authentication method configuration for credential issuance
 // This specifies what credentials the wallet must present for authentication
+// The format of the credentials is determined by looking up the VCTs in the credential_constructor
 type AuthMethod struct {
 	// VCTs is the list of acceptable Verifiable Credential Type URNs for authentication
 	VCTs []string `yaml:"vcts" json:"vcts" validate:"required,min=1"`
-	// Format is the credential format (e.g., "dc+sd-jwt", "ldp_vc", "mso_mdoc")
-	Format string `yaml:"format" json:"format" validate:"required"`
 	// Claims are the identity claims to extract from the authentication credential
 	Claims []string `yaml:"claims" json:"claims" validate:"required,min=1"`
 }
@@ -715,7 +724,21 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 		return fmt.Errorf("failed to unmarshal VCTM file %s for scope %s: %w", c.VCTMFilePath, scope, err)
 	}
 
+	// Validate that VCTM has a VCT
+	if c.VCTM.VCT == "" {
+		return fmt.Errorf("VCTM file %s for scope %s is missing required 'vct' field", c.VCTMFilePath, scope)
+	}
+
 	return nil
+}
+
+// GetVCT returns the VCT from the loaded VCTM metadata
+// Returns empty string if VCTM is not loaded
+func (c *CredentialConstructor) GetVCT() string {
+	if c.VCTM == nil {
+		return ""
+	}
+	return c.VCTM.VCT
 }
 
 // Generate generates issuer metadata from configuration.
@@ -731,7 +754,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		credConfig := openid4vci.CredentialConfigurationsSupported{
 			Format: constructor.Format,
 			Scope:  scope,
-			VCT:    constructor.VCT,
+			VCT:    constructor.GetVCT(),
 			CredentialDefinition: openid4vci.CredentialDefinition{
 				Type: []string{"VerifiableCredential"},
 			},

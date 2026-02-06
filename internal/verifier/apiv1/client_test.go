@@ -250,7 +250,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError:       false,
@@ -261,10 +263,14 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma", "ehic"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 				"ehic": {
-					VCT: "urn:credential:ehic",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:ehic",
+					},
 				},
 			},
 			expectError:       false,
@@ -275,7 +281,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"openid", "diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError:       false,
@@ -293,7 +301,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"openid"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError:       true,
@@ -304,7 +314,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+
 					VCTM: &sdjwtvc.VCTM{
 						VCT:  "urn:credential:diploma",
 						Name: "Diploma Credential",
@@ -375,7 +385,9 @@ func TestClient_createDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError: false,

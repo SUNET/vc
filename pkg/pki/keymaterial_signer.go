@@ -116,11 +116,6 @@ func (s *KeyMaterialSigner) SigningMethod() jwt.SigningMethod {
 	return s.km.SigningMethod
 }
 
-// GetPrivateKey returns the underlying private key (for legacy compatibility).
-func (s *KeyMaterialSigner) GetPrivateKey() crypto.PrivateKey {
-	return s.km.PrivateKey
-}
-
 // GetCertificate returns the certificate if available.
 func (s *KeyMaterialSigner) GetCertificate() *x509.Certificate {
 	return s.km.Cert

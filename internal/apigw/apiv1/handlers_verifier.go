@@ -45,6 +45,17 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	// Get auth method configuration (guaranteed to exist by config validation)
 	authMethod := c.cfg.AuthMethods[credentialConstructor.AuthMethod]
 
+	// Get format from credential constructor based on VCT
+	// All VCTs in the same auth method should have the same format (validated at config load)
+	format := ""
+	if len(authMethod.VCTs) > 0 {
+		format = c.cfg.GetFormatForVCT(authMethod.VCTs[0])
+	}
+	if format == "" {
+		// Fallback to the format of the credential being issued
+		format = credentialConstructor.Format
+	}
+
 	// Build DCQL claims from auth method configuration
 	claimQueries := make([]openid4vp.ClaimQuery, 0, len(authMethod.Claims))
 	for _, claim := range authMethod.Claims {
@@ -57,7 +68,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		Credentials: []openid4vp.CredentialQuery{
 			{
 				ID:       authorizationContext.Scope[0],
-				Format:   authMethod.Format,
+				Format:   format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
 					VCTValues: authMethod.VCTs,
@@ -253,7 +264,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scope[0])
 	}
 
-	c.log.Debug("Found credential constructor", "scope", authCtx.Scope, "vct", credentialConstructorCfg.VCT)
+	c.log.Debug("Found credential constructor", "scope", authCtx.Scope, "vct", credentialConstructorCfg.GetVCT())
 
 	// Extract identity from validated credential
 	identity := &model.Identity{}
@@ -269,10 +280,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Retrieve documents matching the identity
 	// Use authorizationContext.VCT which should be set to the VCT value
-	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.VCT, "identity", identity)
+	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.GetVCT(), "identity", identity)
 	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
 		Meta: &model.MetaData{
-			VCT: credentialConstructorCfg.VCT,
+			VCT: credentialConstructorCfg.GetVCT(),
 		},
 		Identity: identity,
 	})

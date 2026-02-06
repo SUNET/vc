@@ -95,6 +95,78 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
+	// Register custom validation for vcts_exist - validates that VCTs in AuthMethods exist in CredentialConstructors
+	err = validate.RegisterValidation("vcts_exist", func(fl validator.FieldLevel) bool {
+		// Get the AuthMethods map
+		authMethodsField := fl.Field()
+		if authMethodsField.Kind() != reflect.Map || authMethodsField.IsNil() {
+			return true // Skip validation if not a map or nil
+		}
+
+		// Get the Cfg from top level
+		top := fl.Top()
+		if top.Kind() == reflect.Ptr {
+			top = top.Elem()
+		}
+
+		if top.Type().Name() != "Cfg" {
+			return false
+		}
+
+		// Get CredentialConstructor field from Cfg
+		credentialConstructorField := top.FieldByName("CredentialConstructor")
+		if !credentialConstructorField.IsValid() || credentialConstructorField.IsNil() {
+			return true // No constructors to validate against
+		}
+
+		credentialConstructors := credentialConstructorField.Interface().(map[string]*model.CredentialConstructor)
+
+		// Build a map of VCT -> format for quick lookup
+		vctToFormat := make(map[string]string)
+		for _, constructor := range credentialConstructors {
+			if constructor != nil {
+				vct := constructor.GetVCT()
+				if vct != "" {
+					vctToFormat[vct] = constructor.Format
+				}
+			}
+		}
+
+		// Validate each AuthMethod
+		authMethodsMap := authMethodsField.Interface().(map[string]*model.AuthMethod)
+		for authMethodName, authMethod := range authMethodsMap {
+			if authMethod == nil {
+				continue
+			}
+
+			// Check each VCT in the auth method
+			for _, vct := range authMethod.VCTs {
+				if _, exists := vctToFormat[vct]; !exists {
+					// VCT not found in any credential constructor
+					return false
+				}
+			}
+
+			// Validate that all VCTs in the same auth method have the same format
+			if len(authMethod.VCTs) > 1 {
+				firstFormat := vctToFormat[authMethod.VCTs[0]]
+				for i := 1; i < len(authMethod.VCTs); i++ {
+					format := vctToFormat[authMethod.VCTs[i]]
+					if format != firstFormat {
+						// Mixed formats in same auth method
+						_ = authMethodName // Suppress unused warning
+						return false
+					}
+				}
+			}
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return validate, nil
 }
 

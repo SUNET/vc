@@ -25,25 +25,21 @@ func TestMetadataGenerationAgainstReference(t *testing.T) {
 	// Setup credential constructors
 	credentialConstructors := map[string]*CredentialConstructor{
 		"diploma": {
-			VCT:          "urn:eudi:diploma:1",
 			VCTMFilePath: "../../metadata/vctm_diploma.json",
 			Format:       "dc+sd-jwt",
 			AuthMethod:   "basic",
 		},
 		"pid_1_5": {
-			VCT:          "urn:eudi:pid:arf-1.5:1",
 			VCTMFilePath: "../../metadata/vctm_pid_arf_1_5.json",
 			Format:       "dc+sd-jwt",
 			AuthMethod:   "pid_auth",
 		},
 		"ehic": {
-			VCT:          "urn:eudi:ehic:1",
 			VCTMFilePath: "../../metadata/vctm_ehic.json",
 			Format:       "dc+sd-jwt",
 			AuthMethod:   "basic",
 		},
 		"pda1": {
-			VCT:          "urn:eudi:pda1:1",
 			VCTMFilePath: "../../metadata/vctm_pda1.json",
 			Format:       "dc+sd-jwt",
 			AuthMethod:   "basic",

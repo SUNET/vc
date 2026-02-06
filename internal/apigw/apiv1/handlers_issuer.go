@@ -119,7 +119,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
 			Meta: &model.MetaData{
 				AuthenticSource: authContext.AuthenticSource,
-				VCT:             credentialConstructor.VCT,
+				VCT:             credentialConstructor.GetVCT(),
 			},
 			Identity: authContext.Identity,
 		})
