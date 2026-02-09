@@ -7,7 +7,7 @@ import (
 	"crypto/rsa"
 	"testing"
 	"time"
-	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
 
@@ -18,16 +18,16 @@ import (
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
 	ctx := t.Context()
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(nil)
 
 	// Create a test session
-	session := &db.Session{
-		ID:        "test-session-123",
+	authCtx := &cache.AuthorizationContext{
+		SessionID: "test-session-123",
 		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-		Status:    db.SessionStatusPending,
+		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
+		Status:    cache.SessionStatusPending,
 	}
-	err := mockDB.Sessions.Create(ctx, session)
+	err := client.authContextCache.Create(ctx, authCtx)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -77,32 +77,28 @@ func TestGetQRCode(t *testing.T) {
 // TestPollSession tests session polling
 func TestPollSession(t *testing.T) {
 	ctx := t.Context()
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(nil)
 
 	// Create test sessions with different statuses
-	pendingSession := &db.Session{
-		ID:        "pending-session",
+	pendingSession := &cache.AuthorizationContext{
+		SessionID: "pending-session",
 		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-		Status:    db.SessionStatusPending,
+		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
+		Status:    cache.SessionStatusPending,
 	}
-	err := mockDB.Sessions.Create(ctx, pendingSession)
+	err := client.authContextCache.Create(ctx, pendingSession)
 	require.NoError(t, err)
 
-	codeIssuedSession := &db.Session{
-		ID:        "code-issued-session",
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-		Status:    db.SessionStatusCodeIssued,
-		OIDCRequest: db.OIDCRequest{
-			RedirectURI: "https://example.com/callback",
-			State:       "test-state-123",
-		},
-		Tokens: db.TokenSet{
-			AuthorizationCode: "auth-code-xyz",
-		},
+	codeIssuedSession := &cache.AuthorizationContext{
+		SessionID:   "code-issued-session",
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(1 * time.Hour).Unix(),
+		Status:      cache.SessionStatusCodeIssued,
+		RedirectURI: "https://example.com/callback",
+		State:       "test-state-123",
+		Code:        "auth-code-xyz",
 	}
-	err = mockDB.Sessions.Create(ctx, codeIssuedSession)
+	err = client.authContextCache.Create(ctx, codeIssuedSession)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -118,7 +114,7 @@ func TestPollSession(t *testing.T) {
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp *PollSessionResponse) {
-				assert.Equal(t, string(db.SessionStatusPending), resp.Status)
+				assert.Equal(t, string(cache.SessionStatusPending), resp.Status)
 				assert.Empty(t, resp.RedirectURI)
 			},
 		},
@@ -129,7 +125,7 @@ func TestPollSession(t *testing.T) {
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp *PollSessionResponse) {
-				assert.Equal(t, string(db.SessionStatusCodeIssued), resp.Status)
+				assert.Equal(t, string(cache.SessionStatusCodeIssued), resp.Status)
 				assert.NotEmpty(t, resp.RedirectURI)
 				assert.Contains(t, resp.RedirectURI, "code=auth-code-xyz")
 				assert.Contains(t, resp.RedirectURI, "state=test-state-123")
@@ -163,85 +159,71 @@ func TestPollSession(t *testing.T) {
 // TestGetUserInfo tests the UserInfo endpoint
 func TestGetUserInfo(t *testing.T) {
 	ctx := t.Context()
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(nil)
 
 	// Create a session with verified claims
-	session := &db.Session{
-		ID:        "userinfo-session",
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-		Status:    db.SessionStatusTokenIssued,
-		OIDCRequest: db.OIDCRequest{
-			ClientID: "test-client",
-			Scope:    "openid profile email",
-		},
-		Tokens: db.TokenSet{
-			AccessToken:          "test-access-token-123",
-			AccessTokenExpiresAt: time.Now().Add(1 * time.Hour),
-		},
+	authCtx := &cache.AuthorizationContext{
+		SessionID:            "userinfo-session",
+		CreatedAt:            time.Now(),
+		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
+		Status:               cache.SessionStatusTokenIssued,
+		ClientID:             "test-client",
+		Scopes:               []string{"openid", "profile", "email"},
+		AccessToken:          "test-access-token-123",
+		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 		VerifiedClaims: map[string]any{
 			"sub":   "user-123",
 			"name":  "John Doe",
 			"email": "john@example.com",
 		},
 	}
-	err := mockDB.Sessions.Create(ctx, session)
+	err := client.authContextCache.Create(ctx, authCtx)
 	require.NoError(t, err)
 
 	// Create a session with expired token
-	expiredSession := &db.Session{
-		ID:        "expired-session",
-		CreatedAt: time.Now().Add(-2 * time.Hour),
-		ExpiresAt: time.Now().Add(-1 * time.Hour),
-		Status:    db.SessionStatusTokenIssued,
-		Tokens: db.TokenSet{
-			AccessToken:          "expired-token",
-			AccessTokenExpiresAt: time.Now().Add(-1 * time.Hour), // Expired 1 hour ago
-		},
+	expiredSession := &cache.AuthorizationContext{
+		SessionID:            "expired-session",
+		CreatedAt:            time.Now().Add(-2 * time.Hour),
+		ExpiresAt:            time.Now().Add(-1 * time.Hour).Unix(),
+		Status:               cache.SessionStatusTokenIssued,
+		AccessToken:          "expired-token",
+		AccessTokenExpiresAt: time.Now().Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
 	}
-	err = mockDB.Sessions.Create(ctx, expiredSession)
+	err = client.authContextCache.Create(ctx, expiredSession)
 	require.NoError(t, err)
 
 	// Create a session without 'sub' claim
-	sessionNoSub := &db.Session{
-		ID:        "session-no-sub",
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-		Status:    db.SessionStatusTokenIssued,
-		OIDCRequest: db.OIDCRequest{
-			ClientID: "test-client",
-		},
-		Tokens: db.TokenSet{
-			AccessToken:          "token-no-sub",
-			AccessTokenExpiresAt: time.Now().Add(1 * time.Hour),
-		},
+	sessionNoSub := &cache.AuthorizationContext{
+		SessionID:            "session-no-sub",
+		CreatedAt:            time.Now(),
+		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
+		Status:               cache.SessionStatusTokenIssued,
+		ClientID:             "test-client",
+		AccessToken:          "token-no-sub",
+		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 		VerifiedClaims: map[string]any{
 			"name":  "Jane Doe",
 			"email": "jane@example.com",
 		},
 	}
-	err = mockDB.Sessions.Create(ctx, sessionNoSub)
+	err = client.authContextCache.Create(ctx, sessionNoSub)
 	require.NoError(t, err)
 
 	// Create a session with non-string 'sub' claim
-	sessionNonStringSub := &db.Session{
-		ID:        "session-non-string-sub",
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(1 * time.Hour),
-		Status:    db.SessionStatusTokenIssued,
-		OIDCRequest: db.OIDCRequest{
-			ClientID: "test-client",
-		},
-		Tokens: db.TokenSet{
-			AccessToken:          "token-non-string-sub",
-			AccessTokenExpiresAt: time.Now().Add(1 * time.Hour),
-		},
+	sessionNonStringSub := &cache.AuthorizationContext{
+		SessionID:            "session-non-string-sub",
+		CreatedAt:            time.Now(),
+		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
+		Status:               cache.SessionStatusTokenIssued,
+		ClientID:             "test-client",
+		AccessToken:          "token-non-string-sub",
+		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 		VerifiedClaims: map[string]any{
 			"sub":  12345, // Non-string sub
 			"name": "Bob Smith",
 		},
 	}
-	err = mockDB.Sessions.Create(ctx, sessionNonStringSub)
+	err = client.authContextCache.Create(ctx, sessionNonStringSub)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -341,16 +323,16 @@ func TestGetOIDCRequestObject(t *testing.T) {
 	tests := []struct {
 		name         string
 		sessionID    string
-		sessionSetup func(*db.Session)
+		authCtxSetup func(*cache.AuthorizationContext)
 		expectError  bool
 	}{
 		{
 			name:      "successful request object generation",
 			sessionID: "session-ro-1",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.ExpiresAt = time.Now().Add(10 * time.Minute)
-				s.OpenID4VP.DCQL = &openid4vp.DCQL{
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.ExpiresAt = time.Now().Add(10 * time.Minute).Unix()
+				s.DCQLQuery = &openid4vp.DCQL{
 					Credentials: []openid4vp.CredentialQuery{
 						{
 							ID:     "test_credential",
@@ -367,23 +349,23 @@ func TestGetOIDCRequestObject(t *testing.T) {
 		{
 			name:      "expired session",
 			sessionID: "session-expired",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.ExpiresAt = time.Now().Add(-10 * time.Minute) // Already expired
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.ExpiresAt = time.Now().Add(-10 * time.Minute).Unix() // Already expired
 			},
 			expectError: true,
 		},
 		{
 			name:         "session not found",
 			sessionID:    "non-existent-session",
-			sessionSetup: nil,
+			authCtxSetup: nil,
 			expectError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Generate RSA key for signing
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -391,22 +373,18 @@ func TestGetOIDCRequestObject(t *testing.T) {
 			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := &db.Session{
-					ID:        tt.sessionID,
-					Status:    db.SessionStatusPending,
-					CreatedAt: time.Now(),
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://client.example.com/callback",
-						Scope:       "openid",
-					},
-					OpenID4VP: db.OpenID4VPSession{},
-					Tokens:    db.TokenSet{},
+			if tt.authCtxSetup != nil {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:   tt.sessionID,
+					Status:      cache.SessionStatusPending,
+					CreatedAt:   time.Now(),
+					ExpiresAt:   time.Now().Add(10 * time.Minute).Unix(),
+					ClientID:    "test-client",
+					RedirectURI: "https://client.example.com/callback",
+					Scopes:      []string{"openid"},
 				}
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -425,8 +403,8 @@ func TestGetOIDCRequestObject(t *testing.T) {
 				assert.NotEmpty(t, resp.RequestObject)
 
 				// Verify nonce was stored in session
-				session, _ := mockDB.Sessions.GetByID(ctx, tt.sessionID)
-				assert.NotEmpty(t, session.OpenID4VP.RequestObjectNonce)
+				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				assert.NotEmpty(t, authCtx.RequestObjectNonce)
 			}
 		})
 	}
@@ -441,7 +419,7 @@ func TestProcessCallback(t *testing.T) {
 		sessionID        string
 		code             string
 		errorParam       string
-		sessionSetup     func(*db.Session)
+		authCtxSetup     func(*cache.AuthorizationContext)
 		expectError      bool
 		expectErrorInURI bool
 	}{
@@ -449,10 +427,10 @@ func TestProcessCallback(t *testing.T) {
 			name:      "successful callback with code",
 			sessionID: "session-callback-1",
 			code:      "auth-code-123",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusCodeIssued
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusCodeIssued
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError: false,
 		},
@@ -460,10 +438,10 @@ func TestProcessCallback(t *testing.T) {
 			name:       "callback with error",
 			sessionID:  "session-callback-error",
 			errorParam: "access_denied",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError:      false,
 			expectErrorInURI: true,
@@ -472,32 +450,29 @@ func TestProcessCallback(t *testing.T) {
 			name:         "session not found",
 			sessionID:    "non-existent-session",
 			code:         "some-code",
-			sessionSetup: nil,
+			authCtxSetup: nil,
 			expectError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := &db.Session{
-					ID:        tt.sessionID,
-					Status:    db.SessionStatusPending,
-					CreatedAt: time.Now(),
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://client.example.com/callback",
-						Scope:       "openid",
-						State:       "client-state",
-					},
-					Tokens: db.TokenSet{},
+			if tt.authCtxSetup != nil {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:   tt.sessionID,
+					Status:      cache.SessionStatusPending,
+					CreatedAt:   time.Now(),
+					ExpiresAt:   time.Now().Add(10 * time.Minute).Unix(),
+					ClientID:    "test-client",
+					RedirectURI: "https://client.example.com/callback",
+					Scopes:      []string{"openid"},
+					State:       "client-state",
 				}
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -624,76 +599,76 @@ func TestProcessDirectPost(t *testing.T) {
 		vpToken                string
 		response               string
 		presentationSubmission string
-		sessionSetup           func(*db.Session)
+		authCtxSetup           func(*cache.AuthorizationContext)
 		expectError            bool
 		expectedErrorType      error
 		expectShowCredentials  bool
-		expectedStatus         db.SessionStatus
+		expectedStatus         cache.SessionStatus
 	}{
 		{
 			name:      "successful direct post with VP token",
 			sessionID: "session-dp-1",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
-				s.OIDCRequest.Scope = "openid profile"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
+				s.Scopes = []string{"openid", "profile"}
 			},
 			expectError:    false,
-			expectedStatus: db.SessionStatusCodeIssued,
+			expectedStatus: cache.SessionStatusCodeIssued,
 		},
 		{
 			name:      "direct post with DC API response parameter",
 			sessionID: "session-dp-2",
 			response:  "encrypted.jwt.token",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError:    false,
-			expectedStatus: db.SessionStatusCodeIssued,
+			expectedStatus: cache.SessionStatusCodeIssued,
 		},
 		{
 			name:                   "direct post with presentation submission",
 			sessionID:              "session-dp-3",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
 			presentationSubmission: `{"id":"submission-1","definition_id":"def-1"}`,
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError:    false,
-			expectedStatus: db.SessionStatusCodeIssued,
+			expectedStatus: cache.SessionStatusCodeIssued,
 		},
 		{
 			name:                   "direct post with invalid presentation submission JSON",
 			sessionID:              "session-dp-4",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
 			presentationSubmission: `{invalid json}`,
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError:    false, // Should continue even with invalid presentation submission
-			expectedStatus: db.SessionStatusCodeIssued,
+			expectedStatus: cache.SessionStatusCodeIssued,
 		},
 		{
 			name:      "direct post with show credentials enabled",
 			sessionID: "session-dp-5",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
-				s.OIDCRequest.ShowCredentialDetails = true
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
+				s.ShowCredentialDetails = true
 			},
 			expectError:           false,
 			expectShowCredentials: true,
-			expectedStatus:        db.SessionStatusAwaitingPresentation,
+			expectedStatus:        cache.SessionStatusAwaitingPresentation,
 		},
 		{
 			name:              "session not found",
@@ -705,8 +680,8 @@ func TestProcessDirectPost(t *testing.T) {
 		{
 			name:      "no vp_token or response provided",
 			sessionID: "session-dp-6",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
 			},
 			expectError:       true,
 			expectedErrorType: ErrInvalidRequest,
@@ -715,38 +690,34 @@ func TestProcessDirectPost(t *testing.T) {
 			name:      "direct post without redirect URI",
 			sessionID: "session-dp-7",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.RedirectURI = "" // No redirect URI
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "" // No redirect URI
+				s.State = "client-state"
 			},
 			expectError:    false,
-			expectedStatus: db.SessionStatusCodeIssued,
+			expectedStatus: cache.SessionStatusCodeIssued,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := &db.Session{
-					ID:        tt.sessionID,
-					Status:    db.SessionStatusPending,
-					CreatedAt: time.Now(),
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://client.example.com/callback",
-						Scope:       "openid",
-						State:       "client-state",
-					},
-					OpenID4VP: db.OpenID4VPSession{},
-					Tokens:    db.TokenSet{},
+			if tt.authCtxSetup != nil {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:   tt.sessionID,
+					Status:      cache.SessionStatusPending,
+					CreatedAt:   time.Now(),
+					ExpiresAt:   time.Now().Add(10 * time.Minute).Unix(),
+					ClientID:    "test-client",
+					RedirectURI: "https://client.example.com/callback",
+					Scopes:      []string{"openid"},
+					State:       "client-state",
 				}
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -770,13 +741,13 @@ func TestProcessDirectPost(t *testing.T) {
 				require.NotNil(t, resp)
 
 				// Verify session was updated
-				session, _ := mockDB.Sessions.GetByID(ctx, tt.sessionID)
-				assert.Equal(t, tt.expectedStatus, session.Status)
+				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				assert.Equal(t, tt.expectedStatus, authCtx.Status)
 
 				if tt.expectShowCredentials {
 					// Should redirect to display page
 					assert.Contains(t, resp.RedirectURI, "/verification/display/")
-				} else if session.OIDCRequest.RedirectURI != "" {
+				} else if authCtx.RedirectURI != "" {
 					// Should have authorization code in redirect
 					assert.Contains(t, resp.RedirectURI, "code=")
 					assert.Contains(t, resp.RedirectURI, "state=")

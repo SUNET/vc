@@ -33,24 +33,26 @@ type Client struct {
 	notify *notify.Service
 
 	// Metadata
-	oauth2Metadata  *oauth2.AuthorizationServerMetadata
-	credentialCache *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
+	oauth2Metadata *oauth2.AuthorizationServerMetadata
 
 	// PKI for signing
 	pkiSigner      pki.Signer
 	pkiSigningCert *x509.Certificate
 	pkiSignerChain []string
-	openid4vp      *openid4vp.Client
-	trustService   *openid4vp.TrustService
+
+	// Clients and services
+	openid4vp    *openid4vp.Client
+	trustService *openid4vp.TrustService
 
 	// Cache
-	authContextCache *cache.AuthContextCache
-
-	// OIDC related
+	authContextCache            *cache.AuthContextCache
+	credentialCache             *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
 	ephemeralEncryptionKeyCache *ttlcache.Cache[string, jwk.Key]
 	requestObjectCache          *ttlcache.Cache[string, *openid4vp.RequestObject]
-	presentationBuilder         *openid4vp.PresentationBuilder
-	claimsExtractor             *openid4vp.ClaimsExtractor
+
+	// OIDC related
+	presentationBuilder *openid4vp.PresentationBuilder
+	claimsExtractor     *openid4vp.ClaimsExtractor
 }
 
 // New creates a new instance of the public api
@@ -67,7 +69,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	c := &Client{
 		cfg:                         cfg,
 		db:                          db,
-		authContextCache:            cache.NewAuthContextCache(10 * time.Minute),
+		authContextCache:            cache.NewAuthContextCache(15 * time.Minute),
 		log:                         log.New("apiv1"),
 		notify:                      notify,
 		openid4vp:                   openid4vpClient,
@@ -78,8 +80,8 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	}
 
 	// Start caches
-	go c.credentialCache.Start()
 	go c.ephemeralEncryptionKeyCache.Start()
+	go c.credentialCache.Start()
 	go c.requestObjectCache.Start()
 
 	// Load PKI signing key and chain for request object signing and OIDC

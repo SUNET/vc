@@ -36,10 +36,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	// Get credential constructor to determine auth method
-	credentialConstructor := c.cfg.GetCredentialConstructor(authorizationContext.Scope[0])
+	credentialConstructor := c.cfg.GetCredentialConstructor(authorizationContext.Scopes[0])
 	if credentialConstructor == nil {
-		c.log.Error(nil, "credential constructor not found for scope", "scope", authorizationContext.Scope[0])
-		return "", errors.New("credential constructor not found for scope: " + authorizationContext.Scope[0])
+		c.log.Error(nil, "credential constructor not found for scope", "scope", authorizationContext.Scopes[0])
+		return "", errors.New("credential constructor not found for scope: " + authorizationContext.Scopes[0])
 	}
 
 	// Get auth method configuration (guaranteed to exist by config validation)
@@ -67,7 +67,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	dcql := &openid4vp.DCQL{
 		Credentials: []openid4vp.CredentialQuery{
 			{
-				ID:       authorizationContext.Scope[0],
+				ID:       authorizationContext.Scopes[0],
 				Format:   format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
@@ -82,10 +82,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
 				Options: [][]string{
-					{authorizationContext.Scope[0]},
+					{authorizationContext.Scopes[0]},
 				},
 				Required: false,
-				Purpose:  "fetch credential for " + authorizationContext.Scope[0],
+				Purpose:  "fetch credential for " + authorizationContext.Scopes[0],
 			},
 		},
 	}
@@ -210,13 +210,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
-	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scope)
+	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
 
 	// Extract VP Token from the map using the scope as key
-	vpToken, ok := vpResponse.VPToken[authCtx.Scope[0]]
+	vpToken, ok := vpResponse.VPToken[authCtx.Scopes[0]]
 	if !ok {
-		c.log.Error(nil, "VP Token not found for scope", "scope", authCtx.Scope[0], "available_keys", vpResponse.VPToken)
-		return nil, fmt.Errorf("VP Token not found for scope: %s", authCtx.Scope[0])
+		c.log.Error(nil, "VP Token not found for scope", "scope", authCtx.Scopes[0], "available_keys", vpResponse.VPToken)
+		return nil, fmt.Errorf("VP Token not found for scope: %s", authCtx.Scopes[0])
 	}
 
 	// Prepare response parameters
@@ -258,13 +258,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Get credential constructor configuration using GetCredentialConstructor
 	// This looks up by VCT (primary key) or CommonName (for backward compatibility)
-	credentialConstructorCfg := c.cfg.GetCredentialConstructor(authCtx.Scope[0])
+	credentialConstructorCfg := c.cfg.GetCredentialConstructor(authCtx.Scopes[0])
 	if credentialConstructorCfg == nil {
-		c.log.Error(nil, "credential constructor not found for scope", "scope", authCtx.Scope[0])
-		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scope[0])
+		c.log.Error(nil, "credential constructor not found for scope", "scope", authCtx.Scopes[0])
+		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scopes[0])
 	}
 
-	c.log.Debug("Found credential constructor", "scope", authCtx.Scope, "vct", credentialConstructorCfg.GetVCT())
+	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.GetVCT())
 
 	// Extract identity from validated credential
 	identity := &model.Identity{}

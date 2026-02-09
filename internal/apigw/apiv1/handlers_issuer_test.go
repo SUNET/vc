@@ -277,7 +277,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	mockAuthCtx := &mockAuthContextColl{
 		authContext: &cache.AuthorizationContext{
 			SessionID: "session-123",
-			Scope:     []string{"pid"},
+			Scopes:    []string{"pid"},
 			Identity: &model.Identity{
 				AuthenticSourcePersonID: "test-identity-123",
 				GivenName:               "John",
@@ -303,7 +303,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	// Verify mock authorization context retrieval
 	authCtx, err := mockAuthCtx.GetWithAccessToken(ctx, accessToken)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pid"}, authCtx.Scope)
+	assert.Equal(t, []string{"pid"}, authCtx.Scopes)
 	assert.Equal(t, nonce, authCtx.Nonce)
 	assert.NotNil(t, authCtx.Token)
 	assert.Equal(t, accessToken, authCtx.Token.AccessToken)

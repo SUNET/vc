@@ -94,7 +94,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	if len(authContext.Scope) == 0 {
+	if len(authContext.Scopes) == 0 {
 		c.log.Error(nil, "no scope found in auth context")
 		return nil, errors.New("no scope found in auth context")
 	}
@@ -102,7 +102,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	document := &model.CompleteDocument{}
 
 	// Retrieve document based on scope configuration from credential constructor
-	scope := authContext.Scope[0]
+	scope := authContext.Scopes[0]
 	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
 	if credentialConstructor == nil {
 		c.log.Error(nil, "unsupported scope", "scope", scope)
@@ -174,14 +174,14 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	// Branch based on requested credential format
 	switch format {
 	case "mso_mdoc":
-		return c.issueMDoc(ctx, authContext.Scope[0], documentData, jwk, document)
+		return c.issueMDoc(ctx, authContext.Scopes[0], documentData, jwk, document)
 
 	case "vc+sd-jwt", "dc+sd-jwt":
-		return c.issueSDJWT(ctx, authContext.Scope[0], documentData, jwk, document)
+		return c.issueSDJWT(ctx, authContext.Scopes[0], documentData, jwk, document)
 
 	case "ldp_vc", "vc+ld+json":
 		// W3C VC 2.0 Data Integrity credential
-		return c.issueVC20(ctx, authContext.Scope[0], documentData, document, req)
+		return c.issueVC20(ctx, authContext.Scopes[0], documentData, document, req)
 
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)

@@ -115,33 +115,33 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	defer span.End()
 
 	// Get the session
-	session, err := c.db.Sessions.GetByID(ctx, sessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to get session")
 		return ErrServerError
 	}
-	if session == nil {
+	if authCtx == nil {
 		c.log.Info("Session not found", "session_id", sessionID)
 		return ErrInvalidRequest
 	}
 
 	// Update session with VP token and presentation submission
-	session.OpenID4VP.VPToken = vpToken
-	session.OpenID4VP.PresentationSubmission = presentationSubmission
+	authCtx.VPToken = vpToken
+	authCtx.PresentationSubmission = presentationSubmission
 
 	// Extract claims from VP token
 	claims, err := c.extractClaimsFromVPToken(ctx, vpToken)
 	if err != nil {
 		c.log.Error(err, "Failed to extract claims from VP token")
-		session.Status = "error"
-		if err := c.db.Sessions.Update(ctx, session); err != nil {
+		authCtx.Status = "error"
+		if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session with error status")
 		}
 		return err
 	}
 
 	// Store verified claims
-	session.VerifiedClaims = claims
+	authCtx.VerifiedClaims = claims
 
 	// Generate authorization code
 	authCode, err := crypto.GenerateSecureToken(0, 32)
@@ -149,12 +149,12 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		c.log.Error(err, "Failed to generate authorization code")
 		return err
 	}
-	session.Tokens.AuthorizationCode = authCode
-	session.Tokens.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
-	session.Status = "code_issued"
+	authCtx.Code = authCode
+	authCtx.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix()
+	authCtx.Status = "code_issued"
 
 	// Update session
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return ErrServerError
 	}
@@ -187,25 +187,25 @@ func (c *Client) GetPollStatus(ctx context.Context, sessionID string) (*SessionP
 	ctx, span := c.tracer.Start(ctx, "apiv1:get_poll_status")
 	defer span.End()
 
-	session, err := c.db.Sessions.GetByID(ctx, sessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to get session")
 		return nil, ErrServerError
 	}
-	if session == nil {
+	if authCtx == nil {
 		return nil, ErrNotFound
 	}
 
 	response := &SessionPollResponse{
-		SessionID: session.ID,
-		Status:    string(session.Status),
+		SessionID: authCtx.SessionID,
+		Status:    string(authCtx.Status),
 	}
 
 	// Include authorization code if available
-	if session.Status == "code_issued" && session.Tokens.AuthorizationCode != "" {
-		response.AuthorizationCode = session.Tokens.AuthorizationCode
-		response.RedirectURI = session.OIDCRequest.RedirectURI
-		response.State = session.OIDCRequest.State
+	if authCtx.Status == "code_issued" && authCtx.Code != "" {
+		response.AuthorizationCode = authCtx.Code
+		response.RedirectURI = authCtx.RedirectURI
+		response.State = authCtx.State
 	}
 
 	return response, nil

@@ -2,9 +2,9 @@ package apiv1
 
 import (
 	"context"
-	"fmt"
+	"net/url"
 	"time"
-	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/crypto"
 )
 
@@ -22,18 +22,18 @@ type UpdateSessionPreferenceResponse struct {
 // UpdateSessionPreference updates the session's credential display preference
 func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSessionPreferenceRequest) (*UpdateSessionPreferenceResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, req.SessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
-	if session == nil {
+	if authCtx == nil {
 		return nil, ErrSessionNotFound
 	}
 
 	// Update preference
-	session.OIDCRequest.ShowCredentialDetails = req.ShowCredentialDetails
+	authCtx.ShowCredentialDetails = req.ShowCredentialDetails
 
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session preference")
 		return nil, ErrServerError
 	}
@@ -54,32 +54,42 @@ type ConfirmCredentialDisplayResponse struct {
 // ConfirmCredentialDisplay handles user confirmation after viewing credential details
 func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string, req *ConfirmCredentialDisplayRequest) (*ConfirmCredentialDisplayResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, sessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
-	if session == nil {
+	if authCtx == nil {
 		return nil, ErrSessionNotFound
 	}
 
 	// Verify session is in the right state
-	if session.Status != db.SessionStatusAwaitingPresentation {
-		c.log.Info("Session not awaiting confirmation", "session_id", sessionID, "status", session.Status)
+	if authCtx.Status != cache.SessionStatusAwaitingPresentation {
+		c.log.Info("Session not awaiting confirmation", "session_id", sessionID, "status", authCtx.Status)
 		return nil, ErrInvalidRequest
 	}
 
 	if !req.Confirmed {
 		// User cancelled - return error to RP
 		c.log.Info("User cancelled credential display", "session_id", sessionID)
-		session.Status = db.SessionStatusError
-		c.db.Sessions.Update(ctx, session)
+		authCtx.Status = cache.SessionStatusError
+		if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+			c.log.Error(err, "Failed to update session after cancellation")
+			return nil, ErrServerError
+		}
 
 		redirectURI := ""
-		if session.OIDCRequest.RedirectURI != "" && session.OIDCRequest.State != "" {
-			redirectURI = fmt.Sprintf("%s?error=access_denied&error_description=User+cancelled&state=%s",
-				session.OIDCRequest.RedirectURI,
-				session.OIDCRequest.State,
-			)
+		if authCtx.RedirectURI != "" && authCtx.State != "" {
+			u, err := url.Parse(authCtx.RedirectURI)
+			if err != nil {
+				c.log.Error(err, "Failed to parse redirect URI")
+				return nil, ErrServerError
+			}
+			q := u.Query()
+			q.Set("error", "access_denied")
+			q.Set("error_description", "User cancelled")
+			q.Set("state", authCtx.State)
+			u.RawQuery = q.Encode()
+			redirectURI = u.String()
 		}
 
 		return &ConfirmCredentialDisplayResponse{
@@ -95,11 +105,11 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 	}
 	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 
-	session.Status = db.SessionStatusCodeIssued
-	session.Tokens.AuthorizationCode = code
-	session.Tokens.CodeExpiresAt = codeExpiry
+	authCtx.Status = cache.SessionStatusCodeIssued
+	authCtx.Code = code
+	authCtx.CodeExpiresAt = codeExpiry.Unix()
 
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session after confirmation")
 		return nil, ErrServerError
 	}
@@ -108,12 +118,17 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 
 	// Return redirect URI with code
 	redirectURI := ""
-	if session.OIDCRequest.RedirectURI != "" {
-		redirectURI = fmt.Sprintf("%s?code=%s&state=%s",
-			session.OIDCRequest.RedirectURI,
-			code,
-			session.OIDCRequest.State,
-		)
+	if authCtx.RedirectURI != "" {
+		u, err := url.Parse(authCtx.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("code", code)
+		q.Set("state", authCtx.State)
+		u.RawQuery = q.Encode()
+		redirectURI = u.String()
 	}
 
 	return &ConfirmCredentialDisplayResponse{
@@ -144,28 +159,28 @@ type GetCredentialDisplayDataResponse struct {
 // GetCredentialDisplayData retrieves data needed for the credential display page
 func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentialDisplayDataRequest) (*GetCredentialDisplayDataResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, req.SessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
-	if session == nil {
+	if authCtx == nil {
 		return nil, ErrSessionNotFound
 	}
 
 	// Verify session has VP data
-	if session.OpenID4VP.VPToken == "" {
+	if authCtx.VPToken == "" {
 		c.log.Info("Session has no VP token", "session_id", req.SessionID)
 		return nil, ErrInvalidRequest
 	}
 
 	// Build response
 	response := &GetCredentialDisplayDataResponse{
-		SessionID:         session.ID,
-		VPToken:           session.OpenID4VP.VPToken,
-		Claims:            session.VerifiedClaims,
-		ClientID:          session.OIDCRequest.ClientID,
-		RedirectURI:       session.OIDCRequest.RedirectURI,
-		State:             session.OIDCRequest.State,
+		SessionID:         authCtx.SessionID,
+		VPToken:           authCtx.VPToken,
+		Claims:            authCtx.VerifiedClaims,
+		ClientID:          authCtx.ClientID,
+		RedirectURI:       authCtx.RedirectURI,
+		State:             authCtx.State,
 		ShowRawCredential: c.cfg.Verifier.CredentialDisplay.ShowRawCredential,
 		ShowClaims:        c.cfg.Verifier.CredentialDisplay.ShowClaims,
 		PrimaryColor:      c.cfg.Verifier.AuthorizationPageCSS.PrimaryColor,

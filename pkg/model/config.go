@@ -694,6 +694,7 @@ func (c *Cfg) GetFormatForVCT(vct string) string {
 type CredentialConstructor struct {
 	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
+	VCT          string                         `yaml:"vct" json:"vct" validate:"required"`
 	Format       string                         `yaml:"format" json:"format" validate:"required"`
 	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,auth_method_exists"`
 	Attributes   map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
@@ -732,13 +733,13 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 	return nil
 }
 
-// GetVCT returns the VCT from the loaded VCTM metadata
-// Returns empty string if VCTM is not loaded
+// GetVCT returns the VCT from the loaded VCTM metadata.
+// Falls back to the VCT field from the YAML configuration if VCTM is not yet loaded.
 func (c *CredentialConstructor) GetVCT() string {
-	if c.VCTM == nil {
-		return ""
+	if c.VCTM != nil && c.VCTM.VCT != "" {
+		return c.VCTM.VCT
 	}
-	return c.VCTM.VCT
+	return c.VCT
 }
 
 // Generate generates issuer metadata from configuration.

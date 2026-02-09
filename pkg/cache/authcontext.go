@@ -74,6 +74,9 @@ func (c *AuthContextCache) Save(ctx context.Context, doc *AuthorizationContext) 
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
+	if doc.AccessToken != "" {
+		c.indices[fmt.Sprintf("access_token:%s", doc.AccessToken)] = doc.SessionID
+	}
 
 	return nil
 }
@@ -362,4 +365,177 @@ func (c *AuthContextCache) updateIndices(doc *AuthorizationContext) {
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
+	if doc.AccessToken != "" {
+		c.indices[fmt.Sprintf("access_token:%s", doc.AccessToken)] = doc.SessionID
+	}
+}
+
+// GetByID retrieves an authorization context by session ID
+func (c *AuthContextCache) GetByID(ctx context.Context, id string) (*AuthorizationContext, error) {
+	if id == "" {
+		return nil, errors.New("id cannot be empty")
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	item := c.cache.Get(id)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	return item.Value(), nil
+}
+
+// GetByAuthorizationCode retrieves an authorization context by authorization code
+func (c *AuthContextCache) GetByAuthorizationCode(ctx context.Context, code string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	indexKey := fmt.Sprintf("code:%s", code)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	return item.Value(), nil
+}
+
+// GetByAccessToken retrieves an authorization context by access token
+func (c *AuthContextCache) GetByAccessToken(ctx context.Context, token string) (*AuthorizationContext, error) {
+	if token == "" {
+		return nil, errors.New("token cannot be empty")
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	indexKey := fmt.Sprintf("access_token:%s", token)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	return item.Value(), nil
+}
+
+// Update updates an existing authorization context
+func (c *AuthContextCache) Update(ctx context.Context, doc *AuthorizationContext) error {
+	if doc == nil {
+		return errors.New("document cannot be nil")
+	}
+
+	if doc.SessionID == "" {
+		return errors.New("sessionID is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if exists
+	item := c.cache.Get(doc.SessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	// Update in cache
+	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
+
+	// Update secondary indices
+	c.updateIndices(doc)
+
+	return nil
+}
+
+// Delete removes an authorization context from the cache
+func (c *AuthContextCache) Delete(ctx context.Context, id string) error {
+	if id == "" {
+		return errors.New("id cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Get the doc first to clean up indices
+	item := c.cache.Get(id)
+	if item != nil {
+		doc := item.Value()
+		// Clean up indices
+		c.deleteIndices(doc)
+	}
+
+	// Delete from primary cache
+	c.cache.Delete(id)
+
+	return nil
+}
+
+// deleteIndices removes secondary indices for a document (must be called with lock held)
+func (c *AuthContextCache) deleteIndices(doc *AuthorizationContext) {
+	if doc.RequestURI != "" {
+		delete(c.indices, fmt.Sprintf("request_uri:%s", doc.RequestURI))
+	}
+	if doc.Code != "" {
+		delete(c.indices, fmt.Sprintf("code:%s", doc.Code))
+	}
+	if doc.State != "" {
+		delete(c.indices, fmt.Sprintf("state:%s", doc.State))
+	}
+	if doc.VerifierResponseCode != "" {
+		delete(c.indices, fmt.Sprintf("verifier_response_code:%s", doc.VerifierResponseCode))
+	}
+	if doc.EphemeralEncryptionKeyID != "" {
+		delete(c.indices, fmt.Sprintf("ephemeral_key_id:%s", doc.EphemeralEncryptionKeyID))
+	}
+	if doc.RequestObjectID != "" {
+		delete(c.indices, fmt.Sprintf("request_object_id:%s", doc.RequestObjectID))
+	}
+	if doc.Token != nil && doc.Token.AccessToken != "" {
+		delete(c.indices, fmt.Sprintf("access_token:%s", doc.Token.AccessToken))
+	}
+	if doc.AccessToken != "" {
+		delete(c.indices, fmt.Sprintf("access_token:%s", doc.AccessToken))
+	}
+}
+
+// MarkCodeAsUsed marks an authorization code as used (forfeited)
+func (c *AuthContextCache) MarkCodeAsUsed(ctx context.Context, id string) error {
+	if id == "" {
+		return errors.New("id cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item := c.cache.Get(id)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	doc := item.Value()
+	doc.Forfeited = true
+
+	// Update the primary cache entry
+	c.cache.Set(id, doc, ttlcache.DefaultTTL)
+
+	return nil
+}
+
+// Create is an alias for Save to match the Session API
+func (c *AuthContextCache) Create(ctx context.Context, doc *AuthorizationContext) error {
+	return c.Save(ctx, doc)
 }

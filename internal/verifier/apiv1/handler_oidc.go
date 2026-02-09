@@ -10,6 +10,7 @@ import (
 	"time"
 	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/jose"
 
@@ -103,31 +104,6 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate session ID: %w", err)
 	}
-	session := &db.Session{
-		ID:        sessionID,
-		CreatedAt: time.Now(),
-		// Session expires after the configured duration
-		ExpiresAt: time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.SessionDuration) * time.Second),
-		Status:    db.SessionStatusPending,
-		OIDCRequest: db.OIDCRequest{
-			ClientID:            req.ClientID,
-			RedirectURI:         req.RedirectURI,
-			Scope:               req.Scope,
-			State:               req.State,
-			Nonce:               req.Nonce,
-			CodeChallenge:       req.CodeChallenge,
-			CodeChallengeMethod: req.CodeChallengeMethod,
-			ResponseType:        req.ResponseType,
-			ResponseMode:        req.ResponseMode,
-			Display:             req.Display,
-			Prompt:              req.Prompt,
-			MaxAge:              req.MaxAge,
-			UILocales:           strings.Split(req.UILocales, " "),
-			IDTokenHint:         req.IDTokenHint,
-			LoginHint:           req.LoginHint,
-			ACRValues:           strings.Split(req.ACRValues, " "),
-		},
-	}
 
 	// Create DCQL query based on requested scopes
 	dcqlQuery, err := c.createDCQLQuery(ctx, requestedScopes)
@@ -135,10 +111,27 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		c.log.Error(err, "Failed to create DCQL query")
 		return nil, ErrServerError
 	}
-	session.OpenID4VP.DCQL = dcqlQuery
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID: sessionID,
+		CreatedAt: time.Now(),
+		// Session expires after the configured duration
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.SessionDuration) * time.Second).Unix(),
+		Status:              cache.SessionStatusPending,
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		Scopes:              requestedScopes,
+		State:               req.State,
+		Nonce:               req.Nonce,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		ResponseType:        req.ResponseType,
+		ResponseMode:        req.ResponseMode,
+		DCQLQuery:           dcqlQuery,
+	}
 
 	// Save session
-	if err := c.db.Sessions.Create(ctx, session); err != nil {
+	if err := c.authContextCache.Create(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to create session")
 		return nil, ErrServerError
 	}
@@ -149,7 +142,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		c.log.Error(err, "Failed to construct request object path")
 		return nil, ErrServerError
 	}
-	
+
 	// Construct OpenID4VP authorization request URL with query parameters
 	q := url.Values{}
 	q.Set("client_id", c.cfg.Verifier.PublicURL)
@@ -161,7 +154,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		c.log.Error(err, "Failed to construct QR code image URL")
 		return nil, ErrServerError
 	}
-	
+
 	pollURL, err := url.JoinPath("/poll", sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to construct poll URL")
@@ -256,25 +249,25 @@ func (c *Client) Token(ctx context.Context, req *TokenRequest) (*TokenResponse, 
 
 func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
 	// Get session by authorization code
-	session, err := c.db.Sessions.GetByAuthorizationCode(ctx, req.Code)
+	authCtx, err := c.authContextCache.GetByAuthorizationCode(ctx, req.Code)
 	if err != nil {
-		c.log.Error(err, "Failed to get session by code")
-		return nil, ErrServerError
+		c.log.Info("Session not found for code", "error", err)
+		return nil, ErrInvalidGrant
 	}
-	if session == nil {
+	if authCtx == nil {
 		c.log.Info("Session not found for code")
 		return nil, ErrInvalidGrant
 	}
 
 	// Check if code has already been used
-	if session.Tokens.AuthorizationCodeUsed {
-		c.log.Info("Authorization code already used", "session_id", session.ID)
+	if authCtx.Forfeited {
+		c.log.Info("Authorization code already used", "session_id", authCtx.SessionID)
 		return nil, ErrInvalidGrant
 	}
 
 	// Check if code has expired
-	if time.Now().After(session.Tokens.CodeExpiresAt) {
-		c.log.Info("Authorization code expired", "session_id", session.ID)
+	if time.Now().Unix() > authCtx.CodeExpiresAt {
+		c.log.Info("Authorization code expired", "session_id", authCtx.SessionID)
 		return nil, ErrInvalidGrant
 	}
 
@@ -294,31 +287,31 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 
 	// Verify client ID matches
-	if session.OIDCRequest.ClientID != req.ClientID {
+	if authCtx.ClientID != req.ClientID {
 		c.log.Info("Client ID mismatch")
 		return nil, ErrInvalidGrant
 	}
 
 	// Verify redirect URI matches
-	if session.OIDCRequest.RedirectURI != req.RedirectURI {
+	if authCtx.RedirectURI != req.RedirectURI {
 		c.log.Info("Redirect URI mismatch")
 		return nil, ErrInvalidGrant
 	}
 
 	// Validate PKCE if present
-	if session.OIDCRequest.CodeChallenge != "" {
-		if err := utils.ValidatePKCE(req.CodeVerifier, session.OIDCRequest.CodeChallenge, session.OIDCRequest.CodeChallengeMethod); err != nil {
+	if authCtx.CodeChallenge != "" {
+		if err := utils.ValidatePKCE(req.CodeVerifier, authCtx.CodeChallenge, authCtx.CodeChallengeMethod); err != nil {
 			c.log.Info("PKCE validation failed")
 			return nil, ErrInvalidGrant
 		}
 	}
 
 	// Mark code as used
-	if err := c.db.Sessions.MarkCodeAsUsed(ctx, session.ID); err != nil {
+	if err := c.authContextCache.MarkCodeAsUsed(ctx, authCtx.SessionID); err != nil {
 		c.log.Error(err, "Failed to mark code as used")
 		return nil, ErrServerError
 	}
-	session.Tokens.AuthorizationCodeUsed = true
+	authCtx.Forfeited = true
 
 	// Generate tokens
 	accessToken, err := crypto.GenerateSecureToken(0, 32)
@@ -333,22 +326,21 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 
 	// Generate ID token
-	idToken, err := c.generateIDToken(ctx, session, client)
+	idToken, err := c.generateIDToken(ctx, authCtx, client)
 	if err != nil {
 		c.log.Error(err, "Failed to generate ID token")
 		return nil, ErrServerError
 	}
 
 	// Update session with tokens
-	session.Tokens.AccessToken = accessToken
-	session.Tokens.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.AccessTokenDuration) * time.Second)
-	session.Tokens.IDToken = idToken
-	session.Tokens.RefreshToken = refreshToken
-	session.Tokens.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second)
-	session.Tokens.TokenType = "Bearer"
-	session.Status = db.SessionStatusTokenIssued
+	authCtx.AccessToken = accessToken
+	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.AccessTokenDuration) * time.Second).Unix()
+	authCtx.IDToken = idToken
+	authCtx.RefreshToken = refreshToken
+	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second).Unix()
+	authCtx.Status = cache.SessionStatusTokenIssued
 
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}
@@ -359,7 +351,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		ExpiresIn:    c.cfg.Verifier.OIDC.AccessTokenDuration,
 		RefreshToken: refreshToken,
 		IDToken:      idToken,
-		Scope:        session.OIDCRequest.Scope,
+		Scope:        strings.Join(authCtx.Scopes, " "),
 	}, nil
 }
 
@@ -369,11 +361,11 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, req *TokenRequest)
 }
 
 // generateIDToken creates a signed ID token
-func (c *Client) generateIDToken(ctx context.Context, session *db.Session, client *db.Client) (string, error) {
+func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.AuthorizationContext, client *db.Client) (string, error) {
 	now := time.Now()
 
 	// Generate subject identifier
-	walletID := session.OpenID4VP.WalletID
+	walletID := authCtx.WalletID
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
@@ -385,11 +377,11 @@ func (c *Client) generateIDToken(ctx context.Context, session *db.Session, clien
 		"aud":   client.ClientID,
 		"exp":   now.Add(idTokenTTL).Unix(),
 		"iat":   now.Unix(),
-		"nonce": session.OIDCRequest.Nonce,
+		"nonce": authCtx.Nonce,
 	}
 
 	// Add verified claims
-	maps.Copy(claims, session.VerifiedClaims)
+	maps.Copy(claims, authCtx.VerifiedClaims)
 
 	// Use jose.MakeJWT to sign with pki.Signer
 	header := jwt.MapClaims{

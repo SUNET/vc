@@ -3,7 +3,7 @@ package apiv1
 import (
 	"testing"
 	"time"
-	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,12 +45,12 @@ func TestUpdateSessionPreference(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
 			if tt.sessionExists {
-				session := createTestDBSessionForPrefs(tt.sessionID)
-				err := mockDB.Sessions.Create(ctx, session)
+				authCtx := createTestDBSessionForPrefs(tt.sessionID)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -70,8 +70,8 @@ func TestUpdateSessionPreference(t *testing.T) {
 				assert.True(t, response.Success)
 
 				// Verify preference was stored
-				session, _ := mockDB.Sessions.GetByID(ctx, tt.sessionID)
-				assert.Equal(t, tt.preference, session.OIDCRequest.ShowCredentialDetails)
+				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				assert.Equal(t, tt.preference, authCtx.ShowCredentialDetails)
 			}
 		})
 	}
@@ -82,22 +82,22 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 	ctx := t.Context()
 
 	tests := []struct {
-		name              string
-		sessionID         string
-		confirmed         bool
-		sessionSetup      func(*db.Session)
-		expectError       bool
-		expectCodeIssued  bool
-		expectErrorInURI  bool
+		name             string
+		sessionID        string
+		confirmed        bool
+		authCtxSetup     func(*cache.AuthorizationContext)
+		expectError      bool
+		expectCodeIssued bool
+		expectErrorInURI bool
 	}{
 		{
 			name:      "successful confirmation",
 			sessionID: "session-confirm-1",
 			confirmed: true,
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusAwaitingPresentation
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusAwaitingPresentation
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError:      false,
 			expectCodeIssued: true,
@@ -106,20 +106,20 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 			name:      "user cancelled",
 			sessionID: "session-cancel-1",
 			confirmed: false,
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusAwaitingPresentation
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusAwaitingPresentation
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
-			expectError:     false,
+			expectError:      false,
 			expectErrorInURI: true,
 		},
 		{
 			name:      "wrong session status",
 			sessionID: "session-wrong-status",
 			confirmed: true,
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending // Not awaiting presentation
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending // Not awaiting presentation
 			},
 			expectError: true,
 		},
@@ -127,20 +127,20 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 			name:         "session not found",
 			sessionID:    "non-existent-session",
 			confirmed:    true,
-			sessionSetup: nil,
+			authCtxSetup: nil,
 			expectError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := createTestDBSessionForPrefs(tt.sessionID)
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+			if tt.authCtxSetup != nil {
+				authCtx := createTestDBSessionForPrefs(tt.sessionID)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -159,9 +159,9 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 
 				if tt.expectCodeIssued {
 					// Verify code was issued
-					session, _ := mockDB.Sessions.GetByID(ctx, tt.sessionID)
-					assert.Equal(t, db.SessionStatusCodeIssued, session.Status)
-					assert.NotEmpty(t, session.Tokens.AuthorizationCode)
+					authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+					assert.Equal(t, cache.SessionStatusCodeIssued, authCtx.Status)
+					assert.NotEmpty(t, authCtx.Code)
 					assert.Contains(t, response.RedirectURI, "code=")
 					assert.Contains(t, response.RedirectURI, "state=")
 				}
@@ -170,8 +170,8 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 					// Verify error response in redirect URI
 					assert.Contains(t, response.RedirectURI, "error=access_denied")
 					// Session should be in error status
-					session, _ := mockDB.Sessions.GetByID(ctx, tt.sessionID)
-					assert.Equal(t, db.SessionStatusError, session.Status)
+					authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+					assert.Equal(t, cache.SessionStatusError, authCtx.Status)
 				}
 			}
 		})
@@ -185,22 +185,22 @@ func TestGetCredentialDisplayData(t *testing.T) {
 	tests := []struct {
 		name          string
 		sessionID     string
-		sessionSetup  func(*db.Session)
+		authCtxSetup  func(*cache.AuthorizationContext)
 		expectError   bool
 		expectVPToken bool
 	}{
 		{
 			name:      "successful retrieval with VP token",
 			sessionID: "session-display-1",
-			sessionSetup: func(s *db.Session) {
-				s.OpenID4VP.VPToken = "eyJhbGciOiJFUzI1NiJ9.test.signature"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.VPToken = "eyJhbGciOiJFUzI1NiJ9.test.signature"
 				s.VerifiedClaims = map[string]any{
 					"given_name":  "John",
 					"family_name": "Doe",
 				}
-				s.OIDCRequest.ClientID = "test-client"
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
-				s.OIDCRequest.State = "client-state"
+				s.ClientID = "test-client"
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
 			},
 			expectError:   false,
 			expectVPToken: true,
@@ -208,29 +208,29 @@ func TestGetCredentialDisplayData(t *testing.T) {
 		{
 			name:      "session without VP token",
 			sessionID: "session-no-vp",
-			sessionSetup: func(s *db.Session) {
+			authCtxSetup: func(s *cache.AuthorizationContext) {
 				// Don't set VP token
-				s.OIDCRequest.ClientID = "test-client"
+				s.ClientID = "test-client"
 			},
 			expectError: true,
 		},
 		{
 			name:         "session not found",
 			sessionID:    "non-existent-session",
-			sessionSetup: nil,
+			authCtxSetup: nil,
 			expectError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := createTestDBSessionForPrefs(tt.sessionID)
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+			if tt.authCtxSetup != nil {
+				authCtx := createTestDBSessionForPrefs(tt.sessionID)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -262,21 +262,18 @@ func TestGetCredentialDisplayData(t *testing.T) {
 }
 
 // Helper function for session preference tests
-func createTestDBSessionForPrefs(sessionID string) *db.Session {
-	return &db.Session{
-		ID:        sessionID,
-		Status:    db.SessionStatusPending,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-		OIDCRequest: db.OIDCRequest{
-			ClientID:     "test-client",
-			RedirectURI:  "https://client.example.com/callback",
-			ResponseType: "code",
-			Scope:        "openid",
-			State:        "client-state",
-		},
-		OpenID4VP:      db.OpenID4VPSession{},
-		Tokens:         db.TokenSet{},
-		VerifiedClaims: make(map[string]any),
+func createTestDBSessionForPrefs(sessionID string) *cache.AuthorizationContext {
+	authCtx := &cache.AuthorizationContext{
+		SessionID:    sessionID,
+		Status:       cache.SessionStatusPending,
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(10 * time.Minute).Unix(),
+		ClientID:     "test-client",
+		RedirectURI:  "https://client.example.com/callback",
+		ResponseType: "code",
+		Scopes:       []string{"openid"},
+		State:        "client-state",
 	}
+
+	return authCtx
 }

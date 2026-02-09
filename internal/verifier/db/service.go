@@ -22,10 +22,9 @@ type Service struct {
 	tracer     *trace.Tracer
 	probeStore *apiv1_status.StatusProbeStore
 
-	// OIDC session and client collections (from verifier-proxy)
-	// Using interfaces to allow mocking in tests
-	Sessions SessionStore
-	Clients  ClientStore
+	// OIDC client collection
+	// Using interface to allow mocking in tests
+	Clients ClientStore
 }
 
 // New creates a new database service
@@ -46,10 +45,6 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 
 	// Initialize OIDC collections (from verifier-proxy)
 	oidcDB := service.dbClient.Database("verifier")
-	service.Sessions = &SessionCollection{
-		Service:    service,
-		collection: oidcDB.Collection("sessions"),
-	}
 	service.Clients = &ClientCollection{
 		Service:    service,
 		collection: oidcDB.Collection("clients"),
@@ -61,11 +56,10 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 }
 
 // NewServiceWithMocks creates a db.Service with mock implementations for testing
-// This allows unit tests to inject mock SessionStore and ClientStore implementations
-func NewServiceWithMocks(sessions SessionStore, clients ClientStore) *Service {
+// This allows unit tests to inject mock ClientStore implementation
+func NewServiceWithMocks(clients ClientStore) *Service {
 	return &Service{
-		Sessions: sessions,
-		Clients:  clients,
+		Clients: clients,
 	}
 }
 

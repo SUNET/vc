@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"vc/pkg/cache"
@@ -67,7 +68,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 
 	authorizationContext := &cache.AuthorizationContext{
 		SessionID:                sessionID,
-		Scope:                    scopes,
+		Scopes:                   scopes,
 		Code:                     "",
 		RequestURI:               "",
 		WalletURI:                "",
@@ -92,8 +93,13 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
+	responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "direct_post")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct response URI: %w", err)
+	}
+
 	requestObject := &openid4vp.RequestObject{
-		ResponseURI:  fmt.Sprintf("%s/verification/direct_post", c.cfg.Verifier.PublicURL),
+		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
 		ISS:          strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"),
 		ClientID:     authorizationContext.ClientID,

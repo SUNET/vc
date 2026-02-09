@@ -5,7 +5,7 @@ import (
 	"crypto/rsa"
 	"testing"
 	"time"
-	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
@@ -231,7 +231,7 @@ func TestHandleDirectPost(t *testing.T) {
 		sessionID              string
 		vpToken                string
 		presentationSubmission any
-		sessionSetup           func(*db.Session)
+		authCtxSetup           func(*cache.AuthorizationContext)
 		expectError            bool
 	}{
 		{
@@ -239,8 +239,8 @@ func TestHandleDirectPost(t *testing.T) {
 			sessionID:              "test-session-dp-1",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test.signature",
 			presentationSubmission: map[string]any{"id": "submission-1"},
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
 			},
 			expectError: false,
 		},
@@ -249,7 +249,7 @@ func TestHandleDirectPost(t *testing.T) {
 			sessionID:              "non-existent-session",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test.signature",
 			presentationSubmission: map[string]any{"id": "submission-1"},
-			sessionSetup:           nil,
+			authCtxSetup:           nil,
 			expectError:            true,
 		},
 		{
@@ -257,9 +257,9 @@ func TestHandleDirectPost(t *testing.T) {
 			sessionID:              "test-session-dp-2",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.payload.signature",
 			presentationSubmission: nil,
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
-				s.OIDCRequest.Scope = "openid profile"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.Scopes = []string{"openid", "profile"}
 			},
 			expectError: false,
 		},
@@ -267,13 +267,13 @@ func TestHandleDirectPost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := createTestDBSession(tt.sessionID)
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+			if tt.authCtxSetup != nil {
+				authCtx := createTestDBSession(tt.sessionID)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -285,11 +285,11 @@ func TestHandleDirectPost(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Verify session was updated
-				session, _ := mockDB.Sessions.GetByID(ctx, tt.sessionID)
-				assert.NotNil(t, session)
-				assert.Equal(t, tt.vpToken, session.OpenID4VP.VPToken)
-				assert.Equal(t, db.SessionStatusCodeIssued, session.Status)
-				assert.NotEmpty(t, session.Tokens.AuthorizationCode)
+				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				assert.NotNil(t, authCtx)
+				assert.Equal(t, tt.vpToken, authCtx.VPToken)
+				assert.Equal(t, cache.SessionStatusCodeIssued, authCtx.Status)
+				assert.NotEmpty(t, authCtx.Code)
 			}
 		})
 	}
@@ -302,15 +302,15 @@ func TestGetPollStatus(t *testing.T) {
 	tests := []struct {
 		name         string
 		sessionID    string
-		sessionSetup func(*db.Session)
+		authCtxSetup func(*cache.AuthorizationContext)
 		expectError  bool
 		expectedCode bool
 	}{
 		{
 			name:      "pending session",
 			sessionID: "pending-session-1",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusPending
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
 			},
 			expectError:  false,
 			expectedCode: false,
@@ -318,11 +318,11 @@ func TestGetPollStatus(t *testing.T) {
 		{
 			name:      "code issued session",
 			sessionID: "code-session-1",
-			sessionSetup: func(s *db.Session) {
-				s.Status = db.SessionStatusCodeIssued
-				s.Tokens.AuthorizationCode = "test-auth-code"
-				s.OIDCRequest.State = "client-state"
-				s.OIDCRequest.RedirectURI = "https://client.example.com/callback"
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusCodeIssued
+				s.Code = "test-auth-code"
+				s.State = "client-state"
+				s.RedirectURI = "https://client.example.com/callback"
 			},
 			expectError:  false,
 			expectedCode: true,
@@ -330,20 +330,20 @@ func TestGetPollStatus(t *testing.T) {
 		{
 			name:         "session not found",
 			sessionID:    "non-existent-session",
-			sessionSetup: nil,
+			authCtxSetup: nil,
 			expectError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(nil)
 
 			// Setup session if needed
-			if tt.sessionSetup != nil {
-				session := createTestDBSession(tt.sessionID)
-				tt.sessionSetup(session)
-				err := mockDB.Sessions.Create(ctx, session)
+			if tt.authCtxSetup != nil {
+				authCtx := createTestDBSession(tt.sessionID)
+				tt.authCtxSetup(authCtx)
+				err := client.authContextCache.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -436,20 +436,18 @@ func TestExtractClaimsFromVPToken(t *testing.T) {
 }
 
 // createTestDBSession creates a test session for testing
-func createTestDBSession(sessionID string) *db.Session {
-	return &db.Session{
-		ID:        sessionID,
-		Status:    db.SessionStatusPending,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-		OIDCRequest: db.OIDCRequest{
-			ClientID:     "test-client",
-			RedirectURI:  "https://client.example.com/callback",
-			ResponseType: "code",
-			Scope:        "openid",
-			State:        "client-state",
-		},
-		OpenID4VP: db.OpenID4VPSession{},
-		Tokens:    db.TokenSet{},
+func createTestDBSession(sessionID string) *cache.AuthorizationContext {
+	authCtx := &cache.AuthorizationContext{
+		SessionID:    sessionID,
+		Status:       cache.SessionStatusPending,
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(10 * time.Minute).Unix(),
+		ClientID:     "test-client",
+		RedirectURI:  "https://client.example.com/callback",
+		ResponseType: "code",
+		Scopes:       []string{"openid"},
+		State:        "client-state",
 	}
+
+	return authCtx
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -193,7 +194,10 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 	}
 
 	// Build response
-	registrationClientURI := fmt.Sprintf("%s/register/%s", c.cfg.Verifier.PublicURL, clientID)
+	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", clientID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct registration client URI: %w", err)
+	}
 
 	response := &ClientRegistrationResponse{
 		ClientID:                clientID,
@@ -254,6 +258,11 @@ func (c *Client) GetClientInformation(ctx context.Context, clientID string, regi
 	// Build response
 	scope := strings.Join(client.AllowedScopes, " ")
 
+	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", clientID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct registration client URI: %w", err)
+	}
+
 	response := &ClientInformationResponse{
 		ClientRegistrationResponse: ClientRegistrationResponse{
 			ClientID:                clientID,
@@ -274,7 +283,7 @@ func (c *Client) GetClientInformation(ctx context.Context, clientID string, regi
 			JWKS:                    client.JWKS,
 			SoftwareID:              client.SoftwareID,
 			SoftwareVersion:         client.SoftwareVersion,
-			RegistrationClientURI:   fmt.Sprintf("%s/register/%s", c.cfg.Verifier.PublicURL, clientID),
+			RegistrationClientURI:   registrationClientURI,
 			ApplicationType:         client.ApplicationType,
 			SectorIdentifierURI:     client.SectorIdentifierURI,
 			SubjectType:             client.SubjectType,
@@ -399,6 +408,11 @@ func (c *Client) UpdateClient(ctx context.Context, clientID string, registration
 	// Build response (same as GET)
 	scope := strings.Join(client.AllowedScopes, " ")
 
+	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", clientID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct registration client URI: %w", err)
+	}
+
 	response := &ClientRegistrationResponse{
 		ClientID:                clientID,
 		ClientIDIssuedAt:        client.ClientIDIssuedAt,
@@ -418,7 +432,7 @@ func (c *Client) UpdateClient(ctx context.Context, clientID string, registration
 		JWKS:                    client.JWKS,
 		SoftwareID:              client.SoftwareID,
 		SoftwareVersion:         client.SoftwareVersion,
-	RegistrationClientURI:   fmt.Sprintf("%s/register/%s", c.cfg.Verifier.PublicURL, clientID),
+		RegistrationClientURI:   registrationClientURI,
 		ApplicationType:         client.ApplicationType,
 		SectorIdentifierURI:     client.SectorIdentifierURI,
 		SubjectType:             client.SubjectType,

@@ -36,7 +36,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		SessionID:           uuid.NewString(),
 		Code:                uuid.NewString(),
 		RequestURI:          requestURI,
-		Scope:               []string{req.Scope},
+		Scopes:              []string{req.Scope},
 		Forfeited:           false,
 		CodeChallenge:       req.CodeChallenge,
 		CodeChallengeMethod: req.CodeChallengeMethod,
@@ -99,7 +99,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 
 	response := &openid4vci.AuthorizationResponse{
 		RedirectURL: redirectURL,
-		Scope:       authorizationContext.Scope[0],
+		Scope:       authorizationContext.Scopes[0],
 		SessionID:   authorizationContext.SessionID,
 		ClientID:    authorizationContext.ClientID,
 	}
@@ -143,7 +143,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		AccessToken:          accessToken,
 		TokenType:            "DPoP",
 		ExpiresIn:            3600, // 1 hour
-		Scope:                authorizationContext.Scope[0],
+		Scope:                authorizationContext.Scopes[0],
 		State:                authorizationContext.State,
 		CNonce:               authorizationContext.Nonce,
 		CNonceExpiresIn:      0,

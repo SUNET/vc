@@ -153,9 +153,9 @@ func TestPKCS11Defaults(t *testing.T) {
 
 	assert.Equal(t, "/usr/lib/softhsm/libsofthsm2.so", cfg.ModulePath)
 	assert.Equal(t, uint(0), cfg.SlotID)
-	assert.Equal(t, "1234", cfg.PIN)
-	assert.Equal(t, "vc_key", cfg.KeyLabel)
-	assert.Equal(t, "vc_key_id", cfg.KeyID)
+	assert.Empty(t, cfg.PIN)
+	assert.Empty(t, cfg.KeyLabel)
+	assert.Empty(t, cfg.KeyID)
 }
 
 func TestAdminGUIDefaults(t *testing.T) {

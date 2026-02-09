@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"image/png"
 	"net/url"
+	"strings"
 	"time"
-	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/jose"
 	"vc/pkg/openid4vp"
@@ -165,7 +166,7 @@ func (c *Client) GetJWKS(ctx context.Context) (*jose.JWKS, error) {
 // GetOIDCRequestObject generates and returns a signed JWT request object for OpenID4VP
 func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObjectRequest) (*GetRequestObjectResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, req.SessionID)
+	session, err := c.authContextCache.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -174,7 +175,7 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 	}
 
 	// Check if session is expired
-	if session.ExpiresAt.Before(time.Now()) {
+	if time.Now().Unix() > session.ExpiresAt {
 		return nil, ErrSessionExpired
 	}
 
@@ -184,20 +185,20 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 		c.log.Error(err, "Failed to generate nonce")
 		return nil, ErrServerError
 	}
-	session.OpenID4VP.RequestObjectNonce = nonce
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	session.RequestObjectNonce = nonce
+	if err := c.authContextCache.Update(ctx, session); err != nil {
 		c.log.Error(err, "Failed to update session with nonce")
 		return nil, ErrServerError
 	}
 
 	// Create and sign request object using DCQL from session
-	signedJWT, err := c.CreateRequestObject(ctx, session.ID, session.OpenID4VP.DCQL, nonce)
+	signedJWT, err := c.CreateRequestObject(ctx, session.SessionID, session.DCQLQuery, nonce)
 	if err != nil {
 		c.log.Error(err, "Failed to create request object")
 		return nil, ErrServerError
 	}
 
-	c.log.Debug("Request object signed", "session_id", session.ID)
+	c.log.Debug("Request object signed", "session_id", session.SessionID)
 
 	return &GetRequestObjectResponse{
 		RequestObject: signedJWT,
@@ -207,7 +208,7 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 // ProcessDirectPost processes a direct_post response from a wallet
 func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) (*DirectPostResponse, error) {
 	// Get session by state
-	session, err := c.db.Sessions.GetByID(ctx, req.State)
+	session, err := c.authContextCache.GetByID(ctx, req.State)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -248,7 +249,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	c.log.Debug("Processing VP token", "state", req.State, "vp_token_length", len(vpToken))
 
 	// Extract and map claims from VP token
-	oidcClaims, err := c.extractAndMapClaims(ctx, vpToken, session.OIDCRequest.Scope)
+	oidcClaims, err := c.extractAndMapClaims(ctx, vpToken, strings.Join(session.Scopes, " "))
 	if err != nil {
 		c.log.Error(err, "Failed to extract and map claims from VP token")
 		return nil, ErrInvalidVP
@@ -257,33 +258,39 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	c.log.Debug("Mapped OIDC claims from VP", "claims", oidcClaims)
 
 	// Update session with VP data
-	session.OpenID4VP.VPToken = vpToken
-	session.OpenID4VP.PresentationSubmission = presentationSubmission
+	session.VPToken = vpToken
+	session.PresentationSubmission = presentationSubmission
 	session.VerifiedClaims = oidcClaims
 
 	// Extract wallet ID from claims
 	if sub, ok := oidcClaims["sub"].(string); ok {
-		session.OpenID4VP.WalletID = sub
+		session.WalletID = sub
 	}
 
 	// Check if user requested credential display
-	if session.OIDCRequest.ShowCredentialDetails {
-		session.Status = db.SessionStatusAwaitingPresentation
+	if session.ShowCredentialDetails {
+		session.Status = cache.SessionStatusAwaitingPresentation
 
-		if err := c.db.Sessions.Update(ctx, session); err != nil {
+		if err := c.authContextCache.Update(ctx, session); err != nil {
 			c.log.Error(err, "Failed to update session")
 			return nil, ErrServerError
 		}
 
-		c.log.Info("Redirecting to credential display page", "session_id", session.ID)
+		c.log.Info("Redirecting to credential display page", "session_id", session.SessionID)
+
+		displayURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "display", session.SessionID)
+		if err != nil {
+			c.log.Error(err, "Failed to construct display URI")
+			return nil, ErrServerError
+		}
 
 		return &DirectPostResponse{
-			RedirectURI: fmt.Sprintf("%s/verification/display/%s", c.cfg.Verifier.PublicURL, session.ID),
+			RedirectURI: displayURI,
 		}, nil
 	}
 
 	// Otherwise, issue authorization code immediately
-	session.Status = db.SessionStatusCodeIssued
+	session.Status = cache.SessionStatusCodeIssued
 
 	code, err := crypto.GenerateSecureToken(0, 32)
 	if err != nil {
@@ -292,24 +299,29 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	}
 	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
 
-	session.Tokens.AuthorizationCode = code
-	session.Tokens.CodeExpiresAt = codeExpiry
+	session.Code = code
+	session.CodeExpiresAt = codeExpiry.Unix()
 
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	if err := c.authContextCache.Update(ctx, session); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}
 
-	c.log.Info("VP processed successfully", "session_id", session.ID, "claims_count", len(oidcClaims))
+	c.log.Info("VP processed successfully", "session_id", session.SessionID, "claims_count", len(oidcClaims))
 
 	// Return redirect URI if present
 	redirectURI := ""
-	if session.OIDCRequest.RedirectURI != "" {
-		redirectURI = fmt.Sprintf("%s?code=%s&state=%s",
-			session.OIDCRequest.RedirectURI,
-			code,
-			session.OIDCRequest.State,
-		)
+	if session.RedirectURI != "" {
+		u, err := url.Parse(session.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("code", code)
+		q.Set("state", session.State)
+		u.RawQuery = q.Encode()
+		redirectURI = u.String()
 	}
 
 	return &DirectPostResponse{
@@ -320,7 +332,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 // ProcessCallback processes a callback request
 func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*CallbackResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, req.State)
+	session, err := c.authContextCache.GetByID(ctx, req.State)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -330,36 +342,50 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 
 	// Handle error response
 	if req.Error != "" {
-		session.Status = db.SessionStatusError
-		_ = c.db.Sessions.Update(ctx, session)
+		session.Status = cache.SessionStatusError
+		if err := c.authContextCache.Update(ctx, session); err != nil {
+			c.log.Error(err, "Failed to update session")
+			return nil, ErrServerError
+		}
 
-		redirectURI := fmt.Sprintf("%s?error=%s&state=%s",
-			session.OIDCRequest.RedirectURI,
-			req.Error,
-			session.OIDCRequest.State,
-		)
+		u, err := url.Parse(session.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("error", req.Error)
+		q.Set("state", session.State)
+		u.RawQuery = q.Encode()
 
-		return &CallbackResponse{
-			RedirectURI: redirectURI,
-		}, nil
+		resp := &CallbackResponse{
+			RedirectURI: u.String(),
+		}
+		return resp, nil
 	}
 
 	// Build redirect URI with code
-	redirectURI := fmt.Sprintf("%s?code=%s&state=%s",
-		session.OIDCRequest.RedirectURI,
-		req.Code,
-		session.OIDCRequest.State,
-	)
+	u, err := url.Parse(session.RedirectURI)
+	if err != nil {
+		c.log.Error(err, "Failed to parse redirect URI")
+		return nil, ErrServerError
+	}
+	q := u.Query()
+	q.Set("code", req.Code)
+	q.Set("state", session.State)
+	u.RawQuery = q.Encode()
 
-	return &CallbackResponse{
-		RedirectURI: redirectURI,
-	}, nil
+	resp := &CallbackResponse{
+		RedirectURI: u.String(),
+	}
+
+	return resp, nil
 }
 
 // GetQRCode generates a QR code image for a session
 func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCodeResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, req.SessionID)
+	session, err := c.authContextCache.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -397,7 +423,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 // PollSession returns the current status of a session
 func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*PollSessionResponse, error) {
 	// Get session
-	session, err := c.db.Sessions.GetByID(ctx, req.SessionID)
+	session, err := c.authContextCache.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -410,12 +436,17 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 	}
 
 	// If code is issued, provide redirect URI
-	if session.Status == db.SessionStatusCodeIssued {
-		response.RedirectURI = fmt.Sprintf("%s?code=%s&state=%s",
-			session.OIDCRequest.RedirectURI,
-			session.Tokens.AuthorizationCode,
-			session.OIDCRequest.State,
-		)
+	if session.Status == cache.SessionStatusCodeIssued {
+		u, err := url.Parse(session.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("code", session.Code)
+		q.Set("state", session.State)
+		u.RawQuery = q.Encode()
+		response.RedirectURI = u.String()
 	}
 
 	return response, nil
@@ -424,7 +455,7 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 // GetUserInfo returns user claims based on access token
 func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
 	// Get session by access token
-	session, err := c.db.Sessions.GetByAccessToken(ctx, req.AccessToken)
+	session, err := c.authContextCache.GetByAccessToken(ctx, req.AccessToken)
 	if err != nil {
 		return nil, ErrInvalidGrant
 	}
@@ -433,7 +464,7 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 	}
 
 	// Check if access token is expired
-	if session.Tokens.AccessTokenExpiresAt.Before(time.Now()) {
+	if time.Now().Unix() > session.AccessTokenExpiresAt {
 		return nil, ErrInvalidGrant
 	}
 
@@ -445,7 +476,7 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 		}
 	}
 
-	subject := c.generateSubjectIdentifier(walletID, session.OIDCRequest.ClientID)
+	subject := c.generateSubjectIdentifier(walletID, session.ClientID)
 
 	// Return verified claims
 	response := UserInfoResponse{

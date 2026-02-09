@@ -149,9 +149,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": u.String()})
 
 	// Process all VP tokens for the requested scopes
-	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scope))
+	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
 
-	for _, scope := range authCtx.Scope {
+	for _, scope := range authCtx.Scopes {
 		vpToken, ok := vpResponse.VPToken[scope]
 		if !ok {
 			c.log.Error(nil, "VP token not found for scope", "scope", scope)
