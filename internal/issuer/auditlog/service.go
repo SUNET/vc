@@ -182,6 +182,9 @@ func (s *Service) Close(ctx context.Context) error {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	if s.auditLogChan != nil {
+		close(s.auditLogChan)
+	}
 
 	s.wg.Wait()
 
