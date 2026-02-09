@@ -1,6 +1,8 @@
 package apiv1
 
 import (
+	"sort"
+
 	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
 )
@@ -64,12 +66,14 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 			for alg := range sdjtAlgs {
 				result.SDJWT.SDJWTAlgValues = append(result.SDJWT.SDJWTAlgValues, alg)
 			}
+			sort.Strings(result.SDJWT.SDJWTAlgValues)
 		}
 		if len(kbjwtAlgs) > 0 {
 			result.SDJWT.KBJWTAlgValues = make([]string, 0, len(kbjwtAlgs))
 			for alg := range kbjwtAlgs {
 				result.SDJWT.KBJWTAlgValues = append(result.SDJWT.KBJWTAlgValues, alg)
 			}
+			sort.Strings(result.SDJWT.KBJWTAlgValues)
 		}
 	}
 
@@ -80,6 +84,7 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 		for alg := range mdocAlgs {
 			result.MsoMdoc.IssuerAuthAlgValues = append(result.MsoMdoc.IssuerAuthAlgValues, alg)
 		}
+		sort.Ints(result.MsoMdoc.IssuerAuthAlgValues)
 		// DeviceAuth typically uses the same algorithms
 		result.MsoMdoc.DeviceAuthAlgValues = result.MsoMdoc.IssuerAuthAlgValues
 	}
