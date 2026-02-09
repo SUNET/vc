@@ -512,8 +512,8 @@ func (c *AuthContextCache) deleteIndices(doc *AuthorizationContext) {
 	}
 }
 
-// MarkCodeAsUsed marks an authorization code as used (forfeited)
-func (c *AuthContextCache) MarkCodeAsUsed(ctx context.Context, id string) error {
+// MarkCodeAsForfeited marks an authorization code as forfeited
+func (c *AuthContextCache) MarkCodeAsForfeited(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("id cannot be empty")
 	}

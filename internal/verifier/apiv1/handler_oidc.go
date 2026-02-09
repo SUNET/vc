@@ -306,9 +306,9 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		}
 	}
 
-	// Mark code as used
-	if err := c.authContextCache.MarkCodeAsUsed(ctx, authCtx.SessionID); err != nil {
-		c.log.Error(err, "Failed to mark code as used")
+	// Mark code as forfeited
+	if err := c.authContextCache.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
+		c.log.Error(err, "Failed to forfeit code")
 		return nil, ErrServerError
 	}
 	authCtx.Forfeited = true

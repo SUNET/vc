@@ -45,7 +45,7 @@ type AuthorizationContext struct {
 
 	// Authorization code fields
 	Code      string `json:"code,omitempty" bson:"code,omitempty"`
-	Forfeited bool   `json:"is_used,omitempty" bson:"is_used,omitempty"`
+	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
 
 	// Token fields
 	Token       *Token `json:"token,omitempty" bson:"token,omitempty"`

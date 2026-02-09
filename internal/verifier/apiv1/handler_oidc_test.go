@@ -514,8 +514,8 @@ func TestAuthContextCache(t *testing.T) {
 	assert.NotNil(t, byToken)
 	assert.Equal(t, "session-1", byToken.SessionID)
 
-	// Test MarkCodeAsUsed
-	err = authCache.MarkCodeAsUsed(ctx, "session-1")
+	// Test MarkCodeAsForfeited
+	err = authCache.MarkCodeAsForfeited(ctx, "session-1")
 	assert.NoError(t, err)
 
 	markedSession, _ := authCache.GetByID(ctx, "session-1")
