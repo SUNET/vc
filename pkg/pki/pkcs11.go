@@ -204,21 +204,26 @@ func (s *PKCS11Signer) extractECPublicKey(handle pkcs11.ObjectHandle) error {
 	}
 
 	// Parse EC point (uncompressed format: 04 || X || Y)
+	// SoftHSM2 may wrap the point in a DER OCTET STRING (tag 0x04 || LEN || DATA).
+	// Since the uncompressed point marker is also 0x04, we use the length byte to
+	// distinguish: if point[1] == len(point)-2, it's a DER wrapper.
 	point := attrs[1].Value
-	if len(point) < 3 || point[0] != 0x04 {
-		// Try to unwrap DER encoding
-		if len(point) > 2 && point[0] == 0x04 && point[1] == byte(len(point)-2) {
-			point = point[2:]
+	if len(point) > 2 && point[0] == 0x04 {
+		length := int(point[1])
+		if len(point) >= 2+length && length == len(point)-2 {
+			// DER OCTET STRING wrapper detected — unwrap
+			point = point[2 : 2+length]
 		}
 	}
 
-	if point[0] != 0x04 {
-		return fmt.Errorf("invalid EC point format")
+	if len(point) < 3 || point[0] != 0x04 {
+		return fmt.Errorf("invalid EC point format: expected uncompressed (0x04), got 0x%02x", point[0])
 	}
 
 	keyLen := (curve.Params().BitSize + 7) / 8
 	if len(point) != 1+2*keyLen {
-		return fmt.Errorf("invalid EC point length")
+		return fmt.Errorf("invalid EC point length: got %d bytes, expected %d bytes for %s curve",
+			len(point), 1+2*keyLen, curve.Params().Name)
 	}
 
 	x := new(big.Int).SetBytes(point[1 : 1+keyLen])

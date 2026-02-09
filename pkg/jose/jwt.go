@@ -51,6 +51,15 @@ func MakeJWT(ctx context.Context, header, body jwt.MapClaims, signer pki.Signer)
 		return "", fmt.Errorf("failed to sign: %w", err)
 	}
 
+	// Ensure ECDSA signatures are in JWS format (IEEE P1363: fixed-size R||S).
+	// Some Signer implementations (e.g., PKCS#11 HSMs, crypto.Signer wrappers)
+	// may return ASN.1 DER-encoded signatures, which are not valid for JWS.
+	// This normalization handles both formats transparently.
+	signature, err = ensureJWSSignature(signature, signer.Algorithm())
+	if err != nil {
+		return "", fmt.Errorf("failed to normalize signature for JWS: %w", err)
+	}
+
 	// Encode signature
 	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
 
