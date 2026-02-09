@@ -48,11 +48,11 @@ type Agent struct {
 	keyResolver      KeyResolver
 	endpointResolver EndpointResolver
 	httpClient       *transport.HTTPClient
-	
-	handlers     map[string]MessageHandler
-	handlersMu   sync.RWMutex
-	
-	protocols    *discoverfeatures.ProtocolRegistry
+
+	handlers   map[string]MessageHandler
+	handlersMu sync.RWMutex
+
+	protocols *discoverfeatures.ProtocolRegistry
 }
 
 // Option configures the agent.
@@ -100,14 +100,14 @@ func New(opts ...Option) (*Agent, error) {
 		protocols:  discoverfeatures.NewProtocolRegistry(),
 		httpClient: transport.NewHTTPClient(),
 	}
-	
+
 	for _, opt := range opts {
 		opt(a)
 	}
-	
+
 	// Register built-in protocol handlers
 	a.registerBuiltInHandlers()
-	
+
 	return a, nil
 }
 
@@ -133,7 +133,7 @@ func (a *Agent) registerBuiltInHandlers() {
 	// Trust Ping
 	a.RegisterHandler(trustping.TypePing, a.handleTrustPing)
 	a.protocols.RegisterProtocol(trustping.ProtocolURI, "sender", "receiver")
-	
+
 	// Discover Features
 	a.RegisterHandler(discoverfeatures.TypeQueries, a.handleDiscoverFeatures)
 	a.protocols.RegisterProtocol(discoverfeatures.ProtocolURI, "requester", "responder")
@@ -154,40 +154,40 @@ func (a *Agent) Send(ctx context.Context, to string, msg *message.Message) (*mes
 	if a.endpointResolver == nil {
 		return nil, ErrNoResolver
 	}
-	
+
 	// Get recipient endpoint
 	endpoint, err := a.endpointResolver.ResolveEndpoint(ctx, to)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoEndpoint, err)
 	}
-	
+
 	// Set message addressing
 	msg.From = a.did
 	msg.To = []string{to}
-	
+
 	// Pack the message
 	packed, err := a.packMessage(ctx, msg, to)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Send
 	responseBytes, err := a.httpClient.SendMessage(ctx, endpoint, packed.Message, packed.MediaType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
-	
+
 	// If no response, return nil
 	if responseBytes == nil {
 		return nil, nil
 	}
-	
+
 	// Unpack response
 	result, err := a.unpackMessage(ctx, responseBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack response: %w", err)
 	}
-	
+
 	return result.Message, nil
 }
 
@@ -200,7 +200,7 @@ func (a *Agent) packMessage(ctx context.Context, msg *message.Message, to string
 			return didcomm.PackAnoncrypt(ctx, msg, recipientKeys)
 		}
 	}
-	
+
 	// Fall back to plaintext
 	return didcomm.PackPlaintext(msg)
 }
@@ -208,11 +208,11 @@ func (a *Agent) packMessage(ctx context.Context, msg *message.Message, to string
 // unpackMessage unpacks a received message.
 func (a *Agent) unpackMessage(ctx context.Context, data []byte) (*didcomm.UnpackResult, error) {
 	opts := didcomm.UnpackOptions{}
-	
+
 	if a.keyStore != nil {
 		opts.KeyStore = &agentKeyStore{store: a.keyStore}
 	}
-	
+
 	return didcomm.Unpack(ctx, data, opts)
 }
 
@@ -227,7 +227,9 @@ func (ks *agentKeyStore) GetPrivateKey(ctx context.Context, kid string) (jwk.Key
 
 func (ks *agentKeyStore) ListKeyIDs(ctx context.Context) ([]string, error) {
 	// If the underlying store supports listing, delegate to it
-	if lister, ok := ks.store.(interface{ ListKeyIDs(context.Context) ([]string, error) }); ok {
+	if lister, ok := ks.store.(interface {
+		ListKeyIDs(context.Context) ([]string, error)
+	}); ok {
 		return lister.ListKeyIDs(ctx)
 	}
 	// Otherwise return empty list
@@ -241,27 +243,27 @@ func (a *Agent) ProcessMessage(ctx context.Context, data []byte, mediaType strin
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %v", ErrProcessingFailed, err)
 	}
-	
+
 	// Find handler
 	a.handlersMu.RLock()
 	handler, exists := a.handlers[result.Message.Type]
 	a.handlersMu.RUnlock()
-	
+
 	if !exists {
 		return nil, "", fmt.Errorf("%w: %s", ErrNoHandler, result.Message.Type)
 	}
-	
+
 	// Process
 	response, err := handler(ctx, result.Message)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %v", ErrProcessingFailed, err)
 	}
-	
+
 	// If no response, return nil
 	if response == nil {
 		return nil, "", nil
 	}
-	
+
 	// Pack response
 	var packed *didcomm.PackResult
 	if result.Message.From != "" && a.keyResolver != nil {
@@ -273,13 +275,13 @@ func (a *Agent) ProcessMessage(ctx context.Context, data []byte, mediaType strin
 			}
 		}
 	}
-	
+
 	// Fall back to plaintext
 	packed, err = didcomm.PackPlaintext(response)
 	if err != nil {
 		return nil, "", err
 	}
-	
+
 	return packed.Message, packed.MediaType, nil
 }
 
@@ -303,15 +305,15 @@ func (a *Agent) DiscoverFeatures(ctx context.Context, to string, pattern string)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	response, err := a.Send(ctx, to, query)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if response == nil {
 		return nil, nil
 	}
-	
+
 	return discoverfeatures.GetDiscloseBody(response)
 }

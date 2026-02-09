@@ -82,6 +82,23 @@ func (a *Attachment) GetBytes() ([]byte, error) {
 	return nil, fmt.Errorf("no attachment data available")
 }
 
+// DecodeBase64 decodes base64-encoded attachment data.
+// Returns an error if the attachment doesn't have base64 data.
+func (a *Attachment) DecodeBase64() ([]byte, error) {
+	if a.Data.Base64 == "" {
+		return nil, fmt.Errorf("attachment has no base64 data")
+	}
+	// Try URL encoding first, then standard encoding
+	data, err := base64.RawURLEncoding.DecodeString(a.Data.Base64)
+	if err != nil {
+		data, err = base64.StdEncoding.DecodeString(a.Data.Base64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode base64: %w", err)
+		}
+	}
+	return data, nil
+}
+
 // GetJSON returns the attachment content as a JSON-decoded value.
 // If the content is Base64-encoded JSON, it will be decoded.
 func (a *Attachment) GetJSON(v any) error {

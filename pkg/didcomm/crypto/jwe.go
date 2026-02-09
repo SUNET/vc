@@ -98,8 +98,9 @@ func Encrypt(ctx context.Context, plaintext []byte, recipientKeys []jwk.Key, opt
 	}
 
 	// For multi-recipient, we need to use JSON serialization
+	// (compact serialization only supports a single recipient)
 	if len(recipientKeys) > 1 {
-		// Multi-recipient encryption
+		encOpts = append(encOpts, jwe.WithJSON())
 		for _, recipientKey := range recipientKeys {
 			encOpts = append(encOpts, jwe.WithKey(keyAlg, recipientKey))
 		}

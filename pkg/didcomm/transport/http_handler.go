@@ -19,7 +19,7 @@ type MessageProcessor interface {
 
 // HTTPHandler handles incoming DIDComm messages over HTTP.
 type HTTPHandler struct {
-	processor  MessageProcessor
+	processor    MessageProcessor
 	allowedTypes []string
 }
 

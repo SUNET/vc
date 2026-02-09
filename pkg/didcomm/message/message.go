@@ -56,6 +56,14 @@ type Message struct {
 	// Proves continuity when the sender's DID or keys change.
 	FromPrior string `json:"from_prior,omitempty"`
 
+	// PleaseAck requests acknowledgment of this message. OPTIONAL.
+	// Contains a list of message IDs that should trigger an ack.
+	PleaseAck []string `json:"please_ack,omitempty"`
+
+	// Ack acknowledges receipt of previous messages. OPTIONAL.
+	// Contains message IDs being acknowledged.
+	Ack []string `json:"ack,omitempty"`
+
 	// CustomHeaders contains additional headers not in the spec.
 	// These are serialized at the top level of the message JSON.
 	CustomHeaders map[string]any `json:"-"`
@@ -266,6 +274,12 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 	if m.FromPrior != "" {
 		data["from_prior"] = m.FromPrior
 	}
+	if len(m.PleaseAck) > 0 {
+		data["please_ack"] = m.PleaseAck
+	}
+	if len(m.Ack) > 0 {
+		data["ack"] = m.Ack
+	}
 
 	// Add custom headers
 	for k, v := range m.CustomHeaders {
@@ -299,7 +313,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		"id": true, "type": true, "from": true, "to": true,
 		"thid": true, "pthid": true, "created_time": true,
 		"expires_time": true, "body": true, "attachments": true,
-		"from_prior": true,
+		"from_prior": true, "please_ack": true, "ack": true,
 	}
 
 	for k, v := range raw {
