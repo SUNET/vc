@@ -159,7 +159,7 @@ test-oidcrp: ## Test with OIDC RP build tag
 
 test-vc20: ## Test with VC 2.0 build tag
 	$(info Testing with VC 2.0 build tag)
-	go test -tags $(VC20_TAG) -v ./pkg/vc20/... ./pkg/authzen/... ./pkg/keyresolver/...
+	go test -tags $(VC20_TAG) -v ./pkg/vc20/... ./pkg/keyresolver/...
 
 test-pkcs11: ## Test with PKCS#11 build tag
 	$(info Testing with PKCS#11 build tag)

@@ -12,14 +12,8 @@ import (
 
 func TestMetaQueryJSONSerialization(t *testing.T) {
 	meta := MetaQuery{
-		VCTValues:  []string{"https://example.com/credential"},
-		TypeValues: [][]string{{"VerifiableCredential", "PersonalID"}},
-		ClaimsSets: [][]ClaimQuery{
-			{
-				{Path: []string{"given_name"}},
-				{Path: []string{"family_name"}},
-			},
-		},
+		VCTValues:    []string{"https://example.com/credential"},
+		TypeValues:   [][]string{{"VerifiableCredential", "PersonalID"}},
 		DoctypeValue: "org.iso.18013.5.1.mDL",
 	}
 
@@ -32,17 +26,16 @@ func TestMetaQueryJSONSerialization(t *testing.T) {
 
 	assert.Equal(t, meta.VCTValues, decoded.VCTValues)
 	assert.Equal(t, meta.TypeValues, decoded.TypeValues)
-	assert.Equal(t, meta.ClaimsSets, decoded.ClaimsSets)
 	assert.Equal(t, meta.DoctypeValue, decoded.DoctypeValue)
 }
 
 func TestVPFormatsSupportedJSONSerialization(t *testing.T) {
 	formats := VPFormatsSupported{
-		LDPVC: &VPFormat{
+		LDPVC: &LDPVCFormat{
 			ProofTypeValues:   []string{"DataIntegrityProof"},
 			CryptosuiteValues: []string{"eddsa-2022", "ecdsa-2019"},
 		},
-		JWTVCJson: &VPFormat{
+		JWTVCJson: &JWTVCFormat{
 			AlgValues: []string{"ES256", "ES384"},
 		},
 	}
@@ -61,26 +54,23 @@ func TestVPFormatsSupportedJSONSerialization(t *testing.T) {
 
 func TestDCQLQueryExample(t *testing.T) {
 	dcql := DCQL{
-		CredentialSets: [][]CredentialQuery{
+		Credentials: []CredentialQuery{
 			{
-				{
-					ID:     "pid_credential",
-					Format: "ldp_vc",
-					Meta: MetaQuery{
-						TypeValues: [][]string{{"VerifiableCredential", "PersonalID"}},
-					},
-					Claims: []ClaimQuery{
-						{Path: []string{"given_name"}},
-						{Path: []string{"family_name"}},
-						{Path: []string{"birth_date"}},
-					},
+				ID:     "pid_credential",
+				Format: "ldp_vc",
+				Meta: MetaQuery{
+					TypeValues: [][]string{{"VerifiableCredential", "PersonalID"}},
+				},
+				Claims: []ClaimQuery{
+					{Path: []string{"given_name"}},
+					{Path: []string{"family_name"}},
+					{Path: []string{"birth_date"}},
 				},
 			},
 		},
-		VPFormatsSupported: VPFormatsSupported{
-			LDPVC: &VPFormat{
-				ProofTypeValues:   []string{"DataIntegrityProof"},
-				CryptosuiteValues: []string{"eddsa-2022"},
+		CredentialSets: []CredentialSetQuery{
+			{
+				Options: [][]string{{"pid_credential"}},
 			},
 		},
 	}
@@ -93,11 +83,11 @@ func TestDCQLQueryExample(t *testing.T) {
 	err = json.Unmarshal(jsonData, &decoded)
 	require.NoError(t, err)
 
+	assert.Equal(t, 1, len(decoded.Credentials))
+	assert.Equal(t, "pid_credential", decoded.Credentials[0].ID)
+	assert.Equal(t, "ldp_vc", decoded.Credentials[0].Format)
+	assert.Equal(t, 3, len(decoded.Credentials[0].Claims))
 	assert.Equal(t, 1, len(decoded.CredentialSets))
-	assert.Equal(t, 1, len(decoded.CredentialSets[0]))
-	assert.Equal(t, "pid_credential", decoded.CredentialSets[0][0].ID)
-	assert.Equal(t, "ldp_vc", decoded.CredentialSets[0][0].Format)
-	assert.Equal(t, 3, len(decoded.CredentialSets[0][0].Claims))
 }
 
 func TestValidateCredentialQuerySDJWT(t *testing.T) {
