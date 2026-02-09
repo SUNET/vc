@@ -25,9 +25,12 @@ func (s *Service) SendWebHook(ctx context.Context, inData any) error {
 		return err
 	}
 
-	// Send to all destination queues (non-blocking)
+	// Send to all destination queues (non-blocking, shutdown-safe)
 	for _, dest := range s.destinations {
 		select {
+		case <-s.done:
+			s.log.Debug("service shutting down, dropping audit message", "target", dest.Target)
+			return nil
 		case dest.msgChan <- jsonBytes:
 			// Message queued successfully
 		default:

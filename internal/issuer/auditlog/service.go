@@ -45,6 +45,8 @@ type Service struct {
 	cancel       context.CancelFunc // cancels processAuditLog
 	destinations []*Destination     // pre-parsed destinations
 	mu           sync.Mutex         // mutex for file operations
+	done         chan struct{}       // closed on shutdown to prevent sends
+	closeOnce    sync.Once          // ensures done is closed exactly once
 }
 
 // New creates a new auditlog service
@@ -53,6 +55,7 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 		cfg:          cfg,
 		log:          log.New("auditlog"),
 		auditLogChan: make(chan *AuditLog, 100), // buffered channel
+		done:         make(chan struct{}),
 	}
 
 	// Parse and prepare destinations
@@ -168,22 +171,19 @@ func (s *Service) destinationWorker(ctx context.Context, dest *Destination) {
 
 // Close closes the auditlog service
 func (s *Service) Close(ctx context.Context) error {
-	// Stop all destination workers
+	// Signal shutdown to prevent new sends
+	s.closeOnce.Do(func() { close(s.done) })
+
+	// Stop all destination workers via context cancellation
 	for _, dest := range s.destinations {
 		if dest.cancel != nil {
 			dest.cancel()
-		}
-		if dest.msgChan != nil {
-			close(dest.msgChan)
 		}
 	}
 
 	// Signal processAuditLog to stop
 	if s.cancel != nil {
 		s.cancel()
-	}
-	if s.auditLogChan != nil {
-		close(s.auditLogChan)
 	}
 
 	s.wg.Wait()

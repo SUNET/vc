@@ -9,11 +9,16 @@ import (
 
 // AddAuditLog adds an audit log entry to auditLogChan channel.
 func (s *Service) AddAuditLog(ctx context.Context, eventType string, message any) {
-	s.auditLogChan <- &AuditLog{
+	entry := &AuditLog{
 		EventType: eventType,
 		Date:      time.Now().Format(time.RFC3339),
 		ID:        uuid.NewString(),
 		Message:   message,
+	}
+	select {
+	case <-s.done:
+		s.log.Debug("service shutting down, dropping audit log entry", "event", eventType)
+	case s.auditLogChan <- entry:
 	}
 }
 
