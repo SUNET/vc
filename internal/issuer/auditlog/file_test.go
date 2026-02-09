@@ -51,6 +51,94 @@ func TestFile_SendToDestination(t *testing.T) {
 	service.Close(t.Context())
 }
 
+func TestFile_FileSyncEveryWrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "audit_sync.log")
+
+	cfg := &model.Cfg{
+		Issuer: &model.Issuer{
+			AuditLog: &model.AuditLog{
+				Enabled:          true,
+				Destinations:     []string{logFile},
+				FileSyncInterval: 0, // 0 = fsync every write
+			},
+		},
+	}
+
+	log := logger.NewSimple("test")
+	service, err := New(ctx, cfg, log)
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), service.fileSyncInterval)
+
+	dest := service.destinations[0]
+	jsonBytes := []byte(`{"sync":"immediate"}`)
+
+	err = service.writeToFile(dest, jsonBytes)
+	assert.NoError(t, err)
+	// dirty should remain false since sync happened immediately
+	assert.False(t, dest.dirty)
+
+	content, err := os.ReadFile(logFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "immediate")
+
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	service.Close(t.Context())
+}
+
+func TestFile_DeferredSync(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "audit_deferred.log")
+
+	cfg := &model.Cfg{
+		Issuer: &model.Issuer{
+			AuditLog: &model.AuditLog{
+				Enabled:          true,
+				Destinations:     []string{logFile},
+				FileSyncInterval: 100 * time.Millisecond,
+			},
+		},
+	}
+
+	log := logger.NewSimple("test")
+	service, err := New(ctx, cfg, log)
+	require.NoError(t, err)
+	assert.Equal(t, 100*time.Millisecond, service.fileSyncInterval)
+
+	dest := service.destinations[0]
+	jsonBytes := []byte(`{"sync":"deferred"}`)
+
+	err = service.writeToFile(dest, jsonBytes)
+	assert.NoError(t, err)
+	// dirty should be true since sync is deferred
+	assert.True(t, dest.dirty)
+
+	// Wait for periodic sync to fire
+	time.Sleep(250 * time.Millisecond)
+
+	service.mu.Lock()
+	isDirty := dest.dirty
+	service.mu.Unlock()
+	assert.False(t, isDirty, "periodic sync should have cleared dirty flag")
+
+	content, err := os.ReadFile(logFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "deferred")
+
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	service.Close(t.Context())
+}
+
+
+
 func TestFile_DestinationParsing(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

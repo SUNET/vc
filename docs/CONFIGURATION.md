@@ -519,15 +519,17 @@ mDL (ISO 18013-5) issuer configuration.
 
 ### `audit_log`
 
-| Field          | Type    | Description                                               | Default | Required         |
-| -------------- | ------- | --------------------------------------------------------- | ------- | ---------------- |
-| `enabled`      | `bool`  | Enable audit logging                                      | `false` | No               |
-| `destinations` | `array` | Log destinations (console/stdout, file path, or HTTP URL) | -       | Yes (if enabled) |
+| Field                | Type       | Description                                               | Default | Required         |
+| -------------------- | ---------- | --------------------------------------------------------- | ------- | ---------------- |
+| `enabled`            | `bool`     | Enable audit logging                                      | `false` | No               |
+| `destinations`       | `array`    | Log destinations (console/stdout, file path, or HTTP URL) | -       | Yes (if enabled) |
+| `file_sync_interval` | `duration` | Controls fsync behavior for **file** destinations. `0` = fsync after every write (strict durability, lower throughput). `> 0` = periodic batched fsync at the given interval (better throughput, bounded data-loss window). Has no effect on console or webhook destinations. | `5s`    | No               |
 
 **Example:**
 ```yaml
 audit_log:
   enabled: true
+  file_sync_interval: 5s  # 0 = fsync every write, >0 = batched periodic fsync
   destinations:
     - "stdout"
     - "/var/log/audit.log"

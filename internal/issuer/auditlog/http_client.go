@@ -90,7 +90,10 @@ func (s *Service) sendWebhook(ctx context.Context, url string, jsonBytes []byte)
 	return nil
 }
 
-// writeToFile appends audit log data to a file
+// writeToFile appends audit log data to a file.
+// Sync behavior is controlled by the FileSyncInterval config option:
+//   - FileSyncInterval=0:   fsync after every write (strict durability, lower throughput)
+//   - FileSyncInterval>0:   periodic fsync at the configured interval (batched flushes, better throughput)
 func (s *Service) writeToFile(dest *Destination, jsonBytes []byte) error {
 	if dest.File == nil {
 		return errors.New("file handle is nil")
@@ -105,11 +108,42 @@ func (s *Service) writeToFile(dest *Destination, jsonBytes []byte) error {
 		return err
 	}
 
-	// Sync to ensure data is written to disk
-	if err := dest.File.Sync(); err != nil {
-		return err
+	// Sync strategy: immediate fsync when interval is 0 (strict durability);
+	// otherwise mark dirty for periodic batched flush.
+	if s.fileSyncInterval == 0 {
+		if err := dest.File.Sync(); err != nil {
+			return err
+		}
+	} else {
+		dest.dirty = true
 	}
 
 	s.log.Debug("audit log written to file", "file", dest.Target)
 	return nil
+}
+
+// periodicSync runs a background goroutine that flushes dirty file destinations
+// at the configured SyncInterval. This amortises the cost of fsync across many
+// writes while still bounding the window of data that could be lost on a crash.
+func (s *Service) periodicSync(ctx context.Context, dest *Destination) {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.fileSyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			if dest.dirty && dest.File != nil {
+				if err := dest.File.Sync(); err != nil {
+					s.log.Error(err, "periodic sync failed", "file", dest.Target)
+				}
+				dest.dirty = false
+			}
+			s.mu.Unlock()
+		}
+	}
 }

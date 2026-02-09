@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -26,6 +27,7 @@ type Destination struct {
 	File    *os.File           // open file handle for file destinations
 	msgChan chan []byte        // message queue for this destination
 	cancel  context.CancelFunc // cancel function to stop worker
+	dirty   bool               // true when writes have occurred since last sync
 }
 
 // AuditLog holds the request data for the SendWebHook method
@@ -38,15 +40,16 @@ type AuditLog struct {
 
 // Service holds auditlog service
 type Service struct {
-	cfg          *model.Cfg
-	log          *logger.Log
-	auditLogChan chan *AuditLog
-	wg           sync.WaitGroup
-	cancel       context.CancelFunc // cancels processAuditLog
-	destinations []*Destination     // pre-parsed destinations
-	mu           sync.Mutex         // mutex for file operations
-	done         chan struct{}       // closed on shutdown to prevent sends
-	closeOnce    sync.Once          // ensures done is closed exactly once
+	cfg            *model.Cfg
+	log            *logger.Log
+	auditLogChan   chan *AuditLog
+	wg             sync.WaitGroup
+	cancel         context.CancelFunc // cancels processAuditLog
+	destinations   []*Destination     // pre-parsed destinations
+	mu             sync.Mutex         // mutex for file operations
+	done           chan struct{}       // closed on shutdown to prevent sends
+	closeOnce      sync.Once          // ensures done is closed exactly once
+	fileSyncInterval time.Duration    // file destinations: 0 = fsync every write, >0 = periodic batched fsync
 }
 
 // New creates a new auditlog service
@@ -60,12 +63,15 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 
 	// Parse and prepare destinations
 	if cfg.Issuer != nil && cfg.Issuer.AuditLog != nil && cfg.Issuer.AuditLog.Enabled {
+		service.fileSyncInterval = cfg.Issuer.AuditLog.FileSyncInterval
+
 		var err error
 		service.destinations, err = service.parseDestinations(cfg.Issuer.AuditLog.Destinations)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse audit log destinations: %w", err)
 		}
-		service.log.Info("Audit log enabled", "destinations", len(service.destinations))
+		service.log.Info("Audit log enabled", "destinations", len(service.destinations),
+			"file_sync_interval", service.fileSyncInterval)
 
 		// Start worker for each destination
 		for _, dest := range service.destinations {
@@ -74,6 +80,12 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 			dest.msgChan = make(chan []byte, 100) // buffered channel per destination
 			service.wg.Add(1)
 			go service.destinationWorker(workerCtx, dest)
+
+			// Start periodic sync goroutine for file destinations
+			if dest.Type == DestinationFile && service.fileSyncInterval > 0 {
+				service.wg.Add(1)
+				go service.periodicSync(workerCtx, dest)
+			}
 		}
 	} else {
 		service.log.Info("Audit log disabled")
@@ -188,9 +200,19 @@ func (s *Service) Close(ctx context.Context) error {
 
 	s.wg.Wait()
 
-	// Close all file destinations
+	// Final sync and close all file destinations
 	for _, dest := range s.destinations {
 		if dest.Type == DestinationFile && dest.File != nil {
+			// Flush any remaining dirty data before closing
+			s.mu.Lock()
+			if dest.dirty {
+				if err := dest.File.Sync(); err != nil {
+					s.log.Error(err, "Failed to sync audit log file on close", "path", dest.Target)
+				}
+				dest.dirty = false
+			}
+			s.mu.Unlock()
+
 			if err := dest.File.Close(); err != nil {
 				s.log.Error(err, "Failed to close audit log file", "path", dest.Target)
 			}

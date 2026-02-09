@@ -336,8 +336,9 @@ type Issuer struct {
 
 // AuditLog holds audit log configuration for multiple destinations
 type AuditLog struct {
-	Enabled      bool     `yaml:"enabled" default:"false"`
-	Destinations []string `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	Enabled      bool          `yaml:"enabled" default:"false"`
+	Destinations []string      `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	FileSyncInterval time.Duration `yaml:"file_sync_interval" default:"5s"` // File destinations: 0 = fsync every write, >0 = periodic batched fsync at interval
 	// Destinations can be:
 	//   - "console" or "stdout": write to standard output
 	//   - File path (e.g., "/var/log/audit.log"): write to file
