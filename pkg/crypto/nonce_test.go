@@ -33,6 +33,37 @@ func TestGenerateSecureToken_DefaultSize(t *testing.T) {
 	}
 }
 
+func TestGenerateSecureToken_DefaultValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("byteSize_0_stringLength_0_defaults_to_32_bytes", func(t *testing.T) {
+		t.Parallel()
+		token, err := GenerateSecureToken(0, 0)
+		require.NoError(t, err)
+		decoded, err := base64.RawURLEncoding.DecodeString(token)
+		require.NoError(t, err)
+		assert.Len(t, decoded, 32, "both args zero must default to 32 random bytes")
+		assert.Len(t, token, base64.RawURLEncoding.EncodedLen(32))
+	})
+
+	t.Run("byteSize_0_with_stringLength_does_not_use_32_byte_default", func(t *testing.T) {
+		t.Parallel()
+		// stringLength=10 needs only (10*3+3)/4 = 8 bytes, NOT the 32-byte default
+		token, err := GenerateSecureToken(0, 10)
+		require.NoError(t, err)
+		assert.Len(t, token, 10, "stringLength path must not fall into the 32-byte default")
+	})
+
+	t.Run("stringLength_0_with_byteSize_uses_byteSize", func(t *testing.T) {
+		t.Parallel()
+		token, err := GenerateSecureToken(16, 0)
+		require.NoError(t, err)
+		decoded, err := base64.RawURLEncoding.DecodeString(token)
+		require.NoError(t, err)
+		assert.Len(t, decoded, 16, "stringLength 0 must use the explicit byteSize, not the 32-byte default")
+	})
+}
+
 // ---------------------------------------------------------------------------
 // 2. Explicit byteSize values
 // ---------------------------------------------------------------------------
