@@ -154,7 +154,11 @@ func (s *Service) destinationWorker(ctx context.Context, dest *Destination) {
 		case <-ctx.Done():
 			s.log.Info("Destination worker stopping", "type", destType, "target", dest.Target)
 			return
-		case msg := <-dest.msgChan:
+		case msg, ok := <-dest.msgChan:
+			if !ok {
+				s.log.Info("Destination channel closed, stopping worker", "type", destType, "target", dest.Target)
+				return
+			}
 			if err := s.sendToDestination(ctx, dest, msg); err != nil {
 				s.log.Error(err, "Failed to send audit log", "type", destType, "target", dest.Target)
 			}

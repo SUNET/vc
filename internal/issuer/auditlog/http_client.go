@@ -49,7 +49,7 @@ func (s *Service) sendToDestination(ctx context.Context, dest *Destination, json
 		log.Println(string(messageWithPrefix))
 		return nil
 	case DestinationWebhook:
-		return s.sendWebhook(dest.Target, jsonBytes)
+		return s.sendWebhook(ctx, dest.Target, jsonBytes)
 	case DestinationFile:
 		return s.writeToFile(dest, messageWithPrefix)
 	default:
@@ -58,8 +58,8 @@ func (s *Service) sendToDestination(ctx context.Context, dest *Destination, json
 }
 
 // sendWebhook sends audit log data via HTTP POST
-func (s *Service) sendWebhook(url string, jsonBytes []byte) error {
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
+func (s *Service) sendWebhook(ctx context.Context, url string, jsonBytes []byte) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBytes))
 	if err != nil {
 		return err
 	}

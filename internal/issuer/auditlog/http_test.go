@@ -129,7 +129,7 @@ func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
 	require.NoError(t, err)
 
 	jsonBytes := []byte(`{"test":"data"}`)
-	err = service.sendWebhook("://invalid-url", jsonBytes)
+	err = service.sendWebhook(t.Context(), "://invalid-url", jsonBytes)
 	assert.Error(t, err)
 
 	// Clean up
@@ -163,7 +163,7 @@ func TestHTTP_SendWebhook_Timeout(t *testing.T) {
 	require.NoError(t, err)
 
 	jsonBytes := []byte(`{"test":"data"}`)
-	err = service.sendWebhook(server.URL, jsonBytes)
+	err = service.sendWebhook(t.Context(), server.URL, jsonBytes)
 	assert.Error(t, err)
 
 	// Clean up
