@@ -22,8 +22,7 @@ type Service struct {
 	tracer     *trace.Tracer
 	probeStore *apiv1_status.StatusProbeStore
 
-	// OIDC client collection
-	// Using interface to allow mocking in tests
+	// OIDC client collection, client registration
 	Clients ClientStore
 }
 
