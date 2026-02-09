@@ -56,6 +56,10 @@ func ParseSigningKey(signingKeyPath string) (crypto.PrivateKey, error) {
 // CreateJWKSFromSigner creates a JWKS from a pki.Signer
 // keyUsage defaults to "sig" if empty string is provided
 func CreateJWKSFromSigner(signer pki.Signer, keyUsage string) (*JWKS, error) {
+	if signer == nil {
+		return nil, errors.New("signer must not be nil")
+	}
+
 	// Default keyUsage to "sig" if not provided
 	if keyUsage == "" {
 		keyUsage = "sig"

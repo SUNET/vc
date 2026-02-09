@@ -98,6 +98,12 @@ func TestParseSigningKey(t *testing.T) {
 }
 
 func TestCreateJWKSFromSigner(t *testing.T) {
+	t.Run("returns error for nil signer", func(t *testing.T) {
+		_, err := CreateJWKSFromSigner(nil, "sig")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "signer must not be nil")
+	})
+
 	t.Run("creates JWKS from RSA signer", func(t *testing.T) {
 		keyPath := createTestRSAKey(t)
 		privateKey, err := ParseSigningKey(keyPath)
