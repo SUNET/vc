@@ -82,7 +82,8 @@ func (s *Service) sendWebhook(ctx context.Context, url string, jsonBytes []byte)
 	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.New("webhook returned non-200 status")
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("webhook returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	s.log.Debug("webhook delivered", "url", url)
