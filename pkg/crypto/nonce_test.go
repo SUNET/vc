@@ -2,260 +2,230 @@ package crypto
 
 import (
 	"encoding/base64"
-	"strings"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// base64URLCharset matches only base64url characters (RFC 4648 §5) without padding.
+var base64URLCharset = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// ---------------------------------------------------------------------------
+// 1. Default size behaviour (both args zero → 32 random bytes)
+// ---------------------------------------------------------------------------
+
+func TestGenerateSecureToken_DefaultSize(t *testing.T) {
+	t.Parallel()
+	// RawURLEncoding of 32 bytes → ceil(32*4/3) = 43 chars, always.
+	const wantChars = 43
+	const wantBytes = 32
+
+	for i := 0; i < 50; i++ {
+		token, err := GenerateSecureToken(0, 0)
+		require.NoError(t, err)
+		assert.Len(t, token, wantChars, "default token must be exactly %d chars", wantChars)
+
+		decoded, err := base64.RawURLEncoding.DecodeString(token)
+		require.NoError(t, err, "default token must be valid RawURL base64")
+		assert.Len(t, decoded, wantBytes, "default token must decode to %d bytes", wantBytes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 2. Explicit byteSize values
+// ---------------------------------------------------------------------------
+
 func TestGenerateSecureToken_ByteSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name         string
-		byteSize     int
-		stringLength int
-		wantMinLen   int
-		wantMaxLen   int
+		name          string
+		byteSize      int
+		wantEncLen    int // base64.RawURLEncoding.EncodedLen(effectiveBytes)
+		wantDecBytes  int // effective byte count after clamping
 	}{
 		{
-			name:         "default size (32 bytes)",
-			byteSize:     0,
-			stringLength: 0,
-			wantMinLen:   43,
-			wantMaxLen:   43,
+			name:         "1 byte",
+			byteSize:     1,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(1),  // 2
+			wantDecBytes: 1,
 		},
 		{
 			name:         "16 bytes",
 			byteSize:     16,
-			stringLength: 0,
-			wantMinLen:   21,
-			wantMaxLen:   22,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(16), // 22
+			wantDecBytes: 16,
 		},
 		{
 			name:         "32 bytes",
 			byteSize:     32,
-			stringLength: 0,
-			wantMinLen:   43,
-			wantMaxLen:   43,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(32), // 43
+			wantDecBytes: 32,
 		},
 		{
 			name:         "64 bytes",
 			byteSize:     64,
-			stringLength: 0,
-			wantMinLen:   85,
-			wantMaxLen:   86,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(64), // 86
+			wantDecBytes: 64,
 		},
 		{
-			name:         "maximum 94 bytes",
+			name:         "93 bytes (just below max)",
+			byteSize:     93,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(93), // 124
+			wantDecBytes: 93,
+		},
+		{
+			name:         "94 bytes (max)",
 			byteSize:     94,
-			stringLength: 0,
-			wantMinLen:   125,
-			wantMaxLen:   126,
-		},
-		{
-			name:         "exceeds maximum (100 bytes -> capped at 94)",
-			byteSize:     100,
-			stringLength: 0,
-			wantMinLen:   125,
-			wantMaxLen:   126,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(94), // 126
+			wantDecBytes: 94,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			token, err := GenerateSecureToken(tt.byteSize, tt.stringLength)
+			t.Parallel()
+			token, err := GenerateSecureToken(tt.byteSize, 0)
 			require.NoError(t, err)
-			assert.NotEmpty(t, token)
-			assert.GreaterOrEqual(t, len(token), tt.wantMinLen)
-			assert.LessOrEqual(t, len(token), tt.wantMaxLen)
+			assert.Len(t, token, tt.wantEncLen)
 
-			// Verify it's valid base64 URL encoding
-			_, err = base64.RawURLEncoding.DecodeString(token)
-			assert.NoError(t, err, "token should be valid base64 URL encoding")
+			decoded, err := base64.RawURLEncoding.DecodeString(token)
+			require.NoError(t, err, "token must be decodable base64url")
+			assert.Len(t, decoded, tt.wantDecBytes, "decoded length must match effective byte size")
 		})
 	}
 }
 
-func TestGenerateSecureToken_StringLength(t *testing.T) {
-	tests := []struct {
-		name         string
-		byteSize     int
-		stringLength int
-		wantLen      int
-	}{
-		{
-			name:         "32 character string",
-			byteSize:     0,
-			stringLength: 32,
-			wantLen:      32,
-		},
-		{
-			name:         "43 character string",
-			byteSize:     0,
-			stringLength: 43,
-			wantLen:      43,
-		},
-		{
-			name:         "64 character string",
-			byteSize:     0,
-			stringLength: 64,
-			wantLen:      64,
-		},
-		{
-			name:         "100 character string",
-			byteSize:     0,
-			stringLength: 100,
-			wantLen:      100,
-		},
-		{
-			name:         "very large string (150 chars -> capped at 126)",
-			byteSize:     0,
-			stringLength: 150,
-			wantLen:      126,
-		},
-	}
+// ---------------------------------------------------------------------------
+// 3. stringLength: output must be exactly the requested character count
+// ---------------------------------------------------------------------------
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			token, err := GenerateSecureToken(tt.byteSize, tt.stringLength)
+func TestGenerateSecureToken_StringLength_Exact(t *testing.T) {
+	t.Parallel()
+	lengths := []int{1, 2, 10, 32, 43, 50, 64, 100, 125, 126}
+
+	for _, want := range lengths {
+		t.Run("len_"+itoa(want), func(t *testing.T) {
+			t.Parallel()
+			token, err := GenerateSecureToken(0, want)
 			require.NoError(t, err)
-			assert.NotEmpty(t, token)
-			assert.Equal(t, tt.wantLen, len(token))
-
-			// Verify it's valid base64 URL encoding (or truncated version)
-			// Truncated tokens may not decode, but should only contain valid chars
-			validChars := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-			for _, ch := range token {
-				assert.True(t, strings.ContainsRune(validChars, ch),
-					"token should only contain base64 URL-safe characters")
-			}
+			assert.Len(t, token, want, "output must be exactly %d chars", want)
 		})
 	}
 }
 
-func TestGenerateSecureToken_Uniqueness(t *testing.T) {
-	// Generate 1000 tokens and verify they're all unique
-	tokens := make(map[string]bool)
-	iterations := 1000
-
-	for i := 0; i < iterations; i++ {
-		token, err := GenerateSecureToken(32, 0)
-		require.NoError(t, err)
-		assert.False(t, tokens[token], "token should be unique")
-		tokens[token] = true
-	}
-
-	assert.Len(t, tokens, iterations, "all tokens should be unique")
-}
-
-func TestGenerateSecureToken_StringLengthPriority(t *testing.T) {
-	// When both byteSize and stringLength are provided, stringLength takes priority
+func TestGenerateSecureToken_StringLength_IgnoresByteSize(t *testing.T) {
+	t.Parallel()
+	// When stringLength > 0 the byteSize argument is ignored.
 	token, err := GenerateSecureToken(16, 50)
 	require.NoError(t, err)
-	assert.Equal(t, 50, len(token), "stringLength should take priority over byteSize")
+	assert.Len(t, token, 50, "stringLength must take priority over byteSize")
 }
 
-func TestGenerateSecureToken_Base64URLSafe(t *testing.T) {
-	// Verify tokens don't contain characters that need URL encoding
-	forbiddenChars := []string{"+", "/", "="}
+// ---------------------------------------------------------------------------
+// 4. Max-size clamping (94 bytes / 126 encoded chars)
+// ---------------------------------------------------------------------------
 
-	for i := 0; i < 100; i++ {
-		token, err := GenerateSecureToken(32, 0)
-		require.NoError(t, err)
+func TestGenerateSecureToken_MaxClamping_ByteSize(t *testing.T) {
+	t.Parallel()
+	maxEncLen := base64.RawURLEncoding.EncodedLen(94) // 126
 
-		for _, char := range forbiddenChars {
-			assert.NotContains(t, token, char,
-				"token should not contain '%s' (should use URL-safe encoding)", char)
+	for _, over := range []int{95, 100, 200, 1000} {
+		t.Run("byteSize_"+itoa(over), func(t *testing.T) {
+			t.Parallel()
+			token, err := GenerateSecureToken(over, 0)
+			require.NoError(t, err)
+			assert.Len(t, token, maxEncLen,
+				"byteSize %d must be clamped to 94 bytes → %d chars", over, maxEncLen)
+
+			decoded, err := base64.RawURLEncoding.DecodeString(token)
+			require.NoError(t, err)
+			assert.Len(t, decoded, 94, "decoded bytes must be clamped to 94")
+		})
+	}
+}
+
+func TestGenerateSecureToken_MaxClamping_StringLength(t *testing.T) {
+	t.Parallel()
+	maxEncLen := base64.RawURLEncoding.EncodedLen(94) // 126
+
+	for _, over := range []int{127, 128, 150, 256, 1000} {
+		t.Run("stringLength_"+itoa(over), func(t *testing.T) {
+			t.Parallel()
+			token, err := GenerateSecureToken(0, over)
+			require.NoError(t, err)
+			assert.LessOrEqual(t, len(token), maxEncLen,
+				"stringLength %d must be clamped; max output is %d chars", over, maxEncLen)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 5. URL-safety: no padding, only base64url charset
+// ---------------------------------------------------------------------------
+
+func TestGenerateSecureToken_URLSafe(t *testing.T) {
+	t.Parallel()
+
+	// Test across many sizes and iteration to catch any stray chars.
+	configs := []struct {
+		byteSize     int
+		stringLength int
+	}{
+		{0, 0},
+		{1, 0},
+		{16, 0},
+		{32, 0},
+		{64, 0},
+		{94, 0},
+		{100, 0},  // clamped
+		{0, 1},
+		{0, 32},
+		{0, 64},
+		{0, 126},
+		{0, 200}, // clamped
+	}
+
+	for _, cfg := range configs {
+		for range 20 {
+			token, err := GenerateSecureToken(cfg.byteSize, cfg.stringLength)
+			require.NoError(t, err)
+
+			assert.Regexp(t, base64URLCharset, token,
+				"token must only contain base64url chars (A-Z a-z 0-9 - _)")
+			assert.NotContains(t, token, "=",
+				"token must not contain padding character '='")
+			assert.NotContains(t, token, "+",
+				"token must not contain standard-base64 char '+'")
+			assert.NotContains(t, token, "/",
+				"token must not contain standard-base64 char '/'")
 		}
 	}
 }
 
-func TestGenerateSecureToken_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name         string
-		byteSize     int
-		stringLength int
-		expectError  bool
-	}{
-		{
-			name:         "both zero (should use default)",
-			byteSize:     0,
-			stringLength: 0,
-			expectError:  false,
-		},
-		{
-			name:         "string length of 1",
-			byteSize:     0,
-			stringLength: 1,
-			expectError:  false,
-		},
-		{
-			name:         "byte size of 1",
-			byteSize:     1,
-			stringLength: 0,
-			expectError:  false,
-		},
-		{
-			name:         "maximum values",
-			byteSize:     94,
-			stringLength: 0,
-			expectError:  false,
-		},
-	}
+// ---------------------------------------------------------------------------
+// 6. Uniqueness (statistical sanity check)
+// ---------------------------------------------------------------------------
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			token, err := GenerateSecureToken(tt.byteSize, tt.stringLength)
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.NotEmpty(t, token)
-			}
-		})
-	}
-}
+func TestGenerateSecureToken_Uniqueness(t *testing.T) {
+	t.Parallel()
+	const iterations = 1000
+	tokens := make(map[string]struct{}, iterations)
 
-func TestGenerateSecureToken_ConsistentEncoding(t *testing.T) {
-	// Generate tokens and verify consistent encoding properties
-	for i := 0; i < 100; i++ {
+	for i := 0; i < iterations; i++ {
 		token, err := GenerateSecureToken(32, 0)
 		require.NoError(t, err)
-
-		// Should be exactly 43 characters for 32 bytes
-		assert.Equal(t, 43, len(token))
-
-		// Should decode to 32 bytes
-		decoded, err := base64.RawURLEncoding.DecodeString(token)
-		require.NoError(t, err)
-		assert.Equal(t, 32, len(decoded))
+		_, dup := tokens[token]
+		assert.False(t, dup, "token collision detected")
+		tokens[token] = struct{}{}
 	}
+	assert.Len(t, tokens, iterations, "all tokens must be unique")
 }
 
-func TestGenerateSecureToken_StringLengthCalculation(t *testing.T) {
-	// Verify the byte calculation for string length works correctly
-	tests := []struct {
-		stringLength int
-		minBytes     int
-		maxBytes     int
-	}{
-		{stringLength: 32, minBytes: 24, maxBytes: 24}, // (32 * 3 + 3) / 4 = 24
-		{stringLength: 43, minBytes: 32, maxBytes: 33}, // (43 * 3 + 3) / 4 = 32.5
-		{stringLength: 64, minBytes: 48, maxBytes: 48}, // (64 * 3 + 3) / 4 = 48
-	}
-
-	for _, tt := range tests {
-		t.Run(string(rune(tt.stringLength)), func(t *testing.T) {
-			token, err := GenerateSecureToken(0, tt.stringLength)
-			require.NoError(t, err)
-			assert.Equal(t, tt.stringLength, len(token))
-
-			// Verify we can decode at least the expected bytes
-			// (may be truncated, so we can't decode directly)
-			assert.NotEmpty(t, token)
-		})
-	}
-}
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
 
 func BenchmarkGenerateSecureToken_32Bytes(b *testing.B) {
 	for i := 0; i < b.N; i++ {
@@ -263,20 +233,37 @@ func BenchmarkGenerateSecureToken_32Bytes(b *testing.B) {
 	}
 }
 
-func BenchmarkGenerateSecureToken_64Bytes(b *testing.B) {
+func BenchmarkGenerateSecureToken_94Bytes(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, _ = GenerateSecureToken(64, 0)
+		_, _ = GenerateSecureToken(94, 0)
 	}
 }
 
-func BenchmarkGenerateSecureToken_32Chars(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_, _ = GenerateSecureToken(0, 32)
-	}
-}
-
-func BenchmarkGenerateSecureToken_64Chars(b *testing.B) {
+func BenchmarkGenerateSecureToken_StringLen64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = GenerateSecureToken(0, 64)
 	}
+}
+
+// itoa is a small helper to avoid importing strconv just for test names.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := [20]byte{}
+	i := len(buf)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
