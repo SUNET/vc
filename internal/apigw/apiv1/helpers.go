@@ -20,7 +20,7 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 	}
 
 	// Track which formats we've seen to aggregate algorithms
-	sdjtAlgs := make(map[string]bool)
+	sdjwtAlgs := make(map[string]bool)
 	kbjwtAlgs := make(map[string]bool)
 	mdocAlgs := make(map[int]bool)
 
@@ -36,7 +36,7 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 			// SD-JWT signing algorithms
 			for _, alg := range config.CredentialSigningAlgValuesSupported {
 				if algStr, ok := alg.(string); ok {
-					sdjtAlgs[algStr] = true
+					sdjwtAlgs[algStr] = true
 				}
 			}
 
@@ -63,11 +63,11 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 	}
 
 	// Build SD-JWT format if we found any algorithms
-	if len(sdjtAlgs) > 0 || len(kbjwtAlgs) > 0 {
+	if len(sdjwtAlgs) > 0 || len(kbjwtAlgs) > 0 {
 		result.SDJWT = &openid4vp.SDJWTVCFormat{}
-		if len(sdjtAlgs) > 0 {
-			result.SDJWT.SDJWTAlgValues = make([]string, 0, len(sdjtAlgs))
-			for alg := range sdjtAlgs {
+		if len(sdjwtAlgs) > 0 {
+			result.SDJWT.SDJWTAlgValues = make([]string, 0, len(sdjwtAlgs))
+			for alg := range sdjwtAlgs {
 				result.SDJWT.SDJWTAlgValues = append(result.SDJWT.SDJWTAlgValues, alg)
 			}
 			sort.Strings(result.SDJWT.SDJWTAlgValues)
