@@ -101,16 +101,16 @@ func TestGenerateSecureToken_ByteSize(t *testing.T) {
 			wantDecBytes: 64,
 		},
 		{
-			name:         "93 bytes (just below max)",
-			byteSize:     93,
-			wantEncLen:   base64.RawURLEncoding.EncodedLen(93), // 124
-			wantDecBytes: 93,
+			name:         "95 bytes (just below max)",
+			byteSize:     95,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(95), // 127
+			wantDecBytes: 95,
 		},
 		{
-			name:         "94 bytes (max)",
-			byteSize:     94,
-			wantEncLen:   base64.RawURLEncoding.EncodedLen(94), // 126
-			wantDecBytes: 94,
+			name:         "96 bytes (max)",
+			byteSize:     96,
+			wantEncLen:   base64.RawURLEncoding.EncodedLen(96), // 128
+			wantDecBytes: 96,
 		},
 	}
 
@@ -134,7 +134,7 @@ func TestGenerateSecureToken_ByteSize(t *testing.T) {
 
 func TestGenerateSecureToken_StringLength_Exact(t *testing.T) {
 	t.Parallel()
-	lengths := []int{1, 2, 10, 32, 43, 50, 64, 100, 125, 126}
+	lengths := []int{1, 2, 10, 32, 43, 50, 64, 100, 125, 126, 128}
 
 	for _, want := range lengths {
 		t.Run("len_"+itoa(want), func(t *testing.T) {
@@ -155,33 +155,33 @@ func TestGenerateSecureToken_StringLength_IgnoresByteSize(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Max-size clamping (94 bytes / 126 encoded chars)
+// 4. Max-size clamping (96 bytes / 128 encoded chars)
 // ---------------------------------------------------------------------------
 
 func TestGenerateSecureToken_MaxClamping_ByteSize(t *testing.T) {
 	t.Parallel()
-	maxEncLen := base64.RawURLEncoding.EncodedLen(94) // 126
+	maxEncLen := base64.RawURLEncoding.EncodedLen(96) // 128
 
-	for _, over := range []int{95, 100, 200, 1000} {
+	for _, over := range []int{97, 100, 200, 1000} {
 		t.Run("byteSize_"+itoa(over), func(t *testing.T) {
 			t.Parallel()
 			token, err := GenerateSecureToken(over, 0)
 			require.NoError(t, err)
 			assert.Len(t, token, maxEncLen,
-				"byteSize %d must be clamped to 94 bytes → %d chars", over, maxEncLen)
+				"byteSize %d must be clamped to 96 bytes → %d chars", over, maxEncLen)
 
 			decoded, err := base64.RawURLEncoding.DecodeString(token)
 			require.NoError(t, err)
-			assert.Len(t, decoded, 94, "decoded bytes must be clamped to 94")
+			assert.Len(t, decoded, 96, "decoded bytes must be clamped to 96")
 		})
 	}
 }
 
 func TestGenerateSecureToken_MaxClamping_StringLength(t *testing.T) {
 	t.Parallel()
-	maxEncLen := base64.RawURLEncoding.EncodedLen(94) // 126
+	maxEncLen := base64.RawURLEncoding.EncodedLen(96) // 128
 
-	for _, over := range []int{127, 128, 150, 256, 1000} {
+	for _, over := range []int{129, 150, 256, 1000} {
 		t.Run("stringLength_"+itoa(over), func(t *testing.T) {
 			t.Parallel()
 			token, err := GenerateSecureToken(0, over)
@@ -209,12 +209,12 @@ func TestGenerateSecureToken_URLSafe(t *testing.T) {
 		{16, 0},
 		{32, 0},
 		{64, 0},
-		{94, 0},
+		{96, 0},
 		{100, 0},  // clamped
 		{0, 1},
 		{0, 32},
 		{0, 64},
-		{0, 126},
+		{0, 128},
 		{0, 200}, // clamped
 	}
 
@@ -264,9 +264,9 @@ func BenchmarkGenerateSecureToken_32Bytes(b *testing.B) {
 	}
 }
 
-func BenchmarkGenerateSecureToken_94Bytes(b *testing.B) {
+func BenchmarkGenerateSecureToken_96Bytes(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, _ = GenerateSecureToken(94, 0)
+		_, _ = GenerateSecureToken(96, 0)
 	}
 }
 
