@@ -43,54 +43,44 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		CredentialConstructor: map[string]*model.CredentialConstructor{
 			// OAuth2 scope based keys
 			"diploma": {
-				VCT:          model.CredentialTypeUrnEudiDiploma1,
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"pid": {
-				VCT:          model.CredentialTypeUrnEudiPid1,
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"ehic": {
-				VCT:          model.CredentialTypeUrnEudiEhic1,
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"pda1": {
-				VCT:          model.CredentialTypeUrnEudiPda11,
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"micro_credential": {
-				VCT:          model.CredentialTypeUrnEudiMicroCredential1,
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"elm": {
-				VCT:          model.CredentialTypeUrnEudiElm1,
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"openbadge_complete": {
-				VCT:          "urn:eudi:openbadge_complete:1",
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"openbadge_basic": {
-				VCT:          "urn:eudi:openbadge_basic:1",
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 			"openbadge_endorsements": {
-				VCT:          "urn:eudi:openbadge_endorsements:1",
 				VCTMFilePath: "testdata/vctm_test.json",
 				AuthMethod:   "basic",
 			},
 		},
 		Issuer: &model.Issuer{
 			APIServer:  model.APIServer{},
-			Identifier: "",
 			GRPCServer: model.GRPCServer{},
 			KeyConfig: &pki.KeyConfig{
 				PrivateKeyPath: "testdata/signing_test.key",
@@ -105,7 +95,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 			},
 		},
 		Registry: &model.Registry{
-			ExternalServerURL: "https://test-registry.sunet.se",
+			PublicURL: "https://test-registry.sunet.se",
 		},
 	}
 
@@ -134,7 +124,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		client.privateKey = rsaKey
 		client.publicKey = &rsaKey.PublicKey
 		// Also update the signer to use RSA
-	signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
+		signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
 		assert.NoError(t, err)
 		client.signer = signer
 	}

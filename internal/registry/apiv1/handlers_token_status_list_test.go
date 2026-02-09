@@ -86,7 +86,7 @@ func newTestClient() (*Client, *mockTokenStatusListIssuer) {
 	client := &Client{
 		cfg: &model.Cfg{
 			Registry: &model.Registry{
-				ExternalServerURL: "https://example.com",
+				PublicURL: "https://example.com",
 			},
 		},
 		log:                   logger.NewSimple("test"),
@@ -101,7 +101,7 @@ func newTestClient() (*Client, *mockTokenStatusListIssuer) {
 
 func TestTokenStatusLists_Success_JWT(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup: add a JWT to the cache
 	expectedJWT := "eyJhbGciOiJFUzI1NiIsInR5cCI6InN0YXR1c2xpc3Qrand0In0.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwic3ViIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS9zdGF0dXNsaXN0cy8xIiwiZXhwIjoyMjkxNzIwMTcwLCJpYXQiOjE2ODY5MjAxNzAsInN0YXR1c19saXN0Ijp7ImJpdHMiOjgsImxzdCI6ImVOcmJ1UmdBQWhjQlhRIn0sInR0bCI6NDMyMDB9.signature"
@@ -122,7 +122,7 @@ func TestTokenStatusLists_Success_JWT(t *testing.T) {
 
 func TestTokenStatusLists_Success_JWT_ExplicitAcceptHeader(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	expectedJWT := "eyJhbGciOiJFUzI1NiJ9.payload.signature"
 	mock.SetJWT(42, expectedJWT)
@@ -142,7 +142,7 @@ func TestTokenStatusLists_Success_JWT_ExplicitAcceptHeader(t *testing.T) {
 
 func TestTokenStatusLists_Success_CWT(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// CWT is binary data
 	expectedCWT := []byte{0xD2, 0x84, 0x43, 0xA1, 0x01, 0x26, 0xA0, 0x58, 0x24}
@@ -163,7 +163,7 @@ func TestTokenStatusLists_Success_CWT(t *testing.T) {
 
 func TestTokenStatusLists_SectionNotFound_JWT(t *testing.T) {
 	client, _ := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	req := &TokenStatusListsRequest{
 		ID:     999, // Non-existent section
@@ -177,7 +177,7 @@ func TestTokenStatusLists_SectionNotFound_JWT(t *testing.T) {
 
 func TestTokenStatusLists_SectionNotFound_CWT(t *testing.T) {
 	client, _ := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	req := &TokenStatusListsRequest{
 		ID:     999, // Non-existent section
@@ -191,7 +191,7 @@ func TestTokenStatusLists_SectionNotFound_CWT(t *testing.T) {
 
 func TestTokenStatusLists_HistoricalResolution_NotSupported(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add data to cache so we know it's not a "not found" error
 	mock.SetJWT(1, "some.jwt.token")
@@ -211,7 +211,7 @@ func TestTokenStatusLists_HistoricalResolution_NotSupported(t *testing.T) {
 // resolution not supported
 func TestTokenStatusLists_NegativeTimeParameter(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mock.SetJWT(1, "some.jwt.token")
 
@@ -228,7 +228,7 @@ func TestTokenStatusLists_NegativeTimeParameter(t *testing.T) {
 
 func TestTokenStatusLists_UnrecognizedAcceptHeader_DefaultsToJWT(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	expectedJWT := "default.jwt.token"
 	mock.SetJWT(1, expectedJWT)
@@ -260,7 +260,7 @@ func TestTokenStatusLists_UnrecognizedAcceptHeader_DefaultsToJWT(t *testing.T) {
 
 func TestTokenStatusLists_MultipleSections(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup multiple sections
 	mock.SetJWT(0, "jwt.section.0")
@@ -299,7 +299,7 @@ func TestTokenStatusLists_MultipleSections(t *testing.T) {
 
 func TestTokenStatusLists_LargeSectionID(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with a large section ID
 	largeSectionID := int64(9223372036854775807) // Max int64
@@ -318,7 +318,7 @@ func TestTokenStatusLists_LargeSectionID(t *testing.T) {
 
 func TestTokenStatusLists_ZeroSectionID(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	expectedJWT := "jwt.for.section.zero"
 	mock.SetJWT(0, expectedJWT)
@@ -339,7 +339,7 @@ func TestTokenStatusLists_ZeroSectionID(t *testing.T) {
 
 func TestTokenStatusListAggregation_Success_Empty(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mock.SetSections([]int64{})
 
@@ -352,7 +352,7 @@ func TestTokenStatusListAggregation_Success_Empty(t *testing.T) {
 
 func TestTokenStatusListAggregation_Success_SingleSection(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mock.SetSections([]int64{1})
 
@@ -366,7 +366,7 @@ func TestTokenStatusListAggregation_Success_SingleSection(t *testing.T) {
 
 func TestTokenStatusListAggregation_Success_MultipleSections(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mock.SetSections([]int64{0, 1, 2, 10, 100})
 
@@ -388,7 +388,7 @@ func TestTokenStatusListAggregation_Success_MultipleSections(t *testing.T) {
 
 func TestTokenStatusListAggregation_Error_DatabaseFailure(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dbError := errors.New("database connection failed")
 	mock.SetError(dbError)
@@ -424,10 +424,10 @@ func TestTokenStatusListAggregation_DifferentBaseURLs(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mock := newTestClient()
-			client.cfg.Registry.ExternalServerURL = tt.baseURL
+			client.cfg.Registry.PublicURL = tt.baseURL
 			mock.SetSections([]int64{1})
 
-			ctx := context.Background()
+			ctx := t.Context()
 			resp, err := client.TokenStatusListAggregation(ctx)
 			require.NoError(t, err)
 			require.NotNil(t, resp)
@@ -440,7 +440,7 @@ func TestTokenStatusListAggregation_DifferentBaseURLs(t *testing.T) {
 
 func TestTokenStatusListAggregation_LargeSectionNumbers(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with large section numbers
 	mock.SetSections([]int64{0, 999999, 1000000})
@@ -511,7 +511,7 @@ func TestTokenStatusListAggregationResponse_Fields(t *testing.T) {
 
 func TestTokenStatusLists_EmptyJWTInCache(t *testing.T) {
 	client, _ := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Empty cache - section not found
 	req := &TokenStatusListsRequest{
@@ -525,7 +525,7 @@ func TestTokenStatusLists_EmptyJWTInCache(t *testing.T) {
 
 func TestTokenStatusLists_EmptyCWTInCache(t *testing.T) {
 	client, _ := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Similar to JWT, nil/empty CWT should be not found
 	req := &TokenStatusListsRequest{
@@ -540,7 +540,7 @@ func TestTokenStatusLists_EmptyCWTInCache(t *testing.T) {
 
 func TestTokenStatusLists_CWTWithBinaryData(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with various binary patterns
 	binaryData := []byte{
@@ -563,7 +563,7 @@ func TestTokenStatusLists_CWTWithBinaryData(t *testing.T) {
 
 func TestTokenStatusLists_JWTWithSpecialCharacters(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// JWT with base64url characters
 	jwtToken := "eyJhbGciOiJFUzI1NiIsInR5cCI6InN0YXR1c2xpc3Qrand0In0.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwic3ViIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS9zdGF0dXNsaXN0cy8xIn0.MEUCIQDnGL_-gEP-3Z0xBLJJKz6x_d1WBHdPFX0H8oNTn8A4ngIgYbw7E6ydR0WC5sF8xGCNW7EzNqVZ8EH3qJNs0MxVH-A"
@@ -580,7 +580,7 @@ func TestTokenStatusLists_JWTWithSpecialCharacters(t *testing.T) {
 
 func TestTokenStatusLists_TimeParameter_ValidTimestamps(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Even valid timestamps should return "not supported" error
 	validTimestamps := []int64{
@@ -613,7 +613,7 @@ func TestTokenStatusLists_TimeParameter_ValidTimestamps(t *testing.T) {
 
 func TestTokenStatusLists_ConcurrentAccess(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup cache
 	mock.SetJWT(1, "jwt.token.1")
@@ -645,7 +645,7 @@ func TestTokenStatusLists_ConcurrentAccess(t *testing.T) {
 
 func TestTokenStatusListAggregation_ConcurrentAccess(t *testing.T) {
 	client, mock := newTestClient()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mock.SetSections([]int64{1, 2, 3, 4, 5})
 
@@ -696,10 +696,10 @@ func TestErrorTypes(t *testing.T) {
 // ============================================================================
 
 func TestNew(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cfg := &model.Cfg{
 		Registry: &model.Registry{
-			ExternalServerURL: "https://example.com",
+			PublicURL: "https://example.com",
 		},
 	}
 	log := logger.NewSimple("test")

@@ -9,7 +9,7 @@ import (
 type TrustService struct {
 }
 
-//func (ts *TrustService) ExtractPublicKeyFromCnfMap(cnf map[string]interface{}) (interface{}, error) {
+//func (ts *TrustService) ExtractPublicKeyFromCnfMap(cnf map[string]any) (any, error) {
 //	jwkMap, ok := cnf["jwk"]
 //	if !ok {
 //		return nil, fmt.Errorf("missing 'jwk' field in cnf")
@@ -32,7 +32,7 @@ type TrustService struct {
 //	return jwk.Key, nil
 //}
 
-func (ts *TrustService) ExtractPublicKeyFromX5C(x5cBase64 string) (interface{}, error) {
+func (ts *TrustService) ExtractPublicKeyFromX5C(x5cBase64 string) (any, error) {
 	derCert, err := base64.StdEncoding.DecodeString(x5cBase64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 x5c certificate: %w", err)

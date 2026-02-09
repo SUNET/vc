@@ -1,7 +1,6 @@
 package socialsecurity
 
 import (
-	"context"
 	"testing"
 	"time"
 	"vc/pkg/helpers"
@@ -80,7 +79,7 @@ func TestEHICSchemaValidation(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			got := helpers.ValidateDocumentData(ctx, tt.payload, logger.NewSimple("test"))
 

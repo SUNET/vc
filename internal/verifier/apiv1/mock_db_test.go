@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
@@ -15,113 +16,6 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
-
-// MockSessionCollection is an in-memory implementation of SessionCollection for testing
-type MockSessionCollection struct {
-	mu       sync.RWMutex
-	sessions map[string]*db.Session
-}
-
-// NewMockSessionCollection creates a new mock session collection
-func NewMockSessionCollection() *MockSessionCollection {
-	return &MockSessionCollection{
-		sessions: make(map[string]*db.Session),
-	}
-}
-
-// Create creates a new session
-func (m *MockSessionCollection) Create(ctx context.Context, session *db.Session) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.sessions[session.ID]; exists {
-		return errors.New("session already exists")
-	}
-
-	m.sessions[session.ID] = session
-	return nil
-}
-
-// GetByID retrieves a session by ID
-func (m *MockSessionCollection) GetByID(ctx context.Context, id string) (*db.Session, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	session, exists := m.sessions[id]
-	if !exists {
-		return nil, nil
-	}
-
-	return session, nil
-}
-
-// GetByAuthorizationCode retrieves a session by authorization code
-func (m *MockSessionCollection) GetByAuthorizationCode(ctx context.Context, code string) (*db.Session, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, session := range m.sessions {
-		if session.Tokens.AuthorizationCode == code {
-			return session, nil
-		}
-	}
-
-	return nil, nil
-}
-
-// GetByAccessToken retrieves a session by access token
-func (m *MockSessionCollection) GetByAccessToken(ctx context.Context, token string) (*db.Session, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, session := range m.sessions {
-		if session.Tokens.AccessToken == token {
-			return session, nil
-		}
-	}
-
-	return nil, nil
-}
-
-// Update updates a session
-func (m *MockSessionCollection) Update(ctx context.Context, session *db.Session) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.sessions[session.ID]; !exists {
-		return errors.New("session not found")
-	}
-
-	m.sessions[session.ID] = session
-	return nil
-}
-
-// Delete deletes a session
-func (m *MockSessionCollection) Delete(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.sessions[id]; !exists {
-		return errors.New("session not found")
-	}
-
-	delete(m.sessions, id)
-	return nil
-}
-
-// MarkCodeAsUsed marks an authorization code as used
-func (m *MockSessionCollection) MarkCodeAsUsed(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	session, exists := m.sessions[id]
-	if !exists {
-		return errors.New("session not found")
-	}
-
-	session.Tokens.AuthorizationCodeUsed = true
-	return nil
-}
 
 // MockClientCollection is an in-memory implementation of ClientCollection for testing
 type MockClientCollection struct {
@@ -196,37 +90,34 @@ func (m *MockClientCollection) AddClient(client *db.Client) {
 }
 
 // Compile-time interface satisfaction checks for mocks
-var _ db.SessionStore = (*MockSessionCollection)(nil)
 var _ db.ClientStore = (*MockClientCollection)(nil)
 
 // MockDBService creates a mock database service for testing
 type MockDBService struct {
-	Sessions *MockSessionCollection
-	Clients  *MockClientCollection
+	Clients *MockClientCollection
 }
 
 // NewMockDBService creates a new mock database service
 func NewMockDBService() *MockDBService {
 	return &MockDBService{
-		Sessions: NewMockSessionCollection(),
-		Clients:  NewMockClientCollection(),
+		Clients: NewMockClientCollection(),
 	}
 }
 
 // ToDBService creates a db.Service that uses the mock collections
 // This allows the mocks to be used with the real Client struct
 func (m *MockDBService) ToDBService() *db.Service {
-	return db.NewServiceWithMocks(m.Sessions, m.Clients)
+	return db.NewServiceWithMocks(m.Clients)
 }
 
 // CreateTestClientWithMock creates a test Client with a mock database for testing handlers
 func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	if cfg == nil {
 		cfg = &model.Cfg{
 			Verifier: &model.Verifier{
-				ExternalServerURL: "https://verifier.example.com",
+				PublicURL: "https://verifier.example.com",
 				OIDC: model.OIDCConfig{
 					Issuer:               "https://verifier.example.com",
 					SubjectType:          "public",
@@ -254,7 +145,7 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 		db:                          dbService,
 		log:                         log.New("apiv1"),
 		tracer:                      tracer,
-		oidcSigningAlg:              "RS256",
+		authContextCache:            cache.NewAuthContextCache(15 * time.Minute),
 		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
 		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
 		credentialCache:             ttlcache.New(ttlcache.WithTTL[string, []sdjwtvc.CredentialCache](5 * time.Minute)),

@@ -204,3 +204,40 @@ type CredentialResponseEncryption struct {
 	// If absent then compression MUST not be used.
 	Zip string `json:"zip,omitempty"`
 }
+
+// ResolveCredentialFormat determines the credential format from the request.
+// According to OpenID4VCI spec, the format is derived from the credential_configuration_id
+// which maps to a credential configuration in the issuer metadata.
+func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuerMetadataParameters) (string, error) {
+	if metadata == nil {
+		return "", fmt.Errorf("metadata is required")
+	}
+
+	// Use credential_configuration_id to look up the format from issuer metadata
+	if req.CredentialConfigurationID != "" {
+		if metadata.CredentialConfigurationsSupported != nil {
+			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
+				return config.Format, nil
+			}
+		}
+		return "", fmt.Errorf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)
+	}
+
+	// Use credential_identifier to look up the format
+	// The credential_identifier maps to a credential configuration via authorization_details from the token response
+	// For now, we'll attempt to find a matching configuration by identifier
+	if req.CredentialIdentifier != "" {
+		if metadata.CredentialConfigurationsSupported != nil {
+			// Try to match by credential identifier (may be same as configuration ID in some cases)
+			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialIdentifier]; ok {
+				return config.Format, nil
+			}
+			// If not found directly, we need the authorization context to resolve credential_identifier
+			// For now, default to dc+sd-jwt as a fallback
+			return "dc+sd-jwt", nil
+		}
+		return "", fmt.Errorf("unknown credential_identifier: %s", req.CredentialIdentifier)
+	}
+
+	return "", fmt.Errorf("either credential_configuration_id or credential_identifier must be provided")
+}

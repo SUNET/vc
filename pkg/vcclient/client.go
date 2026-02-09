@@ -15,19 +15,45 @@ import (
 // Client is the client
 type Client struct {
 	httpClient *http.Client
-	apigwFQDN  string
 	log        *logger.Log
+	APIGW      *APIGWClient
+	MockAS     *MockASClient
+	Verifier   *VerifierClient
+}
 
+// APIGWClient handles all APIGW endpoints
+type APIGWClient struct {
+	client   *Client
+	baseURL  string
+	log      *logger.Log
 	Document *documentHandler
 	Identity *identityHandler
 	Root     *rootHandler
-	OIDC     *oidcHandler
+	OAuth    *oauthHandler
 	User     *userHandler
+}
+
+// MockASClient handles MockAS endpoints
+type MockASClient struct {
+	client  *Client
+	baseURL string
+	log     *logger.Log
+	Root    *mockasRootHandler
+	Mock    *mockHandler
+}
+
+// VerifierClient handles Verifier endpoints
+type VerifierClient struct {
+	client  *Client
+	baseURL string
+	log     *logger.Log
 }
 
 // Config is the configuration for the client
 type Config struct {
-	ApigwFQDN string `validate:"required"`
+	ApigwURL    string `validate:""`
+	MockASURL   string `validate:""`
+	VerifierURL string `validate:""`
 }
 
 // New creates a new client
@@ -39,30 +65,57 @@ func New(config *Config, log *logger.Log) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		log:       log.New("vcclient"),
-		apigwFQDN: config.ApigwFQDN,
+		log: log.New("vcclient"),
 	}
 
 	defaultContentType := "application/json"
 
-	c.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/document", defaultContentType: defaultContentType, log: c.log.New("document")}
-	c.Identity = &identityHandler{client: c, serviceBaseURL: "api/v1/identity", defaultContentType: defaultContentType, log: c.log.New("identity")}
-	c.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("root")}
-	c.OIDC = &oidcHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("oidc")}
-	c.User = &userHandler{client: c, serviceBaseURL: "api/v1/user", defaultContentType: defaultContentType, log: c.log.New("user")}
+	// Initialize APIGW client if configured
+	if config.ApigwURL != "" {
+		c.APIGW = &APIGWClient{
+			client:  c,
+			baseURL: config.ApigwURL,
+			log:     c.log.New("apigw"),
+		}
+		c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/document", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
+		c.APIGW.Identity = &identityHandler{client: c, serviceBaseURL: "api/v1/identity", defaultContentType: defaultContentType, log: c.log.New("apigw.identity"), baseURL: config.ApigwURL}
+		c.APIGW.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("apigw.root"), baseURL: config.ApigwURL}
+		c.APIGW.OAuth = &oauthHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("apigw.oauth"), baseURL: config.ApigwURL}
+		c.APIGW.User = &userHandler{client: c, serviceBaseURL: "api/v1/user", defaultContentType: defaultContentType, log: c.log.New("apigw.user"), baseURL: config.ApigwURL}
+	}
+
+	// Initialize MockAS client if configured
+	if config.MockASURL != "" {
+		c.MockAS = &MockASClient{
+			client:  c,
+			baseURL: config.MockASURL,
+			log:     c.log.New("mockas"),
+		}
+		c.MockAS.Root = &mockasRootHandler{client: c, baseURL: config.MockASURL, log: c.log.New("mockas.root")}
+		c.MockAS.Mock = &mockHandler{client: c, serviceBaseURL: "api/v1/mock", defaultContentType: defaultContentType, log: c.log.New("mockas.mock"), baseURL: config.MockASURL}
+	}
+
+	// Initialize Verifier client if configured
+	if config.VerifierURL != "" {
+		c.Verifier = &VerifierClient{
+			client:  c,
+			baseURL: config.VerifierURL,
+			log:     c.log.New("verifier"),
+		}
+	}
 
 	return c, nil
 }
 
 // NewRequest make a new request
-func (c *Client) newRequest(ctx context.Context, method, path, contentType string, body any) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method, path, contentType string, body any, baseURL string) (*http.Request, error) {
 	rel, err := url.Parse(path)
 	if err != nil {
 		c.log.Error(err, "parse url", "path", path)
 		return nil, err
 	}
 
-	u, err := url.Parse(c.apigwFQDN)
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -160,13 +213,14 @@ func checkResponse(r *http.Response) error {
 	return ErrInvalidRequest
 }
 
-func (c *Client) call(ctx context.Context, method, path, contentType string, body, reply any, prefixReplyJSONWithData bool) (*http.Response, error) {
+func (c *Client) call(ctx context.Context, method, path, contentType string, body, reply any, prefixReplyJSONWithData bool, baseURL string) (*http.Response, error) {
 	request, err := c.newRequest(
 		ctx,
 		method,
 		path,
 		contentType,
 		body,
+		baseURL,
 	)
 	if err != nil {
 		c.log.Error(err, "call failed", "method", method, "path", path)

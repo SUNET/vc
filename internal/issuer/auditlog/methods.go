@@ -9,21 +9,33 @@ import (
 
 // AddAuditLog adds an audit log entry to auditLogChan channel.
 func (s *Service) AddAuditLog(ctx context.Context, eventType string, message any) {
-	s.auditLogChan <- &AuditLog{
+	entry := &AuditLog{
 		EventType: eventType,
 		Date:      time.Now().Format(time.RFC3339),
 		ID:        uuid.NewString(),
 		Message:   message,
 	}
+	select {
+	case <-s.done:
+		s.log.Debug("service shutting down, dropping audit log entry", "event", eventType)
+	case s.auditLogChan <- entry:
+	}
 }
 
 // processAuditLog processes the audit log entries from the channel and sends them to the webhook
 func (s *Service) processAuditLog(ctx context.Context) {
+	defer s.wg.Done()
+
 	for {
 		select {
 		case <-ctx.Done():
 			s.log.Info("Audit log service stopped")
-		case auditLog := <-s.auditLogChan:
+			return
+		case auditLog, ok := <-s.auditLogChan:
+			if !ok {
+				s.log.Info("Audit log channel closed, stopping")
+				return
+			}
 			s.log.Info("Processing audit log", "event", auditLog.EventType, "id", auditLog.ID)
 			err := s.SendWebHook(ctx, auditLog)
 			if err != nil {

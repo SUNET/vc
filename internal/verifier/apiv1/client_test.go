@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
@@ -11,58 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestClient_generateSessionID(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple session IDs and verify they're unique
-	ids := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		id := client.generateSessionID()
-		assert.NotEmpty(t, id)
-		assert.False(t, ids[id], "session ID should be unique")
-		ids[id] = true
-	}
-}
-
-func TestClient_generateAuthorizationCode(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple codes and verify they're unique
-	codes := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		code := client.generateAuthorizationCode()
-		assert.NotEmpty(t, code)
-		assert.False(t, codes[code], "authorization code should be unique")
-		codes[code] = true
-	}
-}
-
-func TestClient_generateAccessToken(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple tokens and verify they're unique
-	tokens := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		token := client.generateAccessToken()
-		assert.NotEmpty(t, token)
-		assert.False(t, tokens[token], "access token should be unique")
-		tokens[token] = true
-	}
-}
-
-func TestClient_generateRefreshToken(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Generate multiple tokens and verify they're unique
-	tokens := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		token := client.generateRefreshToken()
-		assert.NotEmpty(t, token)
-		assert.False(t, tokens[token], "refresh token should be unique")
-		tokens[token] = true
-	}
-}
 
 func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
@@ -204,62 +151,8 @@ func TestClient_parseScopes(t *testing.T) {
 	}
 }
 
-func TestClient_getSigningMethod(t *testing.T) {
-	tests := []struct {
-		name        string
-		signingAlg  string
-		expectedAlg string
-	}{
-		{
-			name:        "RS256",
-			signingAlg:  "RS256",
-			expectedAlg: "RS256",
-		},
-		{
-			name:        "RS384",
-			signingAlg:  "RS384",
-			expectedAlg: "RS384",
-		},
-		{
-			name:        "RS512",
-			signingAlg:  "RS512",
-			expectedAlg: "RS512",
-		},
-		{
-			name:        "ES256",
-			signingAlg:  "ES256",
-			expectedAlg: "ES256",
-		},
-		{
-			name:        "ES384",
-			signingAlg:  "ES384",
-			expectedAlg: "ES384",
-		},
-		{
-			name:        "ES512",
-			signingAlg:  "ES512",
-			expectedAlg: "ES512",
-		},
-		{
-			name:        "unknown defaults to RS256",
-			signingAlg:  "unknown",
-			expectedAlg: "RS256",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
-			client.oidcSigningAlg = tt.signingAlg
-			method := client.getSigningMethod()
-			require.NotNil(t, method)
-			assert.Equal(t, tt.expectedAlg, method.Alg())
-		})
-	}
-}
-
 func TestClient_Health(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
 
 	// Note: Health requires db to be set, which may fail in mock
@@ -357,7 +250,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError:       false,
@@ -368,10 +263,14 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma", "ehic"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 				"ehic": {
-					VCT: "urn:credential:ehic",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:ehic",
+					},
 				},
 			},
 			expectError:       false,
@@ -382,7 +281,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"openid", "diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError:       false,
@@ -400,7 +301,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"openid"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError:       true,
@@ -411,7 +314,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+
 					VCTM: &sdjwtvc.VCTM{
 						VCT:  "urn:credential:diploma",
 						Name: "Diploma Credential",
@@ -469,7 +372,7 @@ func ptrString(s string) *string {
 }
 
 func TestClient_createDCQLQuery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name                  string
@@ -482,7 +385,9 @@ func TestClient_createDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-					VCT: "urn:credential:diploma",
+					VCTM: &sdjwtvc.VCTM{
+						VCT: "urn:credential:diploma",
+					},
 				},
 			},
 			expectError: false,

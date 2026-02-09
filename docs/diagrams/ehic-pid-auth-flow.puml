@@ -1,0 +1,28 @@
+@startuml
+
+autonumber
+title Two-Stage PID Authentication Flow for EHIC
+
+user -> wallet: select EHIC credential
+wallet -> oauth: /op/par (scope=ehic)
+wallet -> oauth: /authorize
+oauth -> oauth: detects auth_method=pid_auth
+oauth -> oauth: /authorization/consent
+oauth -> wallet: redirect with verification request_uri
+wallet -> verifier: /verification/request-object
+note right of wallet: DCQL query for PID\n(given_name, birthdate, family_name)
+verifier -> wallet: signed JWT with DCQL
+wallet -> verifier: /verification/direct_post (PID VP token)
+note right of wallet: Extract identity from PID\nQuery EHIC docs by identity
+verifier -> oauth: cache EHIC document in session
+wallet -> oauth: /authorization/consent/callback
+wallet -> oauth: /user/lookup
+oauth -> wallet: EHIC claims for display
+wallet -> oauth: /authorization/consent/svg-template
+user -> wallet: approve consent
+wallet -> oauth: /token (authorization code)
+oauth -> wallet: access_token + c_nonce
+wallet -> issuer: /credential (access_token + proof)
+issuer -> wallet: EHIC SD-JWT credential
+
+@enduml

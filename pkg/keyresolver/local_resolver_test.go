@@ -47,7 +47,7 @@ func TestLocalResolver_DidJwk_Ed25519(t *testing.T) {
 	}
 
 	// Create JWK
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "OKP",
 		"crv": "Ed25519",
 		"x":   base64.RawURLEncoding.EncodeToString(pubKey),
@@ -80,7 +80,7 @@ func TestLocalResolver_DidJwk_Ed25519_WithFragment(t *testing.T) {
 	}
 
 	// Create JWK
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "OKP",
 		"crv": "Ed25519",
 		"x":   base64.RawURLEncoding.EncodeToString(pubKey),

@@ -12,14 +12,13 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
-	"vc/pkg/pki"
+
+	"vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/yaml.v2"
-	"gotest.tools/v3/golden"
+	"github.com/stretchr/testify/require"
 )
 
 // setupTestPKI creates temporary key and certificate files for testing
@@ -135,128 +134,56 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 }
 
 func TestCredentialConstructor(t *testing.T) {
-	tts := []struct {
-		name string
-		have map[string]*CredentialConstructor
+	tests := []struct {
+		name        string
+		constructor *CredentialConstructor
+		scope       string
+		expectedVCT string
 	}{
 		{
-			name: "Valid Config",
-			have: map[string]*CredentialConstructor{
-				"pid": {
-					VCT:          "urn:eudi:pid:1",
-					VCTMFilePath: "./testdata/vctm_pid.json",
-					AuthMethod:   "basic",
-				},
-				"pda1": {
-					VCT:          "urn:eudi:pda1:1",
-					VCTMFilePath: "./testdata/vctm_pda1.json",
-					AuthMethod:   "pid_auth",
-				},
-				"ehic": {
-					VCT:          "urn:eudi:ehic:1",
-					VCTMFilePath: "./testdata/vctm_ehic.json",
-					AuthMethod:   "pid_auth",
-				},
+			name: "Load PID VCTM",
+			constructor: &CredentialConstructor{
+				VCTMFilePath: "./testdata/vctm_pid.json",
+				AuthMethod:   "basic",
 			},
+			scope:       "pid",
+			expectedVCT: "urn:eudi:pid:1",
+		},
+		{
+			name: "Load PDA1 VCTM",
+			constructor: &CredentialConstructor{
+				VCTMFilePath: "./testdata/vctm_pda1.json",
+				AuthMethod:   "pid_auth",
+			},
+			scope:       "pda1",
+			expectedVCT: "urn:eudi:pda1:1",
+		},
+		{
+			name: "Load EHIC VCTM",
+			constructor: &CredentialConstructor{
+				VCTMFilePath: "./testdata/vctm_ehic.json",
+				AuthMethod:   "pid_auth",
+			},
+			scope:       "ehic",
+			expectedVCT: "urn:eudi:ehic:1",
 		},
 	}
 
-	for _, tt := range tts {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()
 
-			for scope, cc := range tt.have {
-				err := cc.LoadVCTMetadata(ctx, scope)
-				assert.NoError(t, err)
-
-				t.Logf("Loaded VCTM for: %s (VCT: %s)", cc.VCT, scope)
-			}
-		})
-	}
-}
-
-func TestCredentialConstructorFormatting(t *testing.T) {
-	tts := []struct {
-		name     string
-		cfgPath  string
-		loadVCTM []string
-		want     map[string]*CredentialConstructor
-	}{
-		{
-			name:     "Valid Config",
-			cfgPath:  "cfg.yaml",
-			loadVCTM: []string{"ehic"},
-			want: map[string]*CredentialConstructor{
-				"diploma": {
-					VCT: "urn:eudi:diploma:1",
-				},
-				"elm": {
-					VCT: "urn:eudi:elm:1",
-				},
-				"micro_credential": {
-					VCT: "urn:eudi:micro_credential:1",
-				},
-				"pid": {
-					VCT: "urn:eudi:pid:1",
-				},
-				"openbadge_basic": {
-					VCT: "urn:eudi:openbadge_basic:1",
-				},
-				"openbadge_complete": {
-					VCT: "urn:eudi:openbadge_complete:1",
-				},
-				"openbadge_endorsements": {
-					VCT: "urn:eudi:openbadge_endorsements:1",
-				},
-				"pda1": {
-					VCT: "urn:eudi:pda1:1",
-				},
-				"ehic": {
-					VCT: "urn:eudi:ehic:1",
-					Attributes: map[string]map[string][]string{
-						"en-US": {
-							"Social Security PIN":        {"personal_administrative_number"},
-							"Issuing authority":          {"issuing_authority"},
-							"Issuing authority id":       {"issuing_authority", "id"},
-							"Issuing authority name":     {"issuing_authority", "name"},
-							"Issuing country":            {"issuing_country"},
-							"Expiry date":                {"date_of_expiry"},
-							"Issue date":                 {"date_of_issuance"},
-							"Competent institution":      {"authentic_source"},
-							"Competent institution id":   {"authentic_source", "id"},
-							"Competent institution name": {"authentic_source", "name"},
-							"Ending date":                {"ending_date"},
-							"Starting date":              {"starting_date"},
-							"Document number":            {"document_number"},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tts {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := t.Context()
-			cfgFile := golden.Get(t, tt.cfgPath)
-
-			cfg := &Cfg{}
-			err := yaml.Unmarshal(cfgFile, cfg)
+			err := tt.constructor.LoadVCTMetadata(ctx, tt.scope)
 			assert.NoError(t, err)
 
-			for scope, cc := range cfg.CredentialConstructor {
-				if slices.Contains(tt.loadVCTM, scope) {
-					err := cc.LoadVCTMetadata(ctx, scope)
-					assert.NoError(t, err)
-					cc.Attributes = cc.VCTM.Attributes()
-				}
+			// Verify VCTM was loaded
+			assert.NotNil(t, tt.constructor.VCTM, "VCTM should be loaded")
 
-				cc.VCTMFilePath = ""
-				cc.AuthMethod = ""
-				cc.VCTM = nil
-			}
+			// Verify VCT matches expected value
+			assert.Equal(t, tt.expectedVCT, tt.constructor.GetVCT(), "VCT should match expected value")
 
-			assert.Equal(t, tt.want, cfg.CredentialConstructor)
+			// Verify VCTM has the VCT field populated
+			assert.Equal(t, tt.expectedVCT, tt.constructor.VCTM.VCT, "VCTM.VCT should be populated")
 		})
 	}
 }
@@ -273,7 +200,7 @@ func TestGetCredentialConstructorAuthMethod(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"pid": {
-						VCT:        "urn:eudi:pid:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 						AuthMethod: "basic",
 					},
 				},
@@ -286,7 +213,7 @@ func TestGetCredentialConstructorAuthMethod(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"ehic": {
-						VCT:        "urn:eudi:ehic:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 						AuthMethod: "pid_auth",
 					},
 				},
@@ -299,7 +226,7 @@ func TestGetCredentialConstructorAuthMethod(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"pid": {
-						VCT:        "urn:eudi:pid:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 						AuthMethod: "basic",
 					},
 				},
@@ -320,15 +247,15 @@ func TestGetCredentialConstructorAuthMethod(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"pid": {
-						VCT:        "urn:eudi:pid:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 						AuthMethod: "basic",
 					},
 					"ehic": {
-						VCT:        "urn:eudi:ehic:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 						AuthMethod: "pid_auth",
 					},
 					"diploma": {
-						VCT:        "urn:eudi:diploma:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
 						AuthMethod: "pid_auth",
 					},
 				},
@@ -358,7 +285,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"pid": {
-						VCT:          "urn:eudi:pid:1",
+						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 						AuthMethod:   "basic",
 						VCTMFilePath: "/path/to/vctm_pid.json",
 					},
@@ -366,7 +293,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 			},
 			scope: "pid",
 			want: &CredentialConstructor{
-				VCT:          "urn:eudi:pid:1",
+				VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				AuthMethod:   "basic",
 				VCTMFilePath: "/path/to/vctm_pid.json",
 			},
@@ -376,7 +303,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"pid": {
-						VCT:        "urn:eudi:pid:1",
+						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 						AuthMethod: "basic",
 					},
 				},
@@ -397,12 +324,12 @@ func TestGetCredentialConstructor(t *testing.T) {
 			cfg: &Cfg{
 				CredentialConstructor: map[string]*CredentialConstructor{
 					"pid": {
-						VCT:          "urn:eudi:pid:1",
+						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 						AuthMethod:   "basic",
 						VCTMFilePath: "/path/to/vctm_pid.json",
 					},
 					"ehic": {
-						VCT:          "urn:eudi:ehic:1",
+						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 						AuthMethod:   "pid_auth",
 						VCTMFilePath: "/path/to/vctm_ehic.json",
 					},
@@ -410,7 +337,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 			},
 			scope: "ehic",
 			want: &CredentialConstructor{
-				VCT:          "urn:eudi:ehic:1",
+				VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 				AuthMethod:   "pid_auth",
 				VCTMFilePath: "/path/to/vctm_ehic.json",
 			},
@@ -467,7 +394,7 @@ func TestLoadFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			err := tt.constructor.LoadVCTMetadata(ctx, "test_scope")
 
 			if tt.wantErr {
@@ -484,171 +411,54 @@ func TestLoadFile(t *testing.T) {
 }
 
 func TestIssuerMetadataLoadAndSign(t *testing.T) {
-	// Setup test PKI files
-	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
-
 	tests := []struct {
-		name        string
-		metadata    IssuerMetadata
-		keyConfig   *pki.KeyConfig
-		wantErr     bool
-		errContains string
+		name     string
+		metadata IssuerMetadata
 	}{
 		{
-			name:     "Valid runtime generation with RSA keys and chain",
+			name:     "Valid runtime generation",
 			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      rsaCertPath,
-			},
-			wantErr: false,
-		},
-		{
-			name:     "Valid runtime generation with EC keys and chain",
-			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: ecKeyPath,
-				ChainPath:      ecCertPath,
-			},
-			wantErr: false,
-		},
-		{
-			name:     "Signing key file does not exist",
-			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: "./testdata/nonexistent.pem",
-				ChainPath:      rsaCertPath,
-			},
-			wantErr:     true,
-			errContains: "no such file or directory",
-		},
-		{
-			name:     "Certificate chain file does not exist",
-			metadata: IssuerMetadata{},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      "./testdata/nonexistent.crt",
-			},
-			wantErr:     true,
-			errContains: "no such file or directory",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			metadata, privateKey, cert, chain, err := tt.metadata.LoadAndSign(ctx, "https://issuer.example.com", tt.keyConfig, nil)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.errContains != "" {
-					assert.Contains(t, err.Error(), tt.errContains)
-				}
-				assert.Nil(t, metadata)
-				assert.Nil(t, privateKey)
-				assert.Nil(t, cert)
-				assert.Nil(t, chain)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, metadata)
-				assert.NotNil(t, privateKey)
-				assert.NotNil(t, cert)
-				assert.NotEmpty(t, chain)
-				assert.NotEmpty(t, metadata.SignedMetadata, "SignedMetadata should be populated with signed JWT")
-			}
+			ctx := t.Context()
+			metadata, err := tt.metadata.Generate(ctx, "https://issuer.example.com", nil)
+			require.NoError(t, err)
+			assert.NotNil(t, metadata)
+			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty until Sign() is called")
 		})
 	}
 }
 
 func TestOAuthServerLoadAndSignMetadata(t *testing.T) {
-	// Setup test PKI files
-	rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath := setupTestPKI(t)
-
 	tests := []struct {
-		name        string
-		server      OAuthServer
-		keyConfig   *pki.KeyConfig
-		issuerURL   string
-		wantErr     bool
-		errContains string
+		name      string
+		server    OAuthServer
+		issuerURL string
 	}{
 		{
-			name: "Runtime-generated metadata with RSA keys",
+			name: "Runtime-generated metadata",
 			server: OAuthServer{
 				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      rsaCertPath,
 			},
 			issuerURL: "https://test.oauth.example.com",
-			wantErr:   false,
-		},
-		{
-			name: "Runtime-generated metadata with EC keys",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: ecKeyPath,
-				ChainPath:      ecCertPath,
-			},
-			issuerURL: "https://test.oauth.example.com",
-			wantErr:   false,
-		},
-		{
-			name: "Signing key file does not exist",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: "./testdata/nonexistent.pem",
-				ChainPath:      rsaCertPath,
-			},
-			issuerURL:   "https://test.oauth.example.com",
-			wantErr:     true,
-			errContains: "no such file or directory",
-		},
-		{
-			name: "Certificate chain file does not exist",
-			server: OAuthServer{
-				TokenEndpoint: "https://test.oauth.example.com/token",
-			},
-			keyConfig: &pki.KeyConfig{
-				PrivateKeyPath: rsaKeyPath,
-				ChainPath:      "./testdata/nonexistent.crt",
-			},
-			issuerURL:   "https://test.oauth.example.com",
-			wantErr:     true,
-			errContains: "no such file or directory",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			metadata, privateKey, chain, err := tt.server.LoadAndSignMetadata(ctx, tt.issuerURL, tt.keyConfig)
+			ctx := t.Context()
+			metadata := tt.server.GenerateMetadata(ctx, tt.issuerURL)
 
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.errContains != "" {
-					assert.Contains(t, err.Error(), tt.errContains)
-				}
-				assert.Nil(t, metadata)
-				assert.Nil(t, privateKey)
-				assert.Nil(t, chain)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, metadata)
-				assert.NotNil(t, privateKey)
-				assert.NotEmpty(t, chain)
-				assert.NotEmpty(t, metadata.SignedMetadata, "SignedMetadata should be populated after signing")
-				// Verify metadata has expected fields
-				assert.NotEmpty(t, metadata.Issuer)
-				assert.Equal(t, tt.issuerURL, metadata.Issuer)
-				assert.NotEmpty(t, metadata.AuthorizationEndpoint)
-				assert.NotEmpty(t, metadata.TokenEndpoint)
-			}
+			assert.NotNil(t, metadata)
+			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty before signing")
+			// Verify metadata has expected fields
+			assert.NotEmpty(t, metadata.Issuer)
+			assert.Equal(t, tt.issuerURL, metadata.Issuer)
+			assert.NotEmpty(t, metadata.AuthorizationEndpoint)
+			assert.NotEmpty(t, metadata.TokenEndpoint)
 		})
 	}
 }

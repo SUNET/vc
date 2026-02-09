@@ -15,7 +15,7 @@ import (
 
 // ExampleNew demonstrates creating an OpenID4VP client with default settings
 func ExampleNew() {
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	// Create a client with default TTL settings (10 minutes for both caches)
 	client, err := openid4vp.New(ctx, nil)
@@ -37,7 +37,7 @@ func ExampleNew() {
 
 // ExampleNew_withCustomConfig demonstrates creating a client with custom TTL settings
 func ExampleNew_withCustomConfig() {
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	// Create a client with custom TTL values
 	config := &openid4vp.Config{
@@ -64,7 +64,7 @@ func ExampleNew_withCustomConfig() {
 
 // ExampleNew_usage demonstrates using both caches in the client
 func ExampleNew_usage() {
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	// Create client
 	client, err := openid4vp.New(ctx, nil)

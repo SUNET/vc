@@ -77,14 +77,9 @@ type ClientMetadata struct {
 	EncryptedResponseEncValuesSupported []string `json:"encrypted_response_enc_values_supported,omitempty" bson:"encrypted_response_enc_values_supported,omitempty" validate:"omitempty,dive,oneof=A128CBC-HS256 A256CBC-HS512 A128GCM A256GCM"`
 
 	//vp_formats_supported: REQUIRED when not available to the Wallet via another mechanism. As defined in Section 11.1.
-	VPFormatsSupported map[string]map[string][]string `json:"vp_formats_supported,omitempty" bson:"vp_formats_supported,omitempty"`
+	// Per OpenID4VP spec, this is the properly formatted field for client_metadata in authorization requests
+	VPFormatsSupported *VPFormatsSupported `json:"vp_formats_supported,omitempty" bson:"vp_formats_supported,omitempty"`
 
-	////////
-	//	jwks: OPTIONAL. A JWKS as defined in [RFC7591]. It MAY contain one or more public keys, such as those used by the Wallet as an input to a key agreement that may be used for encryption of the Authorization Response (see Section 8.3), or where the Wallet will require the public key of the Verifier to generate the Verifiable Presentation. This allows the Verifier to pass ephemeral keys specific to this Authorization Request. Public keys included in this parameter MUST NOT be used to verify the signature of signed Authorization Requests.
-	//JWKS Keys `json:"jwks,omitempty" bson:"jwks,omitempty" validate:"omitempty"`
-	//
-	// vp_formats: REQUIRED when not available to the Wallet via another mechanism. As defined in Section 11.1.
-	VPFormats map[string]map[string][]string `json:"vp_formats,omitempty" bson:"vp_formats,omitempty"`
 	// authorization_signed_response_alg: OPTIONAL. As defined in [JARM].
 	AuthorizationSignedResponseALG string `json:"authorization_signed_response_alg,omitempty" bson:"authorization_signed_response_alg,omitempty" validate:"omitempty,oneof=RS256 ES256 PS256 EdDSA"`
 	// authorization_encrypted_response_alg: OPTIONAL. As defined in [JARM].

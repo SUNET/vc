@@ -1,37 +1,28 @@
 credential_constructor:
   pid:
-    vct: "urn:eudi:pid:1"
     vctm_file_path: "testdata/vctm_pid.json"
     auth_method: basic
   ehic:
-    vct: "urn:eudi:ehic:1"
     vctm_file_path: "testdata/vctm_ehic.json"
     auth_method: pid_auth
   pda1:
-    vct: "urn:eudi:pda1:1"
     vctm_file_path: "testdata/vctm_pda1.json"
     auth_method: pid_auth
   elm:
-    vct: "urn:eudi:elm:1"
     vctm_file_path: "testdata/vctm_elm.json"
     auth_method: pid_auth
   diploma:
-    vct: "urn:eudi:diploma:1"
     vctm_file_path: "testdata/vctm_diploma.json"
     auth_method: pid_auth
   micro_credential:
-    vct: "urn:eudi:micro_credential:1"
     vctm_file_path: "testdata/vctm_microcredential.json"
     auth_method: pid_auth
   openbadge_complete:
-    vct: "urn:eudi:openbadge_complete:1"
     vctm_file_path: "testdata/vctm_elm.json"
     auth_method: pid_auth
   openbadge_basic:
-    vct: "urn:eudi:openbadge_basic:1"
     vctm_file_path: "testdata/vctm_elm.json"
     auth_method: pid_auth
   openbadge_endorsements:
-    vct: "urn:eudi:openbadge_endorsements:1"
     vctm_file_path: "testdata/vctm_elm.json"
     auth_method: pid_auth

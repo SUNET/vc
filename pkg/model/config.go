@@ -2,36 +2,36 @@ package model
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"slices"
 	"time"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
+	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
 	"vc/pkg/sdjwtvc"
 )
 
 // APIServer holds the api server configuration
 type APIServer struct {
-	Addr         string            `yaml:"addr" validate:"required"`
-	ExternalPort string            `yaml:"external_port,omitempty" validate:"omitempty"`
-	PublicKeys   map[string]string `yaml:"public_keys"`
-	TLS          TLS               `yaml:"tls" validate:"omitempty"`
-	BasicAuth    BasicAuth         `yaml:"basic_auth"`
-	CORS         *CORS             `yaml:"cors,omitempty" validate:"omitempty"`
+	Addr      string    `yaml:"addr" validate:"required" default:":8080"`
+	TLS       TLS       `yaml:"tls" validate:"omitempty"`
+	BasicAuth BasicAuth `yaml:"basic_auth"`
+	CORS      *CORS     `yaml:"cors,omitempty" validate:"omitempty"`
 }
 
 // CORS holds the CORS configuration
 type CORS struct {
-	AllowedOrigins []string `yaml:"allowed_origins" validate:"omitempty"`
+	AllowedOrigins []string `yaml:"allowed_origins" validate:"omitempty" default:"[]"`
 }
 
 // TLS holds the tls configuration
 type TLS struct {
-	Enabled      bool   `yaml:"enabled"`
+	Enabled      bool   `yaml:"enabled" default:"false"`
 	CertFilePath string `yaml:"cert_file_path" validate:"required"`
 	KeyFilePath  string `yaml:"key_file_path" validate:"required"`
 }
@@ -43,61 +43,49 @@ type Mongo struct {
 
 // Kafka holds the kafka configuration that is common for the entire system
 type Kafka struct {
-	Enabled bool     `yaml:"enabled"`
-	Brokers []string `yaml:"brokers" validate:"required"`
+	Enabled bool     `yaml:"enabled" default:"false"`
+	Brokers []string `yaml:"brokers" validate:"required" default:"[\"kafka0:9092\", \"kafka1:9092\"]"`
 }
 
 // Log holds the log configuration
 type Log struct {
-	Level      string `yaml:"level"`
 	FolderPath string `yaml:"folder_path"`
 }
 
 // Common holds the common configuration
 type Common struct {
-	HTTPProxy       string                `yaml:"http_proxy"`
-	Production      bool                  `yaml:"production"`
-	Log             Log                   `yaml:"log"`
-	Mongo           Mongo                 `yaml:"mongo" validate:"omitempty"`
-	Tracing         OTEL                  `yaml:"tracing" validate:"required"`
-	Kafka           Kafka                 `yaml:"kafka" validate:"omitempty"`
-	CredentialOffer CredentialOfferConfig `yaml:"credential_offer" validate:"omitempty"`
+	Production        bool                    `yaml:"production" default:"true"`
+	Log               Log                     `yaml:"log"`
+	Mongo             Mongo                   `yaml:"mongo" validate:"omitempty"`
+	Tracing           OTEL                    `yaml:"tracing" validate:"required"`
+	Kafka             Kafka                   `yaml:"kafka" validate:"omitempty"`
+	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
 }
 
-type CredentialOfferConfig struct {
-	// WalletURL sets the wallet url or "openid-credential-offer://"
-	WalletURL string `yaml:"wallet_url"`
-	IssuerURL string `yaml:"issuer_url" validate:"required"`
-	Type      string `yaml:"type" validate:"required,oneof=credential_offer_uri credential_offer"`
-	QR        QRCfg  `yaml:"qr" validate:"omitempty"`
+type CredentialOfferQRConfig struct {
+	Type string `yaml:"type" validate:"required,oneof=credential_offer_uri credential_offer" default:"credential_offer"`
+	QR   QRCfg  `yaml:"qr" validate:"omitempty"`
 }
 
 // QRCfg holds the qr configuration
 type QRCfg struct {
-	RecoveryLevel int `yaml:"recovery_level" validate:"required,min=0,max=3"`
-	Size          int `yaml:"size" validate:"required"`
+	RecoveryLevel int `yaml:"recovery_level" validate:"required,min=0,max=3" default:"2"`
+	Size          int `yaml:"size" validate:"required" default:"256"`
 }
 
 // GRPCServer holds the rpc configuration
 type GRPCServer struct {
-	Addr     string  `yaml:"addr" validate:"required"`
-	Insecure bool    `yaml:"insecure"`
-	TLS      GRPCTLS `yaml:"tls,omitempty"`
+	Addr string  `yaml:"addr" validate:"required" default:":8090"`
+	TLS  GRPCTLS `yaml:"tls,omitempty"`
 }
 
 // GRPCTLS holds the mTLS configuration for gRPC server
 type GRPCTLS struct {
-	Enabled                   bool              `yaml:"enabled"`
-	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enabled true"`              // Server certificate
-	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enabled true"`               // Server private key
-	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enabled true"`              // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" validate:"required_if=Enabled true"` // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
-}
-
-// PDF holds the pdf configuration (special Ladok case)
-type PDF struct {
-	KeepSignedDuration   int `yaml:"keep_signed_duration"`
-	KeepUnsignedDuration int `yaml:"keep_unsigned_duration"`
+	Enabled                   bool              `yaml:"enabled" default:"false"`
+	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.crt"` // Server certificate
+	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.key"`  // Server private key
+	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enabled true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                         // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
 }
 
 // JWTAttribute holds the jwt attribute configuration.
@@ -106,14 +94,14 @@ type JWTAttribute struct {
 	// Issuer of the token example: https://issuer.sunet.se
 	Issuer string `yaml:"issuer" validate:"required"`
 
-	// StaticHost is the static host of the issuer, expose static files, like pictures
+	// StaticHost is the static host of the issuer, expose static files, like pictures.
 	StaticHost string `yaml:"static_host" validate:"omitempty"`
 
 	// EnableNotBefore states the time not before which the token is valid
-	EnableNotBefore bool `yaml:"enable_not_before"`
+	EnableNotBefore bool `yaml:"enable_not_before" default:"false"`
 
 	// Valid duration of the token in seconds
-	ValidDuration int64 `yaml:"valid_duration" validate:"required_with=EnableNotBefore"`
+	ValidDuration int64 `yaml:"valid_duration" validate:"required_with=EnableNotBefore" default:"3600"`
 
 	// VerifiableCredentialType URL example: https://credential.sunet.se/identity_credential
 	VerifiableCredentialType string `yaml:"verifiable_credential_type" validate:"required"`
@@ -128,7 +116,7 @@ type JWTAttribute struct {
 // SAMLConfig holds SAML Service Provider configuration for the issuer
 type SAMLConfig struct {
 	// Enabled turns on SAML support (default: false)
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" default:"false"`
 
 	// EntityID is the SAML SP entity identifier (typically the metadata URL)
 	EntityID string `yaml:"entity_id" validate:"required_if=Enabled true"`
@@ -221,7 +209,7 @@ func (c *SAMLConfig) Validate() error {
 // OIDCRPConfig holds OIDC Relying Party configuration for credential issuance
 type OIDCRPConfig struct {
 	// Enabled turns on OIDC RP support (default: false)
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" default:"false"`
 
 	// Dynamic Registration (RFC 7591) support
 	// If enabled, the OIDC RP will attempt to register itself with the OIDC Provider
@@ -245,10 +233,10 @@ type OIDCRPConfig struct {
 
 	// Scopes are the OAuth2/OIDC scopes to request
 	// Default: ["openid", "profile", "email"]
-	Scopes []string `yaml:"scopes"`
+	Scopes []string `yaml:"scopes" validate:"required,min=1,dive,required" default:"[\"openid\", \"profile\", \"email\"]"`
 
 	// SessionDuration in seconds (default: 3600)
-	SessionDuration int `yaml:"session_duration"`
+	SessionDuration int `yaml:"session_duration" default:"3600"`
 
 	// Client metadata for dynamic registration or display purposes
 	ClientName string   `yaml:"client_name,omitempty"`
@@ -268,7 +256,7 @@ type OIDCRPConfig struct {
 type DynamicRegistrationConfig struct {
 	// Enabled turns on dynamic client registration
 	// If true, ClientID and ClientSecret from OIDCRPConfig are ignored
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" default:"false"`
 
 	// InitialAccessToken is an optional bearer token for registration
 	// Required by some OIDC Providers (e.g., Keycloak)
@@ -286,20 +274,8 @@ func (c *OIDCRPConfig) Validate() error {
 		return nil
 	}
 
-	// Ensure scopes includes "openid" at minimum
-	if len(c.Scopes) == 0 {
-		c.Scopes = []string{"openid", "profile", "email"}
-	}
-
-	hasOpenID := false
-	for _, scope := range c.Scopes {
-		if scope == "openid" {
-			hasOpenID = true
-			break
-		}
-	}
-
-	if !hasOpenID {
+	// Ensure 'openid' scope is present (mandatory for OIDC)
+	if !slices.Contains(c.Scopes, "openid") {
 		return errors.New("OIDC scopes must include 'openid'")
 	}
 
@@ -336,7 +312,7 @@ type AttributeConfig struct {
 	Claim string `yaml:"claim" validate:"required"`
 
 	// Required indicates if this attribute must be present in the assertion/response
-	Required bool `yaml:"required"`
+	Required bool `yaml:"required" default:"false"`
 
 	// Transform is an optional transformation to apply
 	// Supported: "lowercase", "uppercase", "trim"
@@ -349,27 +325,37 @@ type AttributeConfig struct {
 // Issuer holds the issuer configuration
 type Issuer struct {
 	APIServer      APIServer      `yaml:"api_server" validate:"required"`
-	Identifier     string         `yaml:"identifier" validate:"required"`
 	GRPCServer     GRPCServer     `yaml:"grpc_server" validate:"required"`
 	KeyConfig      *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	JWTAttribute   JWTAttribute   `yaml:"jwt_attribute" validate:"required"`
 	IssuerURL      string         `yaml:"issuer_url" validate:"required"`
-	WalletURL      string         `yaml:"wallet_url"`
 	RegistryClient GRPCClientTLS  `yaml:"registry_client" validate:"omitempty"`
-	MDoc           *MDocConfig    `yaml:"mdoc" validate:"omitempty"` // mDL/mdoc configuration
+	MDoc           *MDocConfig    `yaml:"mdoc" validate:"omitempty"`      // mDL/mdoc configuration
+	AuditLog       *AuditLog      `yaml:"audit_log" validate:"omitempty"` // Audit log webhook configuration
+}
+
+// AuditLog holds audit log configuration for multiple destinations
+type AuditLog struct {
+	Enabled      bool          `yaml:"enabled" default:"false"`
+	Destinations []string      `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	FileSyncInterval time.Duration `yaml:"file_sync_interval" default:"5s"` // File destinations: 0 = fsync every write, >0 = periodic batched fsync at interval
+	// Destinations can be:
+	//   - "console" or "stdout": write to standard output
+	//   - File path (e.g., "/var/log/audit.log"): write to file
+	//   - URL (http:// or https://): send webhook POST request
 }
 
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
 type MDocConfig struct {
 	CertificateChainPath string        `yaml:"certificate_chain_path" validate:"required"` // Path to PEM certificate chain
-	DefaultValidity      time.Duration `yaml:"default_validity"`                           // Default credential validity (e.g., "365d")
-	DigestAlgorithm      string        `yaml:"digest_algorithm"`                           // "SHA-256", "SHA-384", or "SHA-512"
+	DefaultValidity      time.Duration `yaml:"default_validity" default:"8760h"`           // Default credential validity (365 days)
+	DigestAlgorithm      string        `yaml:"digest_algorithm" default:"SHA-256"`         // "SHA-256", "SHA-384", or "SHA-512"
 }
 
 // GRPCClientTLS holds mTLS configuration for gRPC client connections
 type GRPCClientTLS struct {
 	Addr         string `yaml:"addr" validate:"required"` // Registry gRPC server address
-	TLS          bool   `yaml:"tls"`                      // Enable TLS
+	TLS          bool   `yaml:"tls" default:"false"`      // Enable TLS
 	CertFilePath string `yaml:"cert_file_path"`           // Client certificate for mTLS
 	KeyFilePath  string `yaml:"key_file_path"`            // Client private key for mTLS
 	CAFilePath   string `yaml:"ca_file_path"`             // CA certificate to verify server
@@ -378,8 +364,8 @@ type GRPCClientTLS struct {
 
 // PKCS11 holds PKCS#11 HSM configuration
 type PKCS11 struct {
-	ModulePath string `yaml:"module_path" validate:"required"`
-	SlotID     uint   `yaml:"slot_id"`
+	ModulePath string `yaml:"module_path" default:"/usr/lib/softhsm/libsofthsm2.so"`
+	SlotID     uint   `yaml:"slot_id" default:"0"`
 	PIN        string `yaml:"pin" validate:"required"`
 	KeyLabel   string `yaml:"key_label" validate:"required"`
 	KeyID      string `yaml:"key_id" validate:"required"`
@@ -387,47 +373,43 @@ type PKCS11 struct {
 
 // Registry holds the registry configuration
 type Registry struct {
-	APIServer         APIServer        `yaml:"api_server" validate:"required"`
-	ExternalServerURL string           `yaml:"external_server_url" validate:"required"`
-	GRPCServer        GRPCServer       `yaml:"grpc_server" validate:"required"`
-	TokenStatusLists  TokenStatusLists `yaml:"token_status_lists,omitempty" validate:"omitempty"`
-	AdminGUI          AdminGUI         `yaml:"admin_gui,omitempty" validate:"omitempty"`
+	APIServer        APIServer        `yaml:"api_server" validate:"required"`
+	PublicURL        string           `yaml:"public_url" validate:"required,httpurl"`
+	GRPCServer       GRPCServer       `yaml:"grpc_server" validate:"required"`
+	TokenStatusLists TokenStatusLists `yaml:"token_status_lists,omitempty" validate:"omitempty"`
+	AdminGUI         AdminGUI         `yaml:"admin_gui,omitempty" validate:"omitempty"`
 }
 
 // AdminGUI holds the admin GUI configuration
 type AdminGUI struct {
-	Enabled       bool   `yaml:"enabled"`
-	Username      string `yaml:"username" validate:"required_if=Enabled true"`
+	Enabled       bool   `yaml:"enabled" default:"true"`
+	Username      string `yaml:"username" validate:"required_if=Enabled true" default:"admin"`
 	Password      string `yaml:"password" validate:"required_if=Enabled true"`
 	SessionSecret string `yaml:"session_secret" validate:"required_if=Enabled true"` // Secret for session cookies
-}
-
-// Persistent holds the persistent storage configuration
-type Persistent struct {
-	APIServer APIServer `yaml:"api_server" validate:"required"`
 }
 
 // MockAS holds the mock as configuration
 type MockAS struct {
 	APIServer      APIServer `yaml:"api_server" validate:"required"`
 	DatastoreURL   string    `yaml:"datastore_url" validate:"required"`
-	BootstrapUsers []string  `yaml:"bootstrap_users"`
+	BootstrapUsers []string  `yaml:"bootstrap_users" default:"[\"100\", \"102\"]"`
 }
 
 // Verifier holds the verifier configuration
 type Verifier struct {
-	APIServer            APIServer                  `yaml:"api_server" validate:"required"`
-	GRPCServer           GRPCServer                 `yaml:"grpc_server" validate:"required"`
-	ExternalServerURL    string                     `yaml:"external_server_url" validate:"required"`
-	KeyConfig            *pki.KeyConfig             `yaml:"key_config" validate:"required"`
-	OAuthServer          OAuthServer                `yaml:"oauth_server" validate:"omitempty"`
-	SupportedWallets     map[string]string          `yaml:"supported_wallets" validate:"omitempty"`
-	OIDC                 OIDCConfig                 `yaml:"oidc" validate:"omitempty"`
-	OpenID4VP            OpenID4VPConfig            `yaml:"openid4vp" validate:"omitempty"`
-	DigitalCredentials   DigitalCredentialsConfig   `yaml:"digital_credentials,omitempty"`
-	AuthorizationPageCSS AuthorizationPageCSSConfig `yaml:"authorization_page_css,omitempty"`
-	CredentialDisplay    CredentialDisplayConfig    `yaml:"credential_display,omitempty"`
-	Trust                TrustConfig                `yaml:"trust,omitempty"`
+	APIServer            APIServer                     `yaml:"api_server" validate:"required"`
+	GRPCServer           GRPCServer                    `yaml:"grpc_server" validate:"required"`
+	PublicURL            string                        `yaml:"public_url" validate:"required,httpurl"`
+	KeyConfig            *pki.KeyConfig                `yaml:"key_config" validate:"required"`
+	OAuthServer          OAuthServer                   `yaml:"oauth_server" validate:"required"`
+	PreferredVPFormats   *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"` // Informational: tells wallets what formats/algorithms are supported
+	SupportedWallets     map[string]string             `yaml:"supported_wallets" validate:"omitempty"`
+	OIDC                 OIDCConfig                    `yaml:"oidc" validate:"omitempty"`
+	OpenID4VP            OpenID4VPConfig               `yaml:"openid4vp" validate:"omitempty"`
+	DigitalCredentials   DigitalCredentialsConfig      `yaml:"digital_credentials,omitempty"`
+	AuthorizationPageCSS AuthorizationPageCSSConfig    `yaml:"authorization_page_css,omitempty"`
+	CredentialDisplay    CredentialDisplayConfig       `yaml:"credential_display,omitempty"`
+	Trust                TrustConfig                   `yaml:"trust,omitempty"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
@@ -440,8 +422,7 @@ type TrustConfig struct {
 
 	// LocalDIDMethods specifies which DID methods can be resolved locally without go-trust.
 	// Self-contained methods like "did:key" and "did:jwk" are always resolved locally.
-	// Default: ["did:key", "did:jwk"]
-	LocalDIDMethods []string `yaml:"local_did_methods,omitempty"`
+	LocalDIDMethods []string `yaml:"local_did_methods,omitempty" default:"[\"did:key\", \"did:jwk\"]"`
 
 	// TrustPolicies configures per-role trust evaluation policies.
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
@@ -450,7 +431,7 @@ type TrustConfig struct {
 	// Enabled controls whether trust evaluation is enabled.
 	// When false, keys are resolved but not validated against trust frameworks.
 	// Default: true
-	Enabled bool `yaml:"enabled,omitempty"`
+	Enabled bool `yaml:"enabled,omitempty" default:"true"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -465,7 +446,7 @@ type TrustPolicyConfig struct {
 
 	// RequireRevocationCheck enforces revocation status checking for this role.
 	// Default: false
-	RequireRevocationCheck bool `yaml:"require_revocation_check,omitempty"`
+	RequireRevocationCheck bool `yaml:"require_revocation_check,omitempty" default:"false"`
 }
 
 // OIDCConfig holds OIDC-specific configuration for the verifier-proxy's role as an OpenID Provider.
@@ -477,18 +458,18 @@ type OIDCConfig struct {
 	// This identifies the verifier-proxy itself as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
 	Issuer               string `yaml:"issuer" validate:"required"`
-	SessionDuration      int    `yaml:"session_duration" validate:"required"`       // in seconds
-	CodeDuration         int    `yaml:"code_duration" validate:"required"`          // in seconds
-	AccessTokenDuration  int    `yaml:"access_token_duration" validate:"required"`  // in seconds
-	IDTokenDuration      int    `yaml:"id_token_duration" validate:"required"`      // in seconds
-	RefreshTokenDuration int    `yaml:"refresh_token_duration" validate:"required"` // in seconds
+	SessionDuration      int    `yaml:"session_duration" validate:"required" default:"3600"`        // in seconds
+	CodeDuration         int    `yaml:"code_duration" validate:"required" default:"300"`            // in seconds
+	AccessTokenDuration  int    `yaml:"access_token_duration" validate:"required" default:"3600"`   // in seconds
+	IDTokenDuration      int    `yaml:"id_token_duration" validate:"required" default:"3600"`       // in seconds
+	RefreshTokenDuration int    `yaml:"refresh_token_duration" validate:"required" default:"86400"` // in seconds
 	SubjectType          string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
 	SubjectSalt          string `yaml:"subject_salt" validate:"required"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
-	PresentationTimeout     int                         `yaml:"presentation_timeout" validate:"required"`
+	PresentationTimeout     int                         `yaml:"presentation_timeout" validate:"required" default:"300"`
 	SupportedCredentials    []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	PresentationRequestsDir string                      `yaml:"presentation_requests_dir,omitempty"` // Optional: directory with presentation request templates
 }
@@ -496,25 +477,25 @@ type OpenID4VPConfig struct {
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration
 type DigitalCredentialsConfig struct {
 	// Enabled toggles W3C Digital Credentials API support in browser
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" default:"false"`
 
 	// UseJAR enables JWT Authorization Request (JAR) for wallet communication
 	// When true, request objects are signed JWTs instead of plain JSON
-	UseJAR bool `yaml:"use_jar"`
+	UseJAR bool `yaml:"use_jar" default:"false"`
 
 	// PreferredFormats specifies the order of preference for credential formats
 	// Supported values: "vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"
 	// Default: ["vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"]
-	PreferredFormats []string `yaml:"preferred_formats,omitempty"`
+	PreferredFormats []string `yaml:"preferred_formats,omitempty" default:"[\"vc+sd-jwt\", \"dc+sd-jwt\", \"mso_mdoc\"]"`
 
 	// ResponseMode specifies the OpenID4VP response mode for DC API flows
 	// Supported values: "dc_api.jwt" (encrypted), "direct_post.jwt" (signed), "direct_post"
 	// Default: "dc_api.jwt"
-	ResponseMode string `yaml:"response_mode,omitempty" validate:"omitempty,oneof=dc_api.jwt direct_post.jwt direct_post"`
+	ResponseMode string `yaml:"response_mode,omitempty" validate:"omitempty,oneof=dc_api.jwt direct_post.jwt direct_post" default:"dc_api.jwt"`
 
 	// AllowQRFallback enables automatic fallback to QR code if DC API is unavailable
 	// Default: true
-	AllowQRFallback bool `yaml:"allow_qr_fallback"`
+	AllowQRFallback bool `yaml:"allow_qr_fallback" default:"true"`
 
 	// DeepLinkScheme for mobile wallet integration (e.g., "eudi-wallet://")
 	DeepLinkScheme string `yaml:"deep_link_scheme,omitempty"`
@@ -531,7 +512,7 @@ type AuthorizationPageCSSConfig struct {
 	CSSFile string `yaml:"css_file,omitempty"`
 
 	// Theme sets predefined color scheme: "light" (default), "dark", "blue", "purple"
-	Theme string `yaml:"theme,omitempty" validate:"omitempty,oneof=light dark blue purple"`
+	Theme string `yaml:"theme,omitempty" validate:"omitempty,oneof=light dark blue purple" default:"light"`
 
 	// PrimaryColor overrides the primary brand color (hex format: #667eea)
 	PrimaryColor string `yaml:"primary_color,omitempty"`
@@ -553,23 +534,23 @@ type AuthorizationPageCSSConfig struct {
 type CredentialDisplayConfig struct {
 	// Enabled allows users to optionally view credential details before completing authorization
 	// When enabled, a checkbox appears on the authorization page
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" default:"false"`
 
 	// RequireConfirmation forces users to review credentials before proceeding
 	// When true, the credential display step is mandatory (checkbox is pre-checked and disabled)
-	RequireConfirmation bool `yaml:"require_confirmation"`
+	RequireConfirmation bool `yaml:"require_confirmation" default:"false"`
 
 	// ShowRawCredential displays the raw VP token/credential in the display page
 	// Useful for debugging and technical users
-	ShowRawCredential bool `yaml:"show_raw_credential"`
+	ShowRawCredential bool `yaml:"show_raw_credential" default:"false"`
 
 	// ShowClaims displays the parsed claims that will be sent to the RP
 	// Recommended for transparency and user consent
-	ShowClaims bool `yaml:"show_claims"`
+	ShowClaims bool `yaml:"show_claims" default:"true"`
 
 	// AllowEdit allows users to redact certain claims before sending to RP (future feature)
 	// Currently not implemented
-	AllowEdit bool `yaml:"allow_edit,omitempty"`
+	AllowEdit bool `yaml:"allow_edit,omitempty" default:"false"`
 }
 
 // SupportedCredentialConfig maps credential types to OIDC scopes
@@ -578,16 +559,10 @@ type SupportedCredentialConfig struct {
 	Scopes []string `yaml:"scopes" validate:"required"`
 }
 
-// Datastore holds the datastore configuration
-type Datastore struct {
-	APIServer  APIServer  `yaml:"api_server" validate:"required"`
-	GRPCServer GRPCServer `yaml:"grpc_server" validate:"required"`
-}
-
 // BasicAuth holds the basic auth configuration
 type BasicAuth struct {
 	Users   map[string]string `yaml:"users"`
-	Enabled bool              `yaml:"enabled"`
+	Enabled bool              `yaml:"enabled" default:"false"`
 }
 
 type IssuerMetadata struct {
@@ -614,17 +589,17 @@ type CredentialOffers struct {
 
 // APIGW holds the datastore configuration
 type APIGW struct {
-	APIServer           APIServer        `yaml:"api_server" validate:"required"`
-	KeyConfig           *pki.KeyConfig   `yaml:"key_config" validate:"required"`
-	CredentialOffers    CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
-	OauthServer         OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
-	IssuerMetadata      IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
-	ExternalServerURL   string           `yaml:"external_server_url" validate:"required"`
-	RegistryExternalURL string           `yaml:"registry_external_url" validate:"required"` // External URL of the registry service for constructing status list URIs
-	SAML                SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
-	OIDCRP              OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
-	IssuerClient        GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
-	RegistryClient      GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
+	APIServer         APIServer        `yaml:"api_server" validate:"required"`
+	KeyConfig         *pki.KeyConfig   `yaml:"key_config" validate:"required"`
+	CredentialOffers  CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
+	OauthServer       OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
+	IssuerMetadata    IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
+	PublicURL         string           `yaml:"public_url" validate:"required,httpurl"`
+	RegistryPublicURL string           `yaml:"registry_public_url" validate:"required,httpurl"` // Public URL of the registry service for constructing status list URIs
+	SAML              SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
+	OIDCRP            OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	IssuerClient      GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
+	RegistryClient    GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -642,7 +617,6 @@ type TokenStatusLists struct {
 // OTEL holds the opentelemetry configuration
 type OTEL struct {
 	Addr    string `yaml:"addr" validate:"required"`
-	Type    string `yaml:"type" validate:"required"`
 	Timeout int64  `yaml:"timeout" default:"10"`
 }
 
@@ -673,57 +647,20 @@ type UI struct {
 	} `yaml:"services"`
 }
 
-// CredentialType holds the configuration for the credential type
-type CredentialType struct {
-	Profile string `yaml:"profile" validate:"required"`
-}
-
-// NotificationEndpoint holds the configuration for the notification endpoint
-type NotificationEndpoint struct {
-	URL string `yaml:"url" validate:"required"`
-}
-
-// AuthenticSourceEndpoint holds the configuration for the authentic source
-type AuthenticSourceEndpoint struct {
-	URL string `yaml:"url" validate:"required"`
-}
-
-// SignatureServiceEndpoint holds the configuration for the signature service
-type SignatureServiceEndpoint struct {
-	URL string `yaml:"url" validate:"required"`
-}
-
-// RevocationServiceEndpoint holds the configuration for the revocation service
-type RevocationServiceEndpoint struct {
-	URL string `yaml:"url" validate:"required"`
-}
-
-// AuthenticSource holds the configuration for the authentic source
-type AuthenticSource struct {
-	CountryCode               string                    `yaml:"country_code" validate:"required,iso3166_1_alpha2"`
-	NotificationEndpoint      NotificationEndpoint      `yaml:"notification_endpoint" validate:"required"`
-	AuthenticSourceEndpoint   AuthenticSourceEndpoint   `yaml:"authentic_source_endpoint" validate:"required"`
-	SignatureServiceEndpoint  SignatureServiceEndpoint  `yaml:"signature_service_endpoint" validate:"required"`
-	RevocationServiceEndpoint RevocationServiceEndpoint `yaml:"revocation_service_endpoint" validate:"required"`
-	CredentialTypes           map[string]CredentialType `yaml:"credential_types" validate:"required"`
-}
-
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common           *Common                    `yaml:"common"`
-	AuthenticSources map[string]AuthenticSource `yaml:"authentic_sources" validate:"omitempty"`
-	APIGW            *APIGW                     `yaml:"apigw" validate:"omitempty"`
-	Issuer           *Issuer                    `yaml:"issuer" validate:"omitempty"`
-	Verifier         *Verifier                  `yaml:"verifier" validate:"omitempty"`
-	Datastore        *Datastore                 `yaml:"datastore" validate:"omitempty"`
-	Registry         *Registry                  `yaml:"registry" validate:"omitempty"`
-	Persistent       *Persistent                `yaml:"persistent" validate:"omitempty"`
-	MockAS           *MockAS                    `yaml:"mock_as" validate:"omitempty"`
-	UI               *UI                        `yaml:"ui" validate:"omitempty"`
+	Common      *Common                `yaml:"common"`
+	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,vcts_exist,dive"`
+	APIGW       *APIGW                 `yaml:"apigw" validate:"omitempty"`
+	Issuer      *Issuer                `yaml:"issuer" validate:"omitempty"`
+	Verifier    *Verifier              `yaml:"verifier" validate:"omitempty"`
+	Registry    *Registry              `yaml:"registry" validate:"omitempty"`
+	MockAS      *MockAS                `yaml:"mock_as" validate:"omitempty"`
+	UI          *UI                    `yaml:"ui" validate:"omitempty"`
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
 	// The constructor contains the VCT URN and other configuration for issuing that credential type
-	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty"`
+	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
 }
 
 // GetCredentialConstructorAuthMethod returns the auth method for the given credential type or "basic" if not found
@@ -744,16 +681,36 @@ func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
 	return nil
 }
 
+// GetFormatForVCT returns the format for a given VCT by looking it up in credential constructors
+// Returns empty string if not found
+func (c *Cfg) GetFormatForVCT(vct string) string {
+	for _, constructor := range c.CredentialConstructor {
+		if constructor != nil && constructor.GetVCT() == vct {
+			return constructor.Format
+		}
+	}
+	return ""
+}
+
 type CredentialConstructor struct {
-	VCT          string                         `yaml:"vct" json:"vct" validate:"required"`
 	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
+	VCT          string                         `yaml:"vct" json:"vct" validate:"required"`
 	Format       string                         `yaml:"format" json:"format" validate:"required"`
-	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic pid_auth"`
+	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,auth_method_exists"`
 	Attributes   map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 }
 
-// LoadVCTMetadata loads and parses the Verifiable Credential Type Metadata (VCTM) file.
+// AuthMethod defines the authentication method configuration for credential issuance
+// This specifies what credentials the wallet must present for authentication
+// The format of the credentials is determined by looking up the VCTs in the credential_constructor
+type AuthMethod struct {
+	// VCTs is the list of acceptable Verifiable Credential Type URNs for authentication
+	VCTs []string `yaml:"vcts" json:"vcts" validate:"required,min=1"`
+	// Claims are the identity claims to extract from the authentication credential
+	Claims []string `yaml:"claims" json:"claims" validate:"required,min=1"`
+}
+
 // The scope parameter is used only for error messages.
 func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope string) error {
 	if c.VCTMFilePath == "" {
@@ -769,14 +726,26 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 		return fmt.Errorf("failed to unmarshal VCTM file %s for scope %s: %w", c.VCTMFilePath, scope, err)
 	}
 
+	// Validate that VCTM has a VCT
+	if c.VCTM.VCT == "" {
+		return fmt.Errorf("VCTM file %s for scope %s is missing required 'vct' field", c.VCTMFilePath, scope)
+	}
+
 	return nil
 }
 
-// LoadAndSign generates and signs issuer metadata at runtime from configuration.
-// All generation and signing is delegated to the openid4vci library.
-// Note: The keyConfig parameter is for signing the metadata JWT itself (APIGW).
-// The credential_signing_alg_values_supported should reflect the Issuer service's capabilities, not APIGW's key.
-func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL string, keyConfig *pki.KeyConfig, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, any, *x509.Certificate, []string, error) {
+// GetVCT returns the VCT from the loaded VCTM metadata.
+// Falls back to the VCT field from the YAML configuration if VCTM is not yet loaded.
+func (c *CredentialConstructor) GetVCT() string {
+	if c.VCTM != nil && c.VCTM.VCT != "" {
+		return c.VCTM.VCT
+	}
+	return c.VCT
+}
+
+// Generate generates issuer metadata from configuration.
+// Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
+func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
 	for scope, constructor := range credentialConstructors {
@@ -787,7 +756,7 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 		credConfig := openid4vci.CredentialConfigurationsSupported{
 			Format: constructor.Format,
 			Scope:  scope,
-			VCT:    constructor.VCT,
+			VCT:    constructor.GetVCT(),
 			CredentialDefinition: openid4vci.CredentialDefinition{
 				Type: []string{"VerifiableCredential"},
 			},
@@ -863,10 +832,13 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 		credentialConfigs[scope] = credConfig
 	}
 
-	return openid4vci.LoadAndSign(ctx, &openid4vci.MetadataConfig{
-		KeyConfig:                            keyConfig,
-		CredentialIssuer:                     externalServerURL,
-		CredentialEndpoint:                   externalServerURL + "/credential",
+	credentialEndpoint, err := url.JoinPath(publicURL, "/credential")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct credential endpoint URL: %w", err)
+	}
+	metadataConfig := &openid4vci.MetadataConfig{
+		CredentialIssuer:                     publicURL,
+		CredentialEndpoint:                   credentialEndpoint,
 		AuthorizationServers:                 cfg.AuthorizationServers,
 		DeferredCredentialEndpoint:           cfg.DeferredCredentialEndpoint,
 		NotificationEndpoint:                 cfg.NotificationEndpoint,
@@ -877,15 +849,20 @@ func (cfg *IssuerMetadata) LoadAndSign(ctx context.Context, externalServerURL st
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,
-	})
+	}
+
+	metadata := metadataConfig.GenerateIssuerMetadata(ctx)
+
+	return metadata, nil
 }
 
-// LoadAndSignMetadata generates and signs OAuth2 metadata at runtime from configuration.
-// All generation and signing is delegated to the oauth2 library.
-func (cfg *OAuthServer) LoadAndSignMetadata(ctx context.Context, issuerURL string, keyConfig *pki.KeyConfig) (*oauth2.AuthorizationServerMetadata, any, []string, error) {
-	return oauth2.GenerateAndSign(&oauth2.MetadataConfig{
+// GenerateMetadata generates OAuth2 metadata from configuration.
+// Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
 		IssuerURL:     issuerURL,
 		TokenEndpoint: cfg.TokenEndpoint,
-		KeyConfig:     keyConfig,
 	})
+
+	return metadata
 }

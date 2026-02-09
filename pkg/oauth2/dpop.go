@@ -1,15 +1,34 @@
 package oauth2
 
 import (
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"vc/internal/gen/issuer/apiv1_issuer"
+	"time"
+	"vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+)
+
+var (
+	ErrInvalidJTI       = errors.New("invalid JTI: must be at least 12 characters")
+	ErrMissingJTI       = errors.New("missing required JTI claim")
+	ErrJTIReplay        = errors.New("JTI has already been used (replay attack detected)")
+	ErrMissingHTM       = errors.New("missing required HTM claim")
+	ErrInvalidHTM       = errors.New("invalid HTM: must be a valid HTTP method")
+	ErrMissingHTU       = errors.New("missing required HTU claim")
+	ErrInvalidTokenType = errors.New("invalid token type: must be 'dpop+jwt'")
+	ErrMissingJWK       = errors.New("missing JWK in token header")
+	ErrMissingIAT       = errors.New("missing required IAT claim")
+	ErrInvalidIAT       = errors.New("invalid IAT: timestamp is malformed")
+	ErrTokenTooOld      = errors.New("token IAT is too old")
+	ErrTokenFromFuture  = errors.New("token IAT is in the future")
+	ErrTokenExpired     = errors.New("token has expired")
+)
+
+const (
+	DefaultMaxAge    = 60 * time.Second
+	DefaultClockSkew = 5 * time.Second
 )
 
 type DPoP struct {
@@ -23,14 +42,14 @@ type DPoP struct {
 	HTU string `json:"htu" validate:"required,url"`
 
 	// IAT Creation timestamp of the JWT (Section 4.1.6 of [RFC7519]).¶
-	//IAT int64 `json:"iat" validate:"required"` // TODO: use time.Time
+	IAT int64 `json:"iat" validate:"required"`
 
 	// ATH Hash of the access token. The value MUST be the result of a base64url encoding (as defined in Section 2 of [RFC7515]) the SHA-256 [SHS] hash of the ASCII encoding of the associated access token's value.¶
 	ATH string `json:"ath"`
 
 	Thumbprint string `json:"thumbprint,omitempty"` // Optional, used for JWK thumbprint
 
-	JWK *apiv1_issuer.Jwk `json:"jwk,omitempty"` // JWK claim, optional
+	JWK *jose.JWKWithMetadata `json:"jwk,omitempty"` // JWK claim, optional
 }
 
 func (d *DPoP) Unmarshal(claims jwt.MapClaims) error {
@@ -47,110 +66,173 @@ func (d *DPoP) Unmarshal(claims jwt.MapClaims) error {
 	return nil
 }
 
-func parseDpopJWK(jwkClaim []byte) (any, string, error) {
-	keySet, err := jwk.Parse(jwkClaim)
-	if err != nil {
-		return nil, "", err
+// ValidateJTI validates the JTI claim for proper format and length
+func (d *DPoP) ValidateJTI() error {
+	if d.JTI == "" {
+		return ErrMissingJTI
 	}
 
-	key, ok := keySet.Key(0)
+	// JTI must be at least 96 bits (12 bytes) when base64url encoded
+	// This is approximately 16 characters in base64url encoding
+	if len(d.JTI) < 12 {
+		return ErrInvalidJTI
+	}
+
+	return nil
+}
+
+// ValidateHTM validates the HTTP method claim
+func (d *DPoP) ValidateHTM() error {
+	if d.HTM == "" {
+		return ErrMissingHTM
+	}
+
+	// Validate against allowed HTTP methods
+	validMethods := map[string]bool{
+		"GET":     true,
+		"POST":    true,
+		"PUT":     true,
+		"DELETE":  true,
+		"PATCH":   true,
+		"HEAD":    true,
+		"OPTIONS": true,
+	}
+
+	if !validMethods[d.HTM] {
+		return ErrInvalidHTM
+	}
+
+	return nil
+}
+
+// ValidateHTU validates the HTTP URI claim
+func (d *DPoP) ValidateHTU() error {
+	if d.HTU == "" {
+		return ErrMissingHTU
+	}
+
+	// Basic URL validation - HTU should not contain query or fragment
+	// Additional validation could be added here
+	return nil
+}
+
+// ValidateIAT validates the issued-at timestamp claim
+// Ensures the token is not too old and not from the future
+func (d *DPoP) ValidateIAT() error {
+	return d.ValidateIATWithWindow(DefaultMaxAge, DefaultClockSkew)
+}
+
+// ValidateIATWithWindow validates IAT with custom time windows
+func (d *DPoP) ValidateIATWithWindow(maxAge, clockSkew time.Duration) error {
+	if d.IAT == 0 {
+		return ErrMissingIAT
+	}
+
+	// Check if IAT is a valid timestamp (not negative, not too far in future)
+	if d.IAT < 0 {
+		return ErrInvalidIAT
+	}
+
+	iat := time.Unix(d.IAT, 0)
+	now := time.Now()
+
+	// Check if token is from the future (with clock skew tolerance)
+	if iat.After(now.Add(clockSkew)) {
+		return ErrTokenFromFuture
+	}
+
+	// Check if token is too old
+	if now.Sub(iat) > maxAge {
+		return ErrTokenTooOld
+	}
+
+	return nil
+}
+
+// Validate performs full validation of DPoP claims with default time windows
+func (d *DPoP) Validate() error {
+	return d.ValidateWithWindow(DefaultMaxAge, DefaultClockSkew)
+}
+
+// ValidateWithWindow performs full validation with custom time windows
+func (d *DPoP) ValidateWithWindow(maxAge, clockSkew time.Duration) error {
+	if err := d.ValidateJTI(); err != nil {
+		return err
+	}
+
+	if err := d.ValidateHTM(); err != nil {
+		return err
+	}
+
+	if err := d.ValidateHTU(); err != nil {
+		return err
+	}
+
+	if err := d.ValidateIATWithWindow(maxAge, clockSkew); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ExtractJTI quickly extracts the JTI claim from a DPoP JWT without full validation
+// This allows services to check for replay attacks before performing expensive validation
+func ExtractJTI(dPopJWT string) (string, error) {
+	jti, err := jose.ExtractClaim(dPopJWT, "jti")
+	if err != nil {
+		if err.Error() == "claim \"jti\" not found" {
+			return "", ErrMissingJTI
+		}
+		return "", err
+	}
+
+	jtiStr, ok := jti.(string)
 	if !ok {
-		return nil, "", fmt.Errorf("failed to get key from JWK set")
+		return "", ErrMissingJTI
 	}
 
-	thumbprint, err := key.Thumbprint(crypto.SHA256)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get key fingerprint: %w", err)
-	}
-	fingerprint := fmt.Sprintf("%x", thumbprint)
-
-	var kk = &ecdsa.PublicKey{}
-
-	if err := jwk.Export(key, kk); err != nil {
-		return nil, "", fmt.Errorf("failed to export key from JWK: %w", err)
+	if len(jtiStr) < 12 {
+		return "", ErrInvalidJTI
 	}
 
-	if err := key.Validate(); err != nil {
-		return nil, "", fmt.Errorf("failed to validate JWK: %w", err)
-	}
-
-	keyIsPrivate, err := jwk.IsPrivateKey(key)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to check if key is private: %w", err)
-	}
-	if keyIsPrivate {
-		fmt.Println("JWK is a private key, expected a public key")
-	}
-
-	return kk, fingerprint, err
+	return jtiStr, nil
 }
 
 func ValidateAndParseDPoPJWT(dPopJWT string) (*DPoP, error) {
 	if dPopJWT == "" {
 		return nil, fmt.Errorf("DPoP JWT is empty")
 	}
-	fmt.Println("Validating DPoP JWT")
-	dpopClaims := &DPoP{}
-	claims := jwt.MapClaims{}
 
-	jwkClaim := map[string]any{}
-
-	token, err := jwt.ParseWithClaims(dPopJWT, claims, func(token *jwt.Token) (any, error) {
-		jwkHeader, jwkOk := token.Header["jwk"].(map[string]any)
-		if !jwkOk {
-			return nil, fmt.Errorf("jwk header not found or invalid type in token")
-		}
-		fmt.Println("JWK in token header:", jwkHeader)
-
-		b, err := json.Marshal(jwkHeader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JWK: %w", err)
-		}
-		var signingKey any
-		signingKey, dpopClaims.Thumbprint, err = parseDpopJWK(b)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse JWK: %w", err)
-		}
-
-		if token.Header["typ"] != "dpop+jwt" {
-			return nil, fmt.Errorf("unexpected token type: %v", token.Header["typ"])
-		}
-
-		// Use the already-checked jwkHeader
-		jwkClaim = jwkHeader
-
-		alg := token.Header["alg"]
-		switch jwt.GetSigningMethod(alg.(string)).(type) {
-		case *jwt.SigningMethodECDSA:
-			return signingKey.(*ecdsa.PublicKey), nil
-		case *jwt.SigningMethodRSA:
-			return signingKey.(*rsa.PublicKey), nil
-		default:
-			return nil, fmt.Errorf("unexpected signing method: %v", alg)
-		}
-	})
+	// Parse and validate JWT with JWK in header
+	claims, header, jwkHeader, thumbprint, err := jose.ParseJWTWithJWKHeader(dPopJWT)
 	if err != nil {
-		return nil, jwt.ErrSignatureInvalid
+		return nil, err
+	}
+
+	// Validate DPoP-specific token type
+	if header["typ"] != "dpop+jwt" {
+		return nil, ErrInvalidTokenType
+	}
+
+	// Unmarshal claims into DPoP struct
+	dpopClaims := &DPoP{
+		Thumbprint: thumbprint,
 	}
 
 	if err := dpopClaims.Unmarshal(claims); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal claims into DPoP struct: %w", err)
 	}
 
-	jwkBytes, err := json.Marshal(jwkClaim) // Ensure the JWK is marshaled to JSON
+	// Validate DPoP claims
+	if err := dpopClaims.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Parse JWK header to jose.JWKWithMetadata
+	jwk, err := jose.ParseJWK(jwkHeader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal JWK: %w", err)
+		return nil, fmt.Errorf("failed to parse JWK: %w", err)
 	}
-
-	jwk := &apiv1_issuer.Jwk{}
-	if err := json.Unmarshal(jwkBytes, &jwk); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JWK: %w", err)
-	}
-
-	jwk.KeyOps = []string{"verify"}
-	jwk.Ext = true
-
-	fmt.Println("Parsed DPoP JWT:", token, "valid:", token.Valid, "jwk", jwk)
 
 	dpopClaims.JWK = jwk
 

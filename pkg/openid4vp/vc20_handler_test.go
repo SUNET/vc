@@ -78,7 +78,7 @@ func TestVC20Handler_VerifyAndExtract_EmptyToken(t *testing.T) {
 		t.Fatalf("NewVC20Handler() error = %v", err)
 	}
 
-	_, err = h.VerifyAndExtract(context.Background(), "")
+	_, err = h.VerifyAndExtract(t.Context(), "")
 	if err == nil {
 		t.Error("expected error for empty token")
 	}
@@ -97,7 +97,7 @@ func TestVC20Handler_VerifyAndExtract_InvalidJSON(t *testing.T) {
 		t.Fatalf("NewVC20Handler() error = %v", err)
 	}
 
-	_, err = h.VerifyAndExtract(context.Background(), "not-json")
+	_, err = h.VerifyAndExtract(t.Context(), "not-json")
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
@@ -123,7 +123,7 @@ func TestVC20Handler_VerifyAndExtract_MissingIssuer(t *testing.T) {
 	}
 	credJSON, _ := json.Marshal(cred)
 
-	_, err = h.VerifyAndExtract(context.Background(), string(credJSON))
+	_, err = h.VerifyAndExtract(t.Context(), string(credJSON))
 	if err == nil {
 		t.Error("expected error for missing issuer")
 	}
@@ -150,7 +150,7 @@ func TestVC20Handler_VerifyAndExtract_UntrustedIssuer(t *testing.T) {
 	}
 	credJSON, _ := json.Marshal(cred)
 
-	_, err = h.VerifyAndExtract(context.Background(), string(credJSON))
+	_, err = h.VerifyAndExtract(t.Context(), string(credJSON))
 	if err == nil {
 		t.Error("expected error for untrusted issuer")
 	}
@@ -177,7 +177,7 @@ func TestVC20Handler_VerifyAndExtract_MissingProof(t *testing.T) {
 	}
 	credJSON, _ := json.Marshal(cred)
 
-	_, err = h.VerifyAndExtract(context.Background(), string(credJSON))
+	_, err = h.VerifyAndExtract(t.Context(), string(credJSON))
 	if err == nil {
 		t.Error("expected error for missing proof")
 	}
@@ -202,7 +202,7 @@ func TestVC20Handler_VerifyAndExtract_MissingKeyResolver(t *testing.T) {
 	}
 	credJSON, _ := json.Marshal(cred)
 
-	_, err = h.VerifyAndExtract(context.Background(), string(credJSON))
+	_, err = h.VerifyAndExtract(t.Context(), string(credJSON))
 	if err == nil {
 		t.Error("expected error for missing key resolver")
 	}
@@ -321,7 +321,7 @@ func TestStaticVC20KeyResolver(t *testing.T) {
 
 	resolver := &StaticVC20KeyResolver{Key: &privKey.PublicKey}
 
-	key, err := resolver.ResolveKey(context.Background(), "any-method")
+	key, err := resolver.ResolveKey(t.Context(), "any-method")
 	if err != nil {
 		t.Fatalf("ResolveKey() error = %v", err)
 	}
@@ -339,7 +339,7 @@ func TestStaticVC20KeyResolver(t *testing.T) {
 func TestStaticVC20KeyResolver_NoKey(t *testing.T) {
 	resolver := &StaticVC20KeyResolver{}
 
-	_, err := resolver.ResolveKey(context.Background(), "any-method")
+	_, err := resolver.ResolveKey(t.Context(), "any-method")
 	if err == nil {
 		t.Error("expected error for nil key")
 	}
@@ -353,7 +353,7 @@ func TestCreateCredential_NoSignerConfig(t *testing.T) {
 		t.Fatalf("NewVC20Handler() error = %v", err)
 	}
 
-	_, err = handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	_, err = handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id":   "did:example:subject",
@@ -383,7 +383,7 @@ func TestCreateCredential_ECDSA2019(t *testing.T) {
 		t.Fatalf("NewVC20Handler() error = %v", err)
 	}
 
-	result, err := handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	result, err := handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id":     "did:example:subject",
@@ -432,7 +432,7 @@ func TestCreateCredential_InvalidKeyType(t *testing.T) {
 		t.Fatalf("NewVC20Handler() error = %v", err)
 	}
 
-	_, err = handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	_, err = handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id": "did:example:subject",
@@ -462,7 +462,7 @@ func TestCreateCredential_WithExpiration(t *testing.T) {
 	}
 
 	expiration := time.Now().Add(24 * time.Hour)
-	result, err := handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	result, err := handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id": "did:example:subject",
@@ -504,7 +504,7 @@ func TestCreateCredential_RoundTrip(t *testing.T) {
 	}
 
 	// Create credential
-	createResult, err := handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	createResult, err := handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id":     "did:example:subject",
@@ -516,7 +516,7 @@ func TestCreateCredential_RoundTrip(t *testing.T) {
 	}
 
 	// Verify credential
-	verifyResult, err := handler.VerifyAndExtract(context.Background(), string(createResult.CredentialJSON))
+	verifyResult, err := handler.VerifyAndExtract(t.Context(), string(createResult.CredentialJSON))
 	if err != nil {
 		t.Fatalf("VerifyAndExtract() error = %v", err)
 	}
@@ -553,7 +553,7 @@ func TestCreateCredential_EdDSA2022(t *testing.T) {
 	}
 
 	// Create credential
-	createResult, err := handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	createResult, err := handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id":     "did:example:subject",
@@ -565,7 +565,7 @@ func TestCreateCredential_EdDSA2022(t *testing.T) {
 	}
 
 	// Verify credential
-	verifyResult, err := handler.VerifyAndExtract(context.Background(), string(createResult.CredentialJSON))
+	verifyResult, err := handler.VerifyAndExtract(t.Context(), string(createResult.CredentialJSON))
 	if err != nil {
 		t.Fatalf("VerifyAndExtract() error = %v", err)
 	}
@@ -599,7 +599,7 @@ func TestCreateCredential_ECDSASd2023(t *testing.T) {
 	}
 
 	// Create credential
-	createResult, err := handler.CreateCredential(context.Background(), &VC20CreateRequest{
+	createResult, err := handler.CreateCredential(t.Context(), &VC20CreateRequest{
 		Types: []string{"UniversityDegreeCredential"},
 		Subject: map[string]any{
 			"id":     "did:example:subject",
@@ -611,7 +611,7 @@ func TestCreateCredential_ECDSASd2023(t *testing.T) {
 	}
 
 	// Verify credential - SD credentials return compact JSON
-	verifyResult, err := handler.VerifyAndExtract(context.Background(), string(createResult.CredentialJSON))
+	verifyResult, err := handler.VerifyAndExtract(t.Context(), string(createResult.CredentialJSON))
 	if err != nil {
 		t.Fatalf("VerifyAndExtract() error = %v", err)
 	}
@@ -728,7 +728,7 @@ func TestVC20Handler_KeyResolverError(t *testing.T) {
 	}
 	credJSON, _ := json.Marshal(cred)
 
-	_, err = h.VerifyAndExtract(context.Background(), string(credJSON))
+	_, err = h.VerifyAndExtract(t.Context(), string(credJSON))
 	if err == nil {
 		t.Error("expected error when key resolver fails")
 	}

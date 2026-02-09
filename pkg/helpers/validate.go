@@ -3,6 +3,7 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -27,6 +28,144 @@ func NewValidator() (*validator.Validate, error) {
 
 		return name
 	})
+
+	// Register custom validation for auth_method_exists
+	err := validate.RegisterValidation("auth_method_exists", func(fl validator.FieldLevel) bool {
+		authMethod := fl.Field().String()
+
+		// "basic" is a special built-in auth method that doesn't require configuration
+		if authMethod == "basic" {
+			return true
+		}
+
+		// Navigate up the struct hierarchy to get the Cfg
+		// CredentialConstructor -> map value -> map[string]*CredentialConstructor -> Cfg
+		top := fl.Top()
+		if top.Kind() == reflect.Ptr {
+			top = top.Elem()
+		}
+
+		if top.Type().Name() != "Cfg" {
+			// If not in Cfg context, fail validation
+			return false
+		}
+
+		// Get AuthMethods field from Cfg
+		authMethodsField := top.FieldByName("AuthMethods")
+		if !authMethodsField.IsValid() || authMethodsField.IsNil() {
+			return false
+		}
+
+		// Check if the auth method exists in the map
+		authMethodsMap := authMethodsField.Interface().(map[string]*model.AuthMethod)
+		_, exists := authMethodsMap[authMethod]
+
+		return exists
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for httpurl - validates URLs with http or https scheme
+	err = validate.RegisterValidation("httpurl", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		// Ensure scheme is either http or https
+		scheme := strings.ToLower(parsedURL.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return false
+		}
+
+		// Ensure host is present (url.Parse accepts "http://" without host)
+		if parsedURL.Host == "" {
+			return false
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for vcts_exist - validates that VCTs in AuthMethods exist in CredentialConstructors
+	err = validate.RegisterValidation("vcts_exist", func(fl validator.FieldLevel) bool {
+		// Get the AuthMethods map
+		authMethodsField := fl.Field()
+		if authMethodsField.Kind() != reflect.Map || authMethodsField.IsNil() {
+			return true // Skip validation if not a map or nil
+		}
+
+		// Get the Cfg from top level
+		top := fl.Top()
+		if top.Kind() == reflect.Ptr {
+			top = top.Elem()
+		}
+
+		if top.Type().Name() != "Cfg" {
+			return false
+		}
+
+		// Get CredentialConstructor field from Cfg
+		credentialConstructorField := top.FieldByName("CredentialConstructor")
+		if !credentialConstructorField.IsValid() || credentialConstructorField.IsNil() {
+			return true // No constructors to validate against
+		}
+
+		credentialConstructors := credentialConstructorField.Interface().(map[string]*model.CredentialConstructor)
+
+		// Build a map of VCT -> format for quick lookup
+		vctToFormat := make(map[string]string)
+		for _, constructor := range credentialConstructors {
+			if constructor != nil {
+				vct := constructor.GetVCT()
+				if vct != "" {
+					vctToFormat[vct] = constructor.Format
+				}
+			}
+		}
+
+		// Validate each AuthMethod
+		authMethodsMap := authMethodsField.Interface().(map[string]*model.AuthMethod)
+		for authMethodName, authMethod := range authMethodsMap {
+			if authMethod == nil {
+				continue
+			}
+
+			// Check each VCT in the auth method
+			for _, vct := range authMethod.VCTs {
+				if _, exists := vctToFormat[vct]; !exists {
+					// VCT not found in any credential constructor
+					return false
+				}
+			}
+
+			// Validate that all VCTs in the same auth method have the same format
+			if len(authMethod.VCTs) > 1 {
+				firstFormat := vctToFormat[authMethod.VCTs[0]]
+				for i := 1; i < len(authMethod.VCTs); i++ {
+					format := vctToFormat[authMethod.VCTs[i]]
+					if format != firstFormat {
+						// Mixed formats in same auth method
+						_ = authMethodName // Suppress unused warning
+						return false
+					}
+				}
+			}
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return validate, nil
 }

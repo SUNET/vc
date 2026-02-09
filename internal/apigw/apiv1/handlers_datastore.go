@@ -57,14 +57,15 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	}
 
 	var qr *openid4vci.QR
-	switch c.cfg.Common.CredentialOffer.Type {
+	switch c.cfg.Common.CredentialOfferQR.Type {
 	case "credential_offer":
 		credentialOffer, err := credentialOfferParameter.CredentialOffer()
 		if err != nil {
 			return err
 		}
 
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOffer.QR.RecoveryLevel, c.cfg.Common.CredentialOffer.QR.Size, c.cfg.Common.CredentialOffer.WalletURL)
+		// Empty string defaults to "openid-credential-offer://" protocol handler
+		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "")
 		if err != nil {
 			return err
 		}
@@ -75,7 +76,8 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 			return err
 		}
 
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOffer.QR.RecoveryLevel, c.cfg.Common.CredentialOffer.QR.Size, c.cfg.Common.CredentialOffer.WalletURL, c.cfg.Common.CredentialOffer.IssuerURL)
+		// Empty string defaults to "openid-credential-offer://" protocol handler
+		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.CredentialOffers.IssuerURL)
 		if err != nil {
 			return err
 		}
@@ -139,18 +141,6 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	return nil
 }
 
-// NotificationRequest is the request for Notification
-type NotificationRequest struct {
-	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
-	DocumentID      string `json:"document_id" validate:"required"`
-}
-
-// NotificationReply is the reply for a Notification
-type NotificationReply struct {
-	Data *openid4vci.QR `json:"data"`
-}
-
 // Notification return QR code and DeepLink for a document
 //
 //	@Summary		Notification
@@ -159,11 +149,11 @@ type NotificationReply struct {
 //	@Tags			dc4eu
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	NotificationReply		"Success"
+//	@Success		200	{object}	vcclient.NotificationReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		NotificationRequest		true	" "
+//	@Param			req	body		vcclient.NotificationRequest		true	" "
 //	@Router			/notification [post]
-func (c *Client) Notification(ctx context.Context, req *NotificationRequest) (*NotificationReply, error) {
+func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
 		VCT:             req.VCT,
@@ -173,7 +163,7 @@ func (c *Client) Notification(ctx context.Context, req *NotificationRequest) (*N
 		return nil, err
 	}
 
-	reply := &NotificationReply{
+	reply := &vcclient.NotificationReply{
 		Data: qrCode,
 	}
 	return reply, nil

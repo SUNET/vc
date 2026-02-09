@@ -1,11 +1,13 @@
 package openid4vci
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -221,7 +223,11 @@ func TestSignIssuerMetadata(t *testing.T) {
 			signingKey, cert := mockGenerateECDSAKey(t)
 			pubKey := signingKey.Public()
 
-			metadataWithSignature, err := metadata.Sign(jwt.SigningMethodES256, signingKey, []string{cert})
+			// Create pki.Signer
+			signer, err := pki.NewSoftwareSigner(signingKey, "test-key-id")
+			require.NoError(t, err)
+
+			metadataWithSignature, err := metadata.Sign(context.Background(), signer, []string{cert})
 			assert.NoError(t, err)
 
 			assert.NotEmpty(t, metadataWithSignature)
@@ -495,8 +501,8 @@ func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Unmarshal both to maps for comparison (to ignore field ordering)
-	var originalMap map[string]interface{}
-	var marshaledMap map[string]interface{}
+	var originalMap map[string]any
+	var marshaledMap map[string]any
 
 	err = json.Unmarshal(originalData, &originalMap)
 	require.NoError(t, err)
@@ -509,8 +515,8 @@ func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {
 	assert.Equal(t, originalMap["credential_endpoint"], marshaledMap["credential_endpoint"])
 
 	// Verify credential configurations are preserved
-	originalConfigs := originalMap["credential_configurations_supported"].(map[string]interface{})
-	marshaledConfigs := marshaledMap["credential_configurations_supported"].(map[string]interface{})
+	originalConfigs := originalMap["credential_configurations_supported"].(map[string]any)
+	marshaledConfigs := marshaledMap["credential_configurations_supported"].(map[string]any)
 	assert.Equal(t, len(originalConfigs), len(marshaledConfigs), "Should have same number of configurations")
 }
 

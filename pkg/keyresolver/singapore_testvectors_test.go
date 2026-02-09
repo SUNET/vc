@@ -45,14 +45,14 @@ const testVectorDir = "../../testdata/sg-test-vectors"
 
 // SGCredential represents a parsed Singapore test vector credential
 type SGCredential struct {
-	Context           interface{}            `json:"@context"`
+	Context           any            `json:"@context"`
 	ID                string                 `json:"id"`
-	Type              interface{}            `json:"type"`
-	Issuer            interface{}            `json:"issuer"`
-	CredentialSubject map[string]interface{} `json:"credentialSubject"`
+	Type              any            `json:"type"`
+	Issuer            any            `json:"issuer"`
+	CredentialSubject map[string]any `json:"credentialSubject"`
 	ValidFrom         string                 `json:"validFrom,omitempty"`
 	ValidUntil        string                 `json:"validUntil,omitempty"`
-	Proof             interface{}            `json:"proof"`
+	Proof             any            `json:"proof"`
 }
 
 // SGProof represents a DataIntegrityProof
@@ -89,12 +89,12 @@ func parseCredential(t *testing.T, data []byte) (*SGCredential, *SGProof) {
 	// Extract proof (handle both single proof and array)
 	var proof SGProof
 	switch p := cred.Proof.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		proofBytes, _ := json.Marshal(p)
 		if err := json.Unmarshal(proofBytes, &proof); err != nil {
 			t.Fatalf("failed to parse proof: %v", err)
 		}
-	case []interface{}:
+	case []any:
 		if len(p) == 0 {
 			t.Fatal("empty proof array")
 		}
@@ -114,7 +114,7 @@ func getIssuerDID(cred *SGCredential) string {
 	switch issuer := cred.Issuer.(type) {
 	case string:
 		return issuer
-	case map[string]interface{}:
+	case map[string]any:
 		if id, ok := issuer["id"].(string); ok {
 			return id
 		}
@@ -139,7 +139,7 @@ func TestSingaporeIssuers_RealDIDWebResolution(t *testing.T) {
 	defer srv.Close()
 
 	resolver := NewGoTrustResolver(srv.URL())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	testCases := []struct {
 		name               string
@@ -214,7 +214,7 @@ func TestSingaporeIssuers_DirectDIDWebResolution(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
 			// Resolve the DID document directly via HTTP
@@ -233,14 +233,14 @@ func TestSingaporeIssuers_DirectDIDWebResolution(t *testing.T) {
 			}
 
 			// Find the verification method in the DID document
-			vms, ok := didDoc["verificationMethod"].([]interface{})
+			vms, ok := didDoc["verificationMethod"].([]any)
 			if !ok {
 				t.Fatalf("no verificationMethod array in DID document")
 			}
 
 			var found bool
 			for _, vm := range vms {
-				vmMap, ok := vm.(map[string]interface{})
+				vmMap, ok := vm.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -255,7 +255,7 @@ func TestSingaporeIssuers_DirectDIDWebResolution(t *testing.T) {
 					t.Logf("  Key type: %s", vmType)
 
 					// Try to extract the public key
-					if jwk, ok := vmMap["publicKeyJwk"].(map[string]interface{}); ok {
+					if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
 						kty, _ := jwk["kty"].(string)
 						crv, _ := jwk["crv"].(string)
 						t.Logf("  JWK: kty=%s, crv=%s", kty, crv)
@@ -272,7 +272,7 @@ func TestSingaporeIssuers_DirectDIDWebResolution(t *testing.T) {
 }
 
 // resolveDIDWebDocument resolves a did:web DID document directly via HTTP(S).
-func resolveDIDWebDocument(ctx context.Context, did string) (map[string]interface{}, error) {
+func resolveDIDWebDocument(ctx context.Context, did string) (map[string]any, error) {
 	// Parse did:web DID to URL
 	if !strings.HasPrefix(did, "did:web:") {
 		return nil, fmt.Errorf("not a did:web DID: %s", did)
@@ -327,7 +327,7 @@ func resolveDIDWebDocument(ctx context.Context, did string) (map[string]interfac
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var didDoc map[string]interface{}
+	var didDoc map[string]any
 	if err := json.Unmarshal(body, &didDoc); err != nil {
 		return nil, fmt.Errorf("failed to parse DID document: %w", err)
 	}
@@ -402,7 +402,7 @@ func TestSingaporeCredentials_Structure(t *testing.T) {
 			// Verify credential has expected type
 			hasExpectedType := false
 			switch types := cred.Type.(type) {
-			case []interface{}:
+			case []any:
 				for _, credType := range types {
 					if credType == tc.expectedType {
 						hasExpectedType = true
@@ -477,7 +477,7 @@ func TestSingaporeCredentials_EdDSA_Verify(t *testing.T) {
 			}
 
 			// Resolve the public key using real did:web resolution
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
 			pubKey, err := resolver.ResolveEd25519WithContext(ctx, proof.VerificationMethod)
@@ -549,7 +549,7 @@ func TestSingaporeCredentials_EdDSA_DirectVerify(t *testing.T) {
 			}
 
 			// Resolve the issuer's DID document via direct HTTP
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
 			didDoc, err := resolveDIDWebDocument(ctx, tc.did)
@@ -589,7 +589,7 @@ func TestSingaporeCredentials_EdDSA_DirectVerify(t *testing.T) {
 }
 
 // extractEd25519KeyFromDIDDoc extracts an Ed25519 public key from a DID document.
-func extractEd25519KeyFromDIDDoc(didDoc map[string]interface{}, verificationMethod string) (ed25519.PublicKey, error) {
+func extractEd25519KeyFromDIDDoc(didDoc map[string]any, verificationMethod string) (ed25519.PublicKey, error) {
 	// Extract key ID from verification method
 	keyID := verificationMethod
 	if idx := strings.Index(keyID, "#"); idx != -1 {
@@ -597,13 +597,13 @@ func extractEd25519KeyFromDIDDoc(didDoc map[string]interface{}, verificationMeth
 	}
 
 	// Find verification methods in DID document
-	vms, ok := didDoc["verificationMethod"].([]interface{})
+	vms, ok := didDoc["verificationMethod"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("no verificationMethod array in DID document")
 	}
 
 	for _, vm := range vms {
-		vmMap, ok := vm.(map[string]interface{})
+		vmMap, ok := vm.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -617,7 +617,7 @@ func extractEd25519KeyFromDIDDoc(didDoc map[string]interface{}, verificationMeth
 		// Found the verification method - try to extract the key
 
 		// Try publicKeyJwk first
-		if jwk, ok := vmMap["publicKeyJwk"].(map[string]interface{}); ok {
+		if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
 			return extractEd25519FromJWK(jwk)
 		}
 
@@ -633,7 +633,7 @@ func extractEd25519KeyFromDIDDoc(didDoc map[string]interface{}, verificationMeth
 }
 
 // extractEd25519FromJWK extracts an Ed25519 key from a JWK.
-func extractEd25519FromJWK(jwk map[string]interface{}) (ed25519.PublicKey, error) {
+func extractEd25519FromJWK(jwk map[string]any) (ed25519.PublicKey, error) {
 	// Verify key type
 	kty, _ := jwk["kty"].(string)
 	if kty != "OKP" {
@@ -771,7 +771,7 @@ func base64URLDecode(s string) ([]byte, error) {
 func resolveSingaporeEd25519Key(t *testing.T, did, verificationMethod string) ed25519.PublicKey {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	didDoc, err := resolveDIDWebDocument(ctx, did)

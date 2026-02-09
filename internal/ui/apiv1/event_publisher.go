@@ -2,10 +2,10 @@ package apiv1
 
 import (
 	"context"
-	apiv1_mockas "vc/internal/mockas/apiv1"
+	"vc/pkg/vcclient"
 )
 
 type EventPublisher interface {
-	MockNext(mockNextRequest *apiv1_mockas.MockNextRequest) error
+	MockNext(mockNextRequest *vcclient.MockNextRequest) error
 	Close(ctx context.Context) error
 }

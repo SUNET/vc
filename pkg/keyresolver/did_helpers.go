@@ -15,8 +15,8 @@ import (
 
 // ExtractEd25519FromMetadata extracts an Ed25519 public key from a DID document
 // or entity configuration returned in the trust_metadata field of an AuthZEN response.
-func ExtractEd25519FromMetadata(metadata interface{}, verificationMethod string) (ed25519.PublicKey, error) {
-	doc, ok := metadata.(map[string]interface{})
+func ExtractEd25519FromMetadata(metadata any, verificationMethod string) (ed25519.PublicKey, error) {
+	doc, ok := metadata.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid metadata format: expected map, got %T", metadata)
 	}
@@ -28,7 +28,7 @@ func ExtractEd25519FromMetadata(metadata interface{}, verificationMethod string)
 	}
 
 	for _, vm := range vms {
-		vmMap, ok := vm.(map[string]interface{})
+		vmMap, ok := vm.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -48,7 +48,7 @@ func ExtractEd25519FromMetadata(metadata interface{}, verificationMethod string)
 		}
 
 		// Try publicKeyJwk
-		if jwk, ok := vmMap["publicKeyJwk"].(map[string]interface{}); ok {
+		if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
 			key, err := JWKToEd25519(jwk)
 			if err == nil {
 				return key, nil
@@ -69,8 +69,8 @@ func ExtractEd25519FromMetadata(metadata interface{}, verificationMethod string)
 
 // ExtractECDSAFromMetadata extracts an ECDSA public key from a DID document
 // or entity configuration returned in the trust_metadata field.
-func ExtractECDSAFromMetadata(metadata interface{}, verificationMethod string) (*ecdsa.PublicKey, error) {
-	doc, ok := metadata.(map[string]interface{})
+func ExtractECDSAFromMetadata(metadata any, verificationMethod string) (*ecdsa.PublicKey, error) {
+	doc, ok := metadata.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid metadata format: expected map, got %T", metadata)
 	}
@@ -82,7 +82,7 @@ func ExtractECDSAFromMetadata(metadata interface{}, verificationMethod string) (
 	}
 
 	for _, vm := range vms {
-		vmMap, ok := vm.(map[string]interface{})
+		vmMap, ok := vm.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -93,7 +93,7 @@ func ExtractECDSAFromMetadata(metadata interface{}, verificationMethod string) (
 		}
 
 		// Try publicKeyJwk (preferred for ECDSA)
-		if jwk, ok := vmMap["publicKeyJwk"].(map[string]interface{}); ok {
+		if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
 			key, err := JWKToECDSA(jwk)
 			if err == nil {
 				return key, nil
@@ -113,15 +113,15 @@ func ExtractECDSAFromMetadata(metadata interface{}, verificationMethod string) (
 }
 
 // getVerificationMethods extracts the verification methods array from a DID document.
-func getVerificationMethods(doc map[string]interface{}) ([]interface{}, error) {
+func getVerificationMethods(doc map[string]any) ([]any, error) {
 	// Standard DID document format
-	if vms, ok := doc["verificationMethod"].([]interface{}); ok {
+	if vms, ok := doc["verificationMethod"].([]any); ok {
 		return vms, nil
 	}
 
 	// Try as array of maps (some serializations)
-	if vms, ok := doc["verificationMethod"].([]map[string]interface{}); ok {
-		result := make([]interface{}, len(vms))
+	if vms, ok := doc["verificationMethod"].([]map[string]any); ok {
+		result := make([]any, len(vms))
 		for i, vm := range vms {
 			result[i] = vm
 		}
@@ -139,8 +139,8 @@ func getVerificationMethods(doc map[string]interface{}) ([]interface{}, error) {
 
 // extractOpenIDFederationKeys extracts JWKs from OpenID Federation entity configuration.
 // Returns an empty slice if no keys are found (not an error - the document may be a regular DID doc).
-func extractOpenIDFederationKeys(doc map[string]interface{}) []interface{} {
-	metadata, ok := doc["metadata"].(map[string]interface{})
+func extractOpenIDFederationKeys(doc map[string]any) []any {
+	metadata, ok := doc["metadata"].(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -155,18 +155,18 @@ func extractOpenIDFederationKeys(doc map[string]interface{}) []interface{} {
 }
 
 // getJWKSFromEntityMetadata extracts JWKS keys from a specific entity type's metadata.
-func getJWKSFromEntityMetadata(metadata map[string]interface{}, entityType string) []interface{} {
-	entityMeta, ok := metadata[entityType].(map[string]interface{})
+func getJWKSFromEntityMetadata(metadata map[string]any, entityType string) []any {
+	entityMeta, ok := metadata[entityType].(map[string]any)
 	if !ok {
 		return nil
 	}
 
-	jwks, ok := entityMeta["jwks"].(map[string]interface{})
+	jwks, ok := entityMeta["jwks"].(map[string]any)
 	if !ok {
 		return nil
 	}
 
-	keys, ok := jwks["keys"].([]interface{})
+	keys, ok := jwks["keys"].([]any)
 	if !ok {
 		return nil
 	}
@@ -175,14 +175,14 @@ func getJWKSFromEntityMetadata(metadata map[string]interface{}, entityType strin
 }
 
 // convertJWKsToVerificationMethods wraps JWKs in pseudo verification method format.
-func convertJWKsToVerificationMethods(keys []interface{}) []interface{} {
-	result := make([]interface{}, 0, len(keys))
+func convertJWKsToVerificationMethods(keys []any) []any {
+	result := make([]any, 0, len(keys))
 	for _, key := range keys {
-		keyMap, ok := key.(map[string]interface{})
+		keyMap, ok := key.(map[string]any)
 		if !ok {
 			continue
 		}
-		vm := map[string]interface{}{
+		vm := map[string]any{
 			"id":           keyMap["kid"],
 			"publicKeyJwk": keyMap,
 		}
@@ -192,7 +192,7 @@ func convertJWKsToVerificationMethods(keys []interface{}) []interface{} {
 }
 
 // matchesVerificationMethod checks if a verification method entry matches the requested ID.
-func matchesVerificationMethod(vmMap map[string]interface{}, verificationMethod string, doc map[string]interface{}) bool {
+func matchesVerificationMethod(vmMap map[string]any, verificationMethod string, doc map[string]any) bool {
 	// Direct ID match
 	if id, ok := vmMap["id"].(string); ok {
 		if id == verificationMethod {

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
-	"vc/pkg/jose"
-	"vc/pkg/model"
+	"vc/pkg/cache"
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
 
@@ -27,7 +27,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	c.log.Debug("Verification request object", "req", req)
 
 	// TODO(masv): should request-object-id be associated with a particular session?
-	authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{
+	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
 		RequestObjectID: req.ID,
 	})
 	if err != nil {
@@ -41,8 +41,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", errors.New("request object not found")
 	}
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.verifierSigningKey)
-	signedJWT, err := requestObject.Sign(signingMethod, c.verifierSigningKey, c.verifierSigningChain)
+	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err
@@ -126,7 +125,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.log.Debug("directPost", "vpResponse", vpResponse)
 
 	// Get authorization context by state
-	authCtx, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{State: vpResponse.State})
+	authCtx, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{State: vpResponse.State})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
@@ -134,12 +133,26 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Generate response code
 	responseCode := uuid.NewString()
-	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": fmt.Sprintf(c.cfg.Verifier.ExternalServerURL+"/verification/callback?response_code=%s", responseCode)})
+	callbackURL, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/callback")
+	if err != nil {
+		c.log.Error(err, "Failed to construct callback URL")
+		return nil, fmt.Errorf("failed to construct callback URL: %w", err)
+	}
+	u, err := url.Parse(callbackURL)
+	if err != nil {
+		c.log.Error(err, "Failed to parse callback URL")
+		return nil, fmt.Errorf("failed to parse callback URL: %w", err)
+	}
+	q := u.Query()
+	q.Set("response_code", responseCode)
+	u.RawQuery = q.Encode()
+	redirectURI := u.String()
+	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})
 
 	// Process all VP tokens for the requested scopes
-	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scope))
+	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
 
-	for _, scope := range authCtx.Scope {
+	for _, scope := range authCtx.Scopes {
 		vpToken, ok := vpResponse.VPToken[scope]
 		if !ok {
 			c.log.Error(nil, "VP token not found for scope", "scope", scope)
@@ -203,7 +216,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
 
-	redirectURI := fmt.Sprintf(c.cfg.Verifier.ExternalServerURL+"/verification/callback?response_code=%s", responseCode)
+
 
 	reply := &VerificationDirectPostResponse{}
 

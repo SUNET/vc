@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +50,7 @@ func TestValidateFromFile(t *testing.T) {
 				},
 				DocumentData: map[string]any{"name": "test_value", "age": "21"},
 			},
-			want: &Error{Title: "document_data_schema_error", Err: []map[string]interface{}{{"location": "/age", "message": map[string]interface{}{"type_mismatch": "Value is string but should be integer"}}}},
+			want: &Error{Title: "document_data_schema_error", Err: []map[string]any{{"location": "/age", "message": map[string]any{"type_mismatch": "Value is string but should be integer"}}}},
 		},
 		{
 			name: "age is too low",
@@ -61,7 +60,7 @@ func TestValidateFromFile(t *testing.T) {
 				},
 				DocumentData: map[string]any{"name": "test_value", "age": 19},
 			},
-			want: (&Error{Title: "document_data_schema_error", Err: []map[string]interface{}{{"location": "/age", "message": map[string]interface{}{"value_below_minimum": "19 should be at least 20"}}}}),
+			want: (&Error{Title: "document_data_schema_error", Err: []map[string]any{{"location": "/age", "message": map[string]any{"value_below_minimum": "19 should be at least 20"}}}}),
 		},
 		{
 			name: "array with objects",
@@ -90,7 +89,7 @@ func TestValidateFromFile(t *testing.T) {
 			if i == 4 {
 				fmt.Println(tt.payload.DocumentData)
 			}
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.remoteRef {
 				serverURL, err := url.Parse(server.URL)
 				assert.NoError(t, err)

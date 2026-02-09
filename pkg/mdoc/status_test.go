@@ -1,7 +1,6 @@
 package mdoc
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -71,7 +70,7 @@ func TestNewStatusChecker_WithOptions(t *testing.T) {
 func TestStatusChecker_CheckStatus_NilRef(t *testing.T) {
 	sc := NewStatusChecker()
 
-	_, err := sc.CheckStatus(context.Background(), nil)
+	_, err := sc.CheckStatus(t.Context(), nil)
 	if err == nil {
 		t.Error("CheckStatus(nil) should fail")
 	}
@@ -80,7 +79,7 @@ func TestStatusChecker_CheckStatus_NilRef(t *testing.T) {
 func TestStatusChecker_CheckStatus_EmptyURI(t *testing.T) {
 	sc := NewStatusChecker()
 
-	_, err := sc.CheckStatus(context.Background(), &StatusReference{URI: "", Index: 0})
+	_, err := sc.CheckStatus(t.Context(), &StatusReference{URI: "", Index: 0})
 	if err == nil {
 		t.Error("CheckStatus with empty URI should fail")
 	}
@@ -89,7 +88,7 @@ func TestStatusChecker_CheckStatus_EmptyURI(t *testing.T) {
 func TestStatusChecker_CheckStatus_NegativeIndex(t *testing.T) {
 	sc := NewStatusChecker()
 
-	_, err := sc.CheckStatus(context.Background(), &StatusReference{URI: "https://example.com/status", Index: -1})
+	_, err := sc.CheckStatus(t.Context(), &StatusReference{URI: "https://example.com/status", Index: -1})
 	if err == nil {
 		t.Error("CheckStatus with negative index should fail")
 	}
@@ -135,7 +134,7 @@ func TestStatusChecker_CheckStatus_WithServer(t *testing.T) {
 	}))
 
 	// Test valid status
-	result, err := sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 0})
+	result, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 0})
 	if err != nil {
 		t.Fatalf("CheckStatus() error = %v", err)
 	}
@@ -145,7 +144,7 @@ func TestStatusChecker_CheckStatus_WithServer(t *testing.T) {
 	}
 
 	// Test invalid status
-	result, err = sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 1})
+	result, err = sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 1})
 	if err != nil {
 		t.Fatalf("CheckStatus() error = %v", err)
 	}
@@ -155,7 +154,7 @@ func TestStatusChecker_CheckStatus_WithServer(t *testing.T) {
 	}
 
 	// Test suspended status
-	result, err = sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 2})
+	result, err = sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 2})
 	if err != nil {
 		t.Fatalf("CheckStatus() error = %v", err)
 	}
@@ -189,7 +188,7 @@ func TestStatusChecker_CheckStatus_IndexOutOfRange(t *testing.T) {
 		return publicKey, nil
 	}))
 
-	_, err := sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 100})
+	_, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 100})
 	if err == nil {
 		t.Error("CheckStatus with out-of-range index should fail")
 	}
@@ -530,7 +529,7 @@ func TestStatusChecker_CacheExpiry(t *testing.T) {
 	)
 
 	// First call should hit the server
-	_, err := sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 0})
+	_, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 0})
 	if err != nil {
 		t.Fatalf("CheckStatus() error = %v", err)
 	}
@@ -539,7 +538,7 @@ func TestStatusChecker_CacheExpiry(t *testing.T) {
 	}
 
 	// Second call should use cache
-	_, err = sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 1})
+	_, err = sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 1})
 	if err != nil {
 		t.Fatalf("CheckStatus() error = %v", err)
 	}
@@ -558,7 +557,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Disabled(t *testing.T) {
 		DocType: DocType,
 	}
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() error = %v", err)
 	}
@@ -588,7 +587,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_NoStatusReference(t *testing.T)
 		},
 	}
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	// No status reference means no revocation support - should return nil, nil
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() error = %v", err)
@@ -643,7 +642,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Valid(t *testing.T) {
 		},
 	}
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() error = %v", err)
 	}
@@ -700,7 +699,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Revoked(t *testing.T) {
 		},
 	}
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() error = %v", err)
 	}
@@ -753,7 +752,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Suspended(t *testing.T) {
 		},
 	}
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() error = %v", err)
 	}
@@ -838,7 +837,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 	}))
 	vsc := NewVerifierStatusCheck(sc)
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() error = %v", err)
 	}
@@ -884,7 +883,7 @@ func TestStatusChecker_CheckStatus_CWTFormat(t *testing.T) {
 	sc := NewStatusChecker()
 
 	// Test valid status (index 0)
-	result, err := sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 0})
+	result, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 0})
 	if err != nil {
 		t.Fatalf("CheckStatus() CWT error = %v", err)
 	}
@@ -893,7 +892,7 @@ func TestStatusChecker_CheckStatus_CWTFormat(t *testing.T) {
 	}
 
 	// Test invalid status (index 1)
-	result, err = sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 1})
+	result, err = sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 1})
 	if err != nil {
 		t.Fatalf("CheckStatus() CWT error = %v", err)
 	}
@@ -902,7 +901,7 @@ func TestStatusChecker_CheckStatus_CWTFormat(t *testing.T) {
 	}
 
 	// Test suspended status (index 2)
-	result, err = sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 2})
+	result, err = sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 2})
 	if err != nil {
 		t.Fatalf("CheckStatus() CWT error = %v", err)
 	}
@@ -939,7 +938,7 @@ func TestStatusChecker_CheckStatus_CWTAutoDetect(t *testing.T) {
 	sc := NewStatusChecker()
 
 	// Should auto-detect CWT format from CBOR tag 18 (0xD2)
-	result, err := sc.CheckStatus(context.Background(), &StatusReference{URI: server.URL, Index: 10})
+	result, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 10})
 	if err != nil {
 		t.Fatalf("CheckStatus() auto-detect CWT error = %v", err)
 	}
@@ -1070,7 +1069,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_CWT(t *testing.T) {
 		},
 	}
 
-	result, err := vsc.CheckDocumentStatus(context.Background(), doc)
+	result, err := vsc.CheckDocumentStatus(t.Context(), doc)
 	if err != nil {
 		t.Fatalf("CheckDocumentStatus() CWT error = %v", err)
 	}

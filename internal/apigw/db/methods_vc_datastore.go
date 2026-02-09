@@ -467,7 +467,6 @@ func (c *VCDatastoreColl) SearchDocuments(ctx context.Context, query *SearchDocu
 	if err := helpers.Check(ctx, c.Service.cfg, query, c.Service.log); err != nil {
 		return nil, false, err
 	}
-	//TODO(mk): validate to prevent NoSQL Injection
 
 	filter := buildSearchDocumentsFilter(query)
 

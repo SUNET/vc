@@ -19,7 +19,7 @@ type presentationRequestTemplate interface {
 	GetID() string
 	GetOIDCScopes() []string
 	GetClaimMappings() map[string]string
-	GetClaimTransforms() map[string]interface{}
+	GetClaimTransforms() map[string]any
 }
 
 // NewClaimsExtractor creates a new claims extractor

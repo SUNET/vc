@@ -51,20 +51,20 @@ func main() {
 }
 
 type IssueRequest struct {
-	Credential map[string]interface{} `json:"credential"`
-	Options    map[string]interface{} `json:"options"`
+	Credential map[string]any `json:"credential"`
+	Options    map[string]any `json:"options"`
 }
 
 type VerifyRequest struct {
-	VerifiableCredential   map[string]interface{} `json:"verifiableCredential"`
-	VerifiablePresentation map[string]interface{} `json:"verifiablePresentation"`
-	Options                map[string]interface{} `json:"options"`
+	VerifiableCredential   map[string]any `json:"verifiableCredential"`
+	VerifiablePresentation map[string]any `json:"verifiablePresentation"`
+	Options                map[string]any `json:"options"`
 }
 
 type VerifyResponse struct {
 	Verified bool          `json:"verified"`
 	Errors   []string      `json:"errors,omitempty"`
-	Results  []interface{} `json:"results,omitempty"`
+	Results  []any `json:"results,omitempty"`
 	Checks   []string      `json:"checks,omitempty"`
 	Warnings []string      `json:"warnings,omitempty"`
 }
@@ -242,11 +242,11 @@ func handleVerify(w http.ResponseWriter, r *http.Request) {
 	// We need to look at the proof object in the credential
 	// RDFCredential has GetProofObject but that returns RDF.
 	// We can check the JSON map directly.
-	proof, ok := req.VerifiableCredential["proof"].(map[string]interface{})
+	proof, ok := req.VerifiableCredential["proof"].(map[string]any)
 	if !ok {
 		// Could be array
-		if proofs, ok := req.VerifiableCredential["proof"].([]interface{}); ok && len(proofs) > 0 {
-			if p, ok := proofs[0].(map[string]interface{}); ok {
+		if proofs, ok := req.VerifiableCredential["proof"].([]any); ok && len(proofs) > 0 {
+			if p, ok := proofs[0].(map[string]any); ok {
 				proof = p
 			}
 		}
@@ -303,7 +303,7 @@ func handleVerifyPresentation(w http.ResponseWriter, r *http.Request) {
 
 	if req.VerifiablePresentation == nil {
 		// Check if the body itself is the VP (some tests might do this)
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(body, &raw); err == nil {
 			if _, ok := raw["type"]; ok {
 				req.VerifiablePresentation = raw
@@ -333,11 +333,11 @@ func handleVerifyPresentation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract proof
-	var proof map[string]interface{}
-	if p, ok := req.VerifiablePresentation["proof"].(map[string]interface{}); ok {
+	var proof map[string]any
+	if p, ok := req.VerifiablePresentation["proof"].(map[string]any); ok {
 		proof = p
-	} else if proofs, ok := req.VerifiablePresentation["proof"].([]interface{}); ok && len(proofs) > 0 {
-		if p, ok := proofs[0].(map[string]interface{}); ok {
+	} else if proofs, ok := req.VerifiablePresentation["proof"].([]any); ok && len(proofs) > 0 {
+		if p, ok := proofs[0].(map[string]any); ok {
 			proof = p
 		}
 	}
@@ -377,7 +377,7 @@ func handleVerifyPresentation(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func verifyEdDSA(vpCred *credential.RDFCredential, proof map[string]interface{}) error {
+func verifyEdDSA(vpCred *credential.RDFCredential, proof map[string]any) error {
 	// 1. Get verificationMethod
 	vm, ok := proof["verificationMethod"].(string)
 	if !ok {

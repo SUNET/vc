@@ -38,12 +38,12 @@ type OIDCRPCallbackResponse struct {
 	Status          string                 `json:"status"`
 	CredentialType  string                 `json:"credential_type"`
 	Credential      string                 `json:"credential"`
-	CredentialOffer map[string]interface{} `json:"credential_offer"`
+	CredentialOffer map[string]any `json:"credential_offer"`
 	Message         string                 `json:"message"`
 }
 
 // OIDCRPInitiate initiates OIDC authentication flow
-func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest, oidcrpService interface{}) (*OIDCRPInitiateResponse, error) {
+func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest, oidcrpService any) (*OIDCRPInitiateResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPInitiate")
 	defer span.End()
 
@@ -65,7 +65,7 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 }
 
 // OIDCRPCallback processes OIDC callback and issues credential
-func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService interface{}) (*OIDCRPCallbackResponse, error) {
+func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (*OIDCRPCallbackResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPCallback")
 	defer span.End()
 
@@ -185,7 +185,7 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 }
 
 // generateCredentialOfferOIDCRP creates an OpenID4VCI credential offer
-func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialType string, credentialConfigID string) (map[string]interface{}, error) {
+func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:generateCredentialOfferOIDCRP")
 	defer span.End()
 
@@ -196,8 +196,8 @@ func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialTy
 	params := openid4vci.CredentialOfferParameters{
 		CredentialIssuer:           c.cfg.APIGW.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
-		Grants: map[string]interface{}{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]interface{}{
+		Grants: map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
 				"pre-authorized_code": preAuthCode,
 				"tx_code":             nil,
 			},
@@ -211,7 +211,7 @@ func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialTy
 	}
 
 	// Convert to map for response
-	var offerMap map[string]interface{}
+	var offerMap map[string]any
 	offerBytes, err := json.Marshal(offer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal offer: %w", err)

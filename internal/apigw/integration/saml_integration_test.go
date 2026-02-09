@@ -111,7 +111,7 @@ type testEnvironment struct {
 
 // setupTestEnvironment creates a complete test environment with mock IdP
 func setupTestEnvironment(t *testing.T) *testEnvironment {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create logger
 	log, err := logger.New("test", "", false)
@@ -331,7 +331,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 		name           string
 		credentialType string
 		attributes     []samltypes.AttributeStatement
-		expected       map[string]interface{}
+		expected       map[string]any
 		shouldError    bool
 	}{
 		{
@@ -346,7 +346,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 					},
 				},
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"given_name":  "Alice",
 				"family_name": "Smith",
 				"birth_date":  "1985-05-15",
@@ -365,8 +365,8 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 					},
 				},
 			},
-			expected: map[string]interface{}{
-				"credentialSubject": map[string]interface{}{
+			expected: map[string]any{
+				"credentialSubject": map[string]any{
 					"givenName":  "Bob",
 					"familyName": "Johnson",
 					"degree":     "Bachelor of Science",
@@ -546,8 +546,8 @@ func createExpiredAssertion(t *testing.T, issuer, audience string) *samltypes.As
 
 // samlAttributesToMap converts SAML AttributeStatements to a simple map
 // This helper extracts the first value from each attribute
-func samlAttributesToMap(statements []samltypes.AttributeStatement) map[string]interface{} {
-	attributes := make(map[string]interface{})
+func samlAttributesToMap(statements []samltypes.AttributeStatement) map[string]any {
+	attributes := make(map[string]any)
 	
 	for _, stmt := range statements {
 		for _, attr := range stmt.Attributes {

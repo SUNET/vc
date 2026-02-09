@@ -8,6 +8,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
@@ -249,7 +250,203 @@ func (v *Validator) validateType(obj map[string]any, requiredType string) error 
 		}
 	}
 
+	// Validate that each type value is either an absolute URL or a term
+	// mapped to a valid absolute URL via @context (W3C VCDM 2.0 §4.5).
+	// Only check for objects that have their own @context (top-level credentials/presentations).
+	// Sub-objects (credentialStatus, credentialSchema, etc.) inherit context from the parent
+	// in JSON-LD, so we skip this check for them.
+	if _, hasContext := obj["@context"]; hasContext {
+		if err := v.validateTypeMappings(obj, types); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// validateTypeMappings checks that every type value resolves to a valid absolute IRI
+// through the @context. A type is valid if it:
+// 1. Is already an absolute URL (e.g., "https://example.org/MyType"), OR
+// 2. Is a term defined in a @context entry that maps to a valid absolute URL, OR
+// 3. Can be resolved via @vocab to a valid absolute URL
+func (v *Validator) validateTypeMappings(obj map[string]any, types []string) error {
+	// Build the set of defined terms and @vocab from the @context
+	terms, vocab, vocabIsNull, allContextsKnown := v.resolveContextTerms(obj)
+
+	for _, typ := range types {
+		// If it's already an absolute URL, it's valid
+		if isAbsoluteURL(typ) {
+			continue
+		}
+
+		// It's a compact term — check if it's defined in the context
+		if mappedIRI, ok := terms[typ]; ok {
+			// The term is defined; verify it maps to a valid absolute URL
+			if !isAbsoluteURL(mappedIRI) {
+				return fmt.Errorf("type %q is mapped to an invalid IRI: %s", typ, mappedIRI)
+			}
+			continue
+		}
+
+		// Not explicitly mapped — check if @vocab can resolve it
+		if vocabIsNull {
+			return fmt.Errorf("type %q is not mapped to an IRI in @context", typ)
+		}
+		if vocab != "" {
+			// @vocab is set; the term would resolve to vocab + typ
+			resolved := vocab + typ
+			if !isAbsoluteURL(resolved) {
+				return fmt.Errorf("type %q resolves to an invalid IRI via @vocab: %s", typ, resolved)
+			}
+			continue
+		}
+
+		// If some context URLs are unknown (not in our embedded store), we can't
+		// definitively say the term is unmapped — the unknown context might define it.
+		// Only reject if all contexts were resolved and the term still wasn't found.
+		if !allContextsKnown {
+			continue
+		}
+
+		return fmt.Errorf("type %q is not mapped to an IRI in @context", typ)
+	}
+
+	return nil
+}
+
+// resolveContextTerms extracts term definitions from all @context entries.
+// Returns the term->IRI mapping, the @vocab value, whether @vocab is explicitly null,
+// and whether all context URLs were successfully resolved from the embedded store.
+func (v *Validator) resolveContextTerms(obj map[string]any) (terms map[string]string, vocab string, vocabIsNull bool, allContextsKnown bool) {
+	terms = make(map[string]string)
+	allContextsKnown = true
+
+	ctx, ok := obj["@context"]
+	if !ok {
+		return terms, "", false, true
+	}
+
+	var contexts []any
+	switch val := ctx.(type) {
+	case string:
+		contexts = []any{val}
+	case []any:
+		contexts = val
+	default:
+		return terms, "", false, true
+	}
+
+	for _, c := range contexts {
+		switch entry := c.(type) {
+		case string:
+			// Well-known context URL — load the embedded context and extract terms
+			if !v.loadContextTerms(entry, terms) {
+				allContextsKnown = false
+			}
+		case map[string]any:
+			// Inline context object — extract terms directly
+			for k, val := range entry {
+				if k == "@vocab" {
+					if val == nil {
+						vocabIsNull = true
+						vocab = ""
+					} else if s, ok := val.(string); ok {
+						vocabIsNull = false
+						vocab = s
+					}
+					continue
+				}
+				if strings.HasPrefix(k, "@") {
+					continue // skip JSON-LD keywords
+				}
+				switch mapped := val.(type) {
+				case string:
+					terms[k] = mapped
+				case map[string]any:
+					if id, ok := mapped["@id"].(string); ok {
+						terms[k] = id
+					}
+				}
+			}
+		}
+	}
+
+	return terms, vocab, vocabIsNull, allContextsKnown
+}
+
+// loadContextTerms loads term definitions from a well-known embedded context URL.
+// Returns true if the context was successfully loaded, false if it's unknown.
+func (v *Validator) loadContextTerms(contextURL string, terms map[string]string) bool {
+	data, err := contextstore.GetContext(contextURL)
+	if err != nil {
+		return false // unknown context
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return false
+	}
+
+	ctx, ok := doc["@context"]
+	if !ok {
+		return false
+	}
+
+	var ctxObj map[string]any
+	switch val := ctx.(type) {
+	case map[string]any:
+		ctxObj = val
+	case []any:
+		// Merge all context objects in the array
+		ctxObj = make(map[string]any)
+		for _, item := range val {
+			if obj, ok := item.(map[string]any); ok {
+				for k, v := range obj {
+					ctxObj[k] = v
+				}
+			}
+		}
+	default:
+		return false
+	}
+
+	for k, val := range ctxObj {
+		if strings.HasPrefix(k, "@") {
+			continue
+		}
+		switch mapped := val.(type) {
+		case string:
+			terms[k] = mapped
+		case map[string]any:
+			if id, ok := mapped["@id"].(string); ok {
+				terms[k] = id
+			}
+		}
+	}
+
+	return true
+}
+
+// isAbsoluteURL checks if a string is an absolute URL/IRI (has a scheme with ://)
+func isAbsoluteURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme == "" {
+		return false
+	}
+	// Must have a valid scheme without spaces
+	if strings.Contains(s[:strings.Index(s, ":")+1], " ") {
+		return false
+	}
+	// URN-style (e.g. urn:uuid:..., did:example:...)
+	if u.Scheme == "urn" || u.Scheme == "did" {
+		return true
+	}
+	// HTTP/HTTPS must have a host
+	if u.Scheme == "http" || u.Scheme == "https" {
+		return u.Host != ""
+	}
+	// Other schemes with opaque data
+	return u.Opaque != "" || u.Host != ""
 }
 
 func (v *Validator) validateIssuer(cred map[string]any) error {

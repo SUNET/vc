@@ -1,7 +1,6 @@
 package openid4vci
 
 import (
-	"context"
 	"testing"
 	"vc/internal/gen/issuer/apiv1_issuer"
 
@@ -46,7 +45,7 @@ func TestCredentialValidation(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
+			ctx := t.Context()
 			got := tt.credentialRequest.Validate(ctx, tt.tokenResponse)
 			assert.NoError(t, got)
 		})
@@ -103,6 +102,148 @@ func TestExtractJWK(t *testing.T) {
 			assert.NoError(t, err, "ExtractJWK should not return an error")
 			assert.NotNil(t, got, "JWK should not be nil")
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestResolveCredentialFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     *CredentialRequest
+		metadata    *CredentialIssuerMetadataParameters
+		wantFormat  string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "resolve by credential_configuration_id",
+			request: &CredentialRequest{
+				CredentialConfigurationID: "pid_config",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"pid_config": {
+						Format: "dc+sd-jwt",
+					},
+				},
+			},
+			wantFormat: "dc+sd-jwt",
+			wantErr:    false,
+		},
+		{
+			name: "resolve by credential_identifier",
+			request: &CredentialRequest{
+				CredentialIdentifier: "ehic_identifier",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"ehic_identifier": {
+						Format: "mso_mdoc",
+					},
+				},
+			},
+			wantFormat: "mso_mdoc",
+			wantErr:    false,
+		},
+		{
+			name: "fallback to dc+sd-jwt for unknown credential_identifier",
+			request: &CredentialRequest{
+				CredentialIdentifier: "unknown_identifier",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"pid_config": {
+						Format: "dc+sd-jwt",
+					},
+				},
+			},
+			wantFormat: "dc+sd-jwt",
+			wantErr:    false,
+		},
+		{
+			name: "error when metadata is nil",
+			request: &CredentialRequest{
+				CredentialConfigurationID: "pid_config",
+			},
+			metadata:    nil,
+			wantErr:     true,
+			errContains: "metadata is required",
+		},
+		{
+			name: "error when credential_configuration_id not found",
+			request: &CredentialRequest{
+				CredentialConfigurationID: "unknown_config",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"pid_config": {
+						Format: "dc+sd-jwt",
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "unknown credential_configuration_id",
+		},
+		{
+			name: "error when neither credential_configuration_id nor credential_identifier provided",
+			request: &CredentialRequest{
+				// Both fields empty
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"pid_config": {
+						Format: "dc+sd-jwt",
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "either credential_configuration_id or credential_identifier must be provided",
+		},
+		{
+			name: "resolve vc+sd-jwt format",
+			request: &CredentialRequest{
+				CredentialConfigurationID: "vc_config",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"vc_config": {
+						Format: "vc+sd-jwt",
+					},
+				},
+			},
+			wantFormat: "vc+sd-jwt",
+			wantErr:    false,
+		},
+		{
+			name: "resolve ldp_vc format",
+			request: &CredentialRequest{
+				CredentialConfigurationID: "ldp_config",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"ldp_config": {
+						Format: "ldp_vc",
+					},
+				},
+			},
+			wantFormat: "ldp_vc",
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format, err := tt.request.ResolveCredentialFormat(tt.metadata)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantFormat, format)
+			}
 		})
 	}
 }

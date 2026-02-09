@@ -39,7 +39,7 @@ func (c *pda1Client) makeSourceData(sourceFilePath string) error {
 	defer func() {
 		// Close the spreadsheet.
 		if err := f.Close(); err != nil {
-			panic(err)
+			c.client.log.Error(err, "failed to close spreadsheet file")
 		}
 	}()
 

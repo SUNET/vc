@@ -65,16 +65,16 @@ func (l *Log) New(path string) *Log {
 }
 
 // Info log
-func (l *Log) Info(msg string, args ...interface{}) {
+func (l *Log) Info(msg string, args ...any) {
 	l.Logger.V(0).WithValues(args...).Info(msg)
 }
 
 // Debug log
-func (l *Log) Debug(msg string, args ...interface{}) {
+func (l *Log) Debug(msg string, args ...any) {
 	l.Logger.V(1).WithValues(args...).Info(msg)
 }
 
 // Trace log
-func (l *Log) Trace(msg string, args ...interface{}) {
+func (l *Log) Trace(msg string, args ...any) {
 	l.Logger.V(2).WithValues(args...).Info(msg)
 }

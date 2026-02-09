@@ -69,7 +69,7 @@ func (c *Client) TokenStatusListsAddRecord(ctx context.Context, req *TokenStatus
 	}
 
 	// Build the Token Status List URI (pointing to registry)
-	uri := c.cfg.APIGW.RegistryExternalURL + "/statuslists/" + strconv.FormatInt(grpcReply.Section, 10)
+	uri := c.cfg.APIGW.RegistryPublicURL + "/statuslists/" + strconv.FormatInt(grpcReply.Section, 10)
 
 	reply := &TokenStatusListsAddRecordResponse{
 		Section: grpcReply.Section,

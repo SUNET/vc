@@ -79,7 +79,7 @@ func TestValidationIdentity(t *testing.T) {
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]interface{}{
+				Err: []map[string]any{
 					{
 						"field":           "birth_date",
 						"namespace":       "birth_date",
@@ -126,7 +126,7 @@ func TestStruct(t *testing.T) {
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]interface{}{
+				Err: []map[string]any{
 					{
 						"field":           "Last",
 						"namespace":       "Names[0].Last",
@@ -188,7 +188,7 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]interface{}{{
+				Err: []map[string]any{{
 					"field":           "birth_date",
 					"namespace":       "ID[0].birth_date",
 					"type":            "string",
@@ -205,6 +205,84 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := CheckSimple(tt.Have)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestHTTPURLValidator(t *testing.T) {
+	validate, err := NewValidator()
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		url         string
+		shouldError bool
+	}{
+		{
+			name:        "Valid HTTPS URL",
+			url:         "https://verifier.example.com",
+			shouldError: false,
+		},
+		{
+			name:        "Valid HTTP URL",
+			url:         "http://localhost:8080",
+			shouldError: false,
+		},
+		{
+			name:        "Valid HTTPS URL with port",
+			url:         "https://vc-interop-3.sunet.se:444",
+			shouldError: false,
+		},
+		{
+			name:        "Valid HTTPS URL with path",
+			url:         "https://example.com/path/to/resource",
+			shouldError: false,
+		},
+		{
+			name:        "Invalid - missing scheme",
+			url:         "verifier.example.com",
+			shouldError: true,
+		},
+		{
+			name:        "Invalid - host:port without scheme",
+			url:         "vc-interop-3.sunet.se:444",
+			shouldError: true,
+		},
+		{
+			name:        "Invalid - just hostname",
+			url:         "localhost",
+			shouldError: true,
+		},
+		{
+			name:        "Invalid - empty string",
+			url:         "",
+			shouldError: true,
+		},
+		{
+			name:        "Invalid - wrong scheme (ftp)",
+			url:         "ftp://example.com",
+			shouldError: true,
+		},
+		{
+			name:        "Invalid - scheme only",
+			url:         "https://",
+			shouldError: true,
+		},
+		{
+			name:        "Invalid - scheme without host",
+			url:         "http://",
+			shouldError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validate.Var(tt.url, "httpurl")
+			if tt.shouldError {
+				assert.Error(t, err, "Expected validation error for URL: %s", tt.url)
+			} else {
+				assert.NoError(t, err, "Expected no validation error for URL: %s", tt.url)
+			}
 		})
 	}
 }

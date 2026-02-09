@@ -220,7 +220,7 @@ verifier:
     addr: :8080
   grpc_server:
     addr: :8090
-  external_server_url: "http://verifier:8080"
+  public_url: "http://verifier:8080"
   supported_wallets:
     "SUNET dev": "https://dev.wallet.sunet.se/cb"
   oauth_server:
@@ -1016,7 +1016,7 @@ ab -n 10000 -c 100 http://verifier-proxy:8080/token
 | Old Config Field | New Config Field | Notes |
 |-----------------|------------------|-------|
 | `verifier.api_server` | `verifier_proxy.api_server` | Same structure |
-| `verifier.external_server_url` | `verifier_proxy.external_url` | Renamed |
+| `verifier.public_url` | `verifier_proxy.external_url` | Renamed |
 | `verifier.oauth_server.token_endpoint` | `verifier_proxy.oidc.issuer` + `/token` | Auto-generated |
 | N/A | `verifier_proxy.oidc.*` | New OIDC config |
 | N/A | `verifier_proxy.openid4vp.*` | New OpenID4VP config |
@@ -1079,7 +1079,7 @@ func (s *Service) endpointLegacyNotify(c *gin.Context) {
 verifier:
   api_server:
     addr: :8080
-  external_server_url: "http://verifier:8080"
+  public_url: "http://verifier:8080"
   oauth_server:
     token_endpoint: "http://verifier:8080/token"
 

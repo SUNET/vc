@@ -2,12 +2,10 @@ package apiv1
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
+	"net/url"
 	"time"
+	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // CreateRequestObject creates and signs an OpenID4VP request object
@@ -26,6 +24,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Create request object
+	responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/direct_post")
+	if err != nil {
+		c.log.Error(err, "Failed to construct response URI")
+		return "", err
+	}
 	requestObject := &openid4vp.RequestObject{
 		ISS:          c.cfg.Verifier.OIDC.Issuer,
 		AUD:          "https://self-issued.me/v2",
@@ -34,23 +37,20 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		ClientID:     c.cfg.Verifier.OIDC.Issuer,
 		Nonce:        nonce,
 		ResponseMode: responseMode,
-		ResponseURI:  c.cfg.Verifier.ExternalServerURL + "/verification/direct_post",
+		ResponseURI:  responseURI,
 		State:        sessionID,
 		DCQLQuery:    dcqlQuery,
 	}
 
-	// Add vp_formats to client_metadata if Digital Credentials API is enabled
-	if c.cfg.Verifier.DigitalCredentials.Enabled {
-		vpFormats := c.buildVPFormats()
-		if len(vpFormats) > 0 {
-			requestObject.ClientMetadata = &openid4vp.ClientMetadata{
-				VPFormats: vpFormats,
-			}
+	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled
+	if c.cfg.Verifier.DigitalCredentials.Enabled && c.cfg.Verifier.PreferredVPFormats != nil {
+		requestObject.ClientMetadata = &openid4vp.ClientMetadata{
+			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
 		}
 	}
 
 	// Sign the request object
-	signedJWT, err := requestObject.Sign(jwt.SigningMethodRS256, c.oidcSigningKey, nil)
+	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, nil)
 	if err != nil {
 		c.log.Error(err, "Failed to sign request object")
 		return "", err
@@ -63,8 +63,8 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 }
 
 // buildVPFormats constructs the vp_formats object based on configured preferred formats
-func (c *Client) buildVPFormats() map[string]map[string][]string {
-	vpFormats := make(map[string]map[string][]string)
+func (c *Client) buildVPFormats() *openid4vp.VPFormatsSupported {
+	result := &openid4vp.VPFormatsSupported{}
 
 	preferredFormats := c.cfg.Verifier.DigitalCredentials.PreferredFormats
 	if len(preferredFormats) == 0 {
@@ -76,18 +76,24 @@ func (c *Client) buildVPFormats() map[string]map[string][]string {
 		switch format {
 		case "vc+sd-jwt", "dc+sd-jwt":
 			// SD-JWT format with supported algorithms
-			vpFormats[format] = map[string][]string{
-				"alg": {"ES256", "ES384", "ES512", "RS256"},
+			if result.SDJWT == nil {
+				result.SDJWT = &openid4vp.SDJWTVCFormat{
+					SDJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+					KBJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
+				}
 			}
 		case "mso_mdoc":
-			// mdoc format with supported algorithms
-			vpFormats["mso_mdoc"] = map[string][]string{
-				"alg": {"ES256", "ES384", "ES512"},
+			// mdoc format with COSE algorithm identifiers
+			if result.MsoMdoc == nil {
+				result.MsoMdoc = &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-7, -35, -36}, // ES256, ES384, ES512
+					DeviceAuthAlgValues: []int{-7, -35, -36},
+				}
 			}
 		}
 	}
 
-	return vpFormats
+	return result
 }
 
 // GetRequestObject retrieves a request object by session ID
@@ -109,42 +115,46 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	defer span.End()
 
 	// Get the session
-	session, err := c.db.Sessions.GetByID(ctx, sessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to get session")
 		return ErrServerError
 	}
-	if session == nil {
+	if authCtx == nil {
 		c.log.Info("Session not found", "session_id", sessionID)
 		return ErrInvalidRequest
 	}
 
 	// Update session with VP token and presentation submission
-	session.OpenID4VP.VPToken = vpToken
-	session.OpenID4VP.PresentationSubmission = presentationSubmission
+	authCtx.VPToken = vpToken
+	authCtx.PresentationSubmission = presentationSubmission
 
 	// Extract claims from VP token
-	claims, err := c.extractClaimsFromVPToken(ctx, vpToken, session.OIDCRequest.Scope)
+	claims, err := c.extractClaimsFromVPToken(ctx, vpToken)
 	if err != nil {
 		c.log.Error(err, "Failed to extract claims from VP token")
-		session.Status = "error"
-		if err := c.db.Sessions.Update(ctx, session); err != nil {
+		authCtx.Status = "error"
+		if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session with error status")
 		}
 		return err
 	}
 
 	// Store verified claims
-	session.VerifiedClaims = claims
+	authCtx.VerifiedClaims = claims
 
 	// Generate authorization code
-	authCode := c.generateAuthorizationCode()
-	session.Tokens.AuthorizationCode = authCode
-	session.Tokens.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
-	session.Status = "code_issued"
+	authCode, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate authorization code")
+		return err
+	}
+	authCtx.Code = authCode
+	authCtx.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix()
+	authCtx.Status = "code_issued"
 
 	// Update session
-	if err := c.db.Sessions.Update(ctx, session); err != nil {
+	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return ErrServerError
 	}
@@ -153,7 +163,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 }
 
 // extractClaimsFromVPToken extracts and maps claims from the VP token
-func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string, scope string) (map[string]any, error) {
+func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string) (map[string]any, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:extract_claims")
 	defer span.End()
 
@@ -172,37 +182,30 @@ func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string, s
 	return claims, nil
 }
 
-// generateNonce creates a cryptographically random nonce
-func (c *Client) generateNonce() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
 // GetPollStatus returns the current status of a session for polling
 func (c *Client) GetPollStatus(ctx context.Context, sessionID string) (*SessionPollResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:get_poll_status")
 	defer span.End()
 
-	session, err := c.db.Sessions.GetByID(ctx, sessionID)
+	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to get session")
 		return nil, ErrServerError
 	}
-	if session == nil {
+	if authCtx == nil {
 		return nil, ErrNotFound
 	}
 
 	response := &SessionPollResponse{
-		SessionID: session.ID,
-		Status:    string(session.Status),
+		SessionID: authCtx.SessionID,
+		Status:    string(authCtx.Status),
 	}
 
 	// Include authorization code if available
-	if session.Status == "code_issued" && session.Tokens.AuthorizationCode != "" {
-		response.AuthorizationCode = session.Tokens.AuthorizationCode
-		response.RedirectURI = session.OIDCRequest.RedirectURI
-		response.State = session.OIDCRequest.State
+	if authCtx.Status == "code_issued" && authCtx.Code != "" {
+		response.AuthorizationCode = authCtx.Code
+		response.RedirectURI = authCtx.RedirectURI
+		response.State = authCtx.State
 	}
 
 	return response, nil

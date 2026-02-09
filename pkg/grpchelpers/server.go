@@ -113,7 +113,7 @@ func FormatFingerprint(fp string) string {
 // fingerprintUnaryInterceptor returns a unary interceptor that verifies client cert fingerprints.
 // allowedFingerprints maps normalized fingerprint -> friendly name.
 func fingerprintUnaryInterceptor(allowedFingerprints map[string]string) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if err := verifyClientFingerprint(ctx, allowedFingerprints); err != nil {
 			return nil, err
 		}
@@ -124,7 +124,7 @@ func fingerprintUnaryInterceptor(allowedFingerprints map[string]string) grpc.Una
 // fingerprintStreamInterceptor returns a stream interceptor that verifies client cert fingerprints.
 // allowedFingerprints maps normalized fingerprint -> friendly name.
 func fingerprintStreamInterceptor(allowedFingerprints map[string]string) grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if err := verifyClientFingerprint(ss.Context(), allowedFingerprints); err != nil {
 			return err
 		}

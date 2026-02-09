@@ -1,7 +1,6 @@
 package trust
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -86,7 +85,7 @@ func TestLocalTrustEvaluator_X5C(t *testing.T) {
 		TrustedRoots: []*x509.Certificate{rootCert},
 	})
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("valid chain is trusted", func(t *testing.T) {
 		decision, err := eval.Evaluate(ctx, &EvaluationRequest{
@@ -175,7 +174,7 @@ func TestLocalTrustEvaluator_ExpiredCert(t *testing.T) {
 		TrustedRoots: []*x509.Certificate{rootCert},
 	})
 
-	decision, err := eval.Evaluate(context.Background(), &EvaluationRequest{
+	decision, err := eval.Evaluate(t.Context(), &EvaluationRequest{
 		EvaluationRequest: trustapi.EvaluationRequest{
 			KeyType: KeyTypeX5C,
 			Key:     []*x509.Certificate{leafCert, rootCert},
@@ -201,7 +200,7 @@ func TestLocalTrustEvaluator_RoleRestriction(t *testing.T) {
 		AllowedRoles: []string{string(RoleIssuer)},
 	})
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("allowed role is accepted", func(t *testing.T) {
 		decision, err := eval.Evaluate(ctx, &EvaluationRequest{
@@ -253,7 +252,7 @@ func TestCompositeEvaluator_FirstSuccess(t *testing.T) {
 
 	composite := NewCompositeEvaluator(StrategyFirstSuccess, rejectingEval, acceptingEval)
 
-	decision, err := composite.Evaluate(context.Background(), &EvaluationRequest{
+	decision, err := composite.Evaluate(t.Context(), &EvaluationRequest{
 		EvaluationRequest: trustapi.EvaluationRequest{
 			SubjectID: "https://issuer.example.com",
 			KeyType:   KeyTypeX5C,
@@ -278,7 +277,7 @@ func TestCompositeEvaluator_Fallback(t *testing.T) {
 
 	composite := NewCompositeEvaluator(StrategyFallback, acceptingEval)
 
-	decision, err := composite.Evaluate(context.Background(), &EvaluationRequest{
+	decision, err := composite.Evaluate(t.Context(), &EvaluationRequest{
 		EvaluationRequest: trustapi.EvaluationRequest{
 			SubjectID: "https://issuer.example.com",
 			KeyType:   KeyTypeX5C,

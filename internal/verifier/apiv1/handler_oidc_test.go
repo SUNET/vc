@@ -1,11 +1,12 @@
 package apiv1
 
 import (
-	"context"
+	"strings"
 	"testing"
 	"time"
 	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -236,7 +237,7 @@ func TestTokenResponse_Fields(t *testing.T) {
 		ExpiresIn:    3600,
 		RefreshToken: "refresh-token-123",
 		IDToken:      "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-		Scope:        "openid profile email",
+		Scope:        strings.Join([]string{"openid", "profile", "email"}, " "),
 	}
 
 	assert.Equal(t, "access-token-123", resp.AccessToken)
@@ -352,7 +353,7 @@ func TestStandardClaims(t *testing.T) {
 // TestAuthorize_ClientValidation tests client validation in the Authorize handler
 // Note: Full Authorize flow requires CredentialConstructor config which is complex to mock
 func TestAuthorize_ClientValidation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Add a test client to the mock
@@ -406,7 +407,7 @@ func TestAuthorize_ClientValidation(t *testing.T) {
 			ResponseType: "code",
 			ClientID:     "test-client-id",
 			RedirectURI:  "https://example.com/callback",
-			Scope:        "openid admin",
+			Scope:        strings.Join([]string{"openid", "admin"}, " "),
 		}
 		_, err := client.Authorize(ctx, req)
 		assert.ErrorIs(t, err, ErrInvalidScope)
@@ -415,7 +416,7 @@ func TestAuthorize_ClientValidation(t *testing.T) {
 
 // TestAuthorize_PKCEValidation tests PKCE enforcement in the Authorize handler
 func TestAuthorize_PKCEValidation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
 
 	// Add a client that requires PKCE
@@ -432,7 +433,7 @@ func TestAuthorize_PKCEValidation(t *testing.T) {
 			ResponseType: "code",
 			ClientID:     "pkce-required-client",
 			RedirectURI:  "https://example.com/callback",
-			Scope:        "openid",
+			Scope:        strings.Join([]string{"openid"}, " "),
 		}
 		_, err := client.Authorize(ctx, req)
 		assert.ErrorIs(t, err, ErrInvalidRequest)
@@ -441,7 +442,7 @@ func TestAuthorize_PKCEValidation(t *testing.T) {
 
 // TestMockClientCollection tests the mock client collection
 func TestMockClientCollection(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	mock := NewMockClientCollection()
 
 	// Test Create
@@ -480,103 +481,95 @@ func TestMockClientCollection(t *testing.T) {
 	assert.Nil(t, deleted)
 }
 
-// TestMockSessionCollection tests the mock session collection
-func TestMockSessionCollection(t *testing.T) {
-	ctx := context.Background()
-	mock := NewMockSessionCollection()
+// TestAuthContextCache tests the auth context cache operations
+func TestAuthContextCache(t *testing.T) {
+	ctx := t.Context()
+	authCache := cache.NewAuthContextCache(15 * time.Minute)
 
 	// Test Create
-	session := &db.Session{
-		ID:     "session-1",
-		Status: db.SessionStatusPending,
-		Tokens: db.TokenSet{
-			AuthorizationCode: "auth-code-123",
-			AccessToken:       "access-token-456",
-		},
+	authCtx := &cache.AuthorizationContext{
+		SessionID:   "session-1",
+		Status:      cache.SessionStatusPending,
+		Code:        "auth-code-123",
+		AccessToken: "access-token-456",
 	}
-	err := mock.Create(ctx, session)
+	err := authCache.Create(ctx, authCtx)
 	assert.NoError(t, err)
 
 	// Test GetByID
-	retrieved, err := mock.GetByID(ctx, "session-1")
+	retrieved, err := authCache.GetByID(ctx, "session-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, retrieved)
-	assert.Equal(t, "session-1", retrieved.ID)
+	assert.Equal(t, "session-1", retrieved.SessionID)
 
 	// Test GetByAuthorizationCode
-	byCode, err := mock.GetByAuthorizationCode(ctx, "auth-code-123")
+	byCode, err := authCache.GetByAuthorizationCode(ctx, "auth-code-123")
 	assert.NoError(t, err)
 	assert.NotNil(t, byCode)
-	assert.Equal(t, "session-1", byCode.ID)
+	assert.Equal(t, "session-1", byCode.SessionID)
 
 	// Test GetByAccessToken
-	byToken, err := mock.GetByAccessToken(ctx, "access-token-456")
+	byToken, err := authCache.GetByAccessToken(ctx, "access-token-456")
 	assert.NoError(t, err)
 	assert.NotNil(t, byToken)
-	assert.Equal(t, "session-1", byToken.ID)
+	assert.Equal(t, "session-1", byToken.SessionID)
 
-	// Test MarkCodeAsUsed
-	err = mock.MarkCodeAsUsed(ctx, "session-1")
+	// Test MarkCodeAsForfeited
+	err = authCache.MarkCodeAsForfeited(ctx, "session-1")
 	assert.NoError(t, err)
 
-	markedSession, _ := mock.GetByID(ctx, "session-1")
-	assert.True(t, markedSession.Tokens.AuthorizationCodeUsed)
+	markedSession, _ := authCache.GetByID(ctx, "session-1")
+	assert.True(t, markedSession.Forfeited)
 
 	// Test Update
-	session.Status = db.SessionStatusCompleted
-	err = mock.Update(ctx, session)
+	authCtx.Status = cache.SessionStatusCompleted
+	err = authCache.Update(ctx, authCtx)
 	assert.NoError(t, err)
 
-	updated, _ := mock.GetByID(ctx, "session-1")
-	assert.Equal(t, db.SessionStatusCompleted, updated.Status)
+	updated, _ := authCache.GetByID(ctx, "session-1")
+	assert.Equal(t, cache.SessionStatusCompleted, updated.Status)
 
 	// Test Delete
-	err = mock.Delete(ctx, "session-1")
+	err = authCache.Delete(ctx, "session-1")
 	assert.NoError(t, err)
 
-	deleted, _ := mock.GetByID(ctx, "session-1")
+	deleted, _ := authCache.GetByID(ctx, "session-1")
 	assert.Nil(t, deleted)
 }
 
 // TestToken_AuthorizationCodeGrant tests the Token endpoint with authorization_code grant
 func TestToken_AuthorizationCodeGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
-		setupMock     func(*testing.T, *MockSessionCollection, *MockClientCollection)
+		setupMock     func(*testing.T, *cache.AuthContextCache, *MockClientCollection)
 		request       *TokenRequest
 		expectError   bool
 		expectedError error
 	}{
 		{
 			name: "successful token exchange",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-1",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:            "test-client",
-						RedirectURI:         "https://example.com/callback",
-						Scope:               "openid profile",
-						Nonce:               "test-nonce",
-						CodeChallenge:       "",
-						CodeChallengeMethod: "",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "valid-code",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
-					OpenID4VP: db.OpenID4VPSession{
-						WalletID: "wallet-123",
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:           "session-1",
+					Status:              cache.SessionStatusCodeIssued,
+					ClientID:            "test-client",
+					RedirectURI:         "https://example.com/callback",
+					Scopes:              []string{"openid", "profile"},
+					Nonce:               "test-nonce",
+					CodeChallenge:       "",
+					CodeChallengeMethod: "",
+					Code:                "valid-code",
+					Forfeited:           false,
+					CodeExpiresAt:       time.Now().Add(10 * time.Minute).Unix(),
+					WalletID:            "wallet-123",
 					VerifiedClaims: map[string]any{
 						"name":  "John Doe",
 						"email": "john@example.com",
 					},
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -597,7 +590,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "invalid grant type",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				// No setup needed
 			},
 			request: &TokenRequest{
@@ -610,7 +603,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "invalid authorization code",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				// No session with this code
 			},
 			request: &TokenRequest{
@@ -625,22 +618,18 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "code already used",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-used",
-					Status: db.SessionStatusTokenIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://example.com/callback",
-						Scope:       "openid",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "used-code",
-						AuthorizationCodeUsed: true, // Already used
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:     "session-used",
+					Status:        cache.SessionStatusTokenIssued,
+					ClientID:      "test-client",
+					RedirectURI:   "https://example.com/callback",
+					Scopes:        []string{"openid"},
+					Code:          "used-code",
+					Forfeited:     true, // Already used
+					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -654,22 +643,18 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "expired authorization code",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-expired",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://example.com/callback",
-						Scope:       "openid",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "expired-code",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(-1 * time.Minute), // Expired
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:     "session-expired",
+					Status:        cache.SessionStatusCodeIssued,
+					ClientID:      "test-client",
+					RedirectURI:   "https://example.com/callback",
+					Scopes:        []string{"openid"},
+					Code:          "expired-code",
+					Forfeited:     false,
+					CodeExpiresAt: time.Now().Add(-1 * time.Minute).Unix(), // Expired
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -683,22 +668,18 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "invalid client credentials",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-2",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://example.com/callback",
-						Scope:       "openid",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "valid-code-2",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:     "session-2",
+					Status:        cache.SessionStatusCodeIssued,
+					ClientID:      "test-client",
+					RedirectURI:   "https://example.com/callback",
+					Scopes:        []string{"openid"},
+					Code:          "valid-code-2",
+					Forfeited:     false,
+					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -719,22 +700,18 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "client ID mismatch",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-3",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "original-client",
-						RedirectURI: "https://example.com/callback",
-						Scope:       "openid",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "valid-code-3",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:     "session-3",
+					Status:        cache.SessionStatusCodeIssued,
+					ClientID:      "original-client",
+					RedirectURI:   "https://example.com/callback",
+					Scopes:        []string{"openid"},
+					Code:          "valid-code-3",
+					Forfeited:     false,
+					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "different-client",
@@ -755,22 +732,18 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "redirect URI mismatch",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-4",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "test-client",
-						RedirectURI: "https://example.com/callback",
-						Scope:       "openid",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "valid-code-4",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:     "session-4",
+					Status:        cache.SessionStatusCodeIssued,
+					ClientID:      "test-client",
+					RedirectURI:   "https://example.com/callback",
+					Scopes:        []string{"openid"},
+					Code:          "valid-code-4",
+					Forfeited:     false,
+					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -791,28 +764,22 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "PKCE validation success",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-pkce",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:            "test-client",
-						RedirectURI:         "https://example.com/callback",
-						Scope:               "openid",
-						CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-						CodeChallengeMethod: "S256",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "pkce-code",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
-					OpenID4VP: db.OpenID4VPSession{
-						WalletID: "wallet-123",
-					},
-					VerifiedClaims: map[string]any{},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:           "session-pkce",
+					Status:              cache.SessionStatusCodeIssued,
+					ClientID:            "test-client",
+					RedirectURI:         "https://example.com/callback",
+					Scopes:              []string{"openid"},
+					CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+					CodeChallengeMethod: "S256",
+					Code:                "pkce-code",
+					Forfeited:           false,
+					CodeExpiresAt:       time.Now().Add(10 * time.Minute).Unix(),
+					WalletID:            "wallet-123",
+					VerifiedClaims:      map[string]any{},
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -832,24 +799,20 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "PKCE validation failure",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-pkce-fail",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:            "test-client",
-						RedirectURI:         "https://example.com/callback",
-						Scope:               "openid",
-						CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-						CodeChallengeMethod: "S256",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "pkce-code-fail",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:           "session-pkce-fail",
+					Status:              cache.SessionStatusCodeIssued,
+					ClientID:            "test-client",
+					RedirectURI:         "https://example.com/callback",
+					Scopes:              []string{"openid"},
+					CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+					CodeChallengeMethod: "S256",
+					Code:                "pkce-code-fail",
+					Forfeited:           false,
+					CodeExpiresAt:       time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -869,26 +832,20 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "public client (no secret required)",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
-				session := &db.Session{
-					ID:     "session-public",
-					Status: db.SessionStatusCodeIssued,
-					OIDCRequest: db.OIDCRequest{
-						ClientID:    "public-client",
-						RedirectURI: "https://example.com/callback",
-						Scope:       "openid",
-					},
-					Tokens: db.TokenSet{
-						AuthorizationCode:     "public-code",
-						AuthorizationCodeUsed: false,
-						CodeExpiresAt:         time.Now().Add(10 * time.Minute),
-					},
-					OpenID4VP: db.OpenID4VPSession{
-						WalletID: "wallet-456",
-					},
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+				authCtx := &cache.AuthorizationContext{
+					SessionID:      "session-public",
+					Status:         cache.SessionStatusCodeIssued,
+					ClientID:       "public-client",
+					RedirectURI:    "https://example.com/callback",
+					Scopes:         []string{"openid"},
+					Code:           "public-code",
+					Forfeited:      false,
+					CodeExpiresAt:  time.Now().Add(10 * time.Minute).Unix(),
+					WalletID:       "wallet-456",
 					VerifiedClaims: map[string]any{},
 				}
-				sessions.Create(ctx, session)
+				sessions.Create(ctx, authCtx)
 
 				client := &db.Client{
 					ClientID:                "public-client",
@@ -910,11 +867,11 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			tt.setupMock(t, mockDB.Sessions, mockDB.Clients)
+			tt.setupMock(t, client.authContextCache, mockDB.Clients)
 
 			// Set up test signing key
 			key := generateTestRSAKey(t)
-			client.SetSigningKeyForTesting(key, "RS256")
+			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Execute
 			resp, err := client.Token(ctx, tt.request)
@@ -936,13 +893,13 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 				assert.Greater(t, resp.ExpiresIn, 0)
 
 				// Verify session was updated
-				session, _ := mockDB.Sessions.GetByAuthorizationCode(ctx, tt.request.Code)
-				if session != nil {
-					assert.True(t, session.Tokens.AuthorizationCodeUsed)
-					assert.Equal(t, db.SessionStatusTokenIssued, session.Status)
-					assert.Equal(t, resp.AccessToken, session.Tokens.AccessToken)
-					assert.Equal(t, resp.IDToken, session.Tokens.IDToken)
-					assert.Equal(t, resp.RefreshToken, session.Tokens.RefreshToken)
+				authCtx, _ := client.authContextCache.GetByAuthorizationCode(ctx, tt.request.Code)
+				if authCtx != nil {
+					assert.True(t, authCtx.Forfeited)
+					assert.Equal(t, cache.SessionStatusTokenIssued, authCtx.Status)
+					assert.Equal(t, resp.AccessToken, authCtx.AccessToken)
+					assert.Equal(t, resp.IDToken, authCtx.IDToken)
+					assert.Equal(t, resp.RefreshToken, authCtx.RefreshToken)
 				}
 			}
 		})
@@ -951,7 +908,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 
 // TestToken_RefreshTokenGrant tests the refresh token grant (currently unimplemented)
 func TestToken_RefreshTokenGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
 
 	req := &TokenRequest{
@@ -971,6 +928,8 @@ func TestToken_RefreshTokenGrant(t *testing.T) {
 
 // TestGenerateIDToken tests ID token generation
 func TestGenerateIDToken(t *testing.T) {
+	ctx := t.Context()
+
 	client, _ := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.OIDC.Issuer = "https://issuer.example.com"
 	client.cfg.Verifier.OIDC.IDTokenDuration = 3600
@@ -979,17 +938,13 @@ func TestGenerateIDToken(t *testing.T) {
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
-	client.SetSigningKeyForTesting(key, "RS256")
+	require.NoError(t, client.SetSigningKeyForTesting(key))
 
-	session := &db.Session{
-		ID: "session-1",
-		OIDCRequest: db.OIDCRequest{
-			ClientID: "test-client",
-			Nonce:    "test-nonce-123",
-		},
-		OpenID4VP: db.OpenID4VPSession{
-			WalletID: "wallet-123",
-		},
+	authCtx := &cache.AuthorizationContext{
+		SessionID: "session-1",
+		ClientID:  "test-client",
+		Nonce:     "test-nonce-123",
+		WalletID:  "wallet-123",
 		VerifiedClaims: map[string]any{
 			"name":  "John Doe",
 			"email": "john@example.com",
@@ -1000,13 +955,13 @@ func TestGenerateIDToken(t *testing.T) {
 		ClientID: "test-client",
 	}
 
-	idToken, err := client.generateIDToken(session, dbClient)
+	idToken, err := client.generateIDToken(ctx, authCtx, dbClient)
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, idToken)
 
 	// Parse and verify token
-	token, err := jwt.Parse(idToken, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(idToken, func(token *jwt.Token) (any, error) {
 		return &key.PublicKey, nil
 	})
 	assert.NoError(t, err)
@@ -1089,18 +1044,18 @@ func TestAuthenticateOIDCClient(t *testing.T) {
 
 // TestAuthorize_FullFlow tests the complete Authorize endpoint flow
 func TestAuthorize_FullFlow(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
-		setupMock     func(*testing.T, *MockSessionCollection, *MockClientCollection)
+		setupMock     func(*testing.T, *cache.AuthContextCache, *MockClientCollection)
 		request       *AuthorizeRequest
 		expectError   bool
 		expectedError error
 	}{
 		{
 			name: "successful authorization request",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1114,7 +1069,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				ResponseType: "code",
 				ClientID:     "test-client",
 				RedirectURI:  "https://example.com/callback",
-				Scope:        "openid profile",
+				Scope:        strings.Join([]string{"openid", "profile"}, " "),
 				State:        "random-state",
 				Nonce:        "random-nonce",
 			},
@@ -1122,21 +1077,21 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "client not found",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				// No client created
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
 				ClientID:     "nonexistent-client",
 				RedirectURI:  "https://example.com/callback",
-				Scope:        "openid",
+				Scope:        strings.Join([]string{"openid"}, " "),
 			},
 			expectError:   true,
 			expectedError: ErrInvalidClient,
 		},
 		{
 			name: "invalid redirect URI",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1149,14 +1104,14 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				ResponseType: "code",
 				ClientID:     "test-client",
 				RedirectURI:  "https://malicious.com/callback",
-				Scope:        "openid",
+				Scope:        strings.Join([]string{"openid"}, " "),
 			},
 			expectError:   true,
 			expectedError: ErrInvalidRequest,
 		},
 		{
 			name: "unsupported response type",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1169,14 +1124,14 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				ResponseType: "token",
 				ClientID:     "test-client",
 				RedirectURI:  "https://example.com/callback",
-				Scope:        "openid",
+				Scope:        strings.Join([]string{"openid"}, " "),
 			},
 			expectError:   true,
 			expectedError: ErrInvalidRequest,
 		},
 		{
 			name: "invalid scope",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1189,14 +1144,14 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				ResponseType: "code",
 				ClientID:     "test-client",
 				RedirectURI:  "https://example.com/callback",
-				Scope:        "openid admin",
+				Scope:        strings.Join([]string{"openid", "admin"}, " "),
 			},
 			expectError:   true,
 			expectedError: ErrInvalidScope,
 		},
 		{
 			name: "PKCE required but not provided",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1217,7 +1172,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "successful with PKCE",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1231,7 +1186,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				ResponseType:        "code",
 				ClientID:            "test-client",
 				RedirectURI:         "https://example.com/callback",
-				Scope:               "openid profile",
+				Scope:               strings.Join([]string{"openid", "profile"}, " "),
 				State:               "state-123",
 				Nonce:               "nonce-456",
 				CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
@@ -1241,7 +1196,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "multiple scopes with different credentials",
-			setupMock: func(t *testing.T, sessions *MockSessionCollection, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1254,7 +1209,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				ResponseType: "code",
 				ClientID:     "test-client",
 				RedirectURI:  "https://example.com/callback",
-				Scope:        "openid profile email",
+				Scope:        strings.Join([]string{"openid", "profile", "email"}, " "),
 				State:        "complex-state",
 				Nonce:        "complex-nonce",
 			},
@@ -1265,7 +1220,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
+			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 			client.cfg.Verifier.OIDC.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enabled = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
@@ -1278,7 +1233,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 			template := createSimplePresentationTemplate(t, []string{"openid", "profile", "email", "address"})
 			client.AddPresentationTemplateForTesting(template)
 
-			tt.setupMock(t, mockDB.Sessions, mockDB.Clients)
+			tt.setupMock(t, client.authContextCache, mockDB.Clients)
 
 			// Execute
 			resp, err := client.Authorize(ctx, tt.request)
@@ -1314,17 +1269,17 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				assert.NotEmpty(t, resp.SecondaryColor)
 
 				// Verify session was created
-				session, _ := mockDB.Sessions.GetByID(ctx, resp.SessionID)
-				assert.NotNil(t, session)
-				assert.Equal(t, db.SessionStatusPending, session.Status)
-				assert.Equal(t, tt.request.ClientID, session.OIDCRequest.ClientID)
-				assert.Equal(t, tt.request.RedirectURI, session.OIDCRequest.RedirectURI)
-				assert.Equal(t, tt.request.Scope, session.OIDCRequest.Scope)
-				assert.Equal(t, tt.request.State, session.OIDCRequest.State)
-				assert.Equal(t, tt.request.Nonce, session.OIDCRequest.Nonce)
+				authCtx, _ := client.authContextCache.GetByID(ctx, resp.SessionID)
+				assert.NotNil(t, authCtx)
+				assert.Equal(t, cache.SessionStatusPending, authCtx.Status)
+				assert.Equal(t, tt.request.ClientID, authCtx.ClientID)
+				assert.Equal(t, tt.request.RedirectURI, authCtx.RedirectURI)
+				assert.Equal(t, strings.Split(tt.request.Scope, " "), authCtx.Scopes)
+				assert.Equal(t, tt.request.State, authCtx.State)
+				assert.Equal(t, tt.request.Nonce, authCtx.Nonce)
 				if tt.request.CodeChallenge != "" {
-					assert.Equal(t, tt.request.CodeChallenge, session.OIDCRequest.CodeChallenge)
-					assert.Equal(t, tt.request.CodeChallengeMethod, session.OIDCRequest.CodeChallengeMethod)
+					assert.Equal(t, tt.request.CodeChallenge, authCtx.CodeChallenge)
+					assert.Equal(t, tt.request.CodeChallengeMethod, authCtx.CodeChallengeMethod)
 				}
 			}
 		})
@@ -1333,10 +1288,10 @@ func TestAuthorize_FullFlow(t *testing.T) {
 
 // TestAuthorize_DigitalCredentialsDisabled tests the authorization flow when Digital Credentials API is disabled
 func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	client, mockDB := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.ExternalServerURL = "https://verifier.example.com"
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.OIDC.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enabled = false
@@ -1361,7 +1316,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 		ResponseType: "code",
 		ClientID:     "dc-disabled-client",
 		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
+		Scope:        strings.Join([]string{"openid", "profile"}, " "),
 		State:        "test-state",
 		Nonce:        "test-nonce",
 	}

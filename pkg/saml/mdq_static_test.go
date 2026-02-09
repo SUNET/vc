@@ -3,7 +3,6 @@
 package saml
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,7 +41,7 @@ func TestNewStaticMDQClient_FromFile(t *testing.T) {
 	assert.Equal(t, "https://static-idp.example.com/idp", client.GetStaticEntityID())
 
 	// Test fetching metadata (should return static metadata)
-	ctx := context.Background()
+	ctx := t.Context()
 	metadata, err := client.GetIDPMetadata(ctx, "https://static-idp.example.com/idp")
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
@@ -74,7 +73,7 @@ func TestNewStaticMDQClient_FromURL(t *testing.T) {
 	assert.Equal(t, "https://static-idp.example.com/idp", client.GetStaticEntityID())
 
 	// Test fetching metadata (should return static metadata)
-	ctx := context.Background()
+	ctx := t.Context()
 	metadata, err := client.GetIDPMetadata(ctx, "https://static-idp.example.com/idp")
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
@@ -95,7 +94,7 @@ func TestStaticMDQClient_GetIDPMetadata_IgnoresEntityID(t *testing.T) {
 	client, err := NewStaticMDQClient(metadataPath, "https://static-idp.example.com/idp", false, log)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Request with different entity ID - should still return static metadata
 	metadata, err := client.GetIDPMetadata(ctx, "https://different-idp.example.com")
@@ -184,7 +183,7 @@ func TestNewStaticMDQClient_EntityIDMismatch(t *testing.T) {
 	assert.Equal(t, "https://different-idp.example.com", client.GetStaticEntityID())
 
 	// But the metadata still has the original entityID
-	metadata, err := client.GetIDPMetadata(context.Background(), "")
+	metadata, err := client.GetIDPMetadata(t.Context(), "")
 	require.NoError(t, err)
 	assert.Equal(t, "https://static-idp.example.com/idp", metadata.EntityID)
 }

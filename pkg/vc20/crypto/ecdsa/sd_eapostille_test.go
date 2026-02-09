@@ -51,7 +51,7 @@ func TestDecodeEApostilleProofValue(t *testing.T) {
 	// But SAL may be presenting base proofs directly
 
 	// Try as raw CBOR array
-	var arr []interface{}
+	var arr []any
 	if err := cbor.Unmarshal(data, &arr); err != nil {
 		t.Logf("CBOR array decode error: %v", err)
 	} else {
@@ -60,7 +60,7 @@ func TestDecodeEApostilleProofValue(t *testing.T) {
 			switch v := item.(type) {
 			case []byte:
 				t.Logf("  [%d] []byte: %d bytes (hex: %s)", i, len(v), hex.EncodeToString(v[:min(32, len(v))]))
-			case []interface{}:
+			case []any:
 				t.Logf("  [%d] array: %d items", i, len(v))
 				for j := 0; j < min(3, len(v)); j++ {
 					switch itemVal := v[j].(type) {

@@ -56,7 +56,7 @@ func setupTestService(t *testing.T) *Service {
 
 	gin.SetMode(gin.TestMode)
 	log := logger.NewSimple("test")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tracer, err := trace.NewForTesting(ctx, "test", log)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestEndpointAdminLoginPage(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/admin/login", nil)
 
-		result, err := s.endpointAdminLoginPage(context.Background(), c)
+		result, err := s.endpointAdminLoginPage(t.Context(), c)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -117,7 +117,7 @@ func TestEndpointAdminLoginPage(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/admin/login?error=Invalid+credentials", nil)
 
-		result, err := s.endpointAdminLoginPage(context.Background(), c)
+		result, err := s.endpointAdminLoginPage(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
@@ -138,7 +138,7 @@ func TestEndpointAdminLogin(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminLogin(context.Background(), c)
+		result, err := s.endpointAdminLogin(t.Context(), c)
 
 		assert.NoError(t, err)
 		assert.Nil(t, result) // Returns nil on redirect
@@ -158,7 +158,7 @@ func TestEndpointAdminLogin(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminLogin(context.Background(), c)
+		result, err := s.endpointAdminLogin(t.Context(), c)
 
 		assert.NoError(t, err)
 		assert.Nil(t, result)
@@ -175,7 +175,7 @@ func TestEndpointAdminLogin(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminLogin(context.Background(), c)
+		result, err := s.endpointAdminLogin(t.Context(), c)
 
 		assert.NoError(t, err)
 		assert.Nil(t, result)
@@ -191,7 +191,7 @@ func TestEndpointAdminLogout(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/admin/logout", nil)
 
-		result, err := s.endpointAdminLogout(context.Background(), c)
+		result, err := s.endpointAdminLogout(t.Context(), c)
 
 		assert.NoError(t, err)
 		assert.Nil(t, result)
@@ -217,7 +217,7 @@ func TestEndpointAdminDashboard(t *testing.T) {
 		// Add cookie to request
 		c.Request.Header.Set("Cookie", w.Header().Get("Set-Cookie"))
 
-		result, err := s.endpointAdminDashboard(context.Background(), c)
+		result, err := s.endpointAdminDashboard(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
@@ -234,7 +234,7 @@ func TestEndpointAdminSearchPage(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/admin/search", nil)
 
-		result, err := s.endpointAdminSearchPage(context.Background(), c)
+		result, err := s.endpointAdminSearchPage(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
@@ -271,7 +271,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminSearch(context.Background(), c)
+		result, err := s.endpointAdminSearch(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
@@ -296,7 +296,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminSearch(context.Background(), c)
+		result, err := s.endpointAdminSearch(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
@@ -334,7 +334,7 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/update-status", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminUpdateStatus(context.Background(), c)
+		result, err := s.endpointAdminUpdateStatus(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
@@ -358,7 +358,7 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/update-status", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		result, err := s.endpointAdminUpdateStatus(context.Background(), c)
+		result, err := s.endpointAdminUpdateStatus(t.Context(), c)
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)

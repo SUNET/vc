@@ -5,64 +5,61 @@ common:
   production: false
   tracing:
     addr: jaeger:4318
-    type: jaeger
     #timeout: 10
-  credential_offer:
-    wallet_url: ""
-    issuer_url: "http://issuer.vc.docker:8080"
+  credential_offer_qr:
     type: "credential_offer"
     qr:
       recovery_level: 2
       size: 256
 
+auth_methods:
+  pid_auth:
+    vcts:
+      - "urn:eudi:pid:arf-1.5:1"
+      - "urn:eudi:pid:arf-1.8:1"
+    claims:
+      - "given_name"
+      - "birthdate"
+      - "family_name"
+
 credential_constructor:
   pid_1_5:
     vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
     auth_method: basic
-    vct: "urn:eudi:pid:arf-1.5:1"
     format: "dc+sd-jwt"
   pid_1_8:
     vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
     auth_method: basic
-    vct: "urn:eudi:pid:arf-1.8:1"
     format: "dc+sd-jwt"
   ehic:
-    vct: "urn:eudi:ehic:1"
     vctm_file_path: "/metadata/vctm_ehic.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   pda1:
-    vct: "urn:eudi:pda1:1"
     vctm_file_path: "/metadata/vctm_pda1.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   elm:
-    vct: "urn:eudi:elm:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   diploma:
-    vct: "urn:eudi:diploma:1"
     vctm_file_path: "/metadata/vctm_diploma.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   micro_credential:
-    vct: "urn:eudi:micro_credential:1"
     vctm_file_path: "/metadata/vctm_microcredential.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   openbadge_complete:
-    vct: "urn:eudi:openbadge_complete:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   openbadge_basic:
-    vct: "urn:eudi:openbadge_basic:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   openbadge_endorsements:
-    vct: "urn:eudi:openbadge_endorsements:1"
     vctm_file_path: "/metadata/vctm_elm.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
@@ -73,59 +70,31 @@ kafka:
     - "kafka0:9092"
     - "kafka1:9092"
 
-authentic_sources:
-  SUNET_v1:
-    country_code: "SE"
-    notification_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/notify"
-    authentic_source_endpoint:
-      url: "http://apigw.vc.docker:8080"
-    signature_service_endpoint:
-      url: "http://issuer.vc.docker:8080"
-    revocation_service_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/revok"
-    credential_types:
-      EHIC:
-        profile: "SD-JWT"
-      PDA1:
-        profile: "SD-JWT"
-  SUNET_v2:
-    country_code: "SE"
-    notification_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/notify"
-    authentic_source_endpoint:
-      url: "http://mockas.vc.docker:8080"
-    signature_service_endpoint:
-      url: "http://issuer.vc.docker:8080"
-    revocation_service_endpoint:
-      url: "http://apigw.vc.docker:8080/api/v1/document/revok"
-    datastore_service_endpoint:
-      url: "http://apigw.vc.docker:8080"
-    credential_types:
-      EHIC:
-        profile: "SD-JWT"
-      PDA1:
-        profile: "SD-JWT"
-
 issuer:
   issuer_url: "http://apigw.vc.docker:8080"
   wallet_url: ""
-  identifier: "SUNET_v1"
   api_server:
     addr: :8080
   grpc_server:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
+  audit_log:
+    enabled: true
+    destinations:
+      - "console"
+      - "/var/log/vc/audit.log"
+      - "http://apigw.vc.docker:8080/api/v1/audit/notify"
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
     # For HSM with PKCS#11 support, uncomment and configure:
     # pkcs11:
-    #   module_path: /usr/lib/softhsm/libsofthsm2.so
-    #   slot_id: 0
-    #   pin: "1234"
-    #   key_label: "issuer-key"
+    #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
+    #   # slot_id: 0  # Default
+    #   # pin: "1234"  # Default
+    #   key_label: "issuer-key"  # Required, default: "vc_key"
+    #   key_id: "issuer-key-id"  # Required, default: "vc_key_id"
     # Optional: configure fallback and priority
     # priority: ["hsm", "file"]
     # enable_hsm: true
@@ -140,21 +109,21 @@ issuer:
 verifier:
   api_server:
     addr: :8080
-    external_port: :8080
   grpc_server:
     addr: verifier.vc.docker:8090
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
-  external_server_url: "http://verifier.vc.docker:8080"
+  public_url: "http://verifier.vc.docker:8080"
   # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
     # Optional: HSM/PKCS#11 configuration (alternative to file-based keys)
     # pkcs11:
-    #   module_path: /usr/lib/softhsm/libsofthsm2.so
-    #   slot_id: 0
-    #   pin: "1234"
-    #   key_label: "verifier-key"
+    #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
+    #   # slot_id: 0  # Default
+    #   # pin: "1234"  # Default
+    #   key_label: "verifier-key"  # Required, default: "vc_key"
+    #   key_id: "verifier-key-id"  # Required, default: "vc_key_id"
     # Optional: Key source selection and priority
     # source: "file"  # Options: "file", "hsm"
     # enable_file: true
@@ -174,6 +143,15 @@ verifier:
           - "ehic"
           - "pda1"
           - "elm"
+  # Preferred VP formats - informs wallets what formats/algorithms the verifier supports
+  # Note: Per OpenID4VP spec, this is informational only and not enforced during verification
+  preferred_vp_formats:
+    "dc+sd-jwt":
+      sd-jwt_alg_values: ["ES256", "ES384", "ES512", "RS256"]
+      kb-jwt_alg_values: ["ES256", "ES384", "ES512", "RS256"]
+    mso_mdoc:
+      issuerauth_alg_values: [-7, -35, -36]  # ES256, ES384, ES512
+      deviceauth_alg_values: [-7, -35, -36]
   oidc:
     # OIDC Provider identifier (issuer of ID tokens and access tokens)
     # This identifies the verifier as an OpenID Provider
@@ -214,7 +192,7 @@ verifier:
 registry:
   api_server:
     addr: :8080
-  external_server_url: "http://localhost:8080"
+  public_url: "http://localhost:8080"
   grpc_server:
     addr: :8090
     # mTLS configuration (optional)
@@ -229,10 +207,11 @@ registry:
       private_key_path: "/pki/signing_ec_private.pem"
       chain_path: "/pki/signing_ec_chain.pem"
       # pkcs11:
-      #   module_path: /usr/lib/softhsm/libsofthsm2.so
-      #   slot_id: 0
-      #   pin: "1234"
-      #   key_label: "registry-tsl-key"
+      #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
+      #   # slot_id: 0  # Default
+      #   # pin: "1234"  # Default
+      #   key_label: "registry-tsl-key"  # Required, default: "vc_key"
+      #   key_id: "registry-tsl-key-id"  # Required, default: "vc_key_id"
   # Admin GUI configuration (optional)
   admin_gui:
     enabled: true
@@ -240,20 +219,16 @@ registry:
     password: "admin_1234"  # Change this in production!
     session_secret: "change-this-to-a-random-32-byte-secret"
 
-persistent:
-  api_server:
-    addr: :8080
-
 apigw:
-  identifier: "SUNET_v1"
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
     # pkcs11:
-    #   module_path: /usr/lib/softhsm/libsofthsm2.so
-    #   slot_id: 0
-    #   pin: "1234"
-    #   key_label: "apigw-key"
+    #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
+    #   # slot_id: 0  # Default
+    #   # pin: "1234"  # Default
+    #   key_label: "apigw-key"  # Required, default: "vc_key"
+    #   key_id: "apigw-key-id"  # Required, default: "vc_key_id"
   api_server:
     addr: :8080
     cors:
@@ -266,8 +241,8 @@ apigw:
       enabled: false
       users:
         admin: "secret123"
-  external_server_url: "http://apigw.vc.docker:8080"
-  registry_external_url: "http://registry.vc.docker:8080"
+  public_url: "http://apigw.vc.docker:8080"
+  registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:

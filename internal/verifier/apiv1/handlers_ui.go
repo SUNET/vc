@@ -3,8 +3,10 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
+	"vc/pkg/cache"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 
@@ -64,24 +66,22 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		scopes = append(scopes, credential.ID)
 	}
 
-	authorizationContext := &model.AuthorizationContext{
+	authorizationContext := &cache.AuthorizationContext{
 		SessionID:                sessionID,
-		Scope:                    scopes,
+		Scopes:                   scopes,
 		Code:                     "",
 		RequestURI:               "",
 		WalletURI:                "",
-		IsUsed:                   false,
+		Forfeited:                false,
 		State:                    state,
-		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.ExternalServerURL, "https://")),
+		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")),
 		ExpiresAt:                0,
 		CodeChallenge:            "",
 		CodeChallengeMethod:      "",
-		LastUsed:                 0,
-		SavedAt:                  0,
 		Consent:                  false,
 		AuthenticSource:          "",
 		Identity:                 &model.Identity{},
-		Token:                    &model.Token{},
+		Token:                    &cache.Token{},
 		Nonce:                    nonce,
 		EphemeralEncryptionKeyID: uuid.NewString(),
 		VerifierResponseCode:     "",
@@ -93,21 +93,22 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
+	responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "direct_post")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct response URI: %w", err)
+	}
+
 	requestObject := &openid4vp.RequestObject{
-		ResponseURI:  fmt.Sprintf("%s/verification/direct_post", c.cfg.Verifier.ExternalServerURL),
+		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
-		ISS:          strings.TrimLeft(c.cfg.Verifier.ExternalServerURL, "https://"),
+		ISS:          strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"),
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post.jwt",
 		State:        authorizationContext.State,
 		Nonce:        authorizationContext.Nonce,
 		ClientMetadata: &openid4vp.ClientMetadata{
-			VPFormats: map[string]map[string][]string{
-				"vc+sd-jwt": {
-					"sd-jwt_alg_values": {"ES256"},
-					"kb-jwt_alg_values": {"ES256"}},
-			},
+			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
 			JWKS: &openid4vp.Keys{
 				Keys: []jwk.Key{ephemeralPublicJWK},
 			},
@@ -124,7 +125,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		VerifierInfo:     []openid4vp.VerifierInfo{},
 	}
 
-	if err := c.authContextStore.Save(ctx, authorizationContext); err != nil {
+	if err := c.authContextCache.Save(ctx, authorizationContext); err != nil {
 		return nil, err
 	}
 
@@ -132,7 +133,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 
 	reply := &UIInteractionReply{}
 
-	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.ExternalServerURL, requestObjectID)
+	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, requestObjectID)
 	if err != nil {
 		return nil, err
 	}

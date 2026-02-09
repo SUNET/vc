@@ -4,7 +4,6 @@
 package openid4vp
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -72,7 +71,7 @@ func TestVC20Handler_VerifyECDSA2019_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the credential
-	result, err := handler.VerifyAndExtract(context.Background(), string(signedJSON))
+	result, err := handler.VerifyAndExtract(t.Context(), string(signedJSON))
 	require.NoError(t, err, "verification should succeed")
 
 	// Check result fields
@@ -160,7 +159,7 @@ func TestVC20Handler_VerifyECDSASd2023_Integration(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	result, err := handler.VerifyAndExtract(context.Background(), string(signedJSON))
+	result, err := handler.VerifyAndExtract(t.Context(), string(signedJSON))
 	require.NoError(t, err, "BASE proof verification should succeed")
 
 	require.Equal(t, "did:example:issuer", result.Issuer)
@@ -180,7 +179,7 @@ func TestVC20Handler_VerifyECDSASd2023_Integration(t *testing.T) {
 	// Verify the DERIVED credential
 	// Note: Derived credentials use @graph structure which may need special handling
 	// For now, we test that base proof verification works
-	resultDerived, err := handler.VerifyAndExtract(context.Background(), string(derivedJSON))
+	resultDerived, err := handler.VerifyAndExtract(t.Context(), string(derivedJSON))
 	if err != nil {
 		t.Logf("Derived proof verification not yet supported: %v", err)
 		t.Skip("Derived credentials with @graph structure need additional handler support")
@@ -251,7 +250,7 @@ func TestVC20Handler_VP_Extraction(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	result, err := handler.VerifyAndExtract(context.Background(), string(vpJSON))
+	result, err := handler.VerifyAndExtract(t.Context(), string(vpJSON))
 	require.NoError(t, err, "VP extraction and verification should succeed")
 
 	require.Equal(t, "did:example:issuer", result.Issuer)
@@ -300,7 +299,7 @@ func TestVC20Handler_TimeValidation(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		_, err = handler.VerifyAndExtract(context.Background(), string(signedJSON))
+		_, err = handler.VerifyAndExtract(t.Context(), string(signedJSON))
 		require.Error(t, err, "future credential should be rejected")
 		require.Contains(t, err.Error(), "not yet valid")
 	})
@@ -340,7 +339,7 @@ func TestVC20Handler_TimeValidation(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		_, err = handler.VerifyAndExtract(context.Background(), string(signedJSON))
+		_, err = handler.VerifyAndExtract(t.Context(), string(signedJSON))
 		require.Error(t, err, "expired credential should be rejected")
 		require.Contains(t, err.Error(), "expired")
 	})

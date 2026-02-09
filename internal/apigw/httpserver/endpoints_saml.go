@@ -7,11 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
-	"time"
 
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
+	"vc/pkg/crypto"
 	"vc/pkg/grpchelpers"
 	"vc/pkg/openid4vci"
 
@@ -26,9 +25,9 @@ import (
 //	@Tags			SAML
 //	@Produce		xml
 //	@Success		200	{string}	string					"SAML metadata XML"
-//	@Failure		500	{object}	map[string]interface{}	"Internal server error"
+//	@Failure		500	{object}	map[string]any	"Internal server error"
 //	@Router			/saml/metadata [get]
-func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (interface{}, error) {
+func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLMetadata")
 	defer span.End()
 
@@ -70,10 +69,10 @@ type SAMLInitiateResponse struct {
 //	@Produce		json
 //	@Param			request	body		SAMLInitiateRequest	true	"SAML initiate request"
 //	@Success		200		{object}	SAMLInitiateResponse
-//	@Failure		400		{object}	map[string]interface{}	"Bad request"
-//	@Failure		500		{object}	map[string]interface{}	"Internal server error"
+//	@Failure		400		{object}	map[string]any	"Bad request"
+//	@Failure		500		{object}	map[string]any	"Internal server error"
 //	@Router			/saml/initiate [post]
-func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (interface{}, error) {
+func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLInitiate")
 	defer span.End()
 
@@ -110,11 +109,11 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (int
 //	@Produce		json
 //	@Param			SAMLResponse	formData	string					true	"Base64-encoded SAML Response"
 //	@Param			RelayState		formData	string					false	"Relay state from initial request"
-//	@Success		200				{object}	map[string]interface{}	"Success with credential claims or offer"
-//	@Failure		400				{object}	map[string]interface{}	"Bad request"
-//	@Failure		500				{object}	map[string]interface{}	"Internal server error"
+//	@Success		200				{object}	map[string]any	"Success with credential claims or offer"
+//	@Failure		400				{object}	map[string]any	"Bad request"
+//	@Failure		500				{object}	map[string]any	"Internal server error"
 //	@Router			/saml/acs [post]
-func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (interface{}, error) {
+func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLACS")
 	defer span.End()
 
@@ -167,9 +166,9 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (interfac
 		return nil, err
 	}
 
-	// Convert SAML attributes (map[string][]string) to map[string]interface{}
+	// Convert SAML attributes (map[string][]string) to map[string]any
 	// Take the first value from each attribute array
-	samlAttrs := make(map[string]interface{})
+	samlAttrs := make(map[string]any)
 	for key, values := range assertion.Attributes {
 		if len(values) > 0 {
 			samlAttrs[key] = values[0] // Use first value
@@ -222,7 +221,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (interfac
 		"credential_type", mapping.CredentialType,
 		"offer_id", credentialOffer["id"])
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":           "success",
 		"credential_type":  mapping.CredentialType,
 		"credential":       credential,
@@ -269,17 +268,23 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 }
 
 // generateCredentialOffer creates an OpenID4VCI credential offer
-func (s *Service) generateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]interface{}, error) {
+func (s *Service) generateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:generateCredentialOffer")
 	defer span.End()
 
 	// Build credential offer parameters
+	// Generate pre-authorized code (fixed-length 32-character string)
+	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
+	}
+
 	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           s.cfg.Common.CredentialOffer.IssuerURL,
+		CredentialIssuer:           s.cfg.APIGW.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
-		Grants: map[string]interface{}{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]interface{}{
-				"pre-authorized_code": generatePreAuthCode(),
+		Grants: map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code": preAuthCode,
 				"tx_code":             nil, // Optional transaction code
 			},
 		},
@@ -292,7 +297,7 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	}
 
 	// Convert to map for response
-	offerData := make(map[string]interface{})
+	offerData := make(map[string]any)
 	offerJSON, err := json.Marshal(offer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal credential offer: %w", err)
@@ -303,12 +308,4 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	}
 
 	return offerData, nil
-}
-
-// generatePreAuthCode generates a pre-authorized code for the credential offer
-// In production, this should be cryptographically secure and stored in the database
-func generatePreAuthCode() string {
-	// TODO: Replace with secure random generation and database storage
-	// For now, use a simple UUID-like string
-	return fmt.Sprintf("%d-%d", time.Now().Unix(), rand.Int63())
 }

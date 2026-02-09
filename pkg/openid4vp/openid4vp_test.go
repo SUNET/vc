@@ -1,7 +1,6 @@
 package openid4vp
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("with nil config uses default TTL", func(t *testing.T) {
 		client, err := New(ctx, nil)
@@ -61,7 +60,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestClient_EphemeralKeyCache(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := New(ctx, nil)
 	require.NoError(t, err)
 	defer client.Close()
@@ -71,7 +70,7 @@ func TestClient_EphemeralKeyCache(t *testing.T) {
 }
 
 func TestClient_RequestObjectCache(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := New(ctx, nil)
 	require.NoError(t, err)
 	defer client.Close()
@@ -81,7 +80,7 @@ func TestClient_RequestObjectCache(t *testing.T) {
 }
 
 func TestClient_Close(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := New(ctx, nil)
 	require.NoError(t, err)
 
@@ -106,7 +105,7 @@ func TestClient_Close(t *testing.T) {
 }
 
 func TestClient_EphemeralKeyCacheUsage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := New(ctx, nil)
 	require.NoError(t, err)
 	defer client.Close()
@@ -143,7 +142,7 @@ func TestClient_EphemeralKeyCacheUsage(t *testing.T) {
 }
 
 func TestClient_RequestObjectCacheUsage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := New(ctx, nil)
 	require.NoError(t, err)
 	defer client.Close()

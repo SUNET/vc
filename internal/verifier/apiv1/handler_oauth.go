@@ -5,13 +5,13 @@ import (
 	"vc/pkg/helpers"
 	"vc/pkg/oauth2"
 
-	"github.com/golang-jwt/jwt/v5"
 )
 
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
 	c.log.Debug("metadata request")
 
-	signedMetadata, err := c.oauth2Metadata.Sign(jwt.SigningMethodRS256, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain)
+	// Sign metadata with fresh signature on each request
+	signedMetadata, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		return nil, err
 	}

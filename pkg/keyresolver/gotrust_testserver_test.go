@@ -3,7 +3,6 @@
 package keyresolver
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -46,7 +45,7 @@ func TestGoTrustResolver_WithTestServer_Discovery(t *testing.T) {
 	defer srv.Close()
 
 	// Test discovery workflow - creates resolver by fetching .well-known/authzen-configuration
-	resolver, err := NewGoTrustResolverWithDiscovery(context.Background(), srv.URL())
+	resolver, err := NewGoTrustResolverWithDiscovery(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to create resolver with discovery: %v", err)
 	}
@@ -74,7 +73,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustEd25519_Accepted(t *testing
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -93,7 +92,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustEd25519_Rejected(t *testing
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:untrusted.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:untrusted.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -112,7 +111,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustECDSA_Accepted(t *testing.T
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustECDSA(context.Background(), "did:web:example.com", &privKey.PublicKey, "verifier")
+	trusted, err := resolver.EvaluateTrustECDSA(t.Context(), "did:web:example.com", &privKey.PublicKey, "verifier")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -131,7 +130,7 @@ func TestGoTrustResolver_WithTestServer_EvaluateTrustECDSA_Rejected(t *testing.T
 	}
 
 	resolver := NewGoTrustResolver(srv.URL())
-	trusted, err := resolver.EvaluateTrustECDSA(context.Background(), "did:web:untrusted.com", &privKey.PublicKey, "")
+	trusted, err := resolver.EvaluateTrustECDSA(t.Context(), "did:web:untrusted.com", &privKey.PublicKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_BySubjectID(t *testing.T
 			return &authzen.EvaluationResponse{
 				Decision: true,
 				Context: &authzen.EvaluationResponseContext{
-					Reason: map[string]interface{}{
+					Reason: map[string]any{
 						"message": "Subject is in trusted list",
 					},
 				},
@@ -165,7 +164,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_BySubjectID(t *testing.T
 		return &authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
-				Reason: map[string]interface{}{
+				Reason: map[string]any{
 					"error": "Subject not in trusted list",
 				},
 			},
@@ -177,7 +176,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_BySubjectID(t *testing.T
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Test trusted DID
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:trusted-issuer.example.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:trusted-issuer.example.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -186,7 +185,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_BySubjectID(t *testing.T
 	}
 
 	// Test untrusted DID
-	trusted, err = resolver.EvaluateTrustEd25519(context.Background(), "did:web:unknown.org", pubKey, "")
+	trusted, err = resolver.EvaluateTrustEd25519(t.Context(), "did:web:unknown.org", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -214,7 +213,7 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_ByRole(t *testing.T) {
 		return &authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
-				Reason: map[string]interface{}{
+				Reason: map[string]any{
 					"error": "Role not allowed: " + req.Action.Name,
 				},
 			},
@@ -226,25 +225,25 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_ByRole(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Test allowed role
-	trusted, _ := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "issuer")
+	trusted, _ := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "issuer")
 	if !trusted {
 		t.Error("expected 'issuer' role to be trusted")
 	}
 
 	// Test another allowed role
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "verifier")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "verifier")
 	if !trusted {
 		t.Error("expected 'verifier' role to be trusted")
 	}
 
 	// Test disallowed role
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "attacker")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "attacker")
 	if trusted {
 		t.Error("expected 'attacker' role to be rejected")
 	}
 
 	// Test no role (should be allowed)
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	if !trusted {
 		t.Error("expected empty role to be trusted")
 	}
@@ -306,7 +305,7 @@ func TestGoTrustEvaluator_WithTestServer_Discovery(t *testing.T) {
 	srv := testserver.New(testserver.WithAcceptAll())
 	defer srv.Close()
 
-	evaluator, err := NewGoTrustEvaluatorWithDiscovery(context.Background(), srv.URL())
+	evaluator, err := NewGoTrustEvaluatorWithDiscovery(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to create evaluator with discovery: %v", err)
 	}
@@ -415,11 +414,11 @@ func TestGoTrustResolver_WithTestServer_Resolution_Ed25519(t *testing.T) {
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	// Create a mock DID document
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -456,11 +455,11 @@ func TestGoTrustResolver_WithTestServer_Resolution_ECDSA(t *testing.T) {
 
 	jwk, _ := ECDSAToJWK(pubKey)
 
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -495,7 +494,7 @@ func TestGoTrustResolver_WithTestServer_Resolution_Denied(t *testing.T) {
 		return &authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
-				Reason: map[string]interface{}{
+				Reason: map[string]any{
 					"error": "DID not found in registry",
 				},
 			},
@@ -547,18 +546,18 @@ func TestIntegration_IssuerCredentialFlow(t *testing.T) {
 	issuerDID := "did:web:issuer.example.com"
 	issuerVM := issuerDID + "#key-1"
 
-	issuerDoc := map[string]interface{}{
+	issuerDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       issuerDID,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           issuerVM,
 				"type":         "JsonWebKey2020",
 				"controller":   issuerDID,
 				"publicKeyJwk": Ed25519ToJWK(issuerKey),
 			},
 		},
-		"assertionMethod": []interface{}{issuerVM},
+		"assertionMethod": []any{issuerVM},
 	}
 
 	// Trust server that:
@@ -578,7 +577,7 @@ func TestIntegration_IssuerCredentialFlow(t *testing.T) {
 			return &authzen.EvaluationResponse{
 				Decision: false,
 				Context: &authzen.EvaluationResponseContext{
-					Reason: map[string]interface{}{"error": "unknown DID"},
+					Reason: map[string]any{"error": "unknown DID"},
 				},
 			}, nil
 		}
@@ -603,7 +602,7 @@ func TestIntegration_IssuerCredentialFlow(t *testing.T) {
 	}
 
 	// Step 2: Validate trust in issuer
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), issuerDID, issuerKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), issuerDID, issuerKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -612,7 +611,7 @@ func TestIntegration_IssuerCredentialFlow(t *testing.T) {
 	}
 
 	// Step 3: Verify untrusted role is rejected
-	trusted, err = resolver.EvaluateTrustEd25519(context.Background(), issuerDID, issuerKey, "admin")
+	trusted, err = resolver.EvaluateTrustEd25519(t.Context(), issuerDID, issuerKey, "admin")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -629,17 +628,17 @@ func TestIntegration_MultipleKeyTypes(t *testing.T) {
 
 	ecdsaJWK, _ := ECDSAToJWK(ecdsaKey)
 
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-ed25519",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
 				"publicKeyJwk": Ed25519ToJWK(ed25519Key),
 			},
-			map[string]interface{}{
+			map[string]any{
 				"id":           "did:web:example.com#key-ecdsa",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -694,7 +693,7 @@ func TestGoTrustResolver_WithTestServer_ServerError(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	// The server error should either return an error OR return false (not trusted)
 	// Either behavior is acceptable for error handling
 	if err == nil && trusted {
@@ -706,7 +705,7 @@ func TestGoTrustResolver_WithTestServer_InvalidServerURL(t *testing.T) {
 	resolver := NewGoTrustResolver("http://localhost:99999") // Invalid port
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
-	_, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	_, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	if err == nil {
 		t.Fatal("expected error for invalid server URL")
 	}
@@ -714,10 +713,10 @@ func TestGoTrustResolver_WithTestServer_InvalidServerURL(t *testing.T) {
 
 func TestGoTrustResolver_WithTestServer_KeyNotFound(t *testing.T) {
 	// Server that returns a DID doc without the requested key
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context":           []string{"https://www.w3.org/ns/did/v1"},
 		"id":                 "did:web:example.com",
-		"verificationMethod": []interface{}{
+		"verificationMethod": []any{
 			// No keys defined
 		},
 	}
@@ -748,7 +747,7 @@ func TestNewGoTrustResolverWithClient_FromTestServer(t *testing.T) {
 	defer srv.Close()
 
 	// Create client via discovery
-	client, err := authzenclient.Discover(context.Background(), srv.URL())
+	client, err := authzenclient.Discover(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to discover: %v", err)
 	}
@@ -757,7 +756,7 @@ func TestNewGoTrustResolverWithClient_FromTestServer(t *testing.T) {
 	resolver := NewGoTrustResolverWithClient(client)
 
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -788,7 +787,7 @@ func TestGoTrustEvaluator_WithTestServer_WithClient(t *testing.T) {
 	defer srv.Close()
 
 	// Create client manually
-	client, err := authzenclient.Discover(context.Background(), srv.URL())
+	client, err := authzenclient.Discover(t.Context(), srv.URL())
 	if err != nil {
 		t.Fatalf("failed to discover: %v", err)
 	}
@@ -914,7 +913,7 @@ func TestGoTrustEvaluator_WithTestServer_ContextMethods(t *testing.T) {
 
 	// Test Ed25519 with context
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
-	ctx := context.Background()
+	ctx := t.Context()
 	trusted, err := evaluator.EvaluateTrustWithContext(ctx, "did:web:example.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust with context: %v", err)
@@ -936,15 +935,15 @@ func TestGoTrustEvaluator_WithTestServer_ContextMethods(t *testing.T) {
 
 func TestGoTrustResolver_WithTestServer_Resolution_ECDSAError(t *testing.T) {
 	// Server that returns metadata without the requested key
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":         "did:web:example.com#other-key",
 				"type":       "JsonWebKey2020",
 				"controller": "did:web:example.com",
-				"publicKeyJwk": map[string]interface{}{
+				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
 					"x":   "test",
@@ -973,15 +972,15 @@ func TestGoTrustResolver_WithTestServer_Resolution_ECDSAError(t *testing.T) {
 
 func TestGoTrustResolver_WithTestServer_Resolution_InvalidJWK(t *testing.T) {
 	// Server that returns a DID doc with invalid JWK
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":         "did:web:example.com#key-1",
 				"type":       "JsonWebKey2020",
 				"controller": "did:web:example.com",
-				"publicKeyJwk": map[string]interface{}{
+				"publicKeyJwk": map[string]any{
 					"kty": "OKP",
 					"crv": "Ed25519",
 					// Missing "x" field - invalid JWK
@@ -1009,7 +1008,7 @@ func TestGoTrustResolver_WithTestServer_Resolution_InvalidJWK(t *testing.T) {
 
 func TestJWKConversion_ErrorCases(t *testing.T) {
 	// Test JWKToEd25519 with invalid input
-	invalidJWK := map[string]interface{}{
+	invalidJWK := map[string]any{
 		"kty": "OKP",
 		"crv": "Ed25519",
 		"x":   "invalid-base64!!!",
@@ -1020,7 +1019,7 @@ func TestJWKConversion_ErrorCases(t *testing.T) {
 	}
 
 	// Test JWKToECDSA with invalid input
-	invalidECJWK := map[string]interface{}{
+	invalidECJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 		"x":   "invalid-base64!!!",
@@ -1032,7 +1031,7 @@ func TestJWKConversion_ErrorCases(t *testing.T) {
 	}
 
 	// Test JWKToECDSA with missing fields
-	incompleteECJWK := map[string]interface{}{
+	incompleteECJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 		"x":   "test",
@@ -1044,7 +1043,7 @@ func TestJWKConversion_ErrorCases(t *testing.T) {
 	}
 
 	// Test JWKToECDSA with unknown curve
-	unknownCurveJWK := map[string]interface{}{
+	unknownCurveJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-999",
 		"x":   "test",
@@ -1064,25 +1063,25 @@ func TestGoTrustResolver_WithTestServer_MultipleVerificationMethods(t *testing.T
 
 	ecdsaJWK, _ := ECDSAToJWK(ecdsaKey)
 
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-auth",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
 				"publicKeyJwk": Ed25519ToJWK(ed25519Key),
 			},
-			map[string]interface{}{
+			map[string]any{
 				"id":           "did:web:example.com#key-signing",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
 				"publicKeyJwk": ecdsaJWK,
 			},
 		},
-		"authentication":  []interface{}{"did:web:example.com#key-auth"},
-		"assertionMethod": []interface{}{"did:web:example.com#key-signing"},
+		"authentication":  []any{"did:web:example.com#key-auth"},
+		"assertionMethod": []any{"did:web:example.com#key-signing"},
 	}
 
 	srv := testserver.New(testserver.WithDecisionFunc(func(req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
@@ -1171,7 +1170,7 @@ type DIDTestCase struct {
 	Name        string                 // Test case name/description
 	DID         string                 // The DID to resolve (e.g., "did:web:example.com")
 	Method      string                 // DID method (e.g., "web", "key")
-	DIDDocument map[string]interface{} // Expected DID document structure
+	DIDDocument map[string]any // Expected DID document structure
 	Keys        []DIDKeyTestCase       // Keys to test resolution for
 	ExpectError bool                   // Whether resolution should fail
 	ErrorMatch  string                 // Expected error substring (if ExpectError)
@@ -1182,20 +1181,20 @@ type DIDKeyTestCase struct {
 	KeyID        string                 // Verification method ID (e.g., "did:web:example.com#key-1")
 	KeyType      string                 // "Ed25519" or "ECDSA"
 	Curve        string                 // For ECDSA: "P-256", "P-384", "P-521"
-	PublicKeyJwk map[string]interface{} // JWK representation (for verification)
+	PublicKeyJwk map[string]any // JWK representation (for verification)
 	ExpectTrust  bool                   // Whether trust evaluation should succeed
 	Role         string                 // Role for trust evaluation
 }
 
 // createMockDIDDocument generates a DID document for testing.
 // This helper creates valid DID documents that match the W3C DID Core spec.
-func createMockDIDDocument(did string, keys []DIDKeyTestCase) map[string]interface{} {
-	verificationMethods := make([]interface{}, 0, len(keys))
-	authenticationRefs := make([]interface{}, 0)
-	assertionMethodRefs := make([]interface{}, 0)
+func createMockDIDDocument(did string, keys []DIDKeyTestCase) map[string]any {
+	verificationMethods := make([]any, 0, len(keys))
+	authenticationRefs := make([]any, 0)
+	assertionMethodRefs := make([]any, 0)
 
 	for _, key := range keys {
-		vm := map[string]interface{}{
+		vm := map[string]any{
 			"id":           key.KeyID,
 			"type":         "JsonWebKey2020",
 			"controller":   did,
@@ -1206,7 +1205,7 @@ func createMockDIDDocument(did string, keys []DIDKeyTestCase) map[string]interfa
 		assertionMethodRefs = append(assertionMethodRefs, key.KeyID)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"@context":           []string{"https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/jws-2020/v1"},
 		"id":                 did,
 		"verificationMethod": verificationMethods,
@@ -1258,7 +1257,7 @@ func TestDIDWeb_Resolution_BasicDomain(t *testing.T) {
 	}
 
 	// Test trust evaluation
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -1290,7 +1289,7 @@ func TestDIDWeb_Resolution_DomainWithPath(t *testing.T) {
 			return &authzen.EvaluationResponse{
 				Decision: false,
 				Context: &authzen.EvaluationResponseContext{
-					Reason: map[string]interface{}{
+					Reason: map[string]any{
 						"error": "unexpected subject ID: " + req.Subject.ID,
 					},
 				},
@@ -1396,7 +1395,7 @@ func TestDIDWeb_TrustEvaluation_TrustedIssuer(t *testing.T) {
 			return &authzen.EvaluationResponse{
 				Decision: true,
 				Context: &authzen.EvaluationResponseContext{
-					Reason: map[string]interface{}{
+					Reason: map[string]any{
 						"trusted_as": "issuer",
 						"registry":   "trusted-issuers",
 					},
@@ -1406,7 +1405,7 @@ func TestDIDWeb_TrustEvaluation_TrustedIssuer(t *testing.T) {
 		return &authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
-				Reason: map[string]interface{}{
+				Reason: map[string]any{
 					"error": "not in trusted issuers list",
 				},
 			},
@@ -1417,7 +1416,7 @@ func TestDIDWeb_TrustEvaluation_TrustedIssuer(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Trusted DID should be accepted
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -1426,7 +1425,7 @@ func TestDIDWeb_TrustEvaluation_TrustedIssuer(t *testing.T) {
 	}
 
 	// Untrusted DID should be rejected
-	trusted, err = resolver.EvaluateTrustEd25519(context.Background(), "did:web:untrusted.com", pubKey, "issuer")
+	trusted, err = resolver.EvaluateTrustEd25519(t.Context(), "did:web:untrusted.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -1472,7 +1471,7 @@ func TestDIDWeb_TrustEvaluation_RoleBased(t *testing.T) {
 		return &authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
-				Reason: map[string]interface{}{
+				Reason: map[string]any{
 					"error":          "role not allowed",
 					"requested_role": requestedRole,
 					"allowed_roles":  roles,
@@ -1485,18 +1484,18 @@ func TestDIDWeb_TrustEvaluation_RoleBased(t *testing.T) {
 	resolver := NewGoTrustResolver(srv.URL())
 
 	// Test allowed role
-	trusted, _ := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, _ := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if !trusted {
 		t.Error("expected 'issuer' role to be trusted")
 	}
 
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "verifier")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "verifier")
 	if !trusted {
 		t.Error("expected 'verifier' role to be trusted")
 	}
 
 	// Test disallowed role
-	trusted, _ = resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "admin")
+	trusted, _ = resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "admin")
 	if trusted {
 		t.Error("expected 'admin' role to be rejected")
 	}
@@ -1571,7 +1570,7 @@ func runDIDTestCase(t *testing.T, tc DIDTestCase) {
 
 	// Generate keys for the test case
 	keys := make([]DIDKeyTestCase, len(tc.Keys))
-	keyMap := make(map[string]interface{}) // keyID -> public key
+	keyMap := make(map[string]any) // keyID -> public key
 
 	for i, keyTC := range tc.Keys {
 		keys[i] = keyTC
@@ -1607,7 +1606,7 @@ func runDIDTestCase(t *testing.T, tc DIDTestCase) {
 			return &authzen.EvaluationResponse{
 				Decision: false,
 				Context: &authzen.EvaluationResponseContext{
-					Reason: map[string]interface{}{
+					Reason: map[string]any{
 						"error": tc.ErrorMatch,
 					},
 				},
@@ -1686,26 +1685,26 @@ func TestDIDWeb_PrepareForRealResolution(t *testing.T) {
 	keyID := did + "#key-1"
 
 	// Create a properly structured DID document
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{
+	didDoc := map[string]any{
+		"@context": []any{
 			"https://www.w3.org/ns/did/v1",
 			"https://w3id.org/security/suites/jws-2020/v1",
 		},
 		"id": did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":         keyID,
 				"type":       "JsonWebKey2020",
 				"controller": did,
-				"publicKeyJwk": map[string]interface{}{
+				"publicKeyJwk": map[string]any{
 					"kty": "OKP",
 					"crv": "Ed25519",
 					"x":   Ed25519ToJWK(pubKey)["x"],
 				},
 			},
 		},
-		"authentication":  []interface{}{keyID},
-		"assertionMethod": []interface{}{keyID},
+		"authentication":  []any{keyID},
+		"assertionMethod": []any{keyID},
 	}
 
 	// Verify structure matches W3C DID Core expectations
@@ -1713,12 +1712,12 @@ func TestDIDWeb_PrepareForRealResolution(t *testing.T) {
 		t.Error("DID document id mismatch")
 	}
 
-	vms, ok := didDoc["verificationMethod"].([]interface{})
+	vms, ok := didDoc["verificationMethod"].([]any)
 	if !ok || len(vms) == 0 {
 		t.Error("DID document must have verification methods")
 	}
 
-	vm := vms[0].(map[string]interface{})
+	vm := vms[0].(map[string]any)
 	if vm["id"] != keyID {
 		t.Error("verification method id mismatch")
 	}
@@ -1764,8 +1763,8 @@ type SingaporeTestVector struct {
 	ID           string                 `json:"id"`
 	Description  string                 `json:"description"`
 	DID          string                 `json:"did"`
-	DIDDocument  map[string]interface{} `json:"didDocument"`
-	Credentials  []interface{}          `json:"credentials,omitempty"`
+	DIDDocument  map[string]any `json:"didDocument"`
+	Credentials  []any          `json:"credentials,omitempty"`
 	ExpectValid  bool                   `json:"expectValid"`
 	ErrorMessage string                 `json:"errorMessage,omitempty"`
 }
@@ -1779,17 +1778,17 @@ func TestSingaporeTestVector_Framework(t *testing.T) {
 		ID:          "sg-test-001",
 		Description: "Basic did:web resolution with Ed25519 key",
 		DID:         "did:web:test.example.sg",
-		DIDDocument: map[string]interface{}{
-			"@context": []interface{}{
+		DIDDocument: map[string]any{
+			"@context": []any{
 				"https://www.w3.org/ns/did/v1",
 			},
 			"id": "did:web:test.example.sg",
-			"verificationMethod": []interface{}{
-				map[string]interface{}{
+			"verificationMethod": []any{
+				map[string]any{
 					"id":         "did:web:test.example.sg#key-1",
 					"type":       "JsonWebKey2020",
 					"controller": "did:web:test.example.sg",
-					"publicKeyJwk": map[string]interface{}{
+					"publicKeyJwk": map[string]any{
 						"kty": "OKP",
 						"crv": "Ed25519",
 						"x":   "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo", // Example base64url
@@ -1838,7 +1837,7 @@ func loadTestVectorsFromJSON(path string) ([]SingaporeTestVector, error) {
 }
 
 // validateDIDDocument checks if a DID document structure is valid.
-func validateDIDDocument(doc map[string]interface{}) error {
+func validateDIDDocument(doc map[string]any) error {
 	// Check required fields
 	if _, ok := doc["@context"]; !ok {
 		return errors.New("DID document missing @context")
@@ -1852,12 +1851,12 @@ func validateDIDDocument(doc map[string]interface{}) error {
 func TestValidateDIDDocument(t *testing.T) {
 	tests := []struct {
 		name    string
-		doc     map[string]interface{}
+		doc     map[string]any
 		wantErr bool
 	}{
 		{
 			name: "valid document",
-			doc: map[string]interface{}{
+			doc: map[string]any{
 				"@context": []string{"https://www.w3.org/ns/did/v1"},
 				"id":       "did:web:example.com",
 			},
@@ -1865,14 +1864,14 @@ func TestValidateDIDDocument(t *testing.T) {
 		},
 		{
 			name: "missing context",
-			doc: map[string]interface{}{
+			doc: map[string]any{
 				"id": "did:web:example.com",
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing id",
-			doc: map[string]interface{}{
+			doc: map[string]any{
 				"@context": []string{"https://www.w3.org/ns/did/v1"},
 			},
 			wantErr: true,
@@ -1904,13 +1903,13 @@ func TestValidateDIDDocument(t *testing.T) {
 // and provides the corresponding did:web DID for the server.
 type DIDWebTestServer struct {
 	HTTPServer   *httptest.Server
-	DIDDocuments map[string]map[string]interface{} // path -> DID document
+	DIDDocuments map[string]map[string]any // path -> DID document
 }
 
 // NewDIDWebTestServer creates a new test server for did:web resolution.
 func NewDIDWebTestServer() *DIDWebTestServer {
 	ts := &DIDWebTestServer{
-		DIDDocuments: make(map[string]map[string]interface{}),
+		DIDDocuments: make(map[string]map[string]any),
 	}
 
 	ts.HTTPServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1952,7 +1951,7 @@ func (ts *DIDWebTestServer) DIDWithPath(pathParts ...string) string {
 }
 
 // AddDIDDocument adds a DID document to be served at the root /.well-known/did.json
-func (ts *DIDWebTestServer) AddDIDDocument(did string, doc map[string]interface{}) {
+func (ts *DIDWebTestServer) AddDIDDocument(did string, doc map[string]any) {
 	// Ensure the document has the correct ID
 	doc["id"] = did
 	ts.DIDDocuments["/.well-known/did.json"] = doc
@@ -1960,7 +1959,7 @@ func (ts *DIDWebTestServer) AddDIDDocument(did string, doc map[string]interface{
 
 // AddDIDDocumentWithPath adds a DID document at a specific path.
 // The path should be like "/users/alice/did.json"
-func (ts *DIDWebTestServer) AddDIDDocumentWithPath(path string, did string, doc map[string]interface{}) {
+func (ts *DIDWebTestServer) AddDIDDocumentWithPath(path string, did string, doc map[string]any) {
 	doc["id"] = did
 	ts.DIDDocuments[path] = doc
 }
@@ -1997,22 +1996,22 @@ func TestRealDIDWeb_Resolution_BasicDomain(t *testing.T) {
 	keyID := did + "#key-1"
 
 	// Create and add DID document
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{
+	didDoc := map[string]any{
+		"@context": []any{
 			"https://www.w3.org/ns/did/v1",
 			"https://w3id.org/security/suites/jws-2020/v1",
 		},
 		"id": did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           keyID,
 				"type":         "JsonWebKey2020",
 				"controller":   did,
 				"publicKeyJwk": Ed25519ToJWK(pubKey),
 			},
 		},
-		"authentication":  []interface{}{keyID},
-		"assertionMethod": []interface{}{keyID},
+		"authentication":  []any{keyID},
+		"assertionMethod": []any{keyID},
 	}
 	ts.AddDIDDocument(did, didDoc)
 
@@ -2049,13 +2048,13 @@ func TestRealDIDWeb_Resolution_WithPath(t *testing.T) {
 	did := ts.DIDWithPath("users", "alice")
 	keyID := did + "#signing-key"
 
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{
+	didDoc := map[string]any{
+		"@context": []any{
 			"https://www.w3.org/ns/did/v1",
 		},
 		"id": did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           keyID,
 				"type":         "JsonWebKey2020",
 				"controller":   did,
@@ -2098,27 +2097,27 @@ func TestRealDIDWeb_Resolution_MultipleKeys(t *testing.T) {
 	authKeyID := did + "#auth-key"
 	signingKeyID := did + "#signing-key"
 
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{
+	didDoc := map[string]any{
+		"@context": []any{
 			"https://www.w3.org/ns/did/v1",
 		},
 		"id": did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           authKeyID,
 				"type":         "JsonWebKey2020",
 				"controller":   did,
 				"publicKeyJwk": Ed25519ToJWK(ed25519Key),
 			},
-			map[string]interface{}{
+			map[string]any{
 				"id":           signingKeyID,
 				"type":         "JsonWebKey2020",
 				"controller":   did,
 				"publicKeyJwk": ecdsaJWK,
 			},
 		},
-		"authentication":  []interface{}{authKeyID},
-		"assertionMethod": []interface{}{signingKeyID},
+		"authentication":  []any{authKeyID},
+		"assertionMethod": []any{signingKeyID},
 	}
 	ts.AddDIDDocument(did, didDoc)
 
@@ -2155,11 +2154,11 @@ func TestRealDIDWeb_TrustEvaluation(t *testing.T) {
 	did := ts.DID()
 	keyID := did + "#key-1"
 
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{"https://www.w3.org/ns/did/v1"},
+	didDoc := map[string]any{
+		"@context": []any{"https://www.w3.org/ns/did/v1"},
 		"id":       did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           keyID,
 				"type":         "JsonWebKey2020",
 				"controller":   did,
@@ -2177,7 +2176,7 @@ func TestRealDIDWeb_TrustEvaluation(t *testing.T) {
 
 	// The did:web registry validates that the key is in the DID document
 	// This is the "trust" aspect - if the key matches, it's trusted
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), did, pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), did, pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -2213,11 +2212,11 @@ func TestRealDIDWeb_Resolution_KeyNotInDocument(t *testing.T) {
 	did := ts.DID()
 
 	// Create DID document with key-1
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{"https://www.w3.org/ns/did/v1"},
+	didDoc := map[string]any{
+		"@context": []any{"https://www.w3.org/ns/did/v1"},
 		"id":       did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           did + "#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   did,
@@ -2260,22 +2259,22 @@ func TestRealDIDWeb_Integration_CredentialVerificationFlow(t *testing.T) {
 	issuerDID := ts.DID()
 	issuerKeyID := issuerDID + "#signing-key"
 
-	issuerDIDDoc := map[string]interface{}{
-		"@context": []interface{}{
+	issuerDIDDoc := map[string]any{
+		"@context": []any{
 			"https://www.w3.org/ns/did/v1",
 			"https://w3id.org/security/suites/jws-2020/v1",
 		},
 		"id": issuerDID,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           issuerKeyID,
 				"type":         "JsonWebKey2020",
 				"controller":   issuerDID,
 				"publicKeyJwk": Ed25519ToJWK(issuerKey),
 			},
 		},
-		"authentication":  []interface{}{issuerKeyID},
-		"assertionMethod": []interface{}{issuerKeyID},
+		"authentication":  []any{issuerKeyID},
+		"assertionMethod": []any{issuerKeyID},
 	}
 	ts.AddDIDDocument(issuerDID, issuerDIDDoc)
 
@@ -2304,7 +2303,7 @@ func TestRealDIDWeb_Integration_CredentialVerificationFlow(t *testing.T) {
 
 	// Step 4: Validate trust in the issuer (the did:web registry does this
 	// by verifying the key is in the DID document at the expected domain)
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), issuerDID, issuerKey, "assertionMethod")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), issuerDID, issuerKey, "assertionMethod")
 	if err != nil {
 		t.Fatalf("Trust evaluation failed: %v", err)
 	}
@@ -2336,16 +2335,16 @@ func RunSingaporeTestVectorWithRealResolution(t *testing.T, tv SingaporeTestVect
 	testKeyID := testDID + "#key-1"
 
 	// Copy the DID document structure but update IDs
-	adaptedDoc := make(map[string]interface{})
+	adaptedDoc := make(map[string]any)
 	for k, v := range tv.DIDDocument {
 		adaptedDoc[k] = v
 	}
 	adaptedDoc["id"] = testDID
 
 	// Update verification method IDs
-	if vms, ok := adaptedDoc["verificationMethod"].([]interface{}); ok {
+	if vms, ok := adaptedDoc["verificationMethod"].([]any); ok {
 		for i, vm := range vms {
-			if vmMap, ok := vm.(map[string]interface{}); ok {
+			if vmMap, ok := vm.(map[string]any); ok {
 				// Update the key ID to use our test server's DID
 				if _, hasID := vmMap["id"]; hasID {
 					vmMap["id"] = testKeyID
@@ -2388,17 +2387,17 @@ func TestRealDIDWeb_SingaporeTestVector_Adapted(t *testing.T) {
 		ID:          "sg-adapted-001",
 		Description: "Singapore test vector with real did:web resolution",
 		DID:         "did:web:test.example.sg", // Will be adapted to test server
-		DIDDocument: map[string]interface{}{
-			"@context": []interface{}{
+		DIDDocument: map[string]any{
+			"@context": []any{
 				"https://www.w3.org/ns/did/v1",
 			},
 			"id": "did:web:test.example.sg",
-			"verificationMethod": []interface{}{
-				map[string]interface{}{
+			"verificationMethod": []any{
+				map[string]any{
 					"id":         "did:web:test.example.sg#key-1",
 					"type":       "JsonWebKey2020",
 					"controller": "did:web:test.example.sg",
-					"publicKeyJwk": map[string]interface{}{
+					"publicKeyJwk": map[string]any{
 						"kty": "OKP",
 						"crv": "Ed25519",
 						"x":   "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
@@ -2424,11 +2423,11 @@ func BenchmarkRealDIDWeb_Resolution(b *testing.B) {
 	did := ts.DID()
 	keyID := did + "#key-1"
 
-	didDoc := map[string]interface{}{
-		"@context": []interface{}{"https://www.w3.org/ns/did/v1"},
+	didDoc := map[string]any{
+		"@context": []any{"https://www.w3.org/ns/did/v1"},
 		"id":       did,
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           keyID,
 				"type":         "JsonWebKey2020",
 				"controller":   did,

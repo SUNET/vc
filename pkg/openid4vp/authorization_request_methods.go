@@ -1,8 +1,11 @@
 package openid4vp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"vc/pkg/jose"
+	"vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -35,27 +38,24 @@ type PresentationDefinitionParameter struct {
 
 // Sign creates a signed JWT representation of the RequestObject according to OpenID4VP specification.
 // The JWT typ header is set to "oauth-authz-req+jwt" as required by OpenID4VP Section 5.2.
+// Uses pki.Signer interface which supports both software keys and HSM.
 //
 // Parameters:
-//   - signingMethod: The JWT signing algorithm (e.g., RS256, ES256)
-//   - signingKey: The private key used for signing
+//   - ctx: Context for signing operations
+//   - signer: The pki.Signer for signing (supports both software and HSM keys)
 //   - x5c: Optional X.509 certificate chain for key verification
 //
 // Returns the signed JWT string or an error if signing fails.
-func (r *RequestObject) Sign(signingMethod jwt.SigningMethod, signingKey any, x5c []string) (string, error) {
+func (r *RequestObject) Sign(ctx context.Context, signer pki.Signer, x5c []string) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("request object cannot be nil")
 	}
-	if signingMethod == nil {
-		return "", fmt.Errorf("signing method cannot be nil")
-	}
-	if signingKey == nil {
-		return "", fmt.Errorf("signing key cannot be nil")
+	if signer == nil {
+		return "", fmt.Errorf("signer cannot be nil")
 	}
 
 	// Build JWT header with required typ claim per OpenID4VP Section 5.2
-	header := map[string]any{
-		"alg": signingMethod.Alg(),
+	header := jwt.MapClaims{
 		"typ": "oauth-authz-req+jwt",
 	}
 
@@ -75,13 +75,10 @@ func (r *RequestObject) Sign(signingMethod jwt.SigningMethod, signingKey any, x5
 		return "", fmt.Errorf("failed to create JWT claims: %w", err)
 	}
 
-	// Create and sign the JWT
-	token := jwt.NewWithClaims(signingMethod, claims)
-	token.Header = header
-
-	signedJWT, err := token.SignedString(signingKey)
+	// Sign using jose.MakeJWT which handles pki.Signer
+	signedJWT, err := jose.MakeJWT(ctx, header, claims, signer)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign JWT: %w", err)
+		return "", err
 	}
 
 	return signedJWT, nil

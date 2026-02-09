@@ -15,7 +15,7 @@ func createTestVPToken(t *testing.T, nonce, aud string, includeBinding bool) str
 	t.Helper()
 
 	// Create a simple JWT header
-	header := map[string]interface{}{
+	header := map[string]any{
 		"alg": "ES256",
 		"typ": "vc+sd-jwt",
 	}
@@ -23,13 +23,13 @@ func createTestVPToken(t *testing.T, nonce, aud string, includeBinding bool) str
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
 
 	// Create JWT payload with claims
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"iss": "https://issuer.example.com",
 		"iat": 1234567890,
 		"exp": 9999999999,
 		"vct": "https://example.com/TestCredential",
-		"cnf": map[string]interface{}{
-			"jwk": map[string]interface{}{
+		"cnf": map[string]any{
+			"jwk": map[string]any{
 				"kty": "EC",
 				"crv": "P-256",
 				"x":   "test",
@@ -48,14 +48,14 @@ func createTestVPToken(t *testing.T, nonce, aud string, includeBinding bool) str
 
 	// Add key binding JWT if requested
 	if includeBinding {
-		kbHeader := map[string]interface{}{
+		kbHeader := map[string]any{
 			"alg": "ES256",
 			"typ": "kb+jwt",
 		}
 		kbHeaderJSON, _ := json.Marshal(kbHeader)
 		kbHeaderB64 := base64.RawURLEncoding.EncodeToString(kbHeaderJSON)
 
-		kbPayload := map[string]interface{}{
+		kbPayload := map[string]any{
 			"nonce": nonce,
 			"aud":   aud,
 			"iat":   1234567890,
@@ -285,14 +285,14 @@ func TestVPTokenValidator_Validate_WithDCQLQuery(t *testing.T) {
 
 func TestParseKeyBindingJWT_Valid(t *testing.T) {
 	// Create a valid KB-JWT
-	header := map[string]interface{}{
+	header := map[string]any{
 		"alg": "ES256",
 		"typ": "kb+jwt",
 	}
 	headerJSON, _ := json.Marshal(header)
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"nonce": "test-nonce",
 		"aud":   "https://verifier.example.com",
 		"iat":   1234567890,
@@ -389,7 +389,7 @@ func TestVPTokenValidator_ValidatePresentation(t *testing.T) {
 		payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
 		require.NoError(t, err)
 
-		var claims map[string]interface{}
+		var claims map[string]any
 		err = json.Unmarshal(payloadBytes, &claims)
 		require.NoError(t, err)
 

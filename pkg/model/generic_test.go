@@ -320,7 +320,7 @@ func TestIdentity_Marshal_WithNationality(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Verify nationality array
-	nationality, ok := result["nationality"].([]interface{})
+	nationality, ok := result["nationality"].([]any)
 	require.True(t, ok)
 	require.Len(t, nationality, 2)
 	assert.Equal(t, "SE", nationality[0])

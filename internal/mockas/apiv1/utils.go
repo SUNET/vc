@@ -5,22 +5,10 @@ import (
 	"time"
 	"vc/pkg/helpers"
 	"vc/pkg/model"
+	"vc/pkg/vcclient"
 
 	"github.com/brianvoe/gofakeit/v6"
 )
-
-// MockInputData is the input data for the mock function
-type MockInputData struct {
-	VCT                     string `json:"vct"`
-	DocumentID              string `json:"document_id"`
-	AuthenticSource         string `json:"authentic_source"`
-	AuthenticSourcePersonID string `json:"authentic_source_person_id"`
-	GivenName               string `json:"given_name"`
-	FamilyName              string `json:"family_name"`
-	BirthDate               string `json:"birth_date"`
-	CollectID               string `json:"collect_id"`
-	IdentitySchemaName      string `json:"identity_schema_name"`
-}
 
 type person struct {
 	sa        *gofakeit.PersonInfo
@@ -40,7 +28,7 @@ type uploadMock struct {
 	DocumentDataVersion string                 `json:"document_data_version,omitempty" validate:"required,semver"`
 }
 
-func (c *Client) mockOne(ctx context.Context, data MockInputData) (*uploadMock, error) {
+func (c *Client) mockOne(ctx context.Context, data *vcclient.MockNextRequest) (*uploadMock, error) {
 	c.log.Debug("mockOne")
 	person := &person{}
 	person.new()

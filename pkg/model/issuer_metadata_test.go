@@ -4,30 +4,25 @@ import (
 	"context"
 	"testing"
 	"vc/pkg/openid4vci"
-	"vc/pkg/pki"
 	"vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestIssuerMetadataLoadAndSign_CustomFormat(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_CustomFormat(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "dc+sd-jwt", // Custom format
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
 	assert.Equal(t, "https://issuer.example.com", metadata.CredentialIssuer)
@@ -38,18 +33,13 @@ func TestIssuerMetadataLoadAndSign_CustomFormat(t *testing.T) {
 	assert.Equal(t, "urn:test:1", credConfig.VCT)
 }
 
-func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
-	cfg := &IssuerMetadata{
-	}
+func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
+	cfg := &IssuerMetadata{}
 
 	// Test that display must come from VCTM, not from constructor
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "vc+sd-jwt",
 			AuthMethod: "basic",
 			// Display comes from VCTM, not from constructor
@@ -57,8 +47,7 @@ func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
 
@@ -68,13 +57,8 @@ func TestIssuerMetadataLoadAndSign_CustomDisplay(t *testing.T) {
 	require.Len(t, credConfig.Display, 0)
 }
 
-func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
-	cfg := &IssuerMetadata{
-	}
+func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
+	cfg := &IssuerMetadata{}
 
 	// Mock VCTM with display
 	mockVCTM := &sdjwtvc.VCTM{
@@ -92,15 +76,13 @@ func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
 			AuthMethod: "basic",
 			VCTM:       mockVCTM,
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
 
@@ -113,52 +95,40 @@ func TestIssuerMetadataLoadAndSign_VCTMDisplay(t *testing.T) {
 	assert.Equal(t, "VCTM Description", credConfig.Display[0].Description)
 }
 
-func TestIssuerMetadataLoadAndSign_CustomCryptoBindingMethods(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		CryptographicBindingMethodsSupported: []string{"jwk", "did:key"},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 	assert.Equal(t, []string{"jwk", "did:key"}, credConfig.CryptographicBindingMethodsSupported)
 }
 
-func TestIssuerMetadataLoadAndSign_CustomSigningAlgorithms(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_CustomSigningAlgorithms(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		CredentialSigningAlgValuesSupported: []string{"ES256", "ES512"},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -167,26 +137,20 @@ func TestIssuerMetadataLoadAndSign_CustomSigningAlgorithms(t *testing.T) {
 	assert.Equal(t, "ES512", credConfig.CredentialSigningAlgValuesSupported[1])
 }
 
-func TestIssuerMetadataLoadAndSign_CustomProofAlgorithms(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		ProofSigningAlgValuesSupported: []string{"ES256", "RS256"},
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -194,13 +158,8 @@ func TestIssuerMetadataLoadAndSign_CustomProofAlgorithms(t *testing.T) {
 	assert.Equal(t, []string{"ES256", "RS256"}, jwtProof.ProofSigningAlgValuesSupported)
 }
 
-func TestIssuerMetadataLoadAndSign_OptionalEndpoints(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		AuthorizationServers:       []string{"https://oauth.example.com"},
 		DeferredCredentialEndpoint: "https://issuer.example.com/deferred",
 		NotificationEndpoint:       "https://issuer.example.com/notification",
@@ -208,27 +167,21 @@ func TestIssuerMetadataLoadAndSign_OptionalEndpoints(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://oauth.example.com"}, metadata.AuthorizationServers)
 	assert.Equal(t, "https://issuer.example.com/deferred", metadata.DeferredCredentialEndpoint)
 	assert.Equal(t, "https://issuer.example.com/notification", metadata.NotificationEndpoint)
 }
 
-func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		CredentialResponseEncryption: &openid4vci.MetadataCredentialResponseEncryption{
 			AlgValuesSupported: []string{"ECDH-ES", "ECDH-ES+A128KW"},
 			EncValuesSupported: []string{"A256GCM", "A128GCM"},
@@ -238,14 +191,13 @@ func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	require.NotNil(t, metadata.CredentialResponseEncryption)
 	assert.Equal(t, []string{"ECDH-ES", "ECDH-ES+A128KW"}, metadata.CredentialResponseEncryption.AlgValuesSupported)
@@ -253,13 +205,8 @@ func TestIssuerMetadataLoadAndSign_CredentialResponseEncryption(t *testing.T) {
 	assert.True(t, metadata.CredentialResponseEncryption.EncryptionRequired)
 }
 
-func TestIssuerMetadataLoadAndSign_BatchCredentialIssuance(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_BatchCredentialIssuance(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		BatchCredentialIssuance: &openid4vci.BatchCredentialIssuance{
 			BatchSize: 10,
 		},
@@ -267,26 +214,20 @@ func TestIssuerMetadataLoadAndSign_BatchCredentialIssuance(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	require.NotNil(t, metadata.BatchCredentialIssuance)
 	assert.Equal(t, 10, metadata.BatchCredentialIssuance.BatchSize)
 }
 
-func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		Display: []openid4vci.MetadataDisplay{
 			{
 				Name:   "Example Issuer",
@@ -301,14 +242,13 @@ func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	require.Len(t, metadata.Display, 1)
 	assert.Equal(t, "Example Issuer", metadata.Display[0].Name)
@@ -316,25 +256,19 @@ func TestIssuerMetadataLoadAndSign_IssuerDisplay(t *testing.T) {
 	assert.Equal(t, "https://example.com/logo.png", metadata.Display[0].Logo.URI)
 }
 
-func TestIssuerMetadataLoadAndSign_NilConstructor(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
-	cfg := &IssuerMetadata{
-	}
+func TestIssuerMetadata_Generate_NilConstructor(t *testing.T) {
+	cfg := &IssuerMetadata{}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": nil, // Nil constructor should be skipped
 		"test_cred2": {
-			VCT:        "urn:test:2",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:2"},
 			AuthMethod: "basic",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 
 	// Should only have test_cred2
@@ -345,34 +279,23 @@ func TestIssuerMetadataLoadAndSign_NilConstructor(t *testing.T) {
 	assert.True(t, exists2, "Valid constructor should be included")
 }
 
-func TestIssuerMetadataLoadAndSign_EmptyConstructors(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
-	cfg := &IssuerMetadata{
-	}
+func TestIssuerMetadata_Generate_EmptyConstructors(t *testing.T) {
+	cfg := &IssuerMetadata{}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, map[string]*CredentialConstructor{})
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", map[string]*CredentialConstructor{})
 	require.NoError(t, err)
 	assert.Empty(t, metadata.CredentialConfigurationsSupported)
 }
 
-func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
+func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 	cfg := &IssuerMetadata{
-
 		// All optional fields omitted to test defaults
 	}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCT:        "urn:test:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "vc+sd-jwt",
 			AuthMethod: "basic",
 			// No custom crypto methods, etc. - testing defaults
@@ -380,8 +303,7 @@ func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -398,35 +320,29 @@ func TestIssuerMetadataLoadAndSign_DefaultValues(t *testing.T) {
 	assert.Equal(t, []string{"VerifiableCredential"}, credConfig.CredentialDefinition.Type)
 }
 
-func TestIssuerMetadataLoadAndSign_MultipleCredentials(t *testing.T) {
-	_, _, ecKeyPath, ecCertPath := setupTestPKI(t)
-
-	keyConfig := &pki.KeyConfig{PrivateKeyPath: ecKeyPath, ChainPath: ecCertPath}
-
-	cfg := &IssuerMetadata{
-	}
+func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
+	cfg := &IssuerMetadata{}
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"pid": {
-			VCT:        "urn:eudi:pid:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 			AuthMethod: "basic",
 			Format:     "dc+sd-jwt",
 		},
 		"ehic": {
-			VCT:        "urn:eudi:ehic:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 			AuthMethod: "pid_auth",
 			Format:     "vc+sd-jwt",
 		},
 		"diploma": {
-			VCT:        "urn:eudi:diploma:1",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
 			AuthMethod: "basic",
 			Format:     "vc+sd-jwt",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, _, _, _, err := cfg.LoadAndSign(ctx, "https://issuer.example.com", keyConfig, credentialConstructors)
-
+	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
 	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)
 

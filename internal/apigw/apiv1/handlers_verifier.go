@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"vc/internal/apigw/db"
-	"vc/pkg/jose"
+	"vc/pkg/cache"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 
@@ -19,32 +20,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
-var vpFormats = []byte(
-	`{
-      "vc+sd-jwt": {
-        "sd-jwt_alg_values": [
-          "ES256"
-        ],
-        "kb-jwt_alg_values": [
-          "ES256"
-        ]
-      },
-      "dc+sd-jwt": {
-        "sd-jwt_alg_values": [
-          "ES256"
-        ],
-        "kb-jwt_alg_values": [
-          "ES256"
-        ]
-      },
-      "mso_mdoc": {
-        "alg": [
-          "ES256"
-        ]
-      }
-    }
-`)
-
 type VerificationRequestObjectRequest struct {
 	ID string `form:"id" uri:"id"`
 }
@@ -52,7 +27,7 @@ type VerificationRequestObjectRequest struct {
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
 	c.log.Debug("Verification request object", "req", req)
 
-	authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{
+	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
 		VerifierResponseCode: req.ID,
 	})
 	if err != nil {
@@ -60,54 +35,75 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
+	// Get credential constructor to determine auth method
+	credentialConstructor := c.cfg.GetCredentialConstructor(authorizationContext.Scopes[0])
+	if credentialConstructor == nil {
+		c.log.Error(nil, "credential constructor not found for scope", "scope", authorizationContext.Scopes[0])
+		return "", errors.New("credential constructor not found for scope: " + authorizationContext.Scopes[0])
+	}
+
+	// Get auth method configuration (guaranteed to exist by config validation)
+	authMethod := c.cfg.AuthMethods[credentialConstructor.AuthMethod]
+
+	// Get format from credential constructor based on VCT
+	// All VCTs in the same auth method should have the same format (validated at config load)
+	format := ""
+	if len(authMethod.VCTs) > 0 {
+		format = c.cfg.GetFormatForVCT(authMethod.VCTs[0])
+	}
+	if format == "" {
+		// Fallback to the format of the credential being issued
+		format = credentialConstructor.Format
+	}
+
+	// Build DCQL claims from auth method configuration
+	claimQueries := make([]openid4vp.ClaimQuery, 0, len(authMethod.Claims))
+	for _, claim := range authMethod.Claims {
+		claimQueries = append(claimQueries, openid4vp.ClaimQuery{
+			Path: []string{claim},
+		})
+	}
+
 	dcql := &openid4vp.DCQL{
 		Credentials: []openid4vp.CredentialQuery{
 			{
-				ID:       authorizationContext.Scope[0],
-				Format:   "dc+sd-jwt",
+				ID:       authorizationContext.Scopes[0],
+				Format:   format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
-					VCTValues: []string{model.CredentialTypeUrnEudiPidARF151, model.CredentialTypeUrnEudiPidARG181},
+					VCTValues: authMethod.VCTs,
 				},
 				TrustedAuthorities:                []openid4vp.TrustedAuthority{},
 				RequireCryptographicHolderBinding: false,
-				Claims: []openid4vp.ClaimQuery{
-					{
-						Path: []string{"given_name"},
-					},
-					{
-						Path: []string{"birthdate"},
-					},
-					{
-						Path: []string{"family_name"},
-					},
-				},
-				ClaimSet: []string{},
+				Claims:                            claimQueries,
+				ClaimSet:                          []string{},
 			},
 		},
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
 				Options: [][]string{
-					{authorizationContext.Scope[0]},
+					{authorizationContext.Scopes[0]},
 				},
 				Required: false,
-				Purpose:  "fetch credential for " + authorizationContext.Scope[0],
+				Purpose:  "fetch credential for " + authorizationContext.Scopes[0],
 			},
 		},
 	}
 
-	vf := map[string]map[string][]string{}
-	if err := json.Unmarshal(vpFormats, &vf); err != nil {
-		return "", err
-	}
+	// Derive VP formats from issuer metadata
+	vf := deriveVPFormatsFromMetadata(c.issuerMetadata)
 
 	_, ephemeralPublicJWK, err := c.EphemeralEncryptionKey(authorizationContext.EphemeralEncryptionKeyID)
 	if err != nil {
 		return "", err
 	}
 
+	responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
+	if err != nil {
+		return "", fmt.Errorf("failed to construct response URI: %w", err)
+	}
 	authorizationRequest := openid4vp.RequestObject{
-		ResponseURI:  c.cfg.APIGW.ExternalServerURL + "/verification/direct_post",
+		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
 		ISS:          authorizationContext.ClientID,
 		ClientID:     authorizationContext.ClientID,
@@ -117,7 +113,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		Nonce:        authorizationContext.Nonce,
 		DCQLQuery:    dcql,
 		ClientMetadata: &openid4vp.ClientMetadata{
-			VPFormats: vf,
+			VPFormatsSupported: vf,
 			JWKS: &openid4vp.Keys{
 				Keys: []jwk.Key{ephemeralPublicJWK},
 			},
@@ -129,8 +125,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 	c.log.Debug("Authorization request", "request", authorizationRequest)
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.issuerMetadataSigningKey)
-	signedJWT, err := authorizationRequest.Sign(signingMethod, c.issuerMetadataSigningKey, c.issuerMetadataSigningChain)
+	signedJWT, err := authorizationRequest.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err
@@ -209,19 +204,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Get authorization context
-	authCtx, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{EphemeralEncryptionKeyID: kid})
+	authCtx, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{EphemeralEncryptionKeyID: kid})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
 	}
 
-	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scope)
+	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
 
 	// Extract VP Token from the map using the scope as key
-	vpToken, ok := vpResponse.VPToken[authCtx.Scope[0]]
+	vpToken, ok := vpResponse.VPToken[authCtx.Scopes[0]]
 	if !ok {
-		c.log.Error(nil, "VP Token not found for scope", "scope", authCtx.Scope[0], "available_keys", vpResponse.VPToken)
-		return nil, fmt.Errorf("VP Token not found for scope: %s", authCtx.Scope[0])
+		c.log.Error(nil, "VP Token not found for scope", "scope", authCtx.Scopes[0], "available_keys", vpResponse.VPToken)
+		return nil, fmt.Errorf("VP Token not found for scope: %s", authCtx.Scopes[0])
 	}
 
 	// Prepare response parameters
@@ -263,13 +258,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Get credential constructor configuration using GetCredentialConstructor
 	// This looks up by VCT (primary key) or CommonName (for backward compatibility)
-	credentialConstructorCfg := c.cfg.GetCredentialConstructor(authCtx.Scope[0])
+	credentialConstructorCfg := c.cfg.GetCredentialConstructor(authCtx.Scopes[0])
 	if credentialConstructorCfg == nil {
-		c.log.Error(nil, "credential constructor not found for scope", "scope", authCtx.Scope[0])
-		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scope[0])
+		c.log.Error(nil, "credential constructor not found for scope", "scope", authCtx.Scopes[0])
+		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scopes[0])
 	}
 
-	c.log.Debug("Found credential constructor", "scope", authCtx.Scope, "vct", credentialConstructorCfg.VCT)
+	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.GetVCT())
 
 	// Extract identity from validated credential
 	identity := &model.Identity{}
@@ -285,10 +280,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Retrieve documents matching the identity
 	// Use authorizationContext.VCT which should be set to the VCT value
-	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.VCT, "identity", identity)
+	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.GetVCT(), "identity", identity)
 	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
 		Meta: &model.MetaData{
-			VCT: credentialConstructorCfg.VCT,
+			VCT: credentialConstructorCfg.GetVCT(),
 		},
 		Identity: identity,
 	})
@@ -309,8 +304,22 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 
+	callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
+	if err != nil {
+		c.log.Error(nil, "Failed to construct callback URL", "error", err)
+		return nil, errors.New("failed to construct callback URL")
+	}
+	u, err := url.Parse(callbackURL)
+	if err != nil {
+		c.log.Error(nil, "Failed to parse callback URL", "error", err)
+		return nil, errors.New("failed to parse callback URL")
+	}
+	q := u.Query()
+	q.Set("response_code", authCtx.VerifierResponseCode)
+	u.RawQuery = q.Encode()
+
 	reply := &VerificationDirectPostResponse{
-		RedirectURI: c.cfg.APIGW.ExternalServerURL + "/authorization/consent/callback/?response_code=" + authCtx.VerifierResponseCode,
+		RedirectURI: u.String(),
 	}
 	return reply, nil
 }

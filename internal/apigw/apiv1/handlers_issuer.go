@@ -5,27 +5,32 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
 	"vc/internal/gen/registry/apiv1_registry"
+	"vc/pkg/crypto"
 	"vc/pkg/helpers"
-	"vc/pkg/jose"
 	"vc/pkg/mdoc"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
+
+	"github.com/jellydator/ttlcache/v3"
 )
 
-// OIDCCredentialOffer https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-offer-endpoint
-func (c *Client) OIDCCredentialOffer(ctx context.Context, req *openid4vci.CredentialOfferParameters) (*openid4vci.CredentialOfferParameters, error) {
+// VCICredentialOffer implements OpenID4VCI credential offer endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-offer-endpoint
+func (c *Client) VCICredentialOffer(ctx context.Context, req *openid4vci.CredentialOfferParameters) (*openid4vci.CredentialOfferParameters, error) {
 	c.log.Debug("credential offer")
 	return nil, nil
 }
 
-// OIDCNonce https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
-func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, error) {
-	nonce, err := openid4vci.GenerateNonce(0)
+// VCINonce implements OpenID4VCI nonce endpoint for DPoP proof freshness
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
+func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error) {
+	nonce, err := crypto.GenerateSecureToken(0, 43)
 	if err != nil {
 		return nil, err
 	}
@@ -35,9 +40,9 @@ func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, erro
 	return response, nil
 }
 
-// OIDCCredential makes a credential
+// VCICredential implements OpenID4VCI credential issuance endpoint
 //
-//	@Summary		OIDCCredential
+//	@Summary		VCICredential
 //	@ID				create-credential
 //	@Description	Create credential endpoint
 //	@Tags			dc4eu
@@ -47,37 +52,84 @@ func (c *Client) OIDCNonce(ctx context.Context) (*openid4vci.NonceResponse, erro
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
-func (c *Client) OIDCCredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+	jti, err := oauth2.ExtractJTI(req.DPoP)
+	if err != nil {
+		c.log.Error(err, "failed to extract JTI from DPoP")
+		return nil, err
+	}
+
+	if c.dpopJTICache.Has(jti) {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
+		return nil, oauth2.ErrJTIReplay
+	}
+
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPoP)
 	if err != nil {
 		c.log.Error(err, "failed to validate DPoP JWT")
 		return nil, err
 	}
 
-	requestATH := req.HashAuthorizeToken()
+	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
 
-	if !dpop.IsAccessTokenDPoP(requestATH) {
+	// Validate HTU matches credential endpoint
+	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
+		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.issuerMetadata.CredentialEndpoint, dpop.HTU)
+	}
+
+	// Validate HTM is POST (credential endpoint only accepts POST)
+	if dpop.HTM != "POST" {
+		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
+	}
+
+	if !dpop.IsAccessTokenDPoP(req.HashAuthorizeToken()) {
 		return nil, errors.New("invalid DPoP token")
 	}
 
 	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
 
-	authContext, err := c.authContextStore.GetWithAccessToken(ctx, accessToken)
+	authContext, err := c.authContextCache.GetWithAccessToken(ctx, accessToken)
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
 		return nil, err
 	}
 
-	if len(authContext.Scope) == 0 {
+	if len(authContext.Scopes) == 0 {
 		c.log.Error(nil, "no scope found in auth context")
 		return nil, errors.New("no scope found in auth context")
 	}
 
 	document := &model.CompleteDocument{}
 
-	// TODO(masv): make this flexible, use config.yaml credential constructor
-	switch authContext.Scope[0] {
-	case "ehic", "pda1", "diploma":
+	// Retrieve document based on scope configuration from credential constructor
+	scope := authContext.Scopes[0]
+	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
+	if credentialConstructor == nil {
+		c.log.Error(nil, "unsupported scope", "scope", scope)
+		return nil, errors.New("unsupported scope: " + scope)
+	}
+
+	// Determine retrieval strategy based on auth method
+	// - "basic": Identity-based authentication → retrieve from datastore
+	// - Other methods defined in auth_methods (e.g., "pid_auth"): Session-based → retrieve from cache
+	authMethod := credentialConstructor.AuthMethod
+	switch authMethod {
+	case model.AuthMethodBasic:
+		// Basic auth: retrieve from datastore using identity
+		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
+			Meta: &model.MetaData{
+				AuthenticSource: authContext.AuthenticSource,
+				VCT:             credentialConstructor.GetVCT(),
+			},
+			Identity: authContext.Identity,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+	default:
+		// Auth methods from config (e.g., pid_auth): retrieve from session cache
+		// These credentials require presenting another credential for authentication
 		docs := c.documentCache.Get(authContext.SessionID).Value()
 		if docs == nil {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
@@ -87,34 +139,6 @@ func (c *Client) OIDCCredential(ctx context.Context, req *openid4vci.CredentialR
 			document = doc
 			break
 		}
-
-	case "pid_1_5":
-		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-			Meta: &model.MetaData{
-				AuthenticSource: authContext.AuthenticSource,
-				VCT:             model.CredentialTypeUrnEudiPidARF151,
-			},
-			Identity: authContext.Identity,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-	case "pid_1_8":
-		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-			Meta: &model.MetaData{
-				AuthenticSource: authContext.AuthenticSource,
-				VCT:             model.CredentialTypeUrnEudiPidARG181,
-			},
-			Identity: authContext.Identity,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-	default:
-		c.log.Error(nil, "unsupported scope", "scope", authContext.Scope)
-		return nil, errors.New("unsupported scope")
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)
@@ -141,7 +165,7 @@ func (c *Client) OIDCCredential(ctx context.Context, req *openid4vci.CredentialR
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := c.resolveCredentialFormat(req)
+	format, err := req.ResolveCredentialFormat(c.issuerMetadata)
 	if err != nil {
 		c.log.Error(err, "failed to resolve credential format")
 		return nil, err
@@ -150,52 +174,19 @@ func (c *Client) OIDCCredential(ctx context.Context, req *openid4vci.CredentialR
 	// Branch based on requested credential format
 	switch format {
 	case "mso_mdoc":
-		return c.issueMDoc(ctx, authContext.Scope[0], documentData, jwk, document)
+		return c.issueMDoc(ctx, authContext.Scopes[0], documentData, jwk, document)
 
 	case "vc+sd-jwt", "dc+sd-jwt":
-		return c.issueSDJWT(ctx, authContext.Scope[0], documentData, jwk, document)
+		return c.issueSDJWT(ctx, authContext.Scopes[0], documentData, jwk, document)
 
 	case "ldp_vc", "vc+ld+json":
 		// W3C VC 2.0 Data Integrity credential
-		return c.issueVC20(ctx, authContext.Scope[0], documentData, document, req)
+		return c.issueVC20(ctx, authContext.Scopes[0], documentData, document, req)
 
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
 		return nil, errors.New("unsupported or missing credential format: " + format)
 	}
-}
-
-// resolveCredentialFormat determines the credential format from the request.
-// According to OpenID4VCI spec, the format is derived from the credential_configuration_id
-// which maps to a credential configuration in the issuer metadata.
-func (c *Client) resolveCredentialFormat(req *openid4vci.CredentialRequest) (string, error) {
-	// Use credential_configuration_id to look up the format from issuer metadata
-	if req.CredentialConfigurationID != "" {
-		if c.issuerMetadata != nil && c.issuerMetadata.CredentialConfigurationsSupported != nil {
-			if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
-				return config.Format, nil
-			}
-		}
-		return "", errors.New("unknown credential_configuration_id: " + req.CredentialConfigurationID)
-	}
-
-	// Use credential_identifier to look up the format
-	// The credential_identifier maps to a credential configuration via authorization_details from the token response
-	// For now, we'll attempt to find a matching configuration by identifier
-	if req.CredentialIdentifier != "" {
-		if c.issuerMetadata != nil && c.issuerMetadata.CredentialConfigurationsSupported != nil {
-			// Try to match by credential identifier (may be same as configuration ID in some cases)
-			if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialIdentifier]; ok {
-				return config.Format, nil
-			}
-			// If not found directly, we need the authorization context to resolve credential_identifier
-			// For now, default to dc+sd-jwt as a fallback
-			return "dc+sd-jwt", nil
-		}
-		return "", errors.New("unknown credential_identifier: " + req.CredentialIdentifier)
-	}
-
-	return "", errors.New("either credential_configuration_id or credential_identifier must be provided")
 }
 
 // issueSDJWT issues an SD-JWT credential
@@ -400,15 +391,17 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 	return coseKey.Bytes()
 }
 
-// OIDCDeferredCredential https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
-func (c *Client) OIDCDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
+// VCIDeferredCredential implements OpenID4VCI deferred credential endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
+func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
-	// run the same code as OIDCCredential
+	// run the same code as VCICredential
 	return nil, nil
 }
 
-// OIDCredentialOfferURI https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-14.html#name-sending-credential-offer-by-
-func (c *Client) OIDCredentialOfferURI(ctx context.Context, req *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error) {
+// VCICredentialOfferURI implements OpenID4VCI credential offer URI endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-14.html#name-sending-credential-offer-by-
+func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error) {
 	c.log.Debug("credential offer uri", "req", req.CredentialOfferUUID)
 	doc, err := c.credentialOfferStore.Get(ctx, req.CredentialOfferUUID)
 	if err != nil {
@@ -419,18 +412,18 @@ func (c *Client) OIDCredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 	return &doc.CredentialOfferParameters, nil
 }
 
-// OIDCNotification https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
-func (c *Client) OIDCNotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
+// VCINotification implements OpenID4VCI notification endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
+func (c *Client) VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
 	c.log.Debug("notification", "req", req)
 	return nil
 }
 
-// OIDCMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
-func (c *Client) OIDCMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
+// VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
+func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	c.log.Debug("metadata request")
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.issuerMetadataSigningKey)
-	signedMetadata, err := c.issuerMetadata.Sign(signingMethod, c.issuerMetadataSigningKey, c.issuerMetadataSigningChain)
+	signedMetadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		return nil, err
 	}

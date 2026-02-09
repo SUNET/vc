@@ -10,7 +10,7 @@ PKI_DIR="${SCRIPT_DIR}/../pki"
 mkdir -p "${PKI_DIR}"
 
 # Service TLS certificates
-service_names="apigw verifier ui registry issuer mockas persistent verifier_proxy vc"
+service_names="apigw verifier ui registry issuer mockas verifier_proxy vc"
 
 # Generate CA key and cert
 cat > ca.conf <<EOF

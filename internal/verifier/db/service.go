@@ -22,13 +22,8 @@ type Service struct {
 	tracer     *trace.Tracer
 	probeStore *apiv1_status.StatusProbeStore
 
-	// Legacy authorization context collection (for backward compatibility)
-	AuthorizationContextColl AuthorizationContextStore
-
-	// OIDC session and client collections (from verifier-proxy)
-	// Using interfaces to allow mocking in tests
-	Sessions SessionStore
-	Clients  ClientStore
+	// OIDC client collection, client registration
+	Clients ClientStore
 }
 
 // New creates a new database service
@@ -47,20 +42,8 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		return nil, err
 	}
 
-	// Initialize verifier database (legacy)
-	var err error
-	service.AuthorizationContextColl, err = NewAuthorizationContextColl(ctx, "verifier_authorization_context", service, log.New("verifier_authorization_context"))
-	if err != nil {
-		service.log.Error(err, "failed to create authorization context collection")
-		return nil, err
-	}
-
 	// Initialize OIDC collections (from verifier-proxy)
 	oidcDB := service.dbClient.Database("verifier")
-	service.Sessions = &SessionCollection{
-		Service:    service,
-		collection: oidcDB.Collection("sessions"),
-	}
 	service.Clients = &ClientCollection{
 		Service:    service,
 		collection: oidcDB.Collection("clients"),
@@ -72,11 +55,10 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 }
 
 // NewServiceWithMocks creates a db.Service with mock implementations for testing
-// This allows unit tests to inject mock SessionStore and ClientStore implementations
-func NewServiceWithMocks(sessions SessionStore, clients ClientStore) *Service {
+// This allows unit tests to inject mock ClientStore implementation
+func NewServiceWithMocks(clients ClientStore) *Service {
 	return &Service{
-		Sessions: sessions,
-		Clients:  clients,
+		Clients: clients,
 	}
 }
 

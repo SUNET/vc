@@ -273,7 +273,7 @@ func TestW3C_Types_MustContainVerifiableCredential(t *testing.T) {
 		},
 		{
 			name:  "VerifiableCredential with additional type",
-			types: []any{"VerifiableCredential", "ExampleCredential"},
+			types: []any{"VerifiableCredential", "https://example.org/ExampleCredential"},
 			valid: true,
 		},
 		{
@@ -329,12 +329,12 @@ func TestW3C_Types_PresentationMustContainVerifiablePresentation(t *testing.T) {
 		},
 		{
 			name:  "with additional type",
-			types: []any{"VerifiablePresentation", "CredentialManagerPresentation"},
+			types: []any{"VerifiablePresentation", "https://example.org/CredentialManagerPresentation"},
 			valid: true,
 		},
 		{
 			name:  "missing VerifiablePresentation",
-			types: []any{"CredentialManagerPresentation"},
+			types: []any{"https://example.org/CredentialManagerPresentation"},
 			valid: false,
 		},
 	}

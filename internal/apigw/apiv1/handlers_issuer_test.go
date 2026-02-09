@@ -12,6 +12,7 @@ import (
 	"time"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
+	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/openid4vci"
@@ -25,11 +26,11 @@ import (
 
 // mockAuthContextColl mocks the authorization context collection
 type mockAuthContextColl struct {
-	authContext *model.AuthorizationContext
+	authContext *cache.AuthorizationContext
 	err         error
 }
 
-func (m *mockAuthContextColl) GetWithAccessToken(ctx context.Context, accessToken string) (*model.AuthorizationContext, error) {
+func (m *mockAuthContextColl) GetWithAccessToken(ctx context.Context, accessToken string) (*cache.AuthorizationContext, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -95,7 +96,7 @@ func createValidDPoPJWT(t *testing.T, accessToken string) (string, *ecdsa.Privat
 	jwkJSON, err := json.Marshal(publicJWK)
 	require.NoError(t, err)
 
-	var jwkMap map[string]interface{}
+	var jwkMap map[string]any
 	err = json.Unmarshal(jwkJSON, &jwkMap)
 	require.NoError(t, err)
 	token.Header["jwk"] = jwkMap
@@ -136,7 +137,7 @@ func createValidProofJWT(t *testing.T, nonce string) (string, *ecdsa.PrivateKey,
 	token.Header["typ"] = "openid4vci-proof+jwt"
 
 	// Add JWK to header
-	var jwkMap map[string]interface{}
+	var jwkMap map[string]any
 	err = json.Unmarshal(jwkJSON, &jwkMap)
 	require.NoError(t, err)
 	token.Header["jwk"] = jwkMap
@@ -148,12 +149,12 @@ func createValidProofJWT(t *testing.T, nonce string) (string, *ecdsa.PrivateKey,
 	return signed, privateKey, jwkJSON
 }
 
-// TestOIDCNonce tests the nonce generation endpoint
+// TestVCINonce tests the nonce generation endpoint
 // Verifies that:
 // - Nonce is generated successfully
 // - Nonce has reasonable length
 // - Each call generates a unique nonce
-func TestOIDCNonce(t *testing.T) {
+func TestVCINonce(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
@@ -161,8 +162,8 @@ func TestOIDCNonce(t *testing.T) {
 		log: log,
 	}
 
-	ctx := context.Background()
-	resp, err := client.OIDCNonce(ctx)
+	ctx := t.Context()
+	resp, err := client.VCINonce(ctx)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -170,19 +171,19 @@ func TestOIDCNonce(t *testing.T) {
 	assert.Greater(t, len(resp.CNonce), 10, "Nonce should be reasonably long")
 
 	// Test that multiple calls generate different nonces
-	resp2, err2 := client.OIDCNonce(ctx)
+	resp2, err2 := client.VCINonce(ctx)
 	assert.NoError(t, err2)
 	assert.NotNil(t, resp2)
 	assert.NotEqual(t, resp.CNonce, resp2.CNonce, "Each call should generate a unique nonce")
 }
 
-func TestOIDCCredential_InvalidDPoP(t *testing.T) {
+func TestVCICredential_InvalidDPoP(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.CredentialRequest{
 		DPoP:          "invalid.jwt.token",
 		Authorization: "DPoP test-access-token",
@@ -191,71 +192,71 @@ func TestOIDCCredential_InvalidDPoP(t *testing.T) {
 		},
 	}
 
-	resp, err := client.OIDCCredential(ctx, req)
+	resp, err := client.VCICredential(ctx, req)
 
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 }
 
-func TestOIDCDeferredCredential(t *testing.T) {
+func TestVCIDeferredCredential(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.DeferredCredentialRequest{
 		TransactionID: "test-transaction-123",
 	}
 
-	resp, err := client.OIDCDeferredCredential(ctx, req)
+	resp, err := client.VCIDeferredCredential(ctx, req)
 
 	// Current implementation returns nil, nil
 	assert.NoError(t, err)
 	assert.Nil(t, resp)
 }
 
-func TestOIDCCredentialOffer(t *testing.T) {
+func TestVCICredentialOffer(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.CredentialOfferParameters{
 		CredentialIssuer: "https://issuer.example.com",
 	}
 
-	resp, err := client.OIDCCredentialOffer(ctx, req)
+	resp, err := client.VCICredentialOffer(ctx, req)
 
 	// Current implementation returns nil, nil
 	assert.NoError(t, err)
 	assert.Nil(t, resp)
 }
 
-func TestOIDCNotification(t *testing.T) {
+func TestVCINotification(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 	client := &Client{
 		log: log,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := &openid4vci.NotificationRequest{
 		NotificationID: "test-notification-123",
 	}
 
-	err := client.OIDCNotification(ctx, req)
+	err := client.VCINotification(ctx, req)
 
 	// Current implementation returns nil
 	assert.NoError(t, err)
 }
 
-// TestOIDCCredential_SuccessfulIssuance tests the complete credential issuance flow
+// TestVCICredential_SuccessfulIssuance tests the complete credential issuance flow
 // This test verifies that all components (DPoP JWT, Proof JWT, mocks) are properly structured
 // for credential issuance, demonstrating the complete flow even though full integration
 // requires dependency injection for the gRPC client.
-func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
-	ctx := context.Background()
+func TestVCICredential_SuccessfulIssuance(t *testing.T) {
+	ctx := t.Context()
 
 	// Setup test data
 	accessToken := "test-access-token-12345"
@@ -274,9 +275,9 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 
 	// Create mock authorization context matching the actual structure
 	mockAuthCtx := &mockAuthContextColl{
-		authContext: &model.AuthorizationContext{
+		authContext: &cache.AuthorizationContext{
 			SessionID: "session-123",
-			Scope:     []string{"pid"},
+			Scopes:    []string{"pid"},
 			Identity: &model.Identity{
 				AuthenticSourcePersonID: "test-identity-123",
 				GivenName:               "John",
@@ -284,7 +285,7 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 				BirthDate:               "1990-01-01",
 				Schema:                  &model.IdentitySchema{},
 			},
-			Token: &model.Token{
+			Token: &cache.Token{
 				AccessToken: accessToken,
 				ExpiresAt:   time.Now().Add(time.Hour).Unix(),
 			},
@@ -302,7 +303,7 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 	// Verify mock authorization context retrieval
 	authCtx, err := mockAuthCtx.GetWithAccessToken(ctx, accessToken)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pid"}, authCtx.Scope)
+	assert.Equal(t, []string{"pid"}, authCtx.Scopes)
 	assert.Equal(t, nonce, authCtx.Nonce)
 	assert.NotNil(t, authCtx.Token)
 	assert.Equal(t, accessToken, authCtx.Token.AccessToken)
@@ -369,7 +370,7 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 	require.NoError(t, err)
 
 	// Parse JWK to extract fields
-	var jwkData map[string]interface{}
+	var jwkData map[string]any
 	err = json.Unmarshal(proofJWK, &jwkData)
 	require.NoError(t, err)
 
@@ -414,5 +415,5 @@ func TestOIDCCredential_SuccessfulIssuance(t *testing.T) {
 	t.Log("Full integration test requires dependency injection to:")
 	t.Log("  1. Inject mock db collections (auth context, datastore)")
 	t.Log("  2. Inject mock gRPC client factory")
-	t.Log("  3. Then call client.OIDCCredential(ctx, req) and verify response")
+	t.Log("  3. Then call client.VCICredential(ctx, req) and verify response")
 }

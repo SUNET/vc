@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -171,7 +170,7 @@ func TestMakeSDJWT(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			log := logger.NewSimple("test")
 			client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -202,7 +201,7 @@ func TestMakeSDJWT(t *testing.T) {
 			headerBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[0])
 			require.NoError(t, err, "should decode JWT header")
 
-			var header map[string]interface{}
+			var header map[string]any
 			err = json.Unmarshal(headerBytes, &header)
 			require.NoError(t, err, "should parse JWT header JSON")
 
@@ -214,7 +213,7 @@ func TestMakeSDJWT(t *testing.T) {
 			payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
 			require.NoError(t, err, "should decode JWT payload")
 
-			var payload map[string]interface{}
+			var payload map[string]any
 			err = json.Unmarshal(payloadBytes, &payload)
 			require.NoError(t, err, "should parse JWT payload JSON")
 
@@ -237,7 +236,7 @@ func TestMakeSDJWT(t *testing.T) {
 }
 
 func TestMakeSDJWT_WithRSAKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "rsa", log)
 
@@ -266,7 +265,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 	headerBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[0])
 	require.NoError(t, err)
 
-	var header map[string]interface{}
+	var header map[string]any
 	err = json.Unmarshal(headerBytes, &header)
 	require.NoError(t, err)
 
@@ -275,7 +274,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 }
 
 func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -302,7 +301,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
 	require.NoError(t, err)
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	err = json.Unmarshal(payloadBytes, &payload)
 	require.NoError(t, err)
 
@@ -314,13 +313,13 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	}
 
 	// Check nested objects recursively
-	var checkForSD func(m map[string]interface{}) bool
-	checkForSD = func(m map[string]interface{}) bool {
+	var checkForSD func(m map[string]any) bool
+	checkForSD = func(m map[string]any) bool {
 		for k, v := range m {
 			if k == "_sd" {
 				return true
 			}
-			if nested, ok := v.(map[string]interface{}); ok {
+			if nested, ok := v.(map[string]any); ok {
 				if checkForSD(nested) {
 					return true
 				}
@@ -337,7 +336,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 }
 
 func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -418,7 +417,7 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			log := logger.NewSimple("test")
 			client := mockNewClient(ctx, t, "ecdsa", log)
 

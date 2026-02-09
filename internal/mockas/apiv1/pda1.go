@@ -41,16 +41,4 @@ func (s *PDA1Service) random(ctx context.Context, person *person) (map[string]an
 	}
 
 	return doc.Marshal()
-
-	//jsonBytes, err := json.Marshal(doc)
-	//if err != nil {
-	//	panic(err)
-	//}
-
-	//reply := map[string]any{}
-	//if err := json.Unmarshal(jsonBytes, &reply); err != nil {
-	//	panic(err)
-	//}
-
-	//return reply
 }

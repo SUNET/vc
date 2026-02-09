@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"testing"
 	"vc/pkg/model"
 	"vc/pkg/sdjwtvc"
@@ -12,7 +11,7 @@ import (
 
 // TestUIMetadata tests the UIMetadata handler
 func TestUIMetadata(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name              string

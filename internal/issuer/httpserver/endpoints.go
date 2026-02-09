@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Service) endpointHealth(ctx context.Context, c *gin.Context) (interface{}, error) {
+func (s *Service) endpointHealth(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointHealth")
 	defer span.End()
 

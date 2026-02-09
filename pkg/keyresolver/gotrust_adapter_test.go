@@ -3,7 +3,6 @@
 package keyresolver
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -46,11 +45,11 @@ func TestGoTrustResolver_ResolveEd25519(t *testing.T) {
 	}
 
 	// Create a mock DID document
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -100,7 +99,7 @@ func TestGoTrustResolver_ResolveEd25519_Denied(t *testing.T) {
 		json.NewEncoder(w).Encode(authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
-				Reason: map[string]interface{}{
+				Reason: map[string]any{
 					"error": "subject not found",
 				},
 			},
@@ -149,11 +148,11 @@ func TestGoTrustResolver_ResolveECDSA(t *testing.T) {
 	}
 
 	// Create a mock DID document
-	didDoc := map[string]interface{}{
+	didDoc := map[string]any{
 		"@context": []string{"https://www.w3.org/ns/did/v1"},
 		"id":       "did:web:example.com",
-		"verificationMethod": []interface{}{
-			map[string]interface{}{
+		"verificationMethod": []any{
+			map[string]any{
 				"id":           "did:web:example.com#key-1",
 				"type":         "JsonWebKey2020",
 				"controller":   "did:web:example.com",
@@ -211,7 +210,7 @@ func TestGoTrustResolver_EvaluateTrustEd25519(t *testing.T) {
 	defer server.Close()
 
 	resolver := NewGoTrustResolver(server.URL)
-	trusted, err := resolver.EvaluateTrustEd25519(context.Background(), "did:web:example.com", pubKey, "issuer")
+	trusted, err := resolver.EvaluateTrustEd25519(t.Context(), "did:web:example.com", pubKey, "issuer")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -244,7 +243,7 @@ func TestGoTrustResolver_EvaluateTrustECDSA(t *testing.T) {
 	defer server.Close()
 
 	resolver := NewGoTrustResolver(server.URL)
-	trusted, err := resolver.EvaluateTrustECDSA(context.Background(), "did:web:example.com", &privKey.PublicKey, "")
+	trusted, err := resolver.EvaluateTrustECDSA(t.Context(), "did:web:example.com", &privKey.PublicKey, "")
 	if err != nil {
 		t.Fatalf("failed to evaluate trust: %v", err)
 	}
@@ -278,7 +277,7 @@ func TestEd25519ToJWK_JWKToEd25519_RoundTrip(t *testing.T) {
 }
 
 func TestJWKToEd25519_InvalidKeyType(t *testing.T) {
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 	}
@@ -289,7 +288,7 @@ func TestJWKToEd25519_InvalidKeyType(t *testing.T) {
 }
 
 func TestJWKToEd25519_InvalidCurve(t *testing.T) {
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "OKP",
 		"crv": "X25519",
 		"x":   "AAAA",
@@ -301,7 +300,7 @@ func TestJWKToEd25519_InvalidCurve(t *testing.T) {
 }
 
 func TestJWKToEd25519_MissingX(t *testing.T) {
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "OKP",
 		"crv": "Ed25519",
 	}
@@ -354,7 +353,7 @@ func TestECDSAToJWK_NilKey(t *testing.T) {
 }
 
 func TestJWKToECDSA_InvalidKeyType(t *testing.T) {
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "OKP",
 		"crv": "Ed25519",
 	}
@@ -365,7 +364,7 @@ func TestJWKToECDSA_InvalidKeyType(t *testing.T) {
 }
 
 func TestJWKToECDSA_UnsupportedCurve(t *testing.T) {
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "EC",
 		"crv": "secp256k1",
 		"x":   "AAAA",
@@ -380,10 +379,10 @@ func TestJWKToECDSA_UnsupportedCurve(t *testing.T) {
 func TestJWKToECDSA_MissingCoordinates(t *testing.T) {
 	tests := []struct {
 		name string
-		jwk  map[string]interface{}
+		jwk  map[string]any
 	}{
-		{"missing x", map[string]interface{}{"kty": "EC", "crv": "P-256", "y": "AAAA"}},
-		{"missing y", map[string]interface{}{"kty": "EC", "crv": "P-256", "x": "AAAA"}},
+		{"missing x", map[string]any{"kty": "EC", "crv": "P-256", "y": "AAAA"}},
+		{"missing y", map[string]any{"kty": "EC", "crv": "P-256", "x": "AAAA"}},
 	}
 
 	for _, tt := range tests {
@@ -410,7 +409,7 @@ func TestNewGoTrustResolverWithDiscovery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver, err := NewGoTrustResolverWithDiscovery(context.Background(), server.URL)
+	resolver, err := NewGoTrustResolverWithDiscovery(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("failed to create resolver with discovery: %v", err)
 	}
@@ -425,7 +424,7 @@ func TestNewGoTrustResolverWithDiscovery_Failure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewGoTrustResolverWithDiscovery(context.Background(), server.URL)
+	_, err := NewGoTrustResolverWithDiscovery(t.Context(), server.URL)
 	if err == nil {
 		t.Fatal("expected error when discovery fails")
 	}

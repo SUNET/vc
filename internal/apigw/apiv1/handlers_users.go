@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"vc/pkg/cache"
 	"vc/pkg/model"
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/vcclient"
@@ -45,12 +46,12 @@ func (c *Client) LoginPIDUser(ctx context.Context, req *vcclient.LoginPIDUserReq
 		return fmt.Errorf("password mismatch for username %s", username)
 	}
 
-	update := &model.AuthorizationContext{
+	update := &cache.AuthorizationContext{
 		Identity:        user.Identity,
 		AuthenticSource: user.AuthenticSource,
 	}
 	// Update the authorization with the user identity
-	if err := c.authContextStore.AddIdentity(ctx, &model.AuthorizationContext{RequestURI: req.RequestURI}, update); err != nil {
+	if err := c.authContextCache.AddIdentity(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}, update); err != nil {
 		c.log.Error(err, "failed to add identity to authorization context")
 		return err
 	}
@@ -64,7 +65,7 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 
 	if req.AuthenticSource == "" && req.SessionID != "" {
 		c.log.Debug("userAuthenticSourceLookup called without authentic source, looking up by session ID", "session_id", req.SessionID)
-		authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{
+		authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
 			SessionID: req.SessionID,
 		})
 		if err != nil {
@@ -92,7 +93,7 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 
 	} else if req.AuthenticSource != "" {
 		c.log.Debug("userAuthenticSourceLookup called with authentic source", "authentic_source", req.AuthenticSource)
-		if err := c.authContextStore.SetAuthenticSource(ctx, &model.AuthorizationContext{SessionID: req.SessionID}, req.AuthenticSource); err != nil {
+		if err := c.authContextCache.SetAuthenticSource(ctx, &cache.AuthorizationContext{SessionID: req.SessionID}, req.AuthenticSource); err != nil {
 			c.log.Error(err, "failed to set authentic source")
 			return nil, fmt.Errorf("failed to set authentic source %s: %w", req.AuthenticSource, err)
 		}
@@ -104,7 +105,7 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error) {
 	c.log.Debug("UserLookup called")
 
-	authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{
+	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
 		RequestURI: req.RequestURI,
 	})
 	if err != nil {
@@ -151,7 +152,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		}
 
 	case model.AuthMethodPID:
-		authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
+		authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
 		if err != nil {
 			c.log.Error(err, "failed to get authorization context")
 			return nil, err
@@ -229,7 +230,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims)
 
-	if err := c.authContextStore.Consent(ctx, &model.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
+	if err := c.authContextCache.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
 		c.log.Error(err, "failed to consent for user", "username", req.Username)
 		return nil, fmt.Errorf("failed to consent for user %s: %w", req.Username, err)
 	}

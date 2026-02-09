@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 	"vc/internal/verifier/db"
+	"vc/pkg/cache"
 	"vc/pkg/configuration"
 	"vc/pkg/openid4vp"
 
@@ -72,44 +73,41 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 }
 
 // createTestSession creates a session for testing
-func createTestSession(t *testing.T, id string, clientID string) *db.Session {
+func createTestSession(t *testing.T, id string, clientID string) *cache.AuthorizationContext {
 	t.Helper()
-	return &db.Session{
-		ID:        id,
-		Status:    db.SessionStatusPending,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(15 * time.Minute),
-		OIDCRequest: db.OIDCRequest{
-			ClientID:     clientID,
-			RedirectURI:  "https://example.com/callback",
-			Scope:        "openid profile",
-			State:        "test-state",
-			Nonce:        "test-nonce",
-			ResponseType: "code",
-		},
-		Tokens: db.TokenSet{},
+	return &cache.AuthorizationContext{
+		SessionID:    id,
+		Status:       cache.SessionStatusPending,
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(15 * time.Minute).Unix(),
+		ClientID:     clientID,
+		RedirectURI:  "https://example.com/callback",
+		Scopes:        []string{"openid", "profile"},
+		State:        "test-state",
+		Nonce:        "test-nonce",
+		ResponseType: "code",
 	}
 }
 
 // createTestSessionWithCode creates a session with an authorization code
-func createTestSessionWithCode(t *testing.T, id string, clientID string, code string) *db.Session {
+func createTestSessionWithCode(t *testing.T, id string, clientID string, code string) *cache.AuthorizationContext {
 	t.Helper()
 	session := createTestSession(t, id, clientID)
-	session.Status = db.SessionStatusCompleted
-	session.Tokens.AuthorizationCode = code
-	session.Tokens.CodeExpiresAt = time.Now().Add(10 * time.Minute)
+	session.Status = cache.SessionStatusCompleted
+	session.Code = code
+	session.CodeExpiresAt = time.Now().Add(10 * time.Minute).Unix()
 	return session
 }
 
 // createTestSessionWithTokens creates a session with tokens
-func createTestSessionWithTokens(t *testing.T, id string, clientID string, accessToken string) *db.Session {
+func createTestSessionWithTokens(t *testing.T, id string, clientID string, accessToken string) *cache.AuthorizationContext {
 	t.Helper()
 	session := createTestSession(t, id, clientID)
-	session.Status = db.SessionStatusCompleted
-	session.Tokens.AccessToken = accessToken
-	session.Tokens.AccessTokenExpiresAt = time.Now().Add(1 * time.Hour)
-	session.Tokens.RefreshToken = "refresh-" + accessToken
-	session.Tokens.RefreshTokenExpiresAt = time.Now().Add(24 * time.Hour)
+	session.Status = cache.SessionStatusCompleted
+	session.AccessToken = accessToken
+	session.AccessTokenExpiresAt = time.Now().Add(1 * time.Hour).Unix()
+	session.RefreshToken = "refresh-" + accessToken
+	session.RefreshTokenExpiresAt = time.Now().Add(24 * time.Hour).Unix()
 	session.VerifiedClaims = map[string]any{
 		"given_name":  "John",
 		"family_name": "Doe",

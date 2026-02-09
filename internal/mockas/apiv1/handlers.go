@@ -5,24 +5,15 @@ import (
 	"errors"
 	"vc/internal/gen/status/apiv1_status"
 	"vc/pkg/model"
+	"vc/pkg/vcclient"
 )
 
-// MockNextRequest holds the request
-type MockNextRequest struct {
-	MockInputData
-}
-
-// MockNextReply is the reply
-type MockNextReply struct {
-	Upload *uploadMock `json:"upload"`
-}
-
 // MockNext sends one mock upload to the datastore
-func (c *Client) MockNext(ctx context.Context, inData *MockNextRequest) (*MockNextReply, error) {
+func (c *Client) MockNext(ctx context.Context, inData *vcclient.MockNextRequest) (*vcclient.MockNextReply, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:MockNext")
 	defer span.End()
 
-	mockUpload, err := c.mockOne(ctx, inData.MockInputData)
+	mockUpload, err := c.mockOne(ctx, inData)
 	if err != nil {
 		return nil, err
 	}
@@ -37,26 +28,21 @@ func (c *Client) MockNext(ctx context.Context, inData *MockNextRequest) (*MockNe
 		return nil, errors.New("upload failed")
 	}
 
-	reply := &MockNextReply{
-		Upload: mockUpload,
+	reply := &vcclient.MockNextReply{
+		Upload: map[string]any{
+			"meta":                  mockUpload.Meta,
+			"identities":            mockUpload.Identities,
+			"document_display":      mockUpload.DocumentDisplay,
+			"document_data":         mockUpload.DocumentData,
+			"document_data_version": mockUpload.DocumentDataVersion,
+		},
 	}
 
 	return reply, nil
 }
 
-// MockBulkRequest holds the request
-type MockBulkRequest struct {
-	MockInputData
-	N int `form:"n"`
-}
-
-// MockBulkReply is the reply
-type MockBulkReply struct {
-	DocumentIDS []string `json:"document_ids"`
-}
-
 // MockBulk sends N mock uploads to the datastore
-func (c *Client) MockBulk(ctx context.Context, inData *MockBulkRequest) (*MockBulkReply, error) {
+func (c *Client) MockBulk(ctx context.Context, inData *vcclient.MockBulkRequest) (*vcclient.MockBulkReply, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:MockBulk")
 	defer span.End()
 
@@ -67,7 +53,7 @@ func (c *Client) MockBulk(ctx context.Context, inData *MockBulkRequest) (*MockBu
 	}
 
 	for i := 0; i < inData.N; i++ {
-		mockUpload, err := c.mockOne(ctx, inData.MockInputData)
+		mockUpload, err := c.mockOne(ctx, &inData.MockNextRequest)
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +69,7 @@ func (c *Client) MockBulk(ctx context.Context, inData *MockBulkRequest) (*MockBu
 		}
 	}
 
-	return &MockBulkReply{
+	return &vcclient.MockBulkReply{
 		DocumentIDS: documentIDS,
 	}, nil
 }

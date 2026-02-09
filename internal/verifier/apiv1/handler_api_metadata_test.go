@@ -1,20 +1,21 @@
 package apiv1
 
 import (
-	"context"
 	"testing"
+	"vc/pkg/jose"
 	"vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGetDiscoveryMetadata tests the OIDC discovery metadata endpoint
 func TestGetDiscoveryMetadata(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -85,11 +86,11 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 
 // TestGetDiscoveryMetadata_NoCredentials tests discovery metadata with no configured credentials
 func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -115,7 +116,7 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 
 // TestGetDiscoveryMetadata_CustomExternalURL tests with different base URLs
 func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name           string
@@ -143,7 +144,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
-					ExternalServerURL: tt.externalURL,
+					PublicURL: tt.externalURL,
 					OIDC: model.OIDCConfig{
 						Issuer:      tt.externalURL,
 						SubjectType: "public",
@@ -170,11 +171,11 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 
 // TestGetJWKS tests the JWKS endpoint
 func TestGetJWKS(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -188,10 +189,10 @@ func TestGetJWKS(t *testing.T) {
 
 		// Set signing key for testing
 		privateKey := generateTestRSAKey(t)
-		client.SetSigningKeyForTesting(privateKey, "RS256")
+		require.NoError(t, client.SetSigningKeyForTesting(privateKey))
 
 		// Test getting JWKS
-		jwks, err := client.GetJWKS(ctx)
+		jwks, err := jose.CreateJWKSFromSigner(client.pkiSigner, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, jwks)
 
@@ -212,7 +213,7 @@ func TestGetJWKS(t *testing.T) {
 
 		// Set ECDSA signing key for testing
 		privateKey := generateTestECDSAKey(t)
-		client.SetSigningKeyForTesting(privateKey, "ES256")
+		require.NoError(t, client.SetSigningKeyForTesting(privateKey))
 
 		// Test getting JWKS
 		jwks, err := client.GetJWKS(ctx)
@@ -235,12 +236,10 @@ func TestGetJWKS(t *testing.T) {
 		client, _ := CreateTestClientWithMock(cfg)
 
 		// Set an unsupported key type (string instead of crypto key)
-		client.SetSigningKeyForTesting("not-a-crypto-key", "HS256")
+		err := client.SetSigningKeyForTesting("not-a-crypto-key")
 
-		// Test getting JWKS should error
-		jwks, err := client.GetJWKS(ctx)
+		// Should error on setting invalid key
 		assert.Error(t, err)
-		assert.Nil(t, jwks)
 		assert.Contains(t, err.Error(), "unsupported key type")
 	})
 
@@ -258,11 +257,11 @@ func TestGetJWKS(t *testing.T) {
 
 // BenchmarkGetDiscoveryMetadata benchmarks discovery metadata generation
 func BenchmarkGetDiscoveryMetadata(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -290,7 +289,7 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
-			ExternalServerURL: "https://verifier.example.com",
+			PublicURL: "https://verifier.example.com",
 			OIDC: model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
@@ -303,7 +302,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx := context.Background()
+		ctx := b.Context()
 		_, _ = client.GetJWKS(ctx)
 	}
 }

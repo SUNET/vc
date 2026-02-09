@@ -7,16 +7,18 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"vc/pkg/cache"
+	"vc/pkg/crypto"
 	"vc/pkg/helpers"
-	"vc/pkg/jose"
-	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
 
 	"github.com/google/uuid"
+	"github.com/jellydator/ttlcache/v3"
 )
 
-// OIDCAuth  https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
+// OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
 	allow, err := c.cfg.APIGW.OauthServer.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
@@ -30,29 +32,38 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	c.log.Debug("PAR", "state", req.State)
 
-	azt := model.AuthorizationContext{
-		SessionID:                uuid.NewString(),
-		Code:                     uuid.NewString(),
-		RequestURI:               requestURI,
-		Scope:                    []string{req.Scope},
-		IsUsed:                   false,
-		CodeChallenge:            req.CodeChallenge,
-		CodeChallengeMethod:      req.CodeChallengeMethod,
-		State:                    req.State,
-		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.ExternalServerURL, "https://")),
-		WalletURI:                req.RedirectURI,
-		ExpiresAt:                time.Now().Add(60 * time.Second).Unix(),
-		Nonce:                    oauth2.GenerateCryptographicNonceFixedLength(32),
-		EphemeralEncryptionKeyID: oauth2.GenerateCryptographicNonceFixedLength(32),
-		VerifierResponseCode:     oauth2.GenerateCryptographicNonceFixedLength(32),
+	azt := cache.AuthorizationContext{
+		SessionID:           uuid.NewString(),
+		Code:                uuid.NewString(),
+		RequestURI:          requestURI,
+		Scopes:              []string{req.Scope},
+		Forfeited:           false,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		State:               req.State,
+		ClientID:            fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
+		WalletURI:           req.RedirectURI,
+		ExpiresAt:           time.Now().Add(60 * time.Second).Unix(),
 	}
 
-	if err := c.authContextStore.Save(ctx, &azt); err != nil {
-		c.log.Error(err, "authorizationContext not saved")
+	azt.Nonce, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	azt.EphemeralEncryptionKeyID, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
+	}
+
+	azt.VerifierResponseCode, err = crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response code: %w", err)
+	}
+
+	if err := c.authContextCache.Save(ctx, &azt); err != nil {
 		return nil, err
 	}
-
-	c.log.Debug("authorizationContext saved")
 
 	response := &openid4vci.ParResponse{
 		RequestURI: requestURI,
@@ -64,11 +75,11 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error) {
 	c.log.Debug("Authorize", "req", req)
-	query := &model.AuthorizationContext{
+	query := &cache.AuthorizationContext{
 		RequestURI: req.RequestURI,
-		ClientID:   fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.ExternalServerURL, "https://")),
+		ClientID:   fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
 	}
-	authorizationContext, err := c.authContextStore.Get(ctx, query)
+	authorizationContext, err := c.authContextCache.Get(ctx, query)
 	c.log.Debug("Get authorization", "query", query, "authorization", authorizationContext)
 	if err != nil {
 		c.log.Error(err, "get error")
@@ -76,7 +87,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	}
 	c.log.Debug("Authorization", "state", authorizationContext.State)
 
-	if authorizationContext.IsUsed {
+	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
 	}
@@ -88,7 +99,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 
 	response := &openid4vci.AuthorizationResponse{
 		RedirectURL: redirectURL,
-		Scope:       authorizationContext.Scope[0],
+		Scope:       authorizationContext.Scopes[0],
 		SessionID:   authorizationContext.SessionID,
 		ClientID:    authorizationContext.ClientID,
 	}
@@ -98,11 +109,12 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	return response, nil
 }
 
-// OIDCToken https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-token-endpoint
+// OAuthToken implements OAuth 2.0 token endpoint for credential issuance
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-token-endpoint
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
-	c.log.Debug("OIDCToken", "req", req)
+	c.log.Debug("OAuthToken", "req", req)
 
-	authorizationContext, err := c.authContextStore.ForfeitAuthorizationCode(ctx, &model.AuthorizationContext{
+	authorizationContext, err := c.authContextCache.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 		Code: req.Code,
 	})
 	if err != nil {
@@ -111,8 +123,18 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
+	// Verify PKCE code_challenge
+	if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
+		c.log.Error(err, "PKCE validation failed")
+		return nil, fmt.Errorf("PKCE validation failed: %w", err)
+	}
+	c.log.Debug("PKCE validation successful")
+
 	// generating a new access token
-	accessToken := oauth2.GenerateCryptographicNonceFixedLength(32)
+	accessToken, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
 	c.log.Debug("Generated access token", "access_token", accessToken)
 
 	// Bind the public key to the generated access token
@@ -121,21 +143,32 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		AccessToken:          accessToken,
 		TokenType:            "DPoP",
 		ExpiresIn:            3600, // 1 hour
-		Scope:                authorizationContext.Scope[0],
+		Scope:                authorizationContext.Scopes[0],
 		State:                authorizationContext.State,
 		CNonce:               authorizationContext.Nonce,
 		CNonceExpiresIn:      0,
 		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{},
 	}
 
-	tokenDoc := &model.Token{
+	tokenDoc := &cache.Token{
 		AccessToken: accessToken,
 		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
 	}
 
-	if err := c.authContextStore.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
+	if err := c.authContextCache.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
 		c.log.Error(err, "failed to add token")
 		return nil, err
+	}
+
+	jti, err := oauth2.ExtractJTI(req.DPOP)
+	if err != nil {
+		c.log.Error(err, "failed to extract JTI from DPoP")
+		return nil, err
+	}
+
+	if c.dpopJTICache.Has(jti) {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
+		return nil, oauth2.ErrJTIReplay
 	}
 
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
@@ -144,16 +177,19 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
+	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
+
+	// Validate HTU matches token endpoint
 	if dpop.HTU != c.cfg.APIGW.OauthServer.TokenEndpoint {
-		return nil, fmt.Errorf("invalid HTU in DPoP claims: %s", dpop.HTU)
+		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.OauthServer.TokenEndpoint, dpop.HTU)
 	}
+
+	// Validate HTM is POST (token endpoint only accepts POST)
 	if dpop.HTM != "POST" {
-		return nil, fmt.Errorf("invalid HTM in DPoP claims: %s", dpop.HTM)
+		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
 	}
 
 	c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
-
-	//base64(sha256(code_verifier)) == stored code_challenge
 
 	//c.db.VCAuthColl.Grant(ctx, req.ClientID, req.Code)
 
@@ -166,8 +202,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
 	c.log.Debug("metadata request")
 
-	signingMethod, _ := jose.GetSigningMethodFromKey(c.oauth2MetadataSigningKey)
-	signedMetadata, err := c.oauth2Metadata.Sign(signingMethod, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain)
+	signedMetadata, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +226,7 @@ type OAuthAuthorizationConsentResponse struct {
 }
 
 func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthorizationConsentRequest) (*OAuthAuthorizationConsentResponse, error) {
-	authorizationContext, err := c.authContextStore.Get(ctx, &model.AuthorizationContext{SessionID: req.SessionID})
+	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{SessionID: req.SessionID})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
@@ -200,7 +235,12 @@ func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthor
 
 	c.log.Debug("OAuthAuthorizationConsent request")
 
-	verifierRequestURI, err := url.Parse(c.cfg.APIGW.ExternalServerURL + "/verification/request-object")
+	verifierRequestURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/request-object")
+	if err != nil {
+		c.log.Error(err, "failed to construct request URI URL")
+		return nil, err
+	}
+	requestURL, err := url.Parse(verifierRequestURI)
 	if err != nil {
 		c.log.Error(err, "failed to parse request URI URL")
 		return nil, err
@@ -210,22 +250,23 @@ func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthor
 		"id": []string{authorizationContext.VerifierResponseCode},
 	}
 
-	verifierRequestURI.RawQuery = requestURI.Encode()
+	requestURL.RawQuery = requestURI.Encode()
+	finalRequestURI := requestURL.String()
 
-	u, err := url.Parse(authorizationContext.WalletURI)
+	walletURL, err := url.Parse(authorizationContext.WalletURI)
 	if err != nil {
-		c.log.Error(err, "failed to parse URL")
+		c.log.Error(err, "failed to parse wallet URL")
 		return nil, err
 	}
 	values := url.Values{
 		"client_id":   []string{authorizationContext.ClientID},
-		"request_uri": []string{verifierRequestURI.String()},
+		"request_uri": []string{finalRequestURI},
 	}
 
-	u.RawQuery = values.Encode()
+	walletURL.RawQuery = values.Encode()
 
 	reply := &OAuthAuthorizationConsentResponse{
-		RedirectURL:       u.String(),
+		RedirectURL:       walletURL.String(),
 		VerifierContextID: authorizationContext.VerifierResponseCode,
 	}
 

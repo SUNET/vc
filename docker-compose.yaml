@@ -110,22 +110,6 @@ services:
     environment:
       - "VC_CONFIG_YAML=config.yaml"
 
-  persistent:
-    container_name: "vc_dev_persistent"
-    hostname: "persistent.vc.docker"
-    image: docker.sunet.se/dc4eu/persistent:latest
-    restart: always
-    volumes:
-      - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
-    depends_on:
-      - mongo
-    networks:
-      vc-dev-net:
-        ipv4_address: 172.16.50.12
-    environment:
-      - "VC_CONFIG_YAML=config.yaml"
-
   mockas:
     container_name: "vc_dev_mockas"
     hostname: "mockas.vc.docker"

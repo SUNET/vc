@@ -4,7 +4,6 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -23,7 +22,7 @@ var mockCredentialSubject = []byte(`{
 }`)
 
 func TestMakeVC20_ECDSA2019(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -65,7 +64,7 @@ func TestMakeVC20_ECDSA2019(t *testing.T) {
 }
 
 func TestMakeVC20_ECDSASD2023(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -101,7 +100,7 @@ func TestMakeVC20_ECDSASD2023(t *testing.T) {
 }
 
 func TestMakeVC20_DefaultCryptosuite(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -126,7 +125,7 @@ func TestMakeVC20_DefaultCryptosuite(t *testing.T) {
 }
 
 func TestMakeVC20_InvalidCryptosuite(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -143,7 +142,7 @@ func TestMakeVC20_InvalidCryptosuite(t *testing.T) {
 }
 
 func TestMakeVC20_InvalidDocumentData(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 
@@ -160,7 +159,7 @@ func TestMakeVC20_InvalidDocumentData(t *testing.T) {
 }
 
 func TestMakeVC20_RoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
 

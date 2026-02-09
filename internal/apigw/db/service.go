@@ -37,7 +37,6 @@ type Service struct {
 
 	VCDatastoreColl            *VCDatastoreColl
 	VCConsentColl              *VCConsentColl
-	VCAuthorizationContextColl *VCAuthorizationContextColl
 	VCUsersColl                *VCUsersColl
 	VCCredentialOfferColl      *VCCredentialOfferColl
 }
@@ -77,11 +76,6 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	}
 
 	var err error
-
-	service.VCAuthorizationContextColl, err = NewAuthorizationContextColl(ctx, "authorization_context", service, log.New("VCAuthorizationContextColl"))
-	if err != nil {
-		return nil, err
-	}
 
 	service.VCUsersColl, err = NewUserColl(ctx, "users", service, log.New("VCUsersColl"))
 	if err != nil {

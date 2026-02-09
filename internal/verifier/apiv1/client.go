@@ -2,16 +2,15 @@ package apiv1
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
+	"vc/pkg/cache"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -21,37 +20,39 @@ import (
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/trace"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // Client holds the public api object
 type Client struct {
-	cfg                        *model.Cfg
-	db                         *db.Service
-	authContextStore           db.AuthorizationContextStore
-	log                        *logger.Log
-	notify                     *notify.Service
-	oauth2Metadata             *oauth2.AuthorizationServerMetadata
-	oauth2MetadataSigningKey   any
-	oauth2MetadataSigningChain []string
-	verifierSigningKey         any
-	verifierSigningCert        *x509.Certificate
-	verifierSigningChain       []string
-	openid4vp                  *openid4vp.Client
-	credentialCache            *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
-	trustService               *openid4vp.TrustService
-	keyLoader                  *pki.KeyLoader
+	cfg    *model.Cfg
+	db     *db.Service
+	log    *logger.Log
+	tracer *trace.Tracer
+	notify *notify.Service
 
-	// OIDC Provider fields (from verifier-proxy merge)
-	tracer                      *trace.Tracer
-	oidcSigningKey              any
-	oidcSigningAlg              string
+	// Metadata
+	oauth2Metadata *oauth2.AuthorizationServerMetadata
+
+	// PKI for signing
+	pkiSigner      pki.Signer
+	pkiSigningCert *x509.Certificate
+	pkiSignerChain []string
+
+	// Clients and services
+	openid4vp    *openid4vp.Client
+	trustService *openid4vp.TrustService
+
+	// Cache
+	authContextCache            *cache.AuthContextCache
+	credentialCache             *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
 	ephemeralEncryptionKeyCache *ttlcache.Cache[string, jwk.Key]
 	requestObjectCache          *ttlcache.Cache[string, *openid4vp.RequestObject]
-	presentationBuilder         *openid4vp.PresentationBuilder
-	claimsExtractor             *openid4vp.ClaimsExtractor
+
+	// OIDC related
+	presentationBuilder *openid4vp.PresentationBuilder
+	claimsExtractor     *openid4vp.ClaimsExtractor
 }
 
 // New creates a new instance of the public api
@@ -68,7 +69,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	c := &Client{
 		cfg:                         cfg,
 		db:                          db,
-		authContextStore:            db.AuthorizationContextColl,
+		authContextCache:            cache.NewAuthContextCache(15 * time.Minute),
 		log:                         log.New("apiv1"),
 		notify:                      notify,
 		openid4vp:                   openid4vpClient,
@@ -76,30 +77,21 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 		tracer:                      tracer,
 		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
 		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
-		keyLoader:                   pki.NewKeyLoader(),
 	}
 
 	// Start caches
-	go c.credentialCache.Start()
 	go c.ephemeralEncryptionKeyCache.Start()
+	go c.credentialCache.Start()
 	go c.requestObjectCache.Start()
 
-	// Load or generate OAuth2 metadata from configuration
-	c.oauth2Metadata, c.oauth2MetadataSigningKey, c.oauth2MetadataSigningChain, err = c.cfg.Verifier.OAuthServer.LoadAndSignMetadata(ctx, c.cfg.Verifier.ExternalServerURL, c.cfg.Verifier.KeyConfig)
+	// Load PKI signing key and chain for request object signing and OIDC
+	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.Verifier.KeyConfig)
 	if err != nil {
-		return nil, err
+		c.log.Info("PKI signing key not loaded", "error", err)
 	}
 
-	// Load verifier signing key and chain for request object signing
-	if err := c.loadVerifierSigningKey(); err != nil {
-		c.log.Info("Verifier signing key not loaded", "error", err)
-	}
-
-	// Load OIDC signing key if configured
-	if err := c.loadOIDCSigningKey(); err != nil {
-		c.log.Info("OIDC signing key not loaded - OIDC provider features disabled", "error", err)
-	}
-	c.oidcSigningAlg = "RS256" // Default algorithm
+	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
+	c.oauth2Metadata = c.cfg.Verifier.OAuthServer.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
@@ -124,38 +116,6 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	c.log.Info("Started")
 
 	return c, nil
-}
-
-// loadVerifierSigningKey loads the verifier signing key and chain from configured paths
-// This key is used for signing request objects in OpenID4VP flows
-func (c *Client) loadVerifierSigningKey() error {
-	// Use centralized KeyLoader with KeyConfig from configuration
-	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.KeyConfig)
-	if err != nil {
-		return fmt.Errorf("failed to load verifier signing key: %w", err)
-	}
-
-	c.verifierSigningKey = km.PrivateKey
-	c.verifierSigningCert = km.Cert
-	c.verifierSigningChain = km.Chain
-
-	return nil
-}
-
-// loadOIDCSigningKey loads the OIDC signing key from the configured path
-func (c *Client) loadOIDCSigningKey() error {
-	// Use centralized KeyLoader with KeyConfig from configuration
-	km, err := c.keyLoader.LoadKeyMaterial(c.cfg.Verifier.KeyConfig)
-	if err != nil {
-		return fmt.Errorf("failed to load OIDC signing key: %w", err)
-	}
-
-	// Create signer to determine algorithm
-	signer := pki.NewKeyMaterialSigner(km)
-
-	c.oidcSigningKey = km.PrivateKey
-	c.oidcSigningAlg = signer.Algorithm()
-	return nil
 }
 
 // loadPresentationTemplates loads presentation request templates from configured directory
@@ -187,30 +147,6 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	return nil
 }
 
-// generateSessionID creates a cryptographically random session identifier
-func (c *Client) generateSessionID() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return oauth2.GenerateCryptographicNonceFixedLength(32)
-	}
-	return hex.EncodeToString(b)
-}
-
-// generateAuthorizationCode creates a cryptographically random authorization code
-func (c *Client) generateAuthorizationCode() string {
-	return oauth2.GenerateCryptographicNonceFixedLength(32)
-}
-
-// generateAccessToken creates a cryptographically random access token
-func (c *Client) generateAccessToken() string {
-	return oauth2.GenerateCryptographicNonceFixedLength(32)
-}
-
-// generateRefreshToken creates a cryptographically random refresh token
-func (c *Client) generateRefreshToken() string {
-	return oauth2.GenerateCryptographicNonceFixedLength(32)
-}
-
 // generateSubjectIdentifier creates a subject identifier for the user
 // This can be either public (same across all RPs) or pairwise (different per RP)
 func (c *Client) generateSubjectIdentifier(walletID string, clientID string) string {
@@ -228,26 +164,6 @@ func (c *Client) generateSubjectIdentifier(walletID string, clientID string) str
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
-	}
-}
-
-// getSigningMethod returns the JWT signing method based on the configured algorithm
-func (c *Client) getSigningMethod() jwt.SigningMethod {
-	switch c.oidcSigningAlg {
-	case "RS256":
-		return jwt.SigningMethodRS256
-	case "RS384":
-		return jwt.SigningMethodRS384
-	case "RS512":
-		return jwt.SigningMethodRS512
-	case "ES256":
-		return jwt.SigningMethodES256
-	case "ES384":
-		return jwt.SigningMethodES384
-	case "ES512":
-		return jwt.SigningMethodES512
-	default:
-		return jwt.SigningMethodRS256
 	}
 }
 
@@ -326,7 +242,7 @@ func (c *Client) buildLegacyDCQLQuery(scopes []string) (*openid4vp.DCQL, error) 
 			ID:     scope,
 			Format: "vc+sd-jwt",
 			Meta: openid4vp.MetaQuery{
-				VCTValues: []string{credInfo.VCT},
+				VCTValues: []string{credInfo.GetVCT()},
 			},
 			Claims: make([]openid4vp.ClaimQuery, 0),
 		}

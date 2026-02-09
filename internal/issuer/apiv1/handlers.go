@@ -74,7 +74,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	}
 
 	// Construct status URI based on registry endpoint and section
-	statusURI := fmt.Sprintf("%s/statuslists/%d", c.cfg.Registry.ExternalServerURL, grpcReply.GetSection())
+	statusURI := fmt.Sprintf("%s/statuslists/%d", c.cfg.Registry.PublicURL, grpcReply.GetSection())
 	opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
 		Index: grpcReply.GetIndex(),
 		URI:   statusURI,
@@ -87,7 +87,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		ctx,
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
-		credentialConstructor.VCT,
+		credentialConstructor.GetVCT(),
 		req.DocumentData,
 		req.JWK,
 		vctm,

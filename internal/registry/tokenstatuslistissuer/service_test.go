@@ -65,7 +65,7 @@ func newTestSuite(t *testing.T) *testSuite {
 		t.Skip("Skipping test: Docker is not available")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 
 	suite := &testSuite{
 		t:      t,
@@ -165,7 +165,7 @@ func (s *testSuite) initializeConfiguration() {
 			},
 		},
 		Registry: &model.Registry{
-			ExternalServerURL: "https://registry.example.com",
+			PublicURL: "https://registry.example.com",
 			TokenStatusLists: model.TokenStatusLists{
 				KeyConfig: &pki.KeyConfig{
 					PrivateKeyPath: s.keyPath,
@@ -255,7 +255,7 @@ func newTestSuiteWithSectionSize(t *testing.T, sectionSize int64) *testSuite {
 		t.Skip("Skipping test: Docker is not available")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 
 	suite := &testSuite{
 		t:      t,

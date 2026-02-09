@@ -1,7 +1,6 @@
 package openid4vci
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -432,12 +431,12 @@ func TestCredentialOfferQR(t *testing.T) {
 	tts := []struct {
 		name                  string
 		parameters            *CredentialOfferParameters
-		walletHost            string
+		walletURL             string
 		expectedCredentialURL string
 	}{
 		{
-			name:       "openid-credential-offer",
-			walletHost: "",
+			name:      "openid-credential-offer-default",
+			walletURL: "",
 			parameters: &CredentialOfferParameters{
 				CredentialIssuer: "issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
@@ -452,8 +451,8 @@ func TestCredentialOfferQR(t *testing.T) {
 			expectedCredentialURL: "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22issuer.sunet.se%22%2C%22credential_configuration_ids%22%3A%5B%22PDA1Credential%22%5D%2C%22grants%22%3A%7B%22authorization_code%22%3A%7B%22issuer_state%22%3A%22collect_id%3Dcollect_id_1%5Cu0026vct%3DPDA1%5Cu0026authentic_source%3Dtest_authentic_source%22%7D%7D%7D",
 		},
 		{
-			name:       "wallet.dc4eu.eu+cb",
-			walletHost: "https://wallet.dc4eu.eu/cb",
+			name:      "web-wallet-https",
+			walletURL: "https://wallet.dc4eu.eu/cb",
 			parameters: &CredentialOfferParameters{
 				CredentialIssuer: "https://satosa-test-1.sunet.se",
 				CredentialConfigurationIDs: []string{
@@ -474,7 +473,7 @@ func TestCredentialOfferQR(t *testing.T) {
 			p, err := tt.parameters.CredentialOffer()
 			assert.NoError(t, err)
 
-			got, err := p.QR(0, 256, tt.walletHost)
+			got, err := p.QR(0, 256, tt.walletURL)
 			assert.NoError(t, err)
 
 			// Validate QR is not empty
@@ -488,14 +487,14 @@ func TestCredentialOfferQR(t *testing.T) {
 
 func TestCredentialOfferURIQR(t *testing.T) {
 	tts := []struct {
-		name                 string
-		parameters           *CredentialOfferParameters
-		credentialServerAddr string
-		walletURL            string
-		issuerURL            string
+		name              string
+		parameters        *CredentialOfferParameters
+		walletURL         string
+		issuerURL         string
+		expectedProtocol  string
 	}{
 		{
-			name: "valid_credential_offer_uri_qr",
+			name: "default-protocol",
 			parameters: &CredentialOfferParameters{
 				CredentialIssuer: "https://issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
@@ -507,8 +506,26 @@ func TestCredentialOfferURIQR(t *testing.T) {
 					},
 				},
 			},
-			walletURL: "https://wallet.dc4eu.eu/cb",
-			issuerURL: "https://issuer.sunet.se",
+			walletURL:        "",
+			issuerURL:        "https://issuer.sunet.se",
+			expectedProtocol: "openid-credential-offer://",
+		},
+		{
+			name: "web-wallet",
+			parameters: &CredentialOfferParameters{
+				CredentialIssuer: "https://issuer.sunet.se",
+				CredentialConfigurationIDs: []string{
+					"PDA1Credential",
+				},
+				Grants: map[string]any{
+					"authorization_code": &GrantAuthorizationCode{
+						IssuerState: fmt.Sprintf("collect_id=%s&vct=%s&authentic_source=%s", "d779badf-f333-434a-8bdf-fc0d419231ef", "PDA1", "SUNET"),
+					},
+				},
+			},
+			walletURL:        "https://wallet.dc4eu.eu/cb",
+			issuerURL:        "https://issuer.sunet.se",
+			expectedProtocol: "https://wallet.dc4eu.eu/cb",
 		},
 	}
 
@@ -525,7 +542,7 @@ func TestCredentialOfferURIQR(t *testing.T) {
 			assert.NotEmpty(t, qr.CredentialOfferURL, "CredentialOfferURL should not be empty")
 
 			// Validate the URL structure
-			assert.Contains(t, qr.CredentialOfferURL, tt.walletURL, "URL should contain wallet URL")
+			assert.Contains(t, qr.CredentialOfferURL, tt.expectedProtocol, "URL should use expected protocol/wallet URL")
 			assert.Contains(t, qr.CredentialOfferURL, "credential_offer_uri=", "URL should contain credential_offer_uri parameter")
 			assert.Contains(t, qr.CredentialOfferURL, url.QueryEscape(tt.issuerURL), "URL should contain encoded issuer URL")
 		})
@@ -600,7 +617,7 @@ func TestUnpackCredentialOffer(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.offer.Unpack(context.TODO())
+			got, err := tt.offer.Unpack(t.Context())
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.want, got)

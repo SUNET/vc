@@ -1,7 +1,6 @@
 package httphelpers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"testing"
@@ -12,7 +11,7 @@ import (
 )
 
 func TestStatusCode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("OpenID4VCI errors", func(t *testing.T) {
 		tests := []struct {

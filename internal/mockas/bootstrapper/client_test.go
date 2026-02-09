@@ -50,7 +50,7 @@ func mockClient() *Client {
 }
 
 func TestCreateJSONSourceFiles(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	c := mockClient()
 	err := c.makeIdentities("testdata/users_paris.xlsx")
 	assert.NoError(t, err)
@@ -238,7 +238,7 @@ func TestUserUpload(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Setup logger
 			log, err := logger.New("test", "", false)
@@ -275,7 +275,7 @@ func TestUserUpload(t *testing.T) {
 				// Return proper JSON response expected by vcclient
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				json.NewEncoder(w).Encode(map[string]any{
 					"status": "ok",
 					"data": map[string]string{
 						"message": "user created successfully",
@@ -285,7 +285,7 @@ func TestUserUpload(t *testing.T) {
 			defer mockServer.Close()
 
 			// Create client with mock vcClient
-			vcClient, err := vcclient.New(&vcclient.Config{ApigwFQDN: mockServer.URL}, log)
+			vcClient, err := vcclient.New(&vcclient.Config{ApigwURL: mockServer.URL}, log)
 			require.NoError(t, err)
 
 			client := &Client{
@@ -671,7 +671,7 @@ func TestDocumentUploader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Setup logger
 			log, err := logger.New("test", "", false)
@@ -708,7 +708,7 @@ func TestDocumentUploader(t *testing.T) {
 				// Return proper JSON response expected by vcclient
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				json.NewEncoder(w).Encode(map[string]any{
 					"status": "ok",
 					"data": map[string]string{
 						"message": "document uploaded successfully",
@@ -718,7 +718,7 @@ func TestDocumentUploader(t *testing.T) {
 			defer mockServer.Close()
 
 			// Create client with mock vcClient
-			vcClient, err := vcclient.New(&vcclient.Config{ApigwFQDN: mockServer.URL}, log)
+			vcClient, err := vcclient.New(&vcclient.Config{ApigwURL: mockServer.URL}, log)
 			require.NoError(t, err)
 
 			client := &Client{
