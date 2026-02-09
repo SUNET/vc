@@ -9,7 +9,7 @@ user -> issuer: selects to use PID as authorization method
 issuer -> wallet: callback with request_uri
 wallet -> verifier: /verification/request-object
 verifier -> wallet: Authorization Request as signed JWT 
-note right: wallet gui
+note right of wallet: wallet gui
 wallet -> verifier: Authorization Response as JWE
 user -> issuer: consenting to use pid
 

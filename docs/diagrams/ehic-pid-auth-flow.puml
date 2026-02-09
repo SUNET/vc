@@ -10,10 +10,10 @@ oauth -> oauth: detects auth_method=pid_auth
 oauth -> oauth: /authorization/consent
 oauth -> wallet: redirect with verification request_uri
 wallet -> verifier: /verification/request-object
-note right: DCQL query for PID\n(given_name, birthdate, family_name)
+note right of wallet: DCQL query for PID\n(given_name, birthdate, family_name)
 verifier -> wallet: signed JWT with DCQL
 wallet -> verifier: /verification/direct_post (PID VP token)
-note right: Extract identity from PID\nQuery EHIC docs by identity
+note right of wallet: Extract identity from PID\nQuery EHIC docs by identity
 verifier -> oauth: cache EHIC document in session
 wallet -> oauth: /authorization/consent/callback
 wallet -> oauth: /user/lookup
