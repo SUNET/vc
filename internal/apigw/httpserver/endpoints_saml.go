@@ -273,8 +273,8 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	defer span.End()
 
 	// Build credential offer parameters
-	// Generate pre-authorized code
-	preAuthCode, err := crypto.GenerateSecureToken(32, 0)
+	// Generate pre-authorized code (fixed-length 32-character string)
+	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
 	}
