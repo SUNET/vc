@@ -148,12 +148,12 @@ func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[str
 			return nil, fmt.Errorf("failed to parse JWK: %w", err)
 		}
 
-		// Calculate thumbprint
+		// Calculate thumbprint (RFC 7638: base64url-encoded)
 		tp, err := key.Thumbprint(crypto.SHA256)
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate key thumbprint: %w", err)
 		}
-		thumbprint = fmt.Sprintf("%x", tp)
+		thumbprint = base64.RawURLEncoding.EncodeToString(tp)
 
 		// Export key for signature verification
 		algRaw, exists := t.Header["alg"]
