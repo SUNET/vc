@@ -86,7 +86,8 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 		}
 		sort.Ints(result.MsoMdoc.IssuerAuthAlgValues)
 		// DeviceAuth typically uses the same algorithms
-		result.MsoMdoc.DeviceAuthAlgValues = result.MsoMdoc.IssuerAuthAlgValues
+		result.MsoMdoc.DeviceAuthAlgValues = make([]int, len(result.MsoMdoc.IssuerAuthAlgValues))
+		copy(result.MsoMdoc.DeviceAuthAlgValues, result.MsoMdoc.IssuerAuthAlgValues)
 	}
 
 	return result
