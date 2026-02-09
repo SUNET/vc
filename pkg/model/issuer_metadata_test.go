@@ -67,7 +67,7 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 		Description: "Test Description",
 		Display: []sdjwtvc.VCTMDisplay{
 			{
-				Lang:        "en-US",
+				Locale:        "en-US",
 				Name:        "VCTM Display Name",
 				Description: "VCTM Description",
 			},

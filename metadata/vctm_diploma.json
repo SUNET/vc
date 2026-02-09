@@ -6,7 +6,7 @@
   "$comment": "",
   "display": [
     {
-      "lang": "en-US",
+      "locale": "en-US",
       "name": "Diploma Credential",
       "description": "Portable European Learning Model (ELM) Diploma Credential.",
       "rendering": {
@@ -38,7 +38,7 @@
       "svg_id": "givenName",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Given name",
           "description": "The given name of the individual who holds the diploma."
         }
@@ -54,7 +54,7 @@
       "svg_id": "familyName",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Family name",
           "description": "The family name of the individual who holds the diploma."
         }
@@ -68,7 +68,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Date of birth",
           "description": "The date of birth of the individual who holds the diploma."
         }
@@ -85,7 +85,7 @@
       "svg_id": "title",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Title",
           "description": "The title of the diploma awarded to the individual."
         }
@@ -104,7 +104,7 @@
       "svg_id": "awardingInstitution",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Awarding institution",
           "description": "The awarding institution of the diploma."
         }
@@ -121,7 +121,7 @@
       "svg_id": "awardingDate",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Awarding date",
           "description": "The awarding date of the diploma."
         }
@@ -143,7 +143,7 @@
       "svg_id": "country",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Country",
           "description": "The country where the issuing institution is located."
         }

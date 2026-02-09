@@ -5,7 +5,7 @@
   "$comment": "test comment",
   "display": [
     {
-      "lang": "en-US",
+      "locale": "en-US",
       "name": "Test Credential",
       "description": "Test Credential.",
       "rendering": {
@@ -34,7 +34,7 @@
       "sd": "always",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Family Name"
         }
       ]
@@ -47,7 +47,7 @@
       "svg_id": "personal_administrative_number_6",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Personal ID",
           "description": "Unique personal identifier used by social security services."
         }
@@ -60,7 +60,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Issuing authority"
         }
       ]

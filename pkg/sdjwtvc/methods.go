@@ -57,9 +57,15 @@ func (c *Client) BuildCredential(issuer string, kid string, privateKey any, vct 
 	fmt.Println("buildCredential", "body", body, "holderJWK", holderJWK)
 
 	// Add standard JWT claims
+	// Per SD-JWT VC draft-13 section 3.2.2.2:
+	// - iss: OPTIONAL (set when provided)
+	// - nbf, exp: OPTIONAL
+	// - vct: REQUIRED
 	body["nbf"] = int64(time.Now().Unix())
 	body["exp"] = time.Now().Add(time.Duration(opts.ExpirationDays) * 24 * time.Hour).Unix()
-	body["iss"] = issuer
+	if issuer != "" {
+		body["iss"] = issuer
+	}
 	body["jti"] = uuid.NewString()
 	body["vct"] = vct
 
@@ -131,9 +137,15 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 	}
 
 	// Add standard JWT claims
+	// Per SD-JWT VC draft-13 section 3.2.2.2:
+	// - iss: OPTIONAL (set when provided)
+	// - nbf, exp: OPTIONAL
+	// - vct: REQUIRED
 	body["nbf"] = int64(time.Now().Unix())
 	body["exp"] = time.Now().Add(time.Duration(opts.ExpirationDays) * 24 * time.Hour).Unix()
-	body["iss"] = issuer
+	if issuer != "" {
+		body["iss"] = issuer
+	}
 	body["jti"] = uuid.NewString()
 	body["vct"] = vct
 

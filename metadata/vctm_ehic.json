@@ -6,7 +6,7 @@
   "$comment": "Implementation of the DC4EU VCTM may require Member State-specific clarifications to align with national policies governing the display of included claims.",
   "display": [
     {
-      "lang": "en-US",
+      "locale": "en-US",
       "name": "EHIC SD-JWT VC",
       "description": "European Health Insurance Card (EHIC) SD-JWT VC",
       "rendering": {
@@ -39,7 +39,7 @@
       "svg_id": "personal_administrative_number_6",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Social Security PIN",
           "description": "Unique personal identifier used by social security services."
         }
@@ -52,7 +52,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Issuing authority"
         }
       ]
@@ -65,7 +65,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Issuing authority id",
           "description": "EHIC issuing authority unique identifier."
         }
@@ -79,7 +79,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Issuing authority name",
           "description": "EHIC issuing authority name."
         }
@@ -93,7 +93,7 @@
       "svg_id": "issuing_country_2",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Issuing country",
           "description": "EHIC issuing country."
         }
@@ -107,7 +107,7 @@
       "svg_id": "date_of_expiry_9",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Expiry date",
           "description": "EHIC expiration date."
         }
@@ -120,7 +120,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Issue date",
           "description": "EHIC validity start date."
         }
@@ -133,7 +133,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Competent institution"
         }
       ]
@@ -147,7 +147,7 @@
       "svg_id": "authentic_source_id_7a",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Competent institution id",
           "description": "Identifier of the competent insitution as registered in the EESSI Institution Repository."
         }
@@ -162,7 +162,7 @@
       "svg_id": "authentic_source_name_7b",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Competent institution name",
           "description": "Name of the competent insitution as registered in the EESSI Institution Repository."
         }
@@ -175,7 +175,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Ending date",
           "description": "End date of the insurance coverage."
         }
@@ -188,7 +188,7 @@
       "sd": "never",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Starting date",
           "description": "Start date of the insurance coverage."
         }
@@ -202,7 +202,7 @@
       "svg_id": "document_number_8",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Document number",
           "description": "EHIC unique document identifier."
         }

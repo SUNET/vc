@@ -768,7 +768,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			for i, vctmDisplay := range constructor.VCTM.Display {
 				display := openid4vci.CredentialMetadataDisplay{
 					Name:        vctmDisplay.Name,
-					Locale:      vctmDisplay.Lang,
+					Locale:      vctmDisplay.Locale,
 					Description: vctmDisplay.Description,
 				}
 
