@@ -42,8 +42,9 @@ type Service struct {
 	log          *logger.Log
 	auditLogChan chan *AuditLog
 	wg           sync.WaitGroup
-	destinations []*Destination // pre-parsed destinations
-	mu           sync.Mutex     // mutex for file operations
+	cancel       context.CancelFunc // cancels processAuditLog
+	destinations []*Destination     // pre-parsed destinations
+	mu           sync.Mutex         // mutex for file operations
 }
 
 // New creates a new auditlog service
@@ -75,8 +76,10 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 		service.log.Info("Audit log disabled")
 	}
 
+	processCtx, processCancel := context.WithCancel(ctx)
+	service.cancel = processCancel
 	service.wg.Add(1)
-	go service.processAuditLog(ctx)
+	go service.processAuditLog(processCtx)
 
 	service.log.Info("Started")
 
@@ -171,8 +174,11 @@ func (s *Service) Close(ctx context.Context) error {
 		}
 	}
 
-	ctx.Done()
-	s.wg.Done()
+	// Signal processAuditLog to stop
+	if s.cancel != nil {
+		s.cancel()
+	}
+
 	s.wg.Wait()
 
 	// Close all file destinations
