@@ -143,14 +143,9 @@ func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[str
 			return nil, fmt.Errorf("failed to marshal JWK: %w", err)
 		}
 
-		keySet, err := jwk.Parse(jwkBytes)
+		key, err := jwk.ParseKey(jwkBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse JWK: %w", err)
-		}
-
-		key, ok := keySet.Key(0)
-		if !ok {
-			return nil, fmt.Errorf("no key found in JWK set")
 		}
 
 		// Calculate thumbprint
@@ -161,8 +156,15 @@ func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[str
 		thumbprint = fmt.Sprintf("%x", tp)
 
 		// Export key for signature verification
-		alg := t.Header["alg"]
-		switch jwt.GetSigningMethod(alg.(string)).(type) {
+		algRaw, exists := t.Header["alg"]
+		if !exists {
+			return nil, fmt.Errorf("missing alg in token header")
+		}
+		algStr, ok := algRaw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid alg type in token header: expected string, got %T", algRaw)
+		}
+		switch jwt.GetSigningMethod(algStr).(type) {
 		case *jwt.SigningMethodECDSA:
 			var ecKey ecdsa.PublicKey
 			if err := jwk.Export(key, &ecKey); err != nil {
@@ -176,7 +178,7 @@ func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[str
 			}
 			return &rsaKey, nil
 		default:
-			return nil, fmt.Errorf("unsupported signing method: %v", alg)
+			return nil, fmt.Errorf("unsupported signing method: %v", algStr)
 		}
 	})
 
