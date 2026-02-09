@@ -1,6 +1,8 @@
 package apiv1
 
 import (
+	"encoding/json"
+	"math"
 	"sort"
 
 	"vc/pkg/openid4vci"
@@ -50,9 +52,11 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 		if format == "mso_mdoc" {
 			// mso_mdoc uses integer COSE algorithm identifiers
 			for _, alg := range config.CredentialSigningAlgValuesSupported {
-				// COSE identifiers are integers (e.g., -7 for ES256)
-				if algInt, ok := alg.(float64); ok {
-					mdocAlgs[int(algInt)] = true
+				// COSE identifiers are integers (e.g., -7 for ES256).
+				// Handle common numeric types that may appear depending
+				// on the deserialization source (JSON, YAML, typed structs).
+				if v, ok := toCOSEAlgID(alg); ok {
+					mdocAlgs[v] = true
 				}
 			}
 		}
@@ -91,4 +95,44 @@ func deriveVPFormatsFromMetadata(metadata *openid4vci.CredentialIssuerMetadataPa
 	}
 
 	return result
+}
+
+// toCOSEAlgID converts an untyped value to a COSE algorithm identifier (int),
+// handling the numeric types that commonly appear when metadata is deserialized
+// from JSON, YAML, or built from untyped Go structs.
+func toCOSEAlgID(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int8:
+		return int(n), true
+	case int16:
+		return int(n), true
+	case int32:
+		return int(n), true
+	case int64:
+		if n >= math.MinInt && n <= math.MaxInt {
+			return int(n), true
+		}
+		return 0, false
+	case float32:
+		if n == float32(int(n)) {
+			return int(n), true
+		}
+		return 0, false
+	case float64:
+		if n == float64(int(n)) {
+			return int(n), true
+		}
+		return 0, false
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			if i >= math.MinInt && i <= math.MaxInt {
+				return int(i), true
+			}
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
 }

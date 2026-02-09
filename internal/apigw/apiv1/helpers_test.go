@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"testing"
 	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
@@ -233,6 +234,74 @@ func TestDeriveVPFormatsFromMetadata(t *testing.T) {
 				MsoMdoc: &openid4vp.MsoMdocFormat{
 					IssuerAuthAlgValues: []int{-7, -35},
 					DeviceAuthAlgValues: []int{-7, -35},
+				},
+			},
+		},
+		{
+			name: "mso_mdoc with int algorithm IDs",
+			metadata: &openid4vci.CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]openid4vci.CredentialConfigurationsSupported{
+					"pid_mdoc": {
+						Format:                              "mso_mdoc",
+						CredentialSigningAlgValuesSupported: []any{int(-7), int(-35)},
+					},
+				},
+			},
+			expected: &openid4vp.VPFormatsSupported{
+				MsoMdoc: &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-7, -35},
+					DeviceAuthAlgValues: []int{-7, -35},
+				},
+			},
+		},
+		{
+			name: "mso_mdoc with int64 algorithm IDs",
+			metadata: &openid4vci.CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]openid4vci.CredentialConfigurationsSupported{
+					"pid_mdoc": {
+						Format:                              "mso_mdoc",
+						CredentialSigningAlgValuesSupported: []any{int64(-7), int64(-35)},
+					},
+				},
+			},
+			expected: &openid4vp.VPFormatsSupported{
+				MsoMdoc: &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-7, -35},
+					DeviceAuthAlgValues: []int{-7, -35},
+				},
+			},
+		},
+		{
+			name: "mso_mdoc with json.Number algorithm IDs",
+			metadata: &openid4vci.CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]openid4vci.CredentialConfigurationsSupported{
+					"pid_mdoc": {
+						Format:                              "mso_mdoc",
+						CredentialSigningAlgValuesSupported: []any{json.Number("-7"), json.Number("-35")},
+					},
+				},
+			},
+			expected: &openid4vp.VPFormatsSupported{
+				MsoMdoc: &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-7, -35},
+					DeviceAuthAlgValues: []int{-7, -35},
+				},
+			},
+		},
+		{
+			name: "mso_mdoc with mixed numeric types",
+			metadata: &openid4vci.CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]openid4vci.CredentialConfigurationsSupported{
+					"pid_mdoc": {
+						Format:                              "mso_mdoc",
+						CredentialSigningAlgValuesSupported: []any{float64(-7), int(-35), int64(-37), json.Number("-8")},
+					},
+				},
+			},
+			expected: &openid4vp.VPFormatsSupported{
+				MsoMdoc: &openid4vp.MsoMdocFormat{
+					IssuerAuthAlgValues: []int{-37, -35, -8, -7},
+					DeviceAuthAlgValues: []int{-37, -35, -8, -7},
 				},
 			},
 		},
