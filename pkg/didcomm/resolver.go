@@ -11,6 +11,8 @@ import (
 	"fmt"
 
 	"vc/pkg/keyresolver"
+
+	"filippo.io/edwards25519"
 )
 
 // Resolver provides DID resolution for DIDComm operations.
@@ -171,21 +173,31 @@ func (r *Resolver) ResolveService(ctx context.Context, did string) (*DIDCommServ
 // ed25519PublicKeyToX25519 converts an Ed25519 public key to X25519 for key agreement.
 // This is done by interpreting the Ed25519 key as a point on the Edwards curve
 // and converting to the Montgomery form used by X25519.
+//
+// The mathematical basis:
+// - Ed25519 uses the Edwards curve: -x² + y² = 1 + d*x²*y²  where d = -121665/121666
+// - X25519 uses the Montgomery curve: v² = u³ + 486662*u² + u
+// - They are birationally equivalent via: u = (1+y)/(1-y), v = √(-486664) * u/x
+//
+// Reference: RFC 7748 and https://cr.yp.to/ecdh.html
 func ed25519PublicKeyToX25519(edPub ed25519.PublicKey) (*ecdh.PublicKey, error) {
 	if len(edPub) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid Ed25519 public key size")
+		return nil, fmt.Errorf("invalid Ed25519 public key size: got %d, want %d", len(edPub), ed25519.PublicKeySize)
 	}
 
-	// The conversion from Ed25519 to X25519 requires careful handling.
-	// For proper implementation, we should use a dedicated library.
-	// This is a placeholder that returns an error until proper conversion is implemented.
+	// Use filippo.io/edwards25519 for proper curve point handling
+	// This library provides BytesMontgomery() which correctly converts
+	// Edwards25519 points to Montgomery form (X25519)
+	point, err := new(edwards25519.Point).SetBytes(edPub)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Ed25519 public key: %w", err)
+	}
 
-	// TODO: Implement proper Ed25519 -> X25519 conversion
-	// Options:
-	// 1. Use filippo.io/edwards25519 for proper point conversion
-	// 2. Use golang.org/x/crypto/curve25519 with proper point transformation
+	// BytesMontgomery converts the point to Montgomery u-coordinate
+	// This handles the birational equivalence correctly
+	xBytes := point.BytesMontgomery()
 
-	return nil, fmt.Errorf("Ed25519 to X25519 conversion not yet implemented")
+	return ecdh.X25519().NewPublicKey(xBytes)
 }
 
 // ecdsaPublicKeyToECDH converts an ECDSA public key to ECDH format.

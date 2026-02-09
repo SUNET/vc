@@ -12,6 +12,7 @@ var (
 	ErrVerificationFailed   = errors.New("didcomm/crypto: verification failed")
 	ErrUnsupportedAlgorithm = errors.New("didcomm/crypto: unsupported algorithm")
 	ErrInvalidKey           = errors.New("didcomm/crypto: invalid key")
+	ErrInvalidNonce         = errors.New("didcomm/crypto: invalid nonce")
 	ErrNoRecipients         = errors.New("didcomm/crypto: no recipients specified")
 	ErrRecipientNotFound    = errors.New("didcomm/crypto: recipient key not found")
 	ErrInvalidJWE           = errors.New("didcomm/crypto: invalid JWE")

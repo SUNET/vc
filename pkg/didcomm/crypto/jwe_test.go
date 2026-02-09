@@ -74,7 +74,8 @@ func TestParseKeyAlgorithm(t *testing.T) {
 		{"ECDH-ES", false},
 		{"ECDH-ES+A256KW", false},
 		{"ECDH-ES+A128KW", false},
-		{"ECDH-1PU", true}, // Not yet implemented
+		{"ECDH-1PU", false},        // Now implemented
+		{"ECDH-1PU+A256KW", false}, // Now implemented
 		{"UNKNOWN", true},
 	}
 
