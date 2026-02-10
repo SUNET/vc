@@ -22,6 +22,8 @@ Shared configuration used across all services.
 
 ### `common`
 
+> **Path:** `.common`
+
 | Field                 | Type     | Description                         | Default | Required |
 | --------------------- | -------- | ----------------------------------- | ------- | -------- |
 | `production`          | `bool`   | Enable production mode              | `true`  | No       |
@@ -33,11 +35,15 @@ Shared configuration used across all services.
 
 ### `log`
 
+> **Path:** `.common.log`
+
 | Field         | Type     | Description        | Default | Required |
 | ------------- | -------- | ------------------ | ------- | -------- |
 | `folder_path` | `string` | Path to log folder | -       | No       |
 
 ### `mongo`
+
+> **Path:** `.common.mongo`
 
 | Field | Type     | Description            | Default | Required |
 | ----- | -------- | ---------------------- | ------- | -------- |
@@ -50,6 +56,8 @@ mongo:
 ```
 
 ### `tracing`
+
+> **Path:** `.common.tracing`
 
 OpenTelemetry configuration for distributed tracing.
 
@@ -68,6 +76,8 @@ tracing:
 
 ### `kafka`
 
+> **Path:** `.common.kafka`
+
 | Field     | Type       | Description              | Default                          | Required         |
 | --------- | ---------- | ------------------------ | -------------------------------- | ---------------- |
 | `enabled` | `bool`     | Enable Kafka integration | `false`                          | No               |
@@ -84,12 +94,16 @@ kafka:
 
 ### `credential_offer_qr`
 
+> **Path:** `.common.credential_offer_qr`
+
 | Field  | Type     | Description                                                         | Default            | Required |
 | ------ | -------- | ------------------------------------------------------------------- | ------------------ | -------- |
 | `type` | `string` | Credential offer type: `credential_offer` or `credential_offer_uri` | `credential_offer` | No       |
 | `qr`   | `object` | QR code configuration                                               | -                  | No       |
 
 ### `qr`
+
+> **Path:** `.common.credential_offer_qr.qr`
 
 QR code generation settings.
 
@@ -114,6 +128,8 @@ credential_offer_qr:
 Defines authentication methods for credential issuance. Each method specifies what credentials the wallet must present. The configuration key is `auth_methods` at the root level.
 
 ### Authentication Method Structure
+
+> **Path:** `.auth_methods.<method_name>`
 
 | Field    | Type    | Description                                     | Default | Required     |
 | -------- | ------- | ----------------------------------------------- | ------- | ------------ |
@@ -146,6 +162,8 @@ auth_methods:
 Maps OAuth2 scopes to credential configurations. The key is the scope name used in authorization requests.
 
 ### Credential Constructor Structure
+
+> **Path:** `.credential_constructor.<scope>`
 
 | Field            | Type     | Description                                                           | Default | Required |
 | ---------------- | -------- | --------------------------------------------------------------------- | ------- | -------- |
@@ -189,6 +207,8 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `apigw`
 
+> **Path:** `.apigw`
+
 | Field                 | Type     | Description                                                                        | Default | Required |
 | --------------------- | -------- | ---------------------------------------------------------------------------------- | ------- | -------- |
 | `api_server`          | `object` | HTTP API server configuration                                                      | -       | Yes      |
@@ -205,6 +225,8 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `api_server`
 
+> **Path:** `.apigw.api_server`
+
 HTTP API server configuration.
 
 | Field        | Type     | Description               | Default | Required |
@@ -216,6 +238,8 @@ HTTP API server configuration.
 
 ### `tls`
 
+> **Path:** `.apigw.api_server.tls`
+
 | Field            | Type     | Description             | Default | Required         |
 | ---------------- | -------- | ----------------------- | ------- | ---------------- |
 | `enabled`        | `bool`   | Enable TLS              | `false` | No               |
@@ -224,12 +248,16 @@ HTTP API server configuration.
 
 ### `basic_auth`
 
+> **Path:** `.apigw.api_server.basic_auth`
+
 | Field     | Type     | Description                      | Default | Required |
 | --------- | -------- | -------------------------------- | ------- | -------- |
 | `enabled` | `bool`   | Enable HTTP Basic authentication | `false` | No       |
 | `users`   | `object` | Username to password mapping     | -       | No       |
 
 ### `cors`
+
+> **Path:** `.apigw.api_server.cors`
 
 | Field             | Type    | Description          | Default | Required |
 | ----------------- | ------- | -------------------- | ------- | -------- |
@@ -253,12 +281,16 @@ apigw:
 
 ### `credential_offers`
 
+> **Path:** `.apigw.credential_offers`
+
 | Field        | Type     | Description                      | Default | Required |
 | ------------ | -------- | -------------------------------- | ------- | -------- |
 | `issuer_url` | `string` | Issuer URL for credential offers | -       | Yes      |
 | `wallets`    | `object` | Wallet redirect configurations   | -       | Yes      |
 
 ### `wallets`
+
+> **Path:** `.apigw.credential_offers.wallets.<name>`
 
 | Field          | Type     | Description              | Default | Required |
 | -------------- | -------- | ------------------------ | ------- | -------- |
@@ -280,6 +312,8 @@ credential_offers:
 
 ### `issuer_metadata`
 
+> **Path:** `.apigw.issuer_metadata`
+
 OpenID4VCI issuer metadata configuration.
 
 | Field                                     | Type     | Description                  | Default                                                  | Required |
@@ -296,12 +330,16 @@ OpenID4VCI issuer metadata configuration.
 
 ### `oauth_server`
 
+> **Path:** `.apigw.oauth_server`
+
 | Field            | Type     | Description                  | Default | Required |
 | ---------------- | -------- | ---------------------------- | ------- | -------- |
 | `token_endpoint` | `string` | OAuth2 token endpoint URL    | -       | Yes      |
 | `clients`        | `object` | OAuth2 client configurations | -       | Yes      |
 
 ### `saml`
+
+> **Path:** `.apigw.saml`
 
 SAML Service Provider configuration for credential issuance via SAML authentication.
 
@@ -323,6 +361,8 @@ SAML Service Provider configuration for credential issuance via SAML authenticat
 
 ### `static_idp_metadata`
 
+> **Path:** `.apigw.saml.static_idp_metadata`
+
 | Field           | Type     | Description                       | Default | Required |
 | --------------- | -------- | --------------------------------- | ------- | -------- |
 | `entity_id`     | `string` | IdP entity identifier             | -       | Yes      |
@@ -333,6 +373,8 @@ SAML Service Provider configuration for credential issuance via SAML authenticat
 
 ### Credential Mapping Structure
 
+> **Path:** `.apigw.saml.credential_mappings.<type>`
+
 Maps external attributes to credential claims for a specific credential type.
 
 | Field                  | Type     | Description                                    | Default | Required |
@@ -342,6 +384,8 @@ Maps external attributes to credential claims for a specific credential type.
 | `default_idp`          | `string` | Default IdP entityID for this credential type  | -       | No       |
 
 ### Attribute Structure
+
+> **Path:** `.apigw.saml.credential_mappings.<type>.attributes.<oid>`
 
 | Field       | Type     | Description                                         | Default | Required |
 | ----------- | -------- | --------------------------------------------------- | ------- | -------- |
@@ -375,6 +419,8 @@ saml:
 
 ### `oidcrp`
 
+> **Path:** `.apigw.oidcrp`
+
 OIDC Relying Party configuration for credential issuance via OIDC authentication.
 
 | Field                  | Type     | Description                                           | Default                          | Required         |
@@ -398,6 +444,8 @@ OIDC Relying Party configuration for credential issuance via OIDC authentication
 *Note: Required unless `dynamic_registration.enabled` is true.
 
 ### `dynamic_registration`
+
+> **Path:** `.apigw.oidcrp.dynamic_registration`
 
 | Field                  | Type     | Description                                                | Default | Required |
 | ---------------------- | -------- | ---------------------------------------------------------- | ------- | -------- |
@@ -431,6 +479,8 @@ oidcrp:
 
 ### gRPC Client Configuration
 
+> **Path:** `.apigw.issuer_client`, `.apigw.registry_client`, `.issuer.registry_client`
+
 mTLS configuration for gRPC client connections.
 
 | Field            | Type     | Description                      | Default | Required |
@@ -450,6 +500,8 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 ### `issuer`
 
+> **Path:** `.issuer`
+
 | Field             | Type     | Description                   | Default | Required |
 | ----------------- | -------- | ----------------------------- | ------- | -------- |
 | `api_server`      | `object` | HTTP API server configuration | -       | Yes      |
@@ -463,12 +515,16 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 ### `grpc_server`
 
+> **Path:** `.issuer.grpc_server`, `.verifier.grpc_server`, `.registry.grpc_server`
+
 | Field  | Type     | Description        | Default | Required |
 | ------ | -------- | ------------------ | ------- | -------- |
 | `addr` | `string` | Listen address     | `:8090` | No       |
 | `tls`  | `object` | mTLS configuration | -       | No       |
 
 ### gRPC Server TLS Configuration
+
+> **Path:** `.<service>.grpc_server.tls`
 
 mTLS configuration for gRPC server.
 
@@ -496,6 +552,8 @@ grpc_server:
 
 ### `jwt_attribute`
 
+> **Path:** `.issuer.jwt_attribute`
+
 JWT credential attribute configuration.
 
 | Field                        | Type     | Description                                           | Default | Required |
@@ -509,6 +567,8 @@ JWT credential attribute configuration.
 
 ### `mdoc`
 
+> **Path:** `.issuer.mdoc`
+
 mDL (ISO 18013-5) issuer configuration.
 
 | Field                    | Type       | Description                                          | Default            | Required |
@@ -518,6 +578,8 @@ mDL (ISO 18013-5) issuer configuration.
 | `digest_algorithm`       | `string`   | Digest algorithm: "SHA-256", "SHA-384", or "SHA-512" | `SHA-256`          | No       |
 
 ### `audit_log`
+
+> **Path:** `.issuer.audit_log`
 
 | Field                | Type       | Description                                               | Default | Required         |
 | -------------------- | ---------- | --------------------------------------------------------- | ------- | ---------------- |
@@ -538,6 +600,8 @@ audit_log:
 
 ### `pkcs11`
 
+> **Path:** `.<service>.key_config.pkcs11`
+
 PKCS#11 HSM configuration for hardware security module integration.
 
 | Field         | Type     | Description            | Default                           | Required |
@@ -555,6 +619,8 @@ PKCS#11 HSM configuration for hardware security module integration.
 Configuration for the Verifier service that verifies credentials and acts as an OIDC Provider.
 
 ### `verifier`
+
+> **Path:** `.verifier`
 
 | Field                    | Type     | Description                                               | Default | Required |
 | ------------------------ | -------- | --------------------------------------------------------- | ------- | -------- |
@@ -574,6 +640,8 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 
 ### `oidc`
 
+> **Path:** `.verifier.oidc`
+
 OIDC Provider configuration for the verifier's role as an OpenID Provider.
 
 | Field                    | Type     | Description                            | Default | Required |
@@ -589,6 +657,8 @@ OIDC Provider configuration for the verifier's role as an OpenID Provider.
 
 ### `openid4vp`
 
+> **Path:** `.verifier.openid4vp`
+
 | Field                       | Type     | Description                                   | Default | Required |
 | --------------------------- | -------- | --------------------------------------------- | ------- | -------- |
 | `presentation_timeout`      | `int`    | Presentation timeout in seconds               | `300`   | No       |
@@ -596,6 +666,8 @@ OIDC Provider configuration for the verifier's role as an OpenID Provider.
 | `presentation_requests_dir` | `string` | Directory with presentation request templates | -       | No       |
 
 ### Supported Credential Structure
+
+> **Path:** `.verifier.openid4vp.supported_credentials[]`
 
 | Field    | Type     | Description                                      | Default | Required |
 | -------- | -------- | ------------------------------------------------ | ------- | -------- |
@@ -617,6 +689,8 @@ openid4vp:
 
 ### `digital_credentials`
 
+> **Path:** `.verifier.digital_credentials`
+
 W3C Digital Credentials API configuration for browser-based credential presentation.
 
 | Field               | Type     | Description                                                      | Default                                  | Required |
@@ -629,6 +703,8 @@ W3C Digital Credentials API configuration for browser-based credential presentat
 | `deep_link_scheme`  | `string` | Deep link scheme for mobile wallets                              | -                                        | No       |
 
 ### `authorization_page_css`
+
+> **Path:** `.verifier.authorization_page_css`
 
 Customization for the authorization page styling.
 
@@ -645,6 +721,8 @@ Customization for the authorization page styling.
 
 ### `credential_display`
 
+> **Path:** `.verifier.credential_display`
+
 Controls credential display before sending to RP.
 
 | Field                  | Type   | Description                            | Default | Required |
@@ -657,6 +735,8 @@ Controls credential display before sending to RP.
 
 ### `trust`
 
+> **Path:** `.verifier.trust`
+
 Configuration for key resolution and trust evaluation via go-trust.
 
 | Field               | Type     | Description                  | Default                  | Required |
@@ -667,6 +747,8 @@ Configuration for key resolution and trust evaluation via go-trust.
 | `enabled`           | `bool`   | Enable trust evaluation      | `true`                   | No       |
 
 ### Trust Policy Structure
+
+> **Path:** `.verifier.trust.trust_policies.<role>`
 
 | Field                      | Type    | Description                 | Default | Required |
 | -------------------------- | ------- | --------------------------- | ------- | -------- |
@@ -700,6 +782,8 @@ Configuration for the Registry service that manages credential status.
 
 ### `registry`
 
+> **Path:** `.registry`
+
 | Field                | Type     | Description                                               | Default | Required |
 | -------------------- | -------- | --------------------------------------------------------- | ------- | -------- |
 | `api_server`         | `object` | HTTP API server configuration                             | -       | Yes      |
@@ -709,6 +793,8 @@ Configuration for the Registry service that manages credential status.
 | `admin_gui`          | `object` | Admin GUI configuration                                   | -       | No       |
 
 ### `token_status_lists`
+
+> **Path:** `.registry.token_status_lists`
 
 Token Status List configuration per draft-ietf-oauth-status-list.
 
@@ -720,6 +806,8 @@ Token Status List configuration per draft-ietf-oauth-status-list.
 | `rate_limit_requests_per_minute` | `int`    | Rate limit per IP                 | `60`                  | No       |
 
 ### `admin_gui`
+
+> **Path:** `.registry.admin_gui`
 
 | Field            | Type     | Description                | Default | Required         |
 | ---------------- | -------- | -------------------------- | ------- | ---------------- |
@@ -735,6 +823,8 @@ Token Status List configuration per draft-ietf-oauth-status-list.
 Configuration for the Mock Authentic Source service used for testing.
 
 ### `mockas`
+
+> **Path:** `.mock_as`
 
 | Field             | Type     | Description                      | Default          | Required |
 | ----------------- | -------- | -------------------------------- | ---------------- | -------- |
@@ -761,6 +851,8 @@ mock_as:
 Configuration for the User Interface service.
 
 ### `ui`
+
+> **Path:** `.ui`
 
 | Field                                   | Type     | Description                   | Default | Required |
 | --------------------------------------- | -------- | ----------------------------- | ------- | -------- |
