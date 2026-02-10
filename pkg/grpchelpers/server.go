@@ -23,7 +23,7 @@ import (
 // If TLS is disabled, returns nil (for insecure server).
 // If TLS is enabled without client CA, uses server-only TLS.
 // If TLS is enabled with client CA, uses mutual TLS (mTLS) requiring client certificates.
-// If AllowedClientFingerprints is set, adds an interceptor to verify client cert fingerprints.
+// If AllowedClientFingerprints or AllowedClientDNs is set, adds an interceptor to verify client certs.
 func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	if !cfg.TLS.Enabled {
 		return nil, nil
@@ -59,18 +59,11 @@ func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	creds := credentials.NewTLS(tlsConfig)
 	opts := []grpc.ServerOption{grpc.Creds(creds)}
 
-	// Add fingerprint verification interceptor if allowlist is configured
-	if len(cfg.TLS.AllowedClientFingerprints) > 0 {
-		// Build normalized allowlist: normalized fingerprint -> friendly name
-		allowedSet := make(map[string]string, len(cfg.TLS.AllowedClientFingerprints))
-		for fp, name := range cfg.TLS.AllowedClientFingerprints {
-			// Normalize: remove "SHA256:" prefix if present, lowercase, remove colons
-			normalized := normalizeFingerprint(fp)
-			allowedSet[normalized] = name
-		}
-
-		interceptor := fingerprintUnaryInterceptor(allowedSet)
-		streamInterceptor := fingerprintStreamInterceptor(allowedSet)
+	// Add client identity verification interceptor if any allowlist is configured
+	allowedFingerprints, allowedDNs := buildClientAllowlists(cfg.TLS)
+	if allowedFingerprints != nil || allowedDNs != nil {
+		interceptor := clientAuthUnaryInterceptor(allowedFingerprints, allowedDNs)
+		streamInterceptor := clientAuthStreamInterceptor(allowedFingerprints, allowedDNs)
 		opts = append(opts,
 			grpc.UnaryInterceptor(interceptor),
 			grpc.StreamInterceptor(streamInterceptor),
@@ -78,6 +71,26 @@ func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	}
 
 	return opts, nil
+}
+
+// buildClientAllowlists normalizes the fingerprint and DN allowlists from the TLS config.
+// Returns nil maps when the respective allowlist is not configured.
+func buildClientAllowlists(tlsCfg model.GRPCTLS) (allowedFingerprints, allowedDNs map[string]string) {
+	if len(tlsCfg.AllowedClientFingerprints) > 0 {
+		allowedFingerprints = make(map[string]string, len(tlsCfg.AllowedClientFingerprints))
+		for fp, name := range tlsCfg.AllowedClientFingerprints {
+			allowedFingerprints[normalizeFingerprint(fp)] = name
+		}
+	}
+
+	if len(tlsCfg.AllowedClientDNs) > 0 {
+		allowedDNs = make(map[string]string, len(tlsCfg.AllowedClientDNs))
+		for dn, name := range tlsCfg.AllowedClientDNs {
+			allowedDNs[normalizeDN(dn)] = name
+		}
+	}
+
+	return allowedFingerprints, allowedDNs
 }
 
 // normalizeFingerprint normalizes a fingerprint string for comparison.
@@ -110,31 +123,45 @@ func FormatFingerprint(fp string) string {
 	return "SHA256:" + strings.Join(parts, ":")
 }
 
-// fingerprintUnaryInterceptor returns a unary interceptor that verifies client cert fingerprints.
-// allowedFingerprints maps normalized fingerprint -> friendly name.
-func fingerprintUnaryInterceptor(allowedFingerprints map[string]string) grpc.UnaryServerInterceptor {
+// normalizeDN normalizes a Distinguished Name string for comparison.
+// Trims whitespace and converts to lowercase for case-insensitive matching.
+func normalizeDN(dn string) string {
+	return strings.ToLower(strings.TrimSpace(dn))
+}
+
+// CertDN returns the Subject Distinguished Name of a certificate as a string.
+// Uses the standard RFC 2253 / Go x509 String() format.
+func CertDN(cert *x509.Certificate) string {
+	return cert.Subject.String()
+}
+
+// clientAuthUnaryInterceptor returns a unary interceptor that verifies client certs
+// against both fingerprint and DN allowlists. A client is allowed if it matches EITHER list.
+func clientAuthUnaryInterceptor(allowedFingerprints, allowedDNs map[string]string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if err := verifyClientFingerprint(ctx, allowedFingerprints); err != nil {
+		if err := verifyClientIdentity(ctx, allowedFingerprints, allowedDNs); err != nil {
 			return nil, err
 		}
 		return handler(ctx, req)
 	}
 }
 
-// fingerprintStreamInterceptor returns a stream interceptor that verifies client cert fingerprints.
-// allowedFingerprints maps normalized fingerprint -> friendly name.
-func fingerprintStreamInterceptor(allowedFingerprints map[string]string) grpc.StreamServerInterceptor {
+// clientAuthStreamInterceptor returns a stream interceptor that verifies client certs
+// against both fingerprint and DN allowlists. A client is allowed if it matches EITHER list.
+func clientAuthStreamInterceptor(allowedFingerprints, allowedDNs map[string]string) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if err := verifyClientFingerprint(ss.Context(), allowedFingerprints); err != nil {
+		if err := verifyClientIdentity(ss.Context(), allowedFingerprints, allowedDNs); err != nil {
 			return err
 		}
 		return handler(srv, ss)
 	}
 }
 
-// verifyClientFingerprint extracts the client certificate from the context and verifies its fingerprint.
-// allowedFingerprints maps normalized fingerprint -> friendly name.
-func verifyClientFingerprint(ctx context.Context, allowedFingerprints map[string]string) error {
+// verifyClientIdentity extracts the client certificate from the context and verifies it
+// against fingerprint and/or DN allowlists. The client is allowed if it matches EITHER list.
+// This supports both pinned certificates (via fingerprints) and dynamic certificates like
+// ACME/Let's Encrypt (via DN matching).
+func verifyClientIdentity(ctx context.Context, allowedFingerprints, allowedDNs map[string]string) error {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return status.Error(codes.Unauthenticated, "no peer info")
@@ -150,11 +177,47 @@ func verifyClientFingerprint(ctx context.Context, allowedFingerprints map[string
 	}
 
 	clientCert := tlsInfo.State.PeerCertificates[0]
-	fingerprint := CertFingerprint(clientCert)
 
-	if _, allowed := allowedFingerprints[fingerprint]; !allowed {
-		return status.Errorf(codes.PermissionDenied, "client certificate fingerprint not in allowlist: %s", FormatFingerprint(fingerprint))
+	// Check fingerprint allowlist
+	if len(allowedFingerprints) > 0 {
+		fingerprint := CertFingerprint(clientCert)
+		if _, allowed := allowedFingerprints[fingerprint]; allowed {
+			return nil
+		}
 	}
 
-	return nil
+	// Check DN allowlist
+	if len(allowedDNs) > 0 {
+		dn := normalizeDN(CertDN(clientCert))
+		if _, allowed := allowedDNs[dn]; allowed {
+			return nil
+		}
+	}
+
+	// Build informative error message
+	fingerprint := CertFingerprint(clientCert)
+	dn := CertDN(clientCert)
+	return status.Errorf(codes.PermissionDenied,
+		"client certificate not in allowlist: fingerprint=%s, dn=%q", FormatFingerprint(fingerprint), dn)
+}
+
+// fingerprintUnaryInterceptor returns a unary interceptor that verifies client cert fingerprints.
+// allowedFingerprints maps normalized fingerprint -> friendly name.
+// Deprecated: Use clientAuthUnaryInterceptor instead which supports both fingerprints and DNs.
+func fingerprintUnaryInterceptor(allowedFingerprints map[string]string) grpc.UnaryServerInterceptor {
+	return clientAuthUnaryInterceptor(allowedFingerprints, nil)
+}
+
+// fingerprintStreamInterceptor returns a stream interceptor that verifies client cert fingerprints.
+// allowedFingerprints maps normalized fingerprint -> friendly name.
+// Deprecated: Use clientAuthStreamInterceptor instead which supports both fingerprints and DNs.
+func fingerprintStreamInterceptor(allowedFingerprints map[string]string) grpc.StreamServerInterceptor {
+	return clientAuthStreamInterceptor(allowedFingerprints, nil)
+}
+
+// verifyClientFingerprint extracts the client certificate from the context and verifies its fingerprint.
+// allowedFingerprints maps normalized fingerprint -> friendly name.
+// Deprecated: Use verifyClientIdentity instead which supports both fingerprints and DNs.
+func verifyClientFingerprint(ctx context.Context, allowedFingerprints map[string]string) error {
+	return verifyClientIdentity(ctx, allowedFingerprints, nil)
 }

@@ -623,7 +623,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 ### `grpc_server`
 
-> **Path:** `.issuer.grpc_server`, `.verifier.grpc_server`, `.registry.grpc_server`
+> **Path:** `.issuer.grpc_server`, `.registry.grpc_server`
 
 | Field  | Type     | Description        | Default | Required |
 | ------ | -------- | ------------------ | ------- | -------- |
@@ -636,13 +636,18 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 mTLS configuration for gRPC server.
 
-| Field                         | Type     | Description                                 | Default                | Required         |
-| ----------------------------- | -------- | ------------------------------------------- | ---------------------- | ---------------- |
-| `enabled`                     | `bool`   | Enable mTLS                                 | `false`                | No               |
-| `cert_file_path`              | `string` | Server certificate path                     | `/pki/grpc_server.crt` | Yes (if enabled) |
-| `key_file_path`               | `string` | Server private key path                     | `/pki/grpc_server.key` | Yes (if enabled) |
-| `client_ca_path`              | `string` | CA to verify client certificates            | `/pki/client_ca.crt`   | Yes (if enabled) |
-| `allowed_client_fingerprints` | `object` | SHA256 fingerprint to friendly name mapping | -                      | No               |
+| Field                         | Type     | Description                                                                 | Default                | Required         |
+| ----------------------------- | -------- | --------------------------------------------------------------------------- | ---------------------- | ---------------- |
+| `enabled`                     | `bool`   | Enable mTLS                                                                 | `false`                | No               |
+| `cert_file_path`              | `string` | Server certificate path                                                     | `/pki/grpc_server.crt` | Yes (if enabled) |
+| `key_file_path`               | `string` | Server private key path                                                     | `/pki/grpc_server.key` | Yes (if enabled) |
+| `client_ca_path`              | `string` | CA to verify client certificates                                            | `/pki/client_ca.crt`   | Yes (if enabled) |
+| `allowed_client_fingerprints` | `object` | SHA256 fingerprint to friendly name mapping                                 | -                      | No               |
+| `allowed_client_dns`          | `object` | Certificate Subject DN to friendly name mapping (for ACME/short-lived certs) | -                      | No               |
+
+Access is granted if the client certificate matches **either** a fingerprint or a DN entry.
+Fingerprints are ideal for pinning long-lived certificates, while DNs are better suited for
+short-lived certificates (e.g., ACME / Let's Encrypt) where the fingerprint changes on every renewal.
 
 **Example:**
 ```yaml
@@ -653,9 +658,14 @@ grpc_server:
     cert_file_path: "/pki/grpc_server.crt"
     key_file_path: "/pki/grpc_server.key"
     client_ca_path: "/pki/client_ca.crt"
+    # Pin specific certificates by fingerprint
     allowed_client_fingerprints:
       "a1b2c3d4...": "apigw-prod"
       "e5f6g7h8...": "apigw-staging"
+    # Allow certificates by Subject DN (useful for ACME/Let's Encrypt)
+    allowed_client_dns:
+      "CN=apigw.example.com,O=MyOrg": "apigw-acme"
+      "CN=issuer.example.com,O=MyOrg": "issuer-acme"
 ```
 
 ### `jwt_attribute`
@@ -733,7 +743,6 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | Field                    | Type     | Description                                               | Default | Required |
 | ------------------------ | -------- | --------------------------------------------------------- | ------- | -------- |
 | `api_server`             | `object` | HTTP API server configuration                             | -       | Yes      |
-| `grpc_server`            | `object` | gRPC server configuration                                 | -       | Yes      |
 | `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | -       | Yes      |
 | `key_config`             | `object` | Signing key configuration                                 | -       | Yes      |
 | `oauth_server`           | `object` | OAuth2 server configuration                               | -       | Yes      |

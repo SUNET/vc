@@ -110,8 +110,6 @@ issuer:
 verifier:
   api_server:
     addr: :8080
-  grpc_server:
-    addr: verifier.vc.docker:8090
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
   public_url: "http://verifier.vc.docker:8080"
   # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
@@ -202,6 +200,12 @@ registry:
     #   cert_file_path: "/pki/grpc_server.crt"
     #   key_file_path: "/pki/grpc_server.key"
     #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
+    #   # Pin specific certs by fingerprint
+    #   allowed_client_fingerprints:
+    #     "sha256:aa:bb:cc:...": "apigw-prod"
+    #   # Allow certs by Subject DN
+    #   allowed_client_dns:
+    #     "CN=apigw.example.com,O=MyOrg": "apigw-acme"
   # Token Status Lists configuration per draft-ietf-oauth-status-list
   token_status_lists:
     key_config:

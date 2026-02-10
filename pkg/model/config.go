@@ -87,6 +87,7 @@ type GRPCTLS struct {
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enabled true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
 	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                       // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
+	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns"`                                                                // Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod")
 }
 
 // JWTAttribute holds the jwt attribute configuration.
@@ -339,7 +340,6 @@ type MockAS struct {
 // Verifier holds the verifier configuration
 type Verifier struct {
 	APIServer            APIServer                     `yaml:"api_server" validate:"required"`
-	GRPCServer           GRPCServer                    `yaml:"grpc_server" validate:"required"`
 	PublicURL            string                        `yaml:"public_url" validate:"required,httpurl"`
 	KeyConfig            *pki.KeyConfig                `yaml:"key_config" validate:"required"`
 	OAuthServer          OAuthServer                   `yaml:"oauth_server" validate:"required"`
