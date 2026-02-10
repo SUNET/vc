@@ -349,7 +349,7 @@ func TestVCTMEncode(t *testing.T) {
 			Description: "A test credential",
 			Display: []VCTMDisplay{
 				{
-					Lang: "en",
+					Locale: "en",
 					Name: "Test",
 				},
 			},

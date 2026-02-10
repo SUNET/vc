@@ -6,7 +6,7 @@
   "extends#integrity": "sha256-9cLlJNXN-TsMk-PmKjZ5t0WRL5ca_xGgX3c1VLmXfh-WRL5",
   "display": [
     {
-      "lang": "en-US",
+      "locale": "en-US",
       "name": "Betelgeuse Education Credential",
       "description": "An education credential for all carbon-based life forms on Betelgeusians",
       "rendering": {
@@ -33,7 +33,7 @@
       }
     },
     {
-      "lang": "de-DE",
+      "locale": "de-DE",
       "name": "Betelgeuse-Bildungsnachweis",
       "rendering": {
         "simple": {
@@ -66,12 +66,12 @@
       ],
       "display": [
         {
-          "lang": "de-DE",
+          "locale": "de-DE",
           "label": "Vor- und Nachname",
           "description": "Der Name des Studenten"
         },
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Name",
           "description": "The name of the student"
         }
@@ -84,12 +84,12 @@
       ],
       "display": [
         {
-          "lang": "de-DE",
+          "locale": "de-DE",
           "label": "Adresse",
           "description": "Adresse zum Zeitpunkt des Abschlusses"
         },
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Address",
           "description": "Address at the time of graduation"
         }
@@ -103,11 +103,11 @@
       ],
       "display": [
         {
-          "lang": "de-DE",
+          "locale": "de-DE",
           "label": "Straße"
         },
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Street Address"
         }
       ],
@@ -121,19 +121,17 @@
       ],
       "display": [
         {
-          "lang": "de-DE",
+          "locale": "de-DE",
           "label": "Abschluss",
           "description": "Der Abschluss des Studenten"
         },
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Degree",
           "description": "Degree earned by the student"
         }
       ],
       "sd": "allowed"
     }
-  ],
-  "schema_url": "https://exampleuniversity.com/public/credential-schema-0.9",
-  "schema_url#integrity": "sha256-o984vn819a48ui1llkwPmKjZ5t0WRL5ca_xGgX3c1VLmXfh"
+  ]
 }
