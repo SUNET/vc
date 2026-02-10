@@ -98,6 +98,7 @@
         "skatteverket",
         "socialsecurity",
         "softhsm",
+        "staticcheck",
         "staticembed",
         "statuslist",
         "statuslists",
@@ -116,7 +117,8 @@
         "vcclient",
         "VCTM",
         "vcts",
-        "VICAL"
+        "VICAL",
+        "vulncheck"
     ],
     "makefile.configureOnOpen": false
 }

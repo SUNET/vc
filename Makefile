@@ -51,7 +51,7 @@ BUILD_CONFIGS           := \
 
 .PHONY: help pki pki-clean test test-env \
 	build build-% \
-	docker-build docker-build-% docker-push docker-push-% docker-tag docker-tag-% docker-pull docker-archive \
+	docker-build docker-build-% docker-push docker-push-% docker-push-apigw-saml docker-push-apigw-oidcrp docker-push-apigw-all docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
 	check-protoc diagram install-tools clean-apt-cache vscode \
@@ -327,6 +327,23 @@ docker-push-$(1): ## Push Docker image for $(1)
 endef
 
 $(foreach service,$(SERVICES),$(eval $(call DOCKER_PUSH_TEMPLATE,$(service))))
+
+# Push targets for optional feature builds
+docker-push-apigw-saml: ## Push apigw Docker image with SAML support
+	$(info Pushing docker image apigw-saml)
+	docker push $(call docker-tag,apigw-saml,$(VERSION))
+
+docker-push-apigw-oidcrp: ## Push apigw Docker image with OIDC RP support
+	$(info Pushing docker image apigw-oidcrp)
+	docker push $(call docker-tag,apigw-oidcrp,$(VERSION))
+
+docker-push-apigw-all: ## Push apigw Docker image with all features
+	$(info Pushing docker image apigw-full)
+	docker push $(call docker-tag,apigw-full,$(VERSION))
+
+docker-push-issuer-hsm: ## Push issuer Docker image with PKCS#11 HSM support
+	$(info Pushing docker image issuer-hsm)
+	docker push $(call docker-tag,issuer-hsm,$(VERSION))
 
 # ==============================================================================
 # Docker Tag Targets
