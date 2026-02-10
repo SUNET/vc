@@ -1,0 +1,353 @@
+// Package jcs tests using official W3C test vectors from the
+// Data Integrity EdDSA Cryptosuites v1.0 specification.
+// Reference: https://www.w3.org/TR/vc-di-eddsa/#representation-eddsa-jcs-2022
+package jcs
+
+import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"testing"
+
+	"github.com/multiformats/go-multibase"
+)
+
+// W3C Test Vectors from Section B.3: Representation: eddsa-jcs-2022
+// https://www.w3.org/TR/vc-di-eddsa/#representation-eddsa-jcs-2022
+
+// Test keys from the specification
+const (
+	// Public key: multicodec ed25519-pub (0xed01) + 32 bytes
+	w3cPublicKeyMultibase = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
+	// Secret key: multicodec ed25519-priv (0x8026) + 64 bytes (seed + public)
+	w3cSecretKeyMultibase = "z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq"
+)
+
+// Expected intermediate values from the specification
+const (
+	// EXAMPLE 31: Canonical Credential without Proof
+	expectedCanonicalCredential = `{"@context":["https://www.w3.org/ns/credentials/v2","https://www.w3.org/ns/credentials/examples/v2"],"credentialSubject":{"alumniOf":"The School of Examples","id":"did:example:abcdefgh"},"description":"A minimum viable example of an Alumni Credential.","id":"urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33","issuer":"https://vc.example/issuers/5678","name":"Alumni Credential","type":["VerifiableCredential","AlumniCredential"],"validFrom":"2023-01-01T00:00:00Z"}`
+
+	// EXAMPLE 32: Hash of Canonical Credential without Proof (hex)
+	expectedCredentialHash = "59b7cb6251b8991add1ce0bc83107e3db9dbbab5bd2c28f687db1a03abc92f19"
+
+	// EXAMPLE 34: Canonical Proof Options Document
+	expectedCanonicalProofOptions = `{"@context":["https://www.w3.org/ns/credentials/v2","https://www.w3.org/ns/credentials/examples/v2"],"created":"2023-02-24T23:36:38Z","cryptosuite":"eddsa-jcs-2022","proofPurpose":"assertionMethod","type":"DataIntegrityProof","verificationMethod":"did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"}`
+
+	// EXAMPLE 35: Hash of Canonical Proof Options Document (hex) - truncated in spec, using known hash
+	expectedProofHash = "66ab154f5c2890a140cb8388a22a160454f80575f6eae09e5a097cabe539a1db"
+
+	// EXAMPLE 36: Combine hashes of Proof Options and Credential (hex)
+	expectedCombinedHash = "66ab154f5c2890a140cb8388a22a160454f80575f6eae09e5a097cabe539a1db59b7cb6251b8991add1ce0bc83107e3db9dbbab5bd2c28f687db1a03abc92f19"
+
+	// EXAMPLE 37: Signature of Combined Hashes (hex)
+	expectedSignature = "407cd12654b33d718ecbb99179a1506daaa849450bf3fc523cce3e1c96f8b80351da3f253d725c6f00b07c9e5448d50b3ef78012b9ab54255116d069c6dd2808"
+
+	// EXAMPLE 38: Signature of Combined Hashes base58-btc
+	expectedProofValue = "z2HnFSSPPBzR36zdDgK8PbEHeXbR56YF24jwMpt3R1eHXQzJDMWS93FCzpvJpwTWd3GAVFuUfjoJdcnTMuVor51aX"
+)
+
+// Unsigned credential from EXAMPLE 30
+var w3cUnsignedCredential = map[string]any{
+	"@context": []any{
+		"https://www.w3.org/ns/credentials/v2",
+		"https://www.w3.org/ns/credentials/examples/v2",
+	},
+	"id":   "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33",
+	"type": []any{"VerifiableCredential", "AlumniCredential"},
+	"name": "Alumni Credential",
+	"description": "A minimum viable example of an Alumni Credential.",
+	"issuer":      "https://vc.example/issuers/5678",
+	"validFrom":   "2023-01-01T00:00:00Z",
+	"credentialSubject": map[string]any{
+		"id":       "did:example:abcdefgh",
+		"alumniOf": "The School of Examples",
+	},
+}
+
+// Signed credential from EXAMPLE 39
+var w3cSignedCredential = map[string]any{
+	"@context": []any{
+		"https://www.w3.org/ns/credentials/v2",
+		"https://www.w3.org/ns/credentials/examples/v2",
+	},
+	"id":   "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33",
+	"type": []any{"VerifiableCredential", "AlumniCredential"},
+	"name": "Alumni Credential",
+	"description": "A minimum viable example of an Alumni Credential.",
+	"issuer":      "https://vc.example/issuers/5678",
+	"validFrom":   "2023-01-01T00:00:00Z",
+	"credentialSubject": map[string]any{
+		"id":       "did:example:abcdefgh",
+		"alumniOf": "The School of Examples",
+	},
+	"proof": map[string]any{
+		"type":       "DataIntegrityProof",
+		"cryptosuite": "eddsa-jcs-2022",
+		"created":    "2023-02-24T23:36:38Z",
+		"verificationMethod": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
+		"proofPurpose": "assertionMethod",
+		"@context": []any{
+			"https://www.w3.org/ns/credentials/v2",
+			"https://www.w3.org/ns/credentials/examples/v2",
+		},
+		"proofValue": "z2HnFSSPPBzR36zdDgK8PbEHeXbR56YF24jwMpt3R1eHXQzJDMWS93FCzpvJpwTWd3GAVFuUfjoJdcnTMuVor51aX",
+	},
+}
+
+// decodeMultibaseKey decodes a multibase-encoded Ed25519 key.
+// Ed25519 public keys use 0xed01 prefix, private keys use 0x8026 prefix.
+func decodeMultibaseKey(multibaseKey string) ([]byte, error) {
+	_, keyBytes, err := multibase.Decode(multibaseKey)
+	if err != nil {
+		return nil, err
+	}
+	// Skip multicodec prefix (2 bytes for pub, 2 bytes for priv)
+	if len(keyBytes) > 2 {
+		return keyBytes[2:], nil
+	}
+	return keyBytes, nil
+}
+
+func getW3CKeys(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+
+	pubKeyBytes, err := decodeMultibaseKey(w3cPublicKeyMultibase)
+	if err != nil {
+		t.Fatalf("Failed to decode public key: %v", err)
+	}
+	if len(pubKeyBytes) != ed25519.PublicKeySize {
+		t.Fatalf("Invalid public key size: expected %d, got %d", ed25519.PublicKeySize, len(pubKeyBytes))
+	}
+
+	privKeyBytes, err := decodeMultibaseKey(w3cSecretKeyMultibase)
+	if err != nil {
+		t.Fatalf("Failed to decode private key: %v", err)
+	}
+	
+	// The secret key is just the seed (32 bytes), need to derive full key
+	if len(privKeyBytes) == ed25519.SeedSize {
+		return ed25519.PublicKey(pubKeyBytes), ed25519.NewKeyFromSeed(privKeyBytes)
+	}
+	
+	// If it's already 64 bytes, it's seed + public
+	if len(privKeyBytes) == ed25519.PrivateKeySize {
+		return ed25519.PublicKey(pubKeyBytes), ed25519.PrivateKey(privKeyBytes)
+	}
+
+	t.Fatalf("Invalid private key size: %d", len(privKeyBytes))
+	return nil, nil
+}
+
+// TestW3CCanonicalizeCredential verifies our JCS canonicalization matches the W3C test vector.
+func TestW3CCanonicalizeCredential(t *testing.T) {
+	canonical, err := Canonicalize(w3cUnsignedCredential)
+	if err != nil {
+		t.Fatalf("Failed to canonicalize: %v", err)
+	}
+
+	if string(canonical) != expectedCanonicalCredential {
+		t.Errorf("Canonical form mismatch.\nExpected: %s\nGot:      %s", expectedCanonicalCredential, string(canonical))
+	}
+}
+
+// TestW3CCredentialHash verifies our hash of the canonicalized credential matches the W3C test vector.
+func TestW3CCredentialHash(t *testing.T) {
+	canonical, err := Canonicalize(w3cUnsignedCredential)
+	if err != nil {
+		t.Fatalf("Failed to canonicalize: %v", err)
+	}
+
+	hash := sha256.Sum256(canonical)
+	hashHex := hex.EncodeToString(hash[:])
+
+	if hashHex != expectedCredentialHash {
+		t.Errorf("Credential hash mismatch.\nExpected: %s\nGot:      %s", expectedCredentialHash, hashHex)
+	}
+}
+
+// TestW3CProofOptionsHash verifies the proof options hash matches the W3C test vector.
+func TestW3CProofOptionsHash(t *testing.T) {
+	// Proof options from EXAMPLE 33
+	proofOptions := map[string]any{
+		"type":       "DataIntegrityProof",
+		"cryptosuite": "eddsa-jcs-2022",
+		"created":    "2023-02-24T23:36:38Z",
+		"verificationMethod": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
+		"proofPurpose": "assertionMethod",
+		"@context": []any{
+			"https://www.w3.org/ns/credentials/v2",
+			"https://www.w3.org/ns/credentials/examples/v2",
+		},
+	}
+
+	canonical, err := Canonicalize(proofOptions)
+	if err != nil {
+		t.Fatalf("Failed to canonicalize proof options: %v", err)
+	}
+
+	if string(canonical) != expectedCanonicalProofOptions {
+		t.Errorf("Canonical proof options mismatch.\nExpected: %s\nGot:      %s", expectedCanonicalProofOptions, string(canonical))
+	}
+
+	hash := sha256.Sum256(canonical)
+	hashHex := hex.EncodeToString(hash[:])
+
+	if hashHex != expectedProofHash {
+		t.Errorf("Proof options hash mismatch.\nExpected: %s\nGot:      %s", expectedProofHash, hashHex)
+	}
+}
+
+// TestW3CCombinedHash verifies the combined hash (proofHash || docHash) matches the W3C test vector.
+func TestW3CCombinedHash(t *testing.T) {
+	proofOptions := map[string]any{
+		"type":       "DataIntegrityProof",
+		"cryptosuite": "eddsa-jcs-2022",
+		"created":    "2023-02-24T23:36:38Z",
+		"verificationMethod": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
+		"proofPurpose": "assertionMethod",
+		"@context": []any{
+			"https://www.w3.org/ns/credentials/v2",
+			"https://www.w3.org/ns/credentials/examples/v2",
+		},
+	}
+
+	proofCanonical, _ := Canonicalize(proofOptions)
+	docCanonical, _ := Canonicalize(w3cUnsignedCredential)
+
+	proofHash := sha256.Sum256(proofCanonical)
+	docHash := sha256.Sum256(docCanonical)
+
+	// Per spec Section 3.3.4: hashData = proofConfigHash || transformedDocumentHash
+	combined := append(proofHash[:], docHash[:]...)
+	combinedHex := hex.EncodeToString(combined)
+
+	if combinedHex != expectedCombinedHash {
+		t.Errorf("Combined hash mismatch.\nExpected: %s\nGot:      %s", expectedCombinedHash, combinedHex)
+	}
+}
+
+// TestW3CVerifySignedCredential verifies the W3C signed credential using our implementation.
+func TestW3CVerifySignedCredential(t *testing.T) {
+	pubKey, _ := getW3CKeys(t)
+
+	suite := NewSuite()
+	err := suite.Verify(w3cSignedCredential, pubKey)
+	if err != nil {
+		t.Fatalf("Failed to verify W3C signed credential: %v", err)
+	}
+}
+
+// TestW3CSignatureBytes verifies the signature value from the W3C test vector.
+func TestW3CSignatureBytes(t *testing.T) {
+	// Decode the proofValue from the signed credential  
+	_, sigBytes, err := multibase.Decode(expectedProofValue)
+	if err != nil {
+		t.Fatalf("Failed to decode proofValue: %v", err)
+	}
+
+	sigHex := hex.EncodeToString(sigBytes)
+	if sigHex != expectedSignature {
+		t.Errorf("Signature bytes mismatch.\nExpected: %s\nGot:      %s", expectedSignature, sigHex)
+	}
+}
+
+// TestW3CRoundTrip tests that we can sign and verify a document with the W3C keys.
+func TestW3CRoundTrip(t *testing.T) {
+	pubKey, privKey := getW3CKeys(t)
+
+	suite := NewSuite()
+	
+	// Sign the unsigned credential
+	opts := &SignOptions{
+		VerificationMethod: "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
+		ProofPurpose:      "assertionMethod",
+	}
+
+	signed, err := suite.Sign(w3cUnsignedCredential, privKey, opts)
+	if err != nil {
+		t.Fatalf("Failed to sign: %v", err)
+	}
+
+	// Verify the signed credential
+	if err := suite.Verify(signed, pubKey); err != nil {
+		t.Fatalf("Failed to verify: %v", err)
+	}
+
+	// Check that proof contains @context
+	proof, ok := signed["proof"].(map[string]any)
+	if !ok {
+		t.Fatal("signed document has no proof")
+	}
+	if _, hasCtx := proof["@context"]; !hasCtx {
+		t.Error("proof is missing @context (required by W3C spec)")
+	}
+}
+
+// TestW3CContextMismatch tests that verification fails when document @context doesn't match proof @context.
+func TestW3CContextMismatch(t *testing.T) {
+	pubKey, _ := getW3CKeys(t)
+
+	// Create a modified credential where document @context has extra entries
+	modifiedCredential := make(map[string]any)
+	for k, v := range w3cSignedCredential {
+		modifiedCredential[k] = v
+	}
+	// Add an extra context entry that wasn't there when signed
+	modifiedCredential["@context"] = []any{
+		"https://www.w3.org/ns/credentials/v2",
+		"https://www.w3.org/ns/credentials/examples/v2",
+		"https://example.com/extra-context",
+	}
+
+	suite := NewSuite()
+	
+	// This should still verify because document @context STARTS with proof @context
+	// Per spec step 4.1: "Check that the securedDocument.@context starts with all values 
+	// contained in the proofOptions.@context in the same order"
+	err := suite.Verify(modifiedCredential, pubKey)
+	if err != nil {
+		t.Fatalf("Verification should succeed when doc @context starts with proof @context: %v", err)
+	}
+}
+
+// TestW3CContextOrderMismatch tests that verification fails when @context order doesn't match.
+func TestW3CContextOrderMismatch(t *testing.T) {
+	pubKey, _ := getW3CKeys(t)
+
+	// Create a modified credential with @context in wrong order
+	modifiedCredential := make(map[string]any)
+	for k, v := range w3cSignedCredential {
+		modifiedCredential[k] = v
+	}
+	// Reverse the context order
+	modifiedCredential["@context"] = []any{
+		"https://www.w3.org/ns/credentials/examples/v2",
+		"https://www.w3.org/ns/credentials/v2",
+	}
+
+	suite := NewSuite()
+	err := suite.Verify(modifiedCredential, pubKey)
+	if err == nil {
+		t.Error("Verification should fail when @context order doesn't match proof @context")
+	}
+}
+
+// TestW3CContextMissing tests that verification fails when document lacks @context but proof has it.
+func TestW3CContextMissing(t *testing.T) {
+	pubKey, _ := getW3CKeys(t)
+
+	// Create a modified credential without @context
+	modifiedCredential := make(map[string]any)
+	for k, v := range w3cSignedCredential {
+		if k != "@context" {
+			modifiedCredential[k] = v
+		}
+	}
+
+	suite := NewSuite()
+	err := suite.Verify(modifiedCredential, pubKey)
+	if err == nil {
+		t.Error("Verification should fail when document lacks @context but proof has it")
+	}
+}

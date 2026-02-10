@@ -107,6 +107,12 @@ func (s *Suite) Sign(document any, key ed25519.PrivateKey, opts *SignOptions) (m
 		proofConfig["challenge"] = opts.Challenge
 	}
 
+	// Per W3C eddsa-jcs-2022 spec Section 3.3.1 step 2:
+	// If unsecuredDocument.@context is present, set proof.@context to unsecuredDocument.@context
+	if ctx, ok := docWithoutProof["@context"]; ok {
+		proofConfig["@context"] = ctx
+	}
+
 	docCanonical, err := Canonicalize(docWithoutProof)
 	if err != nil {
 		return nil, fmt.Errorf("failed to canonicalize document: %w", err)
@@ -212,6 +218,22 @@ func (s *Suite) VerifyWithProof(document map[string]any, proof map[string]any, p
 		}
 	}
 
+	// Per W3C eddsa-jcs-2022 spec Section 3.3.2 steps 4.1-4.2:
+	// If proofOptions.@context exists:
+	// - Check that document.@context starts with all values in proofOptions.@context
+	// - Set unsecuredDocument.@context equal to proofOptions.@context
+	if proofCtx, ok := proofConfig["@context"]; ok {
+		docCtx, hasDocCtx := docWithoutProof["@context"]
+		if !hasDocCtx {
+			return fmt.Errorf("proof has @context but document does not")
+		}
+		if !contextStartsWith(docCtx, proofCtx) {
+			return fmt.Errorf("document @context does not start with proof @context values")
+		}
+		// Set unsecuredDocument.@context equal to proofOptions.@context
+		docWithoutProof["@context"] = proofCtx
+	}
+
 	docCanonical, err := Canonicalize(docWithoutProof)
 	if err != nil {
 		return fmt.Errorf("failed to canonicalize document: %w", err)
@@ -307,4 +329,67 @@ func getString(m map[string]any, key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// contextStartsWith checks if docCtx starts with proofCtx values in the same order.
+// This implements the W3C eddsa-jcs-2022 spec Section 3.3.2 step 4.1.
+func contextStartsWith(docCtx, proofCtx any) bool {
+	// Normalize both to slices for comparison
+	docSlice := normalizeContext(docCtx)
+	proofSlice := normalizeContext(proofCtx)
+
+	if len(proofSlice) > len(docSlice) {
+		return false
+	}
+
+	for i, proofVal := range proofSlice {
+		if !contextValuesEqual(docSlice[i], proofVal) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// normalizeContext converts a @context value to a slice of values.
+func normalizeContext(ctx any) []any {
+	if ctx == nil {
+		return nil
+	}
+	if slice, ok := ctx.([]any); ok {
+		return slice
+	}
+	// Handle []string (common in Go code)
+	if strSlice, ok := ctx.([]string); ok {
+		result := make([]any, len(strSlice))
+		for i, s := range strSlice {
+			result[i] = s
+		}
+		return result
+	}
+	// Single value context
+	return []any{ctx}
+}
+
+// contextValuesEqual compares two @context values for equality.
+func contextValuesEqual(a, b any) bool {
+	// For strings, direct comparison
+	if aStr, ok := a.(string); ok {
+		if bStr, ok := b.(string); ok {
+			return aStr == bStr
+		}
+		return false
+	}
+	// For objects (maps), compare JSON representation
+	if aMap, ok := a.(map[string]any); ok {
+		if bMap, ok := b.(map[string]any); ok {
+			aJSON, err1 := json.Marshal(aMap)
+			bJSON, err2 := json.Marshal(bMap)
+			if err1 != nil || err2 != nil {
+				return false
+			}
+			return string(aJSON) == string(bJSON)
+		}
+	}
+	return false
 }
