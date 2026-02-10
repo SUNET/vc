@@ -5,6 +5,7 @@ Complete reference for all configuration parameters in the VC system.
 ## Table of Contents
 
 - [Common Configuration](#common-configuration)
+- [External Secrets File](#external-secrets-file)
 - [Authentication Methods](#authentication-methods)
 - [Credential Constructor](#credential-constructor)
 - [API Gateway (APIGW)](#api-gateway-apigw)
@@ -24,14 +25,15 @@ Shared configuration used across all services.
 
 > **Path:** `.common`
 
-| Field                 | Type     | Description                         | Default | Required |
-| --------------------- | -------- | ----------------------------------- | ------- | -------- |
-| `production`          | `bool`   | Enable production mode              | `true`  | No       |
-| `log`                 | `object` | Logging configuration               | -       | Yes      |
-| `mongo`               | `object` | MongoDB configuration               | -       | No       |
-| `tracing`             | `object` | OpenTelemetry tracing configuration | -       | Yes      |
-| `kafka`               | `object` | Kafka message broker configuration  | -       | No       |
-| `credential_offer_qr` | `object` | Credential offer QR code settings   | -       | No       |
+| Field                 | Type     | Description                                                                 | Default | Required |
+| --------------------- | -------- | --------------------------------------------------------------------------- | ------- | -------- |
+| `production`          | `bool`   | Enable production mode                                                      | `true`  | No       |
+| `log`                 | `object` | Logging configuration                                                       | -       | Yes      |
+| `mongo`               | `object` | MongoDB configuration                                                       | -       | No       |
+| `tracing`             | `object` | OpenTelemetry tracing configuration                                         | -       | Yes      |
+| `kafka`               | `object` | Kafka message broker configuration                                          | -       | No       |
+| `credential_offer_qr` | `object` | Credential offer QR code settings                                           | -       | No       |
+| `secret_file_path`    | `string` | Path to external secrets YAML file. See [External Secrets File](#external-secrets-file) | -       | No       |
 
 ### `log`
 
@@ -119,6 +121,112 @@ credential_offer_qr:
   qr:
     recovery_level: 2
     size: 256
+```
+
+---
+
+## External Secrets File
+
+Secrets can optionally be separated from the main `config.yaml` into a dedicated file. This can be useful for separating concerns — for example keeping secrets in a file managed by a different process, encrypted at rest with GPG, injected via orchestration tooling, or simply kept out of version control.
+
+Whether a separate file improves security depends on the deployment infrastructure. The feature provides flexibility; how to best protect secrets is left to the deployer.
+
+### Enabling
+
+Set `common.secret_file_path` in `config.yaml`:
+
+```yaml
+common:
+  secret_file_path: "/etc/vc/secrets.yaml"
+```
+
+### Behavior
+
+When `secret_file_path` is set:
+
+1. The secrets file is loaded and parsed.
+2. **All** secret fields in `config.yaml` are cleared (zeroed) so they cannot be used.
+3. Secret values from the external file are applied to the configuration.
+
+This means if a secret is present in `config.yaml` but `secret_file_path` is set, the value in `config.yaml` is **ignored**. All secrets **must** be defined in the external file.
+
+When `secret_file_path` is **not** set, behavior is unchanged — secrets are read from `config.yaml` as before.
+
+### Secret Fields
+
+The following fields are treated as secrets and must be defined in the external file when `secret_file_path` is used:
+
+| Config Path | Secret File Path | Description |
+| --- | --- | --- |
+| `common.mongo.uri` | `common.mongo.uri` | MongoDB connection URI (may contain credentials) |
+| `apigw.api_server.basic_auth.users` | `apigw.api_server.basic_auth.users` | Basic auth user/password map |
+| `apigw.oidcrp.client_secret` | `apigw.oidcrp.client_secret` | OIDC Relying Party client secret |
+| `registry.admin_gui.password` | `registry.admin_gui.password` | Registry admin GUI password |
+| `registry.admin_gui.session_secret` | `registry.admin_gui.session_secret` | Registry admin session cookie secret |
+| `verifier.oidc.subject_salt` | `verifier.oidc.subject_salt` | Salt for pairwise subject identifiers |
+| `ui.password` | `ui.password` | UI admin password |
+| `ui.session_cookie_authentication_key` | `ui.session_cookie_authentication_key` | Session cookie HMAC key |
+| `ui.session_store_encryption_key` | `ui.session_store_encryption_key` | Session cookie encryption key |
+
+### Example Secrets File
+
+See `config.secrets.example.yaml` in the repository root for a complete template.
+
+```yaml
+---
+common:
+  mongo:
+    uri: "mongodb://user:password@mongo:27017"
+
+apigw:
+  api_server:
+    basic_auth:
+      users:
+        admin: "strong-random-password"
+  oidcrp:
+    client_secret: "your-oidc-client-secret"
+
+registry:
+  admin_gui:
+    password: "strong-random-password"
+    session_secret: "random-32-byte-secret"
+
+verifier:
+  oidc:
+    subject_salt: "random-salt-for-production"
+
+ui:
+  password: "strong-random-password"
+  session_cookie_authentication_key: "random-64-byte-key"
+  session_store_encryption_key: "random-32-byte-key"
+```
+
+### Deployment Examples
+
+Below are examples of how to mount the secrets file in common orchestration environments. Adapt to your infrastructure as needed.
+
+**Docker Compose:**
+
+```yaml
+# docker-compose.yaml
+services:
+  myservice:
+    volumes:
+      - ./secrets.yaml:/etc/vc/secrets.yaml:ro
+```
+
+**Kubernetes:**
+
+```yaml
+volumes:
+  - name: vc-secrets
+    secret:
+      secretName: vc-secrets
+volumeMounts:
+  - name: vc-secrets
+    mountPath: /etc/vc/secrets.yaml
+    subPath: secrets.yaml
+    readOnly: true
 ```
 
 ---

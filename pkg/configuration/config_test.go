@@ -1,0 +1,115 @@
+package configuration
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestLoadSecrets_ValidFile(t *testing.T) {
+	content := `---
+common:
+  mongo:
+    uri: "mongodb://secret-user:secret-pass@host:27017"
+apigw:
+  api_server:
+    basic_auth:
+      users:
+        admin: "secret-admin-pass"
+  oidcrp:
+    client_secret: "secret-client-secret"
+registry:
+  admin_gui:
+    password: "secret-registry-pass"
+    session_secret: "secret-session-value"
+verifier:
+  oidc:
+    subject_salt: "secret-salt-value"
+ui:
+  password: "secret-ui-pass"
+  session_cookie_authentication_key: "secret-cookie-key"
+  session_store_encryption_key: "secret-encryption-key"
+`
+	tmpDir := t.TempDir()
+	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
+	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
+
+	secrets, err := LoadSecrets(secretsPath)
+	require.NoError(t, err)
+
+	// Verify common secrets
+	require.NotNil(t, secrets.Common)
+	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", secrets.Common.Mongo.URI)
+
+	// Verify APIGW secrets
+	require.NotNil(t, secrets.APIGW)
+	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.BasicAuth.Users["admin"])
+	assert.Equal(t, "secret-client-secret", secrets.APIGW.OIDCRP.ClientSecret)
+
+	// Verify Registry secrets
+	require.NotNil(t, secrets.Registry)
+	assert.Equal(t, "secret-registry-pass", secrets.Registry.AdminGUI.Password)
+	assert.Equal(t, "secret-session-value", secrets.Registry.AdminGUI.SessionSecret)
+
+	// Verify Verifier secrets
+	require.NotNil(t, secrets.Verifier)
+	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDC.SubjectSalt)
+
+	// Verify UI secrets
+	require.NotNil(t, secrets.UI)
+	assert.Equal(t, "secret-ui-pass", secrets.UI.Password)
+	assert.Equal(t, "secret-cookie-key", secrets.UI.SessionCookieAuthenticationKey)
+	assert.Equal(t, "secret-encryption-key", secrets.UI.SessionStoreEncryptionKey)
+}
+
+func TestLoadSecrets_FileNotFound(t *testing.T) {
+	_, err := LoadSecrets("/nonexistent/path/secrets.yaml")
+	assert.Error(t, err)
+}
+
+func TestLoadSecrets_DirectoryPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := LoadSecrets(tmpDir)
+	assert.Error(t, err)
+}
+
+func TestLoadSecrets_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretsPath := filepath.Join(tmpDir, "bad.yaml")
+	require.NoError(t, os.WriteFile(secretsPath, []byte("{{not valid yaml"), 0600))
+
+	_, err := LoadSecrets(secretsPath)
+	assert.Error(t, err)
+}
+
+func TestLoadSecrets_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretsPath := filepath.Join(tmpDir, "empty.yaml")
+	require.NoError(t, os.WriteFile(secretsPath, []byte(""), 0600))
+
+	secrets, err := LoadSecrets(secretsPath)
+	require.NoError(t, err)
+
+	assert.Nil(t, secrets.Common)
+	assert.Nil(t, secrets.APIGW)
+}
+
+func TestLoadSecrets_PartialSecrets(t *testing.T) {
+	content := `---
+ui:
+  password: "only-ui-password"
+`
+	tmpDir := t.TempDir()
+	secretsPath := filepath.Join(tmpDir, "partial.yaml")
+	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
+
+	secrets, err := LoadSecrets(secretsPath)
+	require.NoError(t, err)
+
+	require.NotNil(t, secrets.UI)
+	assert.Equal(t, "only-ui-password", secrets.UI.Password)
+	assert.Nil(t, secrets.Common)
+}

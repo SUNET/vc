@@ -1,5 +1,6 @@
 ---
 common:
+  # secret_file_path: "/path/to/secrets.yaml"  # When set, all secrets are read from this file and secret values in config.yaml are ignored
   mongo:
     uri: mongodb://mongo:27017
   production: false

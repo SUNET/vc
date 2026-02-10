@@ -60,6 +60,9 @@ type Common struct {
 	Tracing           OTEL                    `yaml:"tracing" validate:"required"`
 	Kafka             Kafka                   `yaml:"kafka" validate:"omitempty"`
 	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
+	// SecretFilePath is the path to a separate YAML file containing secrets.
+	// When set, ALL secrets MUST be defined in that file and secret values in config.yaml are ignored.
+	SecretFilePath string `yaml:"secret_file_path,omitempty"`
 }
 
 type CredentialOfferQRConfig struct {
@@ -85,7 +88,7 @@ type GRPCTLS struct {
 	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.crt"` // Server certificate
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enabled true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                         // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                       // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
 }
 
 // JWTAttribute holds the jwt attribute configuration.
@@ -336,8 +339,8 @@ type Issuer struct {
 
 // AuditLog holds audit log configuration for multiple destinations
 type AuditLog struct {
-	Enabled      bool          `yaml:"enabled" default:"false"`
-	Destinations []string      `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	Enabled          bool          `yaml:"enabled" default:"false"`
+	Destinations     []string      `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
 	FileSyncInterval time.Duration `yaml:"file_sync_interval" default:"5s"` // File destinations: 0 = fsync every write, >0 = periodic batched fsync at interval
 	// Destinations can be:
 	//   - "console" or "stdout": write to standard output

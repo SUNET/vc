@@ -3,6 +3,7 @@ package configuration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"vc/pkg/helpers"
@@ -54,9 +55,47 @@ func New(ctx context.Context) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	// If a secret file path is configured, load secrets from that file
+	// and clear all secrets from the main config so they are not used.
+	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
+		secrets, err := LoadSecrets(cfg.Common.SecretFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load secrets file: %w", err)
+		}
+		cfg.ClearSecrets()
+		cfg.ApplySecrets(secrets)
+		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
+	}
+
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// LoadSecrets reads and parses the secrets YAML file.
+func LoadSecrets(path string) (*model.Secrets, error) {
+	cleanPath := filepath.Clean(path)
+
+	fileInfo, err := os.Stat(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat secrets file %q: %w", cleanPath, err)
+	}
+
+	if fileInfo.IsDir() {
+		return nil, fmt.Errorf("secrets path %q is a directory, not a file", cleanPath)
+	}
+
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read secrets file %q: %w", cleanPath, err)
+	}
+
+	secrets := &model.Secrets{}
+	if err := yaml.Unmarshal(data, secrets); err != nil {
+		return nil, fmt.Errorf("cannot parse secrets file %q: %w", cleanPath, err)
+	}
+
+	return secrets, nil
 }
