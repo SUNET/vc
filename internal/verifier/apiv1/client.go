@@ -242,7 +242,7 @@ func (c *Client) buildLegacyDCQLQuery(scopes []string) (*openid4vp.DCQL, error) 
 			ID:     scope,
 			Format: "vc+sd-jwt",
 			Meta: openid4vp.MetaQuery{
-				VCTValues: []string{credInfo.GetVCT()},
+				VCTValues: []string{credInfo.VCTM.VCT},
 			},
 			Claims: make([]openid4vp.ClaimQuery, 0),
 		}

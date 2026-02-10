@@ -997,7 +997,6 @@ auth_methods:
 
 credential_constructor:
   pid:
-    vct: "urn:eudi:pid:1"
     vctm_file_path: "metadata/vctm_pid.json"
     format: "dc+sd-jwt"
     auth_method: "basic"
@@ -1093,7 +1092,6 @@ auth_methods:
 
 credential_constructor:
   pid:
-    vct: "urn:eudi:pid:1"
     vctm_file_path: "metadata/vctm_pid.json"
     format: "dc+sd-jwt"
     auth_method: "basic"

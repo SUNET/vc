@@ -626,7 +626,7 @@ func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
 // Returns empty string if not found
 func (c *Cfg) GetFormatForVCT(vct string) string {
 	for _, constructor := range c.CredentialConstructor {
-		if constructor != nil && constructor.GetVCT() == vct {
+		if constructor != nil && constructor.VCTM.VCT == vct {
 			return constructor.Format
 		}
 	}
@@ -636,7 +636,6 @@ func (c *Cfg) GetFormatForVCT(vct string) string {
 type CredentialConstructor struct {
 	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
-	VCT          string                         `yaml:"vct" json:"vct" validate:"required"`
 	Format       string                         `yaml:"format" json:"format" validate:"required"`
 	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,auth_method_exists"`
 	Attributes   map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
@@ -675,15 +674,6 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 	return nil
 }
 
-// GetVCT returns the VCT from the loaded VCTM metadata.
-// Falls back to the VCT field from the YAML configuration if VCTM is not yet loaded.
-func (c *CredentialConstructor) GetVCT() string {
-	if c.VCTM != nil && c.VCTM.VCT != "" {
-		return c.VCTM.VCT
-	}
-	return c.VCT
-}
-
 // Generate generates issuer metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
 func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, error) {
@@ -697,7 +687,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		credConfig := openid4vci.CredentialConfigurationsSupported{
 			Format: constructor.Format,
 			Scope:  scope,
-			VCT:    constructor.GetVCT(),
+			VCT:    constructor.VCTM.VCT,
 			CredentialDefinition: openid4vci.CredentialDefinition{
 				Type: []string{"VerifiableCredential"},
 			},

@@ -264,7 +264,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scopes[0])
 	}
 
-	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.GetVCT())
+	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.VCTM.VCT)
 
 	// Extract identity from validated credential
 	identity := &model.Identity{}
@@ -280,10 +280,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Retrieve documents matching the identity
 	// Use authorizationContext.VCT which should be set to the VCT value
-	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.GetVCT(), "identity", identity)
+	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.VCTM.VCT, "identity", identity)
 	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
 		Meta: &model.MetaData{
-			VCT: credentialConstructorCfg.GetVCT(),
+			VCT: credentialConstructorCfg.VCTM.VCT,
 		},
 		Identity: identity,
 	})
