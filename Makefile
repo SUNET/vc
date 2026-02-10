@@ -477,6 +477,14 @@ w3c-test: build-vc20-test-server ## Run W3C test suite (managed)
 diagram: ## Generate PlantUML diagrams
 	plantuml docs/diagrams/*.puml
 
+build-gen-config-docs: ## Build gen_config_docs tool
+	$(info Building gen_config_docs)
+	$(CGO_ENABLED_STATIC) go build $(BUILD_FLAGS) -o ./bin/gen_config_docs ./developer_tools/scripts/gen_config_docs/
+
+gen-config-docs: build-gen-config-docs ## Generate configuration reference documentation
+	$(info Generating docs/CONFIGURATION.md)
+	./bin/gen_config_docs
+
 install-tools: ## Install required development tools
 	$(info Installing from apt)
 	apt-get update && apt-get install -y \

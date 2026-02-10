@@ -14,8 +14,9 @@ import (
 	"vc/pkg/sdjwtvc"
 )
 
-// APIServer holds the api server configuration
+// APIServer holds the HTTP API server configuration
 type APIServer struct {
+	// Addr is the listen address for the HTTP server
 	Addr      string    `yaml:"addr" validate:"required" default:":8080"`
 	TLS       TLS       `yaml:"tls" validate:"omitempty"`
 	BasicAuth BasicAuth `yaml:"basic_auth"`
@@ -24,60 +25,83 @@ type APIServer struct {
 
 // CORS holds the CORS configuration
 type CORS struct {
+	// AllowedOrigins is the list of allowed CORS origins
+	// Example: ["https://wallet.sunet.se", "https://app.sunet.se"]
 	AllowedOrigins []string `yaml:"allowed_origins" validate:"omitempty" default:"[]"`
 }
 
-// TLS holds the tls configuration
+// TLS holds the TLS configuration
 type TLS struct {
-	Enabled      bool   `yaml:"enabled" default:"false"`
+	// Enabled enables TLS
+	Enabled bool `yaml:"enabled" default:"false"`
+	// CertFilePath is the path to the TLS certificate
 	CertFilePath string `yaml:"cert_file_path" validate:"required"`
-	KeyFilePath  string `yaml:"key_file_path" validate:"required"`
+	// KeyFilePath is the path to the TLS private key
+	KeyFilePath string `yaml:"key_file_path" validate:"required"`
 }
 
-// Mongo holds the database configuration
+// Mongo holds the MongoDB configuration
 type Mongo struct {
+	// URI is the MongoDB connection URI
+	// Example: "mongodb://user:password@mongo:27017/vc"
 	URI string `yaml:"uri" validate:"required"`
 }
 
-// Kafka holds the kafka configuration that is common for the entire system
+// Kafka holds the Kafka message broker configuration
 type Kafka struct {
-	Enabled bool     `yaml:"enabled" default:"false"`
+	// Enabled enables Kafka integration
+	Enabled bool `yaml:"enabled" default:"false"`
+	// Brokers is the list of Kafka broker addresses
 	Brokers []string `yaml:"brokers" validate:"required" default:"[\"kafka0:9092\", \"kafka1:9092\"]"`
 }
 
-// Log holds the log configuration
+// Log holds the logging configuration
 type Log struct {
+	// FolderPath is the path to the log folder
+	// Example: "/var/log/vc"
 	FolderPath string `yaml:"folder_path"`
 }
 
-// Common holds the common configuration
+// Common holds the shared configuration used across all services
 type Common struct {
-	Production        bool                    `yaml:"production" default:"true"`
-	Log               Log                     `yaml:"log"`
-	Mongo             Mongo                   `yaml:"mongo" validate:"omitempty"`
-	Tracing           OTEL                    `yaml:"tracing" validate:"required"`
-	Kafka             Kafka                   `yaml:"kafka" validate:"omitempty"`
+	// Production enables production mode
+	Production bool `yaml:"production" default:"true"`
+	// Log is the logging configuration
+	Log Log `yaml:"log"`
+	// Mongo is the MongoDB configuration
+	Mongo Mongo `yaml:"mongo" validate:"omitempty"`
+	// Tracing is the OpenTelemetry tracing configuration
+	Tracing OTEL `yaml:"tracing" validate:"required"`
+	// Kafka is the Kafka message broker configuration
+	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
+	// CredentialOfferQR holds credential offer QR code settings
 	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
-	// SecretFilePath is the path to a separate YAML file containing secrets.
-	// When set, ALL secrets MUST be defined in that file and secret values in config.yaml are ignored.
+	// SecretFilePath is the path to a separate YAML file containing secrets; when set, ALL secrets MUST be in that file and secret values in config.yaml are ignored. Example: "/etc/vc/secrets.yaml"
 	SecretFilePath string `yaml:"secret_file_path,omitempty"`
 }
 
+// CredentialOfferQRConfig holds credential offer QR code settings
 type CredentialOfferQRConfig struct {
+	// Type is the credential offer type: "credential_offer" or "credential_offer_uri"
 	Type string `yaml:"type" validate:"required,oneof=credential_offer_uri credential_offer" default:"credential_offer"`
-	QR   QRCfg  `yaml:"qr" validate:"omitempty"`
+	// QR holds QR code generation settings
+	QR QRCfg `yaml:"qr" validate:"omitempty"`
 }
 
-// QRCfg holds the qr configuration
+// QRCfg holds the QR code generation settings
 type QRCfg struct {
+	// RecoveryLevel is the error correction level (0-3)
 	RecoveryLevel int `yaml:"recovery_level" validate:"required,min=0,max=3" default:"2"`
-	Size          int `yaml:"size" validate:"required" default:"256"`
+	// Size is the QR code size in pixels
+	Size int `yaml:"size" validate:"required" default:"256"`
 }
 
-// GRPCServer holds the rpc configuration
+// GRPCServer holds the gRPC server configuration
 type GRPCServer struct {
-	Addr string  `yaml:"addr" validate:"required" default:":8090"`
-	TLS  GRPCTLS `yaml:"tls,omitempty"`
+	// Addr is the gRPC server listen address
+	Addr string `yaml:"addr" validate:"required" default:":8090"`
+	// TLS holds the mTLS configuration
+	TLS GRPCTLS `yaml:"tls,omitempty"`
 }
 
 // GRPCTLS holds the mTLS configuration for gRPC server
@@ -121,13 +145,14 @@ type SAMLConfig struct {
 	Enabled bool `yaml:"enabled" default:"false"`
 
 	// EntityID is the SAML SP entity identifier (typically the metadata URL)
+	// Example: "https://issuer.sunet.se/saml/metadata"
 	EntityID string `yaml:"entity_id" validate:"required_if=Enabled true"`
 
 	// MetadataURL is the public URL where SP metadata is served (optional, auto-generated if empty)
 	MetadataURL string `yaml:"metadata_url,omitempty"`
 
 	// MDQServer is the base URL for MDQ (Metadata Query Protocol) server
-	// Example: "https://md.example.org/entities/" (must end with /)
+	// Example: "https://md.sunet.se/entities/" (must end with /)
 	// Mutually exclusive with StaticIDPMetadata
 	MDQServer string `yaml:"mdq_server,omitempty"`
 
@@ -142,7 +167,7 @@ type SAMLConfig struct {
 	PrivateKeyPath string `yaml:"private_key_path" validate:"required_if=Enabled true"`
 
 	// ACSEndpoint is the Assertion Consumer Service URL where IdP sends SAML responses
-	// Example: "https://issuer.example.com/saml/acs"
+	// Example: "https://issuer.sunet.se/saml/acs"
 	ACSEndpoint string `yaml:"acs_endpoint" validate:"required_if=Enabled true"`
 
 	// SessionDuration in seconds (default: 3600)
@@ -186,7 +211,7 @@ type OIDCRPConfig struct {
 	ClientSecret string `yaml:"client_secret"`
 
 	// RedirectURI is the callback URL where the OIDC Provider sends the authorization response
-	// Example: "https://issuer.example.com/oidcrp/callback"
+	// Example: "https://issuer.sunet.se/oidcrp/callback"
 	RedirectURI string `yaml:"redirect_uri" validate:"required_if=Enabled true"`
 
 	// IssuerURL is the OIDC Provider's issuer URL for discovery
@@ -264,100 +289,154 @@ type AttributeConfig struct {
 	Default string `yaml:"default,omitempty"`
 }
 
-// Issuer holds the issuer configuration
+// Issuer holds the configuration for the Issuer service that signs and issues verifiable credentials
 type Issuer struct {
-	APIServer      APIServer      `yaml:"api_server" validate:"required"`
-	GRPCServer     GRPCServer     `yaml:"grpc_server" validate:"required"`
-	KeyConfig      *pki.KeyConfig `yaml:"key_config" validate:"required"`
-	JWTAttribute   JWTAttribute   `yaml:"jwt_attribute" validate:"required"`
-	IssuerURL      string         `yaml:"issuer_url" validate:"required"`
-	RegistryClient GRPCClientTLS  `yaml:"registry_client" validate:"omitempty"`
-	MDoc           *MDocConfig    `yaml:"mdoc" validate:"omitempty"`      // mDL/mdoc configuration
-	AuditLog       *AuditLog      `yaml:"audit_log" validate:"omitempty"` // Audit log webhook configuration
+	// APIServer is the HTTP API server configuration
+	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// GRPCServer is the gRPC server configuration
+	GRPCServer GRPCServer `yaml:"grpc_server" validate:"required"`
+	// KeyConfig is the signing key configuration
+	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	// JWTAttribute holds the JWT credential attribute configuration
+	JWTAttribute JWTAttribute `yaml:"jwt_attribute" validate:"required"`
+	// IssuerURL is the issuer identifier URL
+	// Example: "https://issuer.sunet.se"
+	IssuerURL string `yaml:"issuer_url" validate:"required"`
+	// RegistryClient is the registry gRPC client config
+	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
+	// MDoc holds mDL/mdoc configuration
+	MDoc *MDocConfig `yaml:"mdoc" validate:"omitempty"`
+	// AuditLog holds audit log configuration
+	AuditLog *AuditLog `yaml:"audit_log" validate:"omitempty"`
 }
 
 // AuditLog holds audit log configuration for multiple destinations
 type AuditLog struct {
-	Enabled          bool          `yaml:"enabled" default:"false"`
-	Destinations     []string      `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
-	FileSyncInterval time.Duration `yaml:"file_sync_interval" default:"5s"` // File destinations: 0 = fsync every write, >0 = periodic batched fsync at interval
-	// Destinations can be:
-	//   - "console" or "stdout": write to standard output
-	//   - File path (e.g., "/var/log/audit.log"): write to file
-	//   - URL (http:// or https://): send webhook POST request
+	// Enabled enables audit logging
+	Enabled bool `yaml:"enabled" default:"false"`
+	// Destinations is the list of log destinations (console/stdout, file path, or HTTP URL)
+	// Example: ["stdout", "/var/log/audit.log", "https://audit.sunet.se/webhook"]
+	Destinations []string `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	// FileSyncInterval controls fsync behavior for file destinations.
+	// 0 = fsync after every write (strict durability, lower throughput).
+	// >0 = periodic batched fsync at the given interval (better throughput, bounded data-loss window).
+	// Has no effect on console or webhook destinations.
+	FileSyncInterval time.Duration `yaml:"file_sync_interval" default:"5s"`
 }
 
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
 type MDocConfig struct {
-	CertificateChainPath string        `yaml:"certificate_chain_path" validate:"required"` // Path to PEM certificate chain
-	DefaultValidity      time.Duration `yaml:"default_validity" default:"8760h"`           // Default credential validity (365 days)
-	DigestAlgorithm      string        `yaml:"digest_algorithm" default:"SHA-256"`         // "SHA-256", "SHA-384", or "SHA-512"
+	// CertificateChainPath is the path to the PEM certificate chain
+	CertificateChainPath string `yaml:"certificate_chain_path" validate:"required"`
+	// DefaultValidity is the default credential validity (default: 365 days)
+	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
+	// DigestAlgorithm is the digest algorithm: "SHA-256", "SHA-384", or "SHA-512"
+	DigestAlgorithm string `yaml:"digest_algorithm" default:"SHA-256"`
 }
 
 // GRPCClientTLS holds mTLS configuration for gRPC client connections
 type GRPCClientTLS struct {
-	Addr         string `yaml:"addr" validate:"required"` // Registry gRPC server address
-	TLS          bool   `yaml:"tls" default:"false"`      // Enable TLS
-	CertFilePath string `yaml:"cert_file_path"`           // Client certificate for mTLS
-	KeyFilePath  string `yaml:"key_file_path"`            // Client private key for mTLS
-	CAFilePath   string `yaml:"ca_file_path"`             // CA certificate to verify server
-	ServerName   string `yaml:"server_name"`              // Server name for TLS verification (optional)
+	// Addr is the gRPC server address
+	// Example: "issuer:8090"
+	Addr string `yaml:"addr" validate:"required"`
+	// TLS enables TLS
+	TLS bool `yaml:"tls" default:"false"`
+	// CertFilePath is the client certificate for mTLS
+	CertFilePath string `yaml:"cert_file_path"`
+	// KeyFilePath is the client private key for mTLS
+	KeyFilePath string `yaml:"key_file_path"`
+	// CAFilePath is the CA certificate to verify the server
+	CAFilePath string `yaml:"ca_file_path"`
+	// ServerName is the server name for TLS verification (optional)
+	ServerName string `yaml:"server_name"`
 }
 
-// PKCS11 holds PKCS#11 HSM configuration
+// PKCS11 holds PKCS#11 HSM configuration for hardware security module integration
 type PKCS11 struct {
+	// ModulePath is the path to the PKCS#11 module
 	ModulePath string `yaml:"module_path" default:"/usr/lib/softhsm/libsofthsm2.so"`
-	SlotID     uint   `yaml:"slot_id" default:"0"`
-	PIN        string `yaml:"pin" validate:"required"`
-	KeyLabel   string `yaml:"key_label" validate:"required"`
-	KeyID      string `yaml:"key_id" validate:"required"`
+	// SlotID is the HSM slot ID
+	SlotID uint `yaml:"slot_id" default:"0"`
+	// PIN is the PIN for HSM access
+	PIN string `yaml:"pin" validate:"required"`
+	// KeyLabel is the key label in HSM
+	KeyLabel string `yaml:"key_label" validate:"required"`
+	// KeyID is the key ID in HSM
+	KeyID string `yaml:"key_id" validate:"required"`
 }
 
-// Registry holds the registry configuration
+// Registry holds the configuration for the Registry service that manages credential status
 type Registry struct {
-	APIServer        APIServer        `yaml:"api_server" validate:"required"`
-	PublicURL        string           `yaml:"public_url" validate:"required,httpurl"`
-	GRPCServer       GRPCServer       `yaml:"grpc_server" validate:"required"`
+	// APIServer is the HTTP API server configuration
+	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
+	// Example: "https://registry.sunet.se"
+	PublicURL string `yaml:"public_url" validate:"required,httpurl"`
+	// GRPCServer is the gRPC server configuration
+	GRPCServer GRPCServer `yaml:"grpc_server" validate:"required"`
+	// TokenStatusLists holds the Token Status List configuration
 	TokenStatusLists TokenStatusLists `yaml:"token_status_lists,omitempty" validate:"omitempty"`
-	AdminGUI         AdminGUI         `yaml:"admin_gui,omitempty" validate:"omitempty"`
+	// AdminGUI holds the admin GUI configuration
+	AdminGUI AdminGUI `yaml:"admin_gui,omitempty" validate:"omitempty"`
 }
 
 // AdminGUI holds the admin GUI configuration
 type AdminGUI struct {
-	Enabled       bool   `yaml:"enabled" default:"true"`
-	Username      string `yaml:"username" validate:"required_if=Enabled true" default:"admin"`
-	Password      string `yaml:"password" validate:"required_if=Enabled true"`
-	SessionSecret string `yaml:"session_secret" validate:"required_if=Enabled true"` // Secret for session cookies
+	// Enabled enables the admin GUI
+	Enabled bool `yaml:"enabled" default:"true"`
+	// Username is the admin username
+	Username string `yaml:"username" validate:"required_if=Enabled true" default:"admin"`
+	// Password is the admin password
+	Password string `yaml:"password" validate:"required_if=Enabled true"`
+	// SessionSecret is the secret for session cookies
+	SessionSecret string `yaml:"session_secret" validate:"required_if=Enabled true"`
 }
 
-// MockAS holds the mock as configuration
+// MockAS holds the configuration for the Mock Authentic Source service used for testing
 type MockAS struct {
-	APIServer      APIServer `yaml:"api_server" validate:"required"`
-	DatastoreURL   string    `yaml:"datastore_url" validate:"required"`
-	BootstrapUsers []string  `yaml:"bootstrap_users" default:"[\"100\", \"102\"]"`
+	// APIServer is the HTTP API server configuration
+	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// DatastoreURL is the datastore service URL
+	// Example: "http://datastore:8080"
+	DatastoreURL string `yaml:"datastore_url" validate:"required"`
+	// BootstrapUsers is the list of user IDs to bootstrap on startup
+	BootstrapUsers []string `yaml:"bootstrap_users" default:"[\"100\", \"102\"]"`
 }
 
-// Verifier holds the verifier configuration
+// Verifier holds the configuration for the Verifier service that verifies credentials and acts as an OIDC Provider
 type Verifier struct {
-	APIServer            APIServer                     `yaml:"api_server" validate:"required"`
-	PublicURL            string                        `yaml:"public_url" validate:"required,httpurl"`
-	KeyConfig            *pki.KeyConfig                `yaml:"key_config" validate:"required"`
-	OAuthServer          OAuthServer                   `yaml:"oauth_server" validate:"required"`
-	PreferredVPFormats   *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"` // Informational: tells wallets what formats/algorithms are supported
-	SupportedWallets     map[string]string             `yaml:"supported_wallets" validate:"omitempty"`
-	OIDC                 OIDCConfig                    `yaml:"oidc" validate:"omitempty"`
-	OpenID4VP            OpenID4VPConfig               `yaml:"openid4vp" validate:"omitempty"`
-	DigitalCredentials   DigitalCredentialsConfig      `yaml:"digital_credentials,omitempty"`
-	AuthorizationPageCSS AuthorizationPageCSSConfig    `yaml:"authorization_page_css,omitempty"`
-	CredentialDisplay    CredentialDisplayConfig       `yaml:"credential_display,omitempty"`
-	Trust                TrustConfig                   `yaml:"trust,omitempty"`
+	// APIServer is the HTTP API server configuration
+	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
+	// Example: "https://verifier.sunet.se"
+	PublicURL string `yaml:"public_url" validate:"required,httpurl"`
+	// KeyConfig is the signing key configuration
+	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	// OAuthServer is the OAuth2 server configuration
+	OAuthServer OAuthServer `yaml:"oauth_server" validate:"required"`
+	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
+	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
+	// SupportedWallets holds supported wallet configurations
+	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
+	// OIDC holds the OIDC Provider configuration
+	OIDC OIDCConfig `yaml:"oidc" validate:"omitempty"`
+	// OpenID4VP holds the OpenID4VP configuration
+	OpenID4VP OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
+	// DigitalCredentials holds the W3C Digital Credentials API configuration
+	DigitalCredentials DigitalCredentialsConfig `yaml:"digital_credentials,omitempty"`
+	// AuthorizationPageCSS holds the authorization page styling configuration
+	AuthorizationPageCSS AuthorizationPageCSSConfig `yaml:"authorization_page_css,omitempty"`
+	// CredentialDisplay holds the credential display settings
+	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
+	// Trust holds the trust evaluation configuration
+	Trust TrustConfig `yaml:"trust,omitempty"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
 // This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
 type TrustConfig struct {
 	// GoTrustURL is the URL of the go-trust PDP (Policy Decision Point) service.
-	// Example: "https://trust.example.com/pdp"
+	// Example: "https://trust.sunet.se/pdp"
 	// If empty, trust evaluation is disabled and only local DID methods will work.
 	GoTrustURL string `yaml:"go_trust_url,omitempty"`
 
@@ -398,21 +477,32 @@ type OIDCConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier-proxy itself as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
-	Issuer               string `yaml:"issuer" validate:"required"`
-	SessionDuration      int    `yaml:"session_duration" validate:"required" default:"3600"`        // in seconds
-	CodeDuration         int    `yaml:"code_duration" validate:"required" default:"300"`            // in seconds
-	AccessTokenDuration  int    `yaml:"access_token_duration" validate:"required" default:"3600"`   // in seconds
-	IDTokenDuration      int    `yaml:"id_token_duration" validate:"required" default:"3600"`       // in seconds
-	RefreshTokenDuration int    `yaml:"refresh_token_duration" validate:"required" default:"86400"` // in seconds
-	SubjectType          string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
-	SubjectSalt          string `yaml:"subject_salt" validate:"required"`
+	// Example: "https://verifier.sunet.se"
+	Issuer string `yaml:"issuer" validate:"required"`
+	// SessionDuration is the session duration in seconds
+	SessionDuration int `yaml:"session_duration" validate:"required" default:"3600"`
+	// CodeDuration is the authorization code duration in seconds
+	CodeDuration int `yaml:"code_duration" validate:"required" default:"300"`
+	// AccessTokenDuration is the access token duration in seconds
+	AccessTokenDuration int `yaml:"access_token_duration" validate:"required" default:"3600"`
+	// IDTokenDuration is the ID token duration in seconds
+	IDTokenDuration int `yaml:"id_token_duration" validate:"required" default:"3600"`
+	// RefreshTokenDuration is the refresh token duration in seconds
+	RefreshTokenDuration int `yaml:"refresh_token_duration" validate:"required" default:"86400"`
+	// SubjectType is the subject type: "public" or "pairwise"
+	SubjectType string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
+	// SubjectSalt is the salt for pairwise subject generation
+	SubjectSalt string `yaml:"subject_salt" validate:"required"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
-	PresentationTimeout     int                         `yaml:"presentation_timeout" validate:"required" default:"300"`
-	SupportedCredentials    []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
-	PresentationRequestsDir string                      `yaml:"presentation_requests_dir,omitempty"` // Optional: directory with presentation request templates
+	// PresentationTimeout is the presentation timeout in seconds
+	PresentationTimeout int `yaml:"presentation_timeout" validate:"required" default:"300"`
+	// SupportedCredentials holds the supported credential configurations
+	SupportedCredentials []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
+	// PresentationRequestsDir is an optional directory with presentation request templates
+	PresentationRequestsDir string `yaml:"presentation_requests_dir,omitempty"`
 }
 
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration
@@ -438,7 +528,8 @@ type DigitalCredentialsConfig struct {
 	// Default: true
 	AllowQRFallback bool `yaml:"allow_qr_fallback" default:"true"`
 
-	// DeepLinkScheme for mobile wallet integration (e.g., "eudi-wallet://")
+	// DeepLinkScheme for mobile wallet integration
+	// Example: "eudi-wallet://"
 	DeepLinkScheme string `yaml:"deep_link_scheme,omitempty"`
 }
 
@@ -455,10 +546,12 @@ type AuthorizationPageCSSConfig struct {
 	// Theme sets predefined color scheme: "light" (default), "dark", "blue", "purple"
 	Theme string `yaml:"theme,omitempty" validate:"omitempty,oneof=light dark blue purple" default:"light"`
 
-	// PrimaryColor overrides the primary brand color (hex format: #667eea)
+	// PrimaryColor overrides the primary brand color
+	// Example: "#667eea"
 	PrimaryColor string `yaml:"primary_color,omitempty"`
 
-	// SecondaryColor overrides the secondary brand color (hex format: #764ba2)
+	// SecondaryColor overrides the secondary brand color
+	// Example: "#764ba2"
 	SecondaryColor string `yaml:"secondary_color,omitempty"`
 
 	// LogoURL provides a URL to a custom logo image
@@ -496,51 +589,86 @@ type CredentialDisplayConfig struct {
 
 // SupportedCredentialConfig maps credential types to OIDC scopes
 type SupportedCredentialConfig struct {
-	VCT    string   `yaml:"vct" validate:"required"`
+	// VCT is the verifiable credential type
+	// Example: "urn:eudi:pid:1"
+	VCT string `yaml:"vct" validate:"required"`
+	// Scopes are the OIDC scopes that grant access to this credential
 	Scopes []string `yaml:"scopes" validate:"required"`
 }
 
-// BasicAuth holds the basic auth configuration
+// BasicAuth holds the HTTP Basic authentication configuration
 type BasicAuth struct {
-	Users   map[string]string `yaml:"users"`
-	Enabled bool              `yaml:"enabled" default:"false"`
+	// Users is a username to password mapping
+	Users map[string]string `yaml:"users"`
+	// Enabled enables HTTP Basic authentication
+	Enabled bool `yaml:"enabled" default:"false"`
 }
 
+// IssuerMetadata holds the OpenID4VCI issuer metadata configuration
 type IssuerMetadata struct {
-	AuthorizationServers                 []string                                         `yaml:"authorization_servers" validate:"omitempty"`
-	DeferredCredentialEndpoint           string                                           `yaml:"deferred_credential_endpoint" validate:"omitempty"`
-	NotificationEndpoint                 string                                           `yaml:"notification_endpoint" validate:"omitempty"`
-	CryptographicBindingMethodsSupported []string                                         `yaml:"cryptographic_binding_methods_supported" validate:"omitempty"`
-	CredentialSigningAlgValuesSupported  []string                                         `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
-	ProofSigningAlgValuesSupported       []string                                         `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
-	CredentialResponseEncryption         *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
-	BatchCredentialIssuance              *openid4vci.BatchCredentialIssuance              `yaml:"batch_credential_issuance" validate:"omitempty"`
-	Display                              []openid4vci.MetadataDisplay                     `yaml:"display" validate:"omitempty"`
+	// AuthorizationServers lists the authorization server URLs
+	AuthorizationServers []string `yaml:"authorization_servers" validate:"omitempty"`
+	// DeferredCredentialEndpoint is the deferred credential endpoint
+	DeferredCredentialEndpoint string `yaml:"deferred_credential_endpoint" validate:"omitempty"`
+	// NotificationEndpoint is the notification endpoint
+	NotificationEndpoint string `yaml:"notification_endpoint" validate:"omitempty"`
+	// CryptographicBindingMethodsSupported lists the supported binding methods
+	CryptographicBindingMethodsSupported []string `yaml:"cryptographic_binding_methods_supported" validate:"omitempty"`
+	// CredentialSigningAlgValuesSupported lists the supported signing algorithms
+	CredentialSigningAlgValuesSupported []string `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
+	// ProofSigningAlgValuesSupported lists the supported proof algorithms
+	ProofSigningAlgValuesSupported []string `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
+	// CredentialResponseEncryption holds the response encryption configuration
+	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
+	// BatchCredentialIssuance holds the batch issuance configuration
+	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
+	// Display holds the display metadata
+	Display []openid4vci.MetadataDisplay `yaml:"display" validate:"omitempty"`
 }
 
+// CredentialOfferWallets holds wallet redirect configuration
 type CredentialOfferWallets struct {
-	Label       string `yaml:"label" validate:"required"`
+	// Label is the display label for the wallet
+	Label string `yaml:"label" validate:"required"`
+	// RedirectURI is the wallet redirect URI
+	// Example: "eudi-wallet://credential-offer"
 	RedirectURI string `yaml:"redirect_uri" validate:"required"`
 }
 
+// CredentialOffers holds credential offer configurations
 type CredentialOffers struct {
-	IssuerURL string                            `yaml:"issuer_url" validate:"required"`
-	Wallets   map[string]CredentialOfferWallets `yaml:"wallets" validate:"required"`
+	// IssuerURL is the issuer URL for credential offers
+	IssuerURL string `yaml:"issuer_url" validate:"required"`
+	// Wallets holds wallet redirect configurations
+	Wallets map[string]CredentialOfferWallets `yaml:"wallets" validate:"required"`
 }
 
-// APIGW holds the datastore configuration
+// APIGW holds the configuration for the API Gateway service that handles credential issuance requests
 type APIGW struct {
-	APIServer         APIServer        `yaml:"api_server" validate:"required"`
-	KeyConfig         *pki.KeyConfig   `yaml:"key_config" validate:"required"`
-	CredentialOffers  CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
-	OauthServer       OAuthServer      `yaml:"oauth_server" validate:"omitempty"`
-	IssuerMetadata    IssuerMetadata   `yaml:"issuer_metadata" validate:"omitempty"`
-	PublicURL         string           `yaml:"public_url" validate:"required,httpurl"`
-	RegistryPublicURL string           `yaml:"registry_public_url" validate:"required,httpurl"` // Public URL of the registry service for constructing status list URIs
-	SAML              SAMLConfig       `yaml:"saml,omitempty" validate:"omitempty"`
-	OIDCRP            OIDCRPConfig     `yaml:"oidcrp,omitempty" validate:"omitempty"`
-	IssuerClient      GRPCClientTLS    `yaml:"issuer_client" validate:"required"`   // gRPC client config for issuer
-	RegistryClient    GRPCClientTLS    `yaml:"registry_client" validate:"required"` // gRPC client config for registry
+	// APIServer is the HTTP API server configuration
+	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// KeyConfig is the signing key configuration
+	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	// CredentialOffers holds credential offer wallet configurations
+	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
+	// OauthServer is the OAuth2 server configuration
+	OauthServer OAuthServer `yaml:"oauth_server" validate:"omitempty"`
+	// IssuerMetadata holds the OpenID4VCI issuer metadata
+	IssuerMetadata IssuerMetadata `yaml:"issuer_metadata" validate:"omitempty"`
+	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
+	// Example: "https://issuer.sunet.se"
+	PublicURL string `yaml:"public_url" validate:"required,httpurl"`
+	// RegistryPublicURL is the public URL of the registry service for constructing status list URIs
+	// Example: "https://registry.sunet.se"
+	RegistryPublicURL string `yaml:"registry_public_url" validate:"required,httpurl"`
+	// SAML holds the SAML Service Provider configuration
+	SAML SAMLConfig `yaml:"saml,omitempty" validate:"omitempty"`
+	// OIDCRP holds the OIDC Relying Party configuration
+	OIDCRP OIDCRPConfig `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	// IssuerClient is the gRPC client config for issuer
+	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
+	// RegistryClient is the gRPC client config for registry
+	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -555,26 +683,38 @@ type TokenStatusLists struct {
 	RateLimitRequestsPerMinute int `yaml:"rate_limit_requests_per_minute" default:"60"`
 }
 
-// OTEL holds the opentelemetry configuration
+// OTEL holds the OpenTelemetry tracing configuration
 type OTEL struct {
-	Addr    string `yaml:"addr" validate:"required"`
-	Timeout int64  `yaml:"timeout" default:"10"`
+	// Addr is the OTEL collector address
+	// Example: "jaeger:4318"
+	Addr string `yaml:"addr" validate:"required"`
+	// Timeout is the timeout in seconds
+	Timeout int64 `yaml:"timeout" default:"10"`
 }
 
-// OAuthServer holds the oauth server configuration
+// OAuthServer holds the OAuth2 server configuration
 type OAuthServer struct {
-	TokenEndpoint string         `yaml:"token_endpoint" validate:"required"`
-	Clients       oauth2.Clients `yaml:"clients" validate:"required"`
+	// TokenEndpoint is the OAuth2 token endpoint URL
+	// Example: "https://verifier.sunet.se/token"
+	TokenEndpoint string `yaml:"token_endpoint" validate:"required"`
+	// Clients holds the OAuth2 client configurations
+	Clients oauth2.Clients `yaml:"clients" validate:"required"`
 }
 
-// UI holds the user-interface configuration
+// UI holds the configuration for the User Interface service
 type UI struct {
-	APIServer                         APIServer `yaml:"api_server" validate:"required"`
-	Username                          string    `yaml:"username" validate:"required"`
-	Password                          string    `yaml:"password" validate:"required"`
-	SessionCookieAuthenticationKey    string    `yaml:"session_cookie_authentication_key" validate:"required"`
-	SessionStoreEncryptionKey         string    `yaml:"session_store_encryption_key" validate:"required"`
-	SessionInactivityTimeoutInSeconds int       `yaml:"session_inactivity_timeout_in_seconds" validate:"required"`
+	// APIServer is the HTTP API server configuration
+	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// Username is the UI login username
+	Username string `yaml:"username" validate:"required"`
+	// Password is the UI login password
+	Password string `yaml:"password" validate:"required"`
+	// SessionCookieAuthenticationKey is the session cookie HMAC key
+	SessionCookieAuthenticationKey string `yaml:"session_cookie_authentication_key" validate:"required"`
+	// SessionStoreEncryptionKey is the session cookie encryption key
+	SessionStoreEncryptionKey string `yaml:"session_store_encryption_key" validate:"required"`
+	// SessionInactivityTimeoutInSeconds is the session inactivity timeout in seconds
+	SessionInactivityTimeoutInSeconds int `yaml:"session_inactivity_timeout_in_seconds" validate:"required"`
 	Services                          struct {
 		APIGW struct {
 			BaseURL string `yaml:"base_url"`
