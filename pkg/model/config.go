@@ -3,11 +3,9 @@ package model
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"slices"
 	"time"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
@@ -164,49 +162,10 @@ type StaticIDPConfig struct {
 	EntityID string `yaml:"entity_id" validate:"required"`
 
 	// MetadataPath is the file path to IdP metadata XML (mutually exclusive with MetadataURL)
-	MetadataPath string `yaml:"metadata_path,omitempty"`
+	MetadataPath string `yaml:"metadata_path,omitempty" validate:"required_without=MetadataURL,excluded_with=MetadataURL"`
 
 	// MetadataURL is the HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath)
 	MetadataURL string `yaml:"metadata_url,omitempty"`
-}
-
-// Validate validates SAMLConfig for consistency
-func (c *SAMLConfig) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
-
-	// Check mutual exclusivity of MDQ and static IdP
-	hasMDQ := c.MDQServer != ""
-	hasStatic := c.StaticIDPMetadata != nil
-
-	if !hasMDQ && !hasStatic {
-		return errors.New("SAML enabled but neither mdq_server nor static_idp_metadata configured")
-	}
-
-	if hasMDQ && hasStatic {
-		return errors.New("SAML configuration cannot have both mdq_server and static_idp_metadata")
-	}
-
-	// Validate static IdP config if present
-	if hasStatic {
-		if c.StaticIDPMetadata.EntityID == "" {
-			return errors.New("static_idp_metadata.entity_id is required")
-		}
-
-		hasPath := c.StaticIDPMetadata.MetadataPath != ""
-		hasURL := c.StaticIDPMetadata.MetadataURL != ""
-
-		if !hasPath && !hasURL {
-			return errors.New("static_idp_metadata requires either metadata_path or metadata_url")
-		}
-
-		if hasPath && hasURL {
-			return errors.New("static_idp_metadata cannot have both metadata_path and metadata_url")
-		}
-	}
-
-	return nil
 }
 
 // OIDCRPConfig holds OIDC Relying Party configuration for credential issuance
@@ -269,27 +228,6 @@ type DynamicRegistrationConfig struct {
 	// Example: "/var/lib/vc/oidcrp-registration.json"
 	// If empty, credentials are not persisted (re-register on restart)
 	StoragePath string `yaml:"storage_path,omitempty"`
-}
-
-// Validate validates OIDCRPConfig for consistency
-func (c *OIDCRPConfig) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
-
-	// Ensure 'openid' scope is present (mandatory for OIDC)
-	if !slices.Contains(c.Scopes, "openid") {
-		return errors.New("OIDC scopes must include 'openid'")
-	}
-
-	// Validate that either static credentials or dynamic registration is configured
-	if !c.DynamicRegistration.Enabled {
-		if c.ClientID == "" || c.ClientSecret == "" {
-			return errors.New("OIDC RP requires either client_id/client_secret or dynamic_registration.enabled=true")
-		}
-	}
-
-	return nil
 }
 
 // CredentialMapping defines how to issue a specific credential type via SAML

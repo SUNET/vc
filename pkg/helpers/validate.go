@@ -167,6 +167,51 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
+	// Register struct-level validation for SAMLConfig
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.SAMLConfig)
+		if !cfg.Enabled {
+			return
+		}
+
+		hasMDQ := cfg.MDQServer != ""
+		hasStatic := cfg.StaticIDPMetadata != nil
+
+		if !hasMDQ && !hasStatic {
+			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_required", "")
+		}
+		if hasMDQ && hasStatic {
+			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_exclusive", "")
+		}
+	}, model.SAMLConfig{})
+
+	// Register struct-level validation for OIDCRPConfig
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.OIDCRPConfig)
+		if !cfg.Enabled {
+			return
+		}
+
+		// 'openid' scope is mandatory for OIDC
+		hasOpenID := false
+		for _, s := range cfg.Scopes {
+			if s == "openid" {
+				hasOpenID = true
+				break
+			}
+		}
+		if !hasOpenID {
+			sl.ReportError(cfg.Scopes, "Scopes", "Scopes", "oidc_openid_scope_required", "")
+		}
+
+		// Either static credentials or dynamic registration must be configured
+		if !cfg.DynamicRegistration.Enabled {
+			if cfg.ClientID == "" || cfg.ClientSecret == "" {
+				sl.ReportError(cfg.ClientID, "ClientID", "ClientID", "oidc_credentials_required", "")
+			}
+		}
+	}, model.OIDCRPConfig{})
+
 	return validate, nil
 }
 
@@ -234,3 +279,5 @@ func ValidateDocumentData(ctx context.Context, completeDocument *model.CompleteD
 
 	return nil
 }
+
+
