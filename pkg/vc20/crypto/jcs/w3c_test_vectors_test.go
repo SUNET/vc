@@ -21,6 +21,14 @@ const (
 	w3cPublicKeyMultibase = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
 	// Secret key: multicodec ed25519-priv (0x8026) + 64 bytes (seed + public)
 	w3cSecretKeyMultibase = "z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq"
+
+	// Common W3C @context URLs
+	w3cCredentialsContextV2  = "https://www.w3.org/ns/credentials/v2"
+	w3cCredentialsExamplesV2 = "https://www.w3.org/ns/credentials/examples/v2"
+
+	// W3C test vector values
+	w3cTestVerificationMethod = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
+	w3cTestCreated            = "2023-02-24T23:36:38Z"
 )
 
 // Expected intermediate values from the specification
@@ -50,12 +58,12 @@ const (
 // Unsigned credential from EXAMPLE 30
 var w3cUnsignedCredential = map[string]any{
 	"@context": []any{
-		"https://www.w3.org/ns/credentials/v2",
-		"https://www.w3.org/ns/credentials/examples/v2",
+		w3cCredentialsContextV2,
+		w3cCredentialsExamplesV2,
 	},
-	"id":   "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33",
-	"type": []any{"VerifiableCredential", "AlumniCredential"},
-	"name": "Alumni Credential",
+	"id":          "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33",
+	"type":        []any{"VerifiableCredential", "AlumniCredential"},
+	"name":        "Alumni Credential",
 	"description": "A minimum viable example of an Alumni Credential.",
 	"issuer":      "https://vc.example/issuers/5678",
 	"validFrom":   "2023-01-01T00:00:00Z",
@@ -68,12 +76,12 @@ var w3cUnsignedCredential = map[string]any{
 // Signed credential from EXAMPLE 39
 var w3cSignedCredential = map[string]any{
 	"@context": []any{
-		"https://www.w3.org/ns/credentials/v2",
-		"https://www.w3.org/ns/credentials/examples/v2",
+		w3cCredentialsContextV2,
+		w3cCredentialsExamplesV2,
 	},
-	"id":   "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33",
-	"type": []any{"VerifiableCredential", "AlumniCredential"},
-	"name": "Alumni Credential",
+	"id":          "urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33",
+	"type":        []any{"VerifiableCredential", "AlumniCredential"},
+	"name":        "Alumni Credential",
 	"description": "A minimum viable example of an Alumni Credential.",
 	"issuer":      "https://vc.example/issuers/5678",
 	"validFrom":   "2023-01-01T00:00:00Z",
@@ -82,16 +90,16 @@ var w3cSignedCredential = map[string]any{
 		"alumniOf": "The School of Examples",
 	},
 	"proof": map[string]any{
-		"type":       "DataIntegrityProof",
-		"cryptosuite": "eddsa-jcs-2022",
-		"created":    "2023-02-24T23:36:38Z",
-		"verificationMethod": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
-		"proofPurpose": "assertionMethod",
+		"type":               ProofTypeDataIntegrity,
+		"cryptosuite":        CryptosuiteEdDSAJCS2022,
+		"created":            w3cTestCreated,
+		"verificationMethod": w3cTestVerificationMethod,
+		"proofPurpose":       "assertionMethod",
 		"@context": []any{
-			"https://www.w3.org/ns/credentials/v2",
-			"https://www.w3.org/ns/credentials/examples/v2",
+			w3cCredentialsContextV2,
+			w3cCredentialsExamplesV2,
 		},
-		"proofValue": "z2HnFSSPPBzR36zdDgK8PbEHeXbR56YF24jwMpt3R1eHXQzJDMWS93FCzpvJpwTWd3GAVFuUfjoJdcnTMuVor51aX",
+		"proofValue": expectedProofValue,
 	},
 }
 
@@ -124,12 +132,12 @@ func getW3CKeys(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	if err != nil {
 		t.Fatalf("Failed to decode private key: %v", err)
 	}
-	
+
 	// The secret key is just the seed (32 bytes), need to derive full key
 	if len(privKeyBytes) == ed25519.SeedSize {
 		return ed25519.PublicKey(pubKeyBytes), ed25519.NewKeyFromSeed(privKeyBytes)
 	}
-	
+
 	// If it's already 64 bytes, it's seed + public
 	if len(privKeyBytes) == ed25519.PrivateKeySize {
 		return ed25519.PublicKey(pubKeyBytes), ed25519.PrivateKey(privKeyBytes)
@@ -169,17 +177,7 @@ func TestW3CCredentialHash(t *testing.T) {
 // TestW3CProofOptionsHash verifies the proof options hash matches the W3C test vector.
 func TestW3CProofOptionsHash(t *testing.T) {
 	// Proof options from EXAMPLE 33
-	proofOptions := map[string]any{
-		"type":       "DataIntegrityProof",
-		"cryptosuite": "eddsa-jcs-2022",
-		"created":    "2023-02-24T23:36:38Z",
-		"verificationMethod": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
-		"proofPurpose": "assertionMethod",
-		"@context": []any{
-			"https://www.w3.org/ns/credentials/v2",
-			"https://www.w3.org/ns/credentials/examples/v2",
-		},
-	}
+	proofOptions := buildW3CProofOptions()
 
 	canonical, err := Canonicalize(proofOptions)
 	if err != nil {
@@ -200,17 +198,7 @@ func TestW3CProofOptionsHash(t *testing.T) {
 
 // TestW3CCombinedHash verifies the combined hash (proofHash || docHash) matches the W3C test vector.
 func TestW3CCombinedHash(t *testing.T) {
-	proofOptions := map[string]any{
-		"type":       "DataIntegrityProof",
-		"cryptosuite": "eddsa-jcs-2022",
-		"created":    "2023-02-24T23:36:38Z",
-		"verificationMethod": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
-		"proofPurpose": "assertionMethod",
-		"@context": []any{
-			"https://www.w3.org/ns/credentials/v2",
-			"https://www.w3.org/ns/credentials/examples/v2",
-		},
-	}
+	proofOptions := buildW3CProofOptions()
 
 	proofCanonical, _ := Canonicalize(proofOptions)
 	docCanonical, _ := Canonicalize(w3cUnsignedCredential)
@@ -227,6 +215,21 @@ func TestW3CCombinedHash(t *testing.T) {
 	}
 }
 
+// buildW3CProofOptions creates the standard W3C test vector proof options.
+func buildW3CProofOptions() map[string]any {
+	return map[string]any{
+		"type":               ProofTypeDataIntegrity,
+		"cryptosuite":        CryptosuiteEdDSAJCS2022,
+		"created":            w3cTestCreated,
+		"verificationMethod": w3cTestVerificationMethod,
+		"proofPurpose":       "assertionMethod",
+		"@context": []any{
+			w3cCredentialsContextV2,
+			w3cCredentialsExamplesV2,
+		},
+	}
+}
+
 // TestW3CVerifySignedCredential verifies the W3C signed credential using our implementation.
 func TestW3CVerifySignedCredential(t *testing.T) {
 	pubKey, _ := getW3CKeys(t)
@@ -240,7 +243,7 @@ func TestW3CVerifySignedCredential(t *testing.T) {
 
 // TestW3CSignatureBytes verifies the signature value from the W3C test vector.
 func TestW3CSignatureBytes(t *testing.T) {
-	// Decode the proofValue from the signed credential  
+	// Decode the proofValue from the signed credential
 	_, sigBytes, err := multibase.Decode(expectedProofValue)
 	if err != nil {
 		t.Fatalf("Failed to decode proofValue: %v", err)
@@ -257,11 +260,11 @@ func TestW3CRoundTrip(t *testing.T) {
 	pubKey, privKey := getW3CKeys(t)
 
 	suite := NewSuite()
-	
+
 	// Sign the unsigned credential
 	opts := &SignOptions{
-		VerificationMethod: "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2",
-		ProofPurpose:      "assertionMethod",
+		VerificationMethod: w3cTestVerificationMethod,
+		ProofPurpose:       testProofPurposeAssertion,
 	}
 
 	signed, err := suite.Sign(w3cUnsignedCredential, privKey, opts)
@@ -295,15 +298,15 @@ func TestW3CContextMismatch(t *testing.T) {
 	}
 	// Add an extra context entry that wasn't there when signed
 	modifiedCredential["@context"] = []any{
-		"https://www.w3.org/ns/credentials/v2",
-		"https://www.w3.org/ns/credentials/examples/v2",
+		w3cCredentialsContextV2,
+		w3cCredentialsExamplesV2,
 		"https://example.com/extra-context",
 	}
 
 	suite := NewSuite()
-	
+
 	// This should still verify because document @context STARTS with proof @context
-	// Per spec step 4.1: "Check that the securedDocument.@context starts with all values 
+	// Per spec step 4.1: "Check that the securedDocument.@context starts with all values
 	// contained in the proofOptions.@context in the same order"
 	err := suite.Verify(modifiedCredential, pubKey)
 	if err != nil {
@@ -322,8 +325,8 @@ func TestW3CContextOrderMismatch(t *testing.T) {
 	}
 	// Reverse the context order
 	modifiedCredential["@context"] = []any{
-		"https://www.w3.org/ns/credentials/examples/v2",
-		"https://www.w3.org/ns/credentials/v2",
+		w3cCredentialsExamplesV2,
+		w3cCredentialsContextV2,
 	}
 
 	suite := NewSuite()

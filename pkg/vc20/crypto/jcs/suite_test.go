@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+// Test constants to avoid duplicating literals
+const (
+	testVerificationMethodIssuer = "did:example:issuer#key-1"
+	testVerificationMethodKey    = "did:example:key"
+	testVerificationMethodDIDKey = "did:key"
+	testDocID                    = "test-doc"
+	testProofPurposeAssertion    = "assertionMethod"
+)
+
+// Test error message formats
+const (
+	errSignFailed = "Sign failed: %v"
+)
+
 func TestNewSuite(t *testing.T) {
 	suite := NewSuite()
 	if suite == nil {
@@ -107,14 +121,14 @@ func TestSignAndVerify(t *testing.T) {
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 		Created:            time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC),
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	proof, ok := signed["proof"].(map[string]any)
@@ -148,18 +162,18 @@ func TestVerifyFailsWithWrongKey(t *testing.T) {
 	suite := NewSuite()
 
 	document := map[string]any{
-		"id":   "test-doc",
+		"id":   testDocID,
 		"data": "test data",
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	err = suite.Verify(signed, wrongPub)
@@ -174,18 +188,18 @@ func TestVerifyFailsWithTamperedDocument(t *testing.T) {
 	suite := NewSuite()
 
 	document := map[string]any{
-		"id":   "test-doc",
+		"id":   testDocID,
 		"data": "original data",
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	signed["data"] = "tampered data"
@@ -202,11 +216,11 @@ func TestSignWithOptionalFields(t *testing.T) {
 	suite := NewSuite()
 
 	document := map[string]any{
-		"id": "test-doc",
+		"id": testDocID,
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "authentication",
 		Domain:             "example.com",
 		Challenge:          "abc123",
@@ -214,7 +228,7 @@ func TestSignWithOptionalFields(t *testing.T) {
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	proof, ok := signed["proof"].(map[string]any)
@@ -247,13 +261,13 @@ func TestRoundTripWithJSON(t *testing.T) {
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	jsonBytes, err := json.Marshal(signed)
@@ -289,14 +303,14 @@ func TestSignValidationErrors(t *testing.T) {
 			name:     "nil document",
 			doc:      nil,
 			key:      priv,
-			opts:     &SignOptions{VerificationMethod: "did:key", ProofPurpose: "assertionMethod"},
+			opts:     &SignOptions{VerificationMethod: testVerificationMethodDIDKey, ProofPurpose: "assertionMethod"},
 			errMatch: "document is nil",
 		},
 		{
 			name:     "nil key",
 			doc:      document,
 			key:      nil,
-			opts:     &SignOptions{VerificationMethod: "did:key", ProofPurpose: "assertionMethod"},
+			opts:     &SignOptions{VerificationMethod: testVerificationMethodDIDKey, ProofPurpose: "assertionMethod"},
 			errMatch: "private key is nil",
 		},
 		{
@@ -317,7 +331,7 @@ func TestSignValidationErrors(t *testing.T) {
 			name:     "missing proofPurpose",
 			doc:      document,
 			key:      priv,
-			opts:     &SignOptions{VerificationMethod: "did:key"},
+			opts:     &SignOptions{VerificationMethod: testVerificationMethodDIDKey},
 			errMatch: "proofPurpose is required",
 		},
 	}
@@ -407,18 +421,18 @@ func TestVerifyWithProofArray(t *testing.T) {
 	suite := NewSuite()
 
 	document := map[string]any{
-		"id":   "test-doc",
+		"id":   testDocID,
 		"data": "test data",
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	// Convert single proof to array with other proofs
@@ -481,18 +495,18 @@ func TestSignPreservesExistingProofArray(t *testing.T) {
 	}
 
 	document := map[string]any{
-		"id":    "test-doc",
+		"id":    testDocID,
 		"proof": existingProofs,
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	proofArray, ok := signed["proof"].([]any)
@@ -516,18 +530,18 @@ func TestSignPreservesExistingSingleProof(t *testing.T) {
 	}
 
 	document := map[string]any{
-		"id":    "test-doc",
+		"id":    testDocID,
 		"proof": existingProof,
 	}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	proofArray, ok := signed["proof"].([]any)
@@ -558,7 +572,7 @@ func TestToMapWithStruct(t *testing.T) {
 	document := TestDoc{ID: "test-123", Name: "Test Document"}
 
 	opts := &SignOptions{
-		VerificationMethod: "did:example:issuer#key-1",
+		VerificationMethod: testVerificationMethodIssuer,
 		ProofPurpose:       "assertionMethod",
 	}
 
@@ -590,13 +604,13 @@ func TestVerifyWithStructDocument(t *testing.T) {
 	// First sign a document
 	document := map[string]any{"id": "test-struct"}
 	opts := &SignOptions{
-		VerificationMethod: "did:example:key",
+		VerificationMethod: testVerificationMethodKey,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	// Convert to struct and verify
@@ -618,13 +632,13 @@ func TestVerifyWithProofDirect(t *testing.T) {
 
 	document := map[string]any{"id": "test", "data": "value"}
 	opts := &SignOptions{
-		VerificationMethod: "did:example:key",
+		VerificationMethod: testVerificationMethodKey,
 		ProofPurpose:       "assertionMethod",
 	}
 
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 
 	proof := signed["proof"].(map[string]any)
@@ -687,7 +701,7 @@ func TestSignAutoCreatedTime(t *testing.T) {
 
 	document := map[string]any{"id": "test"}
 	opts := &SignOptions{
-		VerificationMethod: "did:example:key",
+		VerificationMethod: testVerificationMethodKey,
 		ProofPurpose:       "assertionMethod",
 		// Created is zero, should be auto-generated
 	}
@@ -695,7 +709,7 @@ func TestSignAutoCreatedTime(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Second) // Add buffer for timing
 	signed, err := suite.Sign(document, priv, opts)
 	if err != nil {
-		t.Fatalf("Sign failed: %v", err)
+		t.Fatalf(errSignFailed, err)
 	}
 	after := time.Now().UTC().Add(time.Second) // Add buffer for timing
 

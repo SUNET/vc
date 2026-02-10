@@ -26,6 +26,11 @@ const (
 
 	// ProofTypeDataIntegrity is the W3C Data Integrity proof type
 	ProofTypeDataIntegrity = "DataIntegrityProof"
+
+	// JSON-LD keys
+	keyContext    = "@context"
+	keyProof      = "proof"
+	keyProofValue = "proofValue"
 )
 
 // Suite implements the eddsa-jcs-2022 cryptosuite for W3C Data Integrity proofs.
@@ -59,20 +64,8 @@ type DataIntegrityProof struct {
 
 // Sign creates a Data Integrity proof for a JSON document using eddsa-jcs-2022.
 func (s *Suite) Sign(document any, key ed25519.PrivateKey, opts *SignOptions) (map[string]any, error) {
-	if document == nil {
-		return nil, fmt.Errorf("document is nil")
-	}
-	if key == nil {
-		return nil, fmt.Errorf("private key is nil")
-	}
-	if opts == nil {
-		return nil, fmt.Errorf("sign options are nil")
-	}
-	if opts.VerificationMethod == "" {
-		return nil, fmt.Errorf("verificationMethod is required")
-	}
-	if opts.ProofPurpose == "" {
-		return nil, fmt.Errorf("proofPurpose is required")
+	if err := validateSignInputs(document, key, opts); err != nil {
+		return nil, err
 	}
 
 	docMap, err := toMap(document)
@@ -80,13 +73,40 @@ func (s *Suite) Sign(document any, key ed25519.PrivateKey, opts *SignOptions) (m
 		return nil, fmt.Errorf("failed to convert document to map: %w", err)
 	}
 
-	docWithoutProof := make(map[string]any)
-	for k, v := range docMap {
-		if k != "proof" {
-			docWithoutProof[k] = v
-		}
-	}
+	docWithoutProof := copyMapWithoutKey(docMap, keyProof)
+	proofConfig := buildProofConfig(opts, docWithoutProof)
 
+	proofValue, err := createSignature(docWithoutProof, proofConfig, key)
+	if err != nil {
+		return nil, err
+	}
+	proofConfig[keyProofValue] = proofValue
+
+	return buildSignedDocument(docMap, proofConfig), nil
+}
+
+// validateSignInputs validates the inputs for the Sign method.
+func validateSignInputs(document any, key ed25519.PrivateKey, opts *SignOptions) error {
+	if document == nil {
+		return fmt.Errorf("document is nil")
+	}
+	if key == nil {
+		return fmt.Errorf("private key is nil")
+	}
+	if opts == nil {
+		return fmt.Errorf("sign options are nil")
+	}
+	if opts.VerificationMethod == "" {
+		return fmt.Errorf("verificationMethod is required")
+	}
+	if opts.ProofPurpose == "" {
+		return fmt.Errorf("proofPurpose is required")
+	}
+	return nil
+}
+
+// buildProofConfig creates the proof configuration object.
+func buildProofConfig(opts *SignOptions, docWithoutProof map[string]any) map[string]any {
 	created := opts.Created
 	if created.IsZero() {
 		created = time.Now().UTC()
@@ -109,18 +129,23 @@ func (s *Suite) Sign(document any, key ed25519.PrivateKey, opts *SignOptions) (m
 
 	// Per W3C eddsa-jcs-2022 spec Section 3.3.1 step 2:
 	// If unsecuredDocument.@context is present, set proof.@context to unsecuredDocument.@context
-	if ctx, ok := docWithoutProof["@context"]; ok {
-		proofConfig["@context"] = ctx
+	if ctx, ok := docWithoutProof[keyContext]; ok {
+		proofConfig[keyContext] = ctx
 	}
 
+	return proofConfig
+}
+
+// createSignature generates the signature for the document and proof config.
+func createSignature(docWithoutProof, proofConfig map[string]any, key ed25519.PrivateKey) (string, error) {
 	docCanonical, err := Canonicalize(docWithoutProof)
 	if err != nil {
-		return nil, fmt.Errorf("failed to canonicalize document: %w", err)
+		return "", fmt.Errorf("failed to canonicalize document: %w", err)
 	}
 
 	proofCanonical, err := Canonicalize(proofConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to canonicalize proof config: %w", err)
+		return "", fmt.Errorf("failed to canonicalize proof config: %w", err)
 	}
 
 	docHash := sha256.Sum256(docCanonical)
@@ -131,32 +156,43 @@ func (s *Suite) Sign(document any, key ed25519.PrivateKey, opts *SignOptions) (m
 
 	proofValue, err := multibase.Encode(multibase.Base58BTC, signature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode signature: %w", err)
+		return "", fmt.Errorf("failed to encode signature: %w", err)
 	}
 
-	proofConfig["proofValue"] = proofValue
+	return proofValue, nil
+}
 
+// buildSignedDocument creates the result document with the proof attached.
+func buildSignedDocument(docMap, proofConfig map[string]any) map[string]any {
+	result := copyMapWithoutKey(docMap, keyProof)
+
+	existingProof, ok := docMap[keyProof]
+	if !ok {
+		result[keyProof] = proofConfig
+		return result
+	}
+
+	switch p := existingProof.(type) {
+	case []any:
+		result[keyProof] = append(p, proofConfig)
+	case map[string]any:
+		result[keyProof] = []any{p, proofConfig}
+	default:
+		result[keyProof] = proofConfig
+	}
+
+	return result
+}
+
+// copyMapWithoutKey creates a shallow copy of a map excluding a specific key.
+func copyMapWithoutKey(src map[string]any, excludeKey string) map[string]any {
 	result := make(map[string]any)
-	for k, v := range docMap {
-		if k != "proof" {
+	for k, v := range src {
+		if k != excludeKey {
 			result[k] = v
 		}
 	}
-
-	if existingProof, ok := docMap["proof"]; ok {
-		switch p := existingProof.(type) {
-		case []any:
-			result["proof"] = append(p, proofConfig)
-		case map[string]any:
-			result["proof"] = []any{p, proofConfig}
-		default:
-			result["proof"] = proofConfig
-		}
-	} else {
-		result["proof"] = proofConfig
-	}
-
-	return result, nil
+	return result
 }
 
 // Verify verifies an eddsa-jcs-2022 Data Integrity proof on a document.
@@ -180,60 +216,71 @@ func (s *Suite) VerifyWithProof(document map[string]any, proof map[string]any, p
 		return fmt.Errorf("public key is nil")
 	}
 
+	signatureBytes, err := validateAndDecodeProof(proof)
+	if err != nil {
+		return err
+	}
+
+	docWithoutProof := copyMapWithoutKey(document, keyProof)
+	proofConfig := copyMapWithoutKey(proof, keyProofValue)
+
+	if err := validateContext(docWithoutProof, proofConfig); err != nil {
+		return err
+	}
+
+	return verifySignature(docWithoutProof, proofConfig, signatureBytes, publicKey)
+}
+
+// validateAndDecodeProof validates the proof structure and decodes the signature.
+func validateAndDecodeProof(proof map[string]any) ([]byte, error) {
 	proofType, _ := getString(proof, "type")
 	if proofType != ProofTypeDataIntegrity {
-		return fmt.Errorf("invalid proof type: expected %s, got %s", ProofTypeDataIntegrity, proofType)
+		return nil, fmt.Errorf("invalid proof type: expected %s, got %s", ProofTypeDataIntegrity, proofType)
 	}
 
 	cryptosuite, _ := getString(proof, "cryptosuite")
 	if cryptosuite != CryptosuiteEdDSAJCS2022 {
-		return fmt.Errorf("invalid cryptosuite: expected %s, got %s", CryptosuiteEdDSAJCS2022, cryptosuite)
+		return nil, fmt.Errorf("invalid cryptosuite: expected %s, got %s", CryptosuiteEdDSAJCS2022, cryptosuite)
 	}
 
-	proofValue, ok := getString(proof, "proofValue")
+	proofValue, ok := getString(proof, keyProofValue)
 	if !ok || proofValue == "" {
-		return fmt.Errorf("proof is missing proofValue")
+		return nil, fmt.Errorf("proof is missing proofValue")
 	}
 
 	_, signatureBytes, err := multibase.Decode(proofValue)
 	if err != nil {
-		return fmt.Errorf("failed to decode proofValue: %w", err)
+		return nil, fmt.Errorf("failed to decode proofValue: %w", err)
 	}
 
 	if len(signatureBytes) != ed25519.SignatureSize {
-		return fmt.Errorf("invalid signature length: expected %d, got %d", ed25519.SignatureSize, len(signatureBytes))
+		return nil, fmt.Errorf("invalid signature length: expected %d, got %d", ed25519.SignatureSize, len(signatureBytes))
 	}
 
-	docWithoutProof := make(map[string]any)
-	for k, v := range document {
-		if k != "proof" {
-			docWithoutProof[k] = v
-		}
+	return signatureBytes, nil
+}
+
+// validateContext validates @context per W3C eddsa-jcs-2022 spec Section 3.3.2 steps 4.1-4.2.
+func validateContext(docWithoutProof, proofConfig map[string]any) error {
+	proofCtx, ok := proofConfig[keyContext]
+	if !ok {
+		return nil
 	}
 
-	proofConfig := make(map[string]any)
-	for k, v := range proof {
-		if k != "proofValue" {
-			proofConfig[k] = v
-		}
+	docCtx, hasDocCtx := docWithoutProof[keyContext]
+	if !hasDocCtx {
+		return fmt.Errorf("proof has @context but document does not")
 	}
-
-	// Per W3C eddsa-jcs-2022 spec Section 3.3.2 steps 4.1-4.2:
-	// If proofOptions.@context exists:
-	// - Check that document.@context starts with all values in proofOptions.@context
-	// - Set unsecuredDocument.@context equal to proofOptions.@context
-	if proofCtx, ok := proofConfig["@context"]; ok {
-		docCtx, hasDocCtx := docWithoutProof["@context"]
-		if !hasDocCtx {
-			return fmt.Errorf("proof has @context but document does not")
-		}
-		if !contextStartsWith(docCtx, proofCtx) {
-			return fmt.Errorf("document @context does not start with proof @context values")
-		}
-		// Set unsecuredDocument.@context equal to proofOptions.@context
-		docWithoutProof["@context"] = proofCtx
+	if !contextStartsWith(docCtx, proofCtx) {
+		return fmt.Errorf("document @context does not start with proof @context values")
 	}
+	// Set unsecuredDocument.@context equal to proofOptions.@context
+	docWithoutProof[keyContext] = proofCtx
+	return nil
+}
 
+// verifySignature verifies the Ed25519 signature.
+func verifySignature(docWithoutProof, proofConfig map[string]any, signatureBytes []byte, publicKey ed25519.PublicKey) error {
 	docCanonical, err := Canonicalize(docWithoutProof)
 	if err != nil {
 		return fmt.Errorf("failed to canonicalize document: %w", err)
@@ -291,7 +338,7 @@ func toMap(data any) (map[string]any, error) {
 
 // findJCSProof finds the first eddsa-jcs-2022 proof in a document.
 func findJCSProof(doc map[string]any) (map[string]any, error) {
-	proofVal, ok := doc["proof"]
+	proofVal, ok := doc[keyProof]
 	if !ok {
 		return nil, fmt.Errorf("document has no proof")
 	}
