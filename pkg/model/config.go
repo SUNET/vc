@@ -469,13 +469,13 @@ type TrustPolicyConfig struct {
 	RequireRevocationCheck bool `yaml:"require_revocation_check,omitempty" default:"false"`
 }
 
-// OIDCConfig holds OIDC-specific configuration for the verifier-proxy's role as an OpenID Provider.
-// This configures how the verifier-proxy issues ID tokens and access tokens to relying parties.
+// OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider.
+// This configures how the verifier issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 // The signing key is shared from the parent Verifier.KeyConfig.
 type OIDCConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
-	// This identifies the verifier-proxy itself as an OpenID Provider.
+	// This identifies the verifier as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
 	// Example: "https://verifier.sunet.se"
 	Issuer string `yaml:"issuer" validate:"required"`

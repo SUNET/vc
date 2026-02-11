@@ -61,7 +61,6 @@ jobs:
             - mockas_${{ steps.set_tag.outputs.release_tag }}
             - issuer_${{ steps.set_tag.outputs.release_tag }}
             - ui_${{ steps.set_tag.outputs.release_tag }}
-            - verifier-proxy_${{ steps.set_tag.outputs.release_tag }}
           draft: false
           prerelease: false
         env:

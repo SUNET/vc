@@ -522,7 +522,7 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 
 > **Path:** `.verifier.oidc`
 
-This configures how the verifier-proxy issues ID tokens and access tokens to relying parties.
+This configures how the verifier issues ID tokens and access tokens to relying parties.
 Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 The signing key is shared from the parent Verifier.KeyConfig.
 

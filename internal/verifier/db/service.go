@@ -42,7 +42,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		return nil, err
 	}
 
-	// Initialize OIDC collections (from verifier-proxy)
+	// Initialize OIDC collections
 	oidcDB := service.dbClient.Database("verifier")
 	service.Clients = &ClientCollection{
 		Service:    service,

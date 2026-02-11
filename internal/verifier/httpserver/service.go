@@ -124,7 +124,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// oauth2 (original verifier metadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
 
-	// OIDC Discovery (from verifier-proxy merge)
+	// OIDC Discovery
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-configuration", http.StatusOK, s.endpointOIDCDiscovery)
 
 	// JWKS
@@ -137,7 +137,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	rgOAuthSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "op/par", http.StatusCreated, s.endpointOAuthPar)
 
-	// Rate-limited OIDC endpoints (from verifier-proxy merge)
+	// Rate-limited OIDC endpoints
 	// Authorize endpoint with rate limiting
 	rgRoot.GET("authorize", s.authorizeLimiter.Middleware(), func(c *gin.Context) {
 		response, err := s.endpointAuthorize(ctx, c)
@@ -179,7 +179,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodPost, "direct_post", http.StatusOK, s.endpointVerificationDirectPost)
 	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodGet, "callback", http.StatusOK, s.endpointVerificationCallback)
 
-	// OIDC-flow OpenID4VP endpoints (from verifier-proxy merge)
+	// OIDC-flow OpenID4VP endpoints
 	rgOIDCVerification := rgRoot.Group("/verification")
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "request-object/:session_id", http.StatusOK, s.endpointOIDCRequestObject)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "oidc-direct_post", http.StatusOK, s.endpointOIDCDirectPost)
@@ -188,7 +188,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "display/:session_id", http.StatusOK, s.endpointCredentialDisplay)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "confirm/:session_id", http.StatusOK, s.endpointConfirmCredentialDisplay)
 
-	// UI Endpoints (from verifier-proxy merge)
+	// UI Endpoints
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "qr/:session_id", http.StatusOK, s.endpointQRCode)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "poll/:session_id", http.StatusOK, s.endpointPollSession)
 
