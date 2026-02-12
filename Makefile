@@ -26,6 +26,7 @@ WORKER_SERVICES         := registry mockas apigw issuer
 # Docker Configuration
 DOCKER_REGISTRY         := docker.sunet.se/dc4eu
 DOCKER_BUILD_FLAGS      := 
+GO_BUILD_TAGS           ?=
 
 # Build Tags for Optional Features
 SAML_TAG                := saml
@@ -311,6 +312,7 @@ define DOCKER_BUILD_WEB_TEMPLATE
 docker-build-$(1): ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
+		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/web_worker .
 
@@ -324,6 +326,7 @@ docker-build-$(1): ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
+		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .
 
@@ -586,6 +589,9 @@ test-workflows-run: ## Run all GitHub Actions workflows locally
 # Release Management
 # ==============================================================================
 
+VERSION_FILE            := VERSION
+RELEASE_VERSION         := $(shell cat $(VERSION_FILE) 2>/dev/null | tr -d '[:space:]')
+
 check_current_branch: ## Verify current branch is main
 	$(info Current branch: $(CURRENT_BRANCH))
 ifeq ($(CURRENT_BRANCH),main)
@@ -594,22 +600,19 @@ else
 	$(error Not on main branch)
 endif
 
-get_release-tag: ## Generate release tag
-	@date +'%Y%m%d%H%M%S%9N'
+get_release-tag: ## Show current release version from VERSION file
+	@echo "$(RELEASE_VERSION)"
 
-release: check_current_branch ## Create and push a release
-	$(info Release version: $(VERSION))
-	git tag $(VERSION)
-	git push origin $(VERSION)
-	make docker-build
-	make docker-push
-	$(info Release version $(VERSION) done)
-	$(info Tagging $(NEWTAG) from $(VERSION))
-	make docker-tag
-	make VERSION=$(NEWTAG) docker-push
-	$(info Pointing latest to $(NEWTAG))
-	make NEWTAG=latest docker-tag
-	make VERSION=latest docker-push
+release: check_current_branch ## Create and push a git tag from VERSION file
+	$(info Release version: v$(RELEASE_VERSION))
+	git tag -a v$(RELEASE_VERSION) -m "Release v$(RELEASE_VERSION)"
+	git push origin v$(RELEASE_VERSION)
+	$(info Release v$(RELEASE_VERSION) tagged — Jenkins will build and push Docker images)
 
-ci_build: docker-build docker-push ## CI build and push
+ci_build: ## CI build: vanilla + HSM Docker images (used by Jenkins)
+	$(info CI Build: VERSION=$(VERSION))
+	make docker-build VERSION=$(VERSION)
+	make docker-push VERSION=$(VERSION)
+	make docker-build VERSION=$(VERSION)-hsm GO_BUILD_TAGS=pkcs11
+	make docker-push VERSION=$(VERSION)-hsm
 	$(info CI Build complete)
