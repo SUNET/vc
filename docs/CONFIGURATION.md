@@ -219,6 +219,16 @@ Supports both file-based and HSM-based keys with explicit control.
 | `token_endpoint` | `string` | OAuth2 token endpoint URL    | `"https://verifier.sunet.se/token"` | -       | Yes      |
 | `clients`        | `object` | OAuth2 client configurations | -                                   | -       | Yes      |
 
+### `clients` entry
+
+> **Path:** `.apigw.oauth_server.clients.<key>`
+
+| Field          | Type       | Description                                  | Example                          | Default | Required |
+| -------------- | ---------- | -------------------------------------------- | -------------------------------- | ------- | -------- |
+| `type`         | `string`   | Client type                                  | `"public"`                       | -       | Yes      |
+| `redirect_uri` | `string`   | Allowed redirect URI for the client          | `"https://example.com/callback"` | -       | Yes      |
+| `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client | -                                | -       | Yes      |
+
 ### `issuer_metadata`
 
 > **Path:** `.apigw.issuer_metadata`

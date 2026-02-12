@@ -7,12 +7,19 @@ import (
 	"slices"
 )
 
+// Client holds the configuration for a single OAuth2 client
 type Client struct {
-	Type        string   `json:"type" yaml:"type" validate:"required"`
-	RedirectURI string   `json:"redirect_uri" yaml:"redirect_uri" validate:"required"`
-	Scopes      []string `json:"scopes" yaml:"scopes" validate:"required"`
+	// Type is the client type
+	// Example: "public"
+	Type string `json:"type" yaml:"type" validate:"required"`
+	// RedirectURI is the allowed redirect URI for the client
+	// Example: "https://example.com/callback"
+	RedirectURI string `json:"redirect_uri" yaml:"redirect_uri" validate:"required"`
+	// Scopes is the list of OAuth2 scopes allowed for the client
+	Scopes []string `json:"scopes" yaml:"scopes" validate:"required"`
 }
 
+// Clients maps client IDs to their OAuth2 client configuration
 type Clients map[string]*Client
 
 func (c *Clients) Allow(clientID, redirectURI, scope string) (bool, error) {

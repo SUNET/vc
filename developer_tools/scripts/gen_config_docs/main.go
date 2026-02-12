@@ -75,14 +75,16 @@ type TableRow struct {
 // ---- Type registry ----
 
 type TypeRegistry struct {
-	types map[string]*StructDef
-	fset  *token.FileSet
+	types      map[string]*StructDef
+	mapAliases map[string]string // named map type -> map value type name
+	fset       *token.FileSet
 }
 
 func NewTypeRegistry() *TypeRegistry {
 	return &TypeRegistry{
-		types: make(map[string]*StructDef),
-		fset:  token.NewFileSet(),
+		types:      make(map[string]*StructDef),
+		mapAliases: make(map[string]string),
+		fset:       token.NewFileSet(),
 	}
 }
 
@@ -122,22 +124,49 @@ func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 		}
 		for _, spec := range genDecl.Specs {
 			ts := spec.(*ast.TypeSpec)
-			st, ok := ts.Type.(*ast.StructType)
-			if !ok {
+
+			// Handle struct types
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				doc := ""
+				if ts.Doc != nil {
+					doc = commentText(ts.Doc)
+				} else if genDecl.Doc != nil {
+					doc = commentText(genDecl.Doc)
+				}
+				def := &StructDef{Name: ts.Name.Name, Doc: doc, PkgName: pkgName}
+				r.parseFields(st, def, pkgName)
+				r.types[ts.Name.Name] = def
+				r.types[pkgName+"."+ts.Name.Name] = def
 				continue
 			}
-			doc := ""
-			if ts.Doc != nil {
-				doc = commentText(ts.Doc)
-			} else if genDecl.Doc != nil {
-				doc = commentText(genDecl.Doc)
+
+			// Handle named map types (e.g., type Clients map[string]*Client)
+			if mt, ok := ts.Type.(*ast.MapType); ok {
+				valName := resolveTypeName(mt.Value)
+				if valName != "" {
+					// Store package-qualified value type name so we resolve the correct struct
+					qualifiedValName := pkgName + "." + valName
+					r.mapAliases[ts.Name.Name] = qualifiedValName
+					r.mapAliases[pkgName+"."+ts.Name.Name] = qualifiedValName
+				}
 			}
-			def := &StructDef{Name: ts.Name.Name, Doc: doc, PkgName: pkgName}
-			r.parseFields(st, def, pkgName)
-			r.types[ts.Name.Name] = def
-			r.types[pkgName+"."+ts.Name.Name] = def
 		}
 	}
+}
+
+// LookupMapValueType returns the struct definition for the value type of a named map alias.
+// For example, for "Clients" (which is map[string]*Client), it returns the Client struct def.
+func (r *TypeRegistry) LookupMapValueType(name string) *StructDef {
+	valName, ok := r.mapAliases[name]
+	if !ok {
+		if idx := strings.LastIndex(name, "."); idx >= 0 {
+			valName, ok = r.mapAliases[name[idx+1:]]
+		}
+	}
+	if !ok {
+		return nil
+	}
+	return r.Lookup(valName)
 }
 
 func (r *TypeRegistry) parseFields(st *ast.StructType, def *StructDef, pkgName string) {
@@ -798,6 +827,22 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 				} else {
 					// Type already documented; record this additional path
 					recordAdditionalPath(childDef.Name, childPath)
+				}
+				expanded = true
+			}
+		}
+
+		// Named map type alias (e.g., type Clients map[string]*Client)
+		if !expanded && typeName != "" {
+			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
+				if !documented[valDef.Name] {
+					documented[valDef.Name] = true
+					sub := buildStructSubSection(reg, valDef, childPath+".<key>")
+					sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
+					*subs = append(*subs, sub)
+					expandChildren(reg, valDef, childPath+".<key>", subs)
+				} else {
+					recordAdditionalPath(valDef.Name, childPath+".<key>")
 				}
 				expanded = true
 			}
