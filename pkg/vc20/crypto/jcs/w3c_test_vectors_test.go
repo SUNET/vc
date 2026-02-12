@@ -62,7 +62,7 @@ const (
 
 // Unsigned credential from EXAMPLE 30
 var w3cUnsignedCredential = map[string]any{
-	"@context": []any{
+	keyContext: []any{
 		w3cCredentialsContextV2,
 		w3cCredentialsExamplesV2,
 	},
@@ -80,7 +80,7 @@ var w3cUnsignedCredential = map[string]any{
 
 // Signed credential from EXAMPLE 39
 var w3cSignedCredential = map[string]any{
-	"@context": []any{
+	keyContext: []any{
 		w3cCredentialsContextV2,
 		w3cCredentialsExamplesV2,
 	},
@@ -94,13 +94,13 @@ var w3cSignedCredential = map[string]any{
 		"id":       "did:example:abcdefgh",
 		"alumniOf": "The School of Examples",
 	},
-	"proof": map[string]any{
+	keyProof: map[string]any{
 		"type":               ProofTypeDataIntegrity,
 		"cryptosuite":        CryptosuiteEdDSAJCS2022,
 		"created":            w3cTestCreated,
 		"verificationMethod": w3cTestVerificationMethod,
 		"proofPurpose":       "assertionMethod",
-		"@context": []any{
+		keyContext: []any{
 			w3cCredentialsContextV2,
 			w3cCredentialsExamplesV2,
 		},
@@ -247,7 +247,7 @@ func buildW3CProofOptions() map[string]any {
 		"created":            w3cTestCreated,
 		"verificationMethod": w3cTestVerificationMethod,
 		"proofPurpose":       "assertionMethod",
-		"@context": []any{
+		keyContext: []any{
 			w3cCredentialsContextV2,
 			w3cCredentialsExamplesV2,
 		},
@@ -306,7 +306,7 @@ func TestW3CRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("signed document has no proof")
 	}
-	if _, hasCtx := proof["@context"]; !hasCtx {
+	if _, hasCtx := proof[keyContext]; !hasCtx {
 		t.Error("proof is missing @context (required by W3C spec)")
 	}
 }
@@ -322,7 +322,7 @@ func TestW3CContextSupersetAllowed(t *testing.T) {
 		modifiedCredential[k] = v
 	}
 	// Add an extra context entry that wasn't there when signed
-	modifiedCredential["@context"] = []any{
+	modifiedCredential[keyContext] = []any{
 		w3cCredentialsContextV2,
 		w3cCredentialsExamplesV2,
 		"https://example.com/extra-context",
@@ -349,7 +349,7 @@ func TestW3CContextOrderMismatch(t *testing.T) {
 		modifiedCredential[k] = v
 	}
 	// Reverse the context order
-	modifiedCredential["@context"] = []any{
+	modifiedCredential[keyContext] = []any{
 		w3cCredentialsExamplesV2,
 		w3cCredentialsContextV2,
 	}
@@ -368,7 +368,7 @@ func TestW3CContextMissing(t *testing.T) {
 	// Create a modified credential without @context
 	modifiedCredential := make(map[string]any)
 	for k, v := range w3cSignedCredential {
-		if k != "@context" {
+		if k != keyContext {
 			modifiedCredential[k] = v
 		}
 	}

@@ -8,12 +8,10 @@
 // - Trust ping through a mediator
 //
 // To run integration tests:
-//
-//	go test -tags "didcomm vc20 integration" ./pkg/didcomm/...
+//   go test -tags "didcomm vc20 integration" ./pkg/didcomm/...
 //
 // For live mediator tests (when available):
-//
-//	go test -tags "didcomm vc20 integration live" ./pkg/didcomm/...
+//   go test -tags "didcomm vc20 integration live" ./pkg/didcomm/...
 package didcomm_test
 
 import (
@@ -42,6 +40,17 @@ const (
 
 	// TestMediatorRoutingKey is a test X25519 key for the mock mediator
 	testMediatorRoutingKey = "z6LSfRnzDTj1iM...(test-key)"
+
+	// Test DID constants
+	testMediatorDID   = "did:example:mediator"
+	testRecipientDID  = "did:example:recipient"
+	testSenderDID     = "did:example:sender"
+	testRoutingKeySfx = "#routing-key-1"
+
+	// Test error format strings
+	errBuildRoute   = "Failed to build route: %v"
+	errCreatePing   = "Failed to create ping: %v"
+	errHandlePing   = "Failed to handle ping: %v"
 )
 
 // =============================================================================
@@ -73,7 +82,7 @@ func newMockMediatorServer(t *testing.T, did string) *mockMediatorServer {
 	if err != nil {
 		t.Fatalf("Failed to import routing key to JWK: %v", err)
 	}
-	_ = routingKeyJWK.Set("kid", did+"#routing-key-1")
+	_ = routingKeyJWK.Set("kid", did+testRoutingKeySfx)
 
 	m := &mockMediatorServer{
 		did:           did,
@@ -141,19 +150,19 @@ func (m *mockMediatorServer) DIDDocument() map[string]interface{} {
 		"controller": m.did,
 		"verificationMethod": []map[string]interface{}{
 			{
-				"id":           m.did + "#routing-key-1",
+				"id":           m.did + testRoutingKeySfx,
 				"type":         "JsonWebKey2020",
 				"controller":   m.did,
 				"publicKeyJwk": pubKeyMap,
 			},
 		},
-		"keyAgreement": []string{m.did + "#routing-key-1"},
+		"keyAgreement": []string{m.did + testRoutingKeySfx},
 		"service": []map[string]interface{}{
 			{
 				"id":              m.did + "#didcomm-1",
 				"type":            "DIDCommMessaging",
 				"serviceEndpoint": m.server.URL,
-				"routingKeys":     []string{m.did + "#routing-key-1"},
+				"routingKeys":     []string{m.did + testRoutingKeySfx},
 				"accept":          []string{didcomm.MediaTypeEncrypted, didcomm.MediaTypePlaintext},
 			},
 		},
@@ -190,9 +199,9 @@ func (r *testServiceResolver) ResolveDIDCommService(ctx context.Context, did str
 // Integration Tests with Mock Mediator
 // =============================================================================
 
-func TestRouteBuilder_WithMockMediator(t *testing.T) {
+func TestRouteBuilderWithMockMediator(t *testing.T) {
 	// Create mock mediator
-	mediator := newMockMediatorServer(t, "did:example:mediator")
+	mediator := newMockMediatorServer(t, testMediatorDID)
 	defer mediator.Close()
 
 	// Create a mock service resolver using the mediator
@@ -200,7 +209,7 @@ func TestRouteBuilder_WithMockMediator(t *testing.T) {
 		services: map[string]*routing.DIDCommService{
 			mediator.did: {
 				ServiceEndpoint: mediator.URL(),
-				RoutingKeys:     []string{mediator.did + "#routing-key-1"},
+				RoutingKeys:     []string{mediator.did + testRoutingKeySfx},
 				Accept:          []string{didcomm.MediaTypeEncrypted},
 			},
 		},
@@ -210,7 +219,7 @@ func TestRouteBuilder_WithMockMediator(t *testing.T) {
 	builder := routing.NewRouteBuilder(resolver)
 	route, err := builder.BuildRoute(context.Background(), mediator.did)
 	if err != nil {
-		t.Fatalf("Failed to build route: %v", err)
+		t.Fatalf(errBuildRoute, err)
 	}
 
 	if route.IsDirectRoute() {
@@ -222,14 +231,14 @@ func TestRouteBuilder_WithMockMediator(t *testing.T) {
 	}
 }
 
-func TestForwardMessage_WithMockMediator(t *testing.T) {
+func TestForwardMessageWithMockMediator(t *testing.T) {
 	// Create mock mediator
-	mediator := newMockMediatorServer(t, "did:example:mediator")
+	mediator := newMockMediatorServer(t, testMediatorDID)
 	defer mediator.Close()
 
 	// Create a forward message
 	wrappedMsg := []byte(`{"protected":"eyJ0eXAiOiJhcHBsaWNhdGlvbi9kaWRjb21tLWVuY3J5cHRlZCtqc29uIiwiYWxnIjoiRUNESC1FUytBMjU2S1ciLCJlbmMiOiJBMjU2R0NNIn0","ciphertext":"encrypted-content"}`)
-	forward := routing.NewForward(mediator.did, "did:example:recipient", wrappedMsg)
+	forward := routing.NewForward(mediator.did, testRecipientDID, wrappedMsg)
 
 	if forward.Type != routing.ForwardMessageType {
 		t.Errorf("Expected type %s, got %s", routing.ForwardMessageType, forward.Type)
@@ -252,7 +261,7 @@ func TestForwardMessage_WithMockMediator(t *testing.T) {
 
 func TestTrustPingThroughMockMediator(t *testing.T) {
 	// Create mock mediator that forwards trust pings
-	mediator := newMockMediatorServer(t, "did:example:mediator")
+	mediator := newMockMediatorServer(t, testMediatorDID)
 	defer mediator.Close()
 
 	// Generate key pairs for sender and recipient
@@ -264,9 +273,9 @@ func TestTrustPingThroughMockMediator(t *testing.T) {
 	_ = recipientPriv
 
 	// Create trust ping message
-	ping, err := trustping.NewPing("did:example:sender", "did:example:mediator", trustping.WithResponseRequested(true))
+	ping, err := trustping.NewPing(testSenderDID, testMediatorDID, trustping.WithResponseRequested(true))
 	if err != nil {
-		t.Fatalf("Failed to create ping: %v", err)
+		t.Fatalf(errCreatePing, err)
 	}
 
 	if ping.Type != trustping.TypePing {
@@ -276,7 +285,7 @@ func TestTrustPingThroughMockMediator(t *testing.T) {
 	// Verify ping can be handled
 	response, err := trustping.HandlePing(ping)
 	if err != nil {
-		t.Fatalf("Failed to handle ping: %v", err)
+		t.Fatalf(errHandlePing, err)
 	}
 
 	if response == nil {
@@ -303,14 +312,14 @@ func TestPackWithRoutingKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to import recipient key: %v", err)
 	}
-	_ = recipientJWK.Set("kid", "did:example:recipient#key-1")
+	_ = recipientJWK.Set("kid", testRecipientDID+"#key-1")
 
 	// Create test message
 	msg := message.New(
 		message.WithID("test-msg-1"),
 		message.WithType(trustping.TypePing),
-		message.WithFrom("did:example:sender"),
-		message.WithTo("did:example:recipient"),
+		message.WithFrom(testSenderDID),
+		message.WithTo(testRecipientDID),
 	)
 
 	// Pack without routing (direct)
@@ -334,11 +343,11 @@ func TestPackWithRoutingKeys(t *testing.T) {
 // Route Building Tests with Different Topologies
 // =============================================================================
 
-func TestRouteBuilder_DirectDelivery(t *testing.T) {
+func TestRouteBuilderDirectDelivery(t *testing.T) {
 	// Service resolver that returns nil (no routing needed)
 	resolver := &testServiceResolver{
 		services: map[string]*routing.DIDCommService{
-			"did:example:recipient": {
+			testRecipientDID: {
 				ServiceEndpoint: "https://example.com/didcomm",
 				RoutingKeys:     nil, // No routing keys = direct delivery
 				Accept:          []string{didcomm.MediaTypeEncrypted},
@@ -347,9 +356,9 @@ func TestRouteBuilder_DirectDelivery(t *testing.T) {
 	}
 
 	builder := routing.NewRouteBuilder(resolver)
-	route, err := builder.BuildRoute(context.Background(), "did:example:recipient")
+	route, err := builder.BuildRoute(context.Background(), testRecipientDID)
 	if err != nil {
-		t.Fatalf("Failed to build route: %v", err)
+		t.Fatalf(errBuildRoute, err)
 	}
 
 	if !route.IsDirectRoute() {
@@ -357,15 +366,15 @@ func TestRouteBuilder_DirectDelivery(t *testing.T) {
 	}
 }
 
-func TestRouteBuilder_SingleMediator(t *testing.T) {
-	mediator := newMockMediatorServer(t, "did:example:mediator")
+func TestRouteBuilderSingleMediator(t *testing.T) {
+	mediator := newMockMediatorServer(t, testMediatorDID)
 	defer mediator.Close()
 
 	resolver := &testServiceResolver{
 		services: map[string]*routing.DIDCommService{
-			"did:example:recipient": {
+			testRecipientDID: {
 				ServiceEndpoint: mediator.URL(),
-				RoutingKeys:     []string{mediator.did + "#routing-key-1"},
+				RoutingKeys:     []string{mediator.did + testRoutingKeySfx},
 				Accept:          []string{didcomm.MediaTypeEncrypted},
 			},
 			mediator.did: {
@@ -376,9 +385,9 @@ func TestRouteBuilder_SingleMediator(t *testing.T) {
 	}
 
 	builder := routing.NewRouteBuilder(resolver)
-	route, err := builder.BuildRoute(context.Background(), "did:example:recipient")
+	route, err := builder.BuildRoute(context.Background(), testRecipientDID)
 	if err != nil {
-		t.Fatalf("Failed to build route: %v", err)
+		t.Fatalf(errBuildRoute, err)
 	}
 
 	if route.IsDirectRoute() {
@@ -388,23 +397,23 @@ func TestRouteBuilder_SingleMediator(t *testing.T) {
 	t.Logf("Route: %d hops, final=%s", len(route.Hops), route.FinalRecipient)
 }
 
-func TestRouteBuilder_MultipleMediatorators(t *testing.T) {
-	mediator1 := newMockMediatorServer(t, "did:example:mediator1")
+func TestRouteBuilderMultipleMediators(t *testing.T) {
+	mediator1 := newMockMediatorServer(t, testMediatorDID+"1")
 	defer mediator1.Close()
 
-	mediator2 := newMockMediatorServer(t, "did:example:mediator2")
+	mediator2 := newMockMediatorServer(t, testMediatorDID+"2")
 	defer mediator2.Close()
 
 	resolver := &testServiceResolver{
 		services: map[string]*routing.DIDCommService{
-			"did:example:recipient": {
+			testRecipientDID: {
 				ServiceEndpoint: mediator2.URL(),
-				RoutingKeys:     []string{mediator2.did + "#routing-key-1"},
+				RoutingKeys:     []string{mediator2.did + testRoutingKeySfx},
 				Accept:          []string{didcomm.MediaTypeEncrypted},
 			},
 			mediator2.did: {
 				ServiceEndpoint: mediator1.URL(),
-				RoutingKeys:     []string{mediator1.did + "#routing-key-1"},
+				RoutingKeys:     []string{mediator1.did + testRoutingKeySfx},
 				Accept:          []string{didcomm.MediaTypeEncrypted},
 			},
 			mediator1.did: {
@@ -415,9 +424,9 @@ func TestRouteBuilder_MultipleMediatorators(t *testing.T) {
 	}
 
 	builder := routing.NewRouteBuilder(resolver)
-	route, err := builder.BuildRoute(context.Background(), "did:example:recipient")
+	route, err := builder.BuildRoute(context.Background(), testRecipientDID)
 	if err != nil {
-		t.Fatalf("Failed to build route: %v", err)
+		t.Fatalf(errBuildRoute, err)
 	}
 
 	if route.MediatorCount() < 1 {
@@ -435,7 +444,7 @@ func TestForwardMessageParsing(t *testing.T) {
 	wrappedMsg := []byte(`{"protected":"abc","ciphertext":"xyz"}`)
 
 	// Create forward
-	forward := routing.NewForward("did:example:mediator", "did:example:recipient", wrappedMsg)
+	forward := routing.NewForward(testMediatorDID, testRecipientDID, wrappedMsg)
 
 	// Convert to generic message
 	msg := forward.ToMessage()
@@ -446,8 +455,8 @@ func TestForwardMessageParsing(t *testing.T) {
 		t.Fatalf("Failed to parse forward: %v", err)
 	}
 
-	if parsed.Body.Next != "did:example:recipient" {
-		t.Errorf("Expected next=did:example:recipient, got %s", parsed.Body.Next)
+	if parsed.Body.Next != testRecipientDID {
+		t.Errorf("Expected next=%s, got %s", testRecipientDID, parsed.Body.Next)
 	}
 
 	extracted, _ := parsed.GetWrappedMessage()
@@ -482,8 +491,8 @@ func TestForwardMessageJSON(t *testing.T) {
 		t.Errorf("Expected ID forward-123, got %s", forward.ID)
 	}
 
-	if forward.Body.Next != "did:example:recipient" {
-		t.Errorf("Expected next did:example:recipient, got %s", forward.Body.Next)
+	if forward.Body.Next != testRecipientDID {
+		t.Errorf("Expected next %s, got %s", testRecipientDID, forward.Body.Next)
 	}
 }
 
@@ -492,20 +501,17 @@ func TestForwardMessageJSON(t *testing.T) {
 // =============================================================================
 
 func TestTrustPingMessage(t *testing.T) {
-	senderDID := "did:example:sender"
-	recipientDID := "did:example:recipient"
-
 	// Create ping requesting response
-	ping, err := trustping.NewPing(senderDID, recipientDID, trustping.WithResponseRequested(true))
+	ping, err := trustping.NewPing(testSenderDID, testRecipientDID, trustping.WithResponseRequested(true))
 	if err != nil {
-		t.Fatalf("Failed to create ping: %v", err)
+		t.Fatalf(errCreatePing, err)
 	}
 
 	if ping.Type != trustping.TypePing {
 		t.Errorf("Wrong type: %s", ping.Type)
 	}
 
-	if ping.From != senderDID {
+	if ping.From != testSenderDID {
 		t.Errorf("Wrong from: %s", ping.From)
 	}
 
@@ -517,14 +523,14 @@ func TestTrustPingMessage(t *testing.T) {
 }
 
 func TestTrustPingResponse(t *testing.T) {
-	ping, err := trustping.NewPing("did:example:sender", "did:example:recipient", trustping.WithResponseRequested(true))
+	ping, err := trustping.NewPing(testSenderDID, testRecipientDID, trustping.WithResponseRequested(true))
 	if err != nil {
-		t.Fatalf("Failed to create ping: %v", err)
+		t.Fatalf(errCreatePing, err)
 	}
 
 	response, err := trustping.HandlePing(ping)
 	if err != nil {
-		t.Fatalf("Failed to handle ping: %v", err)
+		t.Fatalf(errHandlePing, err)
 	}
 
 	if response.Type != trustping.TypePingResponse {
@@ -538,14 +544,14 @@ func TestTrustPingResponse(t *testing.T) {
 }
 
 func TestTrustPingNoResponseRequested(t *testing.T) {
-	ping, err := trustping.NewPing("did:example:sender", "did:example:recipient", trustping.WithResponseRequested(false))
+	ping, err := trustping.NewPing(testSenderDID, testRecipientDID, trustping.WithResponseRequested(false))
 	if err != nil {
-		t.Fatalf("Failed to create ping: %v", err)
+		t.Fatalf(errCreatePing, err)
 	}
 
 	response, err := trustping.HandlePing(ping)
 	if err != nil {
-		t.Fatalf("Failed to handle ping: %v", err)
+		t.Fatalf(errHandlePing, err)
 	}
 
 	if response != nil {
