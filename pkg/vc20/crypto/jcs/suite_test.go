@@ -5,6 +5,7 @@ package jcs
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -107,7 +108,7 @@ func TestCanonicalizeWithStruct(t *testing.T) {
 }
 
 func TestSignAndVerify(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(nil)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
 	}
@@ -160,8 +161,8 @@ func TestSignAndVerify(t *testing.T) {
 }
 
 func TestVerifyFailsWithWrongKey(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
-	wrongPub, _, _ := ed25519.GenerateKey(nil)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	wrongPub, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	suite := NewSuite()
 
@@ -187,7 +188,7 @@ func TestVerifyFailsWithWrongKey(t *testing.T) {
 }
 
 func TestVerifyFailsWithTamperedDocument(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 
 	suite := NewSuite()
 
@@ -215,7 +216,7 @@ func TestVerifyFailsWithTamperedDocument(t *testing.T) {
 }
 
 func TestSignWithOptionalFields(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 
 	suite := NewSuite()
 
@@ -249,7 +250,7 @@ func TestSignWithOptionalFields(t *testing.T) {
 }
 
 func TestRoundTripWithJSON(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 
 	suite := NewSuite()
 
@@ -292,7 +293,7 @@ func TestRoundTripWithJSON(t *testing.T) {
 
 // Test Sign validation errors
 func TestSignValidationErrors(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 	document := map[string]any{"id": "test"}
 
@@ -355,7 +356,7 @@ func TestSignValidationErrors(t *testing.T) {
 
 // Test Verify validation errors
 func TestVerifyValidationErrors(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	tests := []struct {
@@ -417,7 +418,7 @@ func TestVerifyValidationErrors(t *testing.T) {
 
 // Test with proof array
 func TestVerifyWithProofArray(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	document := map[string]any{
@@ -451,7 +452,7 @@ func TestVerifyWithProofArray(t *testing.T) {
 
 // Test findJCSProof with array containing no JCS proof
 func TestFindJCSProofNotFound(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	doc := map[string]any{
@@ -470,7 +471,7 @@ func TestFindJCSProofNotFound(t *testing.T) {
 
 // Test invalid proof format
 func TestFindJCSProofInvalidFormat(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	doc := map[string]any{
@@ -486,7 +487,7 @@ func TestFindJCSProofInvalidFormat(t *testing.T) {
 
 // Test Sign preserves existing proof as array
 func TestSignPreservesExistingProofArray(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	existingProofs := []any{
@@ -521,7 +522,7 @@ func TestSignPreservesExistingProofArray(t *testing.T) {
 
 // Test Sign preserves existing single proof
 func TestSignPreservesExistingSingleProof(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	existingProof := map[string]any{
@@ -566,7 +567,7 @@ func TestToMapWithStruct(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	document := TestDoc{ID: "test-123", Name: "Test Document"}
@@ -598,7 +599,7 @@ func TestVerifyWithStructDocument(t *testing.T) {
 		Proof map[string]any `json:"proof"`
 	}
 
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	// First sign a document
@@ -627,7 +628,7 @@ func TestVerifyWithStructDocument(t *testing.T) {
 
 // Test VerifyWithProof directly
 func TestVerifyWithProofDirect(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	document := map[string]any{"id": "test", "data": "value"}
@@ -650,7 +651,7 @@ func TestVerifyWithProofDirect(t *testing.T) {
 
 // Test invalid signature length
 func TestVerifyInvalidSignatureLength(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	// z followed by short base58 data (not 64 bytes)
@@ -696,7 +697,7 @@ func TestGetStringWithNonString(t *testing.T) {
 
 // Test Sign with auto-generated created time
 func TestSignAutoCreatedTime(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	suite := NewSuite()
 
 	document := map[string]any{"id": "test"}

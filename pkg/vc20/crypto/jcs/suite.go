@@ -182,7 +182,8 @@ func buildSignedDocument(docMap, proofConfig map[string]any) map[string]any {
 	case map[string]any:
 		result[keyProof] = []any{p, proofConfig}
 	default:
-		result[keyProof] = proofConfig
+		// Preserve existing proof of unexpected type by wrapping it with the new proof
+		result[keyProof] = []any{existingProof, proofConfig}
 	}
 
 	return result
