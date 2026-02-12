@@ -139,7 +139,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `tls`
 
-> **Path:** `.apigw.api_server.tls`
+> **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`, `.mock_as.api_server.tls`, `.ui.api_server.tls`
 
 | Field            | Type     | Description                 | Example | Default | Required |
 | ---------------- | -------- | --------------------------- | ------- | ------- | -------- |
@@ -149,7 +149,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `basic_auth`
 
-> **Path:** `.apigw.api_server.basic_auth`
+> **Path:** `.apigw.api_server.basic_auth`, `.issuer.api_server.basic_auth`, `.verifier.api_server.basic_auth`, `.registry.api_server.basic_auth`, `.mock_as.api_server.basic_auth`, `.ui.api_server.basic_auth`
 
 | Field     | Type     | Description                  | Example | Default | Required |
 | --------- | -------- | ---------------------------- | ------- | ------- | -------- |
@@ -158,7 +158,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `cors`
 
-> **Path:** `.apigw.api_server.cors`
+> **Path:** `.apigw.api_server.cors`, `.issuer.api_server.cors`, `.verifier.api_server.cors`, `.registry.api_server.cors`, `.mock_as.api_server.cors`, `.ui.api_server.cors`
 
 | Field             | Type       | Description                  | Example                                               | Default | Required |
 | ----------------- | ---------- | ---------------------------- | ----------------------------------------------------- | ------- | -------- |
@@ -182,7 +182,7 @@ Supports both file-based and HSM-based keys with explicit control.
 
 ### `pkcs11`
 
-> **Path:** `.apigw.key_config.pkcs11`
+> **Path:** `.apigw.key_config.pkcs11`, `.issuer.key_config.pkcs11`, `.verifier.key_config.pkcs11`, `.registry.token_status_lists.key_config.pkcs11`
 
 | Field         | Type     | Description                       | Example                             | Default | Required |
 | ------------- | -------- | --------------------------------- | ----------------------------------- | ------- | -------- |
@@ -221,7 +221,7 @@ Supports both file-based and HSM-based keys with explicit control.
 
 ### `clients` entry
 
-> **Path:** `.apigw.oauth_server.clients.<key>`
+> **Path:** `.apigw.oauth_server.clients.<key>`, `.verifier.oauth_server.clients.<key>`
 
 | Field          | Type       | Description                                  | Example                          | Default | Required |
 | -------------- | ---------- | -------------------------------------------- | -------------------------------- | ------- | -------- |
@@ -324,7 +324,7 @@ The credential type identifier (map key) is used in API requests and session sta
 
 ### `attributes` entry
 
-> **Path:** `.apigw.saml.credential_mappings.<key>.attributes.<key>`
+> **Path:** `.apigw.saml.credential_mappings.<key>.attributes.<key>`, `.apigw.oidcrp.credential_mappings.<key>.attributes.<key>`
 
 Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
 
@@ -410,7 +410,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 ### `tls`
 
-> **Path:** `.issuer.grpc_server.tls`
+> **Path:** `.issuer.grpc_server.tls`, `.registry.grpc_server.tls`
 
 | Field                         | Type     | Description                                                                        | Example | Default                | Required         |
 | ----------------------------- | -------- | ---------------------------------------------------------------------------------- | ------- | ---------------------- | ---------------- |

@@ -827,6 +827,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 				} else {
 					// Type already documented; record this additional path
 					recordAdditionalPath(childDef.Name, childPath)
+					recordChildPaths(reg, childDef, childPath)
 				}
 				expanded = true
 			}
@@ -843,6 +844,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 					expandChildren(reg, valDef, childPath+".<key>", subs)
 				} else {
 					recordAdditionalPath(valDef.Name, childPath+".<key>")
+					recordChildPaths(reg, valDef, childPath+".<key>")
 				}
 				expanded = true
 			}
@@ -871,6 +873,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 							expandChildren(reg, valDef, childPath+".<key>", subs)
 						} else {
 							recordAdditionalPath(valDef.Name, childPath+".<key>")
+							recordChildPaths(reg, valDef, childPath+".<key>")
 						}
 					}
 				}
@@ -891,6 +894,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 							expandChildren(reg, elemDef, childPath+"[]", subs)
 						} else {
 							recordAdditionalPath(elemDef.Name, childPath+"[]")
+							recordChildPaths(reg, elemDef, childPath+"[]")
 						}
 					}
 				}
@@ -902,6 +906,65 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 func recordAdditionalPath(typeName, path string) {
 	if sub, ok := subsByType[typeName]; ok {
 		sub.AlsoPaths = append(sub.AlsoPaths, path)
+	}
+}
+
+// recordChildPaths recursively records additional paths for all children of an
+// already-documented struct. This ensures that when the same struct type appears
+// under multiple parents (e.g., OAuthServer under both apigw and verifier),
+// child types (e.g., Client under Clients) also get their additional paths recorded.
+func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
+	for _, f := range def.Fields {
+		if f.Tag.YAMLName == "" || f.Tag.YAMLName == "-" {
+			continue
+		}
+		childPath := parentPath + "." + f.Tag.YAMLName
+		recorded := false
+
+		// Named struct type
+		typeName := resolveTypeName(f.TypeExpr)
+		if typeName != "" {
+			if childDef := reg.Lookup(typeName); childDef != nil {
+				recordAdditionalPath(childDef.Name, childPath)
+				recordChildPaths(reg, childDef, childPath)
+				recorded = true
+			}
+		}
+
+		// Named map type alias
+		if !recorded && typeName != "" {
+			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
+				recordAdditionalPath(valDef.Name, childPath+".<key>")
+				recordChildPaths(reg, valDef, childPath+".<key>")
+				recorded = true
+			}
+		}
+
+		// Map with struct value
+		if !recorded {
+			if mt, ok := asMapType(f.TypeExpr); ok {
+				valName := resolveTypeName(mt.Value)
+				if valName != "" {
+					if valDef := reg.Lookup(valName); valDef != nil {
+						recordAdditionalPath(valDef.Name, childPath+".<key>")
+						recordChildPaths(reg, valDef, childPath+".<key>")
+					}
+				}
+			}
+		}
+
+		// Slice of structs
+		if !recorded {
+			if at, ok := f.TypeExpr.(*ast.ArrayType); ok {
+				elemName := resolveTypeName(at.Elt)
+				if elemName != "" {
+					if elemDef := reg.Lookup(elemName); elemDef != nil {
+						recordAdditionalPath(elemDef.Name, childPath+"[]")
+						recordChildPaths(reg, elemDef, childPath+"[]")
+					}
+				}
+			}
+		}
 	}
 }
 
