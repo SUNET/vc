@@ -45,6 +45,13 @@ script:
   - "make docker-build VERSION=${BUILD_TAG}-hsm GO_BUILD_TAGS=pkcs11"
   - "make docker-push VERSION=${BUILD_TAG}-hsm"
 
+  # Tag and push dev on RC builds
+  - |
+    if [ "$PUSH_LATEST" = "false" ]; then
+      make docker-tag VERSION=${BUILD_TAG} NEWTAG=dev
+      make docker-push VERSION=dev
+    fi
+
   # Tag and push latest on main branch
   - |
     if [ "$PUSH_LATEST" = "true" ]; then

@@ -65,12 +65,12 @@ jobs:
             #### Docker Images
             | Service | Image |
             |---------|-------|
-            | apigw | \`docker.sunet.se/dc4eu/apigw:${rcTag}\` |
-            | verifier | \`docker.sunet.se/dc4eu/verifier:${rcTag}\` |
-            | registry | \`docker.sunet.se/dc4eu/registry:${rcTag}\` |
-            | mockas | \`docker.sunet.se/dc4eu/mockas:${rcTag}\` |
-            | issuer | \`docker.sunet.se/dc4eu/issuer:${rcTag}\` |
-            | ui | \`docker.sunet.se/dc4eu/ui:${rcTag}\` |
+            | apigw | \`docker.sunet.se/iam_vc/apigw:${rcTag}\` |
+            | verifier | \`docker.sunet.se/iam_vc/verifier:${rcTag}\` |
+            | registry | \`docker.sunet.se/iam_vc/registry:${rcTag}\` |
+            | mockas | \`docker.sunet.se/iam_vc/mockas:${rcTag}\` |
+            | issuer | \`docker.sunet.se/iam_vc/issuer:${rcTag}\` |
+            | ui | \`docker.sunet.se/iam_vc/ui:${rcTag}\` |
 
             > Deploy with: \`VERSION=${rcTag} docker compose pull\``;
 

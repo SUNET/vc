@@ -24,7 +24,7 @@ WEB_SERVICES            := verifier ui
 WORKER_SERVICES         := registry mockas apigw issuer
 
 # Docker Configuration
-DOCKER_REGISTRY         := docker.sunet.se/dc4eu
+DOCKER_REGISTRY         := docker.sunet.se/iam_vc
 DOCKER_BUILD_FLAGS      := 
 GO_BUILD_TAGS           ?=
 
