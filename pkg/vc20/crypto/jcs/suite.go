@@ -174,7 +174,11 @@ func buildSignedDocument(docMap, proofConfig map[string]any) map[string]any {
 
 	switch p := existingProof.(type) {
 	case []any:
-		result[keyProof] = append(p, proofConfig)
+		// Copy the slice to avoid mutating the original document
+		newProofs := make([]any, len(p)+1)
+		copy(newProofs, p)
+		newProofs[len(p)] = proofConfig
+		result[keyProof] = newProofs
 	case map[string]any:
 		result[keyProof] = []any{p, proofConfig}
 	default:

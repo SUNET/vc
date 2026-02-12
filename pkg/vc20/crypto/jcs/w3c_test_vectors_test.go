@@ -1,3 +1,6 @@
+//go:build vc20
+// +build vc20
+
 // Package jcs tests using official W3C test vectors from the
 // Data Integrity EdDSA Cryptosuites v1.0 specification.
 // Reference: https://www.w3.org/TR/vc-di-eddsa/#representation-eddsa-jcs-2022
@@ -7,9 +10,11 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-varint"
 )
 
 // W3C Test Vectors from Section B.3: Representation: eddsa-jcs-2022
@@ -17,9 +22,9 @@ import (
 
 // Test keys from the specification
 const (
-	// Public key: multicodec ed25519-pub (0xed01) + 32 bytes
+	// Public key: multicodec ed25519-pub (0xed) + 32 bytes
 	w3cPublicKeyMultibase = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
-	// Secret key: multicodec ed25519-priv (0x8026) + 64 bytes (seed + public)
+	// Secret key: multicodec ed25519-priv (0x1300) + 32 bytes (seed only)
 	w3cSecretKeyMultibase = "z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq"
 
 	// Common W3C @context URLs
@@ -104,17 +109,29 @@ var w3cSignedCredential = map[string]any{
 }
 
 // decodeMultibaseKey decodes a multibase-encoded Ed25519 key.
-// Ed25519 public keys use 0xed01 prefix, private keys use 0x8026 prefix.
+// Ed25519 public keys use 0xed (237) prefix, private keys use 0x1300 (4864) prefix.
+// Multicodec prefixes are varint-encoded, so we properly decode the varint length.
 func decodeMultibaseKey(multibaseKey string) ([]byte, error) {
 	_, keyBytes, err := multibase.Decode(multibaseKey)
 	if err != nil {
 		return nil, err
 	}
-	// Skip multicodec prefix (2 bytes for pub, 2 bytes for priv)
-	if len(keyBytes) > 2 {
-		return keyBytes[2:], nil
+	if len(keyBytes) == 0 {
+		return nil, fmt.Errorf("empty key bytes")
 	}
-	return keyBytes, nil
+	// Decode the multicodec varint prefix to determine prefix length
+	codec, prefixLen, err := varint.FromUvarint(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode multicodec prefix: %w", err)
+	}
+	// Validate expected codecs: 0xed for ed25519-pub, 0x1300 for ed25519-priv
+	if codec != 0xed && codec != 0x1300 {
+		return nil, fmt.Errorf("unexpected multicodec: 0x%x (expected 0xed or 0x1300)", codec)
+	}
+	if prefixLen >= len(keyBytes) {
+		return nil, fmt.Errorf("key bytes too short after prefix")
+	}
+	return keyBytes[prefixLen:], nil
 }
 
 func getW3CKeys(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
@@ -200,8 +217,15 @@ func TestW3CProofOptionsHash(t *testing.T) {
 func TestW3CCombinedHash(t *testing.T) {
 	proofOptions := buildW3CProofOptions()
 
-	proofCanonical, _ := Canonicalize(proofOptions)
-	docCanonical, _ := Canonicalize(w3cUnsignedCredential)
+	proofCanonical, err := Canonicalize(proofOptions)
+	if err != nil {
+		t.Fatalf("Failed to canonicalize proof options: %v", err)
+	}
+
+	docCanonical, err := Canonicalize(w3cUnsignedCredential)
+	if err != nil {
+		t.Fatalf("Failed to canonicalize credential: %v", err)
+	}
 
 	proofHash := sha256.Sum256(proofCanonical)
 	docHash := sha256.Sum256(docCanonical)
@@ -287,8 +311,9 @@ func TestW3CRoundTrip(t *testing.T) {
 	}
 }
 
-// TestW3CContextMismatch tests that verification fails when document @context doesn't match proof @context.
-func TestW3CContextMismatch(t *testing.T) {
+// TestW3CContextSupersetAllowed tests that verification succeeds when document @context is a superset
+// that starts with the proof @context values (per W3C spec step 4.1).
+func TestW3CContextSupersetAllowed(t *testing.T) {
 	pubKey, _ := getW3CKeys(t)
 
 	// Create a modified credential where document @context has extra entries

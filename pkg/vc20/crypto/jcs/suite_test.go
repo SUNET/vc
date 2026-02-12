@@ -1,8 +1,12 @@
+//go:build vc20
+// +build vc20
+
 package jcs
 
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -342,7 +346,7 @@ func TestSignValidationErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if tt.errMatch != "" && err.Error() != tt.errMatch {
+			if tt.errMatch != "" && !strings.Contains(err.Error(), tt.errMatch) {
 				t.Errorf("expected error containing %q, got %q", tt.errMatch, err.Error())
 			}
 		})
@@ -404,15 +408,11 @@ func TestVerifyValidationErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if tt.errMatch != "" && !containsString(err.Error(), tt.errMatch) {
+			if tt.errMatch != "" && !strings.Contains(err.Error(), tt.errMatch) {
 				t.Errorf("expected error containing %q, got %q", tt.errMatch, err.Error())
 			}
 		})
 	}
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[:len(substr)] == substr || containsString(s[1:], substr)))
 }
 
 // Test with proof array
