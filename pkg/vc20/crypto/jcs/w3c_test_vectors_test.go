@@ -9,12 +9,12 @@ package jcs
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
 
 	"github.com/multiformats/go-multibase"
-	"github.com/multiformats/go-varint"
 )
 
 // W3C Test Vectors from Section B.3: Representation: eddsa-jcs-2022
@@ -120,9 +120,9 @@ func decodeMultibaseKey(multibaseKey string) ([]byte, error) {
 		return nil, fmt.Errorf("empty key bytes")
 	}
 	// Decode the multicodec varint prefix to determine prefix length
-	codec, prefixLen, err := varint.FromUvarint(keyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode multicodec prefix: %w", err)
+	codec, prefixLen := binary.Uvarint(keyBytes)
+	if prefixLen <= 0 {
+		return nil, fmt.Errorf("failed to decode multicodec prefix")
 	}
 	// Validate expected codecs: 0xed for ed25519-pub, 0x1300 for ed25519-priv
 	if codec != 0xed && codec != 0x1300 {

@@ -34,7 +34,6 @@ require (
 	github.com/miekg/pkcs11 v1.1.2
 	github.com/moogar0880/problems v1.0.1
 	github.com/multiformats/go-multibase v0.2.0
-	github.com/multiformats/go-varint v0.1.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.7.0
 	github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c
