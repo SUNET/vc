@@ -124,9 +124,15 @@ func NewValidator() (*validator.Validate, error) {
 		// Build a map of VCT -> format for quick lookup
 		vctToFormat := make(map[string]string)
 		for _, constructor := range credentialConstructors {
-			if constructor != nil {
+			if constructor != nil && constructor.VCTM != nil {
 				vctToFormat[constructor.VCTM.VCT] = constructor.Format
 			}
+		}
+
+		// If no VCTMs have been loaded yet, skip cross-reference validation
+		// (VCTM files are loaded after config parsing/validation)
+		if len(vctToFormat) == 0 && len(credentialConstructors) > 0 {
+			return true
 		}
 
 		// Validate each AuthMethod

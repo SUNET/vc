@@ -57,6 +57,8 @@ BUILD_CONFIGS           := \
 	check-protoc diagram install-tools clean-apt-cache vscode \
 	gosec staticcheck vulncheck \
 	test-saml test-oidcrp test-vc20 test-pkcs11 test-all-tags \
+	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
+	test-wallet-stack-vci test-wallet-stack-vp test-wallet-stack-e2e test-wallet-stack-security \
 	test-workflows test-workflows-run \
 	w3c-test create-w3c-test-suite run-w3c-test \
 	release check_current_branch ci_build
@@ -169,6 +171,40 @@ test-all-tags: ## Test with all build tags
 	$(info Testing with all build tags)
 	go test -tags "$(SAML_TAG),$(OIDCRP_TAG),$(VC20_TAG),$(PKCS11_TAG)" -v ./...
 
+test-wallet: test-wallet-vci test-wallet-vp test-wallet-e2e ## Run all wallet mock tests
+
+test-wallet-vci: ## Run wallet VCI mock tests
+	$(info Testing wallet VCI flows)
+	go test -v -count=1 -run 'TestVCI' ./internal/wallet/integration/...
+
+test-wallet-vp: ## Run wallet VP mock tests
+	$(info Testing wallet VP flows)
+	go test -v -count=1 -run 'TestVP' ./internal/wallet/integration/...
+
+test-wallet-e2e: ## Run wallet end-to-end mock tests (VCI then VP)
+	$(info Testing wallet end-to-end flows)
+	go test -v -count=1 -run 'TestEndToEnd' ./internal/wallet/integration/...
+
+test-wallet-stack: ## Run all wallet stack tests (requires: docker compose up)
+	$(info Testing wallet against live stack — requires: docker compose up)
+	go test -v -tags stack -count=1 -timeout 180s ./internal/wallet/integration/...
+
+test-wallet-stack-vci: ## Run wallet stack VCI tests (happy path + negative)
+	$(info Testing wallet stack VCI flows)
+	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VCI' ./internal/wallet/integration/...
+
+test-wallet-stack-vp: ## Run wallet stack VP tests
+	$(info Testing wallet stack VP flows)
+	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VP' ./internal/wallet/integration/...
+
+test-wallet-stack-e2e: ## Run wallet stack end-to-end test (VCI then VP)
+	$(info Testing wallet stack E2E flow)
+	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_E2E' ./internal/wallet/integration/...
+
+test-wallet-stack-security: ## Run wallet stack security/negative tests (DPoP, PKCE, replay)
+	$(info Testing wallet stack security — DPoP, PKCE, replay)
+	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VCI_(PAR_|Token_|Credential_)' ./internal/wallet/integration/...
+
 # ==============================================================================
 # Code Quality & Security
 # ==============================================================================
@@ -223,6 +259,18 @@ build-vc20-test-server: ## Build VC 2.0 test server
 	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags $(VC20_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_vc20-test-server \
 		$(LDFLAGS) ./cmd/vc20-test-server/
+
+build-wallet: ## Build wallet test tool
+	$(info Building wallet)
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
+		$(LDFLAGS) ./cmd/wallet/
+
+docker-build-wallet: ## Build Docker image for wallet test tool
+	$(info Docker Building wallet with tag: $(VERSION))
+	docker build --build-arg SERVICE_NAME=wallet \
+		--tag $(call docker-tag,wallet,$(VERSION)) \
+		--file dockerfiles/wallet .
 
 # ==============================================================================
 # Optional Feature Builds (with build tags)

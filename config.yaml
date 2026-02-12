@@ -81,7 +81,7 @@ issuer:
   registry_client:
     addr: registry.vc.docker:8090
   audit_log:
-    enabled: true
+    enabled: false
     destinations:
       - "console"
       - "/var/log/vc/audit.log"
@@ -282,6 +282,8 @@ apigw:
         redirect_uri: "https://dev.wallet.sunet.se"
         scopes:
           - "pid"
+          - "pid_1_5"
+          - "pid_1_8"
           - "diploma"
           - "ehic"
           - "pda1"
