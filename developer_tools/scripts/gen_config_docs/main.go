@@ -338,6 +338,11 @@ func determineRequired(tag TagInfo) string {
 	for _, r := range strings.Split(v, ",") {
 		r = strings.TrimSpace(r)
 		if r == "required" {
+			// If a default value is provided, the field is not required from
+			// the end-user's perspective since the default will be used.
+			if tag.Default != "" {
+				return "No"
+			}
 			return "Yes"
 		}
 	}

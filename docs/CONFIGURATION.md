@@ -68,7 +68,7 @@ Shared configuration used across all services.
 | Field     | Type       | Description                    | Example | Default                          | Required |
 | --------- | ---------- | ------------------------------ | ------- | -------------------------------- | -------- |
 | `enabled` | `bool`     | Kafka integration              | -       | `false`                          | No       |
-| `brokers` | `[]string` | List of Kafka broker addresses | -       | `["kafka0:9092", "kafka1:9092"]` | Yes      |
+| `brokers` | `[]string` | List of Kafka broker addresses | -       | `["kafka0:9092", "kafka1:9092"]` | No       |
 
 ### `credential_offer_qr`
 
@@ -76,7 +76,7 @@ Shared configuration used across all services.
 
 | Field  | Type     | Description                                                         | Example | Default            | Required |
 | ------ | -------- | ------------------------------------------------------------------- | ------- | ------------------ | -------- |
-| `type` | `string` | Credential offer type: "credential_offer" or "credential_offer_uri" | -       | `credential_offer` | Yes      |
+| `type` | `string` | Credential offer type: "credential_offer" or "credential_offer_uri" | -       | `credential_offer` | No       |
 | `qr`   | `object` | QR code generation settings                                         | -       | -                  | No       |
 
 ### `qr`
@@ -85,8 +85,8 @@ Shared configuration used across all services.
 
 | Field            | Type  | Description                  | Example | Default | Required |
 | ---------------- | ----- | ---------------------------- | ------- | ------- | -------- |
-| `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | Yes      |
-| `size`           | `int` | QR code size in pixels       | -       | `256`   | Yes      |
+| `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
+| `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
 
 ## `auth_methods` (Top-level)
 
@@ -132,7 +132,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 | Field        | Type     | Description                        | Example | Default | Required |
 | ------------ | -------- | ---------------------------------- | ------- | ------- | -------- |
-| `addr`       | `string` | Listen address for the HTTP server | -       | `:8080` | Yes      |
+| `addr`       | `string` | Listen address for the HTTP server | -       | `:8080` | No       |
 | `tls`        | `object` | TLS                                | -       | -       | No       |
 | `basic_auth` | `object` | Basic Auth                         | -       | -       | No       |
 | `cors`       | `object` | CORS                               | -       | -       | No       |
@@ -347,7 +347,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `client_secret`        | `string`   | OIDC client secret (required if not using dynamic registration)       | -                                           | -                                | No               |
 | `redirect_uri`         | `string`   | Callback URL where the OIDC Provider sends the authorization response | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled) |
 | `issuer_url`           | `string`   | OIDC Provider's issuer URL for discovery                              | `"https://accounts.google.com"`             | -                                | Yes (if enabled) |
-| `scopes`               | `[]string` | OAuth2/OIDC scopes to request                                         | -                                           | `["openid", "profile", "email"]` | Yes              |
+| `scopes`               | `[]string` | OAuth2/OIDC scopes to request                                         | -                                           | `["openid", "profile", "email"]` | No               |
 | `session_duration`     | `int`      | SessionDuration in seconds (default: 3600)                            | -                                           | `3600`                           | No               |
 | `client_name`          | `string`   | Client metadata for dynamic registration or display purposes          | -                                           | -                                | No               |
 | `client_uri`           | `string`   | Client URI                                                            | -                                           | -                                | No               |
@@ -405,7 +405,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 | Field  | Type     | Description                | Example | Default | Required |
 | ------ | -------- | -------------------------- | ------- | ------- | -------- |
-| `addr` | `string` | GRPC server listen address | -       | `:8090` | Yes      |
+| `addr` | `string` | GRPC server listen address | -       | `:8090` | No       |
 | `tls`  | `object` | MTLS configuration         | -       | -       | No       |
 
 ### `tls`
@@ -539,11 +539,11 @@ The signing key is shared from the parent Verifier.KeyConfig.
 | Field                    | Type     | Description                                                                | Example                       | Default | Required |
 | ------------------------ | -------- | -------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
 | `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata. | `"https://verifier.sunet.se"` | -       | Yes      |
-| `session_duration`       | `int`    | Session duration in seconds                                                | -                             | `3600`  | Yes      |
-| `code_duration`          | `int`    | Authorization code duration in seconds                                     | -                             | `300`   | Yes      |
-| `access_token_duration`  | `int`    | Access token duration in seconds                                           | -                             | `3600`  | Yes      |
-| `id_token_duration`      | `int`    | ID token duration in seconds                                               | -                             | `3600`  | Yes      |
-| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                          | -                             | `86400` | Yes      |
+| `session_duration`       | `int`    | Session duration in seconds                                                | -                             | `3600`  | No       |
+| `code_duration`          | `int`    | Authorization code duration in seconds                                     | -                             | `300`   | No       |
+| `access_token_duration`  | `int`    | Access token duration in seconds                                           | -                             | `3600`  | No       |
+| `id_token_duration`      | `int`    | ID token duration in seconds                                               | -                             | `3600`  | No       |
+| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                          | -                             | `86400` | No       |
 | `subject_type`           | `string` | Subject type: "public" or "pairwise"                                       | -                             | -       | Yes      |
 | `subject_salt`           | `string` | Salt for pairwise subject generation                                       | -                             | -       | Yes      |
 
@@ -553,7 +553,7 @@ The signing key is shared from the parent Verifier.KeyConfig.
 
 | Field                       | Type     | Description                                            | Example | Default | Required |
 | --------------------------- | -------- | ------------------------------------------------------ | ------- | ------- | -------- |
-| `presentation_timeout`      | `int`    | Presentation timeout in seconds                        | -       | `300`   | Yes      |
+| `presentation_timeout`      | `int`    | Presentation timeout in seconds                        | -       | `300`   | No       |
 | `supported_credentials`     | `array`  | Supported credential configurations                    | -       | -       | Yes      |
 | `presentation_requests_dir` | `string` | Optional directory with presentation request templates | -       | -       | No       |
 

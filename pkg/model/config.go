@@ -220,7 +220,6 @@ type OIDCRPConfig struct {
 	IssuerURL string `yaml:"issuer_url" validate:"required_if=Enabled true"`
 
 	// Scopes are the OAuth2/OIDC scopes to request
-	// Default: ["openid", "profile", "email"]
 	Scopes []string `yaml:"scopes" validate:"required,min=1,dive,required" default:"[\"openid\", \"profile\", \"email\"]"`
 
 	// SessionDuration in seconds (default: 3600)
