@@ -824,7 +824,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
 	for scope, constructor := range credentialConstructors {
-		if constructor == nil {
+		if constructor == nil || constructor.VCTM == nil {
+			// Skip constructors without VCTM metadata (e.g. service deployed
+			// separately and VCTM file not available on this node).
 			continue
 		}
 
@@ -838,7 +840,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		}
 
 		// Use VCTM display information
-		if constructor.VCTM != nil && len(constructor.VCTM.Display) > 0 {
+		if len(constructor.VCTM.Display) > 0 {
 			credConfig.Display = make([]openid4vci.CredentialMetadataDisplay, len(constructor.VCTM.Display))
 			for i, vctmDisplay := range constructor.VCTM.Display {
 				display := openid4vci.CredentialMetadataDisplay{

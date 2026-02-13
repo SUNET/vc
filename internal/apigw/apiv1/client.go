@@ -190,6 +190,12 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 	for scope, credential := range c.cfg.CredentialConstructor {
 		vctm := credential.VCTM
 		if vctm == nil {
+			if credential.VCTMFilePath != "" {
+				// VCTMFilePath was configured but VCTM was not loaded – likely a misconfiguration.
+				c.log.Warn("Credential constructor has vctm_file_path but VCTM was not loaded, skipping", "scope", scope, "vctm_file_path", credential.VCTMFilePath)
+			}
+			// No VCTMFilePath means the constructor is intentionally minimal
+			// (e.g. service deployed separately); skip silently.
 			continue
 		}
 
