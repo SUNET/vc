@@ -33,7 +33,7 @@ Shared configuration used across all services.
 | `production`          | `bool`   | Production mode                                                                                                                           | -                        | `true`  | No       |
 | `log`                 | `object` | Logging configuration                                                                                                                     | -                        | -       | No       |
 | `mongo`               | `object` | MongoDB configuration                                                                                                                     | -                        | -       | No       |
-| `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                       | -                        | -       | Yes      |
+| `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                       | -                        | -       | No       |
 | `kafka`               | `object` | Kafka message broker configuration                                                                                                        | -                        | -       | No       |
 | `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                         | -                        | -       | No       |
 | `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, ALL secrets MUST be in that file and secret values in config.yaml are ignored. | `"/etc/vc/secrets.yaml"` | -       | No       |
@@ -59,10 +59,11 @@ Shared configuration used across all services.
 
 > **Path:** `.common.tracing`
 
-| Field     | Type     | Description            | Example         | Default | Required |
-| --------- | -------- | ---------------------- | --------------- | ------- | -------- |
-| `addr`    | `string` | OTEL collector address | `"jaeger:4318"` | -       | Yes      |
-| `timeout` | `int64`  | Timeout in seconds     | -               | `10`    | No       |
+| Field     | Type     | Description                            | Example         | Default | Required |
+| --------- | -------- | -------------------------------------- | --------------- | ------- | -------- |
+| `enable`  | `bool`   | Enable activates OpenTelemetry tracing | -               | `false` | No       |
+| `addr`    | `string` | OTEL collector address                 | `"jaeger:4318"` | -       | No       |
+| `timeout` | `int64`  | Timeout in seconds                     | -               | `10`    | No       |
 
 ### `kafka`
 

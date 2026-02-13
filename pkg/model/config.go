@@ -71,7 +71,7 @@ type Common struct {
 	// Mongo is the MongoDB configuration
 	Mongo Mongo `yaml:"mongo" validate:"omitempty"`
 	// Tracing is the OpenTelemetry tracing configuration
-	Tracing OTEL `yaml:"tracing" validate:"required"`
+	Tracing OTEL `yaml:"tracing" validate:"omitempty"`
 	// Kafka is the Kafka message broker configuration
 	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
 	// CredentialOfferQR holds credential offer QR code settings
@@ -687,9 +687,11 @@ type TokenStatusLists struct {
 
 // OTEL holds the OpenTelemetry tracing configuration
 type OTEL struct {
+	// Enable activates OpenTelemetry tracing
+	Enable bool `yaml:"enable" default:"false"`
 	// Addr is the OTEL collector address
 	// Example: "jaeger:4318"
-	Addr string `yaml:"addr" validate:"required"`
+	Addr string `yaml:"addr" validate:"required_if=Enable true"`
 	// Timeout is the timeout in seconds
 	Timeout int64 `yaml:"timeout" default:"10"`
 }
