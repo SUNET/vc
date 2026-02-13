@@ -59,11 +59,11 @@ Shared configuration used across all services.
 
 > **Path:** `.common.tracing`
 
-| Field     | Type     | Description                            | Example         | Default | Required |
-| --------- | -------- | -------------------------------------- | --------------- | ------- | -------- |
-| `enable`  | `bool`   | Enable activates OpenTelemetry tracing | -               | `false` | No       |
-| `addr`    | `string` | OTEL collector address                 | `"jaeger:4318"` | -       | No       |
-| `timeout` | `int64`  | Timeout in seconds                     | -               | `10`    | No       |
+| Field     | Type     | Description                            | Example         | Default | Required               |
+| --------- | -------- | -------------------------------------- | --------------- | ------- | ---------------------- |
+| `enable`  | `bool`   | Enable activates OpenTelemetry tracing | -               | `false` | No                     |
+| `addr`    | `string` | OTEL collector address                 | `"jaeger:4318"` | -       | Yes (if enable = true) |
+| `timeout` | `int64`  | Timeout in seconds                     | -               | `10`    | No                     |
 
 ### `kafka`
 
@@ -290,19 +290,19 @@ Supports both file-based and HSM-based keys with explicit control.
 
 > **Path:** `.apigw.saml`
 
-| Field                 | Type     | Description                                                                           | Example                                             | Default | Required         |
-| --------------------- | -------- | ------------------------------------------------------------------------------------- | --------------------------------------------------- | ------- | ---------------- |
-| `enabled`             | `bool`   | SAML support (default: false)                                                         | -                                                   | `false` | No               |
-| `entity_id`           | `string` | SAML SP entity identifier (typically the metadata URL)                                | `"https://issuer.sunet.se/saml/metadata"`           | -       | Yes (if enabled) |
-| `metadata_url`        | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)            | -                                                   | -       | No               |
-| `mdq_server`          | `string` | Base URL for MDQ (Metadata Query Protocol) server                                     | `"https://md.sunet.se/entities/" (must end with /)` | -       | No               |
-| `static_idp_metadata` | `object` | A single static IdP as alternative to MDQ                                             | -                                                   | -       | No               |
-| `certificate_path`    | `string` | Path to X.509 certificate for SAML signing/encryption                                 | -                                                   | -       | Yes (if enabled) |
-| `private_key_path`    | `string` | Path to private key for SAML signing/encryption                                       | -                                                   | -       | Yes (if enabled) |
-| `acs_endpoint`        | `string` | Assertion Consumer Service URL where IdP sends SAML responses                         | `"https://issuer.sunet.se/saml/acs"`                | -       | Yes (if enabled) |
-| `session_duration`    | `int`    | SessionDuration in seconds (default: 3600)                                            | -                                                   | -       | No               |
-| `credential_mappings` | `object` | How to map external attributes to credential claims                                   | -                                                   | -       | Yes (if enabled) |
-| `metadata_cache_ttl`  | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ | -                                                   | -       | No               |
+| Field                 | Type     | Description                                                                           | Example                                             | Default | Required                |
+| --------------------- | -------- | ------------------------------------------------------------------------------------- | --------------------------------------------------- | ------- | ----------------------- |
+| `enabled`             | `bool`   | SAML support (default: false)                                                         | -                                                   | `false` | No                      |
+| `entity_id`           | `string` | SAML SP entity identifier (typically the metadata URL)                                | `"https://issuer.sunet.se/saml/metadata"`           | -       | Yes (if enabled = true) |
+| `metadata_url`        | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)            | -                                                   | -       | No                      |
+| `mdq_server`          | `string` | Base URL for MDQ (Metadata Query Protocol) server                                     | `"https://md.sunet.se/entities/" (must end with /)` | -       | No                      |
+| `static_idp_metadata` | `object` | A single static IdP as alternative to MDQ                                             | -                                                   | -       | No                      |
+| `certificate_path`    | `string` | Path to X.509 certificate for SAML signing/encryption                                 | -                                                   | -       | Yes (if enabled = true) |
+| `private_key_path`    | `string` | Path to private key for SAML signing/encryption                                       | -                                                   | -       | Yes (if enabled = true) |
+| `acs_endpoint`        | `string` | Assertion Consumer Service URL where IdP sends SAML responses                         | `"https://issuer.sunet.se/saml/acs"`                | -       | Yes (if enabled = true) |
+| `session_duration`    | `int`    | SessionDuration in seconds (default: 3600)                                            | -                                                   | -       | No                      |
+| `credential_mappings` | `object` | How to map external attributes to credential claims                                   | -                                                   | -       | Yes (if enabled = true) |
+| `metadata_cache_ttl`  | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ | -                                                   | -       | No                      |
 
 ### `static_idp_metadata`
 
@@ -343,23 +343,23 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.oidcrp`
 
-| Field                  | Type       | Description                                                           | Example                                     | Default                          | Required         |
-| ---------------------- | ---------- | --------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | ---------------- |
-| `enabled`              | `bool`     | OIDC RP support (default: false)                                      | -                                           | `false`                          | No               |
-| `dynamic_registration` | `object`   | Dynamic Registration (RFC 7591) support                               | -                                           | -                                | No               |
-| `client_id`            | `string`   | OIDC client identifier (required if not using dynamic registration)   | -                                           | -                                | No               |
-| `client_secret`        | `string`   | OIDC client secret (required if not using dynamic registration)       | -                                           | -                                | No               |
-| `redirect_uri`         | `string`   | Callback URL where the OIDC Provider sends the authorization response | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled) |
-| `issuer_url`           | `string`   | OIDC Provider's issuer URL for discovery                              | `"https://accounts.google.com"`             | -                                | Yes (if enabled) |
-| `scopes`               | `[]string` | OAuth2/OIDC scopes to request                                         | -                                           | `["openid", "profile", "email"]` | No               |
-| `session_duration`     | `int`      | SessionDuration in seconds (default: 3600)                            | -                                           | `3600`                           | No               |
-| `client_name`          | `string`   | Client metadata for dynamic registration or display purposes          | -                                           | -                                | No               |
-| `client_uri`           | `string`   | Client URI                                                            | -                                           | -                                | No               |
-| `logo_uri`             | `string`   | Logo URI                                                              | -                                           | -                                | No               |
-| `contacts`             | `[]string` | Contacts                                                              | -                                           | -                                | No               |
-| `tos_uri`              | `string`   | Tos URI                                                               | -                                           | -                                | No               |
-| `policy_uri`           | `string`   | Policy URI                                                            | -                                           | -                                | No               |
-| `credential_mappings`  | `object`   | How to map OIDC claims to credential claims                           | -                                           | -                                | Yes (if enabled) |
+| Field                  | Type       | Description                                                           | Example                                     | Default                          | Required                |
+| ---------------------- | ---------- | --------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | ----------------------- |
+| `enabled`              | `bool`     | OIDC RP support (default: false)                                      | -                                           | `false`                          | No                      |
+| `dynamic_registration` | `object`   | Dynamic Registration (RFC 7591) support                               | -                                           | -                                | No                      |
+| `client_id`            | `string`   | OIDC client identifier (required if not using dynamic registration)   | -                                           | -                                | No                      |
+| `client_secret`        | `string`   | OIDC client secret (required if not using dynamic registration)       | -                                           | -                                | No                      |
+| `redirect_uri`         | `string`   | Callback URL where the OIDC Provider sends the authorization response | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled = true) |
+| `issuer_url`           | `string`   | OIDC Provider's issuer URL for discovery                              | `"https://accounts.google.com"`             | -                                | Yes (if enabled = true) |
+| `scopes`               | `[]string` | OAuth2/OIDC scopes to request                                         | -                                           | `["openid", "profile", "email"]` | No                      |
+| `session_duration`     | `int`      | SessionDuration in seconds (default: 3600)                            | -                                           | `3600`                           | No                      |
+| `client_name`          | `string`   | Client metadata for dynamic registration or display purposes          | -                                           | -                                | No                      |
+| `client_uri`           | `string`   | Client URI                                                            | -                                           | -                                | No                      |
+| `logo_uri`             | `string`   | Logo URI                                                              | -                                           | -                                | No                      |
+| `contacts`             | `[]string` | Contacts                                                              | -                                           | -                                | No                      |
+| `tos_uri`              | `string`   | Tos URI                                                               | -                                           | -                                | No                      |
+| `policy_uri`           | `string`   | Policy URI                                                            | -                                           | -                                | No                      |
+| `credential_mappings`  | `object`   | How to map OIDC claims to credential claims                           | -                                           | -                                | Yes (if enabled = true) |
 
 ### `dynamic_registration`
 
@@ -416,14 +416,14 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 > **Path:** `.issuer.grpc_server.tls`, `.registry.grpc_server.tls`
 
-| Field                         | Type     | Description                                                                        | Example | Default                | Required         |
-| ----------------------------- | -------- | ---------------------------------------------------------------------------------- | ------- | ---------------------- | ---------------- |
-| `enabled`                     | `bool`   | Enabled                                                                            | -       | `false`                | No               |
-| `cert_file_path`              | `string` | Server certificate                                                                 | -       | `/pki/grpc_server.crt` | Yes (if enabled) |
-| `key_file_path`               | `string` | Server private key                                                                 | -       | `/pki/grpc_server.key` | Yes (if enabled) |
-| `client_ca_path`              | `string` | CA to verify client certificates (for mTLS)                                        | -       | `/pki/client_ca.crt`   | Yes (if enabled) |
-| `allowed_client_fingerprints` | `object` | SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")           | -       | -                      | No               |
-| `allowed_client_dns`          | `object` | Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod") | -       | -                      | No               |
+| Field                         | Type     | Description                                                                        | Example | Default                | Required |
+| ----------------------------- | -------- | ---------------------------------------------------------------------------------- | ------- | ---------------------- | -------- |
+| `enabled`                     | `bool`   | Enabled                                                                            | -       | `false`                | No       |
+| `cert_file_path`              | `string` | Server certificate                                                                 | -       | `/pki/grpc_server.crt` | No       |
+| `key_file_path`               | `string` | Server private key                                                                 | -       | `/pki/grpc_server.key` | No       |
+| `client_ca_path`              | `string` | CA to verify client certificates (for mTLS)                                        | -       | `/pki/client_ca.crt`   | No       |
+| `allowed_client_fingerprints` | `object` | SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")           | -       | -                      | No       |
+| `allowed_client_dns`          | `object` | Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod") | -       | -                      | No       |
 
 ### `jwt_attribute`
 
@@ -455,11 +455,11 @@ In a later state this should be placed under authentic source in order to issue 
 
 > **Path:** `.issuer.audit_log`
 
-| Field                | Type       | Description                                                       | Example                                                              | Default | Required         |
-| -------------------- | ---------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- | ------- | ---------------- |
-| `enabled`            | `bool`     | Audit logging                                                     | -                                                                    | `false` | No               |
-| `destinations`       | `[]string` | List of log destinations (console/stdout, file path, or HTTP URL) | `["stdout", "/var/log/audit.log", "https://audit.sunet.se/webhook"]` | -       | Yes (if enabled) |
-| `file_sync_interval` | `duration` | Fsync behavior for file destinations.                             | -                                                                    | `5s`    | No               |
+| Field                | Type       | Description                                                       | Example                                                              | Default | Required                |
+| -------------------- | ---------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- | ------- | ----------------------- |
+| `enabled`            | `bool`     | Audit logging                                                     | -                                                                    | `false` | No                      |
+| `destinations`       | `[]string` | List of log destinations (console/stdout, file path, or HTTP URL) | `["stdout", "/var/log/audit.log", "https://audit.sunet.se/webhook"]` | -       | Yes (if enabled = true) |
+| `file_sync_interval` | `duration` | Fsync behavior for file destinations.                             | -                                                                    | `5s`    | No                      |
 
 ## `verifier` (Top-level)
 
@@ -664,12 +664,12 @@ Configuration for the Registry service that manages credential status.
 
 > **Path:** `.registry.admin_gui`
 
-| Field            | Type     | Description                | Example | Default | Required         |
-| ---------------- | -------- | -------------------------- | ------- | ------- | ---------------- |
-| `enabled`        | `bool`   | The admin GUI              | -       | `true`  | No               |
-| `username`       | `string` | Admin username             | -       | `admin` | Yes (if enabled) |
-| `password`       | `string` | Admin password             | -       | -       | Yes (if enabled) |
-| `session_secret` | `string` | Secret for session cookies | -       | -       | Yes (if enabled) |
+| Field            | Type     | Description                | Example | Default | Required                |
+| ---------------- | -------- | -------------------------- | ------- | ------- | ----------------------- |
+| `enabled`        | `bool`   | The admin GUI              | -       | `true`  | No                      |
+| `username`       | `string` | Admin username             | -       | `admin` | No                      |
+| `password`       | `string` | Admin password             | -       | -       | Yes (if enabled = true) |
+| `session_secret` | `string` | Secret for session cookies | -       | -       | Yes (if enabled = true) |
 
 ## `mock_as` (Top-level)
 
