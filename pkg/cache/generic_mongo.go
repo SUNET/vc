@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,14 +27,21 @@ type mongoCacheEntry[V any] struct {
 // V must be serializable to BSON. Primitive types (string, bool, int, []byte)
 // and structs with bson tags are supported out of the box.
 type MongoCache[V any] struct {
-	coll *mongo.Collection
+	coll       *mongo.Collection
+	log        Logger
+	collection string
 }
 
 // NewMongoCache creates a new MongoDB-backed generic cache.
 // It creates the necessary indexes including a TTL index for automatic expiration.
-func NewMongoCache[V any](ctx context.Context, client *mongo.Client, database, collection string, ttl time.Duration) (*MongoCache[V], error) {
+// If log is nil operational errors are silently discarded.
+func NewMongoCache[V any](ctx context.Context, client *mongo.Client, database, collection string, ttl time.Duration, log Logger) (*MongoCache[V], error) {
 	if client == nil {
 		return nil, fmt.Errorf("mongo client cannot be nil")
+	}
+
+	if log == nil {
+		log = nopLogger{}
 	}
 
 	coll := client.Database(database).Collection(collection)
@@ -50,7 +58,7 @@ func NewMongoCache[V any](ctx context.Context, client *mongo.Client, database, c
 		return nil, fmt.Errorf("failed to create indexes for cache %q: %w", collection, err)
 	}
 
-	return &MongoCache[V]{coll: coll}, nil
+	return &MongoCache[V]{coll: coll, log: log, collection: collection}, nil
 }
 
 // Get retrieves a value by key.
@@ -58,6 +66,11 @@ func (m *MongoCache[V]) Get(ctx context.Context, key string) (V, bool) {
 	var entry mongoCacheEntry[V]
 	err := m.coll.FindOne(ctx, bson.M{"_id": key}).Decode(&entry)
 	if err != nil {
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			m.log.Error(err, "mongo cache get: operational error treated as miss",
+				"cache", m.collection, "key", key,
+			)
+		}
 		var zero V
 		return zero, false
 	}
@@ -89,13 +102,18 @@ func (m *MongoCache[V]) SetWithTTL(ctx context.Context, key string, value V, _ t
 
 // Delete removes a value by key.
 func (m *MongoCache[V]) Delete(ctx context.Context, key string) {
-	m.coll.DeleteOne(ctx, bson.M{"_id": key})
+	if _, err := m.coll.DeleteOne(ctx, bson.M{"_id": key}); err != nil {
+		m.log.Error(err, "mongo cache delete failed",
+			"cache", m.collection, "key", key,
+		)
+	}
 }
 
 // Len returns the estimated number of items in the cache.
 func (m *MongoCache[V]) Len() int {
 	count, err := m.coll.EstimatedDocumentCount(context.Background())
 	if err != nil {
+		m.log.Error(err, "mongo cache len failed", "cache", m.collection)
 		return 0
 	}
 	return int(count)
@@ -109,7 +127,11 @@ func (m *MongoCache[V]) upsert(ctx context.Context, key string, value V) {
 	}
 
 	opts := options.Replace().SetUpsert(true)
-	m.coll.ReplaceOne(ctx, bson.M{"_id": key}, entry, opts)
+	if _, err := m.coll.ReplaceOne(ctx, bson.M{"_id": key}, entry, opts); err != nil {
+		m.log.Error(err, "mongo cache upsert failed",
+			"cache", m.collection, "key", key,
+		)
+	}
 }
 
 // tryRecoverValue handles the case where V is an interface type and BSON

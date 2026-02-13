@@ -149,7 +149,7 @@ func TestMongoCache_String(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
-	c, err := NewMongoCache[string](t.Context(), client, "test_generic", "cache_string", 10*time.Minute)
+	c, err := NewMongoCache[string](t.Context(), client, "test_generic", "cache_string", 10*time.Minute, nil)
 	require.NoError(t, err)
 	runGenericCacheContractTests(t, c, "hello", "world")
 }
@@ -158,7 +158,7 @@ func TestMongoCache_Bool(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
-	c, err := NewMongoCache[bool](t.Context(), client, "test_generic", "cache_bool", 10*time.Minute)
+	c, err := NewMongoCache[bool](t.Context(), client, "test_generic", "cache_bool", 10*time.Minute, nil)
 	require.NoError(t, err)
 	runGenericCacheContractTests(t, c, true, false)
 }
@@ -167,7 +167,7 @@ func TestMongoCache_Int(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
-	c, err := NewMongoCache[int](t.Context(), client, "test_generic", "cache_int", 10*time.Minute)
+	c, err := NewMongoCache[int](t.Context(), client, "test_generic", "cache_int", 10*time.Minute, nil)
 	require.NoError(t, err)
 	runGenericCacheContractTests(t, c, 42, 99)
 }
@@ -176,7 +176,7 @@ func TestMongoCache_Struct(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
-	c, err := NewMongoCache[testStruct](t.Context(), client, "test_generic", "cache_struct", 10*time.Minute)
+	c, err := NewMongoCache[testStruct](t.Context(), client, "test_generic", "cache_struct", 10*time.Minute, nil)
 	require.NoError(t, err)
 	runGenericCacheContractTests(t, c,
 		testStruct{Name: "alice", Value: 1},
@@ -189,7 +189,7 @@ func TestMongoCache_Bytes(t *testing.T) {
 	defer cleanup()
 
 	ctx := t.Context()
-	c, err := NewMongoCache[[]byte](ctx, client, "test_generic", "cache_bytes", 10*time.Minute)
+	c, err := NewMongoCache[[]byte](ctx, client, "test_generic", "cache_bytes", 10*time.Minute, nil)
 	require.NoError(t, err)
 
 	c.Set(ctx, "bin", []byte{0x01, 0x02})
@@ -203,7 +203,7 @@ func TestMongoCache_Bytes(t *testing.T) {
 }
 
 func TestMongoCache_NilClient(t *testing.T) {
-	_, err := NewMongoCache[string](context.Background(), nil, "db", "col", 5*time.Minute)
+	_, err := NewMongoCache[string](context.Background(), nil, "db", "col", 5*time.Minute, nil)
 	assert.Error(t, err)
 }
 

@@ -5,6 +5,17 @@ import (
 	"time"
 )
 
+// Logger is a minimal logging interface for operational error reporting.
+// Both *logger.Log and logr.Logger satisfy this interface.
+type Logger interface {
+	Error(err error, msg string, keysAndValues ...any)
+}
+
+// nopLogger silently discards all log output.
+type nopLogger struct{}
+
+func (nopLogger) Error(_ error, _ string, _ ...any) {}
+
 // Cache is a generic key-value cache interface with TTL support.
 // All in-memory caches MUST use this interface to allow swapping backends
 // for HA deployments (e.g. memory → mongo).

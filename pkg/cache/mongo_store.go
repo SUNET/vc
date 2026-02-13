@@ -119,7 +119,7 @@ func (s *MongoStore) Get(ctx context.Context, query *AuthorizationContext) (*Aut
 	var result AuthorizationContext
 	err := s.coll.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to get auth context: %w", err)
@@ -137,7 +137,7 @@ func (s *MongoStore) GetByID(ctx context.Context, id string) (*AuthorizationCont
 	var result AuthorizationContext
 	err := s.coll.FindOne(ctx, bson.M{"session_id": id}).Decode(&result)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to get auth context by id: %w", err)
@@ -155,7 +155,7 @@ func (s *MongoStore) GetByAuthorizationCode(ctx context.Context, code string) (*
 	var result AuthorizationContext
 	err := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&result)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to get auth context by code: %w", err)
@@ -180,7 +180,7 @@ func (s *MongoStore) GetByAccessToken(ctx context.Context, token string) (*Autho
 	var result AuthorizationContext
 	err := s.coll.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to get auth context by access token: %w", err)
@@ -243,7 +243,7 @@ func (s *MongoStore) ForfeitAuthorizationCode(ctx context.Context, query *Author
 	var doc AuthorizationContext
 	err := s.coll.FindOne(ctx, filter).Decode(&doc)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to find auth context: %w", err)
@@ -264,7 +264,7 @@ func (s *MongoStore) ForfeitAuthorizationCode(ctx context.Context, query *Author
 	var result AuthorizationContext
 	err = s.coll.FindOneAndUpdate(ctx, atomicFilter, update, opts).Decode(&result)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, errors.New("authorization code already forfeited")
 		}
 		return nil, fmt.Errorf("failed to forfeit authorization code: %w", err)

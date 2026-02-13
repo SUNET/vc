@@ -14,13 +14,18 @@ const defaultDatabase = "vc_cache"
 type Service struct {
 	ha     bool
 	client *mongo.Client
+	log    Logger
 }
 
 // New creates a cache Service.
 // When ha is true the supplied mongo client is used for all caches;
 // otherwise every cache is in-memory. The caller owns the client lifecycle.
-func New(ha bool, client *mongo.Client) *Service {
-	return &Service{ha: ha, client: client}
+// If log is nil operational errors from mongo-backed caches are silently discarded.
+func New(ha bool, client *mongo.Client, log Logger) *Service {
+	if log == nil {
+		log = nopLogger{}
+	}
+	return &Service{ha: ha, client: client, log: log}
 }
 
 // NewAuthContextCache creates an AuthContextStore backed by the service's backend.
@@ -36,5 +41,5 @@ func NewGenericCache[V any](s *Service, ctx context.Context, collection string, 
 	if !s.ha {
 		return NewMemoryCache[V](ttl), nil
 	}
-	return NewMongoCache[V](ctx, s.client, defaultDatabase, collection, ttl)
+	return NewMongoCache[V](ctx, s.client, defaultDatabase, collection, ttl, s.log)
 }
