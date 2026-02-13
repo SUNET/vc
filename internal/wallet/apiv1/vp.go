@@ -2,7 +2,11 @@ package apiv1
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	crypto_sha256 "crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -17,7 +21,71 @@ import (
 	"vc/pkg/openid4vp"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 )
+
+// strongSigningAlgorithms lists the only algorithms accepted when verifying
+// request-object JWTs.  Weak/symmetric algorithms (HS*, RS256, RS384, RS512)
+// are intentionally excluded.
+var strongSigningAlgorithms = []string{
+	"ES256", "ES384", "ES512",
+	"PS256", "PS384", "PS512",
+	"EdDSA",
+}
+
+// requestObjectKeyFunc extracts the verification key from the JWT header.
+// It supports x5c (X.509 certificate chain) and jwk (embedded JSON Web Key).
+func requestObjectKeyFunc(token *jwtv5.Token) (any, error) {
+	// Try x5c first – the leaf certificate contains the public key.
+	if x5cRaw, ok := token.Header["x5c"]; ok {
+		chain, ok := x5cRaw.([]any)
+		if !ok || len(chain) == 0 {
+			return nil, fmt.Errorf("x5c header present but invalid")
+		}
+		leafB64, ok := chain[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("x5c leaf entry is not a string")
+		}
+		derBytes, err := base64.StdEncoding.DecodeString(leafB64)
+		if err != nil {
+			return nil, fmt.Errorf("decoding x5c leaf certificate: %w", err)
+		}
+		cert, err := x509.ParseCertificate(derBytes)
+		if err != nil {
+			return nil, fmt.Errorf("parsing x5c leaf certificate: %w", err)
+		}
+		return cert.PublicKey, nil
+	}
+
+	// Try jwk – the public key is embedded directly.
+	if jwkRaw, ok := token.Header["jwk"]; ok {
+		jwkMap, ok := jwkRaw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("jwk header present but not a JSON object")
+		}
+		jwkBytes, err := json.Marshal(jwkMap)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling jwk header: %w", err)
+		}
+		key, err := jwk.ParseKey(jwkBytes)
+		if err != nil {
+			return nil, fmt.Errorf("parsing jwk header: %w", err)
+		}
+		var pubKey any
+		if err := jwk.Export(key, &pubKey); err != nil {
+			return nil, fmt.Errorf("exporting jwk public key: %w", err)
+		}
+		// Ensure we return the correct concrete type for the jwt library.
+		switch k := pubKey.(type) {
+		case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey:
+			return k, nil
+		default:
+			return nil, fmt.Errorf("unsupported key type from jwk header: %T", k)
+		}
+	}
+
+	return nil, fmt.Errorf("request object JWT contains neither x5c nor jwk header for signature verification")
+}
 
 // runVPScenario executes an OpenID4VP presentation flow
 func (c *Client) runVPScenario(ctx context.Context, vp *config.VPScenario, result *ScenarioResult) error {
@@ -150,9 +218,11 @@ func (c *Client) fetchRequestObject(ctx context.Context, requestURI string) (*op
 	// Try parsing as JWT first
 	bodyStr := strings.TrimSpace(string(body))
 	if strings.Count(bodyStr, ".") == 2 {
-		// It's a JWT - parse without verification (test wallet)
+		// Parse and verify the JWT using only strong signing algorithms
 		claims := jwtv5.MapClaims{}
-		_, _, err := jwtv5.NewParser().ParseUnverified(bodyStr, claims)
+		_, err := jwtv5.NewParser(
+			jwtv5.WithValidMethods(strongSigningAlgorithms),
+		).ParseWithClaims(bodyStr, claims, requestObjectKeyFunc)
 		if err != nil {
 			return nil, fmt.Errorf("parsing request object JWT: %w", err)
 		}
