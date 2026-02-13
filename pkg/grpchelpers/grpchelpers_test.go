@@ -572,8 +572,8 @@ func TestFingerprintUnaryInterceptor(t *testing.T) {
 	})
 }
 
-// TestNormalizeDN tests the DN normalization function
-func TestNormalizeDN(t *testing.T) {
+// TestCanonicalizeDN tests the canonical DN normalization function
+func TestCanonicalizeDN(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -595,20 +595,60 @@ func TestNormalizeDN(t *testing.T) {
 			expected: "cn=apigw,o=sunet",
 		},
 		{
-			name:     "mixed case",
+			name:     "mixed case - sorted by attribute type",
 			input:    "CN=MyClient,O=MyOrg,C=SE",
-			expected: "cn=myclient,o=myorg,c=se",
+			expected: "c=se,cn=myclient,o=myorg",
 		},
 		{
 			name:     "empty string",
 			input:    "",
 			expected: "",
 		},
+		{
+			name:     "different attribute order produces same result",
+			input:    "O=SUNET,CN=apigw",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "reverse order with country",
+			input:    "C=SE,O=SUNET,CN=apigw",
+			expected: "c=se,cn=apigw,o=sunet",
+		},
+		{
+			name:     "spaces around equals and commas",
+			input:    "CN = apigw , O = SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "semicolons as separators",
+			input:    "CN=apigw;O=SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "long attribute type names",
+			input:    "commonName=apigw,organizationName=SUNET,countryName=SE",
+			expected: "c=se,cn=apigw,o=sunet",
+		},
+		{
+			name:     "OID notation",
+			input:    "2.5.4.3=apigw,2.5.4.10=SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "OU attribute",
+			input:    "CN=apigw,OU=IT,O=SUNET",
+			expected: "cn=apigw,o=sunet,ou=it",
+		},
+		{
+			name:     "escaped comma in value",
+			input:    "CN=Last\\, First,O=Org",
+			expected: "cn=last\\, first,o=org",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalizeDN(tt.input)
+			result := canonicalizeDN(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -631,6 +671,80 @@ func TestCertDN(t *testing.T) {
 	assert.Contains(t, dn, "SE")
 }
 
+// TestCertCanonicalDN tests the certificate canonical DN extraction
+func TestCertCanonicalDN(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "test-client",
+		Organization: []string{"TestOrg"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+
+	canonical := certCanonicalDN(cert)
+
+	// Canonical form sorts by attribute type alphabetically and lowercases everything
+	assert.Equal(t, "c=se,cn=test-client,o=testorg", canonical)
+}
+
+// TestCanonicalizeDN_MatchesCertCanonicalDN tests that canonicalizeDN on a config string
+// produces the same result as certCanonicalDN for the same certificate, regardless of
+// attribute ordering in the config string.
+func TestCanonicalizeDN_MatchesCertCanonicalDN(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+	certDN := certCanonicalDN(cert)
+
+	// All these config string variants should match the cert's canonical DN
+	configVariants := []string{
+		"CN=apigw,O=SUNET,C=SE",
+		"C=SE,O=SUNET,CN=apigw",
+		"O=SUNET,C=SE,CN=apigw",
+		"cn=apigw,o=sunet,c=se",
+		"CN=apigw, O=SUNET, C=SE",
+		"  CN=apigw , O=SUNET , C=SE  ",
+		"commonName=apigw,organizationName=SUNET,countryName=SE",
+	}
+
+	for _, variant := range configVariants {
+		t.Run(variant, func(t *testing.T) {
+			assert.Equal(t, certDN, canonicalizeDN(variant),
+				"config DN %q should match cert canonical DN %q", variant, certDN)
+		})
+	}
+}
+
+// TestVerifyClientIdentity_DNOrderIndependent tests that DN allowlist matching works
+// regardless of the attribute order in the config DN string.
+func TestVerifyClientIdentity_DNOrderIndependent(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	// Config DN written in a different order than Go's cert.Subject.String() would produce
+	configDN := "C=SE,O=SUNET,CN=apigw"
+	allowedDNs := map[string]string{canonicalizeDN(configDN): "apigw-prod"}
+
+	err := verifyClientIdentity(ctx, nil, allowedDNs)
+	require.NoError(t, err, "DN matching should be order-independent")
+}
+
 // TestVerifyClientIdentity_DNAllowed tests verification passes when DN matches allowlist
 func TestVerifyClientIdentity_DNAllowed(t *testing.T) {
 	subject := pkix.Name{
@@ -638,7 +752,7 @@ func TestVerifyClientIdentity_DNAllowed(t *testing.T) {
 		Organization: []string{"SUNET"},
 	}
 	cert := generateTestCertWithSubject(t, subject, nil, nil)
-	dn := normalizeDN(CertDN(cert))
+	dn := certCanonicalDN(cert)
 
 	tlsInfo := credentials.TLSInfo{
 		State: tls.ConnectionState{
@@ -692,7 +806,7 @@ func TestVerifyClientIdentity_DNMatchesFingerprintDoesNot(t *testing.T) {
 		Organization: []string{"SUNET"},
 	}
 	cert := generateTestCertWithSubject(t, subject, nil, nil)
-	dn := normalizeDN(CertDN(cert))
+	dn := certCanonicalDN(cert)
 
 	tlsInfo := credentials.TLSInfo{
 		State: tls.ConnectionState{
@@ -842,7 +956,7 @@ func TestVerifyClientIdentity_BothFingerprintAndDNMatch(t *testing.T) {
 	}
 	cert := generateTestCertWithSubject(t, subject, nil, nil)
 	fingerprint := CertFingerprint(cert)
-	dn := normalizeDN(CertDN(cert))
+	dn := certCanonicalDN(cert)
 
 	tlsInfo := credentials.TLSInfo{
 		State: tls.ConnectionState{
@@ -885,7 +999,7 @@ func TestIntegration_mTLS_BothFingerprintAndDNMatch(t *testing.T) {
 	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
 
 	clientFingerprint := CertFingerprint(clientCert)
-	clientDN := normalizeDN(CertDN(clientCert))
+	clientDN := certCanonicalDN(clientCert)
 	t.Logf("Client fingerprint: %s", FormatFingerprint(clientFingerprint))
 	t.Logf("Client DN: %q", clientDN)
 
@@ -976,9 +1090,9 @@ func TestIntegration_mTLS_DNInAllowlist(t *testing.T) {
 	clientCertPath := writeCertToFile(t, tmpDir, "client.pem", clientCert)
 	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
 
-	// Use the actual DN (normalized) from the client cert
-	clientDN := normalizeDN(CertDN(clientCert))
-	t.Logf("Client cert DN: %q (normalized: %q)", CertDN(clientCert), clientDN)
+	// Use the actual DN (canonical) from the client cert
+	clientDN := certCanonicalDN(clientCert)
+	t.Logf("Client cert DN: %q (canonical: %q)", CertDN(clientCert), clientDN)
 
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
@@ -1125,7 +1239,7 @@ func TestIntegration_mTLS_DNAllowedFingerprintNot(t *testing.T) {
 	clientCertPath := writeCertToFile(t, tmpDir, "client.pem", clientCert)
 	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
 
-	clientDN := normalizeDN(CertDN(clientCert))
+	clientDN := certCanonicalDN(clientCert)
 
 	// Configure with WRONG fingerprint but CORRECT DN
 	serverCfg := model.GRPCServer{
