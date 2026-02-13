@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 	"vc/internal/verifier/apiv1/utils"
+	internalcache "vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/pkg/cache"
 
@@ -481,10 +482,10 @@ func TestMockClientCollection(t *testing.T) {
 	assert.Nil(t, deleted)
 }
 
-// TestAuthContextCache tests the auth context cache operations
-func TestAuthContextCache(t *testing.T) {
+// TestMemoryStore tests the auth context cache operations
+func TestMemoryStore(t *testing.T) {
 	ctx := t.Context()
-	authCache := cache.NewAuthContextCache(15 * time.Minute)
+	authCache := internalcache.NewTestMemoryStore(15 * time.Minute)
 
 	// Test Create
 	authCtx := &cache.AuthorizationContext{
@@ -543,14 +544,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		setupMock     func(*testing.T, *cache.AuthContextCache, *MockClientCollection)
+		setupMock     func(*testing.T, cache.AuthContextStore, *MockClientCollection)
 		request       *TokenRequest
 		expectError   bool
 		expectedError error
 	}{
 		{
 			name: "successful token exchange",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:           "session-1",
 					Status:              cache.SessionStatusCodeIssued,
@@ -590,7 +591,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "invalid grant type",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				// No setup needed
 			},
 			request: &TokenRequest{
@@ -603,7 +604,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "invalid authorization code",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				// No session with this code
 			},
 			request: &TokenRequest{
@@ -618,7 +619,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "code already used",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:     "session-used",
 					Status:        cache.SessionStatusTokenIssued,
@@ -643,7 +644,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "expired authorization code",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:     "session-expired",
 					Status:        cache.SessionStatusCodeIssued,
@@ -668,7 +669,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "invalid client credentials",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:     "session-2",
 					Status:        cache.SessionStatusCodeIssued,
@@ -700,7 +701,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "client ID mismatch",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:     "session-3",
 					Status:        cache.SessionStatusCodeIssued,
@@ -732,7 +733,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "redirect URI mismatch",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:     "session-4",
 					Status:        cache.SessionStatusCodeIssued,
@@ -764,7 +765,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "PKCE validation success",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:           "session-pkce",
 					Status:              cache.SessionStatusCodeIssued,
@@ -799,7 +800,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "PKCE validation failure",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:           "session-pkce-fail",
 					Status:              cache.SessionStatusCodeIssued,
@@ -832,7 +833,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 		},
 		{
 			name: "public client (no secret required)",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				authCtx := &cache.AuthorizationContext{
 					SessionID:      "session-public",
 					Status:         cache.SessionStatusCodeIssued,
@@ -867,7 +868,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
-			tt.setupMock(t, client.authContextCache, mockDB.Clients)
+			tt.setupMock(t, client.cacheService.AuthContext, mockDB.Clients)
 
 			// Set up test signing key
 			key := generateTestRSAKey(t)
@@ -893,7 +894,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 				assert.Greater(t, resp.ExpiresIn, 0)
 
 				// Verify session was updated
-				authCtx, _ := client.authContextCache.GetByAuthorizationCode(ctx, tt.request.Code)
+				authCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, tt.request.Code)
 				if authCtx != nil {
 					assert.True(t, authCtx.Forfeited)
 					assert.Equal(t, cache.SessionStatusTokenIssued, authCtx.Status)
@@ -1048,14 +1049,14 @@ func TestAuthorize_FullFlow(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		setupMock     func(*testing.T, *cache.AuthContextCache, *MockClientCollection)
+		setupMock     func(*testing.T, cache.AuthContextStore, *MockClientCollection)
 		request       *AuthorizeRequest
 		expectError   bool
 		expectedError error
 	}{
 		{
 			name: "successful authorization request",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1077,7 +1078,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "client not found",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				// No client created
 			},
 			request: &AuthorizeRequest{
@@ -1091,7 +1092,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "invalid redirect URI",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1111,7 +1112,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "unsupported response type",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1131,7 +1132,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "invalid scope",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1151,7 +1152,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "PKCE required but not provided",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1172,7 +1173,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "successful with PKCE",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1196,7 +1197,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		},
 		{
 			name: "multiple scopes with different credentials",
-			setupMock: func(t *testing.T, sessions *cache.AuthContextCache, clients *MockClientCollection) {
+			setupMock: func(t *testing.T, sessions cache.AuthContextStore, clients *MockClientCollection) {
 				client := &db.Client{
 					ClientID:      "test-client",
 					RedirectURIs:  []string{"https://example.com/callback"},
@@ -1233,7 +1234,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 			template := createSimplePresentationTemplate(t, []string{"openid", "profile", "email", "address"})
 			client.AddPresentationTemplateForTesting(template)
 
-			tt.setupMock(t, client.authContextCache, mockDB.Clients)
+			tt.setupMock(t, client.cacheService.AuthContext, mockDB.Clients)
 
 			// Execute
 			resp, err := client.Authorize(ctx, tt.request)
@@ -1269,7 +1270,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				assert.NotEmpty(t, resp.SecondaryColor)
 
 				// Verify session was created
-				authCtx, _ := client.authContextCache.GetByID(ctx, resp.SessionID)
+				authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, resp.SessionID)
 				assert.NotNil(t, authCtx)
 				assert.Equal(t, cache.SessionStatusPending, authCtx.Status)
 				assert.Equal(t, tt.request.ClientID, authCtx.ClientID)

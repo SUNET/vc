@@ -27,7 +27,7 @@ func TestGetQRCode(t *testing.T) {
 		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 		Status:    cache.SessionStatusPending,
 	}
-	err := client.authContextCache.Create(ctx, authCtx)
+	err := client.cacheService.AuthContext.Create(ctx, authCtx)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -86,7 +86,7 @@ func TestPollSession(t *testing.T) {
 		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 		Status:    cache.SessionStatusPending,
 	}
-	err := client.authContextCache.Create(ctx, pendingSession)
+	err := client.cacheService.AuthContext.Create(ctx, pendingSession)
 	require.NoError(t, err)
 
 	codeIssuedSession := &cache.AuthorizationContext{
@@ -98,7 +98,7 @@ func TestPollSession(t *testing.T) {
 		State:       "test-state-123",
 		Code:        "auth-code-xyz",
 	}
-	err = client.authContextCache.Create(ctx, codeIssuedSession)
+	err = client.cacheService.AuthContext.Create(ctx, codeIssuedSession)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -177,7 +177,7 @@ func TestGetUserInfo(t *testing.T) {
 			"email": "john@example.com",
 		},
 	}
-	err := client.authContextCache.Create(ctx, authCtx)
+	err := client.cacheService.AuthContext.Create(ctx, authCtx)
 	require.NoError(t, err)
 
 	// Create a session with expired token
@@ -189,7 +189,7 @@ func TestGetUserInfo(t *testing.T) {
 		AccessToken:          "expired-token",
 		AccessTokenExpiresAt: time.Now().Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
 	}
-	err = client.authContextCache.Create(ctx, expiredSession)
+	err = client.cacheService.AuthContext.Create(ctx, expiredSession)
 	require.NoError(t, err)
 
 	// Create a session without 'sub' claim
@@ -206,7 +206,7 @@ func TestGetUserInfo(t *testing.T) {
 			"email": "jane@example.com",
 		},
 	}
-	err = client.authContextCache.Create(ctx, sessionNoSub)
+	err = client.cacheService.AuthContext.Create(ctx, sessionNoSub)
 	require.NoError(t, err)
 
 	// Create a session with non-string 'sub' claim
@@ -223,7 +223,7 @@ func TestGetUserInfo(t *testing.T) {
 			"name": "Bob Smith",
 		},
 	}
-	err = client.authContextCache.Create(ctx, sessionNonStringSub)
+	err = client.cacheService.AuthContext.Create(ctx, sessionNonStringSub)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -384,7 +384,7 @@ func TestGetOIDCRequestObject(t *testing.T) {
 					Scopes:      []string{"openid"},
 				}
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -403,7 +403,7 @@ func TestGetOIDCRequestObject(t *testing.T) {
 				assert.NotEmpty(t, resp.RequestObject)
 
 				// Verify nonce was stored in session
-				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, tt.sessionID)
 				assert.NotEmpty(t, authCtx.RequestObjectNonce)
 			}
 		})
@@ -472,7 +472,7 @@ func TestProcessCallback(t *testing.T) {
 					State:       "client-state",
 				}
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -717,7 +717,7 @@ func TestProcessDirectPost(t *testing.T) {
 					State:       "client-state",
 				}
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -741,7 +741,7 @@ func TestProcessDirectPost(t *testing.T) {
 				require.NotNil(t, resp)
 
 				// Verify session was updated
-				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, tt.sessionID)
 				assert.Equal(t, tt.expectedStatus, authCtx.Status)
 
 				if tt.expectShowCredentials {

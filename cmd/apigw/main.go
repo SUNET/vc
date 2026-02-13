@@ -7,6 +7,7 @@ import (
 	"sync"
 	"syscall"
 	"vc/internal/apigw/apiv1"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/db"
 	"vc/internal/apigw/httpserver"
 	"vc/internal/apigw/inbound"
@@ -56,6 +57,11 @@ func main() {
 		panic(err)
 	}
 
+	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
+	if err != nil {
+		panic(err)
+	}
+
 	var eventPublisher apiv1.EventPublisher
 	if cfg.Common.Kafka.Enabled {
 		var err error
@@ -68,7 +74,7 @@ func main() {
 		mainLog.Info("EventPublisher disabled in config")
 	}
 
-	apiv1Client, err := apiv1.New(ctx, dbService, tracer, cfg, log)
+	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, cfg, log)
 	if err != nil {
 		panic(err)
 	}

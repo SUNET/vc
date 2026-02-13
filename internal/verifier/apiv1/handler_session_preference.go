@@ -22,7 +22,7 @@ type UpdateSessionPreferenceResponse struct {
 // UpdateSessionPreference updates the session's credential display preference
 func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSessionPreferenceRequest) (*UpdateSessionPreferenceResponse, error) {
 	// Get session
-	authCtx, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -33,7 +33,7 @@ func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSession
 	// Update preference
 	authCtx.ShowCredentialDetails = req.ShowCredentialDetails
 
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session preference")
 		return nil, ErrServerError
 	}
@@ -54,7 +54,7 @@ type ConfirmCredentialDisplayResponse struct {
 // ConfirmCredentialDisplay handles user confirmation after viewing credential details
 func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string, req *ConfirmCredentialDisplayRequest) (*ConfirmCredentialDisplayResponse, error) {
 	// Get session
-	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -72,7 +72,7 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 		// User cancelled - return error to RP
 		c.log.Info("User cancelled credential display", "session_id", sessionID)
 		authCtx.Status = cache.SessionStatusError
-		if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session after cancellation")
 			return nil, ErrServerError
 		}
@@ -109,7 +109,7 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 	authCtx.Code = code
 	authCtx.CodeExpiresAt = codeExpiry.Unix()
 
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session after confirmation")
 		return nil, ErrServerError
 	}
@@ -159,7 +159,7 @@ type GetCredentialDisplayDataResponse struct {
 // GetCredentialDisplayData retrieves data needed for the credential display page
 func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentialDisplayDataRequest) (*GetCredentialDisplayDataResponse, error) {
 	// Get session
-	authCtx, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}

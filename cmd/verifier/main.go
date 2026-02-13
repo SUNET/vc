@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 	"vc/internal/verifier/apiv1"
+	"vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/httpserver"
 	"vc/internal/verifier/notify"
@@ -62,13 +63,18 @@ func main() {
 		panic(err)
 	}
 
+	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
+	if err != nil {
+		panic(err)
+	}
+
 	notifyService, err := notify.New(ctx, cfg, log)
 	services["notifyService"] = notifyService
 	if err != nil {
 		panic(err)
 	}
 
-	apiv1, err := apiv1.New(ctx, dbService, notifyService, cfg, tracer, log)
+	apiv1, err := apiv1.New(ctx, dbService, notifyService, cacheService, cfg, tracer, log)
 	if err != nil {
 		panic(err)
 	}

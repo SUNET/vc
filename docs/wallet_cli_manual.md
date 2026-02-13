@@ -11,7 +11,7 @@ make build-wallet
 
 # Docker image
 make docker-build-wallet
-# Image: docker.sunet.se/dc4eu/wallet:latest
+# Image: docker.sunet.se/iam_vc/wallet:latest
 ```
 
 ## Usage
@@ -193,14 +193,14 @@ make docker-build-wallet
 
 # Run VCI flow in Docker
 docker run --rm --network vc_vc-dev-net \
-  docker.sunet.se/dc4eu/wallet:latest \
+  docker.sunet.se/iam_vc/wallet:latest \
   vci -issuer-url http://apigw:8080 -pre-authorized-code "abc123" \
       -credential-config-id "urn:eudi:pid:arf-1.5:1" -v
 
 # Run VP flow in Docker (mount credential file)
 docker run --rm --network vc_vc-dev-net \
   -v /tmp/credential.jwt:/cred.jwt \
-  docker.sunet.se/dc4eu/wallet:latest \
+  docker.sunet.se/iam_vc/wallet:latest \
   vp -request-uri "http://verifier:8080/verification/request-object/SESSION_ID" \
      -credential @/cred.jwt -v
 ```

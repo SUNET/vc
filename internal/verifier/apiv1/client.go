@@ -8,20 +8,16 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
-	"vc/pkg/cache"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
-	"vc/pkg/sdjwtvc"
 	"vc/pkg/trace"
-
-	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // Client holds the public api object
@@ -45,10 +41,7 @@ type Client struct {
 	trustService *openid4vp.TrustService
 
 	// Cache
-	authContextCache            *cache.AuthContextCache
-	credentialCache             *ttlcache.Cache[string, []sdjwtvc.CredentialCache]
-	ephemeralEncryptionKeyCache *ttlcache.Cache[string, jwk.Key]
-	requestObjectCache          *ttlcache.Cache[string, *openid4vp.RequestObject]
+	cacheService *cache.Service
 
 	// OIDC related
 	presentationBuilder *openid4vp.PresentationBuilder
@@ -56,7 +49,7 @@ type Client struct {
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheService *cache.Service, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Client, error) {
 	// Create OpenID4VP client with custom TTL settings
 	openid4vpClient, err := openid4vp.New(ctx, &openid4vp.Config{
 		EphemeralKeyTTL:  10 * time.Minute,
@@ -67,22 +60,14 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cfg *model
 	}
 
 	c := &Client{
-		cfg:                         cfg,
-		db:                          db,
-		authContextCache:            cache.NewAuthContextCache(15 * time.Minute),
-		log:                         log.New("apiv1"),
-		notify:                      notify,
-		openid4vp:                   openid4vpClient,
-		credentialCache:             ttlcache.New(ttlcache.WithTTL[string, []sdjwtvc.CredentialCache](5 * time.Minute)),
-		tracer:                      tracer,
-		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
-		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
+		cfg:       cfg,
+		db:        db,
+		log:       log.New("apiv1"),
+		notify:    notify,
+		openid4vp: openid4vpClient,
+		tracer:    tracer,
+		cacheService: cacheService,
 	}
-
-	// Start caches
-	go c.ephemeralEncryptionKeyCache.Start()
-	go c.credentialCache.Start()
-	go c.requestObjectCache.Start()
 
 	// Load PKI signing key and chain for request object signing and OIDC
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.Verifier.KeyConfig)

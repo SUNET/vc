@@ -8,10 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/db"
 	"vc/internal/gen/issuer/apiv1_issuer"
 	"vc/internal/gen/registry/apiv1_registry"
-	"vc/pkg/cache"
 	"vc/pkg/grpchelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -20,7 +20,6 @@ import (
 	"vc/pkg/pki"
 	"vc/pkg/trace"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
@@ -55,42 +54,25 @@ type Client struct {
 	CredentialOfferLookupMetadata *CredentialOfferLookupMetadata
 
 	// Caches
-	authContextCache            *cache.AuthContextCache
-	ephemeralEncryptionKeyCache *ttlcache.Cache[string, jwk.Key]
-	svgTemplateCache            *ttlcache.Cache[string, SVGTemplateReply]
-	documentCache               *ttlcache.Cache[string, map[string]*model.CompleteDocument]
-	dpopJTICache                *ttlcache.Cache[string, bool]
+	cacheService *cache.Service
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, cfg *model.Cfg, log *logger.Log) (*Client, error) {
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
-		authContextCache:              cache.NewAuthContextCache(10 * time.Minute), // Short-lived authorization contexts
 		usersStore:                    db.VCUsersColl,
 		credentialOfferStore:          db.VCCredentialOfferColl,
 		datastoreStore:                db.VCDatastoreColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
-		ephemeralEncryptionKeyCache:   ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
-		svgTemplateCache:              ttlcache.New(ttlcache.WithTTL[string, SVGTemplateReply](2 * time.Hour)),
-		documentCache:                 ttlcache.New(ttlcache.WithTTL[string, map[string]*model.CompleteDocument](5 * time.Minute)),
-		dpopJTICache:                  ttlcache.New(ttlcache.WithTTL[string, bool](5 * time.Minute)),
+		cacheService:                  cacheService,
 	}
 
-	go c.dpopJTICache.Start()
-
-	// Start the ephemeral encryption key cache
-	go c.ephemeralEncryptionKeyCache.Start()
-
-	// Delete expired cache items automatically
-	go c.svgTemplateCache.Start()
-
-	go c.documentCache.Start()
-
 	var err error
+
 	// CRITICAL: Load VCTM data first - issuer metadata generation depends on it
 	// All credential constructors must load successfully for the service to start properly
 	var loadErrors []error
@@ -155,8 +137,26 @@ func New(ctx context.Context, db *db.Service, tracer *trace.Tracer, cfg *model.C
 	return c, nil
 }
 
-// EphemeralEncryptionKey generates a new ephemeral encryption key pair, return private and public JWKs and KID, or error
-func (c *Client) EphemeralEncryptionKey(kid string) (jwk.Key, jwk.Key, error) {
+// EphemeralEncryptionKey returns the ephemeral encryption key pair for the
+// given kid.  If a private key already exists in the cache (i.e. the request-
+// object endpoint was already called for this session) the cached key is
+// reused so that the wallet's encrypted response can still be decrypted.
+// Otherwise a fresh P-256 key pair is generated, the private key is cached,
+// and both private and public JWKs are returned.
+func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Key, jwk.Key, error) {
+	// Return the existing key pair when available to avoid overwriting the
+	// private key on repeated request-object fetches (wallet retries, etc.).
+	if existing, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid); ok {
+		publicJWK, err := existing.PublicKey()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to derive public key from cached ephemeral key: %w", err)
+		}
+		if err := publicJWK.Set("use", "enc"); err != nil {
+			return nil, nil, err
+		}
+		return existing, publicJWK, nil
+	}
+
 	privKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, err
@@ -170,7 +170,7 @@ func (c *Client) EphemeralEncryptionKey(kid string) (jwk.Key, jwk.Key, error) {
 		return nil, nil, err
 	}
 
-	c.ephemeralEncryptionKeyCache.Set(kid, privateJWK, ttlcache.DefaultTTL)
+	c.cacheService.EphemeralEncryptionKey.Set(ctx, kid, privateJWK)
 
 	pub := privKey.Public()
 

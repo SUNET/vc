@@ -114,21 +114,27 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	s.gin.SetHTMLTemplate(f)
 
-	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
-	if err != nil {
-		return nil, err
-	}
-
-	// Configure CORS from config if present and has origins
+	// Configure CORS at the engine level (before route registration) so that
+	// OPTIONS preflight requests are handled correctly. Placing CORS on a
+	// router group causes preflight requests to hit Gin's NoRoute handler
+	// (404) because no explicit OPTIONS route is registered.
 	if s.cfg.APIGW.APIServer.CORS != nil && len(s.cfg.APIGW.APIServer.CORS.AllowedOrigins) > 0 {
 		corsConfig := cors.Config{
 			AllowOrigins:     s.cfg.APIGW.APIServer.CORS.AllowedOrigins,
 			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-			AllowHeaders:     []string{"Content-Type", "Authorization"},
+			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
 			AllowCredentials: true,
 			MaxAge:           12 * time.Hour,
 		}
-		rgRoot.Use(cors.New(corsConfig))
+		s.gin.Use(cors.New(corsConfig))
+	} else {
+		// No CORS origins configured – allow all origins by default.
+		s.gin.Use(cors.Default())
+	}
+
+	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
+	if err != nil {
+		return nil, err
 	}
 
 	rgRestricted, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)

@@ -16,11 +16,11 @@ import (
 
 // Service is the database service
 type Service struct {
-	dbClient   *mongo.Client
-	cfg        *model.Cfg
-	log        *logger.Log
-	tracer     *trace.Tracer
-	probeStore *apiv1_status.StatusProbeStore
+	MongoClient *mongo.Client
+	cfg         *model.Cfg
+	log         *logger.Log
+	tracer      *trace.Tracer
+	probeStore  *apiv1_status.StatusProbeStore
 
 	// OIDC client collection, client registration
 	Clients ClientStore
@@ -43,7 +43,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	}
 
 	// Initialize OIDC collections
-	oidcDB := service.dbClient.Database("verifier")
+	oidcDB := service.MongoClient.Database("verifier")
 	service.Clients = &ClientCollection{
 		Service:    service,
 		collection: oidcDB.Collection("clients"),
@@ -71,7 +71,7 @@ func (s *Service) connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.dbClient = client
+	s.MongoClient = client
 
 	return nil
 }
@@ -91,7 +91,7 @@ func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
 		LastCheckedTS: timestamppb.Now(),
 	}
 
-	if err := s.dbClient.Ping(ctx, nil); err != nil {
+	if err := s.MongoClient.Ping(ctx, nil); err != nil {
 		probe.Message = err.Error()
 		probe.Healthy = false
 	}
@@ -104,7 +104,7 @@ func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
 
 // Close closes the database connection
 func (s *Service) Close(ctx context.Context) error {
-	if err := s.dbClient.Disconnect(ctx); err != nil {
+	if err := s.MongoClient.Disconnect(ctx); err != nil {
 		return err
 	}
 	ctx.Done()

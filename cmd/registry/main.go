@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 	"vc/internal/registry/apiv1"
+	"vc/internal/registry/cache"
 	"vc/internal/registry/db"
 	"vc/internal/registry/grpcserver"
 	"vc/internal/registry/httpserver"
@@ -54,7 +55,12 @@ func main() {
 		panic(err)
 	}
 
-	tokenStatusListIssuerService, err := tokenstatuslistissuer.New(ctx, cfg, dbService, log)
+	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
+	if err != nil {
+		panic(err)
+	}
+
+	tokenStatusListIssuerService, err := tokenstatuslistissuer.New(ctx, cfg, cacheService, dbService, log)
 	services["tokenStatusListIssuerService"] = tokenStatusListIssuerService
 	if err != nil {
 		panic(err)

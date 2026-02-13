@@ -4,18 +4,16 @@ import (
 	"context"
 	"testing"
 	"time"
-	"vc/pkg/cache"
+	"vc/internal/apigw/cache"
+	pkgcache "vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/vcclient"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-var ErrNoDocuments = cache.ErrNoDocuments
 
 // mockUsersStore mocks the users store
 type mockUsersStore struct {
@@ -44,7 +42,7 @@ func (m *mockUsersStore) GetUser(ctx context.Context, username string) (*model.O
 	if user, ok := m.users[username]; ok {
 		return user, nil
 	}
-	return nil, ErrNoDocuments
+	return nil, pkgcache.ErrNoDocuments
 }
 
 func (m *mockUsersStore) GetHashedPassword(ctx context.Context, username string) (string, error) {
@@ -64,7 +62,7 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
+	authContextCache := cache.NewTestMemoryStore(5 * time.Minute)
 	usersStore := newMockUsersStore()
 
 	// Insert test user
@@ -100,9 +98,11 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	client := &Client{
-		log:              log,
-		authContextCache: authContextCache,
-		usersStore:       usersStore,
+		log:        log,
+		usersStore: usersStore,
+		cacheService: &cache.Service{
+			AuthContext: authContextCache,
+		},
 	}
 
 	req := &vcclient.UserLookupRequest{
@@ -134,7 +134,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
+	authContextCache := cache.NewTestMemoryStore(5 * time.Minute)
 
 	// Insert authorization context for PID auth
 	testAuthContext := &cache.AuthorizationContext{
@@ -155,7 +155,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create document cache with test data
-	cache := ttlcache.New[string, map[string]*model.CompleteDocument]()
+	docCache := cache.NewTestMemoryCache[map[string]*model.CompleteDocument](5 * time.Minute)
 	doc := model.CompleteDocument{
 		Meta: &model.MetaData{
 			AuthenticSource: "test-source",
@@ -189,12 +189,14 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	docs := map[string]*model.CompleteDocument{
 		"test-source": &doc,
 	}
-	cache.Set("session-456", docs, ttlcache.DefaultTTL)
+	docCache.Set(context.Background(), "session-456", docs)
 
 	client := &Client{
-		log:              log,
-		documentCache:    cache,
-		authContextCache: authContextCache,
+		log: log,
+		cacheService: &cache.Service{
+			AuthContext: authContextCache,
+			Document:   docCache,
+		},
 	}
 
 	// Create VCTM with claims
@@ -255,7 +257,7 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
+	authContextCache := cache.NewTestMemoryStore(5 * time.Minute)
 
 	// Insert authorization context
 	testAuthContext := &cache.AuthorizationContext{
@@ -275,12 +277,14 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create empty document cache
-	cache := ttlcache.New[string, map[string]*model.CompleteDocument]()
+	docCache := cache.NewTestMemoryCache[map[string]*model.CompleteDocument](5 * time.Minute)
 
 	client := &Client{
-		log:              log,
-		documentCache:    cache,
-		authContextCache: authContextCache,
+		log: log,
+		cacheService: &cache.Service{
+			AuthContext: authContextCache,
+			Document:   docCache,
+		},
 	}
 
 	req := &vcclient.UserLookupRequest{
@@ -302,7 +306,7 @@ func TestUserLookup_UnsupportedAuthMethod(t *testing.T) {
 	log, _ := logger.New("test", "", false)
 
 	// Create mock stores
-	authContextCache := cache.NewAuthContextCache(5 * time.Minute)
+	authContextCache := cache.NewTestMemoryStore(5 * time.Minute)
 
 	// Insert authorization context
 	testAuthContext := &cache.AuthorizationContext{
@@ -321,8 +325,10 @@ func TestUserLookup_UnsupportedAuthMethod(t *testing.T) {
 	require.NoError(t, err)
 
 	client := &Client{
-		log:              log,
-		authContextCache: authContextCache,
+		log: log,
+		cacheService: &cache.Service{
+			AuthContext: authContextCache,
+		},
 	}
 
 	req := &vcclient.UserLookupRequest{

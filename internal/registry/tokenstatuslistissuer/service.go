@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jellydator/ttlcache/v3"
 
+	"vc/internal/registry/cache"
 	"vc/internal/registry/db"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -25,9 +25,7 @@ type Service struct {
 	signer                  pki.Signer
 	log                     *logger.Log
 
-	// Caches for JWT and CWT tokens keyed by section (as string)
-	jwtCache *ttlcache.Cache[string, string]
-	cwtCache *ttlcache.Cache[string, []byte]
+	cacheService *cache.Service
 
 	// refreshInterval is how often tokens are regenerated
 	refreshInterval time.Duration
@@ -41,7 +39,7 @@ type Service struct {
 }
 
 // New creates a new token status list issuer service
-func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbService *db.Service, log *logger.Log) (*Service, error) {
 	refreshSeconds := cfg.Registry.TokenStatusLists.TokenRefreshInterval
 	if refreshSeconds <= 0 {
 		refreshSeconds = 43200 // default 12 hours per spec example (Section 5.1)
@@ -55,12 +53,11 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, log *logger
 		tokenStatusListColl:     dbService.TokenStatusListColl,
 		tokenStatusListMetadata: dbService.TokenStatusListMetadata,
 		log:                     log.New("token_status_list_issuer"),
-		jwtCache:                ttlcache.New(ttlcache.WithTTL[string, string](tokenValidity)),
-		cwtCache:                ttlcache.New(ttlcache.WithTTL[string, []byte](tokenValidity)),
 		refreshInterval:         refreshInterval,
 		tokenValidity:           tokenValidity,
 		ttl:                     refreshSeconds,
 		stopCh:                  make(chan struct{}),
+		cacheService:            cacheService,
 	}
 
 	// Load signing key using KeyLoader
@@ -80,10 +77,6 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, log *logger
 		return nil, fmt.Errorf("failed to initialize Token Status List database: %w", err)
 	}
 
-	// Start cache cleanup goroutines
-	go s.jwtCache.Start()
-	go s.cwtCache.Start()
-
 	// Start the refresh goroutine
 	go s.refreshLoop(ctx)
 
@@ -96,29 +89,27 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, log *logger
 func (s *Service) Close(ctx context.Context) error {
 	s.log.Info("Closing status issuer service")
 	close(s.stopCh)
-	s.jwtCache.Stop()
-	s.cwtCache.Stop()
 	return nil
 }
 
 // GetCachedJWT returns a cached JWT for the given section, or empty string if not cached
 func (s *Service) GetCachedJWT(section int64) string {
 	key := strconv.FormatInt(section, 10)
-	item := s.jwtCache.Get(key)
-	if item == nil {
+	v, ok := s.cacheService.JWT.Get(context.Background(), key)
+	if !ok {
 		return ""
 	}
-	return item.Value()
+	return v
 }
 
 // GetCachedCWT returns a cached CWT for the given section, or nil if not cached
 func (s *Service) GetCachedCWT(section int64) []byte {
 	key := strconv.FormatInt(section, 10)
-	item := s.cwtCache.Get(key)
-	if item == nil {
+	v, ok := s.cacheService.CWT.Get(context.Background(), key)
+	if !ok {
 		return nil
 	}
-	return item.Value()
+	return v
 }
 
 // refreshLoop periodically refreshes all cached status list tokens
@@ -197,7 +188,7 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 	if err != nil {
 		s.log.Error(err, "Failed to generate JWT", "section", section)
 	} else {
-		s.jwtCache.Set(key, jwtToken, ttlcache.DefaultTTL)
+		s.cacheService.JWT.Set(ctx, key, jwtToken)
 	}
 
 	// Generate and cache CWT
@@ -205,6 +196,6 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 	if err != nil {
 		s.log.Error(err, "Failed to generate CWT", "section", section)
 	} else {
-		s.cwtCache.Set(key, cwtToken, ttlcache.DefaultTTL)
+		s.cacheService.CWT.Set(ctx, key, cwtToken)
 	}
 }

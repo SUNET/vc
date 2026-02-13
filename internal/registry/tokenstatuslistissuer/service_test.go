@@ -23,6 +23,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"vc/internal/registry/cache"
 	"vc/internal/registry/db"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -52,6 +53,7 @@ type testSuite struct {
 	cancel         context.CancelFunc
 	cfg            *model.Cfg
 	dbService      *db.Service
+	cacheService   *cache.Service
 	log            *logger.Log
 	tracer         *trace.Tracer
 	mongoContainer testcontainers.Container
@@ -235,6 +237,11 @@ func (s *testSuite) initializeDatabase() {
 	if err != nil {
 		s.t.Fatalf("Failed to create database service: %v", err)
 	}
+
+	s.cacheService, err = cache.New(s.ctx, s.cfg, s.dbService, s.tracer, s.log)
+	if err != nil {
+		s.t.Fatalf("Failed to create cache service: %v", err)
+	}
 }
 
 // cleanup cleans up test resources
@@ -282,13 +289,14 @@ func TestNew_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
 	// Verify service is properly initialized
-	assert.NotNil(t, service.jwtCache)
-	assert.NotNil(t, service.cwtCache)
+	assert.NotNil(t, service.cacheService)
+	assert.NotNil(t, service.cacheService.JWT)
+	assert.NotNil(t, service.cacheService.CWT)
 	assert.NotNil(t, service.signer)
 	assert.Equal(t, suite.cfg, service.cfg)
 
@@ -304,7 +312,7 @@ func TestNew_InvalidKeyPath(t *testing.T) {
 	// Use invalid key path
 	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = "/nonexistent/path/to/key.pem"
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	assert.Error(t, err)
 	assert.Nil(t, service)
 	assert.Contains(t, err.Error(), "failed to load Token Status List signing key")
@@ -318,7 +326,7 @@ func TestNew_RSAKeySupported(t *testing.T) {
 	rsaKeyPath := generateRSAKeyFile(t)
 	suite.cfg.Registry.TokenStatusLists.KeyConfig.PrivateKeyPath = rsaKeyPath
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 	assert.Contains(t, service.signer.Algorithm(), "RS") // RS256, RS384, or RS512
@@ -331,7 +339,7 @@ func TestNew_DefaultRefreshInterval(t *testing.T) {
 	// Set refresh interval to 0 to use default
 	suite.cfg.Registry.TokenStatusLists.TokenRefreshInterval = 0
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
@@ -349,7 +357,7 @@ func TestNew_CustomRefreshInterval(t *testing.T) {
 
 	suite.cfg.Registry.TokenStatusLists.TokenRefreshInterval = 3600 // 1 hour
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
@@ -371,7 +379,7 @@ func TestAddStatus_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -391,7 +399,7 @@ func TestAddStatus_MultipleStatuses(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -426,7 +434,7 @@ func TestGetStatusListForSection_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -445,7 +453,7 @@ func TestGetStatusListForSection_NonexistentSection(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -463,7 +471,7 @@ func TestGetAllSections_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -481,7 +489,7 @@ func TestGetCachedJWT_AfterRefresh(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -501,7 +509,7 @@ func TestGetCachedCWT_AfterRefresh(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -520,7 +528,7 @@ func TestGetCachedJWT_NonexistentSection(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -533,7 +541,7 @@ func TestGetCachedCWT_NonexistentSection(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -550,7 +558,7 @@ func TestGenerateStatusListTokenJWT_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -581,7 +589,7 @@ func TestGenerateStatusListTokenCWT_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -611,7 +619,7 @@ func TestClose_Success(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 
 	err = service.Close(suite.ctx)
@@ -628,7 +636,7 @@ func TestCreateNewSectionIfNeeded_KeepsCurrentSection(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -646,7 +654,7 @@ func TestCreateNewSectionIfNeeded_CreatesNewSection(t *testing.T) {
 	suite := newTestSuiteWithSectionSize(t, 1500)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -678,7 +686,7 @@ func TestCreateNewSectionIfNeeded_BoundaryDecoyCount(t *testing.T) {
 	suite := newTestSuiteWithSectionSize(t, 1001)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -702,7 +710,7 @@ func TestCreateNewSectionIfNeeded_AboveBoundaryDecoyCount(t *testing.T) {
 	suite := newTestSuiteWithSectionSize(t, 1002)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -721,7 +729,7 @@ func TestCreateNewSectionIfNeeded_MultipleSections(t *testing.T) {
 	suite := newTestSuiteWithSectionSize(t, 1010) // Small size for quick test
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -763,7 +771,7 @@ func TestRefreshLoop_PopulatesCache(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -785,7 +793,7 @@ func TestRefreshLoop_StopsOnClose(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 
 	// Close should stop the refresh loop without hanging
@@ -811,7 +819,7 @@ func TestRefreshLoop_StopsOnContextCancel(t *testing.T) {
 	// Create a cancellable context
 	ctx, cancel := context.WithCancel(suite.ctx)
 
-	service, err := New(ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 
 	// Cancel the context
@@ -833,7 +841,7 @@ func TestIntegration_AddStatusAndRetrieve(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 
@@ -858,7 +866,7 @@ func TestIntegration_CacheConsistency(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	service, err := New(suite.ctx, suite.cfg, suite.dbService, suite.log)
+	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	defer service.Close(suite.ctx)
 

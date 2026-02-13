@@ -15,15 +15,15 @@ var databaseName = "vc_registry"
 
 // Service is the database service
 type Service struct {
-	mongoClient *mongo.Client
+	MongoClient *mongo.Client
 	tracer      *trace.Tracer
 	log         *logger.Log
 	cfg         *model.Cfg
 
 	// Token Status List collections (MongoDB)
-	TokenStatusListColl         *TokenStatusListColl
-	TokenStatusListMetadata     *TokenStatusListMetadataColl
-	CredentialSubjects          *CredentialSubjectsColl
+	TokenStatusListColl     *TokenStatusListColl
+	TokenStatusListMetadata *TokenStatusListMetadataColl
+	CredentialSubjects      *CredentialSubjectsColl
 }
 
 // New creates a new database service
@@ -70,10 +70,10 @@ func (s *Service) connectMongo(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.mongoClient = client
+	s.MongoClient = client
 
 	// Verify connection
-	if err := s.mongoClient.Ping(ctx, nil); err != nil {
+	if err := s.MongoClient.Ping(ctx, nil); err != nil {
 		return err
 	}
 
@@ -86,8 +86,8 @@ func (s *Service) Close(ctx context.Context) error {
 	s.log.Info("Stopped")
 
 	// Close MongoDB connection
-	if s.mongoClient != nil {
-		if err := s.mongoClient.Disconnect(ctx); err != nil {
+	if s.MongoClient != nil {
+		if err := s.MongoClient.Disconnect(ctx); err != nil {
 			s.log.Error(err, "failed to disconnect MongoDB")
 		}
 	}

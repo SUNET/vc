@@ -51,7 +51,7 @@ func (c *Client) LoginPIDUser(ctx context.Context, req *vcclient.LoginPIDUserReq
 		AuthenticSource: user.AuthenticSource,
 	}
 	// Update the authorization with the user identity
-	if err := c.authContextCache.AddIdentity(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}, update); err != nil {
+	if err := c.cacheService.AuthContext.AddIdentity(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}, update); err != nil {
 		c.log.Error(err, "failed to add identity to authorization context")
 		return err
 	}
@@ -65,7 +65,7 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 
 	if req.AuthenticSource == "" && req.SessionID != "" {
 		c.log.Debug("userAuthenticSourceLookup called without authentic source, looking up by session ID", "session_id", req.SessionID)
-		authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
+		authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
 			SessionID: req.SessionID,
 		})
 		if err != nil {
@@ -73,8 +73,8 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 			return nil, err
 		}
 
-		docs := c.documentCache.Get(authorizationContext.SessionID).Value()
-		if docs == nil {
+		docs, ok := c.cacheService.Document.Get(ctx, authorizationContext.SessionID)
+		if !ok {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", req.SessionID)
 			return nil, fmt.Errorf("no documents found for session %s", req.SessionID)
 		}
@@ -93,7 +93,7 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 
 	} else if req.AuthenticSource != "" {
 		c.log.Debug("userAuthenticSourceLookup called with authentic source", "authentic_source", req.AuthenticSource)
-		if err := c.authContextCache.SetAuthenticSource(ctx, &cache.AuthorizationContext{SessionID: req.SessionID}, req.AuthenticSource); err != nil {
+		if err := c.cacheService.AuthContext.SetAuthenticSource(ctx, &cache.AuthorizationContext{SessionID: req.SessionID}, req.AuthenticSource); err != nil {
 			c.log.Error(err, "failed to set authentic source")
 			return nil, fmt.Errorf("failed to set authentic source %s: %w", req.AuthenticSource, err)
 		}
@@ -105,7 +105,7 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error) {
 	c.log.Debug("UserLookup called")
 
-	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
+	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
 		RequestURI: req.RequestURI,
 	})
 	if err != nil {
@@ -152,21 +152,15 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		}
 
 	case model.AuthMethodPID:
-		authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
+		authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
 		if err != nil {
 			c.log.Error(err, "failed to get authorization context")
 			return nil, err
 		}
 
-		item := c.documentCache.Get(authorizationContext.SessionID)
-		if item == nil {
+		docs, ok := c.cacheService.Document.Get(ctx, authorizationContext.SessionID)
+		if !ok || len(docs) == 0 {
 			c.log.Error(nil, "no documents found in cache for session")
-			return nil, fmt.Errorf("no documents found for session %s", authorizationContext.SessionID)
-		}
-
-		docs := item.Value()
-		if len(docs) == 0 {
-			c.log.Error(nil, "no documents found in cache for session", "docs_len", len(docs))
 			return nil, fmt.Errorf("no documents found for session %s", authorizationContext.SessionID)
 		}
 
@@ -230,7 +224,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims)
 
-	if err := c.authContextCache.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
+	if err := c.cacheService.AuthContext.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
 		c.log.Error(err, "failed to consent for user", "username", req.Username)
 		return nil, fmt.Errorf("failed to consent for user %s: %w", req.Username, err)
 	}

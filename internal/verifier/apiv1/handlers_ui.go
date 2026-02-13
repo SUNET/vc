@@ -125,7 +125,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		VerifierInfo:     []openid4vp.VerifierInfo{},
 	}
 
-	if err := c.authContextCache.Save(ctx, authorizationContext); err != nil {
+	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {
 		return nil, err
 	}
 

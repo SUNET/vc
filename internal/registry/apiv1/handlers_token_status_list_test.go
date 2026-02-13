@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/tokenstatuslist"
@@ -23,36 +23,36 @@ func int64Ptr(v int64) *int64 {
 
 // mockTokenStatusListIssuer is a mock implementation of the TokenStatusListIssuer interface for testing
 type mockTokenStatusListIssuer struct {
-	jwtCache *ttlcache.Cache[string, string]
-	cwtCache *ttlcache.Cache[string, []byte]
+	jwtCache cache.Cache[string]
+	cwtCache cache.Cache[[]byte]
 	sections []int64
 	err      error
 }
 
 func newMockTokenStatusListIssuer() *mockTokenStatusListIssuer {
 	return &mockTokenStatusListIssuer{
-		jwtCache: ttlcache.New(ttlcache.WithTTL[string, string](time.Hour)),
-		cwtCache: ttlcache.New(ttlcache.WithTTL[string, []byte](time.Hour)),
+		jwtCache: cache.NewMemoryCache[string](time.Hour),
+		cwtCache: cache.NewMemoryCache[[]byte](time.Hour),
 		sections: []int64{},
 	}
 }
 
 func (m *mockTokenStatusListIssuer) GetCachedJWT(section int64) string {
 	key := strconv.FormatInt(section, 10)
-	item := m.jwtCache.Get(key)
-	if item == nil {
+	v, ok := m.jwtCache.Get(context.Background(), key)
+	if !ok {
 		return ""
 	}
-	return item.Value()
+	return v
 }
 
 func (m *mockTokenStatusListIssuer) GetCachedCWT(section int64) []byte {
 	key := strconv.FormatInt(section, 10)
-	item := m.cwtCache.Get(key)
-	if item == nil {
+	v, ok := m.cwtCache.Get(context.Background(), key)
+	if !ok {
 		return nil
 	}
-	return item.Value()
+	return v
 }
 
 func (m *mockTokenStatusListIssuer) GetAllSections(ctx context.Context) ([]int64, error) {
@@ -64,12 +64,12 @@ func (m *mockTokenStatusListIssuer) GetAllSections(ctx context.Context) ([]int64
 
 func (m *mockTokenStatusListIssuer) SetJWT(section int64, jwt string) {
 	key := strconv.FormatInt(section, 10)
-	m.jwtCache.Set(key, jwt, ttlcache.DefaultTTL)
+	m.jwtCache.Set(context.Background(), key, jwt)
 }
 
 func (m *mockTokenStatusListIssuer) SetCWT(section int64, cwt []byte) {
 	key := strconv.FormatInt(section, 10)
-	m.cwtCache.Set(key, cwt, ttlcache.DefaultTTL)
+	m.cwtCache.Set(context.Background(), key, cwt)
 }
 
 func (m *mockTokenStatusListIssuer) SetSections(sections []int64) {

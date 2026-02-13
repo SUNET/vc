@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewAuthContextCache(t *testing.T) {
-	cache := NewAuthContextCache(5 * time.Minute)
+func TestNewMemoryStore(t *testing.T) {
+	cache := NewMemoryStore(5 * time.Minute)
 	require.NotNil(t, cache)
 	assert.NotNil(t, cache.cache)
 	assert.NotNil(t, cache.indices)
@@ -21,7 +21,7 @@ func TestNewAuthContextCache(t *testing.T) {
 
 func TestSave_Success(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:  "session-123",
@@ -48,7 +48,7 @@ func TestSave_Success(t *testing.T) {
 
 func TestSave_WithAllIndices(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:                "session-all",
@@ -80,7 +80,7 @@ func TestSave_WithAllIndices(t *testing.T) {
 
 func TestSave_NilDocument(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	err := cache.Save(ctx, nil)
 	assert.Error(t, err)
@@ -89,7 +89,7 @@ func TestSave_NilDocument(t *testing.T) {
 
 func TestSave_EmptySessionID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		RequestURI: "https://example.com/request",
@@ -102,7 +102,7 @@ func TestSave_EmptySessionID(t *testing.T) {
 
 func TestGet_BySessionID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-direct",
@@ -119,7 +119,7 @@ func TestGet_BySessionID(t *testing.T) {
 
 func TestGet_ByRequestURI(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:  "session-uri",
@@ -135,7 +135,7 @@ func TestGet_ByRequestURI(t *testing.T) {
 
 func TestGet_ByCode(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-code",
@@ -151,7 +151,7 @@ func TestGet_ByCode(t *testing.T) {
 
 func TestGet_ByState(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-state",
@@ -167,7 +167,7 @@ func TestGet_ByState(t *testing.T) {
 
 func TestGet_ByVerifierResponseCode(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:            "session-verifier",
@@ -183,7 +183,7 @@ func TestGet_ByVerifierResponseCode(t *testing.T) {
 
 func TestGet_ByEphemeralKeyID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:                "session-ephemeral",
@@ -199,7 +199,7 @@ func TestGet_ByEphemeralKeyID(t *testing.T) {
 
 func TestGet_ByRequestObjectID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:       "session-request-obj",
@@ -215,7 +215,7 @@ func TestGet_ByRequestObjectID(t *testing.T) {
 
 func TestGet_NilQuery(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	result, err := cache.Get(ctx, nil)
 	assert.Error(t, err)
@@ -225,7 +225,7 @@ func TestGet_NilQuery(t *testing.T) {
 
 func TestGet_NoSearchFields(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{} // Empty query
 	result, err := cache.Get(ctx, query)
@@ -236,7 +236,7 @@ func TestGet_NoSearchFields(t *testing.T) {
 
 func TestGet_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "non-existent"}
 	result, err := cache.Get(ctx, query)
@@ -247,7 +247,7 @@ func TestGet_NotFound(t *testing.T) {
 
 func TestGet_IndexNotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{Code: "non-existent-code"}
 	result, err := cache.Get(ctx, query)
@@ -258,7 +258,7 @@ func TestGet_IndexNotFound(t *testing.T) {
 
 func TestGetWithAccessToken_Success(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-token",
@@ -276,7 +276,7 @@ func TestGetWithAccessToken_Success(t *testing.T) {
 
 func TestGetWithAccessToken_EmptyToken(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	result, err := cache.GetWithAccessToken(ctx, "")
 	assert.Error(t, err)
@@ -286,7 +286,7 @@ func TestGetWithAccessToken_EmptyToken(t *testing.T) {
 
 func TestGetWithAccessToken_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	result, err := cache.GetWithAccessToken(ctx, "non-existent-token")
 	assert.Error(t, err)
@@ -296,7 +296,7 @@ func TestGetWithAccessToken_NotFound(t *testing.T) {
 
 func TestForfeitAuthorizationCode_ByCode(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-forfeit",
@@ -318,7 +318,7 @@ func TestForfeitAuthorizationCode_ByCode(t *testing.T) {
 
 func TestForfeitAuthorizationCode_ByRequestURI(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:  "session-forfeit-uri",
@@ -335,7 +335,7 @@ func TestForfeitAuthorizationCode_ByRequestURI(t *testing.T) {
 
 func TestForfeitAuthorizationCode_NilQuery(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	result, err := cache.ForfeitAuthorizationCode(ctx, nil)
 	assert.Error(t, err)
@@ -345,7 +345,7 @@ func TestForfeitAuthorizationCode_NilQuery(t *testing.T) {
 
 func TestForfeitAuthorizationCode_NoCodeOrRequestURI(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
 	result, err := cache.ForfeitAuthorizationCode(ctx, query)
@@ -356,7 +356,7 @@ func TestForfeitAuthorizationCode_NoCodeOrRequestURI(t *testing.T) {
 
 func TestForfeitAuthorizationCode_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{Code: "non-existent-code"}
 	result, err := cache.ForfeitAuthorizationCode(ctx, query)
@@ -367,7 +367,7 @@ func TestForfeitAuthorizationCode_NotFound(t *testing.T) {
 
 func TestForfeitAuthorizationCode_AlreadyUsed(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-already-used",
@@ -397,7 +397,7 @@ func TestForfeitAuthorizationCode_AlreadyUsed(t *testing.T) {
 
 func TestConsent_Success(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:  "session-consent",
@@ -418,7 +418,7 @@ func TestConsent_Success(t *testing.T) {
 
 func TestConsent_NilQuery(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	err := cache.Consent(ctx, nil)
 	assert.Error(t, err)
@@ -427,7 +427,7 @@ func TestConsent_NilQuery(t *testing.T) {
 
 func TestConsent_EmptyRequestURI(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
 	err := cache.Consent(ctx, query)
@@ -437,7 +437,7 @@ func TestConsent_EmptyRequestURI(t *testing.T) {
 
 func TestConsent_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{RequestURI: "https://example.com/non-existent"}
 	err := cache.Consent(ctx, query)
@@ -447,7 +447,7 @@ func TestConsent_NotFound(t *testing.T) {
 
 func TestAddToken_Success(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-add-token",
@@ -477,7 +477,7 @@ func TestAddToken_Success(t *testing.T) {
 
 func TestAddToken_EmptyCode(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	token := &Token{AccessToken: "token-123"}
 	err := cache.AddToken(ctx, "", token)
@@ -487,7 +487,7 @@ func TestAddToken_EmptyCode(t *testing.T) {
 
 func TestAddToken_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	token := &Token{AccessToken: "token-123"}
 	err := cache.AddToken(ctx, "non-existent-code", token)
@@ -497,7 +497,7 @@ func TestAddToken_NotFound(t *testing.T) {
 
 func TestSetAuthenticSource_Success(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-auth-source",
@@ -516,7 +516,7 @@ func TestSetAuthenticSource_Success(t *testing.T) {
 
 func TestSetAuthenticSource_EmptySource(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
 	err := cache.SetAuthenticSource(ctx, query, "")
@@ -526,7 +526,7 @@ func TestSetAuthenticSource_EmptySource(t *testing.T) {
 
 func TestSetAuthenticSource_NilQuery(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	err := cache.SetAuthenticSource(ctx, nil, "source-123")
 	assert.Error(t, err)
@@ -535,7 +535,7 @@ func TestSetAuthenticSource_NilQuery(t *testing.T) {
 
 func TestSetAuthenticSource_EmptySessionID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{}
 	err := cache.SetAuthenticSource(ctx, query, "source-123")
@@ -545,7 +545,7 @@ func TestSetAuthenticSource_EmptySessionID(t *testing.T) {
 
 func TestSetAuthenticSource_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "non-existent"}
 	err := cache.SetAuthenticSource(ctx, query, "source-123")
@@ -555,7 +555,7 @@ func TestSetAuthenticSource_NotFound(t *testing.T) {
 
 func TestAddIdentity_BySessionID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID: "session-add-identity",
@@ -586,7 +586,7 @@ func TestAddIdentity_BySessionID(t *testing.T) {
 
 func TestAddIdentity_ByRequestURI(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:  "session-identity-uri",
@@ -612,7 +612,7 @@ func TestAddIdentity_ByRequestURI(t *testing.T) {
 
 func TestAddIdentity_ByEphemeralKeyID(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	doc := &AuthorizationContext{
 		SessionID:                "session-identity-key",
@@ -638,7 +638,7 @@ func TestAddIdentity_ByEphemeralKeyID(t *testing.T) {
 
 func TestAddIdentity_NilQuery(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	input := &AuthorizationContext{
 		Identity: &model.Identity{GivenName: "Test"},
@@ -651,7 +651,7 @@ func TestAddIdentity_NilQuery(t *testing.T) {
 
 func TestAddIdentity_NilInput(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
 	err := cache.AddIdentity(ctx, query, nil)
@@ -661,7 +661,7 @@ func TestAddIdentity_NilInput(t *testing.T) {
 
 func TestAddIdentity_NilIdentity(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
 	input := &AuthorizationContext{
@@ -675,7 +675,7 @@ func TestAddIdentity_NilIdentity(t *testing.T) {
 
 func TestAddIdentity_NoQueryFields(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{}
 	input := &AuthorizationContext{
@@ -689,7 +689,7 @@ func TestAddIdentity_NoQueryFields(t *testing.T) {
 
 func TestAddIdentity_NotFound(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "non-existent"}
 	input := &AuthorizationContext{
@@ -703,7 +703,7 @@ func TestAddIdentity_NotFound(t *testing.T) {
 
 func TestCacheTTL(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(100 * time.Millisecond) // Very short TTL for testing
+	cache := NewMemoryStore(100 * time.Millisecond) // Very short TTL for testing
 
 	doc := &AuthorizationContext{
 		SessionID: "session-ttl",
@@ -730,7 +730,7 @@ func TestCacheTTL(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	// Create multiple documents
 	for i := 0; i < 10; i++ {
@@ -762,7 +762,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestUpdateIndices(t *testing.T) {
 	ctx := context.Background()
-	cache := NewAuthContextCache(5 * time.Minute)
+	cache := NewMemoryStore(5 * time.Minute)
 
 	// Initial save
 	doc := &AuthorizationContext{

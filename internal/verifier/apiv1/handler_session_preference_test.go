@@ -50,7 +50,7 @@ func TestUpdateSessionPreference(t *testing.T) {
 			// Setup session if needed
 			if tt.sessionExists {
 				authCtx := createTestDBSessionForPrefs(tt.sessionID)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -70,7 +70,7 @@ func TestUpdateSessionPreference(t *testing.T) {
 				assert.True(t, response.Success)
 
 				// Verify preference was stored
-				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, tt.sessionID)
 				assert.Equal(t, tt.preference, authCtx.ShowCredentialDetails)
 			}
 		})
@@ -140,7 +140,7 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 			if tt.authCtxSetup != nil {
 				authCtx := createTestDBSessionForPrefs(tt.sessionID)
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -159,7 +159,7 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 
 				if tt.expectCodeIssued {
 					// Verify code was issued
-					authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+					authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, tt.sessionID)
 					assert.Equal(t, cache.SessionStatusCodeIssued, authCtx.Status)
 					assert.NotEmpty(t, authCtx.Code)
 					assert.Contains(t, response.RedirectURI, "code=")
@@ -170,7 +170,7 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 					// Verify error response in redirect URI
 					assert.Contains(t, response.RedirectURI, "error=access_denied")
 					// Session should be in error status
-					authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+					authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, tt.sessionID)
 					assert.Equal(t, cache.SessionStatusError, authCtx.Status)
 				}
 			}
@@ -230,7 +230,7 @@ func TestGetCredentialDisplayData(t *testing.T) {
 			if tt.authCtxSetup != nil {
 				authCtx := createTestDBSessionForPrefs(tt.sessionID)
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 

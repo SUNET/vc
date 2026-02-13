@@ -83,6 +83,11 @@ type SVGClaim struct {
 	Value string `json:"value"`
 }
 
+// SVGTemplateReply holds SVG template data.
+type SVGTemplateReply struct {
+	Template string `json:"template"`
+}
+
 type UserLookupReply struct {
 	SVGTemplateClaims map[string]SVGClaim `json:"svg_template_claims,omitempty"`
 	RedirectURL       string              `json:"redirect_url,omitempty"`

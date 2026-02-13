@@ -1,0 +1,56 @@
+package cache
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"vc/internal/registry/db"
+	pkgcache "vc/pkg/cache"
+	"vc/pkg/logger"
+	"vc/pkg/model"
+	"vc/pkg/trace"
+)
+
+// Re-export types from pkg/cache so consumers only need this import.
+type (
+	Cache[V any] = pkgcache.Cache[V]
+)
+
+// Service holds all caches used by the registry service.
+type Service struct {
+	cfg    *model.Cfg
+	log    *logger.Log
+	tracer *trace.Tracer
+
+	JWT Cache[string]
+	CWT Cache[[]byte]
+}
+
+// New creates the registry cache service and initialises all caches.
+func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
+	cs := pkgcache.New(cfg.Common.HA, dbService.MongoClient)
+	s := &Service{
+		cfg:    cfg,
+		log:    log.New("cache"),
+		tracer: tracer,
+	}
+	var err error
+
+	refreshSeconds := cfg.Registry.TokenStatusLists.TokenRefreshInterval
+	if refreshSeconds <= 0 {
+		refreshSeconds = 43200 // default 12 hours
+	}
+	tokenValidity := time.Duration(refreshSeconds)*time.Second - 5*time.Minute
+
+	s.JWT, err = pkgcache.NewGenericCache[string](cs, ctx, "tsl_jwt", tokenValidity)
+	if err != nil {
+		return nil, fmt.Errorf("cache: jwt: %w", err)
+	}
+
+	if s.CWT, err = pkgcache.NewGenericCache[[]byte](cs, ctx, "tsl_cwt", tokenValidity); err != nil {
+		return nil, fmt.Errorf("cache: cwt: %w", err)
+	}
+
+	return s, nil
+}

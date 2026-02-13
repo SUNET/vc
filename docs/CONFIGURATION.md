@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-02-12
+**Generated:** 2026-02-13
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -37,6 +37,7 @@ Shared configuration used across all services.
 | `kafka`               | `object` | Kafka message broker configuration                                                                                                        | -                        | -       | No       |
 | `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                         | -                        | -       | No       |
 | `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, ALL secrets MUST be in that file and secret values in config.yaml are ignored. | `"/etc/vc/secrets.yaml"` | -       | No       |
+| `ha`                  | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                  | -                        | `false` | No       |
 
 ### `log`
 

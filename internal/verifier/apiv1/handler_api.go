@@ -166,7 +166,7 @@ func (c *Client) GetJWKS(ctx context.Context) (*jose.JWKS, error) {
 // GetOIDCRequestObject generates and returns a signed JWT request object for OpenID4VP
 func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObjectRequest) (*GetRequestObjectResponse, error) {
 	// Get session
-	session, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -186,7 +186,7 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 		return nil, ErrServerError
 	}
 	session.RequestObjectNonce = nonce
-	if err := c.authContextCache.Update(ctx, session); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
 		c.log.Error(err, "Failed to update session with nonce")
 		return nil, ErrServerError
 	}
@@ -208,7 +208,7 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 // ProcessDirectPost processes a direct_post response from a wallet
 func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) (*DirectPostResponse, error) {
 	// Get session by state
-	session, err := c.authContextCache.GetByID(ctx, req.State)
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.State)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -271,7 +271,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	if session.ShowCredentialDetails {
 		session.Status = cache.SessionStatusAwaitingPresentation
 
-		if err := c.authContextCache.Update(ctx, session); err != nil {
+		if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
 			c.log.Error(err, "Failed to update session")
 			return nil, ErrServerError
 		}
@@ -302,7 +302,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	session.Code = code
 	session.CodeExpiresAt = codeExpiry.Unix()
 
-	if err := c.authContextCache.Update(ctx, session); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}
@@ -332,7 +332,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 // ProcessCallback processes a callback request
 func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*CallbackResponse, error) {
 	// Get session
-	session, err := c.authContextCache.GetByID(ctx, req.State)
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.State)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -343,7 +343,7 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 	// Handle error response
 	if req.Error != "" {
 		session.Status = cache.SessionStatusError
-		if err := c.authContextCache.Update(ctx, session); err != nil {
+		if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
 			c.log.Error(err, "Failed to update session")
 			return nil, ErrServerError
 		}
@@ -385,7 +385,7 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 // GetQRCode generates a QR code image for a session
 func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCodeResponse, error) {
 	// Get session
-	session, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -423,7 +423,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 // PollSession returns the current status of a session
 func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*PollSessionResponse, error) {
 	// Get session
-	session, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -455,7 +455,7 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 // GetUserInfo returns user claims based on access token
 func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
 	// Get session by access token
-	session, err := c.authContextCache.GetByAccessToken(ctx, req.AccessToken)
+	session, err := c.cacheService.AuthContext.GetByAccessToken(ctx, req.AccessToken)
 	if err != nil {
 		return nil, ErrInvalidGrant
 	}

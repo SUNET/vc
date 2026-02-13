@@ -23,7 +23,7 @@ func NewCredentialOfferColl(ctx context.Context, collName string, service *Servi
 		Service: service,
 	}
 
-	c.Coll = c.Service.dbClient.Database("vc").Collection(collName)
+	c.Coll = c.Service.MongoClient.Database("vc").Collection(collName)
 
 	if err := c.createIndex(ctx); err != nil {
 		return nil, err

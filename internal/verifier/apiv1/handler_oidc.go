@@ -131,7 +131,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Save session
-	if err := c.authContextCache.Create(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Create(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to create session")
 		return nil, ErrServerError
 	}
@@ -249,7 +249,7 @@ func (c *Client) Token(ctx context.Context, req *TokenRequest) (*TokenResponse, 
 
 func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
 	// Get session by authorization code
-	authCtx, err := c.authContextCache.GetByAuthorizationCode(ctx, req.Code)
+	authCtx, err := c.cacheService.AuthContext.GetByAuthorizationCode(ctx, req.Code)
 	if err != nil {
 		c.log.Info("Session not found for code", "error", err)
 		return nil, ErrInvalidGrant
@@ -307,7 +307,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 
 	// Mark code as forfeited
-	if err := c.authContextCache.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
+	if err := c.cacheService.AuthContext.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
 		c.log.Error(err, "Failed to forfeit code")
 		return nil, ErrServerError
 	}
@@ -340,7 +340,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
 
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}

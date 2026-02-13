@@ -12,8 +12,9 @@ import (
 
 var ErrNoDocuments = errors.New("no documents found")
 
-// AuthContextCache implements authorization context storage using ttlcache
-type AuthContextCache struct {
+// MemoryStore implements authorization context storage using an in-memory ttlcache.
+// Suitable for single-instance deployments.
+type MemoryStore struct {
 	// Primary storage: sessionID -> AuthorizationContext
 	cache *ttlcache.Cache[string, *AuthorizationContext]
 	// Secondary indices: various fields -> sessionID
@@ -21,23 +22,32 @@ type AuthContextCache struct {
 	mu      sync.RWMutex
 }
 
-// NewAuthContextCache creates a new cache-based authorization context store
-func NewAuthContextCache(ttl time.Duration) *AuthContextCache {
-	cache := ttlcache.New(
+// NewMemoryStore creates a new in-memory authorization context store.
+func NewMemoryStore(ttl time.Duration) *MemoryStore {
+	s := &MemoryStore{
+		indices: make(map[string]string),
+	}
+
+	c := ttlcache.New(
 		ttlcache.WithTTL[string, *AuthorizationContext](ttl),
 	)
 
-	// Start automatic expired item deletion
-	go cache.Start()
+	// Clean up secondary indices when entries are automatically evicted.
+	c.OnEviction(func(_ context.Context, _ ttlcache.EvictionReason, item *ttlcache.Item[string, *AuthorizationContext]) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.deleteIndices(item.Value())
+	})
 
-	return &AuthContextCache{
-		cache:   cache,
-		indices: make(map[string]string),
-	}
+	// Start automatic expired item deletion
+	go c.Start()
+
+	s.cache = c
+	return s
 }
 
 // Save stores an authorization context in the cache with sessionID as primary key
-func (c *AuthContextCache) Save(ctx context.Context, doc *AuthorizationContext) error {
+func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error {
 	if doc == nil {
 		return errors.New("document cannot be nil")
 	}
@@ -82,7 +92,7 @@ func (c *AuthContextCache) Save(ctx context.Context, doc *AuthorizationContext) 
 }
 
 // Get retrieves an authorization context by query fields
-func (c *AuthContextCache) Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
 	if query == nil {
 		return nil, errors.New("query cannot be nil")
 	}
@@ -132,7 +142,7 @@ func (c *AuthContextCache) Get(ctx context.Context, query *AuthorizationContext)
 }
 
 // GetWithAccessToken retrieves an authorization context by access token
-func (c *AuthContextCache) GetWithAccessToken(ctx context.Context, token string) (*AuthorizationContext, error) {
+func (c *MemoryStore) GetWithAccessToken(ctx context.Context, token string) (*AuthorizationContext, error) {
 	if token == "" {
 		return nil, errors.New("token cannot be empty")
 	}
@@ -155,7 +165,7 @@ func (c *AuthContextCache) GetWithAccessToken(ctx context.Context, token string)
 }
 
 // ForfeitAuthorizationCode marks an authorization code as used
-func (c *AuthContextCache) ForfeitAuthorizationCode(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+func (c *MemoryStore) ForfeitAuthorizationCode(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
 	if query == nil {
 		return nil, errors.New("query cannot be nil")
 	}
@@ -204,7 +214,7 @@ func (c *AuthContextCache) ForfeitAuthorizationCode(ctx context.Context, query *
 }
 
 // Consent marks an authorization context as consented
-func (c *AuthContextCache) Consent(ctx context.Context, query *AuthorizationContext) error {
+func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) error {
 	if query == nil || query.RequestURI == "" {
 		return errors.New("request_uri cannot be empty")
 	}
@@ -236,7 +246,7 @@ func (c *AuthContextCache) Consent(ctx context.Context, query *AuthorizationCont
 }
 
 // AddToken adds a token to an authorization context
-func (c *AuthContextCache) AddToken(ctx context.Context, code string, token *Token) error {
+func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) error {
 	if code == "" {
 		return errors.New("code cannot be empty")
 	}
@@ -268,7 +278,7 @@ func (c *AuthContextCache) AddToken(ctx context.Context, code string, token *Tok
 }
 
 // SetAuthenticSource sets the authentic source for an authorization context
-func (c *AuthContextCache) SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error {
+func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error {
 	if authenticSource == "" {
 		return errors.New("authentic source cannot be empty")
 	}
@@ -295,7 +305,7 @@ func (c *AuthContextCache) SetAuthenticSource(ctx context.Context, query *Author
 }
 
 // AddIdentity adds identity information to an authorization context
-func (c *AuthContextCache) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
+func (c *MemoryStore) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
 	if query == nil {
 		return errors.New("query cannot be nil")
 	}
@@ -343,7 +353,7 @@ func (c *AuthContextCache) AddIdentity(ctx context.Context, query *Authorization
 }
 
 // updateIndices updates secondary indices for a document (must be called with lock held)
-func (c *AuthContextCache) updateIndices(doc *AuthorizationContext) {
+func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.RequestURI != "" {
 		c.indices[fmt.Sprintf("request_uri:%s", doc.RequestURI)] = doc.SessionID
 	}
@@ -371,7 +381,7 @@ func (c *AuthContextCache) updateIndices(doc *AuthorizationContext) {
 }
 
 // GetByID retrieves an authorization context by session ID
-func (c *AuthContextCache) GetByID(ctx context.Context, id string) (*AuthorizationContext, error) {
+func (c *MemoryStore) GetByID(ctx context.Context, id string) (*AuthorizationContext, error) {
 	if id == "" {
 		return nil, errors.New("id cannot be empty")
 	}
@@ -388,7 +398,7 @@ func (c *AuthContextCache) GetByID(ctx context.Context, id string) (*Authorizati
 }
 
 // GetByAuthorizationCode retrieves an authorization context by authorization code
-func (c *AuthContextCache) GetByAuthorizationCode(ctx context.Context, code string) (*AuthorizationContext, error) {
+func (c *MemoryStore) GetByAuthorizationCode(ctx context.Context, code string) (*AuthorizationContext, error) {
 	if code == "" {
 		return nil, errors.New("code cannot be empty")
 	}
@@ -411,7 +421,7 @@ func (c *AuthContextCache) GetByAuthorizationCode(ctx context.Context, code stri
 }
 
 // GetByAccessToken retrieves an authorization context by access token
-func (c *AuthContextCache) GetByAccessToken(ctx context.Context, token string) (*AuthorizationContext, error) {
+func (c *MemoryStore) GetByAccessToken(ctx context.Context, token string) (*AuthorizationContext, error) {
 	if token == "" {
 		return nil, errors.New("token cannot be empty")
 	}
@@ -434,7 +444,7 @@ func (c *AuthContextCache) GetByAccessToken(ctx context.Context, token string) (
 }
 
 // Update updates an existing authorization context
-func (c *AuthContextCache) Update(ctx context.Context, doc *AuthorizationContext) error {
+func (c *MemoryStore) Update(ctx context.Context, doc *AuthorizationContext) error {
 	if doc == nil {
 		return errors.New("document cannot be nil")
 	}
@@ -462,7 +472,7 @@ func (c *AuthContextCache) Update(ctx context.Context, doc *AuthorizationContext
 }
 
 // Delete removes an authorization context from the cache
-func (c *AuthContextCache) Delete(ctx context.Context, id string) error {
+func (c *MemoryStore) Delete(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("id cannot be empty")
 	}
@@ -485,7 +495,7 @@ func (c *AuthContextCache) Delete(ctx context.Context, id string) error {
 }
 
 // deleteIndices removes secondary indices for a document (must be called with lock held)
-func (c *AuthContextCache) deleteIndices(doc *AuthorizationContext) {
+func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	if doc.RequestURI != "" {
 		delete(c.indices, fmt.Sprintf("request_uri:%s", doc.RequestURI))
 	}
@@ -513,7 +523,7 @@ func (c *AuthContextCache) deleteIndices(doc *AuthorizationContext) {
 }
 
 // MarkCodeAsForfeited marks an authorization code as forfeited
-func (c *AuthContextCache) MarkCodeAsForfeited(ctx context.Context, id string) error {
+func (c *MemoryStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("id cannot be empty")
 	}
@@ -536,6 +546,6 @@ func (c *AuthContextCache) MarkCodeAsForfeited(ctx context.Context, id string) e
 }
 
 // Create is an alias for Save to match the Session API
-func (c *AuthContextCache) Create(ctx context.Context, doc *AuthorizationContext) error {
+func (c *MemoryStore) Create(ctx context.Context, doc *AuthorizationContext) error {
 	return c.Save(ctx, doc)
 }

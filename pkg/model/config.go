@@ -78,6 +78,9 @@ type Common struct {
 	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
 	// SecretFilePath is the path to a separate YAML file containing secrets; when set, ALL secrets MUST be in that file and secret values in config.yaml are ignored. Example: "/etc/vc/secrets.yaml"
 	SecretFilePath string `yaml:"secret_file_path,omitempty"`
+	// HA enables high-availability mode. When true, caches use MongoDB (Common.Mongo.URI)
+	// instead of in-memory storage so state is shared across instances.
+	HA bool `yaml:"ha" default:"false"`
 }
 
 // CredentialOfferQRConfig holds credential offer QR code settings

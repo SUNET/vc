@@ -363,6 +363,10 @@ docker-build-issuer-hsm: ## Build issuer Docker image with PKCS#11 HSM support
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
 		--file dockerfiles/worker .
 
+docker-build-gobuild: ## Build gobuild Docker image
+	$(info Docker Building gobuild with tag: $(VERSION))
+	docker build --tag $(call docker-tag,gobuild,$(VERSION)) --file dockerfiles/gobuild .
+
 # ==============================================================================
 # Docker Push Targets
 # ==============================================================================
@@ -395,6 +399,10 @@ docker-push-apigw-all: ## Push apigw Docker image with all features
 docker-push-issuer-hsm: ## Push issuer Docker image with PKCS#11 HSM support
 	$(info Pushing docker image issuer-hsm)
 	docker push $(call docker-tag,issuer-hsm,$(VERSION))
+
+docker-push-gobuild: ## Push gobuild Docker image
+	$(info Pushing docker image gobuild)
+	docker push $(call docker-tag,gobuild,$(VERSION))
 
 # ==============================================================================
 # Docker Tag Targets

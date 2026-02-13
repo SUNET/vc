@@ -14,7 +14,6 @@ import (
 	"vc/pkg/openid4vci"
 
 	"github.com/google/uuid"
-	"github.com/jellydator/ttlcache/v3"
 )
 
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
@@ -61,7 +60,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, fmt.Errorf("failed to generate response code: %w", err)
 	}
 
-	if err := c.authContextCache.Save(ctx, &azt); err != nil {
+	if err := c.cacheService.AuthContext.Save(ctx, &azt); err != nil {
 		return nil, err
 	}
 
@@ -79,7 +78,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 		RequestURI: req.RequestURI,
 		ClientID:   fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
 	}
-	authorizationContext, err := c.authContextCache.Get(ctx, query)
+	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, query)
 	c.log.Debug("Get authorization", "query", query, "authorization", authorizationContext)
 	if err != nil {
 		c.log.Error(err, "get error")
@@ -114,7 +113,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	c.log.Debug("OAuthToken", "req", req)
 
-	authorizationContext, err := c.authContextCache.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
+	authorizationContext, err := c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 		Code: req.Code,
 	})
 	if err != nil {
@@ -155,7 +154,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
 	}
 
-	if err := c.authContextCache.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
+	if err := c.cacheService.AuthContext.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
 		c.log.Error(err, "failed to add token")
 		return nil, err
 	}
@@ -166,7 +165,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
-	if c.dpopJTICache.Has(jti) {
+	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
 		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
 		return nil, oauth2.ErrJTIReplay
 	}
@@ -177,7 +176,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
-	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
+	c.cacheService.DPopJTI.Set(ctx, jti, true)
 
 	// Validate HTU matches token endpoint
 	if dpop.HTU != c.cfg.APIGW.OauthServer.TokenEndpoint {
@@ -226,7 +225,7 @@ type OAuthAuthorizationConsentResponse struct {
 }
 
 func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthorizationConsentRequest) (*OAuthAuthorizationConsentResponse, error) {
-	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{SessionID: req.SessionID})
+	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: req.SessionID})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err

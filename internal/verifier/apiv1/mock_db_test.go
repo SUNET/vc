@@ -5,15 +5,14 @@ import (
 	"errors"
 	"sync"
 	"time"
+	"vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
-	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/trace"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
@@ -141,14 +140,16 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 	// Create client directly with mock dependencies
 	// Note: We bypass New() to avoid loading real config files
 	client := &Client{
-		cfg:                         cfg,
-		db:                          dbService,
-		log:                         log.New("apiv1"),
-		tracer:                      tracer,
-		authContextCache:            cache.NewAuthContextCache(15 * time.Minute),
-		ephemeralEncryptionKeyCache: ttlcache.New(ttlcache.WithTTL[string, jwk.Key](10 * time.Minute)),
-		requestObjectCache:          ttlcache.New(ttlcache.WithTTL[string, *openid4vp.RequestObject](5 * time.Minute)),
-		credentialCache:             ttlcache.New(ttlcache.WithTTL[string, []sdjwtvc.CredentialCache](5 * time.Minute)),
+		cfg:    cfg,
+		db:     dbService,
+		log:    log.New("apiv1"),
+		tracer: tracer,
+		cacheService: &cache.Service{
+			AuthContext:            cache.NewTestMemoryStore(15 * time.Minute),
+			EphemeralEncryptionKey: cache.NewTestMemoryCache[jwk.Key](10 * time.Minute),
+			RequestObject:          cache.NewTestMemoryCache[*openid4vp.RequestObject](5 * time.Minute),
+			Credential:             cache.NewTestMemoryCache[[]sdjwtvc.CredentialCache](5 * time.Minute),
+		},
 	}
 
 	return client, mockDB

@@ -13,7 +13,6 @@ import (
 	"vc/pkg/sdjwtvc"
 
 	"github.com/google/uuid"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 )
@@ -27,7 +26,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	c.log.Debug("Verification request object", "req", req)
 
 	// TODO(masv): should request-object-id be associated with a particular session?
-	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
+	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
 		RequestObjectID: req.ID,
 	})
 	if err != nil {
@@ -125,7 +124,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.log.Debug("directPost", "vpResponse", vpResponse)
 
 	// Get authorization context by state
-	authCtx, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{State: vpResponse.State})
+	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{State: vpResponse.State})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
@@ -212,7 +211,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Cache validated credentials
-	c.credentialCache.Set(responseCode, credentialCaches, ttlcache.DefaultTTL)
+	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
 
@@ -247,11 +246,10 @@ type VerificationCallbackResponse struct {
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {
 	c.log.Debug("verificationCallback", "req", req)
 
-	if has := c.credentialCache.Has(req.ResponseCode); !has {
+	credential, ok := c.cacheService.Credential.Get(ctx, req.ResponseCode)
+	if !ok {
 		return nil, fmt.Errorf("no item in credential cache matching id %s", req.ResponseCode)
 	}
-
-	credential := c.credentialCache.Get(req.ResponseCode).Value()
 
 	reply := &VerificationCallbackResponse{
 		CredentialData: credential,

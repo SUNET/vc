@@ -16,8 +16,6 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
-
-	"github.com/jellydator/ttlcache/v3"
 )
 
 // VCICredentialOffer implements OpenID4VCI credential offer endpoint
@@ -59,7 +57,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	if c.dpopJTICache.Has(jti) {
+	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
 		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
 		return nil, oauth2.ErrJTIReplay
 	}
@@ -70,7 +68,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
+	c.cacheService.DPopJTI.Set(ctx, jti, true)
 
 	// Validate HTU matches credential endpoint
 	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
@@ -88,7 +86,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
 
-	authContext, err := c.authContextCache.GetWithAccessToken(ctx, accessToken)
+	authContext, err := c.cacheService.AuthContext.GetWithAccessToken(ctx, accessToken)
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
 		return nil, err
@@ -130,8 +128,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	default:
 		// Auth methods from config (e.g., pid_auth): retrieve from session cache
 		// These credentials require presenting another credential for authentication
-		docs := c.documentCache.Get(authContext.SessionID).Value()
-		if docs == nil {
+		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)
+		if !ok {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
 			return nil, errors.New("no documents found for session " + authContext.SessionID)
 		}
