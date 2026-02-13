@@ -98,6 +98,17 @@ func TestCreateJSONSourceFiles(t *testing.T) {
 		err = client.save2Disk()
 		assert.NoError(t, err)
 	})
+
+	t.Run("eduid", func(t *testing.T) {
+		client, err := NewEduIDClient(ctx, c)
+		assert.NoError(t, err)
+
+		err = client.makeSourceData("../../../bootstrapping/idp_user.json")
+		assert.NoError(t, err)
+
+		err = client.save2Disk()
+		assert.NoError(t, err)
+	})
 	t.Run("elm", func(t *testing.T) {
 		client, err := NewELMClient(ctx, c)
 		assert.NoError(t, err)

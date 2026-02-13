@@ -17,6 +17,7 @@ auth_methods:
     vcts:
       - "urn:eudi:pid:arf-1.5:1"
       - "urn:eudi:pid:arf-1.8:1"
+      - "urn:credential:eduid:1"
     claims:
       - "given_name"
       - "birthdate"
@@ -49,6 +50,10 @@ credential_constructor:
     format: "dc+sd-jwt"
   micro_credential:
     vctm_file_path: "/metadata/vctm_microcredential.json"
+    auth_method: pid_auth
+    format: "dc+sd-jwt"
+  eduid:
+    vctm_file_path: "/metadata/vctm_eduid.json"
     auth_method: pid_auth
     format: "dc+sd-jwt"
   openbadge_complete:
@@ -143,6 +148,7 @@ verifier:
           - "ehic"
           - "pda1"
           - "elm"
+          - "eduid"
   # Preferred VP formats - informs wallets what formats/algorithms the verifier supports
   # Note: Per OpenID4VP spec, this is informational only and not enforced during verification
   preferred_vp_formats:
@@ -188,6 +194,9 @@ verifier:
       - vct: "urn:eudi:diploma:1"
         scopes:
           - "diploma"
+      - vct: "urn:credential:eduid:1"
+        scopes:
+          - "eduid"
 
 registry:
   api_server:
@@ -281,6 +290,7 @@ apigw:
           - "ehic"
           - "pda1"
           - "elm"
+          - "eduid"
   issuer_metadata:
     # Optional: Authorization servers (if different from credential issuer)
     # authorization_servers:
