@@ -129,12 +129,6 @@ func NewValidator() (*validator.Validate, error) {
 			}
 		}
 
-		// If no VCTMs have been loaded yet, skip cross-reference validation
-		// (VCTM files are loaded after config parsing/validation)
-		if len(vctToFormat) == 0 && len(credentialConstructors) > 0 {
-			return true
-		}
-
 		// Validate each AuthMethod
 		authMethodsMap := authMethodsField.Interface().(map[string]*model.AuthMethod)
 		for authMethodName, authMethod := range authMethodsMap {
@@ -282,5 +276,3 @@ func ValidateDocumentData(ctx context.Context, completeDocument *model.CompleteD
 
 	return nil
 }
-
-

@@ -60,12 +60,12 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	}
 
 	c := &Client{
-		cfg:       cfg,
-		db:        db,
-		log:       log.New("apiv1"),
-		notify:    notify,
-		openid4vp: openid4vpClient,
-		tracer:    tracer,
+		cfg:          cfg,
+		db:           db,
+		log:          log.New("apiv1"),
+		notify:       notify,
+		openid4vp:    openid4vpClient,
+		tracer:       tracer,
 		cacheService: cacheService,
 	}
 
@@ -86,13 +86,9 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	// Initialize claims extractor
 	c.claimsExtractor = openid4vp.NewClaimsExtractor()
 
-	// Load all vct metadata files and populate its data in cfg
-	for scope, credentialInfo := range cfg.CredentialConstructor {
-		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
-			c.log.Error(err, "Failed to load credential constructor", "scope", scope)
-			return nil, err
-		}
-
+	// Override Attributes with filtered variant (excludes nested object claims)
+	// since verifier only exposes leaf-level attributes to the UI.
+	for _, credentialInfo := range cfg.CredentialConstructor {
 		credentialInfo.Attributes = credentialInfo.VCTM.AttributesWithoutObjects()
 	}
 

@@ -67,6 +67,21 @@ func New(ctx context.Context) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
+	// Load VCTM data and derive Attributes before validation so the vcts_exist
+	// validator can cross-reference auth_methods.vcts against actual VCT values.
+	// Only services that configure credential_constructor will have this set.
+	if len(cfg.CredentialConstructor) > 0 {
+		for scope, constructor := range cfg.CredentialConstructor {
+			if constructor == nil || constructor.VCTMFilePath == "" {
+				continue
+			}
+			if err := constructor.LoadVCTMetadata(ctx, scope); err != nil {
+				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
+			}
+			constructor.Attributes = constructor.VCTM.Attributes()
+		}
+	}
+
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
 		return nil, err
 	}

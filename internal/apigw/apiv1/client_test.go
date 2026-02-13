@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"vc/pkg/logger"
@@ -72,6 +73,11 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 			},
 		},
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	// Load VCTMs (normally done by configuration.New)
+	for scope, cc := range client.cfg.CredentialConstructor {
+		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
 	// Execute the function
@@ -200,6 +206,11 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 			},
 		},
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	// Load VCTMs (normally done by configuration.New)
+	for scope, cc := range client.cfg.CredentialConstructor {
+		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
 	// Execute the function
