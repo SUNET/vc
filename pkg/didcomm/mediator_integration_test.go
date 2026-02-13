@@ -1,4 +1,5 @@
 //go:build didcomm && vc20 && integration
+// +build didcomm,vc20,integration
 
 // Package didcomm_test provides integration tests for mediator routing.
 //
