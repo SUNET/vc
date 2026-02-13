@@ -1,0 +1,540 @@
+{
+  "vct": "urn:credential:eduid:1",
+  "name": "eduID Credential",
+  "description": "A verifiable credential for educational identity, based on PID ARF 1.8. Provides identity attributes for students and staff within the education and research sector.",
+  "display": [
+    {
+      "lang": "en-US",
+      "name": "eduID",
+      "rendering": {
+        "simple": {
+          "logo": {
+            "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-logo.svg",
+            "uri#integrity": "sha256-placeholder"
+          },
+          "background_color": "#0d4f8b",
+          "text_color": "#ffffff"
+        },
+        "svg_templates": [
+          {
+            "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-card-template.svg",
+            "uri#integrity": "sha256-placeholder",
+            "properties": {
+              "orientation": "landscape",
+              "color_scheme": "dark",
+              "contrast": "normal"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "lang": "sv",
+      "name": "eduID",
+      "rendering": {
+        "simple": {
+          "logo": {
+            "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-logo.svg",
+            "uri#integrity": "sha256-placeholder"
+          },
+          "background_color": "#0d4f8b",
+          "text_color": "#ffffff"
+        },
+        "svg_templates": [
+          {
+            "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-card-template.svg",
+            "uri#integrity": "sha256-placeholder",
+            "properties": {
+              "orientation": "landscape",
+              "color_scheme": "dark",
+              "contrast": "normal"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "claims": [
+    {
+      "path": ["family_name"],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "family_name",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Family Name",
+          "description": "Current last name(s) or surname(s)."
+        },
+        {
+          "lang": "sv",
+          "label": "Efternamn",
+          "description": "Aktuellt efternamn."
+        }
+      ]
+    },
+    {
+      "path": ["given_name"],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "given_name",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Given Name",
+          "description": "Current first name(s), including middle name(s) if applicable."
+        },
+        {
+          "lang": "sv",
+          "label": "Förnamn",
+          "description": "Förnamn, inklusive mellannamn."
+        }
+      ]
+    },
+    {
+      "path": ["birthdate"],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "birth_date",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Date of Birth",
+          "description": "Full birth date (day, month, year)."
+        },
+        {
+          "lang": "sv",
+          "label": "Födelsedatum",
+          "description": "Fullständigt födelsedatum."
+        }
+      ]
+    },
+    {
+      "path": ["place_of_birth"],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Place of Birth",
+          "description": "Place where the person was born."
+        },
+        {
+          "lang": "sv",
+          "label": "Födelseort",
+          "description": "Plats där personen föddes."
+        }
+      ]
+    },
+    {
+      "path": ["place_of_birth", "locality"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "City of Birth",
+          "description": "Municipality, city, town, or village where the person was born."
+        }
+      ]
+    },
+    {
+      "path": ["place_of_birth", "region"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Region of Birth",
+          "description": "State, province, district, or local area where the person was born."
+        }
+      ]
+    },
+    {
+      "path": ["place_of_birth", "country"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Country of Birth",
+          "description": "Country where the person was born."
+        }
+      ]
+    },
+    {
+      "path": ["nationalities", null],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Nationality",
+          "description": "Country of nationality."
+        }
+      ]
+    },
+    {
+      "path": ["nationalities"],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Nationalities",
+          "description": "Country or countries of nationality."
+        }
+      ]
+    },
+    {
+      "path": ["personal_administrative_number"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Personal ID",
+          "description": "Unique personal identifier assigned by the authority."
+        }
+      ]
+    },
+    {
+      "path": ["picture"],
+      "sd": "always",
+      "svg_id": "picture",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Picture"
+        }
+      ]
+    },
+    {
+      "path": ["birth_family_name"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Birth Last Name",
+          "description": "Last name(s) or surname(s) at birth."
+        }
+      ]
+    },
+    {
+      "path": ["birth_given_name"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Birth First Name",
+          "description": "First name(s), including middle name(s), at birth."
+        }
+      ]
+    },
+    {
+      "path": ["sex"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Sex",
+          "description": "Recorded sex or gender, using standard codes."
+        }
+      ]
+    },
+    {
+      "path": ["email"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Email",
+          "description": "Person's email address."
+        },
+        {
+          "lang": "sv",
+          "label": "E-post",
+          "description": "Personens e-postadress."
+        }
+      ]
+    },
+    {
+      "path": ["phone_number"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Mobile",
+          "description": "Person's mobile phone number."
+        },
+        {
+          "lang": "sv",
+          "label": "Mobilnummer",
+          "description": "Personens mobilnummer."
+        }
+      ]
+    },
+    {
+      "path": ["address"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Address",
+          "description": "Person's residential address."
+        }
+      ]
+    },
+    {
+      "path": ["address", "formatted"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Full Address",
+          "description": "Full formatted address of residence."
+        }
+      ]
+    },
+    {
+      "path": ["address", "street_address"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Street",
+          "description": "Street name of residence."
+        }
+      ]
+    },
+    {
+      "path": ["address", "house_number"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "House Number",
+          "description": "Street number of residence."
+        }
+      ]
+    },
+    {
+      "path": ["address", "postal_code"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Postal Code",
+          "description": "Postal or ZIP code of residence."
+        }
+      ]
+    },
+    {
+      "path": ["address", "locality"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "City",
+          "description": "Municipality, city, town, or village of residence."
+        }
+      ]
+    },
+    {
+      "path": ["address", "region"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Region",
+          "description": "State, province, or regional division of residence."
+        }
+      ]
+    },
+    {
+      "path": ["address", "country"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Country",
+          "description": "Country where the person currently resides."
+        }
+      ]
+    },
+    {
+      "path": ["age_equal_or_over"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age Thresholds",
+          "description": "Age threshold indicators."
+        }
+      ]
+    },
+    {
+      "path": ["age_equal_or_over", "14"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age >= 14",
+          "description": "Indicates if the person is 14 years old or older."
+        }
+      ]
+    },
+    {
+      "path": ["age_equal_or_over", "16"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age >= 16",
+          "description": "Indicates if the person is 16 years old or older."
+        }
+      ]
+    },
+    {
+      "path": ["age_equal_or_over", "18"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age >= 18",
+          "description": "Indicates if the person is 18 years old or older."
+        }
+      ]
+    },
+    {
+      "path": ["age_equal_or_over", "21"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age >= 21",
+          "description": "Indicates if the person is 21 years old or older."
+        }
+      ]
+    },
+    {
+      "path": ["age_equal_or_over", "65"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age >= 65",
+          "description": "Indicates if the person is 65 years old or older."
+        }
+      ]
+    },
+    {
+      "path": ["age_in_years"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Age",
+          "description": "Person's age in completed years."
+        }
+      ]
+    },
+    {
+      "path": ["age_birth_year"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Birth Year",
+          "description": "Year in which the person was born."
+        }
+      ]
+    },
+    {
+      "path": ["issuing_authority"],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Issuing Authority",
+          "description": "Name of the issuing body or Member State."
+        },
+        {
+          "lang": "sv",
+          "label": "Utfärdande myndighet",
+          "description": "Namn på utfärdande organ."
+        }
+      ]
+    },
+    {
+      "path": ["issuing_country"],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Issuing Country",
+          "description": "Member State where the document was issued."
+        },
+        {
+          "lang": "sv",
+          "label": "Utfärdande land",
+          "description": "Medlemsstat där dokumentet utfärdades."
+        }
+      ]
+    },
+    {
+      "path": ["date_of_expiry"],
+      "mandatory": true,
+      "sd": "never",
+      "svg_id": "expiry_date",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Expiry Date",
+          "description": "End date of the document's validity."
+        }
+      ]
+    },
+    {
+      "path": ["date_of_issuance"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Issue Date",
+          "description": "Start date of the document's validity."
+        }
+      ]
+    },
+    {
+      "path": ["document_number"],
+      "sd": "always",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Document Number",
+          "description": "Unique identifier of the eduID document."
+        }
+      ]
+    },
+    {
+      "path": ["issuing_jurisdiction"],
+      "sd": "never",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Issuing Region",
+          "description": "Regional or local subdivision that issued the document."
+        }
+      ]
+    },
+    {
+      "path": ["trust_anchor"],
+      "sd": "never",
+      "display": [
+        {
+          "lang": "en-US",
+          "label": "Trust Anchor",
+          "description": "The trust anchor used to verify the document."
+        }
+      ]
+    }
+  ]
+}
