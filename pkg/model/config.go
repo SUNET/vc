@@ -76,7 +76,7 @@ type Common struct {
 	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
 	// CredentialOfferQR holds credential offer QR code settings
 	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
-	// SecretFilePath is the path to a separate YAML file containing secrets; when set, ALL secrets MUST be in that file and secret values in config.yaml are ignored. Example: "/etc/vc/secrets.yaml"
+	// SecretFilePath is the path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. Example: "/etc/vc/secrets.yaml"
 	SecretFilePath string `yaml:"secret_file_path,omitempty"`
 	// HA enables high-availability mode. When true, caches use MongoDB (Common.Mongo.URI)
 	// instead of in-memory storage so state is shared across instances.

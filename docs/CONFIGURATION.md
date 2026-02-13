@@ -28,16 +28,16 @@ Shared configuration used across all services.
 
 > **Path:** `.common`
 
-| Field                 | Type     | Description                                                                                                                               | Example                  | Default | Required |
-| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
-| `production`          | `bool`   | Production mode                                                                                                                           | -                        | `true`  | No       |
-| `log`                 | `object` | Logging configuration                                                                                                                     | -                        | -       | No       |
-| `mongo`               | `object` | MongoDB configuration                                                                                                                     | -                        | -       | No       |
-| `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                       | -                        | -       | No       |
-| `kafka`               | `object` | Kafka message broker configuration                                                                                                        | -                        | -       | No       |
-| `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                         | -                        | -       | No       |
-| `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, ALL secrets MUST be in that file and secret values in config.yaml are ignored. | `"/etc/vc/secrets.yaml"` | -       | No       |
-| `ha`                  | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                  | -                        | `false` | No       |
+| Field                 | Type     | Description                                                                                                                                                      | Example                  | Default | Required |
+| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
+| `production`          | `bool`   | Production mode                                                                                                                                                  | -                        | `true`  | No       |
+| `log`                 | `object` | Logging configuration                                                                                                                                            | -                        | -       | No       |
+| `mongo`               | `object` | MongoDB configuration                                                                                                                                            | -                        | -       | No       |
+| `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                              | -                        | -       | No       |
+| `kafka`               | `object` | Kafka message broker configuration                                                                                                                               | -                        | -       | No       |
+| `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                                                | -                        | -       | No       |
+| `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. | `"/etc/vc/secrets.yaml"` | -       | No       |
+| `ha`                  | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                                         | -                        | `false` | No       |
 
 ### `log`
 
@@ -758,8 +758,9 @@ The structure of the separate secrets file.
 
 > **Path:** `(root)`
 
-When Common.SecretFilePath is set, all secrets MUST be defined here
-and any secret values in config.yaml are ignored.
+When Common.SecretFilePath is set, secret values in config.yaml are
+cleared; only non-empty fields from this file are applied.
+Fields omitted or left empty here remain at their zero value.
 
 | Field      | Type     | Description | Example | Default | Required |
 | ---------- | -------- | ----------- | ------- | ------- | -------- |

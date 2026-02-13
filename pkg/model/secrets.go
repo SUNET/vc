@@ -1,8 +1,9 @@
 package model
 
 // Secrets defines the structure of the separate secrets file.
-// When Common.SecretFilePath is set, all secrets MUST be defined here
-// and any secret values in config.yaml are ignored.
+// When Common.SecretFilePath is set, secret values in config.yaml are
+// cleared; only non-empty fields from this file are applied.
+// Fields omitted or left empty here remain at their zero value.
 type Secrets struct {
 	Common   *CommonSecrets   `yaml:"common,omitempty"`
 	APIGW    *APIGWSecrets    `yaml:"apigw,omitempty"`

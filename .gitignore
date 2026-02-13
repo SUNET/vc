@@ -45,3 +45,6 @@ playwright-screenshots/
 ISO_IEC_18013_5_2021_EN.pdf
 # Temporary debug/test files
 tmp/
+
+# Runtime secrets – never commit real values
+secrets.yaml
