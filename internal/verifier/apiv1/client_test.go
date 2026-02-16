@@ -322,13 +322,13 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 							{
 								Path: []*string{ptrString("given_name")},
 								Display: []sdjwtvc.ClaimDisplay{
-									{Lang: "en", Label: "Given Name"},
+									{Locale: "en", Label: "Given Name"},
 								},
 							},
 							{
 								Path: []*string{ptrString("family_name")},
 								Display: []sdjwtvc.ClaimDisplay{
-									{Lang: "en", Label: "Family Name"},
+									{Locale: "en", Label: "Family Name"},
 								},
 							},
 						},

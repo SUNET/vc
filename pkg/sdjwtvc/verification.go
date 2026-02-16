@@ -67,7 +67,7 @@ type VerificationOptions struct {
 }
 
 // ParseAndVerify parses and verifies an SD-JWT credential
-// Per draft-13 Section 5 (Validation) and draft-22 Section 6 (Verification)
+// Per draft-13 Section 3.4 (Verification and Processing) and draft-22 Section 6 (Verification)
 // Parameters:
 //   - sdJWT: the SD-JWT string (format: <Issuer-signed JWT>~<Disclosure 1>~...~<Disclosure N>~[<KB-JWT>])
 //   - publicKey: issuer's public key for signature verification
@@ -312,6 +312,8 @@ func (c *Client) verifyJWTSignature(tokenString string, publicKey any) (*jwt.Tok
 }
 
 // validateSDJWTVCStructure validates SD-JWT VC required structure per draft-13 §3.2.2
+// Per draft-13: iss is OPTIONAL, vct is REQUIRED, typ MUST be dc+sd-jwt
+// (vc+sd-jwt is accepted during transition period per §3.2.1)
 func (c *Client) validateSDJWTVCStructure(header map[string]any, claims jwt.MapClaims, opts *VerificationOptions) error {
 	// Validate typ header (§3.2.1)
 	typ, _ := header["typ"].(string)

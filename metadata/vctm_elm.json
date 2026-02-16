@@ -6,7 +6,7 @@
   "$comment": "",
   "display": [
     {
-      "lang": "en-US",
+      "locale": "en-US",
       "name": "ELM Credential",
       "description": "Portable European Learning Model (ELM) Credential.",
       "rendering": {
@@ -30,7 +30,7 @@
       "svg_id": "given_name",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Given name",
           "description": "Given name of the individual who holds the ELM credential."
         }
@@ -47,7 +47,7 @@
       "svg_id": "family_name",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Family name",
           "description": "Family name of the individual who holds the ELM credential."
         }
@@ -67,7 +67,7 @@
       "svg_id": "awarding_body",
       "display": [
         {
-          "lang": "en-US",
+          "locale": "en-US",
           "label": "Awarding body",
           "description": "The legal name of the awarding body that issued the ELM credential."
         }

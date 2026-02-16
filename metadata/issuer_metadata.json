@@ -186,6 +186,36 @@
           ]
         }
       }
+    },
+    "eduid": {
+      "scope": "eduid",
+      "vct": "urn:credential:eduid:1",
+      "format": "dc+sd-jwt",
+      "display": [
+        {
+          "name": "eduID Credential",
+          "description": "Educational Identity Credential",
+          "logo": {
+            "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-logo.svg"
+          },
+          "background_color": "#0d4f8b",
+          "text_color": "#FFFFFF",
+          "locale": "en-US"
+        }
+      ],
+      "cryptographic_binding_methods_supported": [
+        "jwk"
+      ],
+      "credential_signing_alg_values_supported": [
+        "ES256"
+      ],
+      "proof_types_supported": {
+        "jwt": {
+          "proof_signing_alg_values_supported": [
+            "ES256"
+          ]
+        }
+      }
     }
   }
 }

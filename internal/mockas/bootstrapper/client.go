@@ -34,6 +34,7 @@ type Client struct {
 	elmClient             clients
 	diplomaClient         clients
 	MicroCredentialClient clients
+	eduidClient           clients
 }
 
 func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Client, error) {
@@ -82,6 +83,11 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Client, error) 
 		return nil, fmt.Errorf("new micro credential client: %w", err)
 	}
 
+	client.eduidClient, err = NewEduIDClient(ctx, client)
+	if err != nil {
+		return nil, fmt.Errorf("new eduid client: %w", err)
+	}
+
 	client.pidUserClient, err = NewIDPUserClient(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("new user client: %w", err)
@@ -102,6 +108,7 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Client, error) 
 		"microcredential",
 		"pid-1-5",
 		"pid-1-8",
+		"eduid",
 	} {
 		jsonPath := filepath.Join("../../../bootstrapping", fmt.Sprintf("%s.json", credentialType))
 		if err := client.documentUploader(ctx, jsonPath); err != nil {

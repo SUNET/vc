@@ -90,13 +90,6 @@ type VCTM struct {
 	// Array of claim information for validation and display (OPTIONAL per section 6.2)
 	Claims []Claim `json:"claims,omitempty"`
 
-	// SchemaURL references a JSON schema for the credential (extension)
-	SchemaURL string `json:"schema_url,omitempty"`
-
-	// SchemaURLIntegrity provides integrity protection for the schema (extension)
-	// Uses Subresource Integrity format per section 7
-	SchemaURLIntegrity string `json:"schema_url#integrity,omitempty"`
-
 	// Extends references another type that this type extends (OPTIONAL per section 6.4)
 	// URI of the parent type metadata
 	Extends string `json:"extends,omitempty"`
@@ -118,21 +111,21 @@ func (v *VCTM) Encode() ([]string, error) {
 	return []string{encoded}, nil
 }
 
-// Attributes parse vctm claims and return a map of labels and their paths for each language
+// Attributes parse vctm claims and return a map of labels and their paths for each locale
 func (v *VCTM) Attributes() map[string]map[string][]string {
 	reply := map[string]map[string][]string{}
 
 	for _, c := range v.Claims {
 		for _, d := range c.Display {
-			if _, ok := reply[d.Lang]; !ok {
-				reply[d.Lang] = map[string][]string{}
+			if _, ok := reply[d.Locale]; !ok {
+				reply[d.Locale] = map[string][]string{}
 			}
 
 			label := d.Label
 
 			for _, p := range c.Path {
 				if p != nil {
-					reply[d.Lang][label] = append(reply[d.Lang][label], *p)
+					reply[d.Locale][label] = append(reply[d.Locale][label], *p)
 				}
 			}
 		}
@@ -141,7 +134,7 @@ func (v *VCTM) Attributes() map[string]map[string][]string {
 	return reply
 }
 
-// AttributesWithoutObjects parse vctm claims and return a map of labels and their paths for each language,
+// AttributesWithoutObjects parse vctm claims and return a map of labels and their paths for each locale,
 // excluding claims that represent objects (claims with nested paths)
 func (v *VCTM) AttributesWithoutObjects() map[string]map[string][]string {
 	reply := map[string]map[string][]string{}
@@ -158,15 +151,15 @@ func (v *VCTM) AttributesWithoutObjects() map[string]map[string][]string {
 		}
 
 		for _, d := range c.Display {
-			if _, ok := reply[d.Lang]; !ok {
-				reply[d.Lang] = map[string][]string{}
+			if _, ok := reply[d.Locale]; !ok {
+				reply[d.Locale] = map[string][]string{}
 			}
 
 			label := d.Label
 
 			for _, p := range c.Path {
 				if p != nil {
-					reply[d.Lang][label] = append(reply[d.Lang][label], *p)
+					reply[d.Locale][label] = append(reply[d.Locale][label], *p)
 				}
 			}
 		}
@@ -199,9 +192,9 @@ func (v *VCTM) ClaimJSONPath() (*VCTMJSONPath, error) {
 // VCTMDisplay represents display information for a credential type per SD-JWT VC draft-13 section 8
 // Each display object provides locale-specific rendering information for wallets
 type VCTMDisplay struct {
-	// Lang is the language tag per RFC 5646 (REQUIRED per section 8)
-	// Per draft-13, this field is named "locale" in JSON
-	Lang string `json:"lang"`
+	// Locale is the language tag per RFC 5646 (REQUIRED per section 8)
+	// Per draft-12+ this field is named "locale" in JSON (changed from "lang" in earlier drafts)
+	Locale string `json:"locale"`
 
 	// Name is a human-readable name for end users (REQUIRED per section 8)
 	Name string `json:"name"`
@@ -297,6 +290,7 @@ type Claim struct {
 	// - "always": Issuer MUST make the claim selectively disclosable
 	// - "allowed": Issuer MAY make the claim selectively disclosable
 	// - "never": Issuer MUST NOT make the claim selectively disclosable
+	// It is RECOMMENDED to use either "always" or "never" to avoid ambiguity.
 	SD string `json:"sd,omitempty"`
 
 	// Mandatory indicates if claim must be present per section 9.3 (OPTIONAL, default: false)
@@ -324,9 +318,9 @@ func (c *Claim) JSONPath() string {
 
 // ClaimDisplay provides locale-specific claim display information per SD-JWT VC draft-13 section 9.2
 type ClaimDisplay struct {
-	// Lang is the language tag per RFC 5646 (REQUIRED)
-	// Per draft-13, this field is named "locale" in JSON
-	Lang string `json:"lang"`
+	// Locale is the language tag per RFC 5646 (REQUIRED)
+	// Per draft-12+ this field is named "locale" in JSON (changed from "lang" in earlier drafts)
+	Locale string `json:"locale"`
 
 	// Label is a human-readable label for end users (REQUIRED)
 	Label string `json:"label"`

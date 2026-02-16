@@ -1,0 +1,25 @@
+name: Update VCTM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'credentials/**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: sirosfoundation/mtcvctm@v1
+        with:
+          input-dir: ./credentials
+          output-dir: ./vctm
+          base-url: https://github.com/${{ github.repository }}/raw/vctm
+          vctm-branch: vctm
+          commit-message: "Update VCTM files [skip ci]"
