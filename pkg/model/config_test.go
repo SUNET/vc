@@ -424,7 +424,6 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 			metadata, err := tt.metadata.Generate(ctx, "https://issuer.example.com", nil)
 			require.NoError(t, err)
 			assert.NotNil(t, metadata)
-			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty until Sign() is called")
 		})
 	}
 }

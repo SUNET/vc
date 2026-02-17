@@ -37,16 +37,18 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					ProofSigningAlgValuesSupported: []string{"ES256"},
 				},
 			},
-			Display: []CredentialMetadataDisplay{
-				{
-					Name:            "PID SD-JWT VC",
-					Locale:          "en-US",
-					Description:     "Person Identification Data",
-					BackgroundColor: "#1b263b",
-					BackgroundImage: MetadataBackgroundImage{
-						URI: "http://vc_dev_apigw:8080/images/background-image.png",
+			CredentialMetadata: &CredentialMetadata{
+				Display: []CredentialMetadataDisplay{
+					{
+						Name:            "PID SD-JWT VC",
+						Locale:          "en-US",
+						Description:     "Person Identification Data",
+						BackgroundColor: "#1b263b",
+						BackgroundImage: MetadataBackgroundImage{
+							URI: "http://vc_dev_apigw:8080/images/background-image.png",
+						},
+						TextColor: "#FFFFFF",
 					},
-					TextColor: "#FFFFFF",
 				},
 			},
 		},
@@ -61,16 +63,18 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					ProofSigningAlgValuesSupported: []string{"ES256"},
 				},
 			},
-			Display: []CredentialMetadataDisplay{
-				{
-					Name:            "PID - MDOC",
-					Locale:          "en-US",
-					Description:     "Person Identification Data",
-					BackgroundColor: "#4CC3DD",
-					BackgroundImage: MetadataBackgroundImage{
-						URI: "http://vc_dev_apigw:8080/images/background-image.png",
+			CredentialMetadata: &CredentialMetadata{
+				Display: []CredentialMetadataDisplay{
+					{
+						Name:            "PID - MDOC",
+						Locale:          "en-US",
+						Description:     "Person Identification Data",
+						BackgroundColor: "#4CC3DD",
+						BackgroundImage: MetadataBackgroundImage{
+							URI: "http://vc_dev_apigw:8080/images/background-image.png",
+						},
+						TextColor: "#000000",
 					},
-					TextColor: "#000000",
 				},
 			},
 		},
@@ -85,18 +89,20 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					ProofSigningAlgValuesSupported: []string{"ES256"},
 				},
 			},
-			Display: []CredentialMetadataDisplay{
-				{
-					Name:   "Bachelor Diploma - SD-JWT VC",
-					Locale: "en-US",
-					Logo: MetadataLogo{
-						URI: "http://vc_dev_apigw:8080/images/diploma-logo.png",
+			CredentialMetadata: &CredentialMetadata{
+				Display: []CredentialMetadataDisplay{
+					{
+						Name:   "Bachelor Diploma - SD-JWT VC",
+						Locale: "en-US",
+						Logo: MetadataLogo{
+							URI: "http://vc_dev_apigw:8080/images/diploma-logo.png",
+						},
+						BackgroundColor: "#b1d3ff",
+						BackgroundImage: MetadataBackgroundImage{
+							URI: "http://vc_dev_apigw:8080/images/background-image.png",
+						},
+						TextColor: "#ffffff",
 					},
-					BackgroundColor: "#b1d3ff",
-					BackgroundImage: MetadataBackgroundImage{
-						URI: "http://vc_dev_apigw:8080/images/background-image.png",
-					},
-					TextColor: "#ffffff",
 				},
 			},
 		},
@@ -111,16 +117,18 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					ProofSigningAlgValuesSupported: []string{"ES256"},
 				},
 			},
-			Display: []CredentialMetadataDisplay{
-				{
-					Name:            "EHIC - SD-JWT VC",
-					Locale:          "en-US",
-					Description:     "European Health Insurance Card",
-					BackgroundColor: "#1b263b",
-					BackgroundImage: MetadataBackgroundImage{
-						URI: "http://vc_dev_apigw:8080/images/background-image.png",
+			CredentialMetadata: &CredentialMetadata{
+				Display: []CredentialMetadataDisplay{
+					{
+						Name:            "EHIC - SD-JWT VC",
+						Locale:          "en-US",
+						Description:     "European Health Insurance Card",
+						BackgroundColor: "#1b263b",
+						BackgroundImage: MetadataBackgroundImage{
+							URI: "http://vc_dev_apigw:8080/images/background-image.png",
+						},
+						TextColor: "#FFFFFF",
 					},
-					TextColor: "#FFFFFF",
 				},
 			},
 		},
@@ -135,16 +143,18 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					ProofSigningAlgValuesSupported: []string{"ES256"},
 				},
 			},
-			Display: []CredentialMetadataDisplay{
-				{
-					Name:            "POR - SD-JWT VC",
-					Locale:          "en-US",
-					Description:     "Power of Representation",
-					BackgroundColor: "#c3b25d",
-					BackgroundImage: MetadataBackgroundImage{
-						URI: "http://vc_dev_apigw:8080/images/background-image.png",
+			CredentialMetadata: &CredentialMetadata{
+				Display: []CredentialMetadataDisplay{
+					{
+						Name:            "POR - SD-JWT VC",
+						Locale:          "en-US",
+						Description:     "Power of Representation",
+						BackgroundColor: "#c3b25d",
+						BackgroundImage: MetadataBackgroundImage{
+							URI: "http://vc_dev_apigw:8080/images/background-image.png",
+						},
+						TextColor: "#363531",
 					},
-					TextColor: "#363531",
 				},
 			},
 		},
@@ -241,7 +251,7 @@ func TestSignIssuerMetadata(t *testing.T) {
 
 			assert.True(t, token.Valid)
 
-			// ensure the singed claim does not have signed_metadata in it self
+			// ensure the signed claim does not have signed_metadata in it self
 			assert.Empty(t, claims["signed_metadata"])
 
 			assert.Len(t, token.Header["x5c"], 1)
@@ -261,7 +271,6 @@ func TestMarshal(t *testing.T) {
 			EncValuesSupported: []string{"A128GCM"},
 			EncryptionRequired: false,
 		},
-		SignedMetadata: "",
 		Display: []MetadataDisplay{
 			{
 				Name:   "European Health Insurance Card",
@@ -281,23 +290,25 @@ func TestMarshal(t *testing.T) {
 				Scope:                                "EHIC",
 				CryptographicBindingMethodsSupported: []string{"did:example"},
 				CredentialSigningAlgValuesSupported:  []any{"ES256"},
-				CredentialDefinition: CredentialDefinition{
+				CredentialDefinition: &CredentialDefinition{
 					Type: []string{"VerifiableCredential", "EHICCredential"},
 				},
-				Display: []CredentialMetadataDisplay{
-					{
-						Name:   "European Health Insurance Card Credential",
-						Locale: "en-US",
-						Logo: MetadataLogo{
-							URI:     "https://example.edu/public/logo.png",
-							AltText: "a square logo of a EHIC card",
+				CredentialMetadata: &CredentialMetadata{
+					Display: []CredentialMetadataDisplay{
+						{
+							Name:   "European Health Insurance Card Credential",
+							Locale: "en-US",
+							Logo: MetadataLogo{
+								URI:     "https://example.edu/public/logo.png",
+								AltText: "a square logo of a EHIC card",
+							},
+							Description:     "",
+							BackgroundColor: "#12107c",
+							BackgroundImage: MetadataBackgroundImage{
+								URI: "https://example.edu/public/background.png",
+							},
+							TextColor: "#FFFFFF",
 						},
-						Description:     "",
-						BackgroundColor: "#12107c",
-						BackgroundImage: MetadataBackgroundImage{
-							URI: "https://example.edu/public/background.png",
-						},
-						TextColor: "#FFFFFF",
 					},
 				},
 			},
@@ -346,7 +357,7 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 		assert.Equal(t, "http://vc_dev_apigw:8080/credential", metadata.CredentialEndpoint)
 
 		assert.NotEmpty(t, metadata.CredentialConfigurationsSupported, "credential_configurations_supported is required")
-		assert.Len(t, metadata.CredentialConfigurationsSupported, 6, "Expected 6 credential configurations")
+		assert.Len(t, metadata.CredentialConfigurationsSupported, 7, "Expected 7 credential configurations")
 	})
 
 	// Validate display properties
@@ -406,10 +417,11 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 				assert.Contains(t, jwtProof.ProofSigningAlgValuesSupported, "ES256",
 					"JWT proof should support ES256")
 
-				// Validate display
-				assert.NotEmpty(t, config.Display, "Display should not be empty")
-				assert.NotEmpty(t, config.Display[0].Name, "Display name should not be empty")
-				assert.NotEmpty(t, config.Display[0].Locale, "Display locale should not be empty")
+				// Validate display (inside credential_metadata)
+				require.NotNil(t, config.CredentialMetadata, "credential_metadata should not be nil")
+				assert.NotEmpty(t, config.CredentialMetadata.Display, "Display should not be empty")
+				assert.NotEmpty(t, config.CredentialMetadata.Display[0].Name, "Display name should not be empty")
+				assert.NotEmpty(t, config.CredentialMetadata.Display[0].Locale, "Display locale should not be empty")
 			})
 		}
 	})
@@ -421,10 +433,11 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 
 		assert.Equal(t, "diploma", diploma.Scope)
 		assert.Equal(t, "urn:eudi:diploma:1", diploma.VCT)
-		assert.Equal(t, "Bachelor Diploma - SD-JWT VC", diploma.Display[0].Name)
-		assert.NotEmpty(t, diploma.Display[0].Logo.URI)
-		assert.Equal(t, "#b1d3ff", diploma.Display[0].BackgroundColor)
-		assert.Equal(t, "#ffffff", diploma.Display[0].TextColor)
+		require.NotNil(t, diploma.CredentialMetadata)
+		assert.Equal(t, "Bachelor Diploma - SD-JWT VC", diploma.CredentialMetadata.Display[0].Name)
+		assert.NotEmpty(t, diploma.CredentialMetadata.Display[0].Logo.URI)
+		assert.Equal(t, "#b1d3ff", diploma.CredentialMetadata.Display[0].BackgroundColor)
+		assert.Equal(t, "#ffffff", diploma.CredentialMetadata.Display[0].TextColor)
 	})
 
 	t.Run("PID Configuration", func(t *testing.T) {
@@ -433,11 +446,12 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 
 		assert.Equal(t, "pid_1_5", pid.Scope)
 		assert.Equal(t, "urn:eudi:pid:arf-1.5:1", pid.VCT)
-		assert.Equal(t, "PID SD-JWT VC ARF 1.5", pid.Display[0].Name)
-		assert.Equal(t, "Person Identification Data", pid.Display[0].Description)
-		assert.NotEmpty(t, pid.Display[0].BackgroundImage.URI)
-		assert.Equal(t, "#1b263b", pid.Display[0].BackgroundColor)
-		assert.Equal(t, "#FFFFFF", pid.Display[0].TextColor)
+		require.NotNil(t, pid.CredentialMetadata)
+		assert.Equal(t, "PID SD-JWT VC ARF 1.5", pid.CredentialMetadata.Display[0].Name)
+		assert.Equal(t, "Person Identification Data", pid.CredentialMetadata.Display[0].Description)
+		assert.NotEmpty(t, pid.CredentialMetadata.Display[0].BackgroundImage.URI)
+		assert.Equal(t, "#1b263b", pid.CredentialMetadata.Display[0].BackgroundColor)
+		assert.Equal(t, "#FFFFFF", pid.CredentialMetadata.Display[0].TextColor)
 	})
 
 	t.Run("EHIC Configuration", func(t *testing.T) {
@@ -446,8 +460,9 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 
 		assert.Equal(t, "ehic", ehic.Scope)
 		assert.Equal(t, "urn:eudi:ehic:1", ehic.VCT)
-		assert.Equal(t, "EHIC - SD-JWT VC", ehic.Display[0].Name)
-		assert.Equal(t, "European Health Insurance Card", ehic.Display[0].Description)
+		require.NotNil(t, ehic.CredentialMetadata)
+		assert.Equal(t, "EHIC - SD-JWT VC", ehic.CredentialMetadata.Display[0].Name)
+		assert.Equal(t, "European Health Insurance Card", ehic.CredentialMetadata.Display[0].Description)
 	})
 
 	t.Run("PDA1 Configuration", func(t *testing.T) {
@@ -456,8 +471,9 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 
 		assert.Equal(t, "pda1", pda1.Scope)
 		assert.Equal(t, "urn:eudi:pda1:1", pda1.VCT)
-		assert.Equal(t, "PDA1 - SD-JWT VC", pda1.Display[0].Name)
-		assert.Equal(t, "European Portable Document Application", pda1.Display[0].Description)
+		require.NotNil(t, pda1.CredentialMetadata)
+		assert.Equal(t, "PDA1 - SD-JWT VC", pda1.CredentialMetadata.Display[0].Name)
+		assert.Equal(t, "European Portable Document Application", pda1.CredentialMetadata.Display[0].Description)
 	})
 
 	t.Run("PID 1.5 mDoc Configuration", func(t *testing.T) {
@@ -477,11 +493,12 @@ func TestCredentialIssuerMetadataParameters_UnmarshalFromFile(t *testing.T) {
 		// Binding method should be cose_key for mso_mdoc
 		assert.Contains(t, pidMdoc.CryptographicBindingMethodsSupported, "cose_key")
 
-		// Display properties
-		assert.Equal(t, "PID mDoc ARF 1.5", pidMdoc.Display[0].Name)
-		assert.Equal(t, "Person Identification Data (ISO 18013-5 mdoc)", pidMdoc.Display[0].Description)
-		assert.Equal(t, "#1b263b", pidMdoc.Display[0].BackgroundColor)
-		assert.Equal(t, "#FFFFFF", pidMdoc.Display[0].TextColor)
+		// Display properties (inside credential_metadata)
+		require.NotNil(t, pidMdoc.CredentialMetadata)
+		assert.Equal(t, "PID mDoc ARF 1.5", pidMdoc.CredentialMetadata.Display[0].Name)
+		assert.Equal(t, "Person Identification Data (ISO 18013-5 mdoc)", pidMdoc.CredentialMetadata.Display[0].Description)
+		assert.Equal(t, "#1b263b", pidMdoc.CredentialMetadata.Display[0].BackgroundColor)
+		assert.Equal(t, "#FFFFFF", pidMdoc.CredentialMetadata.Display[0].TextColor)
 	})
 }
 
@@ -551,7 +568,6 @@ func TestCredentialIssuerMetadataParameters_OpenID4VCI_Compliance(t *testing.T) 
 		_ = metadata.NotificationEndpoint
 		_ = metadata.CredentialResponseEncryption
 		_ = metadata.BatchCredentialIssuance
-		_ = metadata.SignedMetadata
 		_ = metadata.Display
 	})
 
@@ -573,7 +589,7 @@ func TestCredentialIssuerMetadataParameters_OpenID4VCI_Compliance(t *testing.T) 
 					"doctype should be present for mso_mdoc format")
 			}
 		}
-		assert.Equal(t, 5, sdJwtCount, "Should have 5 SD-JWT VC credentials")
+		assert.Equal(t, 6, sdJwtCount, "Should have 6 SD-JWT VC credentials")
 		assert.Equal(t, 1, mdocCount, "Should have 1 mso_mdoc credential")
 	})
 
@@ -616,14 +632,14 @@ func TestCredentialIssuerMetadataParameters_OpenID4VCI_Compliance(t *testing.T) 
 			}
 		}
 
-		// Credential-level display
+		// Credential-level display (inside credential_metadata)
 		for configID, config := range metadata.CredentialConfigurationsSupported {
-			if len(config.Display) > 0 {
-				assert.NotEmpty(t, config.Display[0].Name,
+			if config.CredentialMetadata != nil && len(config.CredentialMetadata.Display) > 0 {
+				assert.NotEmpty(t, config.CredentialMetadata.Display[0].Name,
 					"Configuration %s display should have a name", configID)
 
-				if config.Display[0].Locale != "" {
-					assert.Regexp(t, `^[a-z]{2}(-[A-Z]{2})?$`, config.Display[0].Locale,
+				if config.CredentialMetadata.Display[0].Locale != "" {
+					assert.Regexp(t, `^[a-z]{2}(-[A-Z]{2})?$`, config.CredentialMetadata.Display[0].Locale,
 						"Configuration %s display locale should be BCP47 compliant", configID)
 				}
 			}
@@ -660,9 +676,10 @@ func TestCredentialIssuerMetadataParameters_OpenID4VCI_Compliance(t *testing.T) 
 				assert.NotEmpty(t, config.CredentialSigningAlgValuesSupported,
 					"Should have credential signing algorithms")
 
-				// Validate display properties
-				assert.NotEmpty(t, config.Display, "Should have display properties")
-				assert.NotEmpty(t, config.Display[0].Name, "Display should have a name")
+				// Validate display properties (inside credential_metadata)
+				require.NotNil(t, config.CredentialMetadata, "credential_metadata should not be nil")
+				assert.NotEmpty(t, config.CredentialMetadata.Display, "Should have display properties")
+				assert.NotEmpty(t, config.CredentialMetadata.Display[0].Name, "Display should have a name")
 			})
 		}
 	})

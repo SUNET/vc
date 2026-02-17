@@ -11,18 +11,20 @@
     "urn:eudi:pid:1": {
       "scope": "pid:sd_jwt_vc",
       "vct": "urn:eudi:pid:1",
-      "display": [
-        {
-          "name": "PID SD-JWT VC",
-          "description": "Person Identification Data",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "PID SD-JWT VC",
+            "description": "Person Identification Data",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "format": "vc+sd-jwt",
       "cryptographic_binding_methods_supported": [
         "jwk"
@@ -41,18 +43,20 @@
     "eu.europa.ec.eudi.pid.1": {
       "scope": "pid:mso_mdoc",
       "doctype": "eu.europa.ec.eudi.pid.1",
-      "display": [
-        {
-          "name": "PID - MDOC",
-          "description": "Person Identification Data",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#4CC3DD",
-          "text_color": "#000000",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "PID - MDOC",
+            "description": "Person Identification Data",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#4CC3DD",
+            "text_color": "#000000",
+            "locale": "en-US"
+          }
+        ]
+      },
       "format": "mso_mdoc",
       "cryptographic_binding_methods_supported": [
         "cose_key"
@@ -72,20 +76,22 @@
       "scope": "diploma",
       "vct": "urn:credential:diploma",
       "format": "vc+sd-jwt",
-      "display": [
-        {
-          "name": "Bachelor Diploma - SD-JWT VC",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "logo": {
-            "uri": "http://vc_dev_apigw:8080/images/diploma-logo.png"
-          },
-          "background_color": "#b1d3ff",
-          "text_color": "#ffffff",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "Bachelor Diploma - SD-JWT VC",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "logo": {
+              "uri": "http://vc_dev_apigw:8080/images/diploma-logo.png"
+            },
+            "background_color": "#b1d3ff",
+            "text_color": "#ffffff",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -104,18 +110,20 @@
       "scope": "ehic",
       "vct": "urn:credential:ehic",
       "format": "vc+sd-jwt",
-      "display": [
-        {
-          "name": "EHIC - SD-JWT VC",
-          "description": "European Health Insurance Card",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "EHIC - SD-JWT VC",
+            "description": "European Health Insurance Card",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -133,18 +141,20 @@
     "urn:eu.europa.ec.eudi:por:1": {
       "scope": "por:sd_jwt_vc",
       "vct": "urn:eu.europa.ec.eudi:por:1",
-      "display": [
-        {
-          "name": "POR - SD-JWT VC",
-          "description": "Power of Representation",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#c3b25d",
-          "text_color": "#363531",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "POR - SD-JWT VC",
+            "description": "Power of Representation",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#c3b25d",
+            "text_color": "#363531",
+            "locale": "en-US"
+          }
+        ]
+      },
       "format": "vc+sd-jwt",
       "cryptographic_binding_methods_supported": [
         "jwk"

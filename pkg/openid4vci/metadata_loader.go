@@ -10,6 +10,7 @@ type MetadataConfig struct {
 	KeyConfig                            *pki.KeyConfig
 	CredentialIssuer                     string
 	CredentialEndpoint                   string
+	NonceEndpoint                        string
 	AuthorizationServers                 []string
 	DeferredCredentialEndpoint           string
 	NotificationEndpoint                 string
@@ -29,6 +30,10 @@ func (cfg *MetadataConfig) GenerateIssuerMetadata(ctx context.Context) *Credenti
 		CredentialIssuer:                  cfg.CredentialIssuer,
 		CredentialEndpoint:                cfg.CredentialEndpoint,
 		CredentialConfigurationsSupported: make(map[string]CredentialConfigurationsSupported),
+	}
+
+	if cfg.NonceEndpoint != "" {
+		metadata.NonceEndpoint = cfg.NonceEndpoint
 	}
 
 	if len(cfg.AuthorizationServers) > 0 {

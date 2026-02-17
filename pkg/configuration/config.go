@@ -67,9 +67,26 @@ func New(ctx context.Context) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
+	// Require credential_constructor when apigw, issuer, or verifier is configured.
+	// These services are non-functional without it.
+	if len(cfg.CredentialConstructor) == 0 {
+		var missing []string
+		if cfg.APIGW != nil {
+			missing = append(missing, "apigw")
+		}
+		if cfg.Issuer != nil {
+			missing = append(missing, "issuer")
+		}
+		if cfg.Verifier != nil {
+			missing = append(missing, "verifier")
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("credential_constructor is required when the following services are configured: %v", missing)
+		}
+	}
+
 	// Load VCTM data and derive Attributes before validation so the vcts_exist
 	// validator can cross-reference auth_methods.vcts against actual VCT values.
-	// Only services that configure credential_constructor will have this set.
 	if len(cfg.CredentialConstructor) > 0 {
 		for scope, constructor := range cfg.CredentialConstructor {
 			if constructor == nil || constructor.VCTMFilePath == "" {

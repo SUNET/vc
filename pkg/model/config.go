@@ -845,15 +845,33 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		credConfig := openid4vci.CredentialConfigurationsSupported{
 			Format: constructor.Format,
 			Scope:  scope,
-			VCT:    constructor.VCTM.VCT,
-			CredentialDefinition: openid4vci.CredentialDefinition{
-				Type: []string{"VerifiableCredential"},
-			},
 		}
+
+		// Set format-specific parameters per OID4VCI 1.0 Appendix A
+		switch constructor.Format {
+		case "dc+sd-jwt":
+			// Appendix A.3: only vct is format-specific for dc+sd-jwt
+			credConfig.VCT = constructor.VCTM.VCT
+		case "mso_mdoc":
+			// Appendix A.2: doctype is format-specific for mso_mdoc
+			credConfig.Doctype = constructor.VCTM.VCT // VCT serves as doctype for mdoc
+		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
+			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
+			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
+				Type: []string{"VerifiableCredential"},
+			}
+			credConfig.VCT = constructor.VCTM.VCT
+		default:
+			// For unknown formats, include VCT if available
+			credConfig.VCT = constructor.VCTM.VCT
+		}
+
+		// Build credential_metadata object (OID4VCI 1.0 Section 12.2.4)
+		credMetadata := &openid4vci.CredentialMetadata{}
 
 		// Use VCTM display information
 		if len(constructor.VCTM.Display) > 0 {
-			credConfig.Display = make([]openid4vci.CredentialMetadataDisplay, len(constructor.VCTM.Display))
+			credMetadata.Display = make([]openid4vci.CredentialMetadataDisplay, len(constructor.VCTM.Display))
 			for i, vctmDisplay := range constructor.VCTM.Display {
 				display := openid4vci.CredentialMetadataDisplay{
 					Name:        vctmDisplay.Name,
@@ -882,8 +900,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					}
 				}
 
-				credConfig.Display[i] = display
+				credMetadata.Display[i] = display
 			}
+		}
+
+		// Only set credential_metadata if it has content
+		if len(credMetadata.Display) > 0 || len(credMetadata.Claims) > 0 {
+			credConfig.CredentialMetadata = credMetadata
 		}
 
 		// Set cryptographic binding methods
@@ -925,9 +948,16 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct credential endpoint URL: %w", err)
 	}
+
+	nonceEndpoint, err := url.JoinPath(publicURL, "/nonce")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct nonce endpoint URL: %w", err)
+	}
+
 	metadataConfig := &openid4vci.MetadataConfig{
 		CredentialIssuer:                     publicURL,
 		CredentialEndpoint:                   credentialEndpoint,
+		NonceEndpoint:                        nonceEndpoint,
 		AuthorizationServers:                 cfg.AuthorizationServers,
 		DeferredCredentialEndpoint:           cfg.DeferredCredentialEndpoint,
 		NotificationEndpoint:                 cfg.NotificationEndpoint,

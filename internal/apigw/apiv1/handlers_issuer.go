@@ -298,7 +298,9 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	if req.CredentialConfigurationID != "" && c.issuerMetadata != nil {
 		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
 			cryptosuite = config.Cryptosuite
-			credentialTypes = config.CredentialDefinition.Type
+			if config.CredentialDefinition != nil {
+				credentialTypes = config.CredentialDefinition.Type
+			}
 			// Mandatory pointers could be specified in config in future
 		}
 	}
@@ -417,18 +419,23 @@ func (c *Client) VCINotification(ctx context.Context, req *openid4vci.Notificati
 	return nil
 }
 
-// VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
+// VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	c.log.Debug("metadata request")
 
-	signedMetadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
-	if err != nil {
-		return nil, err
-	}
-	if err := helpers.Check(ctx, c.cfg, signedMetadata, c.log); err != nil {
+	if err := helpers.Check(ctx, c.cfg, c.issuerMetadata, c.log); err != nil {
 		c.log.Error(err, "failed to check metadata")
 		return nil, err
 	}
 
-	return signedMetadata, nil
+	if c.pkiSigner != nil {
+		metadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+		if err != nil {
+			c.log.Error(err, "failed to sign metadata")
+			return nil, err
+		}
+		return metadata, nil
+	}
+
+	return c.issuerMetadata, nil
 }

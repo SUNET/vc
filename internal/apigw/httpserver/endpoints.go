@@ -342,7 +342,7 @@ func (s *Service) endpointVCINotification(ctx context.Context, c *gin.Context) (
 	return nil, nil
 }
 
-// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointMetadata")
 	defer span.End()
