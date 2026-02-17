@@ -20,7 +20,7 @@ type serverHandler struct {
 
 // ListenAndServe starts the HTTP server with TLS or without based on the APIServer.TLS configuration
 func (s *serverHandler) ListenAndServe(ctx context.Context, server *http.Server, apiConfig model.APIServer) error {
-	if apiConfig.TLS.Enabled {
+	if apiConfig.TLS.Enable {
 		server.TLSConfig = s.client.TLS.Standard(ctx)
 
 		err := server.ListenAndServeTLS(apiConfig.TLS.CertFilePath, apiConfig.TLS.KeyFilePath)

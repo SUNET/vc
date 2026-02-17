@@ -90,7 +90,7 @@ func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationReq
 }
 
 func (c *Client) MockNext(ctx context.Context, req *vcclient.MockNextRequest) (*vcclient.MockNextReply, error) {
-	if c.cfg.Common.Kafka.Enabled {
+	if c.cfg.Common.Kafka.Enable {
 		if err := c.eventPublisher.MockNext(req); err != nil {
 			return nil, err
 		}

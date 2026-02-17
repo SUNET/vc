@@ -58,7 +58,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			inactivityTimeoutInSeconds: cfg.UI.SessionInactivityTimeoutInSeconds,
 			path:                       "/",
 			httpOnly:                   true,
-			secure:                     cfg.UI.APIServer.TLS.Enabled,
+			secure:                     cfg.UI.APIServer.TLS.Enable,
 			sameSite:                   http.SameSiteStrictMode,
 			usernameKey:                "username_key",
 			loggedInTimeKey:            "logged_in_time_key",

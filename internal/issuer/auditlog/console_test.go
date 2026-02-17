@@ -18,7 +18,7 @@ func TestConsole_SendToDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -47,7 +47,7 @@ func TestConsole_DestinationParsing(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"console",
 				},
@@ -77,7 +77,7 @@ func TestConsole_MessageDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -111,7 +111,7 @@ func TestConsole_InvalidJSON(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},

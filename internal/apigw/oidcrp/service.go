@@ -33,7 +33,7 @@ type Service struct {
 
 // New creates a new OIDC RP service
 func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cache[*Session], dbService *db.Service, log *logger.Log) (*Service, error) {
-	if !cfg.Enabled {
+	if !cfg.Enable {
 		log.Info("OIDC RP support disabled")
 		return nil, nil
 	}
@@ -56,10 +56,10 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cac
 	// Resolve client credentials based on registration method
 	var clientID, clientSecret string
 
-	if cfg.Registration.Preconfigured != nil && cfg.Registration.Preconfigured.Enabled {
+	if cfg.Registration.Preconfigured != nil && cfg.Registration.Preconfigured.Enable {
 		clientID = cfg.Registration.Preconfigured.ClientID
 		clientSecret = cfg.Registration.Preconfigured.ClientSecret
-	} else if cfg.Registration.Dynamic.Enabled {
+	} else if cfg.Registration.Dynamic.Enable {
 		log.Info("Dynamic client registration enabled, attempting registration")
 
 		// Check if we have stored credentials
@@ -130,7 +130,7 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cac
 		"issuer", cfg.IssuerURL,
 		"client_id", clientID,
 		"redirect_uri", cfg.RedirectURI,
-		"dynamic_registration", cfg.Registration.Dynamic.Enabled)
+		"dynamic_registration", cfg.Registration.Dynamic.Enable)
 
 	return s, nil
 }

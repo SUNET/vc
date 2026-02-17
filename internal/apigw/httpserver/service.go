@@ -68,7 +68,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		},
 	}
 
-	if s.cfg.APIGW.APIServer.TLS.Enabled {
+	if s.cfg.APIGW.APIServer.TLS.Enable {
 		s.sessionsOptions.Secure = true
 		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}
@@ -171,7 +171,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	rgAPIv1 := rgRoot.Group("api/v1")
 
-	if s.cfg.APIGW.APIServer.BasicAuth.Enabled {
+	if s.cfg.APIGW.APIServer.BasicAuth.Enable {
 		rgAPIv1.Use(s.httpHelpers.Middleware.BasicAuth(ctx, s.cfg.APIGW.APIServer.BasicAuth.Users))
 	}
 

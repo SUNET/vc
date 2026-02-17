@@ -23,7 +23,7 @@ func TestAddAuditLog_GeneratesID(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -66,7 +66,7 @@ func TestAddAuditLog_ComplexMessage(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -113,7 +113,7 @@ func TestProcessAuditLog_ContextCancellation(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -150,7 +150,7 @@ func TestProcessAuditLog_ErrorHandling(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"http://localhost:99999", // Invalid port
 				},
@@ -187,7 +187,7 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -230,7 +230,7 @@ func TestAddAuditLog_NilMessage(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},

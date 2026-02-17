@@ -14,7 +14,7 @@ func TestAPIServerDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, ":8080", cfg.Addr)
-	assert.False(t, cfg.TLS.Enabled)
+	assert.False(t, cfg.TLS.Enable)
 }
 
 func TestTLSDefaults(t *testing.T) {
@@ -22,7 +22,7 @@ func TestTLSDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestCORSDefaults(t *testing.T) {
@@ -39,7 +39,7 @@ func TestKafkaDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.Equal(t, []string{"kafka0:9092", "kafka1:9092"}, cfg.Brokers)
 }
 
@@ -73,7 +73,7 @@ func TestGRPCTLSDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.Equal(t, "/pki/grpc_server.crt", cfg.CertFilePath)
 	assert.Equal(t, "/pki/grpc_server.key", cfg.KeyFilePath)
 	assert.Equal(t, "/pki/client_ca.crt", cfg.ClientCAPath)
@@ -93,7 +93,7 @@ func TestSAMLConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestOIDCRPConfigDefaults(t *testing.T) {
@@ -101,7 +101,7 @@ func TestOIDCRPConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.Equal(t, []string{"openid", "profile", "email"}, cfg.Scopes)
 }
 
@@ -118,7 +118,7 @@ func TestAuditLogDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestMDocConfigDefaults(t *testing.T) {
@@ -155,7 +155,7 @@ func TestAdminGUIDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Enabled)
+	assert.True(t, cfg.Enable)
 	assert.Equal(t, "admin", cfg.Username)
 }
 
@@ -172,7 +172,7 @@ func TestTrustConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Enabled)
+	assert.True(t, cfg.Enable)
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 
@@ -209,7 +209,7 @@ func TestDigitalCredentialsConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.False(t, cfg.UseJAR)
 	assert.Equal(t, []string{"vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"}, cfg.PreferredFormats)
 	assert.Equal(t, "dc_api.jwt", cfg.ResponseMode)
@@ -229,7 +229,7 @@ func TestCredentialDisplayConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.False(t, cfg.RequireConfirmation)
 	assert.False(t, cfg.ShowRawCredential)
 	assert.True(t, cfg.ShowClaims)
@@ -241,7 +241,7 @@ func TestBasicAuthDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestTokenStatusListsDefaults(t *testing.T) {

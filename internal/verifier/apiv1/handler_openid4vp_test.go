@@ -78,7 +78,7 @@ func TestCreateRequestObject(t *testing.T) {
 			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Configure Digital Credentials API
-			client.cfg.Verifier.DigitalCredentials.Enabled = tt.dcEnabled
+			client.cfg.Verifier.DigitalCredentials.Enable = tt.dcEnabled
 			if tt.dcResponseMode != "" {
 				client.cfg.Verifier.DigitalCredentials.ResponseMode = tt.dcResponseMode
 			}

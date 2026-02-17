@@ -171,7 +171,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Add Digital Credentials API configuration
-	if c.cfg.Verifier.DigitalCredentials.Enabled {
+	if c.cfg.Verifier.DigitalCredentials.Enable {
 		response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
 		response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
 		response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode

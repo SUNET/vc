@@ -290,7 +290,7 @@
         <div id="error-message" class="error-message hidden"></div>
 
         {{/* Credential Display Option */}}
-        {{if .Config.CredentialDisplay.Enabled}}
+        {{if .Config.CredentialDisplay.Enable}}
         <div class="info-banner" style="margin-top: 24px;">
             <label style="display: flex; align-items: center; cursor: pointer;">
                 <input type="checkbox" id="show-credential-details" 
@@ -310,7 +310,7 @@
 
         {{/* Digital Credentials API section (shown if supported) */}}
         <div id="dc-api-section" class="hidden">
-            {{if .Config.DigitalCredentials.Enabled}}
+            {{if .Config.DigitalCredentials.Enable}}
             <div class="info-banner">
                 <strong>Browser Wallet Detected!</strong> You can present your credential directly from your browser.
             </div>
@@ -375,10 +375,10 @@
             preferredFormats: {{.PreferredFormats}},
             useJAR: {{.UseJAR}},
             responseMode: '{{.ResponseMode}}',
-            digitalCredentialsEnabled: {{.Config.DigitalCredentials.Enabled}},
+            digitalCredentialsEnabled: {{.Config.DigitalCredentials.Enable}},
             allowQRFallback: {{.Config.DigitalCredentials.AllowQRFallback}},
             deepLinkScheme: '{{.Config.DigitalCredentials.DeepLinkScheme}}',
-            credentialDisplayEnabled: {{.Config.CredentialDisplay.Enabled}},
+            credentialDisplayEnabled: {{.Config.CredentialDisplay.Enable}},
             credentialDisplayRequired: {{.Config.CredentialDisplay.RequireConfirmation}}
         };
 

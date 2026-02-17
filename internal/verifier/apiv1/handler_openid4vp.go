@@ -15,7 +15,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 
 	// Determine response mode based on Digital Credentials API configuration
 	responseMode := "direct_post"
-	if c.cfg.Verifier.DigitalCredentials.Enabled {
+	if c.cfg.Verifier.DigitalCredentials.Enable {
 		if c.cfg.Verifier.DigitalCredentials.ResponseMode != "" {
 			responseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 		} else {
@@ -43,7 +43,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled
-	if c.cfg.Verifier.DigitalCredentials.Enabled && c.cfg.Verifier.PreferredVPFormats != nil {
+	if c.cfg.Verifier.DigitalCredentials.Enable && c.cfg.Verifier.PreferredVPFormats != nil {
 		requestObject.ClientMetadata = &openid4vp.ClientMetadata{
 			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
 		}

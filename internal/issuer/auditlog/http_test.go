@@ -54,7 +54,7 @@ func TestHTTP_SendToDestination_Webhook_Success(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -89,7 +89,7 @@ func TestHTTP_SendToDestination_Webhook_Failure(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -118,7 +118,7 @@ func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -152,7 +152,7 @@ func TestHTTP_SendWebhook_Timeout(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -179,7 +179,7 @@ func TestHTTP_DestinationParsing(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"http://example.com/webhook",
 					"https://example.com/webhook2",
@@ -218,7 +218,7 @@ func TestHTTP_MessageDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -256,7 +256,7 @@ func TestHTTP_QueueFull(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{server.URL},
 			},
 		},

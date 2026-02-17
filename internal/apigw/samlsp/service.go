@@ -32,7 +32,7 @@ type Service struct {
 
 // New creates a new SAML service
 func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache[*Session], log *logger.Log) (*Service, error) {
-	if !cfg.Enabled {
+	if !cfg.Enable {
 		log.Info("SAML support disabled")
 		return nil, nil
 	}
@@ -309,7 +309,7 @@ func (s *Service) IsStaticIDPMode() bool {
 
 // BuildTransformer creates a ClaimTransformer from SAML configuration (package-level for testing)
 func BuildTransformer(cfg *model.SAMLConfig) (*ClaimTransformer, error) {
-	if cfg == nil || !cfg.Enabled {
+	if cfg == nil || !cfg.Enable {
 		return nil, fmt.Errorf("SAML not enabled")
 	}
 

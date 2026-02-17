@@ -12,7 +12,7 @@ import (
 )
 
 func initSAMLSPService(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, log *logger.Log) (httpserver.SAMLSPService, error) {
-	if !cfg.APIGW.SAML.Enabled {
+	if !cfg.APIGW.SAML.Enable {
 		return nil, nil
 	}
 

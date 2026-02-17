@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -328,97 +329,25 @@ func determineRequired(tag TagInfo) string {
 	if v == "" {
 		return "No"
 	}
-
-	// Check each validation rule for any required-family tag (v10 validator).
-	// If the field has a default value, it is never required from the end-user's
-	// perspective because the default will be used when the field is omitted.
-	for rule := range strings.SplitSeq(v, ",") {
-		rule = strings.TrimSpace(rule)
-
-		switch {
-		case rule == "required":
+	if strings.Contains(v, "required_if=Enable true") {
+		return "Yes (if enabled)"
+	}
+	re := regexp.MustCompile(`required_without=(\w+)`)
+	if m := re.FindStringSubmatch(v); len(m) > 1 {
+		return fmt.Sprintf("Yes (if %s not set)", camelToSnake(m[1]))
+	}
+	for _, r := range strings.Split(v, ",") {
+		r = strings.TrimSpace(r)
+		if r == "required" {
+			// If a default value is provided, the field is not required from
+			// the end-user's perspective since the default will be used.
 			if tag.Default != "" {
 				return "No"
 			}
 			return "Yes"
-
-		case strings.HasPrefix(rule, "required_if="):
-			if tag.Default != "" {
-				return "No"
-			}
-			params := strings.TrimPrefix(rule, "required_if=")
-			return "Yes (if " + requiredIfDescription(params) + ")"
-
-		case strings.HasPrefix(rule, "required_unless="):
-			if tag.Default != "" {
-				return "No"
-			}
-			params := strings.TrimPrefix(rule, "required_unless=")
-			return "Yes (unless " + requiredIfDescription(params) + ")"
-
-		case strings.HasPrefix(rule, "required_with="):
-			if tag.Default != "" {
-				return "No"
-			}
-			params := strings.TrimPrefix(rule, "required_with=")
-			fields := camelFieldList(params)
-			return "Yes (if " + fields + " set)"
-
-		case strings.HasPrefix(rule, "required_with_all="):
-			if tag.Default != "" {
-				return "No"
-			}
-			params := strings.TrimPrefix(rule, "required_with_all=")
-			fields := camelFieldList(params)
-			return "Yes (if all of " + fields + " set)"
-
-		case strings.HasPrefix(rule, "required_without="):
-			if tag.Default != "" {
-				return "No"
-			}
-			params := strings.TrimPrefix(rule, "required_without=")
-			fields := camelFieldList(params)
-			return "Yes (if " + fields + " not set)"
-
-		case strings.HasPrefix(rule, "required_without_all="):
-			if tag.Default != "" {
-				return "No"
-			}
-			params := strings.TrimPrefix(rule, "required_without_all=")
-			fields := camelFieldList(params)
-			return "Yes (if none of " + fields + " set)"
 		}
 	}
 	return "No"
-}
-
-// requiredIfDescription formats "FieldName value" pairs into a human-readable condition.
-// For example, "Enabled true" becomes "enabled = true".
-func requiredIfDescription(params string) string {
-	parts := strings.Fields(params)
-	if len(parts) == 2 {
-		return camelToSnake(parts[0]) + " = " + parts[1]
-	}
-	// Multiple field/value pairs
-	var conditions []string
-	for i := 0; i+1 < len(parts); i += 2 {
-		conditions = append(conditions, camelToSnake(parts[i])+" = "+parts[i+1])
-	}
-	if len(conditions) > 0 {
-		return strings.Join(conditions, ", ")
-	}
-	return camelToSnake(params)
-}
-
-// camelFieldList converts space-separated CamelCase field names into a
-// comma-separated list of snake_case names.
-func camelFieldList(params string) string {
-	parts := strings.Fields(params)
-	var names []string
-	for _, p := range parts {
-		names = append(names, camelToSnake(p))
-	}
-	return strings.Join(names, ", ")
 }
 
 func formatDefault(tag TagInfo) string {
@@ -444,7 +373,7 @@ func fieldDescription(f *FieldDef) string {
 	if raw == "" {
 		return titleFromGoName(f.GoName)
 	}
-	for line := range strings.SplitSeq(raw, "\n") {
+	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -489,7 +418,7 @@ func fieldExample(f *FieldDef) string {
 	if raw == "" {
 		return ""
 	}
-	for line := range strings.SplitSeq(raw, "\n") {
+	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

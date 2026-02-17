@@ -32,8 +32,8 @@ type CORS struct {
 
 // TLS holds the TLS configuration
 type TLS struct {
-	// Enabled enables TLS
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable enables TLS
+	Enable bool `yaml:"enable" default:"false"`
 	// CertFilePath is the path to the TLS certificate
 	CertFilePath string `yaml:"cert_file_path" validate:"required"`
 	// KeyFilePath is the path to the TLS private key
@@ -49,8 +49,8 @@ type Mongo struct {
 
 // Kafka holds the Kafka message broker configuration
 type Kafka struct {
-	// Enabled enables Kafka integration
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable enables Kafka integration
+	Enable bool `yaml:"enable" default:"false"`
 	// Brokers is the list of Kafka broker addresses
 	Brokers []string `yaml:"brokers" validate:"required" default:"[\"kafka0:9092\", \"kafka1:9092\"]"`
 }
@@ -109,10 +109,10 @@ type GRPCServer struct {
 
 // GRPCTLS holds the mTLS configuration for gRPC server
 type GRPCTLS struct {
-	Enabled                   bool              `yaml:"enabled" default:"false"`
-	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.crt"` // Server certificate
-	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enabled true" default:"/pki/grpc_server.key"`  // Server private key
-	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enabled true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
+	Enable                    bool              `yaml:"enable" default:"false"`
+	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.crt"` // Server certificate
+	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.key"`  // Server private key
+	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enable true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
 	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                       // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
 	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns"`                                                                // Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod")
 }
@@ -144,12 +144,12 @@ type JWTAttribute struct {
 
 // SAMLConfig holds SAML Service Provider configuration for the issuer
 type SAMLConfig struct {
-	// Enabled turns on SAML support (default: false)
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable turns on SAML support (default: false)
+	Enable bool `yaml:"enable" default:"false"`
 
 	// EntityID is the SAML SP entity identifier (typically the metadata URL)
 	// Example: "https://issuer.sunet.se/saml/metadata"
-	EntityID string `yaml:"entity_id" validate:"required_if=Enabled true"`
+	EntityID string `yaml:"entity_id" validate:"required_if=Enable true"`
 
 	// MetadataURL is the public URL where SP metadata is served (optional, auto-generated if empty)
 	MetadataURL string `yaml:"metadata_url,omitempty"`
@@ -164,14 +164,14 @@ type SAMLConfig struct {
 	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty"`
 
 	// CertificatePath is the path to X.509 certificate for SAML signing/encryption
-	CertificatePath string `yaml:"certificate_path" validate:"required_if=Enabled true"`
+	CertificatePath string `yaml:"certificate_path" validate:"required_if=Enable true"`
 
 	// PrivateKeyPath is the path to private key for SAML signing/encryption
-	PrivateKeyPath string `yaml:"private_key_path" validate:"required_if=Enabled true"`
+	PrivateKeyPath string `yaml:"private_key_path" validate:"required_if=Enable true"`
 
 	// ACSEndpoint is the Assertion Consumer Service URL where IdP sends SAML responses
 	// Example: "https://issuer.sunet.se/saml/acs"
-	ACSEndpoint string `yaml:"acs_endpoint" validate:"required_if=Enabled true"`
+	ACSEndpoint string `yaml:"acs_endpoint" validate:"required_if=Enable true"`
 
 	// SessionDuration is the maximum time in seconds an in-flight SAML authentication flow
 	// (AuthnRequest → Response) may remain active before it expires
@@ -180,7 +180,7 @@ type SAMLConfig struct {
 	// CredentialMappings defines how to map external attributes to credential claims
 	// Key: credential type identifier (e.g., "pid", "diploma")
 	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
-	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enabled true"`
+	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
@@ -200,23 +200,23 @@ type StaticIDPConfig struct {
 
 // OIDCRPConfig holds OIDC Relying Party configuration for credential issuance.
 type OIDCRPConfig struct {
-	// Enabled turns on OIDC RP support (default: false)
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable turns on OIDC RP support (default: false)
+	Enable bool `yaml:"enable" default:"false"`
 
 	// Registration configures how the client obtains credentials from the OIDC Provider.
 	// Exactly one of preconfigured or dynamic must be set:
 	//   - preconfigured: pre-registered client_id and client_secret
 	//   - dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
-	Registration *OIDCRPRegistrationConfig `yaml:"registration" validate:"required_if=Enabled true"`
+	Registration *OIDCRPRegistrationConfig `yaml:"registration" validate:"required_if=Enable true"`
 
 	// RedirectURI is the callback URL where the OIDC Provider sends the authorization response
 	// Example: "https://issuer.sunet.se/oidcrp/callback"
-	RedirectURI string `yaml:"redirect_uri" validate:"required_if=Enabled true"`
+	RedirectURI string `yaml:"redirect_uri" validate:"required_if=Enable true"`
 
 	// IssuerURL is the OIDC Provider's issuer URL for discovery
 	// Example: "https://accounts.google.com"
 	// Used for .well-known/openid-configuration discovery
-	IssuerURL string `yaml:"issuer_url" validate:"required_if=Enabled true"`
+	IssuerURL string `yaml:"issuer_url" validate:"required_if=Enable true"`
 
 	// Scopes are the OAuth2/OIDC scopes to request (at least one scope is required, e.g. "openid")
 	Scopes []string `yaml:"scopes" validate:"required,min=1,dive,required" default:"[\"openid\", \"profile\", \"email\"]"`
@@ -236,7 +236,7 @@ type OIDCRPConfig struct {
 	// CredentialMappings defines how to map OIDC claims to credential claims
 	// Key: credential type identifier (e.g., "pid", "diploma")
 	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
-	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enabled true"`
+	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
 }
 
 // OIDCRPRegistrationConfig configures how the client obtains its credentials.
@@ -253,26 +253,26 @@ type OIDCRPRegistrationConfig struct {
 
 // OIDCRPPreconfiguredConfig holds pre-registered client credentials.
 type OIDCRPPreconfiguredConfig struct {
-	// Enabled activates preconfigured client credentials
-	Enabled bool `yaml:"enabled"`
+	// Enable activates preconfigured client credentials
+	Enable bool `yaml:"enable"`
 
 	// ClientID is the OIDC client identifier
-	ClientID string `yaml:"client_id" validate:"required_if=Enabled true"`
+	ClientID string `yaml:"client_id" validate:"required_if=Enable true"`
 
 	// ClientSecret is the OIDC client secret
-	ClientSecret string `yaml:"client_secret" validate:"required_if=Enabled true"`
+	ClientSecret string `yaml:"client_secret" validate:"required_if=Enable true"`
 }
 
 // OIDCRPDynamicRegistrationConfig configures RFC 7591 dynamic client registration.
 // When set, client credentials are obtained automatically at startup and
 // persisted in the database.
 type OIDCRPDynamicRegistrationConfig struct {
-	// Enabled activates dynamic client registration
-	Enabled bool `yaml:"enabled"`
+	// Enable activates dynamic client registration
+	Enable bool `yaml:"enable"`
 
 	// InitialAccessToken is a bearer token for registration
 	// Required by some OIDC Providers (e.g., Keycloak)
-	InitialAccessToken string `yaml:"initial_access_token,omitempty" validate:"required_if=Enabled true"`
+	InitialAccessToken string `yaml:"initial_access_token,omitempty" validate:"required_if=Enable true"`
 }
 
 // CredentialMapping defines how to issue a specific credential type via SAML
@@ -331,11 +331,11 @@ type Issuer struct {
 
 // AuditLog holds audit log configuration for multiple destinations
 type AuditLog struct {
-	// Enabled enables audit logging
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable enables audit logging
+	Enable bool `yaml:"enable" default:"false"`
 	// Destinations is the list of log destinations (console/stdout, file path, or HTTP URL)
 	// Example: ["stdout", "/var/log/audit.log", "https://audit.sunet.se/webhook"]
-	Destinations []string `yaml:"destinations" validate:"required_if=Enabled true,min=1"`
+	Destinations []string `yaml:"destinations" validate:"required_if=Enable true,min=1"`
 	// FileSyncInterval controls fsync behavior for file destinations.
 	// 0 = fsync after every write (strict durability, lower throughput).
 	// >0 = periodic batched fsync at the given interval (better throughput, bounded data-loss window).
@@ -401,12 +401,12 @@ type Registry struct {
 
 // AdminGUI holds the admin GUI configuration
 type AdminGUI struct {
-	// Enabled enables the admin GUI
-	Enabled bool `yaml:"enabled" default:"true"`
+	// Enable enables the admin GUI
+	Enable bool `yaml:"enable" default:"true"`
 	// Username is the admin username
-	Username string `yaml:"username" validate:"required_if=Enabled true" default:"admin"`
+	Username string `yaml:"username" validate:"required_if=Enable true" default:"admin"`
 	// Password is the admin password
-	Password string `yaml:"password" validate:"required_if=Enabled true"`
+	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
 // MockAS holds the configuration for the Mock Authentic Source service used for testing
@@ -465,10 +465,10 @@ type TrustConfig struct {
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
 
-	// Enabled controls whether trust evaluation is enabled.
+	// Enable controls whether trust evaluation is enabled.
 	// When false, keys are resolved but not validated against trust frameworks.
 	// Default: true
-	Enabled bool `yaml:"enabled,omitempty" default:"true"`
+	Enable bool `yaml:"enable,omitempty" default:"true"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -524,8 +524,8 @@ type OpenID4VPConfig struct {
 
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration
 type DigitalCredentialsConfig struct {
-	// Enabled toggles W3C Digital Credentials API support in browser
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable toggles W3C Digital Credentials API support in browser
+	Enable bool `yaml:"enable" default:"false"`
 
 	// UseJAR enables JWT Authorization Request (JAR) for wallet communication
 	// When true, request objects are signed JWTs instead of plain JSON
@@ -583,9 +583,9 @@ type AuthorizationPageCSSConfig struct {
 
 // CredentialDisplayConfig controls whether and how credentials are displayed before being sent to RP
 type CredentialDisplayConfig struct {
-	// Enabled allows users to optionally view credential details before completing authorization
+	// Enable allows users to optionally view credential details before completing authorization
 	// When enabled, a checkbox appears on the authorization page
-	Enabled bool `yaml:"enabled" default:"false"`
+	Enable bool `yaml:"enable" default:"false"`
 
 	// RequireConfirmation forces users to review credentials before proceeding
 	// When true, the credential display step is mandatory (checkbox is pre-checked and disabled)
@@ -617,8 +617,8 @@ type SupportedCredentialConfig struct {
 type BasicAuth struct {
 	// Users is a username to password mapping
 	Users map[string]string `yaml:"users"`
-	// Enabled enables HTTP Basic authentication
-	Enabled bool `yaml:"enabled" default:"false"`
+	// Enable enables HTTP Basic authentication
+	Enable bool `yaml:"enable" default:"false"`
 }
 
 // IssuerMetadata holds the OpenID4VCI issuer metadata configuration

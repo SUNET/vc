@@ -24,7 +24,7 @@ func TestClearSecrets(t *testing.T) {
 						ClientSecret: "my-client-secret",
 					},
 					Dynamic: &OIDCRPDynamicRegistrationConfig{
-						Enabled:            true,
+						Enable:            true,
 						InitialAccessToken: "my-initial-token",
 					},
 				},
@@ -184,7 +184,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 						ClientSecret: "config-client-secret",
 					},
 					Dynamic: &OIDCRPDynamicRegistrationConfig{
-						Enabled:            true,
+						Enable:            true,
 						InitialAccessToken: "config-initial-token",
 					},
 				},

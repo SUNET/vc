@@ -130,6 +130,12 @@ func NewValidator() (*validator.Validate, error) {
 			}
 		}
 
+		// If no VCTMs are loaded (e.g. services like ui, mockas, registry that
+		// share the config but don't load VCTM files), skip cross-reference validation.
+		if len(vctToFormat) == 0 {
+			return true
+		}
+
 		// Validate each AuthMethod
 		authMethodsMap := authMethodsField.Interface().(map[string]*model.AuthMethod)
 		for authMethodName, authMethod := range authMethodsMap {
@@ -168,7 +174,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register struct-level validation for SAMLConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.SAMLConfig)
-		if !cfg.Enabled {
+		if !cfg.Enable {
 			return
 		}
 
@@ -186,7 +192,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register struct-level validation for OIDCRPConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.OIDCRPConfig)
-		if !cfg.Enabled {
+		if !cfg.Enable {
 			return
 		}
 

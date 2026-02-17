@@ -71,13 +71,13 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, ":id", http.StatusOK, s.endpointStatusLists)
 
 	// Admin GUI endpoints for managing Token Status Lists
-	if s.cfg.Registry.AdminGUI.Enabled {
+	if s.cfg.Registry.AdminGUI.Enable {
 		s.sessionStore = sessions.NewCookieStore([]byte(cacheService.SessionAuthKey), []byte(cacheService.SessionEncKey))
 		s.sessionStore.Options = &sessions.Options{
 			Path:     "/admin",
 			MaxAge:   3600,
 			HttpOnly: true,
-			Secure:   s.cfg.Registry.APIServer.TLS.Enabled,
+			Secure:   s.cfg.Registry.APIServer.TLS.Enable,
 			SameSite: http.SameSiteStrictMode,
 		}
 

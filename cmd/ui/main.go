@@ -34,7 +34,7 @@ func main() {
 		serviceName string = "ui"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -57,7 +57,7 @@ func main() {
 	}
 
 	var eventPublisher apiv1.EventPublisher
-	if cfg.Common.Kafka.Enabled {
+	if cfg.Common.Kafka.Enable {
 		var err error
 		eventPublisher, err = outbound.New(ctx, cfg, tracer, log)
 		services["eventPublisher"] = eventPublisher

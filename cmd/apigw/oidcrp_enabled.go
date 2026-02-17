@@ -14,7 +14,7 @@ import (
 )
 
 func initOIDCRPService(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbService *db.Service, log *logger.Log) (httpserver.OIDCRPService, error) {
-	if !cfg.APIGW.OIDCRP.Enabled {
+	if !cfg.APIGW.OIDCRP.Enable {
 		return nil, nil
 	}
 

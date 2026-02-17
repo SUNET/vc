@@ -243,7 +243,7 @@ func TestNewServerOptions_Disabled(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled: false,
+			Enable: false,
 		},
 	}
 
@@ -257,7 +257,7 @@ func TestNewServerOptions_InvalidCert(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: "/nonexistent/cert.pem",
 			KeyFilePath:  "/nonexistent/key.pem",
 		},
@@ -281,7 +281,7 @@ func TestNewServerOptions_InvalidClientCA(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: "/nonexistent/ca.pem",
@@ -311,7 +311,7 @@ func TestNewServerOptions_InvalidClientCAPEM(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caPath,
@@ -336,7 +336,7 @@ func TestNewServerOptions_ValidTLS(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 		},
@@ -364,7 +364,7 @@ func TestNewServerOptions_ValidMTLS(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -393,7 +393,7 @@ func TestNewServerOptions_WithFingerprints(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -897,7 +897,7 @@ func TestNewServerOptions_WithDNs(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -928,7 +928,7 @@ func TestNewServerOptions_WithBothFingerprintsAndDNs(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1007,7 +1007,7 @@ func TestIntegration_mTLS_BothFingerprintAndDNMatch(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1097,7 +1097,7 @@ func TestIntegration_mTLS_DNInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1170,7 +1170,7 @@ func TestIntegration_mTLS_DNNotInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1245,7 +1245,7 @@ func TestIntegration_mTLS_DNAllowedFingerprintNot(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1557,7 +1557,7 @@ func TestIntegration_mTLS_FingerprintNotInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1646,7 +1646,7 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1742,7 +1742,7 @@ func TestIntegration_mTLS_InvalidClientCert(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath, // Only trusts the first CA

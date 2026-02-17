@@ -27,7 +27,7 @@ func main() {
 		serviceName string = "issuer"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}

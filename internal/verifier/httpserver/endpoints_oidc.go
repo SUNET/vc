@@ -94,7 +94,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		"LogoURL":          response.LogoURL,
 		"Config": gin.H{
 			"DigitalCredentials": gin.H{
-				"Enabled":         s.cfg.Verifier.DigitalCredentials.Enabled,
+				"Enable":          s.cfg.Verifier.DigitalCredentials.Enable,
 				"AllowQRFallback": s.cfg.Verifier.DigitalCredentials.AllowQRFallback,
 				"DeepLinkScheme":  s.cfg.Verifier.DigitalCredentials.DeepLinkScheme,
 			},

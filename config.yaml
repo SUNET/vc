@@ -5,6 +5,7 @@ common:
     uri: mongodb://mongo:27017
   production: false
   tracing:
+    enable: false
     addr: jaeger:4318
     #timeout: 10
   credential_offer_qr:
@@ -71,7 +72,7 @@ credential_constructor:
     format: "dc+sd-jwt"
 
 kafka:
-  enabled: false
+  enable: false
   brokers:
     - "kafka0:9092"
     - "kafka1:9092"
@@ -86,7 +87,7 @@ issuer:
   registry_client:
     addr: registry.vc.docker:8090
   audit_log:
-    enabled: false
+    enable: false
     destinations:
       - "console"
       - "/var/log/vc/audit.log"
@@ -205,7 +206,7 @@ registry:
     addr: :8090
     # mTLS configuration (optional)
     # tls:
-    #   enabled: true
+    #   enable: true
     #   cert_file_path: "/pki/grpc_server.crt"
     #   key_file_path: "/pki/grpc_server.key"
     #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
@@ -228,7 +229,7 @@ registry:
       #   key_id: "registry-tsl-key-id"  # Required, default: "vc_key_id"
   # Admin GUI configuration (optional)
   admin_gui:
-    enabled: true
+    enable: true
     username: "admin"
     password: "admin_1234"  # Change this in production!
 
@@ -251,7 +252,7 @@ apigw:
         - "https://dev.wallet.sunet.se"
         - "https://sunetwallet-dev.app.siros.org"
     basic_auth:
-      enabled: false
+      enable: false
       users:
         admin: "secret123"
   public_url: "http://apigw.vc.docker:8080"
@@ -341,7 +342,7 @@ apigw:
   #   dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
   #
   oidcrp:
-    enabled: false
+    enable: false
     # --- Option A: Pre-registered credentials ---
     registration:
       preconfigured:

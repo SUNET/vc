@@ -1223,7 +1223,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 			client.cfg.Verifier.OIDC.SessionDuration = 900
-			client.cfg.Verifier.DigitalCredentials.Enabled = true
+			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
 			client.cfg.Verifier.DigitalCredentials.UseJAR = true
 			client.cfg.Verifier.DigitalCredentials.ResponseMode = "direct_post.jwt"
@@ -1295,7 +1295,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.OIDC.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
-	client.cfg.Verifier.DigitalCredentials.Enabled = false
+	client.cfg.Verifier.DigitalCredentials.Enable = false
 	// Clear CSS title to test default fallback
 	client.cfg.Verifier.AuthorizationPageCSS.Title = ""
 	client.cfg.Verifier.AuthorizationPageCSS.Subtitle = ""

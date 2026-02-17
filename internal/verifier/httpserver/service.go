@@ -70,7 +70,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		},
 	}
 
-	if s.cfg.Verifier.APIServer.TLS.Enabled {
+	if s.cfg.Verifier.APIServer.TLS.Enable {
 		s.sessionsOptions.Secure = true
 		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}

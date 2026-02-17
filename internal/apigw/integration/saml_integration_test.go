@@ -182,7 +182,7 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 // createTestSAMLConfig creates a test SAML configuration
 func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath string) *model.SAMLConfig {
 	return &model.SAMLConfig{
-		Enabled:          true,
+		Enable:          true,
 		EntityID:         "https://issuer.example.com/saml",
 		ACSEndpoint:      "https://issuer.example.com/saml/acs",
 		MetadataURL:      "https://issuer.example.com/saml/metadata",

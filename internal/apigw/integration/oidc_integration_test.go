@@ -403,15 +403,15 @@ func setupOIDCTestEnvironment(t *testing.T) *oidcTestEnvironment {
 // createTestOIDCRPConfig creates a test OIDC RP configuration pointing at the mock OP
 func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 	return &model.OIDCRPConfig{
-		Enabled: true,
+		Enable: true,
 		Registration: &model.OIDCRPRegistrationConfig{
 			Preconfigured: &model.OIDCRPPreconfiguredConfig{
-				Enabled:      true,
+				Enable:      true,
 				ClientID:     op.clientID,
 				ClientSecret: op.clientSecret,
 			},
 			Dynamic: &model.OIDCRPDynamicRegistrationConfig{
-				Enabled: false,
+				Enable: false,
 			},
 		},
 		IssuerURL:       op.issuerURL,

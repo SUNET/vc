@@ -19,8 +19,18 @@ type envVars struct {
 	ConfigYAML string `envconfig:"VC_CONFIG_YAML" required:"true"`
 }
 
-// New parses config file from VC_CONFIG_YAML environment variable
-func New(ctx context.Context) (*model.Cfg, error) {
+// servicesRequiringVCTM lists services that need credential_constructor and VCTM files.
+var servicesRequiringVCTM = map[string]bool{
+	"apigw":    true,
+	"issuer":   true,
+	"verifier": true,
+}
+
+// New parses config file from VC_CONFIG_YAML environment variable.
+// serviceName identifies the calling service so that steps like VCTM loading
+// can be skipped for services that do not use credential constructors (e.g.
+// ui, mockas, registry).
+func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	log := logger.NewSimple("Configuration")
 	log.Info("Read environmental variable")
 
@@ -67,27 +77,17 @@ func New(ctx context.Context) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
-	// Require credential_constructor when apigw, issuer, or verifier is configured.
-	// These services are non-functional without it.
-	if len(cfg.CredentialConstructor) == 0 {
-		var missing []string
-		if cfg.APIGW != nil {
-			missing = append(missing, "apigw")
+	// Only services that depend on credential_constructor need VCTM loading
+	// and the requirement check. Other services (ui, mockas, registry) share
+	// the same config file but do not use credential constructors at all.
+	if servicesRequiringVCTM[serviceName] {
+		if len(cfg.CredentialConstructor) == 0 {
+			return nil, fmt.Errorf("credential_constructor is required for the %s service", serviceName)
 		}
-		if cfg.Issuer != nil {
-			missing = append(missing, "issuer")
-		}
-		if cfg.Verifier != nil {
-			missing = append(missing, "verifier")
-		}
-		if len(missing) > 0 {
-			return nil, fmt.Errorf("credential_constructor is required when the following services are configured: %v", missing)
-		}
-	}
 
-	// Load VCTM data and derive Attributes before validation so the vcts_exist
-	// validator can cross-reference auth_methods.vcts against actual VCT values.
-	if len(cfg.CredentialConstructor) > 0 {
+		// Load VCTM data and derive Attributes before validation so the
+		// vcts_exist validator can cross-reference auth_methods.vcts against
+		// actual VCT values.
 		for scope, constructor := range cfg.CredentialConstructor {
 			if constructor == nil || constructor.VCTMFilePath == "" {
 				continue

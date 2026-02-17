@@ -26,7 +26,7 @@ import (
 // If TLS is enabled with client CA, uses mutual TLS (mTLS) requiring client certificates.
 // If AllowedClientFingerprints or AllowedClientDNs is set, adds an interceptor to verify client certs.
 func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
-	if !cfg.TLS.Enabled {
+	if !cfg.TLS.Enable {
 		return nil, nil
 	}
 

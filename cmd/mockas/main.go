@@ -27,7 +27,7 @@ func main() {
 		serviceName string = "mockas"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -71,7 +71,7 @@ func main() {
 		panic(err)
 	}
 
-	if cfg.Common.Kafka.Enabled {
+	if cfg.Common.Kafka.Enable {
 		eventConsumer, err := inbound.New(ctx, cfg, apiv1Client, tracer, log.New("eventConsumer"))
 		services["eventConsumer"] = eventConsumer
 		if err != nil {
