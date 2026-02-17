@@ -4,9 +4,7 @@ import * as v from "valibot";
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
     vct: v.string(),
-    vctm_file_path: v.string(),
-    auth_method: v.string(),
-    attributes_v2: v.record(
+    attributes: v.record(
         v.string(),
         v.record(
             v.string(),
@@ -295,7 +293,7 @@ Alpine.data("app", () => ({
 
         /** @type {Record<string, string[]>} */
         const claims = {}
-        for (const [label, path] of Object.entries(chosenCredential.attributes_v2['en-US'])) {
+        for (const [label, path] of Object.entries(chosenCredential.attributes['en-US'])) {
             claims[label] = path;
         }
 

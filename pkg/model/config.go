@@ -789,7 +789,7 @@ func (c *Cfg) GetFormatForVCT(vct string) string {
 }
 
 type CredentialConstructor struct {
-	VCTMFilePath string                         `yaml:"vctm_file_path" json:"vctm_file_path" validate:"required"`
+	VCTMFilePath string                         `yaml:"vctm_file_path" json:"-" validate:"required"`
 	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
 	Format       string                         `yaml:"format" json:"format" validate:"required"`
 	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,auth_method_exists"`
