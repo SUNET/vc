@@ -24,6 +24,10 @@ import (
 func testCfg(ha bool) *model.Cfg {
 	return &model.Cfg{
 		Common: &model.Common{HA: ha},
+		APIGW: &model.APIGW{
+			OIDCRP: model.OIDCRPConfig{SessionDuration: 300},
+			SAML:   model.SAMLConfig{SessionDuration: 300},
+		},
 	}
 }
 
@@ -108,6 +112,8 @@ func TestNew_Memory(t *testing.T) {
 	assert.NotNil(t, s.SVGTemplate, "SVGTemplate cache")
 	assert.NotNil(t, s.Document, "Document cache")
 	assert.NotNil(t, s.DPopJTI, "DPopJTI cache")
+	assert.NotNil(t, s.OIDCRPSession, "OIDCRPSession cache")
+	assert.NotNil(t, s.SAMLSession, "SAMLSession cache")
 
 	ctx := t.Context()
 
@@ -190,6 +196,8 @@ func TestNew_Mongo(t *testing.T) {
 	assert.NotNil(t, s.SVGTemplate, "SVGTemplate cache")
 	assert.NotNil(t, s.Document, "Document cache")
 	assert.NotNil(t, s.DPopJTI, "DPopJTI cache")
+	assert.NotNil(t, s.OIDCRPSession, "OIDCRPSession cache")
+	assert.NotNil(t, s.SAMLSession, "SAMLSession cache")
 
 	ctx := t.Context()
 

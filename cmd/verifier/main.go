@@ -79,7 +79,7 @@ func main() {
 		panic(err)
 	}
 
-	httpserver, err := httpserver.New(ctx, cfg, apiv1, notifyService, tracer, log)
+	httpserver, err := httpserver.New(ctx, cfg, apiv1, notifyService, tracer, cacheService, log)
 	services["httpserver"] = httpserver
 	if err != nil {
 		panic(err)

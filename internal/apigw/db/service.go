@@ -39,6 +39,7 @@ type Service struct {
 	VCConsentColl         *VCConsentColl
 	VCUsersColl           *VCUsersColl
 	VCCredentialOfferColl *VCCredentialOfferColl
+	VCDynamicRegistrationColl *VCDynamicRegistrationColl
 }
 
 // New creates a new database service
@@ -86,6 +87,12 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	service.VCCredentialOfferColl, err = NewCredentialOfferColl(ctx, "credential_offer", service, log.New("VCCredentialOfferColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create credential offer collection")
+		return nil, err
+	}
+
+	service.VCDynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
+	if err != nil {
+		service.log.Error(err, "failed to create dynamic registration collection")
 		return nil, err
 	}
 

@@ -41,6 +41,11 @@ type Service struct {
 	Credential             Cache[[]sdjwtvc.CredentialCache]
 	EphemeralEncryptionKey Cache[jwk.Key]
 	RequestObject          Cache[*openid4vp.RequestObject]
+
+	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
+	SessionAuthKey string
+	// SessionEncKey is the AES encryption key for session cookies, shared across HA instances.
+	SessionEncKey string
 }
 
 // New creates the verifier cache service and initialises all caches.
@@ -68,6 +73,14 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 	if s.RequestObject, err = pkgcache.NewGenericCache[*openid4vp.RequestObject](cs, ctx, "verifier_request_objects", 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("cache: request_objects: %w", err)
 	}
+
+	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).
+	sharedSecrets, err := pkgcache.EnsureSharedSecrets(ctx, cs, "verifier")
+	if err != nil {
+		return nil, fmt.Errorf("cache: shared_secrets: %w", err)
+	}
+	s.SessionAuthKey = sharedSecrets.SessionAuthKey
+	s.SessionEncKey = sharedSecrets.SessionEncKey
 
 	return s, nil
 }

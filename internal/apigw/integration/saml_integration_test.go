@@ -3,9 +3,9 @@
 package integration
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -19,11 +19,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"vc/internal/apigw/samlsp"
+	pkgcache "vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
-	"vc/pkg/saml"
 
+	"github.com/beevik/etree"
 	samltypes "github.com/crewjam/saml"
+	dsig "github.com/russellhaering/goxmldsig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,16 +100,16 @@ func TestSAMLIntegration_ErrorHandling(t *testing.T) {
 
 // testEnvironment holds the test environment setup
 type testEnvironment struct {
-	t              *testing.T
-	ctx            context.Context
-	samlService    *saml.Service
-	mockIdPServer  *httptest.Server
-	mockMDQServer  *httptest.Server
-	sessionStore   *saml.SessionStore
-	log            *logger.Log
-	config         *model.SAMLConfig
-	idpEntityID    string
-	cleanup        func()
+	samlSPService      *samlsp.Service
+	mockIdPServer      *httptest.Server
+	mockMDQServer      *httptest.Server
+	samlSPSessionCache pkgcache.Cache[*samlsp.Session]
+	log                *logger.Log
+	config             *model.SAMLConfig
+	idpEntityID        string
+	idpKey             *rsa.PrivateKey   // IdP signing key
+	idpCert            *x509.Certificate // IdP signing certificate
+	cleanup            func()
 }
 
 // setupTestEnvironment creates a complete test environment with mock IdP
@@ -120,9 +123,26 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 	// Generate temporary test certificates
 	certPath, keyPath, cleanupCerts := generateTestCertificates(t)
 
+	// Generate IdP signing keypair
+	idpKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	idpCertTemplate := x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "test-idp"},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	idpCertDER, err := x509.CreateCertificate(rand.Reader, &idpCertTemplate, &idpCertTemplate, &idpKey.PublicKey, idpKey)
+	require.NoError(t, err)
+	idpCert, err := x509.ParseCertificate(idpCertDER)
+	require.NoError(t, err)
+
 	// Setup mock IdP metadata server (MDQ)
 	idpEntityID := "https://test-idp.example.com/idp"
-	mockMDQServer := createMockMDQServer(t, idpEntityID)
+	idpCertB64 := base64.StdEncoding.EncodeToString(idpCertDER)
+	mockMDQServer := createMockMDQServer(t, idpEntityID, idpCertB64)
 
 	// Setup mock IdP SSO endpoint
 	mockIdPServer := createMockIdPServer(t)
@@ -130,26 +150,26 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 	// Create test configuration
 	config := createTestSAMLConfig(mockMDQServer.URL, mockIdPServer.URL, idpEntityID, certPath, keyPath)
 
-	// Create session store
-	sessionStore := saml.NewSessionStore(3600*time.Second, log)
+	// Create session cache
+	samlSPSessionCache := pkgcache.NewMemoryCache[*samlsp.Session](3600 * time.Second)
 
 	// Create SAML service
-	samlService, err := saml.New(ctx, config, log)
+	samlSPService, err := samlsp.New(ctx, config, samlSPSessionCache, log)
 	require.NoError(t, err)
-	require.NotNil(t, samlService)
+	require.NotNil(t, samlSPService)
 
 	env := &testEnvironment{
-		t:             t,
-		ctx:           ctx,
-		samlService:   samlService,
-		mockIdPServer: mockIdPServer,
-		mockMDQServer: mockMDQServer,
-		sessionStore:  sessionStore,
-		log:           log,
-		config:        config,
-		idpEntityID:   idpEntityID,
+		samlSPService:      samlSPService,
+		mockIdPServer:      mockIdPServer,
+		mockMDQServer:      mockMDQServer,
+		samlSPSessionCache: samlSPSessionCache,
+		log:                log,
+		config:             config,
+		idpEntityID:        idpEntityID,
+		idpKey:             idpKey,
+		idpCert:            idpCert,
 		cleanup: func() {
-			sessionStore.Close()
+			samlSPSessionCache.Stop()
 			mockIdPServer.Close()
 			mockMDQServer.Close()
 			cleanupCerts()
@@ -162,15 +182,15 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 // createTestSAMLConfig creates a test SAML configuration
 func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath string) *model.SAMLConfig {
 	return &model.SAMLConfig{
-		Enabled:         true,
-		EntityID:        "https://issuer.example.com/saml",
-		ACSEndpoint:     "https://issuer.example.com/saml/acs",
-		MetadataURL:     "https://issuer.example.com/saml/metadata",
-		MDQServer:       mdqURL,
+		Enabled:          true,
+		EntityID:         "https://issuer.example.com/saml",
+		ACSEndpoint:      "https://issuer.example.com/saml/acs",
+		MetadataURL:      "https://issuer.example.com/saml/metadata",
+		MDQServer:        mdqURL,
 		MetadataCacheTTL: 3600,
-		CertificatePath: certPath,
-		PrivateKeyPath:  keyPath,
-		SessionDuration: 3600,
+		CertificatePath:  certPath,
+		PrivateKeyPath:   keyPath,
+		SessionDuration:  3600,
 		CredentialMappings: map[string]model.CredentialMapping{
 			"pid": {
 				CredentialConfigID: "urn:eudi:pid:1",
@@ -231,15 +251,30 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 }
 
 // createMockMDQServer creates a mock MDQ (Metadata Query) server
-func createMockMDQServer(t *testing.T, idpEntityID string) *httptest.Server {
+func createMockMDQServer(t *testing.T, idpEntityID, idpCertB64 string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return test IdP metadata
+		// Only return metadata for the known IdP entity ID.
+		// The MDQ client sends the entity ID as a URL-encoded path segment,
+		// but r.URL.Path is the decoded form, so compare against "/"+entityID.
+		if r.URL.Path != "/"+idpEntityID {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		// Return test IdP metadata with signing certificate
 		metadata := fmt.Sprintf(`<?xml version="1.0"?>
 <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
   <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>%s</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </KeyDescriptor>
     <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://test-idp.example.com/sso"/>
   </IDPSSODescriptor>
-</EntityDescriptor>`, idpEntityID)
+</EntityDescriptor>`, idpEntityID, idpCertB64)
 
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
@@ -258,7 +293,9 @@ func createMockIdPServer(t *testing.T) *httptest.Server {
 
 // testSPMetadata tests SP metadata retrieval
 func testSPMetadata(t *testing.T, env *testEnvironment) {
-	metadata, err := env.samlService.GetSPMetadata(env.ctx)
+	ctx := t.Context()
+
+	metadata, err := env.samlSPService.GetSPMetadata(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, metadata)
 
@@ -286,7 +323,9 @@ func testSPMetadata(t *testing.T, env *testEnvironment) {
 
 // testInitiateAuth tests authentication initiation
 func testInitiateAuth(t *testing.T, env *testEnvironment) {
-	authReq, err := env.samlService.InitiateAuth(env.ctx, env.idpEntityID, "pid")
+	ctx := t.Context()
+
+	authReq, err := env.samlSPService.InitiateAuth(ctx, env.idpEntityID, "pid")
 	require.NoError(t, err)
 	require.NotNil(t, authReq)
 
@@ -305,7 +344,7 @@ func testProcessAssertion(t *testing.T, env *testEnvironment) {
 	assertion := createTestAssertion(t, env.idpEntityID, env.config.EntityID)
 
 	// Create transformer
-	transformer, err := env.samlService.BuildTransformer()
+	transformer, err := env.samlSPService.BuildTransformer()
 	require.NoError(t, err)
 
 	// Convert SAML AttributeStatements to simple map
@@ -324,7 +363,7 @@ func testProcessAssertion(t *testing.T, env *testEnvironment) {
 
 // testClaimTransformation tests various claim transformation scenarios
 func testClaimTransformation(t *testing.T, env *testEnvironment) {
-	transformer, err := env.samlService.BuildTransformer()
+	transformer, err := env.samlSPService.BuildTransformer()
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -394,7 +433,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Convert AttributeStatements to simple map
 			attributes := samlAttributesToMap(tc.attributes)
-			
+
 			claims, err := transformer.TransformClaims(tc.credentialType, attributes)
 
 			if tc.shouldError {
@@ -409,8 +448,10 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 
 // testCredentialTypeFlow tests full flow for a specific credential type
 func testCredentialTypeFlow(t *testing.T, env *testEnvironment, credentialType string) {
+	ctx := t.Context()
+
 	// Initiate auth
-	authReq, err := env.samlService.InitiateAuth(env.ctx, env.idpEntityID, credentialType)
+	authReq, err := env.samlSPService.InitiateAuth(ctx, env.idpEntityID, credentialType)
 	require.NoError(t, err)
 	assert.NotEmpty(t, authReq.RedirectURL)
 
@@ -420,22 +461,16 @@ func testCredentialTypeFlow(t *testing.T, env *testEnvironment, credentialType s
 
 // testInvalidIdP tests handling of invalid IdP entity ID
 func testInvalidIdP(t *testing.T, env *testEnvironment) {
-	// Mock MDQ server returns metadata for any IdP - so this test
-	// actually succeeds. In a real scenario with proper MDQ, this would fail.
-	_, err := env.samlService.InitiateAuth(env.ctx, "https://invalid-idp.example.com", "pid")
-	
-	// With our mock, it actually succeeds
-	if err == nil {
-		t.Skip("Mock MDQ returns metadata for any IdP - skipping invalid IdP test")
-		return
-	}
-	
-	assert.Error(t, err)
+	ctx := t.Context()
+
+	_, err := env.samlSPService.InitiateAuth(ctx, "https://invalid-idp.example.com", "pid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get IdP metadata")
 }
 
 // testMissingAttributes tests handling of missing required attributes
 func testMissingAttributes(t *testing.T, env *testEnvironment) {
-	transformer, err := env.samlService.BuildTransformer()
+	transformer, err := env.samlSPService.BuildTransformer()
 	require.NoError(t, err)
 
 	// Assertion missing required attribute
@@ -468,11 +503,148 @@ func testExpiredAssertion(t *testing.T, env *testEnvironment) {
 	assert.True(t, assertion.Conditions.NotOnOrAfter.Before(time.Now()))
 }
 
-// testInvalidSignature tests handling of invalid signatures
+// testInvalidSignature tests that a SAML response signed with a wrong key is rejected
 func testInvalidSignature(t *testing.T, env *testEnvironment) {
-	// This would require actual signature validation
-	// Placeholder for when signature validation is implemented
-	t.Skip("Signature validation not yet implemented in test environment")
+	ctx := t.Context()
+
+	// Initiate auth to create a session
+	authReq, err := env.samlSPService.InitiateAuth(ctx, env.idpEntityID, "pid")
+	require.NoError(t, err)
+
+	// Generate a different key (not the one in IdP metadata)
+	wrongKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	wrongCertTemplate := x509.Certificate{
+		SerialNumber: big.NewInt(99),
+		Subject:      pkix.Name{CommonName: "wrong-idp"},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	wrongCertDER, err := x509.CreateCertificate(rand.Reader, &wrongCertTemplate, &wrongCertTemplate, &wrongKey.PublicKey, wrongKey)
+	require.NoError(t, err)
+	wrongCert, err := x509.ParseCertificate(wrongCertDER)
+	require.NoError(t, err)
+
+	// Build a signed SAML response using the WRONG key
+	samlResponseB64 := createSignedSAMLResponse(t, env.idpEntityID, env.config.EntityID,
+		env.config.ACSEndpoint, authReq.ID, wrongKey, wrongCert)
+
+	// Process the response — should fail signature validation
+	_, err = env.samlSPService.ProcessAssertion(ctx, samlResponseB64, authReq.RelayState)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse SAML response")
+	t.Logf("Correctly rejected invalid signature: %v", err)
+}
+
+// createSignedSAMLResponse builds a complete, XML-signed SAML Response using
+// the crewjam/saml IdentityProvider machinery. The response is signed with
+// the provided key/cert and returned as a base64-encoded string suitable for
+// passing to ProcessAssertion.
+func createSignedSAMLResponse(t *testing.T, idpEntityID, spEntityID, acsURL, inResponseTo string, key *rsa.PrivateKey, cert *x509.Certificate) string {
+	t.Helper()
+
+	now := time.Now()
+
+	// Build the assertion
+	assertion := &samltypes.Assertion{
+		ID:           fmt.Sprintf("id-%x", mustRandomBytes(t, 20)),
+		IssueInstant: now,
+		Version:      "2.0",
+		Issuer: samltypes.Issuer{
+			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
+			Value:  idpEntityID,
+		},
+		Subject: &samltypes.Subject{
+			NameID: &samltypes.NameID{
+				Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+				Value:  "user@example.com",
+			},
+			SubjectConfirmations: []samltypes.SubjectConfirmation{
+				{
+					Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+					SubjectConfirmationData: &samltypes.SubjectConfirmationData{
+						InResponseTo: inResponseTo,
+						Recipient:    acsURL,
+						NotOnOrAfter: now.Add(5 * time.Minute),
+					},
+				},
+			},
+		},
+		Conditions: &samltypes.Conditions{
+			NotBefore:    now.Add(-1 * time.Minute),
+			NotOnOrAfter: now.Add(5 * time.Minute),
+			AudienceRestrictions: []samltypes.AudienceRestriction{
+				{Audience: samltypes.Audience{Value: spEntityID}},
+			},
+		},
+		AttributeStatements: []samltypes.AttributeStatement{
+			{
+				Attributes: []samltypes.Attribute{
+					{Name: "urn:oid:2.5.4.42", Values: []samltypes.AttributeValue{{Value: "John"}}},
+					{Name: "urn:oid:2.5.4.4", Values: []samltypes.AttributeValue{{Value: "Doe"}}},
+					{Name: "urn:oid:1.3.6.1.5.5.7.9.1", Values: []samltypes.AttributeValue{{Value: "1990-01-01"}}},
+				},
+			},
+		},
+	}
+
+	// Build the response
+	response := &samltypes.Response{
+		Destination:  acsURL,
+		ID:           fmt.Sprintf("id-%x", mustRandomBytes(t, 20)),
+		InResponseTo: inResponseTo,
+		IssueInstant: now,
+		Version:      "2.0",
+		Issuer: &samltypes.Issuer{
+			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
+			Value:  idpEntityID,
+		},
+		Status: samltypes.Status{
+			StatusCode: samltypes.StatusCode{
+				Value: samltypes.StatusSuccess,
+			},
+		},
+	}
+
+	// Use the IdP's signing context to sign the assertion
+	keyPair := tls.Certificate{
+		Certificate: [][]byte{cert.Raw},
+		PrivateKey:  key,
+		Leaf:        cert,
+	}
+	keyStore := dsig.TLSCertKeyStore(keyPair)
+	signingContext := dsig.NewDefaultSigningContext(keyStore)
+	signingContext.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
+	err := signingContext.SetSignatureMethod(dsig.RSASHA256SignatureMethod)
+	require.NoError(t, err)
+
+	// Sign the assertion element
+	assertionEl := assertion.Element()
+	signedAssertionEl, err := signingContext.SignEnveloped(assertionEl)
+	require.NoError(t, err)
+
+	// Build the response element and embed the signed assertion
+	responseEl := response.Element()
+	responseEl.AddChild(signedAssertionEl)
+
+	// Serialize to XML
+	doc := etree.NewDocument()
+	doc.SetRoot(responseEl)
+	xmlBytes, err := doc.WriteToBytes()
+	require.NoError(t, err)
+
+	return base64.StdEncoding.EncodeToString(xmlBytes)
+}
+
+// mustRandomBytes generates n random bytes, failing the test on error.
+func mustRandomBytes(t *testing.T, n int) []byte {
+	t.Helper()
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	require.NoError(t, err)
+	return b
 }
 
 // createTestAssertion creates a test SAML assertion with standard attributes
@@ -528,7 +700,7 @@ func createTestAssertion(t *testing.T, issuer, audience string) *samltypes.Asser
 }
 
 // createExpiredAssertion creates an assertion with expired validity
-func createExpiredAssertion(t *testing.T, issuer, audience string) *samltypes.Assertion{
+func createExpiredAssertion(t *testing.T, issuer, audience string) *samltypes.Assertion {
 	past := time.Now().Add(-10 * time.Minute)
 	return &samltypes.Assertion{
 		ID:           "expired-assertion",
@@ -548,7 +720,7 @@ func createExpiredAssertion(t *testing.T, issuer, audience string) *samltypes.As
 // This helper extracts the first value from each attribute
 func samlAttributesToMap(statements []samltypes.AttributeStatement) map[string]any {
 	attributes := make(map[string]any)
-	
+
 	for _, stmt := range statements {
 		for _, attr := range stmt.Attributes {
 			if len(attr.Values) > 0 {
@@ -556,7 +728,7 @@ func samlAttributesToMap(statements []samltypes.AttributeStatement) map[string]a
 			}
 		}
 	}
-	
+
 	return attributes
 }
 

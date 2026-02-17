@@ -26,9 +26,13 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		{
 			name: "valid config with static credentials",
 			config: model.OIDCRPConfig{
-				Enabled:            true,
-				ClientID:           "test-client",
-				ClientSecret:       "test-secret",
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						ClientID:     "test-client",
+						ClientSecret: "test-secret",
+					},
+				},
 				RedirectURI:        "https://example.com/callback",
 				IssuerURL:          "https://issuer.example.com",
 				Scopes:             []string{"openid", "profile"},
@@ -39,13 +43,13 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		{
 			name: "valid config with dynamic registration",
 			config: model.OIDCRPConfig{
-				Enabled:     true,
-				RedirectURI: "https://example.com/callback",
-				IssuerURL:   "https://issuer.example.com",
-				Scopes:      []string{"openid"},
-				DynamicRegistration: model.DynamicRegistrationConfig{
-					Enabled: true,
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Dynamic: &model.OIDCRPDynamicRegistrationConfig{},
 				},
+				RedirectURI:        "https://example.com/callback",
+				IssuerURL:          "https://issuer.example.com",
+				Scopes:             []string{"openid"},
 				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
 			},
 			expectError: false,
@@ -53,9 +57,13 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		{
 			name: "valid config with default scopes",
 			config: model.OIDCRPConfig{
-				Enabled:            true,
-				ClientID:           "test-client",
-				ClientSecret:       "test-secret",
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						ClientID:     "test-client",
+						ClientSecret: "test-secret",
+					},
+				},
 				RedirectURI:        "https://example.com/callback",
 				IssuerURL:          "https://issuer.example.com",
 				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
@@ -66,9 +74,13 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		{
 			name: "missing openid scope",
 			config: model.OIDCRPConfig{
-				Enabled:            true,
-				ClientID:           "test-client",
-				ClientSecret:       "test-secret",
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						ClientID:     "test-client",
+						ClientSecret: "test-secret",
+					},
+				},
 				RedirectURI:        "https://example.com/callback",
 				IssuerURL:          "https://issuer.example.com",
 				Scopes:             []string{"profile", "email"},
@@ -78,7 +90,7 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 			errorMsg:    "oidc_openid_scope_required",
 		},
 		{
-			name: "missing credentials without dynamic registration",
+			name: "no registration configured",
 			config: model.OIDCRPConfig{
 				Enabled:            true,
 				RedirectURI:        "https://example.com/callback",
@@ -87,33 +99,99 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
 			},
 			expectError: true,
-			errorMsg:    "oidc_credentials_required",
+			errorMsg:    "required_if",
 		},
 		{
-			name: "missing client_id only",
+			name: "both preconfigured and dynamic registration",
 			config: model.OIDCRPConfig{
-				Enabled:            true,
-				ClientSecret:       "test-secret",
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						ClientID:     "test-client",
+						ClientSecret: "test-secret",
+					},
+					Dynamic: &model.OIDCRPDynamicRegistrationConfig{},
+				},
 				RedirectURI:        "https://example.com/callback",
 				IssuerURL:          "https://issuer.example.com",
 				Scopes:             []string{"openid"},
 				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
 			},
 			expectError: true,
-			errorMsg:    "oidc_credentials_required",
+			errorMsg:    "excluded_with",
 		},
 		{
-			name: "missing client_secret only",
+			name: "both preconfigured and dynamic with initial access token",
 			config: model.OIDCRPConfig{
-				Enabled:            true,
-				ClientID:           "test-client",
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						ClientID:     "test-client",
+						ClientSecret: "test-secret",
+					},
+					Dynamic: &model.OIDCRPDynamicRegistrationConfig{
+						InitialAccessToken: "some-token",
+					},
+				},
 				RedirectURI:        "https://example.com/callback",
 				IssuerURL:          "https://issuer.example.com",
 				Scopes:             []string{"openid"},
 				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
 			},
 			expectError: true,
-			errorMsg:    "oidc_credentials_required",
+			errorMsg:    "excluded_with",
+		},
+		{
+			name: "dynamic with initial access token is valid",
+			config: model.OIDCRPConfig{
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Dynamic: &model.OIDCRPDynamicRegistrationConfig{
+						InitialAccessToken: "some-token",
+					},
+				},
+				RedirectURI:        "https://example.com/callback",
+				IssuerURL:          "https://issuer.example.com",
+				Scopes:             []string{"openid"},
+				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+			},
+			expectError: false,
+		},
+		{
+			name: "preconfigured missing client_id",
+			config: model.OIDCRPConfig{
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						Enabled:      true,
+						ClientSecret: "test-secret",
+					},
+				},
+				RedirectURI:        "https://example.com/callback",
+				IssuerURL:          "https://issuer.example.com",
+				Scopes:             []string{"openid"},
+				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+			},
+			expectError: true,
+			errorMsg:    "ClientID",
+		},
+		{
+			name: "preconfigured missing client_secret",
+			config: model.OIDCRPConfig{
+				Enabled: true,
+				Registration: &model.OIDCRPRegistrationConfig{
+					Preconfigured: &model.OIDCRPPreconfiguredConfig{
+						Enabled:  true,
+						ClientID: "test-client",
+					},
+				},
+				RedirectURI:        "https://example.com/callback",
+				IssuerURL:          "https://issuer.example.com",
+				Scopes:             []string{"openid"},
+				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+			},
+			expectError: true,
+			errorMsg:    "ClientSecret",
 		},
 	}
 
@@ -132,4 +210,85 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateOIDCRPRegistrationExclusion(t *testing.T) {
+	t.Run("excluded_with reports errors on both fields", func(t *testing.T) {
+		cfg := model.OIDCRPConfig{
+			Enabled: true,
+			Registration: &model.OIDCRPRegistrationConfig{
+				Preconfigured: &model.OIDCRPPreconfiguredConfig{
+					ClientID:     "test-client",
+					ClientSecret: "test-secret",
+				},
+				Dynamic: &model.OIDCRPDynamicRegistrationConfig{},
+			},
+			RedirectURI:        "https://example.com/callback",
+			IssuerURL:          "https://issuer.example.com",
+			Scopes:             []string{"openid"},
+			CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+		}
+		require.NoError(t, defaults.Set(&cfg))
+
+		err := CheckSimple(cfg)
+		require.Error(t, err)
+
+		errStr := err.Error()
+		assert.Contains(t, errStr, "Preconfigured")
+		assert.Contains(t, errStr, "Dynamic")
+		assert.Contains(t, errStr, "excluded_with")
+	})
+
+	t.Run("only preconfigured does not trigger exclusion", func(t *testing.T) {
+		cfg := model.OIDCRPConfig{
+			Enabled: true,
+			Registration: &model.OIDCRPRegistrationConfig{
+				Preconfigured: &model.OIDCRPPreconfiguredConfig{
+					ClientID:     "test-client",
+					ClientSecret: "test-secret",
+				},
+			},
+			RedirectURI:        "https://example.com/callback",
+			IssuerURL:          "https://issuer.example.com",
+			Scopes:             []string{"openid"},
+			CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+		}
+		require.NoError(t, defaults.Set(&cfg))
+
+		err := CheckSimple(cfg)
+		assert.NoError(t, err)
+	})
+
+	t.Run("only dynamic does not trigger exclusion", func(t *testing.T) {
+		cfg := model.OIDCRPConfig{
+			Enabled: true,
+			Registration: &model.OIDCRPRegistrationConfig{
+				Dynamic: &model.OIDCRPDynamicRegistrationConfig{},
+			},
+			RedirectURI:        "https://example.com/callback",
+			IssuerURL:          "https://issuer.example.com",
+			Scopes:             []string{"openid"},
+			CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+		}
+		require.NoError(t, defaults.Set(&cfg))
+
+		err := CheckSimple(cfg)
+		assert.NoError(t, err)
+	})
+
+	t.Run("neither set triggers registration required", func(t *testing.T) {
+		cfg := model.OIDCRPConfig{
+			Enabled:            true,
+			RedirectURI:        "https://example.com/callback",
+			IssuerURL:          "https://issuer.example.com",
+			Scopes:             []string{"openid"},
+			CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+		}
+		require.NoError(t, defaults.Set(&cfg))
+
+		err := CheckSimple(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required_if")
+		assert.NotContains(t, err.Error(), "excluded_with")
+	})
 }

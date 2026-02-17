@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"vc/pkg/logger"
@@ -190,22 +191,8 @@ func NewValidator() (*validator.Validate, error) {
 		}
 
 		// 'openid' scope is mandatory for OIDC
-		hasOpenID := false
-		for _, s := range cfg.Scopes {
-			if s == "openid" {
-				hasOpenID = true
-				break
-			}
-		}
-		if !hasOpenID {
+		if !slices.Contains(cfg.Scopes, "openid") {
 			sl.ReportError(cfg.Scopes, "Scopes", "Scopes", "oidc_openid_scope_required", "")
-		}
-
-		// Either static credentials or dynamic registration must be configured
-		if !cfg.DynamicRegistration.Enabled {
-			if cfg.ClientID == "" || cfg.ClientSecret == "" {
-				sl.ReportError(cfg.ClientID, "ClientID", "ClientID", "oidc_credentials_required", "")
-			}
 		}
 	}, model.OIDCRPConfig{})
 

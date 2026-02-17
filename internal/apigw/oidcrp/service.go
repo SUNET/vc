@@ -4,13 +4,16 @@ package oidcrp
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
+	"net/http"
 	"time"
 
+	"vc/internal/apigw/db"
+	pkgcache "vc/pkg/cache"
+	"vc/pkg/crypto"
 	"vc/pkg/logger"
 	"vc/pkg/model"
+	pkgoauth2 "vc/pkg/oauth2"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -22,25 +25,25 @@ type Service struct {
 	provider     *oidc.Provider
 	verifier     *oidc.IDTokenVerifier
 	oauth2Config *oauth2.Config
-	sessionStore *SessionStore
+	sessionCache pkgcache.Cache[*Session]
+	dbService    *db.Service
+	httpClient   *http.Client
 	log          *logger.Log
 }
 
 // New creates a new OIDC RP service
-func New(ctx context.Context, cfg *model.OIDCRPConfig, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cache[*Session], dbService *db.Service, log *logger.Log) (*Service, error) {
 	if !cfg.Enabled {
 		log.Info("OIDC RP support disabled")
 		return nil, nil
 	}
 
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid OIDC RP configuration: %w", err)
-	}
-
 	s := &Service{
-		cfg: cfg,
-		log: log.New("oidcrp"),
+		cfg:          cfg,
+		sessionCache: sessionCache,
+		dbService:    dbService,
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		log:          log.New("oidcrp"),
 	}
 
 	// Initialize OIDC Provider (performs discovery)
@@ -50,23 +53,27 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, log *logger.Log) (*Servic
 	}
 	s.provider = provider
 
-	// Handle dynamic client registration if enabled
-	clientID := cfg.ClientID
-	clientSecret := cfg.ClientSecret
+	// Resolve client credentials based on registration method
+	var clientID, clientSecret string
 
-	if cfg.DynamicRegistration.Enabled {
+	if cfg.Registration.Preconfigured != nil && cfg.Registration.Preconfigured.Enabled {
+		clientID = cfg.Registration.Preconfigured.ClientID
+		clientSecret = cfg.Registration.Preconfigured.ClientSecret
+	} else if cfg.Registration.Dynamic.Enabled {
 		log.Info("Dynamic client registration enabled, attempting registration")
 
-		// Check if we have cached credentials
-		cachedCreds, err := loadCachedCredentials(cfg.DynamicRegistration.StoragePath)
-		if err == nil && cachedCreds != nil {
-			log.Info("Using cached dynamic registration credentials", "client_id", cachedCreds.ClientID)
-			clientID = cachedCreds.ClientID
-			clientSecret = cachedCreds.ClientSecret
+		// Check if we have stored credentials
+		storedCreds, err := s.dbService.VCDynamicRegistrationColl.Get(ctx)
+		if err != nil {
+			log.Info("Failed to load dynamic registration credentials", "error", err)
+		}
+		if storedCreds != nil {
+			log.Info("Using stored dynamic registration credentials", "client_id", storedCreds.ClientID)
+			clientID = storedCreds.ClientID
+			clientSecret = storedCreds.ClientSecret
 		} else {
 			// Perform dynamic registration
-			regClient := NewDynamicRegistrationClient(log)
-			regReq := BuildRegistrationRequest(cfg)
+			regReq := s.buildRegistrationRequest()
 
 			// Get registration endpoint from provider metadata
 			var providerJSON struct {
@@ -80,7 +87,7 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, log *logger.Log) (*Servic
 				return nil, fmt.Errorf("OIDC provider does not support dynamic client registration (no registration_endpoint in metadata)")
 			}
 
-			regResp, err := regClient.Register(ctx, providerJSON.RegistrationEndpoint, regReq, cfg.DynamicRegistration.InitialAccessToken)
+			regResp, err := s.dynamicClientRegistration(ctx, providerJSON.RegistrationEndpoint, regReq, cfg.Registration.Dynamic.InitialAccessToken)
 			if err != nil {
 				return nil, fmt.Errorf("dynamic client registration failed: %w", err)
 			}
@@ -92,11 +99,15 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, log *logger.Log) (*Servic
 				"client_id", clientID,
 				"registration_access_token_present", regResp.RegistrationAccessToken != "")
 
-			// Cache credentials if storage path is provided
-			if cfg.DynamicRegistration.StoragePath != "" {
-				if err := saveCachedCredentials(cfg.DynamicRegistration.StoragePath, regResp); err != nil {
-					log.Info("Failed to cache dynamic registration credentials", "error", err)
-				}
+			// Persist credentials
+			if err := s.dbService.VCDynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
+				ClientID:                regResp.ClientID,
+				ClientSecret:            regResp.ClientSecret,
+				RegistrationAccessToken: regResp.RegistrationAccessToken,
+				RegistrationClientURI:   regResp.RegistrationClientURI,
+				ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
+			}); err != nil {
+				log.Info("Failed to persist dynamic registration credentials", "error", err)
 			}
 		}
 	}
@@ -115,18 +126,11 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, log *logger.Log) (*Servic
 		Scopes:       cfg.Scopes,
 	}
 
-	// Initialize session store
-	sessionDuration := time.Duration(cfg.SessionDuration) * time.Second
-	if sessionDuration == 0 {
-		sessionDuration = 3600 * time.Second // Default 1 hour
-	}
-	s.sessionStore = NewSessionStore(sessionDuration, s.log)
-
 	s.log.Info("OIDC RP service initialized",
 		"issuer", cfg.IssuerURL,
 		"client_id", clientID,
 		"redirect_uri", cfg.RedirectURI,
-		"dynamic_registration", cfg.DynamicRegistration.Enabled)
+		"dynamic_registration", cfg.Registration.Dynamic.Enabled)
 
 	return s, nil
 }
@@ -150,13 +154,13 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 		"credential_config_id", credMapping.CredentialConfigID)
 
 	// Create session with state, nonce, and PKCE verifier
-	session, err := s.sessionStore.Create(credentialType, s.cfg.IssuerURL)
+	session, err := s.createSession(ctx, credentialType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
 	// Generate PKCE code_challenge from code_verifier
-	codeChallenge := generateCodeChallenge(session.CodeVerifier)
+	codeChallenge := pkgoauth2.CreateCodeChallenge(pkgoauth2.CodeChallengeMethodS256, session.CodeVerifier)
 
 	// Build authorization URL with PKCE
 	authURL := s.oauth2Config.AuthCodeURL(
@@ -188,7 +192,7 @@ type AuthResponse struct {
 // ProcessCallback processes the OIDC provider callback
 func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*AuthResponse, error) {
 	// Retrieve and validate session
-	session, err := s.sessionStore.Get(state)
+	session, err := s.getSession(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("invalid or expired session: %w", err)
 	}
@@ -200,32 +204,32 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 		oauth2.SetAuthURLParam("code_verifier", session.CodeVerifier),
 	)
 	if err != nil {
-		s.sessionStore.Delete(state)
+		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("failed to exchange authorization code: %w", err)
 	}
 
 	// Extract and verify ID token
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		s.sessionStore.Delete(state)
+		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("no id_token in token response")
 	}
 
 	idToken, err := s.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		s.sessionStore.Delete(state)
+		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("failed to verify ID token: %w", err)
 	}
 
 	// Verify nonce
 	var claims map[string]any
 	if err := idToken.Claims(&claims); err != nil {
-		s.sessionStore.Delete(state)
+		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("failed to parse ID token claims: %w", err)
 	}
 
 	if nonce, ok := claims["nonce"].(string); !ok || nonce != session.Nonce {
-		s.sessionStore.Delete(state)
+		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("nonce mismatch")
 	}
 
@@ -243,13 +247,13 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 }
 
 // GetSession retrieves a session by state
-func (s *Service) GetSession(state string) (*Session, error) {
-	return s.sessionStore.Get(state)
+func (s *Service) GetSession(ctx context.Context, state string) (*Session, error) {
+	return s.getSession(ctx, state)
 }
 
 // DeleteSession removes a session
-func (s *Service) DeleteSession(state string) {
-	s.sessionStore.Delete(state)
+func (s *Service) DeleteSession(ctx context.Context, state string) {
+	s.deleteSession(ctx, state)
 }
 
 // BuildTransformer creates a claim transformer from the configuration
@@ -267,11 +271,59 @@ func (s *Service) BuildTransformer() (*ClaimTransformer, error) {
 	}, nil
 }
 
-// generateCodeChallenge generates PKCE code_challenge from code_verifier
-func generateCodeChallenge(verifier string) string {
-	h := sha256.New()
-	h.Write([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+// createSession creates a new session with generated state, nonce, and PKCE code_verifier.
+func (s *Service) createSession(ctx context.Context, credentialType string) (*Session, error) {
+	state, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate state: %w", err)
+	}
+
+	nonce, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	codeVerifier, err := pkgoauth2.CreateCodeVerifier()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate code_verifier: %w", err)
+	}
+
+	now := time.Now()
+	session := &Session{
+		ID:             state,
+		State:          state,
+		Nonce:          nonce,
+		CodeVerifier:   codeVerifier,
+		CredentialType: credentialType,
+		IssuerURL:      s.cfg.IssuerURL,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Duration(s.cfg.SessionDuration) * time.Second),
+	}
+
+	s.sessionCache.Set(ctx, session.ID, session)
+
+	s.log.Debug("session created",
+		"session_id", session.ID,
+		"credential_type", credentialType,
+		"issuer", s.cfg.IssuerURL)
+
+	return session, nil
+}
+
+// getSession retrieves a session by state parameter.
+func (s *Service) getSession(ctx context.Context, state string) (*Session, error) {
+	session, ok := s.sessionCache.Get(ctx, state)
+	if !ok || session == nil {
+		return nil, fmt.Errorf("session not found or expired for state: %s", state)
+	}
+
+	return session, nil
+}
+
+// deleteSession removes a session.
+func (s *Service) deleteSession(ctx context.Context, state string) {
+	s.sessionCache.Delete(ctx, state)
+	s.log.Debug("session deleted", "state", state)
 }
 
 // GetUserInfo fetches additional claims from the UserInfo endpoint

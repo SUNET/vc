@@ -105,14 +105,6 @@ func TestOIDCRPConfigDefaults(t *testing.T) {
 	assert.Equal(t, []string{"openid", "profile", "email"}, cfg.Scopes)
 }
 
-func TestDynamicRegistrationConfigDefaults(t *testing.T) {
-	var cfg DynamicRegistrationConfig
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.False(t, cfg.Enabled)
-}
-
 func TestAttributeConfigDefaults(t *testing.T) {
 	var cfg AttributeConfig
 	err := defaults.Set(&cfg)

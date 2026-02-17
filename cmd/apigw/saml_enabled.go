@@ -4,22 +4,23 @@ package main
 
 import (
 	"context"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/httpserver"
+	"vc/internal/apigw/samlsp"
 	"vc/pkg/logger"
 	"vc/pkg/model"
-	"vc/pkg/saml"
 )
 
-func initSAMLService(ctx context.Context, cfg *model.Cfg, log *logger.Log) (httpserver.SAMLService, error) {
+func initSAMLSPService(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, log *logger.Log) (httpserver.SAMLSPService, error) {
 	if !cfg.APIGW.SAML.Enabled {
 		return nil, nil
 	}
 
-	samlService, err := saml.New(ctx, &cfg.APIGW.SAML, log)
+	samlSPService, err := samlsp.New(ctx, &cfg.APIGW.SAML, cacheService.SAMLSession, log)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Info("SAML service initialized", "entity_id", cfg.APIGW.SAML.EntityID)
-	return samlService, nil
+	return samlSPService, nil
 }

@@ -77,7 +77,7 @@ func main() {
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, log)
+	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)

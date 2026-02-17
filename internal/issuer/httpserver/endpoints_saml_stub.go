@@ -9,7 +9,7 @@ import (
 )
 
 // Stub SAML endpoint implementations when SAML is not compiled in
-// These functions will never be called because s.samlService will be nil,
+// These functions will never be called because s.samlSPService will be nil,
 // but they satisfy the compiler
 
 func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any, error) {

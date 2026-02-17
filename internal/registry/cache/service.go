@@ -25,6 +25,11 @@ type Service struct {
 
 	JWT Cache[string]
 	CWT Cache[[]byte]
+
+	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
+	SessionAuthKey string
+	// SessionEncKey is the AES encryption key for session cookies, shared across HA instances.
+	SessionEncKey string
 }
 
 // New creates the registry cache service and initialises all caches.
@@ -51,6 +56,14 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 	if s.CWT, err = pkgcache.NewGenericCache[[]byte](cs, ctx, "tsl_cwt", tokenValidity); err != nil {
 		return nil, fmt.Errorf("cache: cwt: %w", err)
 	}
+
+	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).
+	sharedSecrets, err := pkgcache.EnsureSharedSecrets(ctx, cs, "registry")
+	if err != nil {
+		return nil, fmt.Errorf("cache: shared_secrets: %w", err)
+	}
+	s.SessionAuthKey = sharedSecrets.SessionAuthKey
+	s.SessionEncKey = sharedSecrets.SessionEncKey
 
 	return s, nil
 }

@@ -20,18 +20,19 @@ apigw:
       users:
         admin: "secret-admin-pass"
   oidcrp:
-    client_secret: "secret-client-secret"
+    registration:
+      preconfigured:
+        client_secret: "secret-client-secret"
+      dynamic:
+        initial_access_token: "secret-initial-token"
 registry:
   admin_gui:
     password: "secret-registry-pass"
-    session_secret: "secret-session-value"
 verifier:
   oidc:
     subject_salt: "secret-salt-value"
 ui:
   password: "secret-ui-pass"
-  session_cookie_authentication_key: "secret-cookie-key"
-  session_store_encryption_key: "secret-encryption-key"
 `
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
@@ -47,12 +48,14 @@ ui:
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)
 	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.BasicAuth.Users["admin"])
-	assert.Equal(t, "secret-client-secret", secrets.APIGW.OIDCRP.ClientSecret)
+	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Preconfigured)
+	assert.Equal(t, "secret-client-secret", secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
+	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Dynamic)
+	assert.Equal(t, "secret-initial-token", secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
 
 	// Verify Registry secrets
 	require.NotNil(t, secrets.Registry)
 	assert.Equal(t, "secret-registry-pass", secrets.Registry.AdminGUI.Password)
-	assert.Equal(t, "secret-session-value", secrets.Registry.AdminGUI.SessionSecret)
 
 	// Verify Verifier secrets
 	require.NotNil(t, secrets.Verifier)
@@ -61,8 +64,6 @@ ui:
 	// Verify UI secrets
 	require.NotNil(t, secrets.UI)
 	assert.Equal(t, "secret-ui-pass", secrets.UI.Password)
-	assert.Equal(t, "secret-cookie-key", secrets.UI.SessionCookieAuthenticationKey)
-	assert.Equal(t, "secret-encryption-key", secrets.UI.SessionStoreEncryptionKey)
 }
 
 func TestLoadSecrets_FileNotFound(t *testing.T) {

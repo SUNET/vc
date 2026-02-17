@@ -40,7 +40,23 @@ type BasicAuthSecrets struct {
 
 // OIDCRPSecrets holds OIDC Relying Party secrets
 type OIDCRPSecrets struct {
+	Registration OIDCRPRegistrationSecrets `yaml:"registration,omitempty"`
+}
+
+// OIDCRPRegistrationSecrets holds registration secrets
+type OIDCRPRegistrationSecrets struct {
+	Preconfigured *OIDCRPPreconfiguredSecrets `yaml:"preconfigured,omitempty"`
+	Dynamic       *OIDCRPDynamicSecrets        `yaml:"dynamic,omitempty"`
+}
+
+// OIDCRPPreconfiguredSecrets holds pre-registered client secrets
+type OIDCRPPreconfiguredSecrets struct {
 	ClientSecret string `yaml:"client_secret"`
+}
+
+// OIDCRPDynamicSecrets holds dynamic registration secrets
+type OIDCRPDynamicSecrets struct {
+	InitialAccessToken string `yaml:"initial_access_token"`
 }
 
 // RegistrySecrets holds registry secrets
@@ -50,8 +66,7 @@ type RegistrySecrets struct {
 
 // AdminGUISecrets holds admin GUI secrets
 type AdminGUISecrets struct {
-	Password      string `yaml:"password"`
-	SessionSecret string `yaml:"session_secret"`
+	Password string `yaml:"password"`
 }
 
 // VerifierSecrets holds verifier secrets
@@ -66,9 +81,7 @@ type OIDCSecrets struct {
 
 // UISecrets holds UI secrets
 type UISecrets struct {
-	Password                       string `yaml:"password"`
-	SessionCookieAuthenticationKey string `yaml:"session_cookie_authentication_key"`
-	SessionStoreEncryptionKey      string `yaml:"session_store_encryption_key"`
+	Password string `yaml:"password"`
 }
 
 // ClearSecrets zeroes out all secret fields in the main config.
@@ -80,12 +93,16 @@ func (cfg *Cfg) ClearSecrets() {
 
 	if cfg.APIGW != nil {
 		cfg.APIGW.APIServer.BasicAuth.Users = nil
-		cfg.APIGW.OIDCRP.ClientSecret = ""
+		if cfg.APIGW.OIDCRP.Registration != nil && cfg.APIGW.OIDCRP.Registration.Preconfigured != nil {
+			cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret = ""
+		}
+		if cfg.APIGW.OIDCRP.Registration != nil && cfg.APIGW.OIDCRP.Registration.Dynamic != nil {
+			cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken = ""
+		}
 	}
 
 	if cfg.Registry != nil {
 		cfg.Registry.AdminGUI.Password = ""
-		cfg.Registry.AdminGUI.SessionSecret = ""
 	}
 
 	if cfg.Verifier != nil {
@@ -94,8 +111,6 @@ func (cfg *Cfg) ClearSecrets() {
 
 	if cfg.UI != nil {
 		cfg.UI.Password = ""
-		cfg.UI.SessionCookieAuthenticationKey = ""
-		cfg.UI.SessionStoreEncryptionKey = ""
 	}
 }
 
@@ -122,8 +137,23 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if len(secrets.APIGW.APIServer.BasicAuth.Users) > 0 {
 			cfg.APIGW.APIServer.BasicAuth.Users = secrets.APIGW.APIServer.BasicAuth.Users
 		}
-		if secrets.APIGW.OIDCRP.ClientSecret != "" {
-			cfg.APIGW.OIDCRP.ClientSecret = secrets.APIGW.OIDCRP.ClientSecret
+		if secrets.APIGW.OIDCRP.Registration.Preconfigured != nil && secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret != "" {
+			if cfg.APIGW.OIDCRP.Registration == nil {
+				cfg.APIGW.OIDCRP.Registration = &OIDCRPRegistrationConfig{}
+			}
+			if cfg.APIGW.OIDCRP.Registration.Preconfigured == nil {
+				cfg.APIGW.OIDCRP.Registration.Preconfigured = &OIDCRPPreconfiguredConfig{}
+			}
+			cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret = secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret
+		}
+		if secrets.APIGW.OIDCRP.Registration.Dynamic != nil && secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken != "" {
+			if cfg.APIGW.OIDCRP.Registration == nil {
+				cfg.APIGW.OIDCRP.Registration = &OIDCRPRegistrationConfig{}
+			}
+			if cfg.APIGW.OIDCRP.Registration.Dynamic == nil {
+				cfg.APIGW.OIDCRP.Registration.Dynamic = &OIDCRPDynamicRegistrationConfig{}
+			}
+			cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken = secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken
 		}
 	}
 
@@ -133,9 +163,6 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		}
 		if secrets.Registry.AdminGUI.Password != "" {
 			cfg.Registry.AdminGUI.Password = secrets.Registry.AdminGUI.Password
-		}
-		if secrets.Registry.AdminGUI.SessionSecret != "" {
-			cfg.Registry.AdminGUI.SessionSecret = secrets.Registry.AdminGUI.SessionSecret
 		}
 	}
 
@@ -154,12 +181,6 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		}
 		if secrets.UI.Password != "" {
 			cfg.UI.Password = secrets.UI.Password
-		}
-		if secrets.UI.SessionCookieAuthenticationKey != "" {
-			cfg.UI.SessionCookieAuthenticationKey = secrets.UI.SessionCookieAuthenticationKey
-		}
-		if secrets.UI.SessionStoreEncryptionKey != "" {
-			cfg.UI.SessionStoreEncryptionKey = secrets.UI.SessionStoreEncryptionKey
 		}
 	}
 }

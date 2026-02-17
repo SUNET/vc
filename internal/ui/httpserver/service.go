@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 	"vc/internal/ui/apiv1"
+	"vc/internal/ui/cache"
 	"vc/pkg/httphelpers"
 	"vc/pkg/trace"
 
@@ -24,6 +25,7 @@ type Service struct {
 	gin           *gin.Engine
 	sessionConfig *sessionConfig
 	httpHelpers   *httphelpers.Client
+	cacheService  *cache.Service
 }
 
 // sessionConfig... values is also used for the session cookie
@@ -40,7 +42,7 @@ type sessionConfig struct {
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	s := &Service{
 		cfg:    cfg,
 		log:    log.New("httpserver"),
@@ -50,6 +52,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		server: &http.Server{
 			ReadHeaderTimeout: 3 * time.Second,
 		},
+		cacheService: cacheService,
 		sessionConfig: &sessionConfig{
 			name:                       "vc_ui_auth_session",
 			inactivityTimeoutInSeconds: cfg.UI.SessionInactivityTimeoutInSeconds,

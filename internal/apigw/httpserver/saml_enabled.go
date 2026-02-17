@@ -3,8 +3,8 @@
 package httpserver
 
 import (
-	"vc/pkg/saml"
+	"vc/internal/apigw/samlsp"
 )
 
-// SAMLService is the actual SAML service when SAML is enabled
-type SAMLService = *saml.Service
+// SAMLSPService is the actual SAML service when SAML is enabled
+type SAMLSPService = *samlsp.Service

@@ -31,12 +31,12 @@ func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLMetadata")
 	defer span.End()
 
-	if s.samlService == nil {
+	if s.samlSPService == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
 
-	metadata, err := s.samlService.GetSPMetadata(ctx)
+	metadata, err := s.samlSPService.GetSPMetadata(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -76,7 +76,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLInitiate")
 	defer span.End()
 
-	if s.samlService == nil {
+	if s.samlSPService == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
@@ -87,7 +87,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 		return nil, err
 	}
 
-	authReq, err := s.samlService.InitiateAuth(ctx, req.IDPEntityID, req.CredentialType)
+	authReq, err := s.samlSPService.InitiateAuth(ctx, req.IDPEntityID, req.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -117,7 +117,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLACS")
 	defer span.End()
 
-	if s.samlService == nil {
+	if s.samlSPService == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
@@ -139,21 +139,21 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	relayState := c.PostForm("RelayState")
 
 	// Process the SAML assertion
-	assertion, err := s.samlService.ProcessAssertion(ctx, string(samlResponseXML), relayState)
+	assertion, err := s.samlSPService.ProcessAssertion(ctx, string(samlResponseXML), relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
 	// Retrieve session to get credential type
-	session, err := s.samlService.GetSession(relayState)
+	session, err := s.samlSPService.GetSession(ctx, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
 
 	// Build transformer from config
-	transformer, err := s.samlService.BuildTransformer()
+	transformer, err := s.samlSPService.BuildTransformer()
 	if err != nil {
 		span.SetStatus(codes.Error, "transformer creation failed")
 		return nil, fmt.Errorf("failed to create transformer: %w", err)

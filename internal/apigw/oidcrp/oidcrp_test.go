@@ -3,9 +3,11 @@
 package oidcrp
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -13,10 +15,15 @@ import (
 // TestSessionStore tests the session store functionality
 func TestSessionStore(t *testing.T) {
 	log := logger.NewSimple("test")
-	store := NewSessionStore(1*time.Hour, log)
+	ctx := context.Background()
+	svc := &Service{
+		cfg:          &model.OIDCRPConfig{IssuerURL: "https://accounts.google.com", SessionDuration: 300},
+		sessionCache: cache.NewMemoryCache[*Session](5 * time.Minute),
+		log:          log,
+	}
 
 	// Test session creation
-	session, err := store.Create("pid", "https://accounts.google.com")
+	session, err := svc.createSession(ctx, "pid")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -26,7 +33,7 @@ func TestSessionStore(t *testing.T) {
 	}
 
 	// Test session retrieval
-	retrieved, err := store.Get(session.State)
+	retrieved, err := svc.getSession(ctx, session.State)
 	if err != nil {
 		t.Fatalf("Failed to retrieve session: %v", err)
 	}
@@ -40,9 +47,9 @@ func TestSessionStore(t *testing.T) {
 	}
 
 	// Test session deletion
-	store.Delete(session.State)
+	svc.deleteSession(ctx, session.State)
 
-	_, err = store.Get(session.State)
+	_, err = svc.getSession(ctx, session.State)
 	if err == nil {
 		t.Error("Expected error when retrieving deleted session")
 	}
@@ -51,11 +58,15 @@ func TestSessionStore(t *testing.T) {
 // TestSessionExpiration tests that expired sessions are removed
 func TestSessionExpiration(t *testing.T) {
 	log := logger.NewSimple("test")
-	// Create store with very short duration
-	store := NewSessionStore(1*time.Millisecond, log)
+	ctx := context.Background()
+	svc := &Service{
+		cfg:          &model.OIDCRPConfig{IssuerURL: "https://accounts.google.com", SessionDuration: 1},
+		sessionCache: cache.NewMemoryCache[*Session](1 * time.Millisecond),
+		log:          log,
+	}
 
 	// Create a session
-	session, err := store.Create("pid", "https://accounts.google.com")
+	session, err := svc.createSession(ctx, "pid")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -64,10 +75,8 @@ func TestSessionExpiration(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Try to get expired session - should fail
-	_, err = store.Get(session.State)
+	_, err = svc.getSession(ctx, session.State)
 	if err == nil {
-		// The cleanup goroutine runs every 5 minutes, so the session might still be there
-		// This is acceptable behavior - sessions are expired but cleanup is periodic
 		t.Log("Session still exists (cleanup hasn't run yet - expected behavior)")
 	}
 }
@@ -227,20 +236,6 @@ func TestServiceInitialization(t *testing.T) {
 	// This test requires a real OIDC provider or mock, so we skip in unit tests
 	// Integration tests with a mock provider should be in internal/apigw/integration/
 	t.Skip("Requires OIDC provider - see integration tests")
-}
-
-// BenchmarkSessionStoreCreate benchmarks session creation
-func BenchmarkSessionStoreCreate(b *testing.B) {
-	log := logger.NewSimple("benchmark")
-	store := NewSessionStore(1*time.Hour, log)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := store.Create("pid", "https://accounts.google.com")
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
 }
 
 // BenchmarkClaimTransform benchmarks claim transformation

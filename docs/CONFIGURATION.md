@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-02-13
+**Generated:** 2026-02-17
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -300,7 +300,7 @@ Supports both file-based and HSM-based keys with explicit control.
 | `certificate_path`    | `string` | Path to X.509 certificate for SAML signing/encryption                                 | -                                                   | -       | Yes (if enabled = true) |
 | `private_key_path`    | `string` | Path to private key for SAML signing/encryption                                       | -                                                   | -       | Yes (if enabled = true) |
 | `acs_endpoint`        | `string` | Assertion Consumer Service URL where IdP sends SAML responses                         | `"https://issuer.sunet.se/saml/acs"`                | -       | Yes (if enabled = true) |
-| `session_duration`    | `int`    | SessionDuration in seconds (default: 3600)                                            | -                                                   | -       | No                      |
+| `session_duration`    | `int`    | Maximum time in seconds an in-flight SAML authentication flow                         | -                                                   | `300`   | No                      |
 | `credential_mappings` | `object` | How to map external attributes to credential claims                                   | -                                                   | -       | Yes (if enabled = true) |
 | `metadata_cache_ttl`  | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ | -                                                   | -       | No                      |
 
@@ -343,33 +343,54 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.oidcrp`
 
-| Field                  | Type       | Description                                                           | Example                                     | Default                          | Required                |
-| ---------------------- | ---------- | --------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | ----------------------- |
-| `enabled`              | `bool`     | OIDC RP support (default: false)                                      | -                                           | `false`                          | No                      |
-| `dynamic_registration` | `object`   | Dynamic Registration (RFC 7591) support                               | -                                           | -                                | No                      |
-| `client_id`            | `string`   | OIDC client identifier (required if not using dynamic registration)   | -                                           | -                                | No                      |
-| `client_secret`        | `string`   | OIDC client secret (required if not using dynamic registration)       | -                                           | -                                | No                      |
-| `redirect_uri`         | `string`   | Callback URL where the OIDC Provider sends the authorization response | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled = true) |
-| `issuer_url`           | `string`   | OIDC Provider's issuer URL for discovery                              | `"https://accounts.google.com"`             | -                                | Yes (if enabled = true) |
-| `scopes`               | `[]string` | OAuth2/OIDC scopes to request                                         | -                                           | `["openid", "profile", "email"]` | No                      |
-| `session_duration`     | `int`      | SessionDuration in seconds (default: 3600)                            | -                                           | `3600`                           | No                      |
-| `client_name`          | `string`   | Client metadata for dynamic registration or display purposes          | -                                           | -                                | No                      |
-| `client_uri`           | `string`   | Client URI                                                            | -                                           | -                                | No                      |
-| `logo_uri`             | `string`   | Logo URI                                                              | -                                           | -                                | No                      |
-| `contacts`             | `[]string` | Contacts                                                              | -                                           | -                                | No                      |
-| `tos_uri`              | `string`   | Tos URI                                                               | -                                           | -                                | No                      |
-| `policy_uri`           | `string`   | Policy URI                                                            | -                                           | -                                | No                      |
-| `credential_mappings`  | `object`   | How to map OIDC claims to credential claims                           | -                                           | -                                | Yes (if enabled = true) |
+| Field                 | Type       | Description                                                                   | Example                                     | Default                          | Required                |
+| --------------------- | ---------- | ----------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | ----------------------- |
+| `enabled`             | `bool`     | OIDC RP support (default: false)                                              | -                                           | `false`                          | No                      |
+| `registration`        | `object`   | How the client obtains credentials from the OIDC Provider.                    | -                                           | -                                | Yes (if enabled = true) |
+| `redirect_uri`        | `string`   | Callback URL where the OIDC Provider sends the authorization response         | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled = true) |
+| `issuer_url`          | `string`   | OIDC Provider's issuer URL for discovery                                      | `"https://accounts.google.com"`             | -                                | Yes (if enabled = true) |
+| `scopes`              | `[]string` | OAuth2/OIDC scopes to request (at least one scope is required, e.g. "openid") | -                                           | `["openid", "profile", "email"]` | No                      |
+| `session_duration`    | `int`      | Maximum time in seconds an in-flight OIDC authorization flow                  | -                                           | `300`                            | No                      |
+| `client_name`         | `string`   | Client metadata for dynamic registration or display purposes                  | -                                           | -                                | No                      |
+| `client_uri`          | `string`   | Client URI                                                                    | -                                           | -                                | No                      |
+| `logo_uri`            | `string`   | Logo URI                                                                      | -                                           | -                                | No                      |
+| `contacts`            | `[]string` | Contacts                                                                      | -                                           | -                                | No                      |
+| `tos_uri`             | `string`   | Tos URI                                                                       | -                                           | -                                | No                      |
+| `policy_uri`          | `string`   | Policy URI                                                                    | -                                           | -                                | No                      |
+| `credential_mappings` | `object`   | How to map OIDC claims to credential claims                                   | -                                           | -                                | Yes (if enabled = true) |
 
-### `dynamic_registration`
+### `registration`
 
-> **Path:** `.apigw.oidcrp.dynamic_registration`
+> **Path:** `.apigw.oidcrp.registration`
 
-| Field                  | Type     | Description                                    | Example                                  | Default | Required |
-| ---------------------- | -------- | ---------------------------------------------- | ---------------------------------------- | ------- | -------- |
-| `enabled`              | `bool`   | Dynamic client registration                    | -                                        | `false` | No       |
-| `initial_access_token` | `string` | Optional bearer token for registration         | -                                        | -       | No       |
-| `storage_path`         | `string` | Where registered client credentials are cached | `"/var/lib/vc/oidcrp-registration.json"` | -       | No       |
+Exactly one of Preconfigured or Dynamic must be set.
+
+| Field           | Type     | Description                                           | Example | Default | Required                       |
+| --------------- | -------- | ----------------------------------------------------- | ------- | ------- | ------------------------------ |
+| `preconfigured` | `object` | Preconfigured uses pre-registered client credentials. | -       | -       | Yes (if dynamic not set)       |
+| `dynamic`       | `object` | Dynamic uses RFC 7591 dynamic client registration.    | -       | -       | Yes (if preconfigured not set) |
+
+### `preconfigured`
+
+> **Path:** `.apigw.oidcrp.registration.preconfigured`
+
+| Field           | Type     | Description                                        | Example | Default | Required                |
+| --------------- | -------- | -------------------------------------------------- | ------- | ------- | ----------------------- |
+| `enabled`       | `bool`   | Enabled activates preconfigured client credentials | -       | -       | No                      |
+| `client_id`     | `string` | OIDC client identifier                             | -       | -       | Yes (if enabled = true) |
+| `client_secret` | `string` | OIDC client secret                                 | -       | -       | Yes (if enabled = true) |
+
+### `dynamic`
+
+> **Path:** `.apigw.oidcrp.registration.dynamic`
+
+When set, client credentials are obtained automatically at startup and
+persisted in the database.
+
+| Field                  | Type     | Description                                   | Example | Default | Required                |
+| ---------------------- | -------- | --------------------------------------------- | ------- | ------- | ----------------------- |
+| `enabled`              | `bool`   | Enabled activates dynamic client registration | -       | -       | No                      |
+| `initial_access_token` | `string` | Bearer token for registration                 | -       | -       | Yes (if enabled = true) |
 
 ### `issuer_client`
 
@@ -664,12 +685,11 @@ Configuration for the Registry service that manages credential status.
 
 > **Path:** `.registry.admin_gui`
 
-| Field            | Type     | Description                | Example | Default | Required                |
-| ---------------- | -------- | -------------------------- | ------- | ------- | ----------------------- |
-| `enabled`        | `bool`   | The admin GUI              | -       | `true`  | No                      |
-| `username`       | `string` | Admin username             | -       | `admin` | No                      |
-| `password`       | `string` | Admin password             | -       | -       | Yes (if enabled = true) |
-| `session_secret` | `string` | Secret for session cookies | -       | -       | Yes (if enabled = true) |
+| Field      | Type     | Description    | Example | Default | Required                |
+| ---------- | -------- | -------------- | ------- | ------- | ----------------------- |
+| `enabled`  | `bool`   | The admin GUI  | -       | `true`  | No                      |
+| `username` | `string` | Admin username | -       | `admin` | No                      |
+| `password` | `string` | Admin password | -       | -       | Yes (if enabled = true) |
 
 ## `mock_as` (Top-level)
 
@@ -698,8 +718,6 @@ Configuration for the User Interface service.
 | `api_server`                            | `object` | HTTP API server configuration         | -       | -       | Yes      |
 | `username`                              | `string` | UI login username                     | -       | -       | Yes      |
 | `password`                              | `string` | UI login password                     | -       | -       | Yes      |
-| `session_cookie_authentication_key`     | `string` | Session cookie HMAC key               | -       | -       | Yes      |
-| `session_store_encryption_key`          | `string` | Session cookie encryption key         | -       | -       | Yes      |
 | `session_inactivity_timeout_in_seconds` | `int`    | Session inactivity timeout in seconds | -       | -       | Yes      |
 | `services`                              | `object` | Services                              | -       | -       | No       |
 
@@ -815,9 +833,34 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.apigw.oidcrp`
 
+| Field          | Type     | Description  | Example | Default | Required |
+| -------------- | -------- | ------------ | ------- | ------- | -------- |
+| `registration` | `object` | Registration | -       | -       | No       |
+
+### `registration`
+
+> **Path:** `.apigw.oidcrp.registration`
+
+| Field           | Type     | Description   | Example | Default | Required |
+| --------------- | -------- | ------------- | ------- | ------- | -------- |
+| `preconfigured` | `object` | Preconfigured | -       | -       | No       |
+| `dynamic`       | `object` | Dynamic       | -       | -       | No       |
+
+### `preconfigured`
+
+> **Path:** `.apigw.oidcrp.registration.preconfigured`
+
 | Field           | Type     | Description   | Example | Default | Required |
 | --------------- | -------- | ------------- | ------- | ------- | -------- |
 | `client_secret` | `string` | Client Secret | -       | -       | No       |
+
+### `dynamic`
+
+> **Path:** `.apigw.oidcrp.registration.dynamic`
+
+| Field                  | Type     | Description          | Example | Default | Required |
+| ---------------------- | -------- | -------------------- | ------- | ------- | -------- |
+| `initial_access_token` | `string` | Initial Access Token | -       | -       | No       |
 
 ### `registry`
 
@@ -831,10 +874,9 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.registry.admin_gui`
 
-| Field            | Type     | Description    | Example | Default | Required |
-| ---------------- | -------- | -------------- | ------- | ------- | -------- |
-| `password`       | `string` | Password       | -       | -       | No       |
-| `session_secret` | `string` | Session Secret | -       | -       | No       |
+| Field      | Type     | Description | Example | Default | Required |
+| ---------- | -------- | ----------- | ------- | ------- | -------- |
+| `password` | `string` | Password    | -       | -       | No       |
 
 ### `verifier`
 
@@ -856,11 +898,9 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.ui`
 
-| Field                               | Type     | Description                       | Example | Default | Required |
-| ----------------------------------- | -------- | --------------------------------- | ------- | ------- | -------- |
-| `password`                          | `string` | Password                          | -       | -       | No       |
-| `session_cookie_authentication_key` | `string` | Session Cookie Authentication Key | -       | -       | No       |
-| `session_store_encryption_key`      | `string` | Session Store Encryption Key      | -       | -       | No       |
+| Field      | Type     | Description | Example | Default | Required |
+| ---------- | -------- | ----------- | ------- | ------- | -------- |
+| `password` | `string` | Password    | -       | -       | No       |
 
 ### Example `secrets.yaml`
 
@@ -876,18 +916,19 @@ apigw:
       users:
         <username>: "<password>"
   oidcrp:
-    client_secret: "your-oidc-client-secret"
+    registration:
+      preconfigured:
+        client_secret: "your-oidc-client-secret"
+      dynamic:
+        initial_access_token: "<secret-value>"
 registry:
   admin_gui:
     password: "change-me-in-production"
-    session_secret: "random-32-byte-secret"
 verifier:
   oidc:
     subject_salt: "random-salt-for-pairwise-subjects"
 ui:
   password: "change-me-in-production"
-  session_cookie_authentication_key: "64-char-hex-hmac-key"
-  session_store_encryption_key: "32-char-hex-encryption-key"
 ```
 
 

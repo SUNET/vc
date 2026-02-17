@@ -13,18 +13,20 @@ import (
 )
 
 func TestBuildRegistrationRequest(t *testing.T) {
-	cfg := &model.OIDCRPConfig{
-		RedirectURI: "https://example.com/callback",
-		ClientName:  "Test Client",
-		ClientURI:   "https://example.com",
-		LogoURI:     "https://example.com/logo.png",
-		Contacts:    []string{"admin@example.com"},
-		TosURI:      "https://example.com/tos",
-		PolicyURI:   "https://example.com/policy",
-		Scopes:      []string{"openid", "profile", "email"},
+	s := &Service{
+		cfg: &model.OIDCRPConfig{
+			RedirectURI: "https://example.com/callback",
+			ClientName:  "Test Client",
+			ClientURI:   "https://example.com",
+			LogoURI:     "https://example.com/logo.png",
+			Contacts:    []string{"admin@example.com"},
+			TosURI:      "https://example.com/tos",
+			PolicyURI:   "https://example.com/policy",
+			Scopes:      []string{"openid", "profile", "email"},
+		},
 	}
 
-	req := BuildRegistrationRequest(cfg)
+	req := s.buildRegistrationRequest()
 
 	if req.RedirectURIs[0] != "https://example.com/callback" {
 		t.Errorf("Expected redirect_uri https://example.com/callback, got %s", req.RedirectURIs[0])
@@ -60,12 +62,14 @@ func TestBuildRegistrationRequest(t *testing.T) {
 }
 
 func TestBuildRegistrationRequest_MinimalConfig(t *testing.T) {
-	cfg := &model.OIDCRPConfig{
-		RedirectURI: "https://example.com/callback",
-		Scopes:      []string{"openid"},
+	s := &Service{
+		cfg: &model.OIDCRPConfig{
+			RedirectURI: "https://example.com/callback",
+			Scopes:      []string{"openid"},
+		},
 	}
 
-	req := BuildRegistrationRequest(cfg)
+	req := s.buildRegistrationRequest()
 
 	if len(req.RedirectURIs) != 1 {
 		t.Errorf("Expected 1 redirect_uri, got %d", len(req.RedirectURIs))
@@ -124,21 +128,22 @@ func TestRegister_Success(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	// Create registration client
+	// Create service
 	log := logger.NewSimple("test")
-	client := NewDynamicRegistrationClient(log)
-
-	// Build registration request
-	cfg := &model.OIDCRPConfig{
-		RedirectURI: "https://example.com/callback",
-		ClientName:  "Test Client",
-		Scopes:      []string{"openid", "profile"},
+	s := &Service{
+		cfg: &model.OIDCRPConfig{
+			RedirectURI: "https://example.com/callback",
+			ClientName:  "Test Client",
+			Scopes:      []string{"openid", "profile"},
+		},
+		httpClient: &http.Client{},
+		log:        log.New("oidcrp"),
 	}
-	req := BuildRegistrationRequest(cfg)
+	req := s.buildRegistrationRequest()
 
 	// Perform registration
 	ctx := t.Context()
-	resp, err := client.Register(ctx, mockServer.URL, req, "")
+	resp, err := s.dynamicClientRegistration(ctx, mockServer.URL, req, "")
 
 	if err != nil {
 		t.Fatalf("Registration failed: %v", err)
@@ -183,20 +188,21 @@ func TestRegister_WithInitialAccessToken(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	// Create registration client
+	// Create service
 	log := logger.NewSimple("test")
-	client := NewDynamicRegistrationClient(log)
-
-	// Build registration request
-	cfg := &model.OIDCRPConfig{
-		RedirectURI: "https://example.com/callback",
-		Scopes:      []string{"openid"},
+	s := &Service{
+		cfg: &model.OIDCRPConfig{
+			RedirectURI: "https://example.com/callback",
+			Scopes:      []string{"openid"},
+		},
+		httpClient: &http.Client{},
+		log:        log.New("oidcrp"),
 	}
-	req := BuildRegistrationRequest(cfg)
+	req := s.buildRegistrationRequest()
 
 	// Perform registration with initial access token
 	ctx := t.Context()
-	resp, err := client.Register(ctx, mockServer.URL, req, expectedToken)
+	resp, err := s.dynamicClientRegistration(ctx, mockServer.URL, req, expectedToken)
 
 	if err != nil {
 		t.Fatalf("Registration failed: %v", err)
@@ -219,16 +225,20 @@ func TestRegister_ServerError(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	// Create registration client
+	// Create service
 	log := logger.NewSimple("test")
-	client := NewDynamicRegistrationClient(log)
+	s := &Service{
+		cfg:        &model.OIDCRPConfig{},
+		httpClient: &http.Client{},
+		log:        log.New("oidcrp"),
+	}
 
 	// Build registration request (intentionally empty)
 	req := &RegistrationRequest{}
 
 	// Perform registration (should fail)
 	ctx := t.Context()
-	_, err := client.Register(ctx, mockServer.URL, req, "")
+	_, err := s.dynamicClientRegistration(ctx, mockServer.URL, req, "")
 
 	if err == nil {
 		t.Fatal("Expected error, got nil")
@@ -241,20 +251,21 @@ func TestRegister_ServerError(t *testing.T) {
 }
 
 func TestRegister_InvalidEndpoint(t *testing.T) {
-	// Create registration client
+	// Create service
 	log := logger.NewSimple("test")
-	client := NewDynamicRegistrationClient(log)
-
-	// Build registration request
-	cfg := &model.OIDCRPConfig{
-		RedirectURI: "https://example.com/callback",
-		Scopes:      []string{"openid"},
+	s := &Service{
+		cfg: &model.OIDCRPConfig{
+			RedirectURI: "https://example.com/callback",
+			Scopes:      []string{"openid"},
+		},
+		httpClient: &http.Client{},
+		log:        log.New("oidcrp"),
 	}
-	req := BuildRegistrationRequest(cfg)
+	req := s.buildRegistrationRequest()
 
 	// Perform registration with invalid endpoint
 	ctx := t.Context()
-	_, err := client.Register(ctx, "http://invalid-endpoint-that-does-not-exist.local", req, "")
+	_, err := s.dynamicClientRegistration(ctx, "http://invalid-endpoint-that-does-not-exist.local", req, "")
 
 	if err == nil {
 		t.Fatal("Expected error for invalid endpoint, got nil")

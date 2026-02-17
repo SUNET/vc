@@ -3,14 +3,13 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"net/http"
 	"time"
 	"vc/internal/verifier/apiv1"
+	"vc/internal/verifier/cache"
 	"vc/internal/verifier/middleware"
 	"vc/internal/verifier/notify"
-	"vc/pkg/crypto"
 	"vc/pkg/httphelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -43,7 +42,7 @@ type Service struct {
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notify.Service, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notify.Service, tracer *trace.Tracer, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	// Initialize rate limiters with default configuration
 	rateLimitConfig := middleware.DefaultRateLimitConfig()
 
@@ -76,18 +75,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}
 
-	// Generate session keys
+	// Session keys resolved by the cache service (HA-shared or ephemeral).
+	s.sessionsAuthKey = cacheService.SessionAuthKey
+	s.sessionsEncKey = cacheService.SessionEncKey
+
 	var err error
-	s.sessionsAuthKey, err = crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate session auth key: %w", err)
-	}
-
-	s.sessionsEncKey, err = crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate session encryption key: %w", err)
-	}
-
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err

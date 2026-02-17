@@ -9,24 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"vc/pkg/logger"
-	"vc/pkg/model"
 )
-
-// DynamicRegistrationClient handles dynamic client registration with OIDC Providers (RFC 7591)
-type DynamicRegistrationClient struct {
-	log    *logger.Log
-	client *http.Client
-}
-
-// NewDynamicRegistrationClient creates a new dynamic registration client
-func NewDynamicRegistrationClient(log *logger.Log) *DynamicRegistrationClient {
-	return &DynamicRegistrationClient{
-		log:    log.New("dynamic-registration"),
-		client: &http.Client{},
-	}
-}
 
 // RegistrationRequest represents RFC 7591 client registration request
 type RegistrationRequest struct {
@@ -105,9 +88,9 @@ type RegistrationResponse struct {
 	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
 }
 
-// Register performs dynamic client registration with an OIDC Provider
-func (d *DynamicRegistrationClient) Register(ctx context.Context, registrationEndpoint string, req *RegistrationRequest, initialAccessToken string) (*RegistrationResponse, error) {
-	d.log.Info("Performing dynamic client registration", "endpoint", registrationEndpoint)
+// dynamicClientRegistration performs dynamic client registration with an OIDC Provider (RFC 7591)
+func (s *Service) dynamicClientRegistration(ctx context.Context, registrationEndpoint string, req *RegistrationRequest, initialAccessToken string) (*RegistrationResponse, error) {
+	s.log.Info("Performing dynamic client registration", "endpoint", registrationEndpoint)
 
 	// Marshal request
 	reqBody, err := json.Marshal(req)
@@ -129,7 +112,7 @@ func (d *DynamicRegistrationClient) Register(ctx context.Context, registrationEn
 	}
 
 	// Send request
-	resp, err := d.client.Do(httpReq)
+	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send registration request: %w", err)
 	}
@@ -143,7 +126,7 @@ func (d *DynamicRegistrationClient) Register(ctx context.Context, registrationEn
 
 	// Check status code
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		d.log.Error(nil, "Registration failed", "status", resp.StatusCode, "body", string(respBody))
+		s.log.Error(nil, "Registration failed", "status", resp.StatusCode, "body", string(respBody))
 		return nil, fmt.Errorf("registration failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -153,30 +136,30 @@ func (d *DynamicRegistrationClient) Register(ctx context.Context, registrationEn
 		return nil, fmt.Errorf("failed to parse registration response: %w", err)
 	}
 
-	d.log.Info("Dynamic client registration successful",
+	s.log.Info("Dynamic client registration successful",
 		"client_id", registrationResp.ClientID,
 		"has_secret", registrationResp.ClientSecret != "")
 
 	return &registrationResp, nil
 }
 
-// BuildRegistrationRequest creates a registration request from OIDC RP config
-func BuildRegistrationRequest(cfg *model.OIDCRPConfig) *RegistrationRequest {
+// buildRegistrationRequest creates a registration request from the service's OIDC RP config
+func (s *Service) buildRegistrationRequest() *RegistrationRequest {
 	return &RegistrationRequest{
-		RedirectURIs:            []string{cfg.RedirectURI},
+		RedirectURIs:            []string{s.cfg.RedirectURI},
 		TokenEndpointAuthMethod: "client_secret_basic", // Default method
 		GrantTypes:              []string{"authorization_code"},
 		ResponseTypes:           []string{"code"},
-		ClientName:              cfg.ClientName,
-		ClientURI:               cfg.ClientURI,
-		LogoURI:                 cfg.LogoURI,
-		Scope:                   joinScopes(cfg.Scopes),
-		Contacts:                cfg.Contacts,
-		TosURI:                  cfg.TosURI,
-		PolicyURI:               cfg.PolicyURI,
+		ClientName:              s.cfg.ClientName,
+		ClientURI:               s.cfg.ClientURI,
+		LogoURI:                 s.cfg.LogoURI,
+		Scope:                   joinScopes(s.cfg.Scopes),
+		Contacts:                s.cfg.Contacts,
+		TosURI:                  s.cfg.TosURI,
+		PolicyURI:               s.cfg.PolicyURI,
 		ApplicationType:         "web",
 		CodeChallengeMethod:     "S256", // Always use PKCE with S256
-		SoftwareID:              "dc4eu-vc-issuer",
+		SoftwareID:              "SUNET-vc-issuer",
 		SoftwareVersion:         "1.0.0", // Could be made configurable
 	}
 }

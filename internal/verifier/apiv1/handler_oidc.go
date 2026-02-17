@@ -115,8 +115,8 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	authCtx := &cache.AuthorizationContext{
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
-		// Session expires after the configured duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.SessionDuration) * time.Second).Unix(),
+		// Authorization request expires after the code duration
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,

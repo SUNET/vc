@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"vc/internal/apigw/db"
+	"vc/internal/apigw/oidcrp"
+	"vc/internal/apigw/samlsp"
 	pkgcache "vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -41,6 +43,17 @@ type Service struct {
 	SVGTemplate            Cache[string]
 	Document               Cache[map[string]*model.CompleteDocument]
 	DPopJTI                Cache[bool]
+
+	// OIDCRPSession stores OIDC RP authentication flow state (state, nonce, PKCE verifier).
+	OIDCRPSession Cache[*oidcrp.Session]
+
+	// SAMLSession stores SAML authentication flow state.
+	SAMLSession Cache[*samlsp.Session]
+
+	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
+	SessionAuthKey string
+	// SessionEncKey is the AES encryption key for session cookies, shared across HA instances.
+	SessionEncKey string
 }
 
 // New creates the apigw cache service and initialises all caches.
@@ -72,6 +85,22 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 	if s.DPopJTI, err = pkgcache.NewGenericCache[bool](cs, ctx, "apigw_dpop_jti", 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("cache: dpop_jti: %w", err)
 	}
+
+	if s.OIDCRPSession, err = pkgcache.NewGenericCache[*oidcrp.Session](cs, ctx, "apigw_oidcrp_sessions", time.Duration(cfg.APIGW.OIDCRP.SessionDuration)*time.Second); err != nil {
+		return nil, fmt.Errorf("cache: oidcrp_sessions: %w", err)
+	}
+
+	if s.SAMLSession, err = pkgcache.NewGenericCache[*samlsp.Session](cs, ctx, "apigw_saml_sessions", time.Duration(cfg.APIGW.SAML.SessionDuration)*time.Second); err != nil {
+		return nil, fmt.Errorf("cache: saml_sessions: %w", err)
+	}
+
+	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).
+	sharedSecrets, err := pkgcache.EnsureSharedSecrets(ctx, cs, "apigw")
+	if err != nil {
+		return nil, fmt.Errorf("cache: shared_secrets: %w", err)
+	}
+	s.SessionAuthKey = sharedSecrets.SessionAuthKey
+	s.SessionEncKey = sharedSecrets.SessionEncKey
 
 	return s, nil
 }

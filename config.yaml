@@ -231,7 +231,6 @@ registry:
     enabled: true
     username: "admin"
     password: "admin_1234"  # Change this in production!
-    session_secret: "change-this-to-a-random-32-byte-secret"
 
 apigw:
   key_config:
@@ -336,26 +335,33 @@ apigw:
     #       alt_text: "SUNET Logo"
   # OIDC Relying Party configuration for issuing credentials via external OIDC Providers
   # Requires building with -tags oidcrp
+  #
+  # registration: choose exactly ONE of:
+  #   preconfigured: pre-registered client_id and client_secret
+  #   dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
+  #
   oidcrp:
     enabled: false
-    # OAuth2 client credentials registered with the OIDC Provider
-    client_id: "your-client-id"
-    client_secret: "your-client-secret"
-    # Callback URL where the OIDC Provider sends the authorization response
+    # --- Option A: Pre-registered credentials ---
+    registration:
+      preconfigured:
+        client_id: "your-client-id"
+        client_secret: "your-client-secret"
+    # --- Option B: Dynamic registration (uncomment and remove preconfigured above) ---
+    # registration:
+    #   dynamic:
+    #     initial_access_token: ""  # Optional, required by some providers (e.g., Keycloak)
+    # client_name: "My Credential Issuer"
+    # client_uri: "https://issuer.example.com"
     redirect_uri: "https://issuer.example.com/oidcrp/callback"
-    # OIDC Provider issuer URL (used for .well-known/openid-configuration discovery)
-    # Examples:
-    #   Google: "https://accounts.google.com"
-    #   Azure AD: "https://login.microsoftonline.com/{tenant-id}/v2.0"
-    #   Keycloak: "https://keycloak.example.com/realms/{realm-name}"
     issuer_url: "https://accounts.google.com"
     # OAuth2/OIDC scopes to request (must include "openid")
     scopes:
       - "openid"
       - "profile"
       - "email"
-    # Session duration in seconds (default: 3600)
-    session_duration: 3600
+    # Session duration in seconds (default: 300)
+    session_duration: 300
     # Credential mappings: how to transform OIDC claims into credentials
     # Key: credential type identifier (must match credential_constructor keys)
     credential_mappings:
@@ -415,50 +421,6 @@ apigw:
             claim: "diploma.university"
             required: false
             default: "Unknown University"
-  
-  # Alternative: Dynamic Client Registration (RFC 7591)
-  # Uncomment to enable automatic client registration with OIDC Providers
-  # oidcrp:
-  #   enabled: true
-  #   # Static credentials are optional when using dynamic registration
-  #   # client_id: "optional-fallback-id"
-  #   # client_secret: "optional-fallback-secret"
-  #   redirect_uri: "https://issuer.example.com/oidcrp/callback"
-  #   issuer_url: "https://accounts.google.com"
-  #   scopes:
-  #     - "openid"
-  #     - "profile"
-  #     - "email"
-  #   session_duration: 3600
-  #   # Client metadata for dynamic registration
-  #   client_name: "My Credential Issuer"
-  #   client_uri: "https://issuer.example.com"
-  #   logo_uri: "https://issuer.example.com/logo.png"
-  #   contacts:
-  #     - "admin@example.com"
-  #   tos_uri: "https://issuer.example.com/terms"
-  #   policy_uri: "https://issuer.example.com/privacy"
-  #   # Dynamic registration settings
-  #   dynamic_registration:
-  #     enabled: true
-  #     # Some providers (e.g., Keycloak) require an initial access token
-  #     # Generate in Keycloak: Realm Settings → Client Registration → Initial Access Tokens
-  #     initial_access_token: ""  # Optional, leave empty for Google
-  #     # Cache registered credentials to avoid re-registration on restart
-  #     storage_path: "/var/lib/vc/oidcrp_credentials.json"
-  #   credential_mappings:
-  #     pid:
-  #       credential_config_id: "urn:eudi:pid:1"
-  #       attributes:
-  #         given_name:
-  #           claim: "identity.given_name"
-  #           required: true
-  #         family_name:
-  #           claim: "identity.family_name"
-  #           required: true
-  #         email:
-  #           claim: "identity.email"
-  #           required: true
 
 mock_as:
   api_server:
@@ -473,10 +435,6 @@ ui:
     addr: :8080
   username: "admin"
   password: "secret123"
-  #It is recommended to use an authentication key with 32 or 64 bytes.
-  session_cookie_authentication_key: "PjanW5cOBIlWzjLK23Q8NIo4va53e1bsgWmcqMdznVzkW3uEozfotj7MZsD7HpBo"
-  #The encryption key, must be either 16, 24, or 32 bytes to select AES-128, AES-192, or AES-256 modes.
-  session_store_encryption_key: "SQxqb3LKw1YFyAiy4j7FaGGJKeEzr8Db"
   session_inactivity_timeout_in_seconds: 1800
   services:
     apigw:

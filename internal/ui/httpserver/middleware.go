@@ -13,7 +13,7 @@ import (
 )
 
 func (s *Service) middlewareUserSession(ctx context.Context, cfg *model.Cfg) gin.HandlerFunc {
-	store := cookie.NewStore([]byte(cfg.UI.SessionCookieAuthenticationKey), []byte(cfg.UI.SessionStoreEncryptionKey))
+	store := cookie.NewStore([]byte(s.cacheService.SessionAuthKey), []byte(s.cacheService.SessionEncKey))
 	store.Options(sessions.Options{
 		Path:     s.sessionConfig.path,
 		MaxAge:   s.sessionConfig.inactivityTimeoutInSeconds,

@@ -1,6 +1,6 @@
 //go:build saml
 
-package saml
+package samlsp
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"time"
 
+	pkgcache "vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 
@@ -25,25 +26,21 @@ type Service struct {
 	cfg          *model.SAMLConfig
 	sp           *saml.ServiceProvider
 	mdqClient    *MDQClient
-	sessionStore *SessionStore
+	sessionCache pkgcache.Cache[*Session]
 	log          *logger.Log
 }
 
 // New creates a new SAML service
-func New(ctx context.Context, cfg *model.SAMLConfig, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache[*Session], log *logger.Log) (*Service, error) {
 	if !cfg.Enabled {
 		log.Info("SAML support disabled")
 		return nil, nil
 	}
 
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid SAML configuration: %w", err)
-	}
-
 	s := &Service{
-		cfg: cfg,
-		log: log.New("saml"),
+		cfg:          cfg,
+		sessionCache: sessionCache,
+		log:          log.New("saml"),
 	}
 
 	// Load X.509 key pair for signing/encryption
@@ -115,13 +112,6 @@ func New(ctx context.Context, cfg *model.SAMLConfig, log *logger.Log) (*Service,
 			"mdq_server", cfg.MDQServer)
 	}
 
-	// Initialize session store
-	sessionDuration := cfg.SessionDuration
-	if sessionDuration == 0 {
-		sessionDuration = 3600 // Default 1 hour
-	}
-	s.sessionStore = NewSessionStore(time.Duration(sessionDuration)*time.Second, s.log)
-
 	return s, nil
 }
 
@@ -181,14 +171,14 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 	}
 
 	// Store session
-	session := &SAMLSession{
+	session := &Session{
 		ID:                 req.ID,
 		CredentialType:     credentialType,
 		CredentialConfigID: credMapping.CredentialConfigID,
 		IDPEntityID:        idpEntityID,
 		CreatedAt:          time.Now(),
 	}
-	s.sessionStore.Set(req.ID, session)
+	s.sessionCache.Set(ctx, req.ID, session)
 
 	// Generate redirect URL
 	redirectURL, err := req.Redirect("", s.sp)
@@ -215,7 +205,7 @@ type Assertion struct {
 // ProcessAssertion processes a SAML response
 func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded string, relayState string) (*Assertion, error) {
 	// Retrieve session
-	session, err := s.sessionStore.Get(relayState)
+	session, err := s.getSession(ctx, relayState)
 	if err != nil {
 		return nil, fmt.Errorf("invalid or expired session: %w", err)
 	}
@@ -230,7 +220,9 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 	s.sp.IDPMetadata = idpMetadata
 
 	// Parse and validate SAML response
+	acsURL := s.sp.AcsURL
 	samlResp, err := s.sp.ParseResponse(&http.Request{
+		URL: &acsURL,
 		PostForm: url.Values{
 			"SAMLResponse": {samlResponseEncoded},
 			"RelayState":   {session.ID},
@@ -262,15 +254,28 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 }
 
 // GetSession retrieves a session by ID
-func (s *Service) GetSession(sessionID string) (*SAMLSession, error) {
-	return s.sessionStore.Get(sessionID)
+func (s *Service) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+	return s.getSession(ctx, sessionID)
+}
+
+// getSession retrieves a session by ID from the cache.
+func (s *Service) getSession(ctx context.Context, id string) (*Session, error) {
+	session, ok := s.sessionCache.Get(ctx, id)
+	if !ok || session == nil {
+		return nil, fmt.Errorf("session not found or expired: %s", id)
+	}
+
+	return session, nil
+}
+
+// deleteSession removes a session from the cache.
+func (s *Service) deleteSession(ctx context.Context, id string) {
+	s.sessionCache.Delete(ctx, id)
+	s.log.Debug("session deleted", "id", id)
 }
 
 // Close cleans up the SAML service
 func (s *Service) Close(ctx context.Context) error {
-	if s.sessionStore != nil {
-		s.sessionStore.Close()
-	}
 	s.log.Info("SAML service stopped")
 	return nil
 }

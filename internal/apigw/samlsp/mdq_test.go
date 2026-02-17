@@ -1,6 +1,6 @@
 //go:build saml
 
-package saml
+package samlsp
 
 import (
 	"net/http"

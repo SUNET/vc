@@ -1,10 +1,12 @@
 //go:build !saml
 
-package saml
+package samlsp
 
 import (
 	"context"
 	"fmt"
+
+	pkgcache "vc/pkg/cache"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -13,7 +15,7 @@ import (
 type Service struct{}
 
 // New returns an error indicating SAML is not compiled in
-func New(ctx context.Context, cfg *model.SAMLConfig, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache[*Session], log *logger.Log) (*Service, error) {
 	return nil, fmt.Errorf("SAML support not compiled in. Rebuild with -tags saml")
 }
 
@@ -51,19 +53,11 @@ func (s *Service) MapToClaims(ctx context.Context, assertion *Assertion, credent
 	return nil, fmt.Errorf("SAML support not compiled in")
 }
 
-// SAMLSession stub type
-type SAMLSession struct {
-	ID                 string
-	CredentialType     string
-	CredentialConfigID string
-	IDPEntityID        string
-}
-
 // ClaimTransformer stub type
 type ClaimTransformer struct{}
 
 // GetSession stub
-func (s *Service) GetSession(sessionID string) (*SAMLSession, error) {
+func (s *Service) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	return nil, fmt.Errorf("SAML support not compiled in")
 }
 

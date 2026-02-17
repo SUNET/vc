@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 	"vc/internal/ui/apiv1"
+	"vc/internal/ui/cache"
 	"vc/internal/ui/httpserver"
 	"vc/internal/ui/outbound"
 	"vc/pkg/configuration"
@@ -72,7 +73,13 @@ func main() {
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiClient, tracer, log)
+	cacheService, err := cache.New(ctx, cfg, log)
+	if err != nil {
+		panic(err)
+	}
+	services["cacheService"] = cacheService
+
+	httpService, err := httpserver.New(ctx, cfg, apiClient, tracer, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)

@@ -19,13 +19,20 @@ func TestClearSecrets(t *testing.T) {
 				},
 			},
 			OIDCRP: OIDCRPConfig{
-				ClientSecret: "my-client-secret",
+				Registration: &OIDCRPRegistrationConfig{
+					Preconfigured: &OIDCRPPreconfiguredConfig{
+						ClientSecret: "my-client-secret",
+					},
+					Dynamic: &OIDCRPDynamicRegistrationConfig{
+						Enabled:            true,
+						InitialAccessToken: "my-initial-token",
+					},
+				},
 			},
 		},
 		Registry: &Registry{
 			AdminGUI: AdminGUI{
 				Password:      "admin-pass",
-				SessionSecret: "session-secret-value",
 			},
 		},
 		Verifier: &Verifier{
@@ -34,9 +41,7 @@ func TestClearSecrets(t *testing.T) {
 			},
 		},
 		UI: &UI{
-			Password:                       "ui-pass",
-			SessionCookieAuthenticationKey: "auth-key",
-			SessionStoreEncryptionKey:      "enc-key",
+			Password: "ui-pass",
 		},
 	}
 
@@ -44,13 +49,11 @@ func TestClearSecrets(t *testing.T) {
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "Common.Mongo.URI should be cleared")
 	assert.Nil(t, cfg.APIGW.APIServer.BasicAuth.Users, "APIGW.APIServer.BasicAuth.Users should be nil")
-	assert.Empty(t, cfg.APIGW.OIDCRP.ClientSecret, "APIGW.OIDCRP.ClientSecret should be cleared")
+	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret, "APIGW.OIDCRP.Registration.Preconfigured.ClientSecret should be cleared")
+	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken, "APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken should be cleared")
 	assert.Empty(t, cfg.Registry.AdminGUI.Password, "Registry.AdminGUI.Password should be cleared")
-	assert.Empty(t, cfg.Registry.AdminGUI.SessionSecret, "Registry.AdminGUI.SessionSecret should be cleared")
 	assert.Empty(t, cfg.Verifier.OIDC.SubjectSalt, "Verifier.OIDC.SubjectSalt should be cleared")
 	assert.Empty(t, cfg.UI.Password, "UI.Password should be cleared")
-	assert.Empty(t, cfg.UI.SessionCookieAuthenticationKey, "UI.SessionCookieAuthenticationKey should be cleared")
-	assert.Empty(t, cfg.UI.SessionStoreEncryptionKey, "UI.SessionStoreEncryptionKey should be cleared")
 }
 
 func TestClearSecrets_NilSections(t *testing.T) {
@@ -80,13 +83,19 @@ func TestApplySecrets(t *testing.T) {
 				},
 			},
 			OIDCRP: OIDCRPSecrets{
-				ClientSecret: "secret-client-secret",
+				Registration: OIDCRPRegistrationSecrets{
+					Preconfigured: &OIDCRPPreconfiguredSecrets{
+						ClientSecret: "secret-client-secret",
+					},
+					Dynamic: &OIDCRPDynamicSecrets{
+						InitialAccessToken: "secret-initial-token",
+					},
+				},
 			},
 		},
 		Registry: &RegistrySecrets{
 			AdminGUI: AdminGUISecrets{
 				Password:      "secret-admin-pass",
-				SessionSecret: "secret-session-secret",
 			},
 		},
 		Verifier: &VerifierSecrets{
@@ -95,9 +104,7 @@ func TestApplySecrets(t *testing.T) {
 			},
 		},
 		UI: &UISecrets{
-			Password:                       "secret-ui-pass",
-			SessionCookieAuthenticationKey: "secret-auth-key",
-			SessionStoreEncryptionKey:      "secret-enc-key",
+			Password: "secret-ui-pass",
 		},
 	}
 
@@ -105,13 +112,11 @@ func TestApplySecrets(t *testing.T) {
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)
 	assert.Equal(t, "from-secrets-file", cfg.APIGW.APIServer.BasicAuth.Users["admin"])
-	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.ClientSecret)
+	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
+	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)
-	assert.Equal(t, "secret-session-secret", cfg.Registry.AdminGUI.SessionSecret)
 	assert.Equal(t, "secret-salt", cfg.Verifier.OIDC.SubjectSalt)
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)
-	assert.Equal(t, "secret-auth-key", cfg.UI.SessionCookieAuthenticationKey)
-	assert.Equal(t, "secret-enc-key", cfg.UI.SessionStoreEncryptionKey)
 }
 
 func TestApplySecrets_NilSecrets(t *testing.T) {
@@ -140,7 +145,6 @@ func TestApplySecrets_PartialSecrets(t *testing.T) {
 	cfg.ApplySecrets(secrets)
 
 	assert.Equal(t, "only-password", cfg.UI.Password)
-	assert.Empty(t, cfg.UI.SessionCookieAuthenticationKey, "empty secret should not overwrite")
 }
 
 func TestApplySecrets_CreatesNilSections(t *testing.T) {
@@ -175,13 +179,20 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 				},
 			},
 			OIDCRP: OIDCRPConfig{
-				ClientSecret: "config-client-secret",
+				Registration: &OIDCRPRegistrationConfig{
+					Preconfigured: &OIDCRPPreconfiguredConfig{
+						ClientSecret: "config-client-secret",
+					},
+					Dynamic: &OIDCRPDynamicRegistrationConfig{
+						Enabled:            true,
+						InitialAccessToken: "config-initial-token",
+					},
+				},
 			},
 		},
 		Registry: &Registry{
 			AdminGUI: AdminGUI{
 				Password:      "config-admin-pass",
-				SessionSecret: "config-session-secret",
 			},
 		},
 		Verifier: &Verifier{
@@ -190,9 +201,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		UI: &UI{
-			Password:                       "config-ui-pass",
-			SessionCookieAuthenticationKey: "config-auth-key",
-			SessionStoreEncryptionKey:      "config-enc-key",
+			Password: "config-ui-pass",
 		},
 	}
 
@@ -214,13 +223,19 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 				},
 			},
 			OIDCRP: OIDCRPSecrets{
-				ClientSecret: "secret-client-secret",
+				Registration: OIDCRPRegistrationSecrets{
+					Preconfigured: &OIDCRPPreconfiguredSecrets{
+						ClientSecret: "secret-client-secret",
+					},
+					Dynamic: &OIDCRPDynamicSecrets{
+						InitialAccessToken: "secret-initial-token",
+					},
+				},
 			},
 		},
 		Registry: &RegistrySecrets{
 			AdminGUI: AdminGUISecrets{
 				Password:      "secret-admin-pass",
-				SessionSecret: "secret-session-secret",
 			},
 		},
 		Verifier: &VerifierSecrets{
@@ -229,20 +244,16 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		UI: &UISecrets{
-			Password:                       "secret-ui-pass",
-			SessionCookieAuthenticationKey: "secret-auth-key",
-			SessionStoreEncryptionKey:      "secret-enc-key",
+			Password: "secret-ui-pass",
 		},
 	}
 	cfg.ApplySecrets(secrets)
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)
 	assert.Equal(t, "secret-password", cfg.APIGW.APIServer.BasicAuth.Users["admin"])
-	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.ClientSecret)
+	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
+	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)
-	assert.Equal(t, "secret-session-secret", cfg.Registry.AdminGUI.SessionSecret)
 	assert.Equal(t, "secret-salt", cfg.Verifier.OIDC.SubjectSalt)
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)
-	assert.Equal(t, "secret-auth-key", cfg.UI.SessionCookieAuthenticationKey)
-	assert.Equal(t, "secret-enc-key", cfg.UI.SessionStoreEncryptionKey)
 }

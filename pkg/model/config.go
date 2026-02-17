@@ -173,8 +173,9 @@ type SAMLConfig struct {
 	// Example: "https://issuer.sunet.se/saml/acs"
 	ACSEndpoint string `yaml:"acs_endpoint" validate:"required_if=Enabled true"`
 
-	// SessionDuration in seconds (default: 3600)
-	SessionDuration int `yaml:"session_duration"`
+	// SessionDuration is the maximum time in seconds an in-flight SAML authentication flow
+	// (AuthnRequest → Response) may remain active before it expires
+	SessionDuration int `yaml:"session_duration" validate:"required" default:"300"`
 
 	// CredentialMappings defines how to map external attributes to credential claims
 	// Key: credential type identifier (e.g., "pid", "diploma")
@@ -197,21 +198,16 @@ type StaticIDPConfig struct {
 	MetadataURL string `yaml:"metadata_url,omitempty"`
 }
 
-// OIDCRPConfig holds OIDC Relying Party configuration for credential issuance
+// OIDCRPConfig holds OIDC Relying Party configuration for credential issuance.
 type OIDCRPConfig struct {
 	// Enabled turns on OIDC RP support (default: false)
 	Enabled bool `yaml:"enabled" default:"false"`
 
-	// Dynamic Registration (RFC 7591) support
-	// If enabled, the OIDC RP will attempt to register itself with the OIDC Provider
-	// instead of using pre-configured client credentials
-	DynamicRegistration DynamicRegistrationConfig `yaml:"dynamic_registration"`
-
-	// ClientID is the OIDC client identifier (required if not using dynamic registration)
-	ClientID string `yaml:"client_id"`
-
-	// ClientSecret is the OIDC client secret (required if not using dynamic registration)
-	ClientSecret string `yaml:"client_secret"`
+	// Registration configures how the client obtains credentials from the OIDC Provider.
+	// Exactly one of preconfigured or dynamic must be set:
+	//   - preconfigured: pre-registered client_id and client_secret
+	//   - dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
+	Registration *OIDCRPRegistrationConfig `yaml:"registration" validate:"required_if=Enabled true"`
 
 	// RedirectURI is the callback URL where the OIDC Provider sends the authorization response
 	// Example: "https://issuer.sunet.se/oidcrp/callback"
@@ -222,11 +218,12 @@ type OIDCRPConfig struct {
 	// Used for .well-known/openid-configuration discovery
 	IssuerURL string `yaml:"issuer_url" validate:"required_if=Enabled true"`
 
-	// Scopes are the OAuth2/OIDC scopes to request
+	// Scopes are the OAuth2/OIDC scopes to request (at least one scope is required, e.g. "openid")
 	Scopes []string `yaml:"scopes" validate:"required,min=1,dive,required" default:"[\"openid\", \"profile\", \"email\"]"`
 
-	// SessionDuration in seconds (default: 3600)
-	SessionDuration int `yaml:"session_duration" default:"3600"`
+	// SessionDuration is the maximum time in seconds an in-flight OIDC authorization flow
+	// (state, nonce, PKCE verifier) may remain active before it expires
+	SessionDuration int `yaml:"session_duration" validate:"required" default:"300"`
 
 	// Client metadata for dynamic registration or display purposes
 	ClientName string   `yaml:"client_name,omitempty"`
@@ -242,20 +239,40 @@ type OIDCRPConfig struct {
 	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enabled true"`
 }
 
-// DynamicRegistrationConfig configures RFC 7591 dynamic client registration
-type DynamicRegistrationConfig struct {
-	// Enabled turns on dynamic client registration
-	// If true, ClientID and ClientSecret from OIDCRPConfig are ignored
-	Enabled bool `yaml:"enabled" default:"false"`
+// OIDCRPRegistrationConfig configures how the client obtains its credentials.
+// Exactly one of Preconfigured or Dynamic must be set.
+type OIDCRPRegistrationConfig struct {
+	// Preconfigured uses pre-registered client credentials.
+	// Set this when the client is already registered with the OIDC Provider.
+	Preconfigured *OIDCRPPreconfiguredConfig `yaml:"preconfigured,omitempty" validate:"required_without=Dynamic,excluded_with=Dynamic"`
 
-	// InitialAccessToken is an optional bearer token for registration
+	// Dynamic uses RFC 7591 dynamic client registration.
+	// Set this when the client should register itself at startup.
+	Dynamic *OIDCRPDynamicRegistrationConfig `yaml:"dynamic,omitempty" validate:"required_without=Preconfigured,excluded_with=Preconfigured"`
+}
+
+// OIDCRPPreconfiguredConfig holds pre-registered client credentials.
+type OIDCRPPreconfiguredConfig struct {
+	// Enabled activates preconfigured client credentials
+	Enabled bool `yaml:"enabled"`
+
+	// ClientID is the OIDC client identifier
+	ClientID string `yaml:"client_id" validate:"required_if=Enabled true"`
+
+	// ClientSecret is the OIDC client secret
+	ClientSecret string `yaml:"client_secret" validate:"required_if=Enabled true"`
+}
+
+// OIDCRPDynamicRegistrationConfig configures RFC 7591 dynamic client registration.
+// When set, client credentials are obtained automatically at startup and
+// persisted in the database.
+type OIDCRPDynamicRegistrationConfig struct {
+	// Enabled activates dynamic client registration
+	Enabled bool `yaml:"enabled"`
+
+	// InitialAccessToken is a bearer token for registration
 	// Required by some OIDC Providers (e.g., Keycloak)
-	InitialAccessToken string `yaml:"initial_access_token,omitempty"`
-
-	// StoragePath is where registered client credentials are cached
-	// Example: "/var/lib/vc/oidcrp-registration.json"
-	// If empty, credentials are not persisted (re-register on restart)
-	StoragePath string `yaml:"storage_path,omitempty"`
+	InitialAccessToken string `yaml:"initial_access_token,omitempty" validate:"required_if=Enabled true"`
 }
 
 // CredentialMapping defines how to issue a specific credential type via SAML
@@ -390,8 +407,6 @@ type AdminGUI struct {
 	Username string `yaml:"username" validate:"required_if=Enabled true" default:"admin"`
 	// Password is the admin password
 	Password string `yaml:"password" validate:"required_if=Enabled true"`
-	// SessionSecret is the secret for session cookies
-	SessionSecret string `yaml:"session_secret" validate:"required_if=Enabled true"`
 }
 
 // MockAS holds the configuration for the Mock Authentic Source service used for testing
@@ -713,10 +728,6 @@ type UI struct {
 	Username string `yaml:"username" validate:"required"`
 	// Password is the UI login password
 	Password string `yaml:"password" validate:"required"`
-	// SessionCookieAuthenticationKey is the session cookie HMAC key
-	SessionCookieAuthenticationKey string `yaml:"session_cookie_authentication_key" validate:"required"`
-	// SessionStoreEncryptionKey is the session cookie encryption key
-	SessionStoreEncryptionKey string `yaml:"session_store_encryption_key" validate:"required"`
 	// SessionInactivityTimeoutInSeconds is the session inactivity timeout in seconds
 	SessionInactivityTimeoutInSeconds int `yaml:"session_inactivity_timeout_in_seconds" validate:"required"`
 	Services                          struct {
@@ -824,10 +835,11 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 	// Convert CredentialConstructor to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
 	for scope, constructor := range credentialConstructors {
-		if constructor == nil || constructor.VCTM == nil {
-			// Skip constructors without VCTM metadata (e.g. service deployed
-			// separately and VCTM file not available on this node).
+		if constructor == nil {
 			continue
+		}
+		if constructor.VCTM == nil {
+			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
 		credConfig := openid4vci.CredentialConfigurationsSupported{

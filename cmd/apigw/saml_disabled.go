@@ -4,12 +4,13 @@ package main
 
 import (
 	"context"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/httpserver"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
 
-func initSAMLService(ctx context.Context, cfg *model.Cfg, log *logger.Log) (httpserver.SAMLService, error) {
+func initSAMLSPService(ctx context.Context, cfg *model.Cfg, _ *cache.Service, log *logger.Log) (httpserver.SAMLSPService, error) {
 	if cfg.APIGW.SAML.Enabled {
 		log.Info("SAML enabled in config but not compiled in. Rebuild with -tags saml")
 	}

@@ -3,13 +3,12 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"net/http"
 	"time"
 	"vc/internal/apigw/apiv1"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/staticembed"
-	"vc/pkg/crypto"
 	"vc/pkg/httphelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -40,12 +39,12 @@ type Service struct {
 	sessionsEncKey  string
 	sessionsAuthKey string
 	sessionsName    string
-	samlService     SAMLService
+	samlSPService     SAMLSPService
 	oidcrpService   OIDCRPService
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlService SAMLService, oidcrpService OIDCRPService, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlSPService SAMLSPService, oidcrpService OIDCRPService, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	s := &Service{
 		cfg:    cfg,
 		log:    log.New("httpserver"),
@@ -56,7 +55,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			ReadHeaderTimeout: 3 * time.Second,
 		},
 		eventPublisher:  eventPublisher,
-		samlService:     samlService,
+		samlSPService:     samlSPService,
 		oidcrpService:   oidcrpService,
 		sessionsName:    "oauth_user_session",
 		sessionsOptions: sessions.Options{
@@ -74,18 +73,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}
 
-	// Generate session keys
+	// Session keys resolved by the cache service (HA-shared or ephemeral).
+	s.sessionsAuthKey = cacheService.SessionAuthKey
+	s.sessionsEncKey = cacheService.SessionEncKey
+
 	var err error
-	s.sessionsAuthKey, err = crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate session auth key: %w", err)
-	}
-
-	s.sessionsEncKey, err = crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate session encryption key: %w", err)
-	}
-
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
