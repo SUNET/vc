@@ -3,6 +3,7 @@ module vc
 go 1.25.1
 
 require (
+	filippo.io/edwards25519 v1.1.0
 	github.com/IBM/sarama v1.46.3
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/brianvoe/gofakeit/v6 v6.28.0
@@ -10,6 +11,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/creasty/defaults v1.8.0
 	github.com/crewjam/saml v0.5.1
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
 	github.com/dustin/go-broadcast v0.0.0-20211018055107-71439988bd91
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/gin-contrib/cors v1.7.6
@@ -44,7 +46,6 @@ require (
 	github.com/swaggo/swag v1.16.6
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/xuri/excelize/v2 v2.10.0
-	go.mongodb.org/mongo-driver v1.17.7
 	go.mongodb.org/mongo-driver/v2 v2.4.2
 	go.opentelemetry.io/contrib/propagators/jaeger v1.39.0
 	go.opentelemetry.io/otel v1.39.0
@@ -64,7 +65,6 @@ require (
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
-	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -84,7 +84,6 @@ require (
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/docker v28.5.1+incompatible // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
@@ -134,6 +133,8 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
+	github.com/lestrrat-go/dsig v1.0.0 // indirect
+	github.com/lestrrat-go/dsig-secp256k1 v1.0.0 // indirect
 	github.com/lestrrat-go/httpcc v1.0.1 // indirect
 	github.com/lestrrat-go/httprc/v3 v3.0.3 // indirect
 	github.com/lestrrat-go/option/v2 v2.0.0 // indirect
@@ -150,7 +151,6 @@ require (
 	github.com/moby/term v0.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
@@ -184,6 +184,7 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
+	github.com/valyala/fastjson v1.6.7 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.2.0 // indirect
