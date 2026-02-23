@@ -48,7 +48,7 @@ func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, erro
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation) as required by JWT RFC 7518
-		return encodeECDSASignature(r, sigS, key.Curve)
+		return EncodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
 		return rsa.SignPKCS1v15(rand.Reader, key, hash, hashed)
 	default:
@@ -67,7 +67,7 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation)
-		return encodeECDSASignature(r, sigS, key.Curve)
+		return EncodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
 		// For RSA, we need to know the hash algorithm used for the digest
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())

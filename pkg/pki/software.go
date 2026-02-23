@@ -64,7 +64,7 @@ func (s *SoftwareSigner) Sign(ctx context.Context, data []byte) ([]byte, error) 
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation) as required by JWT RFC 7518
-		return encodeECDSASignature(r, sigS, key.Curve)
+		return EncodeECDSASignature(r, sigS, key.Curve)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.privateKey)
 	}
@@ -85,7 +85,7 @@ func (s *SoftwareSigner) SignDigest(ctx context.Context, digest []byte) ([]byte,
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation)
-		return encodeECDSASignature(r, sigS, key.Curve)
+		return EncodeECDSASignature(r, sigS, key.Curve)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.privateKey)
 	}

@@ -10,6 +10,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"testing"
+
+	"vc/pkg/pki"
 )
 
 func TestECDSAKeyWrapper_SignDigest(t *testing.T) {
@@ -194,7 +196,9 @@ func TestEncodeDecodeIEEEP1363_RoundTrip(t *testing.T) {
 	}
 
 	digest := make([]byte, 32)
-	rand.Read(digest)
+	if _, err := rand.Read(digest); err != nil {
+		t.Fatalf("Failed to generate random digest: %v", err)
+	}
 
 	r, s, err := ecdsa.Sign(rand.Reader, privateKey, digest)
 	if err != nil {
@@ -202,7 +206,10 @@ func TestEncodeDecodeIEEEP1363_RoundTrip(t *testing.T) {
 	}
 
 	// Encode to IEEE P1363
-	encoded := encodeIEEEP1363(r, s, elliptic.P256())
+	encoded, err := pki.EncodeECDSASignature(r, s, elliptic.P256())
+	if err != nil {
+		t.Fatalf("EncodeECDSASignature() error = %v", err)
+	}
 
 	// Decode back
 	decodedR, decodedS, err := DecodeIEEEP1363(encoded, elliptic.P256())

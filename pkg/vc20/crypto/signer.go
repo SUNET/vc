@@ -58,7 +58,11 @@ func (w *ECDSAKeyWrapper) SignDigest(ctx context.Context, digest []byte) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("ECDSA sign failed: %w", err)
 	}
-	return encodeIEEEP1363(r, s, w.key.Curve), nil
+	sig, err := pki.EncodeECDSASignature(r, s, w.key.Curve)
+	if err != nil {
+		return nil, fmt.Errorf("signature encoding failed: %w", err)
+	}
+	return sig, nil
 }
 
 // PublicKey returns the ECDSA public key.
@@ -147,35 +151,8 @@ func ecdsaAlgorithmForCurve(curve elliptic.Curve) string {
 	}
 }
 
-// encodeIEEEP1363 encodes an ECDSA signature (r, s) to IEEE P1363 format.
-// IEEE P1363 is a fixed-size concatenation of r and s, each padded to curve key size.
-func encodeIEEEP1363(r, s *big.Int, curve elliptic.Curve) []byte {
-	keyBytes := (curve.Params().BitSize + 7) / 8
-
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-
-	// Create fixed-size output
-	signature := make([]byte, 2*keyBytes)
-
-	// Copy r and s with left-padding to correct size
-	copy(signature[keyBytes-len(rBytes):keyBytes], rBytes)
-	copy(signature[2*keyBytes-len(sBytes):], sBytes)
-
-	return signature
-}
-
 // DecodeIEEEP1363 decodes an IEEE P1363 format ECDSA signature to (r, s) big integers.
 // Useful for verification routines.
 func DecodeIEEEP1363(signature []byte, curve elliptic.Curve) (*big.Int, *big.Int, error) {
-	keyBytes := (curve.Params().BitSize + 7) / 8
-
-	if len(signature) != 2*keyBytes {
-		return nil, nil, fmt.Errorf("invalid signature length: expected %d, got %d", 2*keyBytes, len(signature))
-	}
-
-	r := new(big.Int).SetBytes(signature[:keyBytes])
-	s := new(big.Int).SetBytes(signature[keyBytes:])
-
-	return r, s, nil
+	return pki.DecodeECDSASignature(signature, curve)
 }
