@@ -130,9 +130,8 @@ func encryptWithJWX(ctx context.Context, plaintext []byte, recipientKeys []jwk.K
 	}
 
 	// For multi-recipient, we need to use JSON serialization
-	// (compact serialization only supports a single recipient)
 	if len(recipientKeys) > 1 {
-		encOpts = append(encOpts, jwe.WithJSON())
+		// Multi-recipient encryption
 		for _, recipientKey := range recipientKeys {
 			encOpts = append(encOpts, jwe.WithKey(keyAlg, recipientKey))
 		}
@@ -483,14 +482,15 @@ func encryptA256CBCHS512(plaintext, cek, aad []byte) (ciphertext, tag, iv []byte
 	// PKCS7 padding
 	padded := pkcs7Pad(plaintext, aes.BlockSize)
 
-	// Encrypt using AES-256-CBC
+	// Encrypt using AES-256-CBC (per RFC 7518 A256CBC-HS512)
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
 	ciphertext = make([]byte, len(padded))
-	mode := cipher.NewCBCEncrypter(block, iv)
+	//nolint:gosec // RFC 7518 A256CBC-HS512 requires CBC mode - this is authenticated encryption with HMAC-SHA-512
+	mode := cipher.NewCBCEncrypter(block, iv) //NOSONAR go:S5542
 	mode.CryptBlocks(ciphertext, padded)
 
 	// Compute HMAC-SHA-512 tag
@@ -625,14 +625,15 @@ func wrapKeyAES(cek, wrappingKey []byte) ([]byte, error) {
 		copy(r[i], cek[(i-1)*8:i*8])
 	}
 
-	// Wrap
+	// Wrap per RFC 3394 AES Key Wrap
 	for j := 0; j <= 5; j++ {
 		for i := 1; i <= n; i++ {
 			// B = AES(K, A | R[i])
 			b := make([]byte, 16)
 			copy(b[:8], a)
 			copy(b[8:], r[i])
-			block.Encrypt(b, b)
+			//nolint:gosec // RFC 3394 AES Key Wrap - this is a key-wrapping primitive with integrity check
+			block.Encrypt(b, b) //NOSONAR go:S5542
 
 			// A = MSB(64, B) ^ t where t = (n*j)+i
 			t := uint64(n*j + i)
@@ -932,7 +933,7 @@ func decryptA256CBCHS512(ctx context.Context, msg *EncryptedMessage, header *JWE
 		return nil, fmt.Errorf("%w: HMAC verification failed", ErrDecryptionFailed)
 	}
 
-	// Decrypt using AES-256-CBC
+	// Decrypt using AES-256-CBC (per RFC 7518 A256CBC-HS512)
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
@@ -942,7 +943,8 @@ func decryptA256CBCHS512(ctx context.Context, msg *EncryptedMessage, header *JWE
 		return nil, fmt.Errorf("%w: ciphertext length not a multiple of block size", ErrDecryptionFailed)
 	}
 
-	mode := cipher.NewCBCDecrypter(block, iv)
+	//nolint:gosec // RFC 7518 A256CBC-HS512 - HMAC authentication verified above before decryption
+	mode := cipher.NewCBCDecrypter(block, iv) //NOSONAR go:S5542
 	plaintext := make([]byte, len(ciphertext))
 	mode.CryptBlocks(plaintext, ciphertext)
 
@@ -1121,7 +1123,8 @@ func unwrapKeyAES(wrappedKey, wrappingKey []byte) ([]byte, error) {
 			b := make([]byte, 16)
 			copy(b[:8], a)
 			copy(b[8:], r[i])
-			block.Decrypt(b, b)
+			//nolint:gosec // RFC 3394 AES Key Unwrap - integrity check validates after unwrap
+			block.Decrypt(b, b) //NOSONAR go:S5542
 
 			// A = MSB(64, B)
 			copy(a, b[:8])
