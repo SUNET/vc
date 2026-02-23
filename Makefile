@@ -16,7 +16,7 @@ pki-clean:
 	$(info Cleaning PKI material)
 	rm -rf developer_tools/pki
 
-test: test-apigw test-issuer test-mockas test-registry test-ui test-verifier
+test: test-apigw test-issuer test-mockas test-registry test-ui test-verifier test-didcomm-all
 
 test-apigw:
 	$(info Testing apigw)

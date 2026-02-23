@@ -131,7 +131,8 @@ func encryptWithJWX(ctx context.Context, plaintext []byte, recipientKeys []jwk.K
 
 	// For multi-recipient, we need to use JSON serialization
 	if len(recipientKeys) > 1 {
-		// Multi-recipient encryption
+		// Multi-recipient encryption requires JSON serialization
+		encOpts = append(encOpts, jwe.WithJSON())
 		for _, recipientKey := range recipientKeys {
 			encOpts = append(encOpts, jwe.WithKey(keyAlg, recipientKey))
 		}
