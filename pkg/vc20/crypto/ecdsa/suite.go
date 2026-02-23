@@ -1,8 +1,8 @@
 package ecdsa
 
 import (
+	"context"
 	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vc/pkg/vc20/credential"
+	vccrypto "vc/pkg/vc20/crypto"
 	"vc/pkg/vc20/crypto/common"
 
 	"github.com/multiformats/go-multibase"
@@ -41,11 +42,22 @@ type SignOptions struct {
 
 // Sign signs a credential using ecdsa-rdfc-2019
 func (s *Suite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, opts *SignOptions) (*credential.RDFCredential, error) {
+	if key == nil {
+		return nil, fmt.Errorf("private key is nil")
+	}
+	// Wrap the raw key and delegate to SignWithSigner
+	wrapper := vccrypto.NewECDSAKeyWrapper(key)
+	return s.SignWithSigner(cred, wrapper, opts)
+}
+
+// SignWithSigner signs a credential using ecdsa-rdfc-2019 with a VCSigner.
+// This method supports both raw keys (via wrappers) and HSM-based keys (via pki.RawSigner).
+func (s *Suite) SignWithSigner(cred *credential.RDFCredential, signer vccrypto.VCSigner, opts *SignOptions) (*credential.RDFCredential, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("credential is nil")
 	}
-	if key == nil {
-		return nil, fmt.Errorf("private key is nil")
+	if signer == nil {
+		return nil, fmt.Errorf("signer is nil")
 	}
 	if opts == nil {
 		return nil, fmt.Errorf("sign options are nil")
@@ -99,12 +111,7 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, opts
 	}
 
 	// 4. Combine hashes
-	// The spec says: hash(proofOptionsHash + documentHash)
-	// But wait, CanonicalHash returns hex string. We need raw bytes?
-	// RDFCredential.CanonicalHash returns hex string.
-	// We should probably get the canonical form string and hash it ourselves to be sure about concatenation.
-
-	// Let's get canonical forms instead
+	// Get canonical forms
 	docCanonical, err := credWithoutProof.CanonicalForm()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
@@ -122,36 +129,19 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, opts
 	// Concatenate: proofHash + docHash
 	combined := append(proofHashBytes[:], docHashBytes[:]...)
 
-	// 5. Sign
-	// ECDSA signature
-	rInt, sInt, err := ecdsa.Sign(rand.Reader, key, combined)
+	// 5. Sign using the VCSigner
+	signature, err := signer.SignDigest(context.Background(), combined)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
 
-	// Serialize signature (r || s)
-	curveBits := key.Curve.Params().BitSize
-	keyBytes := (curveBits + 7) / 8
-
-	rBytes := rInt.Bytes()
-	sBytes := sInt.Bytes()
-
-	// Pad to key size
-	signature := make([]byte, 2*keyBytes)
-	copy(signature[keyBytes-len(rBytes):keyBytes], rBytes)
-	copy(signature[2*keyBytes-len(sBytes):], sBytes)
-
 	// 6. Encode signature (multibase base58-btc)
-	// Header for base58-btc is 'z'
 	proofValue, err := multibase.Encode(multibase.Base58BTC, signature)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode signature: %w", err)
 	}
 
 	// 7. Add proof to credential
-	// We need to take the original JSON (or convert dataset to JSON), add proof, and re-parse
-	// Since RDFCredential is immutable-ish, we create a new one.
-
 	// Get JSON from original credential (or convert if needed)
 	var credMap map[string]any
 	originalJSON := cred.OriginalJSON()
@@ -174,9 +164,6 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, opts
 	proofConfig["proofValue"] = proofValue
 
 	// Add proof to credential
-	// If proof already exists, it should be an array or we replace it?
-	// Usually we append if it's an array, or turn it into an array.
-	// For simplicity, let's assume single proof or overwrite for now, or append.
 	if existingProof, ok := credMap["proof"]; ok {
 		if proofs, ok := existingProof.([]any); ok {
 			credMap["proof"] = append(proofs, proofConfig)

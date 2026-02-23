@@ -70,6 +70,27 @@ func (s *SoftwareSigner) Sign(ctx context.Context, data []byte) ([]byte, error) 
 	}
 }
 
+// SignDigest signs a pre-computed digest without additional hashing.
+// This is useful for protocols like W3C Data Integrity that control the hashing process.
+func (s *SoftwareSigner) SignDigest(ctx context.Context, digest []byte) ([]byte, error) {
+	switch key := s.privateKey.(type) {
+	case *rsa.PrivateKey:
+		// For RSA, we need to know the hash algorithm used for the digest
+		hash := getHashForAlgorithm(s.algorithm)
+		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest)
+	case *ecdsa.PrivateKey:
+		// Sign the digest directly using ECDSA
+		r, sigS, err := ecdsa.Sign(rand.Reader, key, digest)
+		if err != nil {
+			return nil, err
+		}
+		// Convert to IEEE P1363 format (fixed-size R||S concatenation)
+		return encodeECDSASignature(r, sigS, key.Curve)
+	default:
+		return nil, fmt.Errorf("unsupported key type: %T", s.privateKey)
+	}
+}
+
 // Algorithm returns the JWT algorithm name.
 func (s *SoftwareSigner) Algorithm() string {
 	return s.algorithm
