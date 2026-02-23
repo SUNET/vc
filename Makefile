@@ -4,7 +4,7 @@ NAME 					:= vc
 LDFLAGS                 := -ldflags "-w -s --extldflags '-static'"
 LDFLAGS_DYNAMIC			:= -ldflags "-w -s"
 CURRENT_BRANCH 			:= $(shell git rev-parse --abbrev-ref HEAD)
-SERVICES 				:= verifier registry persistent mockas apigw issuer ui wallet
+SERVICES 				:= verifier registry mockas apigw issuer ui
 PORT                    := 8888
 W3C_TEST_SUITE_DIR      := /tmp/w3c-test-suite
 
@@ -16,7 +16,7 @@ pki-clean:
 	$(info Cleaning PKI material)
 	rm -rf developer_tools/pki
 
-test: test-apigw test-issuer test-mockas test-persistent test-registry test-ui test-verifier
+test: test-apigw test-issuer test-mockas test-registry test-ui test-verifier
 
 test-apigw:
 	$(info Testing apigw)
@@ -29,10 +29,6 @@ test-issuer:
 test-mockas:
 	$(info Testing mockas)
 	go test -v ./cmd/mockas/... ./internal/mockas/...
-
-test-persistent:
-	$(info Testing persistent)
-	go test -v ./cmd/persistent/... ./internal/persistent/...
 
 test-registry:
 	$(info Testing registry)
