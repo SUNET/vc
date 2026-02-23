@@ -261,8 +261,14 @@ func TestResolveVerification_ECDSA(t *testing.T) {
 
 // TestResolveVerification_BothKeyTypes tests resolution when both Ed25519 and ECDSA exist.
 func TestResolveVerification_BothKeyTypes(t *testing.T) {
-	edPub, _, _ := ed25519.GenerateKey(rand.Reader)
-	ecPriv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	edPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate Ed25519 key: %v", err)
+	}
+	ecPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ECDSA key: %v", err)
+	}
 
 	did := "did:example:charlie"
 	mock := &mockResolver{
@@ -438,7 +444,9 @@ func TestEd25519ToX25519ECDHCompatibility(t *testing.T) {
 
 	// Generate a separate X25519 key pair for ECDH
 	var x25519Priv [32]byte
-	rand.Read(x25519Priv[:])
+	if _, err := rand.Read(x25519Priv[:]); err != nil {
+		t.Fatalf("Failed to generate random key: %v", err)
+	}
 	var x25519Pub2 [32]byte
 	curve25519.ScalarBaseMult(&x25519Pub2, &x25519Priv)
 

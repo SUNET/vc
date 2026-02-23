@@ -266,8 +266,14 @@ func TestTrustPingThroughMockMediator(t *testing.T) {
 	defer mediator.Close()
 
 	// Generate key pairs for sender and recipient
-	senderPub, senderPriv, _ := ed25519.GenerateKey(rand.Reader)
-	recipientPub, recipientPriv, _ := ed25519.GenerateKey(rand.Reader)
+	senderPub, senderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate sender Ed25519 key: %v", err)
+	}
+	recipientPub, recipientPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate recipient Ed25519 key: %v", err)
+	}
 	_ = senderPub
 	_ = senderPriv
 	_ = recipientPub
