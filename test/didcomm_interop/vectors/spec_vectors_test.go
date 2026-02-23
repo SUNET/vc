@@ -372,16 +372,14 @@ func getSignerPublicKey(t *testing.T, keys *SpecKeyMaterial, keyID string) jwk.K
 }
 
 func getAlgorithm(alg string) jwa.KeyEncryptionAlgorithm {
-	switch alg {
-	case "ECDH-ES+A256KW":
-		return jwa.ECDH_ES_A256KW()
-	case "ECDH-1PU+A256KW":
-		// ECDH-1PU is not directly supported by jwx, use ECDH-ES for testing
-		// In real usage, this would require a custom implementation
-		return jwa.ECDH_ES_A256KW()
-	default:
+	// ECDH-1PU is not directly supported by jwx library, so we map
+	// both ECDH-ES and ECDH-1PU variants to ECDH-ES for testing purposes.
+	// In production, ECDH-1PU requires a custom implementation.
+	if alg == "ECDH-ES+A256KW" || alg == "ECDH-1PU+A256KW" {
 		return jwa.ECDH_ES_A256KW()
 	}
+	// Default fallback for any unrecognized algorithm
+	return jwa.ECDH_ES_A256KW()
 }
 
 func getSigningAlgorithm(alg string) jwa.SignatureAlgorithm {
