@@ -1,0 +1,82 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Vet examines Go source code
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Static analysis checks
+    - unused        # Find unused code
+    - gofmt         # Check formatting
+    - goimports     # Check imports
+    - misspell      # Find commonly misspelled words
+    - revive        # Drop-in replacement for golint
+    - stylecheck    # Replacement for golint
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Find unused function parameters
+    - gosec         # Security checks
+    - bodyclose     # Check HTTP response bodies are closed
+    - noctx         # Find HTTP requests without context
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    check-type-assertions: false  # Type assertions are checked by prior type switches
+  
+  govet:
+    enable-all: true
+    disable:
+      - shadow      # Shadow variables are sometimes intentional
+      - fieldalignment  # Field alignment optimization not critical for this project
+  
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: var-naming
+        severity: warning
+        disabled: false
+      - name: package-comments
+        severity: warning
+        disabled: false
+  
+  stylecheck:
+    checks: ["all"]
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+        - unused
+        - fieldalignment
+    
+    # Exclude security checks from cmd tools (benchmarks, etc.)
+    - path: ^cmd/
+      linters:
+        - gosec
+    
+    # Type assertions in compare.go are safe due to prior type checking
+    - path: pkg/compare/compare\.go
+      linters:
+        - errcheck
+      text: "type assertion on error"
+    
+    # Type assertions in starform.go are safe due to prior type checking  
+    - path: pkg/starform/starform\.go
+      linters:
+        - errcheck
+      text: "type assertion on error"
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
