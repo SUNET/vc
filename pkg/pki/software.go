@@ -64,7 +64,29 @@ func (s *SoftwareSigner) Sign(ctx context.Context, data []byte) ([]byte, error) 
 			return nil, err
 		}
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation) as required by JWT RFC 7518
-		return encodeECDSASignature(r, sigS, key.Curve)
+		return EncodeECDSASignature(r, sigS, key.Curve)
+	default:
+		return nil, fmt.Errorf("unsupported key type: %T", s.privateKey)
+	}
+}
+
+// SignDigest signs a pre-computed digest without additional hashing.
+// This is useful for protocols like W3C Data Integrity that control the hashing process.
+func (s *SoftwareSigner) SignDigest(ctx context.Context, digest []byte) ([]byte, error) {
+	switch key := s.privateKey.(type) {
+	case *rsa.PrivateKey:
+		// Use crypto.Signer interface for RSA signing. This is PKCS#1 v1.5 signature
+		// (not encryption), a standard scheme for JWT RS256/RS384/RS512.
+		hash := getHashForAlgorithm(s.algorithm)
+		return key.Sign(rand.Reader, digest, hash)
+	case *ecdsa.PrivateKey:
+		// Sign the digest directly using ECDSA
+		r, sigS, err := ecdsa.Sign(rand.Reader, key, digest)
+		if err != nil {
+			return nil, err
+		}
+		// Convert to IEEE P1363 format (fixed-size R||S concatenation)
+		return EncodeECDSASignature(r, sigS, key.Curve)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.privateKey)
 	}

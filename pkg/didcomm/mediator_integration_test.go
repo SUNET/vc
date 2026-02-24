@@ -9,10 +9,12 @@
 // - Trust ping through a mediator
 //
 // To run integration tests:
-//   go test -tags "didcomm vc20 integration" ./pkg/didcomm/...
+//
+//	go test -tags "didcomm vc20 integration" ./pkg/didcomm/...
 //
 // For live mediator tests (when available):
-//   go test -tags "didcomm vc20 integration live" ./pkg/didcomm/...
+//
+//	go test -tags "didcomm vc20 integration live" ./pkg/didcomm/...
 package didcomm_test
 
 import (
@@ -49,9 +51,9 @@ const (
 	testRoutingKeySfx = "#routing-key-1"
 
 	// Test error format strings
-	errBuildRoute   = "Failed to build route: %v"
-	errCreatePing   = "Failed to create ping: %v"
-	errHandlePing   = "Failed to handle ping: %v"
+	errBuildRoute = "Failed to build route: %v"
+	errCreatePing = "Failed to create ping: %v"
+	errHandlePing = "Failed to handle ping: %v"
 )
 
 // =============================================================================
@@ -266,8 +268,14 @@ func TestTrustPingThroughMockMediator(t *testing.T) {
 	defer mediator.Close()
 
 	// Generate key pairs for sender and recipient
-	senderPub, senderPriv, _ := ed25519.GenerateKey(rand.Reader)
-	recipientPub, recipientPriv, _ := ed25519.GenerateKey(rand.Reader)
+	senderPub, senderPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate sender Ed25519 key: %v", err)
+	}
+	recipientPub, recipientPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate recipient Ed25519 key: %v", err)
+	}
 	_ = senderPub
 	_ = senderPriv
 	_ = recipientPub

@@ -176,6 +176,16 @@ func (sc *SignerConfig) GetKeyMaterial() (*KeyMaterial, error) {
 	return sc.keyMaterial, nil
 }
 
+// RawSigner returns a RawSigner interface for advanced signing operations.
+// This is useful for protocols like W3C Data Integrity that need to sign pre-computed digests.
+func (sc *SignerConfig) RawSigner() (RawSigner, error) {
+	if err := sc.initialize(); err != nil {
+		return nil, fmt.Errorf("failed to initialize key material: %w", err)
+	}
+
+	return NewKeyMaterialSigner(sc.keyMaterial), nil
+}
+
 // getHashAlgorithmForKey returns the appropriate hash algorithm for a given public key.
 func getHashAlgorithmForKey(pubKey crypto.PublicKey) crypto.Hash {
 	switch k := pubKey.(type) {

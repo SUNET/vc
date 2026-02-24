@@ -161,7 +161,7 @@ func handleIssue(w http.ResponseWriter, r *http.Request) {
 			ProofPurpose:       "assertionMethod",
 			Created:            time.Now().UTC(),
 		}
-		signedCred, err = suite.Sign(cred, key, opts)
+		signedCred, err = suite.Sign(r.Context(), cred, key, opts)
 	case "ecdsa-sd-2023":
 		suite := vc_ecdsa.NewSdSuite()
 		opts := &vc_ecdsa.SdSignOptions{

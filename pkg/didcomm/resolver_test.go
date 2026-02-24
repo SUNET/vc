@@ -18,6 +18,16 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
+// generateECDSAKey is a test helper that generates an ECDSA P-256 key.
+func generateECDSAKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate ECDSA key: %v", err)
+	}
+	return privKey
+}
+
 // mockResolver is a test helper that implements keyresolver.Resolver
 type mockResolver struct {
 	ed25519Keys map[string]ed25519.PublicKey
@@ -119,11 +129,7 @@ func TestResolveKeyAgreement_Ed25519(t *testing.T) {
 
 // TestResolveKeyAgreement_ECDSA tests key agreement resolution with ECDSA (P-256) keys.
 func TestResolveKeyAgreement_ECDSA(t *testing.T) {
-	// Generate P-256 key
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate ECDSA key: %v", err)
-	}
+	privKey := generateECDSAKey(t)
 
 	did := "did:example:bob"
 	mock := &mockResolver{
@@ -226,10 +232,7 @@ func TestResolveVerification_Ed25519(t *testing.T) {
 
 // TestResolveVerification_ECDSA tests verification key resolution with ECDSA.
 func TestResolveVerification_ECDSA(t *testing.T) {
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate ECDSA key: %v", err)
-	}
+	privKey := generateECDSAKey(t)
 
 	did := "did:example:bob"
 	mock := &mockResolver{
@@ -261,8 +264,11 @@ func TestResolveVerification_ECDSA(t *testing.T) {
 
 // TestResolveVerification_BothKeyTypes tests resolution when both Ed25519 and ECDSA exist.
 func TestResolveVerification_BothKeyTypes(t *testing.T) {
-	edPub, _, _ := ed25519.GenerateKey(rand.Reader)
-	ecPriv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	edPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate Ed25519 key: %v", err)
+	}
+	ecPriv := generateECDSAKey(t)
 
 	did := "did:example:charlie"
 	mock := &mockResolver{
@@ -438,7 +444,9 @@ func TestEd25519ToX25519ECDHCompatibility(t *testing.T) {
 
 	// Generate a separate X25519 key pair for ECDH
 	var x25519Priv [32]byte
-	rand.Read(x25519Priv[:])
+	if _, err := rand.Read(x25519Priv[:]); err != nil {
+		t.Fatalf("Failed to generate random key: %v", err)
+	}
 	var x25519Pub2 [32]byte
 	curve25519.ScalarBaseMult(&x25519Pub2, &x25519Priv)
 

@@ -13,10 +13,13 @@ const DefaultMaxHops = 10
 // Hop represents a single hop in a routing path.
 type Hop struct {
 	// RecipientDID is the DID that should receive the message at this hop.
+	// This is used for encryption (Encrypter interface requires DIDs).
 	RecipientDID string
 
-	// RoutingKey is the key ID to use for encryption at this hop.
-	// If empty, the recipient's default key agreement key is used.
+	// RoutingKey is the original key ID from the service endpoint.
+	// May be a DID URL (e.g., did:example:mediator#key-1) or a DID.
+	// The Encrypter uses RecipientDID (extracted from RoutingKey if needed)
+	// since the encryption interface operates on DIDs, not key IDs.
 	RoutingKey string
 
 	// ServiceEndpoint is the endpoint URL for this hop (if known).
@@ -107,7 +110,10 @@ func (rb *RouteBuilder) buildRouteRecursive(ctx context.Context, did string, dep
 	// Resolve the DID's service endpoint
 	service, err := rb.resolver.ResolveDIDCommService(ctx, did)
 	if err != nil {
-		// If we can't resolve, assume direct delivery
+		// Fallback to direct delivery when service resolution fails.
+		// This allows sending to DIDs that don't publish DIDComm services,
+		// treating them as direct recipients. Callers should handle this
+		// by attempting direct delivery or reporting the missing endpoint.
 		return &Route{
 			FinalRecipient: did,
 			Hops: []Hop{

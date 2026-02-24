@@ -156,10 +156,10 @@ func determineSigningAlgorithm(key jwk.Key, hint string) (jwa.SignatureAlgorithm
 			if crv.String() == "secp256k1" {
 				return jwa.ES256K(), nil
 			}
-			return jwa.ES256(), fmt.Errorf("%w: unsupported curve %s", ErrUnsupportedAlgorithm, crv)
+			return jwa.ES256(), fmt.Errorf("%w: unsupported curve %v", ErrUnsupportedAlgorithm, crv)
 		}
 	default:
-		return jwa.EdDSA(), fmt.Errorf("%w: unsupported key type %s", ErrUnsupportedAlgorithm, kty)
+		return jwa.EdDSA(), fmt.Errorf("%w: unsupported key type %v", ErrUnsupportedAlgorithm, kty)
 	}
 }
 

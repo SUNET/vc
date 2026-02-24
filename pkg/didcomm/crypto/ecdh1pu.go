@@ -109,71 +109,13 @@ func (e *ECDH1PUKeyAgreement) GenerateEphemeralKey() error {
 // Returns the derived key and the ephemeral public key (for inclusion in JWE header).
 // Note: This method does NOT include the cc_tag. Use DeriveKeyWithTag for ECDH-1PU key commitment.
 func (e *ECDH1PUKeyAgreement) DeriveKey() ([]byte, jwk.Key, error) {
-	if e.SenderPrivateKey == nil {
-		return nil, nil, fmt.Errorf("%w: sender private key is required for ECDH-1PU encryption", ErrInvalidKey)
-	}
-
-	if e.EphemeralPrivateKey == nil {
-		if err := e.GenerateEphemeralKey(); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	// Extract raw keys for ECDH operations
-	ephemeralPriv, err := extractECDHPrivateKey(e.EphemeralPrivateKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract ephemeral private key: %w", err)
-	}
-
-	senderPriv, err := extractECDHPrivateKey(e.SenderPrivateKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract sender private key: %w", err)
-	}
-
-	recipientPub, err := extractECDHPublicKey(e.RecipientPublicKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract recipient public key: %w", err)
-	}
-
-	// Compute Z_es = ECDH(ephemeral_private, recipient_public)
-	zES, err := ephemeralPriv.ECDH(recipientPub)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to compute Z_es: %w", err)
-	}
-
-	// Compute Z_ss = ECDH(sender_private, recipient_public)
-	zSS, err := senderPriv.ECDH(recipientPub)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to compute Z_ss: %w", err)
-	}
-
-	// Concatenate: Z = Z_es || Z_ss
-	z := append(zES, zSS...)
-
-	// Get the required key size for the content encryption algorithm
-	keySize, err := getKeyWrapKeySize(e.Algorithm)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Derive the key wrapping key using Concat KDF
-	// For ECDH-1PU+A256KW, we use the same KDF as ECDH-ES
-	derivedKey, err := concatKDF(z, e.Algorithm, e.APU, e.APV, keySize)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to derive key: %w", err)
-	}
-
-	// Get ephemeral public key for inclusion in JWE header
-	ephemeralPubKey, err := e.EphemeralPrivateKey.PublicKey()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get ephemeral public key: %w", err)
-	}
-
-	return derivedKey, ephemeralPubKey, nil
+	return e.DeriveKeyWithTag(nil)
 }
 
-// DeriveKeyWithTag derives the key using ECDH-1PU with key commitment (cc_tag).
-// This includes the content ciphertext authentication tag in the KDF per draft-madden-jose-ecdh-1pu.
+// DeriveKeyWithTag derives the key using ECDH-1PU with optional key commitment (cc_tag).
+// If ccTag is nil or empty, uses standard Concat KDF.
+// If ccTag is provided, includes the content ciphertext authentication tag in the KDF
+// per draft-madden-jose-ecdh-1pu for key commitment.
 // Returns the derived key and the ephemeral public key.
 func (e *ECDH1PUKeyAgreement) DeriveKeyWithTag(ccTag []byte) ([]byte, jwk.Key, error) {
 	if e.SenderPrivateKey == nil {
@@ -186,36 +128,11 @@ func (e *ECDH1PUKeyAgreement) DeriveKeyWithTag(ccTag []byte) ([]byte, jwk.Key, e
 		}
 	}
 
-	// Extract raw keys for ECDH operations
-	ephemeralPriv, err := extractECDHPrivateKey(e.EphemeralPrivateKey)
+	// Compute the shared secret Z = Z_es || Z_ss
+	z, err := e.computeSharedSecret()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract ephemeral private key: %w", err)
+		return nil, nil, err
 	}
-
-	senderPriv, err := extractECDHPrivateKey(e.SenderPrivateKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract sender private key: %w", err)
-	}
-
-	recipientPub, err := extractECDHPublicKey(e.RecipientPublicKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract recipient public key: %w", err)
-	}
-
-	// Compute Z_es = ECDH(ephemeral_private, recipient_public)
-	zES, err := ephemeralPriv.ECDH(recipientPub)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to compute Z_es: %w", err)
-	}
-
-	// Compute Z_ss = ECDH(sender_private, recipient_public)
-	zSS, err := senderPriv.ECDH(recipientPub)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to compute Z_ss: %w", err)
-	}
-
-	// Concatenate: Z = Z_es || Z_ss
-	z := append(zES, zSS...)
 
 	// Get the required key size for the content encryption algorithm
 	keySize, err := getKeyWrapKeySize(e.Algorithm)
@@ -223,10 +140,10 @@ func (e *ECDH1PUKeyAgreement) DeriveKeyWithTag(ccTag []byte) ([]byte, jwk.Key, e
 		return nil, nil, err
 	}
 
-	// Derive the key wrapping key using Concat KDF with cc_tag (key commitment)
-	derivedKey, err := concatKDF1PU(z, e.Algorithm, e.APU, e.APV, ccTag, keySize)
+	// Derive the key wrapping key using the appropriate KDF
+	derivedKey, err := e.deriveKeyFromZ(z, ccTag, keySize)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to derive key with tag: %w", err)
+		return nil, nil, err
 	}
 
 	// Get ephemeral public key for inclusion in JWE header
@@ -236,6 +153,58 @@ func (e *ECDH1PUKeyAgreement) DeriveKeyWithTag(ccTag []byte) ([]byte, jwk.Key, e
 	}
 
 	return derivedKey, ephemeralPubKey, nil
+}
+
+// computeSharedSecret computes Z = Z_es || Z_ss for ECDH-1PU encryption.
+func (e *ECDH1PUKeyAgreement) computeSharedSecret() ([]byte, error) {
+	// Extract raw keys for ECDH operations
+	ephemeralPriv, err := extractECDHPrivateKey(e.EphemeralPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ephemeral private key: %w", err)
+	}
+
+	senderPriv, err := extractECDHPrivateKey(e.SenderPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract sender private key: %w", err)
+	}
+
+	recipientPub, err := extractECDHPublicKey(e.RecipientPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract recipient public key: %w", err)
+	}
+
+	// Compute Z_es = ECDH(ephemeral_private, recipient_public)
+	zES, err := ephemeralPriv.ECDH(recipientPub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute Z_es: %w", err)
+	}
+
+	// Compute Z_ss = ECDH(sender_private, recipient_public)
+	zSS, err := senderPriv.ECDH(recipientPub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute Z_ss: %w", err)
+	}
+
+	// Concatenate: Z = Z_es || Z_ss
+	return append(zES, zSS...), nil
+}
+
+// deriveKeyFromZ derives the key wrapping key from shared secret Z.
+// Uses concatKDF1PU if ccTag is provided, otherwise uses standard concatKDF.
+func (e *ECDH1PUKeyAgreement) deriveKeyFromZ(z, ccTag []byte, keySize int) ([]byte, error) {
+	if len(ccTag) > 0 {
+		derivedKey, err := concatKDF1PU(z, e.Algorithm, e.APU, e.APV, ccTag, keySize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to derive key with tag: %w", err)
+		}
+		return derivedKey, nil
+	}
+
+	derivedKey, err := concatKDF(z, e.Algorithm, e.APU, e.APV, keySize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive key: %w", err)
+	}
+	return derivedKey, nil
 }
 
 // DeriveKeyForDecryption derives the key for decryption given the ephemeral public key.
@@ -281,19 +250,8 @@ func (e *ECDH1PUKeyAgreement) DeriveKeyForDecryption(ephemeralPubKey jwk.Key, se
 		return nil, err
 	}
 
-	// Derive the key wrapping key
-	// Use concatKDF1PU if CCTag is set (for ECDH-1PU key commitment)
-	var derivedKey []byte
-	if len(e.CCTag) > 0 {
-		derivedKey, err = concatKDF1PU(z, e.Algorithm, e.APU, e.APV, e.CCTag, keySize)
-	} else {
-		derivedKey, err = concatKDF(z, e.Algorithm, e.APU, e.APV, keySize)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to derive key: %w", err)
-	}
-
-	return derivedKey, nil
+	// Derive the key wrapping key (uses CCTag if set for key commitment)
+	return e.deriveKeyFromZ(z, e.CCTag, keySize)
 }
 
 // generateECDHKey generates an ECDH key pair for the specified curve.
