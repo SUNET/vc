@@ -266,9 +266,10 @@ func decodeMultikeyECDSA(multikey string) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("multikey too short")
 	}
 
-	// Check multicodec prefix for P-256 (secp256r1)
+	// Check multicodec prefix for ECDSA curves
 	// P-256 compressed public key multicodec: 0x1200 encoded as varint is 0x80 0x24
 	// P-384 compressed public key multicodec: 0x1201 encoded as varint is 0x81 0x24
+	// P-521 compressed public key multicodec: 0x1202 encoded as varint is 0x82 0x24
 	var curve elliptic.Curve
 	var keyData []byte
 
@@ -280,12 +281,16 @@ func decodeMultikeyECDSA(multikey string) (*ecdsa.PublicKey, error) {
 		// P-384 compressed public key
 		curve = elliptic.P384()
 		keyData = decoded[2:]
+	} else if len(decoded) >= 2 && decoded[0] == 0x82 && decoded[1] == 0x24 {
+		// P-521 compressed public key
+		curve = elliptic.P521()
+		keyData = decoded[2:]
 	} else {
 		// Not a recognized ECDSA multicodec
 		return nil, fmt.Errorf("unrecognized ECDSA multicodec: 0x%02x 0x%02x", decoded[0], decoded[1])
 	}
 
-	// Parse compressed point format (33 bytes for P-256, 49 for P-384)
+	// Parse compressed point format (33 bytes for P-256, 49 for P-384, 67 for P-521)
 	x, y := elliptic.UnmarshalCompressed(curve, keyData)
 	if x == nil {
 		return nil, fmt.Errorf("failed to unmarshal compressed ECDSA point")

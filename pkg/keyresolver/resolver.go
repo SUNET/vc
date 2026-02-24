@@ -148,10 +148,11 @@ func NewLocalResolver() *LocalResolver {
 
 // CanResolveLocally returns true if the verification method can be resolved
 // locally without contacting external services (i.e., self-contained DIDs).
-// This includes did:key and did:jwk methods, as well as raw multikey formats.
+// This includes did:key, did:jwk, and did:peer methods, as well as raw multikey formats.
 func CanResolveLocally(verificationMethod string) bool {
 	return strings.HasPrefix(verificationMethod, "did:key:") ||
 		strings.HasPrefix(verificationMethod, "did:jwk:") ||
+		strings.HasPrefix(verificationMethod, "did:peer:") ||
 		strings.HasPrefix(verificationMethod, "z") || // multibase base58-btc
 		strings.HasPrefix(verificationMethod, "u") // multibase base64url
 }
@@ -168,6 +169,11 @@ func (l *LocalResolver) ResolveEd25519(verificationMethod string) (ed25519.Publi
 		return l.resolveDidJwkEd25519(verificationMethod)
 	}
 
+	// Handle did:peer format
+	if strings.HasPrefix(verificationMethod, "did:peer:") {
+		return l.resolveDidPeerEd25519(verificationMethod)
+	}
+
 	// Handle multikey format directly
 	if strings.HasPrefix(verificationMethod, "u") || strings.HasPrefix(verificationMethod, "z") {
 		return l.decodeMultikey(verificationMethod)
@@ -176,7 +182,7 @@ func (l *LocalResolver) ResolveEd25519(verificationMethod string) (ed25519.Publi
 	return nil, fmt.Errorf("unsupported verification method format: %s", verificationMethod)
 }
 
-// ResolveECDSA extracts ECDSA keys from local formats (did:key, did:jwk, multikey)
+// ResolveECDSA extracts ECDSA keys from local formats (did:key, did:jwk, did:peer, multikey)
 func (l *LocalResolver) ResolveECDSA(verificationMethod string) (*ecdsa.PublicKey, error) {
 	// Handle did:key format
 	if strings.HasPrefix(verificationMethod, "did:key:") {
@@ -186,6 +192,11 @@ func (l *LocalResolver) ResolveECDSA(verificationMethod string) (*ecdsa.PublicKe
 	// Handle did:jwk format (base64url-encoded JWK)
 	if strings.HasPrefix(verificationMethod, "did:jwk:") {
 		return l.resolveDidJwkECDSA(verificationMethod)
+	}
+
+	// Handle did:peer format
+	if strings.HasPrefix(verificationMethod, "did:peer:") {
+		return l.resolveDidPeerECDSA(verificationMethod)
 	}
 
 	// Handle multikey format directly
@@ -359,6 +370,177 @@ func (l *LocalResolver) parseDidJwk(didJwk string) (map[string]any, error) {
 	}
 
 	return jwk, nil
+}
+
+// =============================================================================
+// did:peer Resolution
+// =============================================================================
+
+// resolveDidPeerEd25519 extracts an Ed25519 public key from a did:peer identifier.
+// Supports did:peer:0 (equivalent to did:key) and did:peer:2 (inline keys with purpose codes).
+func (l *LocalResolver) resolveDidPeerEd25519(didPeer string) (ed25519.PublicKey, error) {
+	// Extract fragment if present (e.g., "did:peer:2.Vz6Mk...#key-1")
+	var fragment string
+	if idx := strings.Index(didPeer, "#"); idx > 0 {
+		fragment = didPeer[idx+1:]
+		didPeer = didPeer[:idx]
+	}
+
+	// Handle did:peer:0 (equivalent to did:key)
+	if strings.HasPrefix(didPeer, "did:peer:0") {
+		multikey := strings.TrimPrefix(didPeer, "did:peer:0")
+		return l.decodeMultikey(multikey)
+	}
+
+	// Handle did:peer:2 (inline keys with purpose codes)
+	if strings.HasPrefix(didPeer, "did:peer:2") {
+		keys, err := parseDidPeer2Keys(didPeer)
+		if err != nil {
+			return nil, err
+		}
+
+		// If fragment specified, find matching key
+		if fragment != "" {
+			return l.findEd25519KeyByFragment(keys, fragment)
+		}
+
+		// Default: return first authentication (V) key
+		for _, key := range keys {
+			if key.Purpose == 'V' {
+				return l.decodeMultikey(key.Multikey)
+			}
+		}
+
+		return nil, fmt.Errorf("no authentication key found in did:peer:2: %s", didPeer)
+	}
+
+	return nil, fmt.Errorf("unsupported did:peer format: %s", didPeer)
+}
+
+// resolveDidPeerECDSA extracts an ECDSA public key from a did:peer identifier.
+func (l *LocalResolver) resolveDidPeerECDSA(didPeer string) (*ecdsa.PublicKey, error) {
+	// Extract fragment if present
+	var fragment string
+	if idx := strings.Index(didPeer, "#"); idx > 0 {
+		fragment = didPeer[idx+1:]
+		didPeer = didPeer[:idx]
+	}
+
+	// Handle did:peer:0 (equivalent to did:key)
+	if strings.HasPrefix(didPeer, "did:peer:0") {
+		multikey := strings.TrimPrefix(didPeer, "did:peer:0")
+		return decodeMultikeyECDSA(multikey)
+	}
+
+	// Handle did:peer:2
+	if strings.HasPrefix(didPeer, "did:peer:2") {
+		keys, err := parseDidPeer2Keys(didPeer)
+		if err != nil {
+			return nil, err
+		}
+
+		// If fragment specified, find matching key
+		if fragment != "" {
+			return findECDSAKeyByFragment(keys, fragment)
+		}
+
+		// Default: return first authentication (V) key
+		for _, key := range keys {
+			if key.Purpose == 'V' {
+				return decodeMultikeyECDSA(key.Multikey)
+			}
+		}
+
+		return nil, fmt.Errorf("no authentication key found in did:peer:2: %s", didPeer)
+	}
+
+	return nil, fmt.Errorf("unsupported did:peer format: %s", didPeer)
+}
+
+// didPeerKey represents a key extracted from a did:peer:2 identifier.
+type didPeerKey struct {
+	Purpose  byte   // V=verification, E=encryption, A=assertion, etc.
+	Multikey string // The multibase-encoded key
+	Index    int    // Position index for fragment generation (key-1, key-2, etc.)
+}
+
+// parseDidPeer2Keys extracts all keys from a did:peer:2 identifier.
+// Format: did:peer:2.{element}.{element}...
+// where element is {purposeCode}{multikey} or S{base64url-json} for services
+func parseDidPeer2Keys(didPeer string) ([]didPeerKey, error) {
+	// Remove "did:peer:2" prefix
+	content := strings.TrimPrefix(didPeer, "did:peer:2")
+	if content == "" {
+		return nil, fmt.Errorf("empty did:peer:2 identifier")
+	}
+
+	// Split by "." (each element starts with ".")
+	parts := strings.Split(content, ".")
+	var keys []didPeerKey
+	keyIndex := 1
+
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+
+		purpose := part[0]
+		data := part[1:]
+
+		// Skip service entries (S)
+		if purpose == 'S' {
+			continue
+		}
+
+		// Valid key purpose codes: V, E, A, I, D
+		if purpose == 'V' || purpose == 'E' || purpose == 'A' || purpose == 'I' || purpose == 'D' {
+			keys = append(keys, didPeerKey{
+				Purpose:  purpose,
+				Multikey: data,
+				Index:    keyIndex,
+			})
+			keyIndex++
+		}
+	}
+
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no keys found in did:peer:2: %s", didPeer)
+	}
+
+	return keys, nil
+}
+
+// findEd25519KeyByFragment finds an Ed25519 key by its fragment identifier (e.g., "key-1").
+func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment string) (ed25519.PublicKey, error) {
+	// Parse fragment as "key-N"
+	var keyIndex int
+	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
+		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	}
+
+	for _, key := range keys {
+		if key.Index == keyIndex {
+			return l.decodeMultikey(key.Multikey)
+		}
+	}
+
+	return nil, fmt.Errorf("key not found: #%s", fragment)
+}
+
+// findECDSAKeyByFragment finds an ECDSA key by its fragment identifier.
+func findECDSAKeyByFragment(keys []didPeerKey, fragment string) (*ecdsa.PublicKey, error) {
+	var keyIndex int
+	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
+		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	}
+
+	for _, key := range keys {
+		if key.Index == keyIndex {
+			return decodeMultikeyECDSA(key.Multikey)
+		}
+	}
+
+	return nil, fmt.Errorf("key not found: #%s", fragment)
 }
 
 // StaticResolver provides a simple key->value resolver for testing
