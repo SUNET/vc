@@ -331,13 +331,11 @@ func (c *WebSocketClient) processIncomingMessage(msgType int, data []byte) {
 	mediaType := c.detectMediaType(msgType, data)
 	ctx := context.Background()
 	response, responseMediaType, err := c.processor.ProcessMessage(ctx, data, mediaType)
-	if err != nil {
+	if err != nil || response == nil {
 		return
 	}
 
-	if response != nil {
-		_ = c.Send(ctx, response, responseMediaType)
-	}
+	_ = c.Send(ctx, response, responseMediaType)
 }
 
 // pingLoop sends periodic pings to keep the connection alive.
@@ -464,11 +462,7 @@ func (h *WebSocketHandler) connectionLoop(conn *websocket.Conn, ctx context.Cont
 func (h *WebSocketHandler) handleMessage(conn *websocket.Conn, ctx context.Context, msgType int, data []byte) error {
 	mediaType := detectMediaTypeFromMessage(msgType, data)
 	response, responseMediaType, err := h.processor.ProcessMessage(ctx, data, mediaType)
-	if err != nil {
-		return nil // Log error but continue
-	}
-
-	if response == nil {
+	if err != nil || response == nil {
 		return nil
 	}
 
