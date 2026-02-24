@@ -2,10 +2,14 @@ package ecdsa
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"math/big"
 	"time"
 
@@ -114,6 +118,35 @@ func addProofToCredential(credMap map[string]any, proof map[string]any) {
 	}
 }
 
+// hashForCurve returns a new hash instance appropriate for the given curve.
+// P-256 uses SHA-256, P-384 uses SHA-384, P-521 uses SHA-512.
+func hashForCurve(curve elliptic.Curve) hash.Hash {
+	switch curve {
+	case elliptic.P384():
+		return sha512.New384()
+	case elliptic.P521():
+		return sha512.New()
+	default:
+		return sha256.New()
+	}
+}
+
+// hashCombinedData hashes the combined proof+document hash to produce a
+// curve-appropriate digest size. This ensures the full combined data is
+// cryptographically bound in the signature.
+func hashCombinedData(combined []byte, pubKey crypto.PublicKey) []byte {
+	ecPub, ok := pubKey.(*ecdsa.PublicKey)
+	if !ok {
+		// Fallback to SHA-256 if we can't determine the curve
+		h := sha256.Sum256(combined)
+		return h[:]
+	}
+
+	hasher := hashForCurve(ecPub.Curve)
+	hasher.Write(combined)
+	return hasher.Sum(nil)
+}
+
 // SignWithSigner signs a credential using ecdsa-rdfc-2019 with a VCSigner.
 // This method supports both raw keys (via wrappers) and HSM-backed keys (via pki.RawSigner).
 func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredential, signer vccrypto.VCSigner, opts *SignOptions) (*credential.RDFCredential, error) {
@@ -165,13 +198,18 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 	proofHashBytes := sha256.Sum256([]byte(proofCanonical))
 	combined := append(proofHashBytes[:], docHashBytes[:]...)
 
-	// 5. Sign using the VCSigner
-	signature, err := signer.SignDigest(ctx, combined)
+	// 5. Hash combined data to curve-appropriate size before signing.
+	// This ensures both proofHash and docHash are cryptographically bound
+	// in the signature (raw ECDSA would truncate to curve order size).
+	digest := hashCombinedData(combined, signer.PublicKey())
+
+	// 6. Sign using the VCSigner
+	signature, err := signer.SignDigest(ctx, digest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
 
-	// 6. Encode signature (multibase base58-btc)
+	// 7. Encode signature (multibase base58-btc)
 	proofValue, err := multibase.Encode(multibase.Base58BTC, signature)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode signature: %w", err)
@@ -293,6 +331,9 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 
 	combined := append(proofHashBytes[:], docHashBytes[:]...)
 
+	// Hash combined data to curve-appropriate size (same as Sign)
+	digest := hashCombinedData(combined, key)
+
 	// 6. Verify signature
 	_, signature, err := multibase.Decode(proofValue)
 	if err != nil {
@@ -307,7 +348,7 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 	rInt := new(big.Int).SetBytes(signature[:keyBytes])
 	sInt := new(big.Int).SetBytes(signature[keyBytes:])
 
-	if !ecdsa.Verify(key, combined, rInt, sInt) {
+	if !ecdsa.Verify(key, digest, rInt, sInt) {
 		return fmt.Errorf("signature verification failed")
 	}
 

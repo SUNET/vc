@@ -95,14 +95,15 @@ func TestECDSAKeyWrapper_SignDigest(t *testing.T) {
 
 func TestECDSAKeyWrapper_DifferentCurves(t *testing.T) {
 	tests := []struct {
-		name      string
-		curve     elliptic.Curve
-		algorithm string
-		keySize   int
+		name       string
+		curve      elliptic.Curve
+		algorithm  string
+		keySize    int
+		digestSize int // Curve-appropriate digest size
 	}{
-		{"P-256", elliptic.P256(), "ES256", 64},
-		{"P-384", elliptic.P384(), "ES384", 96},
-		{"P-521", elliptic.P521(), "ES512", 132},
+		{"P-256", elliptic.P256(), "ES256", 64, 32},  // SHA-256
+		{"P-384", elliptic.P384(), "ES384", 96, 48},  // SHA-384
+		{"P-521", elliptic.P521(), "ES512", 132, 64}, // SHA-512
 	}
 
 	for _, tt := range tests {
@@ -115,7 +116,8 @@ func TestECDSAKeyWrapper_DifferentCurves(t *testing.T) {
 				t.Errorf("Algorithm() = %q, want %q", got, tt.algorithm)
 			}
 
-			digest := make([]byte, 64) // Large enough for any curve
+			// Use curve-appropriate digest size to match real-world usage
+			digest := make([]byte, tt.digestSize)
 			if _, err := rand.Read(digest); err != nil {
 				t.Fatalf("rand.Read() error = %v", err)
 			}

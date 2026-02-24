@@ -41,6 +41,7 @@ type Attachment struct {
 // AttachmentData represents the actual attachment content.
 // At least one of JWS, Links, Base64, or JSON should be set.
 // Multiple formats are allowed per DIDComm spec.
+// Additional validation rules are enforced by AttachmentData.Validate.
 type AttachmentData struct {
 	// JWS is a JSON Web Signature wrapping the content.
 	// Provides integrity and optional authentication.
@@ -72,7 +73,8 @@ func (a *Attachment) Validate() error {
 // Works for Base64 and JSON encoded content.
 func (a *Attachment) GetBytes() ([]byte, error) {
 	if a.Data.Base64 != "" {
-		return base64.RawURLEncoding.DecodeString(a.Data.Base64)
+		// Use tolerant decoder to support both padded and unpadded encodings
+		return a.DecodeBase64()
 	}
 	if a.Data.JSON != nil {
 		return json.Marshal(a.Data.JSON)
@@ -112,7 +114,8 @@ func (a *Attachment) GetJSON(v any) error {
 		return json.Unmarshal(data, v)
 	}
 	if a.Data.Base64 != "" {
-		data, err := base64.RawURLEncoding.DecodeString(a.Data.Base64)
+		// Use tolerant decoder for better interop
+		data, err := a.DecodeBase64()
 		if err != nil {
 			return err
 		}
@@ -121,7 +124,8 @@ func (a *Attachment) GetJSON(v any) error {
 	return fmt.Errorf("no JSON data available")
 }
 
-// Validate checks that exactly one data format is specified.
+// Validate checks that at least one data format is specified.
+// DIDComm allows multiple formats, so we only check for minimum presence.
 func (d *AttachmentData) Validate() error {
 	count := 0
 	if d.JWS != nil {

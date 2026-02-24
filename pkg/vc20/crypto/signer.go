@@ -53,6 +53,14 @@ func NewECDSAKeyWrapper(key *ecdsa.PrivateKey) *ECDSAKeyWrapper {
 
 // SignDigest signs a pre-computed digest using ECDSA.
 // Returns the signature in IEEE P1363 format (R||S concatenation).
+//
+// NOTE: The digest length should match the curve's hash size requirement:
+//   - P-256 (ES256): 32 bytes (SHA-256)
+//   - P-384 (ES384): 48 bytes (SHA-384)
+//   - P-521 (ES512): 64 bytes (SHA-512)
+//
+// If the digest is longer than the curve's bit size, ecdsa.Sign will only use the
+// leftmost bits up to the curve order size. Callers should ensure proper hashing.
 func (w *ECDSAKeyWrapper) SignDigest(ctx context.Context, digest []byte) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand.Reader, w.key, digest)
 	if err != nil {

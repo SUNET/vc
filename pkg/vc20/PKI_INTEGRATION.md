@@ -67,8 +67,9 @@ Update each suite with new `SignWithSigner` methods:
 
 ### Current (Raw Key)
 ```go
+ctx := context.Background()
 suite := ecdsa.NewSuite()
-signedCred, err := suite.Sign(cred, ecdsaPrivateKey, opts)
+signedCred, err := suite.Sign(ctx, cred, ecdsaPrivateKey, opts)
 ```
 
 ### New (With PKI/HSM)
@@ -85,8 +86,9 @@ signerConfig := pki.NewSignerConfig(&pki.KeyConfig{
 rawSigner, err := signerConfig.RawSigner()
 vcSigner := crypto.NewPKISignerWrapper(rawSigner)
 
+ctx := context.Background()
 suite := ecdsa.NewSuite()
-signedCred, err := suite.SignWithSigner(cred, vcSigner, opts)
+signedCred, err := suite.SignWithSigner(ctx, cred, vcSigner, opts)
 ```
 
 ## Backward Compatibility

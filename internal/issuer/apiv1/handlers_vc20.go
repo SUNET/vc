@@ -127,7 +127,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	}
 
 	// Sign the credential
-	signedCred, err := c.signVC20Credential(cred, cryptosuite, req.MandatoryPointers)
+	signedCred, err := c.signVC20Credential(ctx, cred, cryptosuite, req.MandatoryPointers)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign credential: %w", err)
 	}
@@ -190,7 +190,7 @@ func (c *Client) buildVC20CredentialJSON(
 }
 
 // signVC20Credential signs a credential using the specified cryptosuite
-func (c *Client) signVC20Credential(cred *credential.RDFCredential, cryptosuite string, mandatoryPointers []string) (*credential.RDFCredential, error) {
+func (c *Client) signVC20Credential(ctx context.Context, cred *credential.RDFCredential, cryptosuite string, mandatoryPointers []string) (*credential.RDFCredential, error) {
 	// Get the verification method from config
 	verificationMethod := c.cfg.Issuer.JWTAttribute.Issuer + "#key-1"
 	if c.kid != "" {
@@ -204,7 +204,7 @@ func (c *Client) signVC20Credential(cred *credential.RDFCredential, cryptosuite 
 			return nil, fmt.Errorf("ecdsa-rdfc-2019 requires ECDSA private key, got %T", c.privateKey)
 		}
 		suite := ecdsaSuite.NewSuite()
-		return suite.Sign(cred, key, &ecdsaSuite.SignOptions{
+		return suite.Sign(ctx, cred, key, &ecdsaSuite.SignOptions{
 			VerificationMethod: verificationMethod,
 			ProofPurpose:       "assertionMethod",
 			Created:            time.Now().UTC(),
