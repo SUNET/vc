@@ -20,7 +20,7 @@
 //
 //	msg := message.New(
 //	    message.WithType("https://example.com/protocols/1.0/hello"),
-//	    message.WithTo([]string{"did:example:bob"}),
+//	    message.WithTo("did:example:bob"),
 //	    message.WithFrom("did:example:alice"),
 //	    message.WithBody(map[string]any{"greeting": "Hello, Bob!"}),
 //	)

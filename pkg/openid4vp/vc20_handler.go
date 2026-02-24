@@ -921,7 +921,7 @@ func (h *VC20Handler) signECDSA2019(cred *credential.RDFCredential) (*credential
 	}
 
 	suite := ecdsaSuite.NewSuite()
-	return suite.Sign(cred, key, &ecdsaSuite.SignOptions{
+	return suite.Sign(context.Background(), cred, key, &ecdsaSuite.SignOptions{
 		VerificationMethod: h.signerConfig.VerificationMethod,
 		ProofPurpose:       "assertionMethod",
 		Created:            time.Now().UTC(),

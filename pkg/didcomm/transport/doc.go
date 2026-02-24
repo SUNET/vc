@@ -14,7 +14,11 @@
 // Messages are sent as POST requests with appropriate content types.
 //
 //	client := transport.NewHTTPClient()
-//	response, err := client.Send(ctx, "https://example.com/didcomm", message)
+//	response, err := client.Send(ctx, transport.SendRequest{
+//		Endpoint:  "https://example.com/didcomm",
+//		Message:   packedMessage,
+//		MediaType: "application/didcomm-encrypted+json",
+//	})
 //
 // # Server Handler
 //

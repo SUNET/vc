@@ -41,18 +41,18 @@ type SignOptions struct {
 }
 
 // Sign signs a credential using ecdsa-rdfc-2019
-func (s *Suite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, opts *SignOptions) (*credential.RDFCredential, error) {
+func (s *Suite) Sign(ctx context.Context, cred *credential.RDFCredential, key *ecdsa.PrivateKey, opts *SignOptions) (*credential.RDFCredential, error) {
 	if key == nil {
 		return nil, fmt.Errorf("private key is nil")
 	}
 	// Wrap the raw key and delegate to SignWithSigner
 	wrapper := vccrypto.NewECDSAKeyWrapper(key)
-	return s.SignWithSigner(cred, wrapper, opts)
+	return s.SignWithSigner(ctx, cred, wrapper, opts)
 }
 
 // SignWithSigner signs a credential using ecdsa-rdfc-2019 with a VCSigner.
-// This method supports both raw keys (via wrappers) and HSM-based keys (via pki.RawSigner).
-func (s *Suite) SignWithSigner(cred *credential.RDFCredential, signer vccrypto.VCSigner, opts *SignOptions) (*credential.RDFCredential, error) {
+// This method supports both raw keys (via wrappers) and HSM-backed keys (via pki.RawSigner).
+func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredential, signer vccrypto.VCSigner, opts *SignOptions) (*credential.RDFCredential, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("credential is nil")
 	}
@@ -130,7 +130,7 @@ func (s *Suite) SignWithSigner(cred *credential.RDFCredential, signer vccrypto.V
 	combined := append(proofHashBytes[:], docHashBytes[:]...)
 
 	// 5. Sign using the VCSigner
-	signature, err := signer.SignDigest(context.Background(), combined)
+	signature, err := signer.SignDigest(ctx, combined)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}

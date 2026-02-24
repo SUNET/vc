@@ -39,7 +39,8 @@ type Attachment struct {
 }
 
 // AttachmentData represents the actual attachment content.
-// Exactly one of JWS, Hash, Links, Base64, or JSON should be set.
+// At least one of JWS, Links, Base64, or JSON should be set.
+// Multiple formats are allowed per DIDComm spec.
 type AttachmentData struct {
 	// JWS is a JSON Web Signature wrapping the content.
 	// Provides integrity and optional authentication.
@@ -71,7 +72,7 @@ func (a *Attachment) Validate() error {
 // Works for Base64 and JSON encoded content.
 func (a *Attachment) GetBytes() ([]byte, error) {
 	if a.Data.Base64 != "" {
-		return base64.URLEncoding.DecodeString(a.Data.Base64)
+		return base64.RawURLEncoding.DecodeString(a.Data.Base64)
 	}
 	if a.Data.JSON != nil {
 		return json.Marshal(a.Data.JSON)
@@ -111,7 +112,7 @@ func (a *Attachment) GetJSON(v any) error {
 		return json.Unmarshal(data, v)
 	}
 	if a.Data.Base64 != "" {
-		data, err := base64.URLEncoding.DecodeString(a.Data.Base64)
+		data, err := base64.RawURLEncoding.DecodeString(a.Data.Base64)
 		if err != nil {
 			return err
 		}
@@ -144,13 +145,13 @@ func (d *AttachmentData) Validate() error {
 	return nil
 }
 
-// NewBase64Attachment creates an attachment with base64-encoded data.
+// NewBase64Attachment creates an attachment with base64url-encoded data (no padding).
 func NewBase64Attachment(id string, mediaType string, data []byte) Attachment {
 	return Attachment{
 		ID:        id,
 		MediaType: mediaType,
 		Data: AttachmentData{
-			Base64: base64.URLEncoding.EncodeToString(data),
+			Base64: base64.RawURLEncoding.EncodeToString(data),
 		},
 	}
 }

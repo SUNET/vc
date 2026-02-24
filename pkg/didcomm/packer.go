@@ -75,7 +75,10 @@ func Pack(ctx context.Context, msg *message.Message, opts PackOptions) (*PackRes
 	}
 
 	// Step 1: Sign if requested
-	if opts.SignBeforeEncrypt && opts.SignerKey != nil {
+	if opts.SignBeforeEncrypt {
+		if opts.SignerKey == nil {
+			return nil, fmt.Errorf("SignBeforeEncrypt requires SignerKey to be set")
+		}
 		signedMsg, err := crypto.Sign(ctx, plaintext, opts.SignerKey, crypto.SignOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign message: %w", err)

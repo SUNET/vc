@@ -39,7 +39,9 @@ func TestECDSAKeyWrapper_SignDigest(t *testing.T) {
 
 	// Test SignDigest
 	digest := make([]byte, 32) // SHA-256 digest size
-	rand.Read(digest)
+	if _, err := rand.Read(digest); err != nil {
+		t.Fatalf("rand.Read() error = %v", err)
+	}
 
 	signature, err := wrapper.SignDigest(context.Background(), digest)
 	if err != nil {
@@ -89,7 +91,9 @@ func TestECDSAKeyWrapper_DifferentCurves(t *testing.T) {
 			}
 
 			digest := make([]byte, 64) // Large enough for any curve
-			rand.Read(digest)
+			if _, err := rand.Read(digest); err != nil {
+				t.Fatalf("rand.Read() error = %v", err)
+			}
 
 			signature, err := wrapper.SignDigest(context.Background(), digest)
 			if err != nil {

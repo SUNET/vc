@@ -4,6 +4,7 @@
 package ecdsa
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -52,7 +53,7 @@ func TestSignAndVerify(t *testing.T) {
 		Created:            time.Now().UTC(),
 	}
 
-	signedCred, err := suite.Sign(cred, key, opts)
+	signedCred, err := suite.Sign(context.Background(), cred, key, opts)
 	if err != nil {
 		t.Fatalf("Failed to sign credential: %v", err)
 	}
