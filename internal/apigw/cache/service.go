@@ -44,6 +44,10 @@ type Service struct {
 	Document               Cache[map[string]*model.CompleteDocument]
 	DPopJTI                Cache[bool]
 
+	// JWKS caches the raw JWKS JSON fetched from an identity provider's JWKS URL.
+	// The key is the JWKS URL; the value is the raw JSON response ([]byte).
+	JWKS Cache[[]byte]
+
 	// OIDCRPSession stores OIDC RP authentication flow state (state, nonce, PKCE verifier).
 	OIDCRPSession Cache[*oidcrp.Session]
 
@@ -84,6 +88,10 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.DPopJTI, err = pkgcache.NewGenericCache[bool](cs, ctx, "apigw_dpop_jti", 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("cache: dpop_jti: %w", err)
+	}
+
+	if s.JWKS, err = pkgcache.NewGenericCache[[]byte](cs, ctx, "apigw_jwks", 15*time.Minute); err != nil {
+		return nil, fmt.Errorf("cache: jwks: %w", err)
 	}
 
 	if s.OIDCRPSession, err = pkgcache.NewGenericCache[*oidcrp.Session](cs, ctx, "apigw_oidcrp_sessions", time.Duration(cfg.APIGW.OIDCRP.SessionDuration)*time.Second); err != nil {

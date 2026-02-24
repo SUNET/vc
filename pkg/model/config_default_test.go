@@ -236,12 +236,13 @@ func TestCredentialDisplayConfigDefaults(t *testing.T) {
 	assert.False(t, cfg.AllowEdit)
 }
 
-func TestBasicAuthDefaults(t *testing.T) {
-	var cfg BasicAuth
+func TestAPIAuthDefaults(t *testing.T) {
+	var cfg APIAuth
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enable)
+	assert.False(t, cfg.BasicAuth.Enable)
+	assert.False(t, cfg.JWT.Enable)
 }
 
 func TestTokenStatusListsDefaults(t *testing.T) {

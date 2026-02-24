@@ -251,10 +251,32 @@ apigw:
         - "https://demo.wwwallet.org"
         - "https://dev.wallet.sunet.se"
         - "https://sunetwallet-dev.app.siros.org"
-    basic_auth:
-      enable: false
-      users:
-        admin: "secret123"
+    # api_auth configures authentication for the /api/v1 endpoints.
+    # Exactly one of basic_auth.enable or jwt.enable may be true.
+    # If neither is enabled, endpoints are open (no auth).
+    api_auth:
+      basic_auth:
+        enable: false
+        users:
+          admin: "secret123"
+      # jwt:
+      #   enable: true
+      #   jwks_url: "https://auth.example.com/.well-known/jwks.json"
+      #   issuer: "https://auth.example.com"
+      #   audience: "vc-apigw"
+      #   # Optional SPOCP rules for fine-grained per-endpoint authorization.
+      #   # The service name is supplied by the calling service (e.g. "apigw").
+      #   # Each request is checked as:
+      #   #   (api (service <SERVICE>)(method <METHOD>)(path <PATH>)(subject <JWT_SUB>))
+      #   # When no rules are configured, any valid JWT grants access.
+      #   rules:
+      #     # Allow alice full access to all /api/v1/ endpoints on this service
+      #     - "(api (service apigw)(method)(path (* prefix /api/v1/))(subject alice))"
+      #     # Allow bob to only POST to /api/v1/upload on this service
+      #     - "(api (service apigw)(method POST)(path /api/v1/upload)(subject bob))"
+      #     # Allow any subject to read documents
+      #     - "(api (service apigw)(method POST)(path /api/v1/document)(subject))"
+      #   # rules_file: "/etc/vc/api_rules.spocp"
   public_url: "http://apigw.vc.docker:8080"
   registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:

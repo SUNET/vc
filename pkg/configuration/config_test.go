@@ -16,9 +16,10 @@ common:
     uri: "mongodb://secret-user:secret-pass@host:27017"
 apigw:
   api_server:
-    basic_auth:
-      users:
-        admin: "secret-admin-pass"
+    api_auth:
+      basic_auth:
+        users:
+          admin: "secret-admin-pass"
   oidcrp:
     registration:
       preconfigured:
@@ -47,7 +48,7 @@ ui:
 
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)
-	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.BasicAuth.Users["admin"])
+	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
 	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Preconfigured)
 	assert.Equal(t, "secret-client-secret", secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
 	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Dynamic)

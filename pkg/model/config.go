@@ -17,10 +17,10 @@ import (
 // APIServer holds the HTTP API server configuration
 type APIServer struct {
 	// Addr is the listen address for the HTTP server
-	Addr      string    `yaml:"addr" validate:"required" default:":8080"`
-	TLS       TLS       `yaml:"tls" validate:"omitempty"`
-	BasicAuth BasicAuth `yaml:"basic_auth"`
-	CORS      *CORS     `yaml:"cors,omitempty" validate:"omitempty"`
+	Addr    string  `yaml:"addr" validate:"required" default:":8080"`
+	TLS     TLS     `yaml:"tls" validate:"omitempty"`
+	APIAuth APIAuth `yaml:"api_auth"`
+	CORS    *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
 }
 
 // CORS holds the CORS configuration
@@ -613,12 +613,58 @@ type SupportedCredentialConfig struct {
 	Scopes []string `yaml:"scopes" validate:"required"`
 }
 
-// BasicAuth holds the HTTP Basic authentication configuration
-type BasicAuth struct {
-	// Users is a username to password mapping
-	Users map[string]string `yaml:"users"`
+// APIAuth configures the authentication method for the /api/v1 route group.
+// Exactly one of BasicAuth.Enable or JWT.Enable may be true.
+// If neither is enabled, no authentication is applied (open access).
+type APIAuth struct {
+	// BasicAuth holds the HTTP Basic authentication configuration.
+	// When enabled, requests are allowed or rejected based on username/password only.
+	BasicAuth APIAuthBasic `yaml:"basic_auth"`
+	// JWT holds the JWT Bearer token authentication configuration.
+	// When enabled, requests are validated via JWKS and optionally authorized
+	// against SPOCP (S-expression) rules for fine-grained per-endpoint control.
+	JWT APIAuthJWT `yaml:"jwt"`
+}
+
+// APIAuthBasic holds the HTTP Basic authentication configuration.
+// This is a simple allow/deny mechanism – valid credentials grant full access.
+type APIAuthBasic struct {
 	// Enable enables HTTP Basic authentication
 	Enable bool `yaml:"enable" default:"false"`
+	// Users is a username to password mapping
+	Users map[string]string `yaml:"users"`
+}
+
+// APIAuthJWT holds the configuration for JWT Bearer token authentication
+// with optional SPOCP-based authorization.
+//
+// When Rules (and/or RulesFile) are configured, each request is checked against
+// the SPOCP engine. A query of the form
+//
+//	(api (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
+//
+// is evaluated; the request is allowed only if a matching rule exists.
+// The <SERVICE> value is supplied by the calling service at middleware
+// registration time. When two services share endpoints, rules for one
+// service do not grant access to the other.
+// When no rules are configured, any valid JWT grants access.
+type APIAuthJWT struct {
+	// Enable enables JWT Bearer token authentication
+	Enable bool `yaml:"enable" default:"false"`
+	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures.
+	// Example: "https://auth.example.com/.well-known/jwks.json"
+	JWKSURL string `yaml:"jwks_url" validate:"required_if=Enable true,omitempty,url"`
+	// Issuer is the expected "iss" claim. Tokens with a different issuer are rejected.
+	Issuer string `yaml:"issuer" validate:"required_if=Enable true"`
+	// Audience is the expected "aud" claim. Tokens that do not contain this audience are rejected.
+	Audience string `yaml:"audience" validate:"required_if=Enable true"`
+	// Rules are SPOCP S-expression authorization rules loaded into an in-process engine.
+	// When non-empty the middleware builds a query per request and checks it.
+	// Example: ["(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))"]
+	Rules []string `yaml:"rules,omitempty"`
+	// RulesFile is an optional path to a file containing SPOCP rules (one per line).
+	// Rules from this file are loaded in addition to the inline Rules list.
+	RulesFile string `yaml:"rules_file,omitempty"`
 }
 
 // IssuerMetadata holds the OpenID4VCI issuer metadata configuration

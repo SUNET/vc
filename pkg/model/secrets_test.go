@@ -14,8 +14,10 @@ func TestClearSecrets(t *testing.T) {
 		},
 		APIGW: &APIGW{
 			APIServer: APIServer{
-				BasicAuth: BasicAuth{
-					Users: map[string]string{"admin": "secret123"},
+				APIAuth: APIAuth{
+					BasicAuth: APIAuthBasic{
+						Users: map[string]string{"admin": "secret123"},
+					},
 				},
 			},
 			OIDCRP: OIDCRPConfig{
@@ -48,7 +50,7 @@ func TestClearSecrets(t *testing.T) {
 	cfg.ClearSecrets()
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "Common.Mongo.URI should be cleared")
-	assert.Nil(t, cfg.APIGW.APIServer.BasicAuth.Users, "APIGW.APIServer.BasicAuth.Users should be nil")
+	assert.Nil(t, cfg.APIGW.APIServer.APIAuth.BasicAuth.Users, "APIGW.APIServer.APIAuth.BasicAuth.Users should be nil")
 	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret, "APIGW.OIDCRP.Registration.Preconfigured.ClientSecret should be cleared")
 	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken, "APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken should be cleared")
 	assert.Empty(t, cfg.Registry.AdminGUI.Password, "Registry.AdminGUI.Password should be cleared")
@@ -78,8 +80,10 @@ func TestApplySecrets(t *testing.T) {
 		},
 		APIGW: &APIGWSecrets{
 			APIServer: APIServerSecrets{
-				BasicAuth: BasicAuthSecrets{
-					Users: map[string]string{"admin": "from-secrets-file"},
+				APIAuth: APIAuthSecrets{
+					BasicAuth: BasicAuthSecrets{
+						Users: map[string]string{"admin": "from-secrets-file"},
+					},
 				},
 			},
 			OIDCRP: OIDCRPSecrets{
@@ -111,7 +115,7 @@ func TestApplySecrets(t *testing.T) {
 	cfg.ApplySecrets(secrets)
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)
-	assert.Equal(t, "from-secrets-file", cfg.APIGW.APIServer.BasicAuth.Users["admin"])
+	assert.Equal(t, "from-secrets-file", cfg.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
 	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)
@@ -174,8 +178,10 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		},
 		APIGW: &APIGW{
 			APIServer: APIServer{
-				BasicAuth: BasicAuth{
-					Users: map[string]string{"admin": "config-password"},
+				APIAuth: APIAuth{
+					BasicAuth: APIAuthBasic{
+						Users: map[string]string{"admin": "config-password"},
+					},
 				},
 			},
 			OIDCRP: OIDCRPConfig{
@@ -218,8 +224,10 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		},
 		APIGW: &APIGWSecrets{
 			APIServer: APIServerSecrets{
-				BasicAuth: BasicAuthSecrets{
-					Users: map[string]string{"admin": "secret-password"},
+				APIAuth: APIAuthSecrets{
+					BasicAuth: BasicAuthSecrets{
+						Users: map[string]string{"admin": "secret-password"},
+					},
 				},
 			},
 			OIDCRP: OIDCRPSecrets{
@@ -250,7 +258,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 	cfg.ApplySecrets(secrets)
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)
-	assert.Equal(t, "secret-password", cfg.APIGW.APIServer.BasicAuth.Users["admin"])
+	assert.Equal(t, "secret-password", cfg.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
 	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)

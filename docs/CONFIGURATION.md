@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-02-17
+**Generated:** 2026-02-24
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -134,12 +134,12 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`, `.mock_as.api_server`, `.ui.api_server`
 
-| Field        | Type     | Description                        | Example | Default | Required |
-| ------------ | -------- | ---------------------------------- | ------- | ------- | -------- |
-| `addr`       | `string` | Listen address for the HTTP server | -       | `:8080` | No       |
-| `tls`        | `object` | TLS                                | -       | -       | No       |
-| `basic_auth` | `object` | Basic Auth                         | -       | -       | No       |
-| `cors`       | `object` | CORS                               | -       | -       | No       |
+| Field      | Type     | Description                        | Example | Default | Required |
+| ---------- | -------- | ---------------------------------- | ------- | ------- | -------- |
+| `addr`     | `string` | Listen address for the HTTP server | -       | `:8080` | No       |
+| `tls`      | `object` | TLS                                | -       | -       | No       |
+| `api_auth` | `object` | API Auth                           | -       | -       | No       |
+| `cors`     | `object` | CORS                               | -       | -       | No       |
 
 ### `tls`
 
@@ -151,14 +151,54 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `cert_file_path` | `string` | Path to the TLS certificate | -       | -       | Yes      |
 | `key_file_path`  | `string` | Path to the TLS private key | -       | -       | Yes      |
 
+### `api_auth`
+
+> **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`, `.mock_as.api_server.api_auth`, `.ui.api_server.api_auth`
+
+Exactly one of BasicAuth.Enable or JWT.Enable may be true.
+If neither is enabled, no authentication is applied (open access).
+
+| Field        | Type     | Description                                    | Example | Default | Required |
+| ------------ | -------- | ---------------------------------------------- | ------- | ------- | -------- |
+| `basic_auth` | `object` | HTTP Basic authentication configuration.       | -       | -       | No       |
+| `jwt`        | `object` | JWT Bearer token authentication configuration. | -       | -       | No       |
+
 ### `basic_auth`
 
-> **Path:** `.apigw.api_server.basic_auth`, `.issuer.api_server.basic_auth`, `.verifier.api_server.basic_auth`, `.registry.api_server.basic_auth`, `.mock_as.api_server.basic_auth`, `.ui.api_server.basic_auth`
+> **Path:** `.apigw.api_server.api_auth.basic_auth`, `.issuer.api_server.api_auth.basic_auth`, `.verifier.api_server.api_auth.basic_auth`, `.registry.api_server.api_auth.basic_auth`, `.mock_as.api_server.api_auth.basic_auth`, `.ui.api_server.api_auth.basic_auth`
+
+This is a simple allow/deny mechanism – valid credentials grant full access.
 
 | Field    | Type     | Description                  | Example | Default | Required |
 | -------- | -------- | ---------------------------- | ------- | ------- | -------- |
-| `users`  | `object` | Username to password mapping | -       | -       | No       |
 | `enable` | `bool`   | HTTP Basic authentication    | -       | `false` | No       |
+| `users`  | `object` | Username to password mapping | -       | -       | No       |
+
+### `jwt`
+
+> **Path:** `.apigw.api_server.api_auth.jwt`, `.issuer.api_server.api_auth.jwt`, `.verifier.api_server.api_auth.jwt`, `.registry.api_server.api_auth.jwt`, `.mock_as.api_server.api_auth.jwt`, `.ui.api_server.api_auth.jwt`
+
+with optional SPOCP-based authorization.
+
+When Rules (and/or RulesFile) are configured, each request is checked against
+the SPOCP engine. A query of the form
+
+(api (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
+
+is evaluated; the request is allowed only if a matching rule exists.
+The <SERVICE> value is supplied by the calling service at middleware
+registration time. When two services share endpoints, rules for one
+service do not grant access to the other.
+When no rules are configured, any valid JWT grants access.
+
+| Field        | Type       | Description                                                                  | Example                                                                      | Default | Required         |
+| ------------ | ---------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------- | ---------------- |
+| `enable`     | `bool`     | JWT Bearer token authentication                                              | -                                                                            | `false` | No               |
+| `jwks_url`   | `string`   | URL of the JSON Web Key Set used to validate token signatures.               | `"https://auth.example.com/.well-known/jwks.json"`                           | -       | Yes (if enabled) |
+| `issuer`     | `string`   | Expected "iss" claim. Tokens with a different issuer are rejected.           | -                                                                            | -       | Yes (if enabled) |
+| `audience`   | `string`   | Expected "aud" claim. Tokens that do not contain this audience are rejected. | -                                                                            | -       | Yes (if enabled) |
+| `rules`      | `[]string` | SPOCP S-expression authorization rules loaded into an in-process engine.     | `["(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))"]` | -       | No               |
+| `rules_file` | `string`   | Optional path to a file containing SPOCP rules (one per line).               | -                                                                            | -       | No               |
 
 ### `cors`
 
@@ -817,13 +857,21 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.apigw.api_server`
 
+| Field      | Type     | Description | Example | Default | Required |
+| ---------- | -------- | ----------- | ------- | ------- | -------- |
+| `api_auth` | `object` | API Auth    | -       | -       | No       |
+
+### `api_auth`
+
+> **Path:** `.apigw.api_server.api_auth`
+
 | Field        | Type     | Description | Example | Default | Required |
 | ------------ | -------- | ----------- | ------- | ------- | -------- |
 | `basic_auth` | `object` | Basic Auth  | -       | -       | No       |
 
 ### `basic_auth`
 
-> **Path:** `.apigw.api_server.basic_auth`
+> **Path:** `.apigw.api_server.api_auth.basic_auth`
 
 | Field   | Type     | Description | Example | Default | Required |
 | ------- | -------- | ----------- | ------- | ------- | -------- |
@@ -912,9 +960,10 @@ common:
     uri: "mongodb://user:password@mongo:27017/vc"
 apigw:
   api_server:
-    basic_auth:
-      users:
-        <username>: "<password>"
+    api_auth:
+      basic_auth:
+        users:
+          <username>: "<password>"
   oidcrp:
     registration:
       preconfigured:

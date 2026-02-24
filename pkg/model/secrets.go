@@ -30,6 +30,11 @@ type APIGWSecrets struct {
 
 // APIServerSecrets holds API server secrets (basic auth passwords)
 type APIServerSecrets struct {
+	APIAuth APIAuthSecrets `yaml:"api_auth,omitempty"`
+}
+
+// APIAuthSecrets holds secrets for the api_auth section
+type APIAuthSecrets struct {
 	BasicAuth BasicAuthSecrets `yaml:"basic_auth,omitempty"`
 }
 
@@ -92,7 +97,7 @@ func (cfg *Cfg) ClearSecrets() {
 	}
 
 	if cfg.APIGW != nil {
-		cfg.APIGW.APIServer.BasicAuth.Users = nil
+		cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = nil
 		if cfg.APIGW.OIDCRP.Registration != nil && cfg.APIGW.OIDCRP.Registration.Preconfigured != nil {
 			cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret = ""
 		}
@@ -134,8 +139,8 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.APIGW == nil {
 			cfg.APIGW = &APIGW{}
 		}
-		if len(secrets.APIGW.APIServer.BasicAuth.Users) > 0 {
-			cfg.APIGW.APIServer.BasicAuth.Users = secrets.APIGW.APIServer.BasicAuth.Users
+		if len(secrets.APIGW.APIServer.APIAuth.BasicAuth.Users) > 0 {
+			cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = secrets.APIGW.APIServer.APIAuth.BasicAuth.Users
 		}
 		if secrets.APIGW.OIDCRP.Registration.Preconfigured != nil && secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret != "" {
 			if cfg.APIGW.OIDCRP.Registration == nil {
