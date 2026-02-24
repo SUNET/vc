@@ -350,10 +350,7 @@ func (c *WebSocketClient) pingLoop() {
 		case <-c.done:
 			return
 		case <-ticker.C:
-			c.mu.RLock()
-			conn := c.conn
-			c.mu.RUnlock()
-
+			conn := c.getConn()
 			if conn == nil {
 				return
 			}
