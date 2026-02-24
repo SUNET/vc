@@ -138,6 +138,13 @@ func (s *SmartResolver) GetRemoteResolver() Resolver {
 	return s.remote
 }
 
+// DID method prefixes
+const (
+	didPeerPrefix  = "did:peer:"
+	didPeer0Prefix = "did:peer:0"
+	didPeer2Prefix = "did:peer:2"
+)
+
 // LocalResolver resolves keys from local data (multikey, did:key, did:jwk)
 type LocalResolver struct{}
 
@@ -152,7 +159,7 @@ func NewLocalResolver() *LocalResolver {
 func CanResolveLocally(verificationMethod string) bool {
 	return strings.HasPrefix(verificationMethod, "did:key:") ||
 		strings.HasPrefix(verificationMethod, "did:jwk:") ||
-		strings.HasPrefix(verificationMethod, "did:peer:") ||
+		strings.HasPrefix(verificationMethod, didPeerPrefix) ||
 		strings.HasPrefix(verificationMethod, "z") || // multibase base58-btc
 		strings.HasPrefix(verificationMethod, "u") // multibase base64url
 }
@@ -170,7 +177,7 @@ func (l *LocalResolver) ResolveEd25519(verificationMethod string) (ed25519.Publi
 	}
 
 	// Handle did:peer format
-	if strings.HasPrefix(verificationMethod, "did:peer:") {
+	if strings.HasPrefix(verificationMethod, didPeerPrefix) {
 		return l.resolveDidPeerEd25519(verificationMethod)
 	}
 
@@ -195,7 +202,7 @@ func (l *LocalResolver) ResolveECDSA(verificationMethod string) (*ecdsa.PublicKe
 	}
 
 	// Handle did:peer format
-	if strings.HasPrefix(verificationMethod, "did:peer:") {
+	if strings.HasPrefix(verificationMethod, didPeerPrefix) {
 		return l.resolveDidPeerECDSA(verificationMethod)
 	}
 
@@ -387,13 +394,13 @@ func (l *LocalResolver) resolveDidPeerEd25519(didPeer string) (ed25519.PublicKey
 	}
 
 	// Handle did:peer:0 (equivalent to did:key)
-	if strings.HasPrefix(didPeer, "did:peer:0") {
-		multikey := strings.TrimPrefix(didPeer, "did:peer:0")
+	if strings.HasPrefix(didPeer, didPeer0Prefix) {
+		multikey := strings.TrimPrefix(didPeer, didPeer0Prefix)
 		return l.decodeMultikey(multikey)
 	}
 
 	// Handle did:peer:2 (inline keys with purpose codes)
-	if strings.HasPrefix(didPeer, "did:peer:2") {
+	if strings.HasPrefix(didPeer, didPeer2Prefix) {
 		keys, err := parseDidPeer2Keys(didPeer)
 		if err != nil {
 			return nil, err
@@ -427,13 +434,13 @@ func (l *LocalResolver) resolveDidPeerECDSA(didPeer string) (*ecdsa.PublicKey, e
 	}
 
 	// Handle did:peer:0 (equivalent to did:key)
-	if strings.HasPrefix(didPeer, "did:peer:0") {
-		multikey := strings.TrimPrefix(didPeer, "did:peer:0")
+	if strings.HasPrefix(didPeer, didPeer0Prefix) {
+		multikey := strings.TrimPrefix(didPeer, didPeer0Prefix)
 		return decodeMultikeyECDSA(multikey)
 	}
 
 	// Handle did:peer:2
-	if strings.HasPrefix(didPeer, "did:peer:2") {
+	if strings.HasPrefix(didPeer, didPeer2Prefix) {
 		keys, err := parseDidPeer2Keys(didPeer)
 		if err != nil {
 			return nil, err

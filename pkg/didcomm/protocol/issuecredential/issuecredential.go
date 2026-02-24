@@ -513,7 +513,8 @@ func (i *IssueCredential) GetCredential() (json.RawMessage, string, error) {
 		return attach.Data.JSON, attach.Format, nil
 	}
 	if attach.Data.Base64 != "" {
-		// TODO: decode base64
+		// Base64-encoded credentials are part of the spec but not commonly used.
+		// Most implementations use JSON attachments directly.
 		return nil, attach.Format, fmt.Errorf("base64 credential not yet supported")
 	}
 	return nil, "", fmt.Errorf("no credential data in attachment")

@@ -10,8 +10,8 @@ import (
 	"vc/pkg/didcomm/message"
 )
 
-// CredentialStore provides access to stored credentials for presentation.
-type CredentialStore interface {
+// CredentialFinder provides access to stored credentials for presentation.
+type CredentialFinder interface {
 	// FindCredentials finds credentials matching a presentation definition.
 	// Returns the matching credentials as JSON.
 	FindCredentials(ctx context.Context, presentationDef json.RawMessage) ([]json.RawMessage, error)
@@ -33,7 +33,7 @@ type PresentationVerifier interface {
 // Handler handles present-proof protocol messages.
 type Handler struct {
 	holderDID    string
-	store        CredentialStore
+	store        CredentialFinder
 	builder      PresentationBuilder
 	verifier     PresentationVerifier
 	onRequest    func(ctx context.Context, request *RequestPresentation, msg *message.Message) (*message.Message, error)
@@ -44,7 +44,7 @@ type Handler struct {
 type HandlerOption func(*Handler)
 
 // WithCredentialStore sets the credential store for finding matching credentials.
-func WithCredentialStore(store CredentialStore) HandlerOption {
+func WithCredentialStore(store CredentialFinder) HandlerOption {
 	return func(h *Handler) {
 		h.store = store
 	}

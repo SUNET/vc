@@ -47,6 +47,9 @@ const (
 	defaultReadTimeout    = 60 * time.Second
 	defaultWriteTimeout   = 10 * time.Second
 	defaultMaxMessageSize = 1024 * 1024 // 1MB
+
+	// Error message format for wrapped errors
+	errWrapFormat = "%w: %v"
 )
 
 // WebSocketClient provides bidirectional DIDComm messaging over WebSocket.
@@ -130,7 +133,7 @@ func (c *WebSocketClient) Connect(ctx context.Context, endpoint string) error {
 
 	conn, resp, err := dialer.DialContext(ctx, endpoint, nil)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrConnectionFailed, err)
+		return fmt.Errorf(errWrapFormat, ErrConnectionFailed, err)
 	}
 
 	// Verify subprotocol was accepted
@@ -171,7 +174,7 @@ func (c *WebSocketClient) Send(ctx context.Context, message []byte, mediaType st
 	// Some implementations wrap in an envelope; we send raw for simplicity.
 	_ = conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	if err := conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
-		return fmt.Errorf("%w: %v", ErrSendFailed, err)
+		return fmt.Errorf(errWrapFormat, ErrSendFailed, err)
 	}
 
 	return nil
@@ -199,7 +202,7 @@ func (c *WebSocketClient) SendWithEnvelope(ctx context.Context, message []byte, 
 
 	_ = conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	if err := conn.WriteJSON(envelope); err != nil {
-		return fmt.Errorf("%w: %v", ErrSendFailed, err)
+		return fmt.Errorf(errWrapFormat, ErrSendFailed, err)
 	}
 
 	return nil
@@ -223,7 +226,7 @@ func (c *WebSocketClient) Receive(ctx context.Context) ([]byte, string, error) {
 		if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 			return nil, "", ErrConnectionClosed
 		}
-		return nil, "", fmt.Errorf("%w: %v", ErrReceiveFailed, err)
+		return nil, "", fmt.Errorf(errWrapFormat, ErrReceiveFailed, err)
 	}
 
 	// Determine media type based on message content
@@ -277,49 +280,63 @@ func (c *WebSocketClient) Close() error {
 // readLoop reads incoming messages and processes them.
 func (c *WebSocketClient) readLoop() {
 	for {
-		select {
-		case <-c.done:
+		if c.shouldStopReading() {
 			return
-		default:
 		}
 
-		c.mu.RLock()
-		conn := c.conn
-		c.mu.RUnlock()
-
+		conn := c.getConn()
 		if conn == nil {
 			return
 		}
 
-		_ = conn.SetReadDeadline(time.Now().Add(c.readTimeout))
-		msgType, data, err := conn.ReadMessage()
+		msgType, data, err := c.readNextMessage(conn)
 		if err != nil {
-			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				// Unexpected close
-			}
 			c.Close()
 			return
 		}
 
-		// Determine media type
-		mediaType := c.detectMediaType(msgType, data)
+		c.processIncomingMessage(msgType, data)
+	}
+}
 
-		// Process message
-		if c.processor != nil {
-			ctx := context.Background()
-			response, responseMediaType, err := c.processor.ProcessMessage(ctx, data, mediaType)
-			if err != nil {
-				// Log error but continue processing
-				continue
-			}
+// shouldStopReading checks if the read loop should terminate.
+func (c *WebSocketClient) shouldStopReading() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
+}
 
-			// Send response if provided
-			if response != nil {
-				if sendErr := c.Send(ctx, response, responseMediaType); sendErr != nil {
-					// Log error
-				}
-			}
-		}
+// getConn returns the current connection safely.
+func (c *WebSocketClient) getConn() *websocket.Conn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.conn
+}
+
+// readNextMessage reads the next message from the connection.
+func (c *WebSocketClient) readNextMessage(conn *websocket.Conn) (int, []byte, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+	return conn.ReadMessage()
+}
+
+// processIncomingMessage handles an incoming WebSocket message.
+func (c *WebSocketClient) processIncomingMessage(msgType int, data []byte) {
+	if c.processor == nil {
+		return
+	}
+
+	mediaType := c.detectMediaType(msgType, data)
+	ctx := context.Background()
+	response, responseMediaType, err := c.processor.ProcessMessage(ctx, data, mediaType)
+	if err != nil {
+		return
+	}
+
+	if response != nil {
+		_ = c.Send(ctx, response, responseMediaType)
 	}
 }
 
@@ -418,53 +435,57 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Verify subprotocol (gorilla sets this automatically if negotiated)
-	if conn.Subprotocol() != DIDCommSubprotocol {
-		// Client didn't request didcomm/v2 subprotocol - could allow plain WebSocket
-		// or reject. For now, we continue but this may indicate a non-DIDComm client.
-	}
+	h.setupConnection(conn)
+	h.connectionLoop(conn, r.Context())
+}
 
+// setupConnection configures the WebSocket connection.
+func (h *WebSocketHandler) setupConnection(conn *websocket.Conn) {
 	conn.SetReadLimit(h.maxMessageSize)
-
-	// Set up ping/pong handlers
 	conn.SetPongHandler(func(string) error {
 		_ = conn.SetReadDeadline(time.Now().Add(defaultReadTimeout))
 		return nil
 	})
+}
 
-	// Connection loop
+// connectionLoop handles the message read/write loop.
+func (h *WebSocketHandler) connectionLoop(conn *websocket.Conn, ctx context.Context) {
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(defaultReadTimeout))
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				// Log unexpected close
-			}
 			return
 		}
 
-		// Determine media type
-		mediaType := detectMediaTypeFromMessage(msgType, data)
-
-		// Process message
-		response, responseMediaType, err := h.processor.ProcessMessage(r.Context(), data, mediaType)
-		if err != nil {
-			// Log but continue
-			continue
-		}
-
-		// Send response if provided
-		if response != nil {
-			outType := websocket.BinaryMessage
-			if responseMediaType == didcomm.MediaTypePlaintext {
-				outType = websocket.TextMessage
-			}
-			_ = conn.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
-			if err := conn.WriteMessage(outType, response); err != nil {
-				return
-			}
+		if err := h.handleMessage(conn, ctx, msgType, data); err != nil {
+			return
 		}
 	}
+}
+
+// handleMessage processes a single message and sends response if needed.
+func (h *WebSocketHandler) handleMessage(conn *websocket.Conn, ctx context.Context, msgType int, data []byte) error {
+	mediaType := detectMediaTypeFromMessage(msgType, data)
+	response, responseMediaType, err := h.processor.ProcessMessage(ctx, data, mediaType)
+	if err != nil {
+		return nil // Log error but continue
+	}
+
+	if response == nil {
+		return nil
+	}
+
+	return h.sendResponse(conn, response, responseMediaType)
+}
+
+// sendResponse writes a response message to the connection.
+func (h *WebSocketHandler) sendResponse(conn *websocket.Conn, response []byte, mediaType string) error {
+	outType := websocket.BinaryMessage
+	if mediaType == didcomm.MediaTypePlaintext {
+		outType = websocket.TextMessage
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
+	return conn.WriteMessage(outType, response)
 }
 
 // detectMediaTypeFromMessage determines the DIDComm media type from message content.

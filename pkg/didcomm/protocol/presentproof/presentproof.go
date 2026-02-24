@@ -37,6 +37,9 @@ const (
 	FormatDIFPresentationSubmission = "dif/presentation-exchange/submission@v2.0"
 	FormatW3CVC                     = "w3c/vc@v2.0"
 	FormatW3CVP                     = "w3c/vp@v2.0"
+
+	// MediaTypeJSON is the standard JSON media type for attachments.
+	MediaTypeJSON = "application/json"
 )
 
 // ProposePresentation represents a proposal from holder to verifier
@@ -125,7 +128,7 @@ func NewRequestPresentation(from, to string, presentationDef json.RawMessage, op
 		RequestAttach: []Attachment{
 			{
 				ID:        "request-0",
-				MediaType: "application/json",
+				MediaType: MediaTypeJSON,
 				Format:    FormatDIFPresentationExchange,
 				Data: AttachmentData{
 					JSON: presentationDef,
@@ -168,7 +171,7 @@ func NewPresentation(request *message.Message, vp json.RawMessage, opts ...Reque
 		PresentationAttach: []Attachment{
 			{
 				ID:        "presentation-0",
-				MediaType: "application/json",
+				MediaType: MediaTypeJSON,
 				Format:    FormatW3CVP,
 				Data: AttachmentData{
 					JSON: vp,
@@ -206,7 +209,7 @@ func NewProposePresentation(from, to string, proposal json.RawMessage, opts ...R
 		ProposalAttach: []Attachment{
 			{
 				ID:        "proposal-0",
-				MediaType: "application/json",
+				MediaType: MediaTypeJSON,
 				Format:    FormatDIFPresentationExchange,
 				Data: AttachmentData{
 					JSON: proposal,

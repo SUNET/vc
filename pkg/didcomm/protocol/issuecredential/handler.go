@@ -18,8 +18,8 @@ type CredentialIssuer interface {
 	IssueCredential(ctx context.Context, request *RequestCredential, holderDID string) (json.RawMessage, string, error)
 }
 
-// CredentialStore stores received credentials.
-type CredentialStore interface {
+// CredentialStorer stores received credentials.
+type CredentialStorer interface {
 	// StoreCredential saves a received credential.
 	StoreCredential(ctx context.Context, credential json.RawMessage, format string, issuerDID string) error
 }
@@ -47,7 +47,7 @@ type Handler struct {
 	previewBuilder CredentialPreviewBuilder
 
 	// Holder mode dependencies
-	store     CredentialStore
+	store     CredentialStorer
 	evaluator OfferEvaluator
 
 	// Custom message handlers
@@ -118,7 +118,7 @@ func WithPreviewBuilder(builder CredentialPreviewBuilder) HandlerOption {
 }
 
 // WithCredentialStore sets the credential store for holder mode.
-func WithCredentialStore(store CredentialStore) HandlerOption {
+func WithCredentialStore(store CredentialStorer) HandlerOption {
 	return func(h *Handler) {
 		h.store = store
 	}
