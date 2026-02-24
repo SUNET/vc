@@ -69,11 +69,10 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 		// Convert to IEEE P1363 format (fixed-size R||S concatenation)
 		return EncodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
-		// RSA-PKCS1v15 SIGNATURE (not encryption). This is a standard signature scheme
-		// widely used in JWT RS256/RS384/RS512. It's distinct from RSA-PKCS1v15 encryption
-		// which has known vulnerabilities. The signature scheme is secure.
+		// Use crypto.Signer interface for RSA signing. This is PKCS#1 v1.5 signature
+		// (not encryption), a standard scheme for JWT RS256/RS384/RS512.
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
-		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest) //nolint:gosec // NOSONAR
+		return key.Sign(rand.Reader, digest, hash)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}

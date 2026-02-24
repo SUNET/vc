@@ -75,11 +75,10 @@ func (s *SoftwareSigner) Sign(ctx context.Context, data []byte) ([]byte, error) 
 func (s *SoftwareSigner) SignDigest(ctx context.Context, digest []byte) ([]byte, error) {
 	switch key := s.privateKey.(type) {
 	case *rsa.PrivateKey:
-		// RSA-PKCS1v15 SIGNATURE (not encryption). This is a standard signature scheme
-		// widely used in JWT RS256/RS384/RS512. It's distinct from RSA-PKCS1v15 encryption
-		// which has known vulnerabilities. The signature scheme is secure.
+		// Use crypto.Signer interface for RSA signing. This is PKCS#1 v1.5 signature
+		// (not encryption), a standard scheme for JWT RS256/RS384/RS512.
 		hash := getHashForAlgorithm(s.algorithm)
-		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest) //nolint:gosec // NOSONAR
+		return key.Sign(rand.Reader, digest, hash)
 	case *ecdsa.PrivateKey:
 		// Sign the digest directly using ECDSA
 		r, sigS, err := ecdsa.Sign(rand.Reader, key, digest)
