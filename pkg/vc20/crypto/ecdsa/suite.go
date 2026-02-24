@@ -50,6 +50,70 @@ func (s *Suite) Sign(ctx context.Context, cred *credential.RDFCredential, key *e
 	return s.SignWithSigner(ctx, cred, wrapper, opts)
 }
 
+// buildProofConfig creates the initial proof configuration map.
+func buildProofConfig(opts *SignOptions) map[string]any {
+	created := opts.Created
+	if created.IsZero() {
+		created = time.Now().UTC()
+	}
+
+	config := map[string]any{
+		"@context":           credential.ContextV2,
+		"type":               ProofType,
+		"cryptosuite":        Cryptosuite2019,
+		"verificationMethod": opts.VerificationMethod,
+		"proofPurpose":       opts.ProofPurpose,
+		"created":            created.Format(time.RFC3339),
+	}
+
+	if opts.Domain != "" {
+		config["domain"] = opts.Domain
+	}
+	if opts.Challenge != "" {
+		config["challenge"] = opts.Challenge
+	}
+
+	return config
+}
+
+// getCredentialAsMap converts an RDFCredential to a map for manipulation.
+func getCredentialAsMap(cred *credential.RDFCredential) (map[string]any, error) {
+	var credMap map[string]any
+	originalJSON := cred.OriginalJSON()
+
+	if originalJSON != "" {
+		if err := json.Unmarshal([]byte(originalJSON), &credMap); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal original credential: %w", err)
+		}
+		return credMap, nil
+	}
+
+	// Convert from RDF
+	jsonBytes, err := json.Marshal(cred)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert credential to JSON: %w", err)
+	}
+	if err := json.Unmarshal(jsonBytes, &credMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal converted credential: %w", err)
+	}
+	return credMap, nil
+}
+
+// addProofToCredential adds a proof to the credential map, handling existing proofs.
+func addProofToCredential(credMap map[string]any, proof map[string]any) {
+	existingProof, hasProof := credMap["proof"]
+	if !hasProof {
+		credMap["proof"] = proof
+		return
+	}
+
+	if proofs, ok := existingProof.([]any); ok {
+		credMap["proof"] = append(proofs, proof)
+	} else {
+		credMap["proof"] = []any{existingProof, proof}
+	}
+}
+
 // SignWithSigner signs a credential using ecdsa-rdfc-2019 with a VCSigner.
 // This method supports both raw keys (via wrappers) and HSM-backed keys (via pki.RawSigner).
 func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredential, signer vccrypto.VCSigner, opts *SignOptions) (*credential.RDFCredential, error) {
@@ -64,45 +128,21 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 	}
 
 	// 1. Get canonical document hash (without proof)
-	// We use CredentialWithoutProof to ensure we don't include any existing proof
 	credWithoutProof, err := cred.CredentialWithoutProof()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
 	}
 
-	// 2. Create proof configuration
-	created := opts.Created
-	if created.IsZero() {
-		created = time.Now().UTC()
-	}
-
-	proofConfig := map[string]any{
-		"@context":           credential.ContextV2,
-		"type":               ProofType,
-		"cryptosuite":        Cryptosuite2019,
-		"verificationMethod": opts.VerificationMethod,
-		"proofPurpose":       opts.ProofPurpose,
-		"created":            created.Format(time.RFC3339),
-	}
-
-	if opts.Domain != "" {
-		proofConfig["domain"] = opts.Domain
-	}
-	if opts.Challenge != "" {
-		proofConfig["challenge"] = opts.Challenge
-	}
+	// 2. Create proof configuration using helper
+	proofConfig := buildProofConfig(opts)
 
 	// 3. Canonicalize and hash proof configuration
-	// We need to convert proofConfig to RDF and then canonicalize
-	// We can use a temporary RDFCredential for this
 	proofConfigBytes, err := json.Marshal(proofConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal proof config: %w", err)
 	}
 
-	// Use standard JSON-LD options
 	ldOpts := credential.NewJSONLDOptions("")
-	// ldOpts.Format = "application/n-quads" // Do not set format, we want RDFDataset
 	ldOpts.Algorithm = ld.AlgorithmURDNA2015
 
 	proofCred, err := credential.NewRDFCredentialFromJSON(proofConfigBytes, ldOpts)
@@ -111,7 +151,6 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 	}
 
 	// 4. Combine hashes
-	// Get canonical forms
 	docCanonical, err := credWithoutProof.CanonicalForm()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
@@ -122,11 +161,8 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 		return nil, fmt.Errorf("failed to get canonical form of proof config: %w", err)
 	}
 
-	// Hash the canonical forms
 	docHashBytes := sha256.Sum256([]byte(docCanonical))
 	proofHashBytes := sha256.Sum256([]byte(proofCanonical))
-
-	// Concatenate: proofHash + docHash
 	combined := append(proofHashBytes[:], docHashBytes[:]...)
 
 	// 5. Sign using the VCSigner
@@ -141,38 +177,14 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 		return nil, fmt.Errorf("failed to encode signature: %w", err)
 	}
 
-	// 7. Add proof to credential
-	// Get JSON from original credential (or convert if needed)
-	var credMap map[string]any
-	originalJSON := cred.OriginalJSON()
-	if originalJSON != "" {
-		if err := json.Unmarshal([]byte(originalJSON), &credMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal original credential: %w", err)
-		}
-	} else {
-		// Convert from RDF
-		jsonBytes, err := json.Marshal(cred)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert credential to JSON: %w", err)
-		}
-		if err := json.Unmarshal(jsonBytes, &credMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal converted credential: %w", err)
-		}
+	// 7. Add proof to credential using helpers
+	credMap, err := getCredentialAsMap(cred)
+	if err != nil {
+		return nil, err
 	}
 
-	// Add proofValue to proofConfig
 	proofConfig["proofValue"] = proofValue
-
-	// Add proof to credential
-	if existingProof, ok := credMap["proof"]; ok {
-		if proofs, ok := existingProof.([]any); ok {
-			credMap["proof"] = append(proofs, proofConfig)
-		} else {
-			credMap["proof"] = []any{existingProof, proofConfig}
-		}
-	} else {
-		credMap["proof"] = proofConfig
-	}
+	addProofToCredential(credMap, proofConfig)
 
 	// Create new RDFCredential
 	newCredBytes, err := json.Marshal(credMap)

@@ -14,12 +14,46 @@ import (
 	"vc/pkg/pki"
 )
 
-func TestECDSAKeyWrapper_SignDigest(t *testing.T) {
-	// Generate a test P-256 key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// generateECDSATestKey generates an ECDSA key for testing.
+func generateECDSATestKey(t *testing.T, curve elliptic.Curve) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
-		t.Fatalf("Failed to generate key: %v", err)
+		t.Fatalf("failed to generate ECDSA key: %v", err)
 	}
+	return key
+}
+
+// generateEdDSATestKey generates an Ed25519 key for testing.
+func generateEdDSATestKey(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate Ed25519 key: %v", err)
+	}
+	return key
+}
+
+// testSignDigest is a test helper that signs a digest and checks for errors.
+func testSignDigest(t *testing.T, signer VCSigner, digest []byte) []byte {
+	t.Helper()
+	signature, err := signer.SignDigest(context.Background(), digest)
+	if err != nil {
+		t.Fatalf("SignDigest failed: %v", err)
+	}
+	return signature
+}
+
+// verifySignatureLength is a test helper that checks signature length.
+func verifySignatureLength(t *testing.T, signature []byte, expected int) {
+	t.Helper()
+	if len(signature) != expected {
+		t.Errorf("signature length = %d, want %d", len(signature), expected)
+	}
+}
+
+func TestECDSAKeyWrapper_SignDigest(t *testing.T) {
+	privateKey := generateECDSATestKey(t, elliptic.P256())
 
 	wrapper := NewECDSAKeyWrapper(privateKey)
 
@@ -43,16 +77,10 @@ func TestECDSAKeyWrapper_SignDigest(t *testing.T) {
 		t.Fatalf("rand.Read() error = %v", err)
 	}
 
-	signature, err := wrapper.SignDigest(context.Background(), digest)
-	if err != nil {
-		t.Fatalf("SignDigest() error = %v", err)
-	}
+	signature := testSignDigest(t, wrapper, digest)
 
 	// Verify signature length (IEEE P1363 format: 2 * key size in bytes)
-	expectedLen := 64 // 32 bytes for r + 32 bytes for s (P-256)
-	if len(signature) != expectedLen {
-		t.Errorf("SignDigest() signature length = %d, want %d", len(signature), expectedLen)
-	}
+	verifySignatureLength(t, signature, 64) // 32 bytes for r + 32 bytes for s (P-256)
 
 	// Verify the signature is valid
 	r, s, err := DecodeIEEEP1363(signature, elliptic.P256())
@@ -79,10 +107,7 @@ func TestECDSAKeyWrapper_DifferentCurves(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			privateKey, err := ecdsa.GenerateKey(tt.curve, rand.Reader)
-			if err != nil {
-				t.Fatalf("Failed to generate key: %v", err)
-			}
+			privateKey := generateECDSATestKey(t, tt.curve)
 
 			wrapper := NewECDSAKeyWrapper(privateKey)
 
@@ -95,24 +120,14 @@ func TestECDSAKeyWrapper_DifferentCurves(t *testing.T) {
 				t.Fatalf("rand.Read() error = %v", err)
 			}
 
-			signature, err := wrapper.SignDigest(context.Background(), digest)
-			if err != nil {
-				t.Fatalf("SignDigest() error = %v", err)
-			}
-
-			if len(signature) != tt.keySize {
-				t.Errorf("SignDigest() signature length = %d, want %d", len(signature), tt.keySize)
-			}
+			signature := testSignDigest(t, wrapper, digest)
+			verifySignatureLength(t, signature, tt.keySize)
 		})
 	}
 }
 
 func TestEdDSAKeyWrapper_SignDigest(t *testing.T) {
-	// Generate a test Ed25519 key
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate key: %v", err)
-	}
+	privateKey := generateEdDSATestKey(t)
 
 	wrapper := NewEdDSAKeyWrapper(privateKey)
 
@@ -133,15 +148,10 @@ func TestEdDSAKeyWrapper_SignDigest(t *testing.T) {
 	// Test SignDigest (for Ed25519, this is the full message, not a digest)
 	message := []byte("test message for ed25519 signing")
 
-	signature, err := wrapper.SignDigest(context.Background(), message)
-	if err != nil {
-		t.Fatalf("SignDigest() error = %v", err)
-	}
+	signature := testSignDigest(t, wrapper, message)
 
 	// Verify signature length (Ed25519 signatures are always 64 bytes)
-	if len(signature) != ed25519.SignatureSize {
-		t.Errorf("SignDigest() signature length = %d, want %d", len(signature), ed25519.SignatureSize)
-	}
+	verifySignatureLength(t, signature, ed25519.SignatureSize)
 
 	// Verify the signature is valid
 	if !ed25519.Verify(privateKey.Public().(ed25519.PublicKey), message, signature) {
@@ -193,11 +203,7 @@ func TestDecodeIEEEP1363_InvalidInput(t *testing.T) {
 }
 
 func TestEncodeDecodeIEEEP1363_RoundTrip(t *testing.T) {
-	// Generate a key and create a real signature
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate key: %v", err)
-	}
+	privateKey := generateECDSATestKey(t, elliptic.P256())
 
 	digest := make([]byte, 32)
 	if _, err := rand.Read(digest); err != nil {
