@@ -491,7 +491,7 @@ func encryptA256CBCHS512(plaintext, cek, aad []byte) (ciphertext, tag, iv []byte
 
 	ciphertext = make([]byte, len(padded))
 	//nolint:gosec // RFC 7518 A256CBC-HS512 requires CBC mode - this is authenticated encryption with HMAC-SHA-512
-	mode := cipher.NewCBCEncrypter(block, iv) //NOSONAR go:S5542
+	mode := cipher.NewCBCEncrypter(block, iv) //NOSONAR
 	mode.CryptBlocks(ciphertext, padded)
 
 	// Compute HMAC-SHA-512 tag
@@ -634,7 +634,7 @@ func wrapKeyAES(cek, wrappingKey []byte) ([]byte, error) {
 			copy(b[:8], a)
 			copy(b[8:], r[i])
 			//nolint:gosec // RFC 3394 AES Key Wrap - this is a key-wrapping primitive with integrity check
-			block.Encrypt(b, b) //NOSONAR go:S5542
+			block.Encrypt(b, b) //NOSONAR
 
 			// A = MSB(64, B) ^ t where t = (n*j)+i
 			t := uint64(n*j + i)
@@ -945,7 +945,7 @@ func decryptA256CBCHS512(ctx context.Context, msg *EncryptedMessage, header *JWE
 	}
 
 	//nolint:gosec // RFC 7518 A256CBC-HS512 - HMAC authentication verified above before decryption
-	mode := cipher.NewCBCDecrypter(block, iv) //NOSONAR go:S5542
+	mode := cipher.NewCBCDecrypter(block, iv) //NOSONAR
 	plaintext := make([]byte, len(ciphertext))
 	mode.CryptBlocks(plaintext, ciphertext)
 
@@ -1125,7 +1125,7 @@ func unwrapKeyAES(wrappedKey, wrappingKey []byte) ([]byte, error) {
 			copy(b[:8], a)
 			copy(b[8:], r[i])
 			//nolint:gosec // RFC 3394 AES Key Unwrap - integrity check validates after unwrap
-			block.Decrypt(b, b) //NOSONAR go:S5542
+			block.Decrypt(b, b) //NOSONAR
 
 			// A = MSB(64, B)
 			copy(a, b[:8])

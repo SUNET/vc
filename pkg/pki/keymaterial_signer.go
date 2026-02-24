@@ -73,7 +73,7 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 		// widely used in JWT RS256/RS384/RS512. It's distinct from RSA-PKCS1v15 encryption
 		// which has known vulnerabilities. The signature scheme is secure.
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
-		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest) //nolint:gosec // NOSONAR go:S5542 - This is signature, not encryption
+		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest) //nolint:gosec //NOSONAR
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}

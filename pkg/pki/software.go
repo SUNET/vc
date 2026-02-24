@@ -79,7 +79,7 @@ func (s *SoftwareSigner) SignDigest(ctx context.Context, digest []byte) ([]byte,
 		// widely used in JWT RS256/RS384/RS512. It's distinct from RSA-PKCS1v15 encryption
 		// which has known vulnerabilities. The signature scheme is secure.
 		hash := getHashForAlgorithm(s.algorithm)
-		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest) //nolint:gosec // NOSONAR go:S5542 - This is signature, not encryption
+		return rsa.SignPKCS1v15(rand.Reader, key, hash, digest) //nolint:gosec //NOSONAR
 	case *ecdsa.PrivateKey:
 		// Sign the digest directly using ECDSA
 		r, sigS, err := ecdsa.Sign(rand.Reader, key, digest)
