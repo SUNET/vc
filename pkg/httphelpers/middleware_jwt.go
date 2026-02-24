@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"unicode"
 	"vc/pkg/model"
 
@@ -57,9 +58,31 @@ func getKeys(ctx context.Context, url string, c JWKSCache, log func(string, ...a
 	return set, nil
 }
 
+// SafeEngine wraps a SPOCP AdaptiveEngine with a sync.RWMutex so that
+// concurrent request handlers can safely call QueryElement while still
+// allowing future rule hot-reloading under a write lock.
+type SafeEngine struct {
+	mu     sync.RWMutex
+	engine *spocp.AdaptiveEngine
+}
+
+// QueryElement checks if the query is authorized (read-locked).
+func (s *SafeEngine) QueryElement(q sexp.Element) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.engine.QueryElement(q)
+}
+
+// RuleCount returns the number of loaded rules (read-locked).
+func (s *SafeEngine) RuleCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.engine.RuleCount()
+}
+
 // buildSPOCPEngine creates a SPOCP engine from the JWT config rules.
 // Returns nil when no rules are configured (authentication-only mode).
-func buildSPOCPEngine(cfg model.APIAuthJWT) (*spocp.AdaptiveEngine, error) {
+func buildSPOCPEngine(cfg model.APIAuthJWT) (*SafeEngine, error) {
 	hasInline := len(cfg.Rules) > 0
 	hasFile := cfg.RulesFile != ""
 
@@ -83,7 +106,7 @@ func buildSPOCPEngine(cfg model.APIAuthJWT) (*spocp.AdaptiveEngine, error) {
 		}
 	}
 
-	return engine, nil
+	return &SafeEngine{engine: engine}, nil
 }
 
 // loadRulesFromFile reads human-readable SPOCP rules (one per line) from a file
@@ -326,7 +349,7 @@ func buildSPOCPQuery(service, method, path, subject string) sexp.Element {
 //
 // On success the parsed claims are stored in the Gin context under the key
 // "jwt_claims" and the "sub" claim is stored under "jwt_subject".
-func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg model.APIAuthJWT, jwksCache JWKSCache, engine *spocp.AdaptiveEngine) gin.HandlerFunc {
+func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg model.APIAuthJWT, jwksCache JWKSCache, engine *SafeEngine) gin.HandlerFunc {
 	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:JWTAuth")
 	defer span.End()
 
