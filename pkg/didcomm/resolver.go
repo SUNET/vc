@@ -87,29 +87,25 @@ type DIDCommService struct {
 
 // ResolveKeyAgreement resolves key agreement keys for a DID.
 // These keys are used for encryption (ECDH key exchange).
+// For network DIDs, this delegates to go-trust via AuthZEN to extract keyAgreement keys
+// from the resolved DID document. For local DIDs (did:key, did:jwk, did:peer), resolution
+// is performed locally.
 func (r *Resolver) ResolveKeyAgreement(ctx context.Context, did string) ([]KeyAgreementKey, error) {
-	// For now, we use the existing resolver to get the DID document
-	// and extract key agreement keys from it.
-	// This is a simplified implementation that will be expanded.
-
-	// Try to resolve as Ed25519 first (many DIDs use Ed25519 for both signing and key agreement via conversion)
-	edKey, err := r.smart.ResolveEd25519(did)
+	// First, try to resolve X25519 key directly from keyAgreement section
+	// This delegates to go-trust for network DIDs and uses local resolution for self-contained DIDs
+	x25519Key, err := r.smart.ResolveX25519(did)
 	if err == nil {
-		// Convert Ed25519 to X25519 for key agreement
-		x25519Key, err := ed25519PublicKeyToX25519(edKey)
-		if err == nil {
-			return []KeyAgreementKey{
-				{
-					ID:         did + "#key-agreement-1",
-					Type:       "X25519KeyAgreementKey2020",
-					Controller: did,
-					PublicKey:  x25519Key,
-				},
-			}, nil
-		}
+		return []KeyAgreementKey{
+			{
+				ID:         did + "#key-agreement-1",
+				Type:       "X25519KeyAgreementKey2020",
+				Controller: did,
+				PublicKey:  x25519Key,
+			},
+		}, nil
 	}
 
-	// Try ECDSA resolver for P-256/P-384 via SmartResolver's ResolveECDSA method
+	// Fallback: try ECDSA for P-256/P-384 key agreement
 	ecKey, err := r.smart.ResolveECDSA(did)
 	if err == nil {
 		ecdhKey, err := ecdsaPublicKeyToECDH(ecKey)
@@ -120,6 +116,23 @@ func (r *Resolver) ResolveKeyAgreement(ctx context.Context, did string) ([]KeyAg
 					Type:       "JsonWebKey2020",
 					Controller: did,
 					PublicKey:  ecdhKey,
+				},
+			}, nil
+		}
+	}
+
+	// Last resort: try Ed25519 to X25519 conversion
+	// This works for DIDs that only have a signing key (Ed25519) and no explicit keyAgreement
+	edKey, err := r.smart.ResolveEd25519(did)
+	if err == nil {
+		x25519Key, err := ed25519PublicKeyToX25519(edKey)
+		if err == nil {
+			return []KeyAgreementKey{
+				{
+					ID:         did + "#key-agreement-1",
+					Type:       "X25519KeyAgreementKey2020",
+					Controller: did,
+					PublicKey:  x25519Key,
 				},
 			}, nil
 		}
@@ -163,11 +176,20 @@ func (r *Resolver) ResolveVerification(ctx context.Context, did string) ([]Verif
 }
 
 // ResolveService resolves DIDCommMessaging service endpoints for a DID.
+// For network DIDs, this delegates to go-trust via AuthZEN to extract service endpoints
+// from the resolved DID document. For did:peer:2, services are extracted from the inline data.
 func (r *Resolver) ResolveService(ctx context.Context, did string) (*DIDCommService, error) {
-	// This requires full DID document resolution.
-	// For now, return an error indicating service resolution is not yet implemented.
-	// Full implementation will parse the DID document and extract DIDCommMessaging services.
-	return nil, fmt.Errorf("%w: service resolution not yet implemented", ErrServiceNotFound)
+	svc, err := r.smart.ResolveService(did)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrServiceNotFound, err)
+	}
+
+	return &DIDCommService{
+		ID:              svc.ID,
+		ServiceEndpoint: svc.ServiceEndpoint,
+		RoutingKeys:     svc.RoutingKeys,
+		Accept:          svc.Accept,
+	}, nil
 }
 
 // ed25519PublicKeyToX25519 converts an Ed25519 public key to X25519 for key agreement.

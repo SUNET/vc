@@ -3,6 +3,7 @@
 package keyresolver
 
 import (
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -110,6 +111,250 @@ func ExtractECDSAFromMetadata(metadata any, verificationMethod string) (*ecdsa.P
 	}
 
 	return nil, fmt.Errorf("ECDSA verification method not found: %s", verificationMethod)
+}
+
+// ExtractX25519FromMetadata extracts an X25519 key agreement key from trust_metadata.
+// It looks for keys in the keyAgreement section of the DID document.
+func ExtractX25519FromMetadata(metadata any, did string) (*ecdh.PublicKey, error) {
+	doc, ok := metadata.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid metadata format: expected map, got %T", metadata)
+	}
+
+	// Get keyAgreement section
+	keyAgreement, err := getKeyAgreementMethods(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ka := range keyAgreement {
+		kaMap, ok := ka.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		// Try publicKeyJwk (preferred for X25519)
+		if jwk, ok := kaMap["publicKeyJwk"].(map[string]any); ok {
+			key, err := JWKToX25519(jwk)
+			if err == nil {
+				return key, nil
+			}
+		}
+
+		// Try publicKeyMultibase (X25519 multicodec is 0xec)
+		if multibase, ok := kaMap["publicKeyMultibase"].(string); ok {
+			key, err := decodeMultikeyX25519(multibase)
+			if err == nil {
+				return key, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("X25519 key agreement key not found for: %s", did)
+}
+
+// ExtractServiceFromMetadata extracts a DIDCommMessaging service from trust_metadata.
+func ExtractServiceFromMetadata(metadata any, did string) (*DIDCommService, error) {
+	doc, ok := metadata.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid metadata format: expected map, got %T", metadata)
+	}
+
+	// Get service section
+	services, err := getServices(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find DIDCommMessaging service
+	for _, svc := range services {
+		svcMap, ok := svc.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		svcType, _ := svcMap["type"].(string)
+		if svcType != "DIDCommMessaging" {
+			continue
+		}
+
+		return parseServiceMap(svcMap)
+	}
+
+	return nil, fmt.Errorf("DIDCommMessaging service not found for: %s", did)
+}
+
+// getKeyAgreementMethods extracts the keyAgreement section from a DID document.
+func getKeyAgreementMethods(doc map[string]any) ([]any, error) {
+	// Direct array of verification methods
+	if kas, ok := doc["keyAgreement"].([]any); ok {
+		return resolveKeyAgreementRefs(kas, doc)
+	}
+
+	// Try as array of maps
+	if kas, ok := doc["keyAgreement"].([]map[string]any); ok {
+		result := make([]any, len(kas))
+		for i, ka := range kas {
+			result[i] = ka
+		}
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("no keyAgreement section found in metadata")
+}
+
+// resolveKeyAgreementRefs resolves keyAgreement references to full verification methods.
+// keyAgreement can contain either full verification methods or string references.
+func resolveKeyAgreementRefs(kas []any, doc map[string]any) ([]any, error) {
+	vms, _ := getVerificationMethods(doc)
+	result := make([]any, 0, len(kas))
+
+	for _, ka := range kas {
+		switch v := ka.(type) {
+		case map[string]any:
+			// Already a full verification method
+			result = append(result, v)
+		case string:
+			// Reference to a verification method - resolve it
+			for _, vm := range vms {
+				vmMap, ok := vm.(map[string]any)
+				if !ok {
+					continue
+				}
+				if id, ok := vmMap["id"].(string); ok && (id == v || strings.HasSuffix(v, "#"+id)) {
+					result = append(result, vmMap)
+					break
+				}
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no keyAgreement methods resolved")
+	}
+
+	return result, nil
+}
+
+// getServices extracts the service section from a DID document.
+func getServices(doc map[string]any) ([]any, error) {
+	// Direct array
+	if svcs, ok := doc["service"].([]any); ok {
+		return svcs, nil
+	}
+
+	// Try as array of maps
+	if svcs, ok := doc["service"].([]map[string]any); ok {
+		result := make([]any, len(svcs))
+		for i, svc := range svcs {
+			result[i] = svc
+		}
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("no service section found in metadata")
+}
+
+// parseServiceMap parses a DIDCommMessaging service entry from a map.
+func parseServiceMap(svcMap map[string]any) (*DIDCommService, error) {
+	svc := &DIDCommService{}
+
+	// ID
+	if id, ok := svcMap["id"].(string); ok {
+		svc.ID = id
+	}
+
+	// ServiceEndpoint can be string, array, or object
+	switch ep := svcMap["serviceEndpoint"].(type) {
+	case string:
+		svc.ServiceEndpoint = ep
+	case []any:
+		if len(ep) > 0 {
+			if s, ok := ep[0].(string); ok {
+				svc.ServiceEndpoint = s
+			} else if obj, ok := ep[0].(map[string]any); ok {
+				if uri, ok := obj["uri"].(string); ok {
+					svc.ServiceEndpoint = uri
+				}
+			}
+		}
+	case map[string]any:
+		if uri, ok := ep["uri"].(string); ok {
+			svc.ServiceEndpoint = uri
+		}
+	}
+
+	// RoutingKeys
+	if rks, ok := svcMap["routingKeys"].([]any); ok {
+		for _, rk := range rks {
+			if s, ok := rk.(string); ok {
+				svc.RoutingKeys = append(svc.RoutingKeys, s)
+			}
+		}
+	}
+
+	// Accept
+	if accepts, ok := svcMap["accept"].([]any); ok {
+		for _, a := range accepts {
+			if s, ok := a.(string); ok {
+				svc.Accept = append(svc.Accept, s)
+			}
+		}
+	}
+
+	if svc.ServiceEndpoint == "" {
+		return nil, fmt.Errorf("service has no endpoint")
+	}
+
+	return svc, nil
+}
+
+// JWKToX25519 extracts an X25519 public key from a JWK.
+func JWKToX25519(jwk map[string]any) (*ecdh.PublicKey, error) {
+	kty, _ := jwk["kty"].(string)
+	crv, _ := jwk["crv"].(string)
+
+	if kty != "OKP" || crv != "X25519" {
+		return nil, fmt.Errorf("not an X25519 JWK: kty=%s, crv=%s", kty, crv)
+	}
+
+	x, ok := jwk["x"].(string)
+	if !ok {
+		return nil, fmt.Errorf("missing x coordinate in X25519 JWK")
+	}
+
+	pubBytes, err := base64.RawURLEncoding.DecodeString(x)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode x coordinate: %w", err)
+	}
+
+	return ecdh.X25519().NewPublicKey(pubBytes)
+}
+
+// decodeMultikeyX25519 decodes an X25519 key from multibase format.
+// X25519 multicodec is 0xec (236), varint encoded as 0xec 0x01
+func decodeMultikeyX25519(multikey string) (*ecdh.PublicKey, error) {
+	if len(multikey) == 0 {
+		return nil, fmt.Errorf("empty multikey")
+	}
+
+	// Decode multibase
+	_, decoded, err := multibase.Decode(multikey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode multibase: %w", err)
+	}
+
+	// Check length (2 bytes multicodec + 32 bytes key)
+	if len(decoded) != 34 {
+		return nil, fmt.Errorf("invalid multikey length: expected 34, got %d", len(decoded))
+	}
+
+	// Check X25519 multicodec prefix (0xec, 0x01)
+	if decoded[0] != 0xec || decoded[1] != 0x01 {
+		return nil, fmt.Errorf("not an X25519 multikey: multicodec 0x%02x%02x", decoded[0], decoded[1])
+	}
+
+	return ecdh.X25519().NewPublicKey(decoded[2:])
 }
 
 // getVerificationMethods extracts the verification methods array from a DID document.
