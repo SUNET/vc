@@ -1,4 +1,5 @@
 //go:build didcomm && vc20
+// +build didcomm,vc20
 
 // Package transport provides WebSocket transport for DIDComm v2 messaging.
 //
@@ -30,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -410,8 +412,13 @@ func NewWebSocketHandler(processor MessageProcessor, opts ...WebSocketHandlerOpt
 			WriteBufferSize: 1024,
 			Subprotocols:    []string{DIDCommSubprotocol},
 			CheckOrigin: func(r *http.Request) bool {
-				// Default: allow same origin
-				return true
+				// Default: same-origin check (compare request origin with host)
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // No Origin header = same-origin request
+				}
+				// Check if origin matches the request host
+				return strings.Contains(origin, r.Host)
 			},
 		},
 	}
