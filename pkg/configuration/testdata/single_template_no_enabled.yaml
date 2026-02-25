@@ -1,0 +1,17 @@
+id: "auto_enabled"
+name: "Auto-enabled template"
+description: "Template without explicit enabled field"
+version: "1.0"
+oidc_scopes:
+  - "test"
+dcql:
+  credentials:
+    - id: "test_cred"
+      format: "vc+sd-jwt"
+      meta:
+        vct_values:
+          - "urn:test:1"
+      claims:
+        - path: ["name"]
+claim_mappings:
+  name: "name"

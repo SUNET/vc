@@ -119,10 +119,10 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			MaxAge:           12 * time.Hour,
 		}
 		s.gin.Use(cors.New(corsConfig))
-	} else {
-		// No CORS origins configured – allow all origins by default.
-		s.gin.Use(cors.Default())
 	}
+	// If no CORS configuration is provided, do not enable CORS middleware by default.
+	// This avoids unintentionally allowing cross-origin access when operators have
+	// not explicitly configured allowed origins.
 
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
 	if err != nil {

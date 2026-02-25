@@ -200,13 +200,20 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 
 	// Try loading as a config with a "templates:" list first
 	var cfg PresentationRequestConfig
-	if err := yaml.Unmarshal(fileBytes, &cfg); err == nil && len(cfg.Templates) > 0 && cfg.Templates[0].ID != "" {
+	if err := yaml.Unmarshal(fileBytes, &cfg); err == nil && len(cfg.Templates) > 0 {
+		hasID := false
 		for _, t := range cfg.Templates {
+			if t.ID != "" {
+				hasID = true
+			}
 			if !t.Enabled {
 				t.Enabled = true
 			}
 		}
-		return cfg.Templates, nil
+		if hasID {
+			return cfg.Templates, nil
+		}
+		return nil, fmt.Errorf("invalid templates configuration in %s: templates list present but all entries missing id", filePath)
 	}
 
 	// Fall back to a single template
