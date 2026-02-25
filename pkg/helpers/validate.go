@@ -125,7 +125,7 @@ func NewValidator() (*validator.Validate, error) {
 		// Build a map of VCT -> format for quick lookup
 		vctToFormat := make(map[string]string)
 		for _, constructor := range credentialConstructors {
-			if constructor != nil && constructor.VCTM != nil {
+			if constructor != nil && constructor.VCTM != nil && constructor.VCTM.VCT != "" {
 				vctToFormat[constructor.VCTM.VCT] = constructor.Format
 			}
 		}
