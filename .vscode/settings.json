@@ -83,6 +83,7 @@
         "promauto",
         "promhttp",
         "protobuf",
+        "protoc",
         "pubkey",
         "qrcode",
         "rpcclient",
