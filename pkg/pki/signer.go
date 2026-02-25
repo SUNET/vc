@@ -29,3 +29,27 @@ type Signer interface {
 	// PublicKey returns the public key for verification purposes.
 	PublicKey() any
 }
+
+// RawSigner extends Signer with direct signature operations for advanced use cases
+// like W3C Data Integrity proofs where the caller controls hashing.
+//
+// This interface is particularly useful for:
+// - VC 2.0 Data Integrity cryptosuites (ecdsa-rdfc-2019, eddsa-rdfc-2022, etc.)
+// - Any protocol that requires signing pre-computed digests
+// - Fine-grained control over the hash-then-sign process
+type RawSigner interface {
+	Signer
+
+	// SignDigest signs a pre-computed digest without additional hashing.
+	//
+	// For ECDSA, the digest should be the appropriate size for the curve:
+	// - P-256: SHA-256 (32 bytes)
+	// - P-384: SHA-384 (48 bytes)
+	// - P-521: SHA-512 (64 bytes)
+	//
+	// For EdDSA (Ed25519), note that Ed25519 does not use pre-hashing in standard mode.
+	// The implementation may need to use Ed25519ph (pre-hashed) or handle this specially.
+	//
+	// The returned signature is in IEEE P1363 format for ECDSA (R||S concatenation).
+	SignDigest(ctx context.Context, digest []byte) ([]byte, error)
+}

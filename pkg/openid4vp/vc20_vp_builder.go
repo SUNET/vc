@@ -3,6 +3,7 @@
 package openid4vp
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -223,7 +224,7 @@ func (b *VPBuilder) signWithECDSA(vpBytes []byte, privateKey crypto.PrivateKey, 
 
 	// Sign
 	suite := ecdsaSuite.NewSuite()
-	signedVP, err := suite.Sign(vpCred, ecKey, signOpts)
+	signedVP, err := suite.Sign(context.Background(), vpCred, ecKey, signOpts)
 	if err != nil {
 		return nil, fmt.Errorf("ECDSA signing failed: %w", err)
 	}

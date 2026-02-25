@@ -162,7 +162,7 @@ test-oidcrp: ## Test with OIDC RP build tag
 
 test-vc20: ## Test with VC 2.0 build tag
 	$(info Testing with VC 2.0 build tag)
-	go test -tags $(VC20_TAG) -v ./pkg/vc20/... ./pkg/keyresolver/...
+	go test -tags $(VC20_TAG) -v ./pkg/vc20/... ./pkg/authzen/... ./pkg/keyresolver/...
 
 test-pkcs11: ## Test with PKCS#11 build tag
 	$(info Testing with PKCS#11 build tag)
@@ -172,6 +172,20 @@ test-all-tags: ## Test with all build tags
 	$(info Testing with all build tags)
 	go test -tags "$(SAML_TAG),$(OIDCRP_TAG),$(VC20_TAG),$(PKCS11_TAG)" -v ./...
 
+# DIDComm v2.1 Test targets
+test-didcomm: ## Test DIDComm v2.1 implementation
+	$(info Testing DIDComm v2.1 implementation)
+	go test -tags "didcomm,$(VC20_TAG)" -v ./pkg/didcomm/...
+
+test-didcomm-interop: ## Run DIDComm interoperability tests
+	$(info Running DIDComm interoperability tests)
+	go test -tags "didcomm,$(VC20_TAG),didcomm_interop" -v ./test/didcomm_interop/...
+
+test-didcomm-all: ## Run all DIDComm tests including interop
+	$(info Running all DIDComm tests including interop)
+	go test -tags "didcomm,$(VC20_TAG),didcomm_interop" -v ./pkg/didcomm/... ./test/didcomm_interop/...
+
+# Wallet Test targets
 test-wallet: test-wallet-vci test-wallet-vp test-wallet-e2e ## Run all wallet mock tests
 
 test-wallet-vci: ## Run wallet VCI mock tests

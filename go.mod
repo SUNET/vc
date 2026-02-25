@@ -3,6 +3,7 @@ module vc
 go 1.25.1
 
 require (
+	filippo.io/edwards25519 v1.1.0
 	github.com/IBM/sarama v1.46.3
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.6.0
@@ -11,6 +12,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/creasty/defaults v1.8.0
 	github.com/crewjam/saml v0.5.1
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
 	github.com/dustin/go-broadcast v0.0.0-20211018055107-71439988bd91
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/gin-contrib/cors v1.7.6
@@ -18,6 +20,7 @@ require (
 	github.com/gin-contrib/sessions v1.0.4
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-jose/go-jose/v4 v4.1.3
+	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/go-playground/validator/v10 v10.30.1
@@ -37,6 +40,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.7.0
 	github.com/russellhaering/goxmldsig v1.5.0
+	github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8
 	github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/stretchr/testify v1.11.1
@@ -82,7 +86,6 @@ require (
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/docker v28.5.1+incompatible // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
@@ -94,7 +97,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/jsonpointer v0.22.4 // indirect
@@ -177,7 +179,6 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280 // indirect
-	github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect

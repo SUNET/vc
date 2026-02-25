@@ -50,7 +50,7 @@ func TestVC20Handler_VerifyECDSA2019_Integration(t *testing.T) {
 	cred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
 	require.NoError(t, err)
 
-	signedCred, err := suite.Sign(cred, key, &ecdsaSuite.SignOptions{
+	signedCred, err := suite.Sign(t.Context(), cred, key, &ecdsaSuite.SignOptions{
 		VerificationMethod: "did:example:issuer#key-1",
 		Created:            time.Now(),
 		ProofPurpose:       "assertionMethod",
@@ -218,7 +218,7 @@ func TestVC20Handler_VP_Extraction(t *testing.T) {
 	cred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
 	require.NoError(t, err)
 
-	signedCred, err := suite.Sign(cred, key, &ecdsaSuite.SignOptions{
+	signedCred, err := suite.Sign(t.Context(), cred, key, &ecdsaSuite.SignOptions{
 		VerificationMethod: "did:example:issuer#key-1",
 		Created:            time.Now(),
 		ProofPurpose:       "assertionMethod",
@@ -283,7 +283,7 @@ func TestVC20Handler_TimeValidation(t *testing.T) {
 		cred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
 		require.NoError(t, err)
 
-		signedCred, err := suite.Sign(cred, key, &ecdsaSuite.SignOptions{
+		signedCred, err := suite.Sign(t.Context(), cred, key, &ecdsaSuite.SignOptions{
 			VerificationMethod: "did:example:issuer#key-1",
 			Created:            time.Now(),
 			ProofPurpose:       "assertionMethod",
@@ -323,7 +323,7 @@ func TestVC20Handler_TimeValidation(t *testing.T) {
 		cred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
 		require.NoError(t, err)
 
-		signedCred, err := suite.Sign(cred, key, &ecdsaSuite.SignOptions{
+		signedCred, err := suite.Sign(t.Context(), cred, key, &ecdsaSuite.SignOptions{
 			VerificationMethod: "did:example:issuer#key-1",
 			Created:            time.Now().Add(-time.Hour * 24 * 30),
 			ProofPurpose:       "assertionMethod",
