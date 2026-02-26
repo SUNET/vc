@@ -88,6 +88,10 @@ func (s *MongoStore) Save(ctx context.Context, doc *AuthorizationContext) error 
 		return errors.New("sessionID is required")
 	}
 
+	if err := doc.Validate(); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
 	if doc.CreatedAt.IsZero() {
 		doc.CreatedAt = time.Now()
 	}
@@ -201,6 +205,10 @@ func (s *MongoStore) Update(ctx context.Context, doc *AuthorizationContext) erro
 	}
 	if doc.SessionID == "" {
 		return errors.New("sessionID is required")
+	}
+
+	if err := doc.Validate(); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
 	}
 
 	result, err := s.coll.ReplaceOne(ctx, bson.M{"session_id": doc.SessionID}, doc)

@@ -56,6 +56,10 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 		return errors.New("sessionID is required")
 	}
 
+	if err := doc.Validate(); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -451,6 +455,10 @@ func (c *MemoryStore) Update(ctx context.Context, doc *AuthorizationContext) err
 
 	if doc.SessionID == "" {
 		return errors.New("sessionID is required")
+	}
+
+	if err := doc.Validate(); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
 	}
 
 	c.mu.Lock()

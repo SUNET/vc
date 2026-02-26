@@ -1,11 +1,15 @@
 package cache
 
 import (
+	"reflect"
+	"strings"
 	"time"
 
 	"vc/pkg/model"
 	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // SessionStatus represents the status of an OIDC session
@@ -82,4 +86,17 @@ type AuthorizationContext struct {
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
 	WalletID                 string          `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
+}
+
+// Validate checks the AuthorizationContext against its struct validation tags.
+func (a *AuthorizationContext) Validate() error {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
+		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		if name == "-" {
+			return ""
+		}
+		return name
+	})
+	return v.Struct(a)
 }
