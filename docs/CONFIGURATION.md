@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-02-25
+**Generated:** 2026-02-26
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -9,6 +9,7 @@ Complete reference for all configuration parameters in the VC system.
 
 ## Table of Contents
 
+- [Environment Variables](#environment-variables)
 - [Common](#common-top-level)
 - [Authentication Methods](#auth_methods-top-level)
 - [API Gateway (APIGW)](#apigw-top-level)
@@ -19,6 +20,15 @@ Complete reference for all configuration parameters in the VC system.
 - [UI](#ui-top-level)
 - [Credential Constructor](#credential_constructor-top-level)
 - [Secrets File Reference](#secrets-file-reference)
+
+## Environment Variables
+
+These environment variables control service behavior outside of the YAML configuration file.
+
+| Variable         | Description                                                                                                                                                                   | Example           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `VC_CONFIG_YAML` | Path to the YAML configuration file. Each service reads this on startup.                                                                                                      | `config.yaml`     |
+| `SSL_CERT_FILE`  | Path to a CA certificate file that Go's `crypto/x509` trusts for TLS verification. Required when services use self-signed or private CA certificates for inter-service HTTPS. | `/pki/rootCA.crt` |
 
 ## `common` (Top-level)
 
@@ -707,7 +717,7 @@ Configuration for the Registry service that manages credential status.
 | `api_server`         | `object` | HTTP API server configuration                             | -                             | -       | Yes      |
 | `public_url`         | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | `"https://registry.sunet.se"` | -       | Yes      |
 | `grpc_server`        | `object` | GRPC server configuration                                 | -                             | -       | Yes      |
-| `token_status_lists` | `object` | Token Status List configuration                           | -                             | -       | No       |
+| `token_status_lists` | `object` | Token Status List configuration                           | -                             | -       | Yes      |
 | `admin_gui`          | `object` | Admin GUI configuration                                   | -                             | -       | No       |
 
 ### `token_status_lists`
@@ -756,9 +766,9 @@ Configuration for the User Interface service.
 | Field                                   | Type     | Description                           | Example | Default | Required |
 | --------------------------------------- | -------- | ------------------------------------- | ------- | ------- | -------- |
 | `api_server`                            | `object` | HTTP API server configuration         | -       | -       | Yes      |
-| `username`                              | `string` | UI login username                     | -       | -       | Yes      |
+| `username`                              | `string` | UI login username                     | -       | `admin` | No       |
 | `password`                              | `string` | UI login password                     | -       | -       | Yes      |
-| `session_inactivity_timeout_in_seconds` | `int`    | Session inactivity timeout in seconds | -       | -       | Yes      |
+| `session_inactivity_timeout_in_seconds` | `int`    | Session inactivity timeout in seconds | -       | `1800`  | No       |
 | `services`                              | `object` | Services                              | -       | -       | No       |
 
 ### `services`

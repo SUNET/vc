@@ -987,9 +987,36 @@ func renderDocument(sections []*DocSection) string {
 
 	// TOC
 	buf.WriteString("## Table of Contents\n\n")
+	buf.WriteString("- [Environment Variables](#environment-variables)\n")
 	for _, sec := range sections {
 		label := sectionLabel(sec.YAMLKey)
 		buf.WriteString(fmt.Sprintf("- [%s](#%s)\n", label, anchor(sec.Title)))
+	}
+	buf.WriteString("\n")
+
+	// Environment Variables section
+	buf.WriteString("## Environment Variables\n\n")
+	buf.WriteString("These environment variables control service behavior outside of the YAML configuration file.\n\n")
+	envVars := []struct{ Var, Desc, Example string }{
+		{"`VC_CONFIG_YAML`", "Path to the YAML configuration file. Each service reads this on startup.", "`config.yaml`"},
+		{"`SSL_CERT_FILE`", "Path to a CA certificate file that Go's `crypto/x509` trusts for TLS verification. Required when services use self-signed or private CA certificates for inter-service HTTPS.", "`/pki/rootCA.crt`"},
+	}
+	envWidths := [3]int{len("Variable"), len("Description"), len("Example")}
+	for _, e := range envVars {
+		if len(e.Var) > envWidths[0] {
+			envWidths[0] = len(e.Var)
+		}
+		if len(e.Desc) > envWidths[1] {
+			envWidths[1] = len(e.Desc)
+		}
+		if len(e.Example) > envWidths[2] {
+			envWidths[2] = len(e.Example)
+		}
+	}
+	buf.WriteString(fmt.Sprintf("| %-*s | %-*s | %-*s |\n", envWidths[0], "Variable", envWidths[1], "Description", envWidths[2], "Example"))
+	buf.WriteString(fmt.Sprintf("| %s | %s | %s |\n", strings.Repeat("-", envWidths[0]), strings.Repeat("-", envWidths[1]), strings.Repeat("-", envWidths[2])))
+	for _, e := range envVars {
+		buf.WriteString(fmt.Sprintf("| %-*s | %-*s | %-*s |\n", envWidths[0], e.Var, envWidths[1], e.Desc, envWidths[2], e.Example))
 	}
 	buf.WriteString("\n")
 
