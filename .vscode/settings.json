@@ -81,6 +81,7 @@
         "Pkce",
         "pkgoauth2",
         "postform",
+        "printascii",
         "promauto",
         "promhttp",
         "protobuf",

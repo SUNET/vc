@@ -44,7 +44,7 @@ type LoginPIDUserRequest struct {
 	Password string `json:"password" form:"password" validate:"required"`
 
 	// RequestURI comes from session cookie
-	RequestURI string `json:"-"`
+	RequestURI string `json:"-" validate:"omitempty,max=128,printascii"`
 }
 
 func (s *userHandler) LoginPIDUser(ctx context.Context, body *LoginPIDUserRequest) (*http.Response, error) {
@@ -74,7 +74,7 @@ type UserLookupRequest struct {
 	Username     string        `json:"-"`
 	AuthMethod   string        `json:"-"`
 	ResponseCode string        `json:"-"`
-	RequestURI   string        `json:"-"`
+	RequestURI   string        `json:"-" validate:"omitempty,max=128,printascii"`
 	VCTM         *sdjwtvc.VCTM `json:"-"`
 }
 
