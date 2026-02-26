@@ -4,6 +4,50 @@ A Go-based microservices backend for issuing and verifying digital credentials, 
 
 The platform implements the OpenID4VCI and OpenID4VP protocols to issue and verify credentials in SD-JWT VC, W3C Verifiable Credentials 2.0, and ISO/IEC 18013-5 mdoc formats.
 
+## Quick Start
+
+```bash
+# 1. Generate development PKI certificates
+make pki
+
+# 2. Start all services (MongoDB + microservices)
+make start
+
+# 3. Verify everything is running
+docker compose ps
+```
+
+The services will be available on the internal Docker network (`172.16.50.0/24`):
+
+| Service      | Address                          |
+| ------------ | -------------------------------- |
+| API Gateway  | `http://apigw.vc.docker:8080`    |
+| UI           | `http://ui.vc.docker:8080`       |
+| Issuer       | `http://issuer.vc.docker:8080`   |
+| Verifier     | `http://verifier.vc.docker:8080` |
+| Registry     | `http://registry.vc.docker:8080` |
+| Mock AS      | `http://mockas.vc.docker:8080`    |
+| MongoDB      | `mongodb://mongo.vc.docker:27017` |
+
+To access a service from the host, use its container IP directly (e.g. `http://172.16.50.2:8080` for apigw) or publish ports in `docker-compose.yaml`.
+
+To stop everything: `make stop`
+
+### Minimal configuration
+
+A minimal config file is provided at `config_minimal.yaml` for getting started with sensible defaults. To use it, set the environment variable before starting:
+
+```bash
+export VC_CONFIG_YAML=config_minimal.yaml
+```
+
+The full configuration with all options is in `config.yaml`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for details.
+
+### Prerequisites
+
+- Docker and Docker Compose
+- GNU Make
+
 ## Services
 
 | Service    | Description                                                                |
