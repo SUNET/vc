@@ -71,7 +71,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, ":id", http.StatusOK, s.endpointStatusLists)
 
 	// Admin GUI endpoints for managing Token Status Lists
-	if s.cfg.Registry.AdminGUI.Enable {
+	if model.BoolVal(s.cfg.Registry.AdminGUI.Enable, true) {
 		s.sessionStore = sessions.NewCookieStore([]byte(cacheService.SessionAuthKey), []byte(cacheService.SessionEncKey))
 		s.sessionStore.Options = &sessions.Options{
 			Path:     "/admin",

@@ -64,7 +64,7 @@ func setupTestService(t *testing.T) *Service {
 	cfg := &model.Cfg{
 		Registry: &model.Registry{
 			AdminGUI: model.AdminGUI{
-				Enable:  true,
+				Enable:   model.BoolPtr(true),
 				Username: "admin",
 				Password: "secret123",
 			},

@@ -6,6 +6,7 @@ import (
 	"time"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
+	"vc/pkg/model"
 )
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference
@@ -182,7 +183,7 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 		RedirectURI:       authCtx.RedirectURI,
 		State:             authCtx.State,
 		ShowRawCredential: c.cfg.Verifier.CredentialDisplay.ShowRawCredential,
-		ShowClaims:        c.cfg.Verifier.CredentialDisplay.ShowClaims,
+		ShowClaims:        model.BoolVal(c.cfg.Verifier.CredentialDisplay.ShowClaims, true),
 		PrimaryColor:      c.cfg.Verifier.AuthorizationPageCSS.PrimaryColor,
 		SecondaryColor:    c.cfg.Verifier.AuthorizationPageCSS.SecondaryColor,
 		CustomCSS:         c.cfg.Verifier.AuthorizationPageCSS.CustomCSS,

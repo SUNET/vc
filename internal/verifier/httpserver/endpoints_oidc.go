@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"vc/internal/verifier/apiv1"
+	"vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/codes"
@@ -95,7 +96,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		"Config": gin.H{
 			"DigitalCredentials": gin.H{
 				"Enable":          s.cfg.Verifier.DigitalCredentials.Enable,
-				"AllowQRFallback": s.cfg.Verifier.DigitalCredentials.AllowQRFallback,
+				"AllowQRFallback": model.BoolVal(s.cfg.Verifier.DigitalCredentials.AllowQRFallback, true),
 				"DeepLinkScheme":  s.cfg.Verifier.DigitalCredentials.DeepLinkScheme,
 			},
 		},

@@ -42,11 +42,7 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 	}
 	var err error
 
-	refreshSeconds := cfg.Registry.TokenStatusLists.TokenRefreshInterval
-	if refreshSeconds <= 0 {
-		refreshSeconds = 43200 // default 12 hours
-	}
-	tokenValidity := time.Duration(refreshSeconds)*time.Second - 5*time.Minute
+	tokenValidity := time.Duration(cfg.Registry.TokenStatusLists.TokenRefreshInterval)*time.Second - 5*time.Minute
 
 	s.JWT, err = pkgcache.NewGenericCache[string](cs, ctx, "tsl_jwt", tokenValidity)
 	if err != nil {

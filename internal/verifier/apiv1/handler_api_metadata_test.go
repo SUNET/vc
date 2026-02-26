@@ -16,12 +16,12 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: model.OIDCConfig{
+			OIDC: &model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
 			},
-			OpenID4VP: model.OpenID4VPConfig{
+			OpenID4VP: &model.OpenID4VPConfig{
 				SupportedCredentials: []model.SupportedCredentialConfig{
 					{
 						VCT:    "https://credentials.example.com/person_id",
@@ -91,12 +91,12 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: model.OIDCConfig{
+			OIDC: &model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
 			},
-			OpenID4VP: model.OpenID4VPConfig{
+			OpenID4VP: &model.OpenID4VPConfig{
 				SupportedCredentials: []model.SupportedCredentialConfig{},
 			},
 		},
@@ -145,12 +145,12 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
 					PublicURL: tt.externalURL,
-					OIDC: model.OIDCConfig{
+					OIDC: &model.OIDCConfig{
 						Issuer:      tt.externalURL,
 						SubjectType: "public",
 						SubjectSalt: "test-salt",
 					},
-					OpenID4VP: model.OpenID4VPConfig{
+					OpenID4VP: &model.OpenID4VPConfig{
 						SupportedCredentials: []model.SupportedCredentialConfig{},
 					},
 				},
@@ -176,7 +176,7 @@ func TestGetJWKS(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: model.OIDCConfig{
+			OIDC: &model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -262,12 +262,12 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: model.OIDCConfig{
+			OIDC: &model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
 			},
-			OpenID4VP: model.OpenID4VPConfig{
+			OpenID4VP: &model.OpenID4VPConfig{
 				SupportedCredentials: []model.SupportedCredentialConfig{
 					{VCT: "cred1", Scopes: []string{"scope1"}},
 					{VCT: "cred2", Scopes: []string{"scope2"}},
@@ -290,7 +290,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: model.OIDCConfig{
+			OIDC: &model.OIDCConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 	"vc/internal/gen/issuer/apiv1_issuer"
 
@@ -62,10 +63,37 @@ func (c *CredentialRequest) IsAccessTokenDPoP() bool {
 	return strings.HasPrefix(c.Authorization, "DPoP ")
 }
 
-// Validate validates the CredentialRequest based claims in TokenResponse
-func (c *CredentialRequest) Validate(ctx context.Context, tokenResponse *TokenResponse) error {
-	for _, authorizationDetails := range tokenResponse.AuthorizationDetails {
-		fmt.Println("AuthorizationDetails: ", authorizationDetails)
+// Validate validates the CredentialRequest against the authorization details per OID4VCI 1.0 Section 7.1.
+// When authorization_details with credential_identifiers was returned in the Token Response,
+// the Credential Request MUST use credential_identifier (matching one of the returned identifiers).
+// Otherwise, credential_configuration_id MUST be used.
+func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails []AuthorizationDetailsParameter) error {
+	hasAuthDetails := len(authorizationDetails) > 0
+
+	if hasAuthDetails {
+		// authorization_details flow: credential_identifier is REQUIRED
+		if c.CredentialIdentifier == "" {
+			return fmt.Errorf("credential_identifier is required when authorization_details was returned in the Token Response")
+		}
+		if c.CredentialConfigurationID != "" {
+			return fmt.Errorf("credential_configuration_id must not be present when credential_identifier is used")
+		}
+
+		// Verify credential_identifier matches one returned in the Token Response
+		for _, ad := range authorizationDetails {
+			if slices.Contains(ad.CredentialIdentifiers, c.CredentialIdentifier) {
+				return nil
+			}
+		}
+		return fmt.Errorf("credential_identifier %q not found in Token Response authorization_details", c.CredentialIdentifier)
+	}
+
+	// scope-based flow: credential_configuration_id is REQUIRED
+	if c.CredentialConfigurationID == "" {
+		return fmt.Errorf("credential_configuration_id is required when authorization_details was not returned in the Token Response")
+	}
+	if c.CredentialIdentifier != "" {
+		return fmt.Errorf("credential_identifier must not be present when credential_configuration_id is used")
 	}
 
 	return nil

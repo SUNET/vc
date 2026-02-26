@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"vc/pkg/model"
+	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
 )
 
@@ -53,7 +54,8 @@ type AuthorizationContext struct {
 	IDToken     string `json:"id_token,omitempty" bson:"id_token,omitempty"`
 
 	// Issuer-specific fields (credential issuance)
-	RequestURI      string          `json:"request_uri,omitempty" bson:"request_uri,omitempty"`
+	AuthorizationDetails []openid4vci.AuthorizationDetailsParameter `json:"authorization_details,omitempty" bson:"authorization_details,omitempty"`
+	RequestURI           string                                     `json:"request_uri,omitempty" bson:"request_uri,omitempty"`
 	WalletURI       string          `json:"redirect_url,omitempty" bson:"redirect_url,omitempty"`
 	Consent         bool            `json:"consent,omitempty" bson:"consent,omitempty"`
 	AuthenticSource string          `json:"authentic_source,omitempty" bson:"authentic_source,omitempty"`

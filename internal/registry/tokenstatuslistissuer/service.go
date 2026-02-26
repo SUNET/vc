@@ -40,11 +40,7 @@ type Service struct {
 
 // New creates a new token status list issuer service
 func New(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbService *db.Service, log *logger.Log) (*Service, error) {
-	refreshSeconds := cfg.Registry.TokenStatusLists.TokenRefreshInterval
-	if refreshSeconds <= 0 {
-		refreshSeconds = 43200 // default 12 hours per spec example (Section 5.1)
-	}
-	refreshInterval := time.Duration(refreshSeconds) * time.Second
+	refreshInterval := time.Duration(cfg.Registry.TokenStatusLists.TokenRefreshInterval) * time.Second
 	// Token validity equals refresh interval minus buffer for regeneration time
 	tokenValidity := refreshInterval - (5 * time.Minute)
 
@@ -55,7 +51,7 @@ func New(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbSer
 		log:                     log.New("token_status_list_issuer"),
 		refreshInterval:         refreshInterval,
 		tokenValidity:           tokenValidity,
-		ttl:                     refreshSeconds,
+		ttl:                     cfg.Registry.TokenStatusLists.TokenRefreshInterval,
 		stopCh:                  make(chan struct{}),
 		cacheService:            cacheService,
 	}

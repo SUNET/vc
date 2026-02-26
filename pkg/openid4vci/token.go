@@ -2,7 +2,7 @@ package openid4vci
 
 //"client_id=1003&grant_type=authorization_code&code=b4af17ce-1c56-4546-9118-d60f6b301e44&code_verifier=vXshCcXYcceHZWukHCOVTN2WhXTJujgblBuokp8ofUw&redirect_uri=https%3A%2F%2Fdev.wallet.sunet.se"}
 
-// TokenRequest https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-token-request
+// TokenRequest https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-token-request
 type TokenRequest struct {
 	// Header field
 	DPOP string `header:"dpop" validate:"required"`
@@ -15,23 +15,23 @@ type TokenRequest struct {
 	//TXCode string `json:"tx_code" validate:"required_unless=GrantType urn:ietf:params:oauth:grant-type:pre-authorized_code"`
 
 	//// Authorization Code Flow
-	//// GrantType REQUIRED.  Value MUST be set to "authorization_code".
+	// GrantType REQUIRED.  Value MUST be set to "authorization_code".
 	GrantType string `form:"grant_type" json:"grant_type" validate:"required,oneof=authorization_code"`
 
-	//// Code REQUIRED.  The authorization code received from the authorization server.
+	// Code REQUIRED.  The authorization code received from the authorization server.
 	Code string `form:"code" json:"code" validate:"required"`
 
-	//// RedirectURI	REQUIRED, if the "redirect_uri" parameter was included in the authorization request as described in Section 4.1.1, and their values MUST be identical.
+	// RedirectURI	REQUIRED, if the "redirect_uri" parameter was included in the authorization request as described in Section 4.1.1, and their values MUST be identical.
 	RedirectURI string `form:"redirect_uri" json:"redirect_uri" validate:"required"`
 
-	//// ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.
+	// ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.
 	ClientID string `form:"client_id" json:"client_id" validate:"required"`
 
-	//// CodeVerifier OPTIONAL (required for public clients)
+	// CodeVerifier OPTIONAL (required for public clients)
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`
 }
 
-// TokenResponse https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-successful-token-response
+// TokenResponse https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-successful-token-response
 type TokenResponse struct {
 	// AccessToken REQUIRED.  The access token issued by the authorization server.
 	AccessToken string `json:"access_token" validate:"required"`
@@ -54,12 +54,8 @@ type TokenResponse struct {
 	// CNonceExpiresIn OPTIONAL. Number denoting the lifetime in seconds of the c_nonce.
 	CNonceExpiresIn int `json:"c_nonce_expires_in"`
 
-	// AuthorizationDetails REQUIRED when authorization_details parameter is used to request issuance of a certain Credential type as defined in Section 5.1.1. It MUST NOT be used otherwise. It is an array of objects, as defined in Section 7 of [RFC9396]. In addition to the parameters defined in Section 5.1.1, this specification defines the following parameter to be used with the authorization details type openid_credential in the Token Response:
-	// * credential_identifiers: OPTIONAL. Array of strings, each uniquely identifying a Credential that can be issued using the Access Token returned in this response. Each of these Credentials corresponds to the same entry in the credential_configurations_supported Credential Issuer metadata but can contain different claim values or a different subset of claims within the claims set identified by that Credential type. This parameter can be used to simplify the Credential Request, as defined in Section 7.2, where the credential_identifier parameter replaces the format parameter and any other Credential format-specific parameters in the Credential Request. When received, the Wallet MUST use these values together with an Access Token in subsequent Credential Requests.
-
-	AuthorizationDetails []AuthorizationDetailsParameter `json:"authorization_details"`
-}
-
-func (t *TokenResponse) DpopResponse() error {
-	return nil
+	// AuthorizationDetails REQUIRED when authorization_details parameter is used in either the Authorization Request or Token Request.
+	// OPTIONAL when scope parameter was used to request issuance of a Credential. It MUST NOT be used otherwise.
+	// It is a non-empty array of objects, as defined in Section 7 of [RFC9396].
+	AuthorizationDetails []AuthorizationDetailsParameter `json:"authorization_details,omitempty"`
 }

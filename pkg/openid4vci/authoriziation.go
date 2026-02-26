@@ -22,6 +22,10 @@ type AuthorizationDetailsParameter struct {
 
 	// Claims OPTIONAL. Object as defined in Appendix A.3.2 excluding the display and value_type parameters. mandatory parameter here is used by the Wallet to indicate to the Issuer that it only accepts Credential(s) issued with those claim(s).
 	Claims map[string]any `json:"claims,omitempty" form:"claims"`
+
+	// CredentialIdentifiers REQUIRED (Token Response only). A non-empty array of strings, each uniquely identifying
+	// a Credential Dataset that can be issued using the Access Token returned in this response.
+	CredentialIdentifiers []string `json:"credential_identifiers,omitempty"`
 }
 
 // PARRequest https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#RFC6749

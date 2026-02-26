@@ -145,7 +145,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	// Add configured credential scopes
-	for _, cred := range c.cfg.Verifier.OpenID4VP.SupportedCredentials {
+	for _, cred := range c.cfg.Verifier.OpenID4VP.GetSupportedCredentials() {
 		for _, scope := range cred.Scopes {
 			metadata.ScopesSupported = append(metadata.ScopesSupported, scope)
 		}

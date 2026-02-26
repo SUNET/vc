@@ -453,7 +453,7 @@ type Verifier struct {
 	// OIDC holds the OIDC Provider configuration
 	OIDC *OIDCConfig `yaml:"oidc,omitempty" validate:"omitempty"`
 	// OpenID4VP holds the OpenID4VP configuration
-	OpenID4VP OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
+	OpenID4VP *OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
 	// DigitalCredentials holds the W3C Digital Credentials API configuration
 	DigitalCredentials DigitalCredentialsConfig `yaml:"digital_credentials,omitempty"`
 	// AuthorizationPageCSS holds the authorization page styling configuration
@@ -535,6 +535,22 @@ type OpenID4VPConfig struct {
 	SupportedCredentials []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	// PresentationRequestsDir is an optional directory with presentation request templates
 	PresentationRequestsDir string `yaml:"presentation_requests_dir,omitempty"`
+}
+
+// GetSupportedCredentials returns the supported credentials, or nil if the config is nil.
+func (c *OpenID4VPConfig) GetSupportedCredentials() []SupportedCredentialConfig {
+	if c == nil {
+		return nil
+	}
+	return c.SupportedCredentials
+}
+
+// GetPresentationRequestsDir returns the presentation requests directory, or empty string if the config is nil.
+func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
+	if c == nil {
+		return ""
+	}
+	return c.PresentationRequestsDir
 }
 
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration

@@ -20,9 +20,14 @@ import (
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
-	allow, err := c.cfg.APIGW.OauthServer.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
-	if !allow {
+	oauthClient, err := c.cfg.APIGW.OauthServer.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
+	if err != nil {
 		return nil, errors.Join(oauth2.ErrInvalidClient, err)
+	}
+
+	// Public clients MUST use PKCE (RFC 6749 Section 2.1)
+	if oauthClient.Type == oauth2.ClientTypePublic && req.CodeChallenge == "" {
+		return nil, errors.Join(oauth2.ErrInvalidClient, oauth2.ErrPKCERequired)
 	}
 
 	c.log.Debug("par")
@@ -32,17 +37,18 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	c.log.Debug("PAR", "state", req.State)
 
 	azt := cache.AuthorizationContext{
-		SessionID:           uuid.NewString(),
-		Code:                uuid.NewString(),
-		RequestURI:          requestURI,
-		Scopes:              []string{req.Scope},
-		Forfeited:           false,
-		CodeChallenge:       req.CodeChallenge,
-		CodeChallengeMethod: req.CodeChallengeMethod,
-		State:               req.State,
-		ClientID:            fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
-		WalletURI:           req.RedirectURI,
-		ExpiresAt:           time.Now().Add(60 * time.Second).Unix(),
+		SessionID:            uuid.NewString(),
+		Code:                 uuid.NewString(),
+		RequestURI:           requestURI,
+		Scopes:               []string{req.Scope},
+		AuthorizationDetails: req.AuthorizationDetails,
+		Forfeited:            false,
+		CodeChallenge:        req.CodeChallenge,
+		CodeChallengeMethod:  req.CodeChallengeMethod,
+		State:                req.State,
+		ClientID:             fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
+		WalletURI:            req.RedirectURI,
+		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
 	}
 
 	azt.Nonce, err = crypto.GenerateSecureToken(0, 32)
@@ -109,9 +115,21 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 }
 
 // OAuthToken implements OAuth 2.0 token endpoint for credential issuance
-// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-13.html#name-token-endpoint
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-token-endpoint
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	c.log.Debug("OAuthToken", "req", req)
+
+	// Look up the client to enforce type-specific requirements
+	oauthClient, err := c.cfg.APIGW.OauthServer.Clients.Get(req.ClientID)
+	if err != nil {
+		c.log.Error(err, "client validation failed")
+		return nil, errors.Join(oauth2.ErrInvalidClient, err)
+	}
+
+	// Public clients (wallets) MUST use PKCE per RFC 6749 Section 2.1
+	if oauthClient.Type == oauth2.ClientTypePublic && req.CodeVerifier == "" {
+		return nil, oauth2.ErrPKCERequired
+	}
 
 	authorizationContext, err := c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 		Code: req.Code,
@@ -122,7 +140,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
-	// Verify PKCE code_challenge
+	// Verify PKCE code_challenge (for all clients that provided one)
 	if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
 		c.log.Error(err, "PKCE validation failed")
 		return nil, fmt.Errorf("PKCE validation failed: %w", err)
@@ -139,14 +157,24 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// Bind the public key to the generated access token
 
 	reply := &openid4vci.TokenResponse{
-		AccessToken:          accessToken,
-		TokenType:            "DPoP",
-		ExpiresIn:            3600, // 1 hour
-		Scope:                authorizationContext.Scopes[0],
-		State:                authorizationContext.State,
-		CNonce:               authorizationContext.Nonce,
-		CNonceExpiresIn:      0,
-		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{},
+		AccessToken:     accessToken,
+		TokenType:       "DPoP",
+		ExpiresIn:       3600, // 1 hour
+		Scope:           authorizationContext.Scopes[0],
+		State:           authorizationContext.State,
+		CNonce:          authorizationContext.Nonce,
+		CNonceExpiresIn: 0,
+	}
+
+	// Per OID4VCI 1.0 Section 6.2: authorization_details is REQUIRED in the Token Response when
+	// authorization_details was used in the Authorization Request, with credential_identifiers added.
+	if len(authorizationContext.AuthorizationDetails) > 0 {
+		responseDetails := make([]openid4vci.AuthorizationDetailsParameter, len(authorizationContext.AuthorizationDetails))
+		for i, ad := range authorizationContext.AuthorizationDetails {
+			responseDetails[i] = ad
+			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
+		}
+		reply.AuthorizationDetails = responseDetails
 	}
 
 	tokenDoc := &cache.Token{

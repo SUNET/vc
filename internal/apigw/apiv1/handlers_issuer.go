@@ -92,6 +92,12 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// Validate credential request against authorization details per OID4VCI 1.0 Section 7.1
+	if err := req.Validate(ctx, authContext.AuthorizationDetails); err != nil {
+		c.log.Error(err, "credential request validation failed")
+		return nil, err
+	}
+
 	if len(authContext.Scopes) == 0 {
 		c.log.Error(nil, "no scope found in auth context")
 		return nil, errors.New("no scope found in auth context")

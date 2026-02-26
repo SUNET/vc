@@ -102,7 +102,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 // loadPresentationTemplates loads presentation request templates from configured directory
 func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Check if templates directory is configured
-	templatesDir := c.cfg.Verifier.OpenID4VP.PresentationRequestsDir
+	templatesDir := c.cfg.Verifier.OpenID4VP.GetPresentationRequestsDir()
 	if templatesDir == "" {
 		c.log.Info("Presentation requests directory not configured, using legacy scope mapping")
 		return nil

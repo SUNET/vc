@@ -19,10 +19,14 @@ import (
 
 // isDockerAvailable checks if Docker is accessible
 func isDockerAvailable() bool {
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "version")
+	cmd := exec.CommandContext(ctx, dockerPath, "version")
 	return cmd.Run() == nil
 }
 

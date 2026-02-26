@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"vc/pkg/model"
 )
 
 // RegistrationRequest represents RFC 7591 client registration request
@@ -160,7 +161,7 @@ func (s *Service) buildRegistrationRequest() *RegistrationRequest {
 		ApplicationType:         "web",
 		CodeChallengeMethod:     "S256", // Always use PKCE with S256
 		SoftwareID:              "SUNET-vc-issuer",
-		SoftwareVersion:         "1.0.0", // Could be made configurable
+		SoftwareVersion:         model.BuildVersion,
 	}
 }
 

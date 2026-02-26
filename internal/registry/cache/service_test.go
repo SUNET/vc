@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creasty/defaults"
+
 	"vc/internal/registry/db"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -21,10 +23,12 @@ import (
 )
 
 func testCfg(ha bool) *model.Cfg {
-	return &model.Cfg{
+	cfg := &model.Cfg{
 		Common:   &model.Common{HA: ha},
-		Registry: &model.Registry{TokenStatusLists: model.TokenStatusLists{TokenRefreshInterval: 3600}},
+		Registry: &model.Registry{TokenStatusLists: &model.TokenStatusLists{TokenRefreshInterval: 3600}},
 	}
+	_ = defaults.Set(cfg)
+	return cfg
 }
 
 func testLogger(t *testing.T) *logger.Log {
@@ -174,7 +178,7 @@ func TestNew_NilMongoClient(t *testing.T) {
 func TestNew_DefaultTokenRefreshInterval(t *testing.T) {
 	cfg := &model.Cfg{
 		Common:   &model.Common{HA: false},
-		Registry: &model.Registry{TokenStatusLists: model.TokenStatusLists{TokenRefreshInterval: 0}},
+		Registry: &model.Registry{TokenStatusLists: &model.TokenStatusLists{TokenRefreshInterval: 0}},
 	}
 	log := testLogger(t)
 	tracer := testTracer(t, cfg, log)

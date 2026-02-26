@@ -23,6 +23,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/creasty/defaults"
+
 	"vc/internal/registry/cache"
 	"vc/internal/registry/db"
 	"vc/pkg/logger"
@@ -158,7 +160,7 @@ func base64Encode(data []byte) string {
 func (s *testSuite) initializeConfiguration() {
 	s.cfg = &model.Cfg{
 		Common: &model.Common{
-			Production: false,
+			Production: model.BoolPtr(false),
 			Log: model.Log{
 				FolderPath: "",
 			},
@@ -168,7 +170,7 @@ func (s *testSuite) initializeConfiguration() {
 		},
 		Registry: &model.Registry{
 			PublicURL: "https://registry.example.com",
-			TokenStatusLists: model.TokenStatusLists{
+			TokenStatusLists: &model.TokenStatusLists{
 				KeyConfig: &pki.KeyConfig{
 					PrivateKeyPath: s.keyPath,
 				},
@@ -176,6 +178,9 @@ func (s *testSuite) initializeConfiguration() {
 				SectionSize:          10000, // Use smaller section size for faster tests
 			},
 		},
+	}
+	if err := defaults.Set(s.cfg); err != nil {
+		s.t.Fatalf("Failed to set defaults: %v", err)
 	}
 }
 
@@ -336,14 +341,17 @@ func TestNew_DefaultRefreshInterval(t *testing.T) {
 	suite := newTestSuite(t)
 	defer suite.cleanup()
 
-	// Set refresh interval to 0 to use default
+	// Build a cfg without explicitly setting TokenRefreshInterval; defaults.Set populates the struct tag default.
 	suite.cfg.Registry.TokenStatusLists.TokenRefreshInterval = 0
+	if err := defaults.Set(suite.cfg); err != nil {
+		t.Fatalf("Failed to set defaults: %v", err)
+	}
 
 	service, err := New(suite.ctx, suite.cfg, suite.cacheService, suite.dbService, suite.log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
-	// Default should be 43200 seconds (12 hours)
+	// Default should be 43200 seconds (12 hours) from struct tag default:"43200"
 	assert.Equal(t, 43200*time.Second, service.refreshInterval)
 	assert.Equal(t, int64(43200), service.ttl)
 
