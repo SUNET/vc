@@ -13,6 +13,7 @@ import (
 	"vc/internal/ui/httpserver"
 	"vc/internal/ui/outbound"
 	"vc/pkg/configuration"
+	"vc/pkg/model"
 	"vc/pkg/logger"
 	"vc/pkg/trace"
 )
@@ -43,7 +44,7 @@ func main() {
 		panic("ui configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}

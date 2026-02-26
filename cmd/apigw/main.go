@@ -13,6 +13,7 @@ import (
 	"vc/internal/apigw/inbound"
 	"vc/internal/apigw/outbound"
 	"vc/pkg/configuration"
+	"vc/pkg/model"
 	"vc/pkg/logger"
 	"vc/pkg/trace"
 )
@@ -38,7 +39,7 @@ func main() {
 		panic("apigw configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}

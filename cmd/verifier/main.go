@@ -15,6 +15,7 @@ import (
 	"vc/internal/verifier/notify"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
+	"vc/pkg/model"
 	"vc/pkg/trace"
 )
 
@@ -44,7 +45,7 @@ func main() {
 		panic("verifier configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}
