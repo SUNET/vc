@@ -10,40 +10,40 @@ import (
 func TestClearSecrets(t *testing.T) {
 	cfg := &Cfg{
 		Common: &Common{
-			Mongo: Mongo{URI: "mongodb://user:pass@host:27017"},
+			Mongo: Mongo{URI: "mongodb://user:pass@host:27017"}, //NOSONAR
 		},
 		APIGW: &APIGW{
 			APIServer: APIServer{
 				APIAuth: APIAuth{
 					BasicAuth: APIAuthBasic{
-						Users: map[string]string{"admin": "secret123"},
+						Users: map[string]string{"admin": "secret123"}, //NOSONAR
 					},
 				},
 			},
 			OIDCRP: OIDCRPConfig{
 				Registration: &OIDCRPRegistrationConfig{
 					Preconfigured: &OIDCRPPreconfiguredConfig{
-						ClientSecret: "my-client-secret",
+						ClientSecret: "my-client-secret", //NOSONAR
 					},
 					Dynamic: &OIDCRPDynamicRegistrationConfig{
-						Enable:            true,
-						InitialAccessToken: "my-initial-token",
+						Enable:             true,
+						InitialAccessToken: "my-initial-token", //NOSONAR
 					},
 				},
 			},
 		},
 		Registry: &Registry{
 			AdminGUI: AdminGUI{
-				Password:      "admin-pass",
+				Password: "admin-pass", //NOSONAR
 			},
 		},
 		Verifier: &Verifier{
-			OIDC: OIDCConfig{
-				SubjectSalt: "salt-value",
+			OIDC: &OIDCConfig{
+				SubjectSalt: "salt-value", //NOSONAR
 			},
 		},
 		UI: &UI{
-			Password: "ui-pass",
+			Password: "ui-pass", //NOSONAR
 		},
 	}
 
@@ -99,7 +99,7 @@ func TestApplySecrets(t *testing.T) {
 		},
 		Registry: &RegistrySecrets{
 			AdminGUI: AdminGUISecrets{
-				Password:      "secret-admin-pass",
+				Password: "secret-admin-pass",
 			},
 		},
 		Verifier: &VerifierSecrets{
@@ -190,7 +190,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 						ClientSecret: "config-client-secret",
 					},
 					Dynamic: &OIDCRPDynamicRegistrationConfig{
-						Enable:            true,
+						Enable:             true,
 						InitialAccessToken: "config-initial-token",
 					},
 				},
@@ -198,11 +198,11 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		},
 		Registry: &Registry{
 			AdminGUI: AdminGUI{
-				Password:      "config-admin-pass",
+				Password: "config-admin-pass",
 			},
 		},
 		Verifier: &Verifier{
-			OIDC: OIDCConfig{
+			OIDC: &OIDCConfig{
 				SubjectSalt: "config-salt",
 			},
 		},
@@ -243,7 +243,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		},
 		Registry: &RegistrySecrets{
 			AdminGUI: AdminGUISecrets{
-				Password:      "secret-admin-pass",
+				Password: "secret-admin-pass",
 			},
 		},
 		Verifier: &VerifierSecrets{

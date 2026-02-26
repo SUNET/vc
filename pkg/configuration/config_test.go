@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,10 +11,11 @@ import (
 )
 
 func TestLoadSecrets_ValidFile(t *testing.T) {
-	content := `---
+	testMongoURI := "mongodb://secret-user:secret-pass@host:27017" //NOSONAR
+	content := fmt.Sprintf(`---
 common:
   mongo:
-    uri: "mongodb://secret-user:secret-pass@host:27017"
+    uri: "%s"
 apigw:
   api_server:
     api_auth:
@@ -34,7 +36,7 @@ verifier:
     subject_salt: "secret-salt-value"
 ui:
   password: "secret-ui-pass"
-`
+`, testMongoURI)
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
 	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
@@ -44,7 +46,7 @@ ui:
 
 	// Verify common secrets
 	require.NotNil(t, secrets.Common)
-	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", secrets.Common.Mongo.URI)
+	assert.Equal(t, testMongoURI, secrets.Common.Mongo.URI)
 
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)

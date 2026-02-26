@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-02-24
+**Generated:** 2026-02-25
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -267,11 +267,11 @@ Supports both file-based and HSM-based keys with explicit control.
 
 > **Path:** `.apigw.oauth_server.clients.<key>`, `.verifier.oauth_server.clients.<key>`
 
-| Field          | Type       | Description                                  | Example                          | Default | Required |
-| -------------- | ---------- | -------------------------------------------- | -------------------------------- | ------- | -------- |
-| `type`         | `string`   | Client type                                  | `"public"`                       | -       | Yes      |
-| `redirect_uri` | `string`   | Allowed redirect URI for the client          | `"https://example.com/callback"` | -       | Yes      |
-| `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client | -                                | -       | Yes      |
+| Field          | Type       | Description                                                        | Example                          | Default  | Required |
+| -------------- | ---------- | ------------------------------------------------------------------ | -------------------------------- | -------- | -------- |
+| `type`         | `string`   | Client type per RFC 6749 Section 2.1 ("public" or "confidential"). | -                                | `public` | No       |
+| `redirect_uri` | `string`   | Allowed redirect URI for the client                                | `"https://example.com/callback"` | -        | Yes      |
+| `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client                       | -                                | -        | Yes      |
 
 ### `issuer_metadata`
 

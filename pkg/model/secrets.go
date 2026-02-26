@@ -51,7 +51,7 @@ type OIDCRPSecrets struct {
 // OIDCRPRegistrationSecrets holds registration secrets
 type OIDCRPRegistrationSecrets struct {
 	Preconfigured *OIDCRPPreconfiguredSecrets `yaml:"preconfigured,omitempty"`
-	Dynamic       *OIDCRPDynamicSecrets        `yaml:"dynamic,omitempty"`
+	Dynamic       *OIDCRPDynamicSecrets       `yaml:"dynamic,omitempty"`
 }
 
 // OIDCRPPreconfiguredSecrets holds pre-registered client secrets
@@ -110,7 +110,7 @@ func (cfg *Cfg) ClearSecrets() {
 		cfg.Registry.AdminGUI.Password = ""
 	}
 
-	if cfg.Verifier != nil {
+	if cfg.Verifier != nil && cfg.Verifier.OIDC != nil {
 		cfg.Verifier.OIDC.SubjectSalt = ""
 	}
 
@@ -176,6 +176,9 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 			cfg.Verifier = &Verifier{}
 		}
 		if secrets.Verifier.OIDC.SubjectSalt != "" {
+			if cfg.Verifier.OIDC == nil {
+				cfg.Verifier.OIDC = &OIDCConfig{}
+			}
 			cfg.Verifier.OIDC.SubjectSalt = secrets.Verifier.OIDC.SubjectSalt
 		}
 	}

@@ -14,6 +14,21 @@ import (
 	"vc/pkg/sdjwtvc"
 )
 
+// BoolVal safely dereferences a *bool, returning the pointed-to value or
+// the supplied fallback when the pointer is nil.
+func BoolVal(b *bool, fallback bool) bool {
+	if b != nil {
+		return *b
+	}
+	return fallback
+}
+
+// BoolPtr returns a pointer to the given bool value.
+// Useful for initializing *bool fields in struct literals.
+func BoolPtr(v bool) *bool {
+	return &v
+}
+
 // APIServer holds the HTTP API server configuration
 type APIServer struct {
 	// Addr is the listen address for the HTTP server
@@ -65,7 +80,7 @@ type Log struct {
 // Common holds the shared configuration used across all services
 type Common struct {
 	// Production enables production mode
-	Production bool `yaml:"production" default:"true"`
+	Production *bool `yaml:"production" default:"true"`
 	// Log is the logging configuration
 	Log Log `yaml:"log"`
 	// Mongo is the MongoDB configuration
@@ -394,7 +409,7 @@ type Registry struct {
 	// GRPCServer is the gRPC server configuration
 	GRPCServer GRPCServer `yaml:"grpc_server" validate:"required"`
 	// TokenStatusLists holds the Token Status List configuration
-	TokenStatusLists TokenStatusLists `yaml:"token_status_lists,omitempty" validate:"omitempty"`
+	TokenStatusLists *TokenStatusLists `yaml:"token_status_lists" validate:"required"`
 	// AdminGUI holds the admin GUI configuration
 	AdminGUI AdminGUI `yaml:"admin_gui,omitempty" validate:"omitempty"`
 }
@@ -402,7 +417,7 @@ type Registry struct {
 // AdminGUI holds the admin GUI configuration
 type AdminGUI struct {
 	// Enable enables the admin GUI
-	Enable bool `yaml:"enable" default:"true"`
+	Enable *bool `yaml:"enable" default:"true"`
 	// Username is the admin username
 	Username string `yaml:"username" validate:"required_if=Enable true" default:"admin"`
 	// Password is the admin password
@@ -436,7 +451,7 @@ type Verifier struct {
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
 	// OIDC holds the OIDC Provider configuration
-	OIDC OIDCConfig `yaml:"oidc" validate:"omitempty"`
+	OIDC *OIDCConfig `yaml:"oidc,omitempty" validate:"omitempty"`
 	// OpenID4VP holds the OpenID4VP configuration
 	OpenID4VP OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
 	// DigitalCredentials holds the W3C Digital Credentials API configuration
@@ -468,7 +483,7 @@ type TrustConfig struct {
 	// Enable controls whether trust evaluation is enabled.
 	// When false, keys are resolved but not validated against trust frameworks.
 	// Default: true
-	Enable bool `yaml:"enable,omitempty" default:"true"`
+	Enable *bool `yaml:"enable,omitempty" default:"true"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -543,7 +558,7 @@ type DigitalCredentialsConfig struct {
 
 	// AllowQRFallback enables automatic fallback to QR code if DC API is unavailable
 	// Default: true
-	AllowQRFallback bool `yaml:"allow_qr_fallback" default:"true"`
+	AllowQRFallback *bool `yaml:"allow_qr_fallback" default:"true"`
 
 	// DeepLinkScheme for mobile wallet integration
 	// Example: "eudi-wallet://"
@@ -597,7 +612,7 @@ type CredentialDisplayConfig struct {
 
 	// ShowClaims displays the parsed claims that will be sent to the RP
 	// Recommended for transparency and user consent
-	ShowClaims bool `yaml:"show_claims" default:"true"`
+	ShowClaims *bool `yaml:"show_claims" default:"true"`
 
 	// AllowEdit allows users to redact certain claims before sending to RP (future feature)
 	// Currently not implemented
@@ -771,11 +786,11 @@ type UI struct {
 	// APIServer is the HTTP API server configuration
 	APIServer APIServer `yaml:"api_server" validate:"required"`
 	// Username is the UI login username
-	Username string `yaml:"username" validate:"required"`
+	Username string `yaml:"username" validate:"required" default:"admin"`
 	// Password is the UI login password
 	Password string `yaml:"password" validate:"required"`
 	// SessionInactivityTimeoutInSeconds is the session inactivity timeout in seconds
-	SessionInactivityTimeoutInSeconds int `yaml:"session_inactivity_timeout_in_seconds" validate:"required"`
+	SessionInactivityTimeoutInSeconds int `yaml:"session_inactivity_timeout_in_seconds" validate:"required" default:"1800"`
 	Services                          struct {
 		APIGW struct {
 			BaseURL string `yaml:"base_url"`

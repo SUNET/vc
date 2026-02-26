@@ -155,7 +155,8 @@ func TestAdminGUIDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Enable)
+	require.NotNil(t, cfg.Enable)
+	assert.True(t, *cfg.Enable)
 	assert.Equal(t, "admin", cfg.Username)
 }
 
@@ -172,7 +173,8 @@ func TestTrustConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Enable)
+	require.NotNil(t, cfg.Enable)
+	assert.True(t, *cfg.Enable)
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 
@@ -213,7 +215,8 @@ func TestDigitalCredentialsConfigDefaults(t *testing.T) {
 	assert.False(t, cfg.UseJAR)
 	assert.Equal(t, []string{"vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"}, cfg.PreferredFormats)
 	assert.Equal(t, "dc_api.jwt", cfg.ResponseMode)
-	assert.True(t, cfg.AllowQRFallback)
+	require.NotNil(t, cfg.AllowQRFallback)
+	assert.True(t, *cfg.AllowQRFallback)
 }
 
 func TestAuthorizationPageCSSConfigDefaults(t *testing.T) {
@@ -232,7 +235,8 @@ func TestCredentialDisplayConfigDefaults(t *testing.T) {
 	assert.False(t, cfg.Enable)
 	assert.False(t, cfg.RequireConfirmation)
 	assert.False(t, cfg.ShowRawCredential)
-	assert.True(t, cfg.ShowClaims)
+	require.NotNil(t, cfg.ShowClaims)
+	assert.True(t, *cfg.ShowClaims)
 	assert.False(t, cfg.AllowEdit)
 }
 

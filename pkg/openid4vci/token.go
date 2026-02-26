@@ -27,7 +27,7 @@ type TokenRequest struct {
 	//// ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.
 	ClientID string `form:"client_id" json:"client_id" validate:"required"`
 
-	//// CodeVerifier OPTIONAL
+	//// CodeVerifier OPTIONAL (required for public clients)
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`
 }
 

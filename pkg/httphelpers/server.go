@@ -83,10 +83,9 @@ func (s *serverHandler) RegStreamEndpoint(ctx context.Context, rg *gin.RouterGro
 
 // SetGinProductionMode sets the gin mode to production or debug
 func (s *serverHandler) SetGinProductionMode() {
-	switch s.client.cfg.Common.Production {
-	case true:
+	if model.BoolVal(s.client.cfg.Common.Production, true) {
 		gin.SetMode(gin.ReleaseMode)
-	case false:
+	} else {
 		gin.SetMode(gin.DebugMode)
 	}
 }

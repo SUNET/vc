@@ -43,10 +43,6 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	cfg := &model.Cfg{}
 
-	if err := defaults.Set(cfg); err != nil {
-		return nil, err
-	}
-
 	configFile, err := os.ReadFile(filepath.Clean(configPath))
 	if err != nil {
 		return nil, err
@@ -62,6 +58,14 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	if err := yaml.Unmarshal(configFile, cfg); err != nil {
+		return nil, err
+	}
+
+	// Apply defaults AFTER unmarshalling so that nested structs inside
+	// pointer fields (e.g. Issuer.APIServer.Addr) receive their default
+	// values. creasty/defaults only sets zero-value fields, so explicit
+	// YAML values are never overwritten.
+	if err := defaults.Set(cfg); err != nil {
 		return nil, err
 	}
 

@@ -140,7 +140,7 @@ verifier:
     token_endpoint: "http://verifier.vc.docker:8080/token"
     clients:
       "1003":
-        type: "confidential"
+        type: "public"
         redirect_uri: "https://dev.wallet.sunet.se"
         scopes:
           - "pid"
@@ -309,7 +309,7 @@ apigw:
     token_endpoint: "http://apigw.vc.docker:8080/token"
     clients:
       "1003":
-        type: "confidential"
+        type: "public"
         redirect_uri: "https://dev.wallet.sunet.se"
         scopes:
           - "pid"
