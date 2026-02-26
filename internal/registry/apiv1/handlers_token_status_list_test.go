@@ -37,18 +37,18 @@ func newMockTokenStatusListIssuer() *mockTokenStatusListIssuer {
 	}
 }
 
-func (m *mockTokenStatusListIssuer) GetCachedJWT(section int64) string {
+func (m *mockTokenStatusListIssuer) GetCachedJWT(ctx context.Context, section int64) string {
 	key := strconv.FormatInt(section, 10)
-	v, ok := m.jwtCache.Get(context.Background(), key)
+	v, ok := m.jwtCache.Get(ctx, key)
 	if !ok {
 		return ""
 	}
 	return v
 }
 
-func (m *mockTokenStatusListIssuer) GetCachedCWT(section int64) []byte {
+func (m *mockTokenStatusListIssuer) GetCachedCWT(ctx context.Context, section int64) []byte {
 	key := strconv.FormatInt(section, 10)
-	v, ok := m.cwtCache.Get(context.Background(), key)
+	v, ok := m.cwtCache.Get(ctx, key)
 	if !ok {
 		return nil
 	}

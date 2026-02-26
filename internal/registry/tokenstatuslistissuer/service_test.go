@@ -504,7 +504,7 @@ func TestGetCachedJWT_AfterRefresh(t *testing.T) {
 	// Wait for initial cache refresh to populate the cache
 	var jwt string
 	require.Eventually(t, func() bool {
-		jwt = service.GetCachedJWT(0)
+		jwt = service.GetCachedJWT(suite.ctx, 0)
 		return jwt != ""
 	}, 15*time.Second, 200*time.Millisecond, "JWT should be cached after initial refresh")
 
@@ -524,7 +524,7 @@ func TestGetCachedCWT_AfterRefresh(t *testing.T) {
 	// Wait for initial cache refresh
 	var cwt []byte
 	require.Eventually(t, func() bool {
-		cwt = service.GetCachedCWT(0)
+		cwt = service.GetCachedCWT(suite.ctx, 0)
 		return len(cwt) > 0
 	}, 15*time.Second, 200*time.Millisecond, "CWT should be cached after initial refresh")
 
@@ -541,7 +541,7 @@ func TestGetCachedJWT_NonexistentSection(t *testing.T) {
 	defer service.Close(suite.ctx)
 
 	// Get JWT for nonexistent section
-	jwt := service.GetCachedJWT(999)
+	jwt := service.GetCachedJWT(suite.ctx, 999)
 	assert.Empty(t, jwt)
 }
 
@@ -554,7 +554,7 @@ func TestGetCachedCWT_NonexistentSection(t *testing.T) {
 	defer service.Close(suite.ctx)
 
 	// Get CWT for nonexistent section
-	cwt := service.GetCachedCWT(999)
+	cwt := service.GetCachedCWT(suite.ctx, 999)
 	assert.Nil(t, cwt)
 }
 
@@ -788,8 +788,8 @@ func TestRefreshLoop_PopulatesCache(t *testing.T) {
 	var jwtToken string
 	var cwtToken []byte
 	require.Eventually(t, func() bool {
-		jwtToken = service.GetCachedJWT(0)
-		cwtToken = service.GetCachedCWT(0)
+		jwtToken = service.GetCachedJWT(suite.ctx, 0)
+		cwtToken = service.GetCachedCWT(suite.ctx, 0)
 		return jwtToken != "" && len(cwtToken) > 0
 	}, 15*time.Second, 200*time.Millisecond, "Cache should be populated by refresh loop")
 
@@ -882,16 +882,16 @@ func TestIntegration_CacheConsistency(t *testing.T) {
 	var jwt1 string
 	var cwt1 []byte
 	require.Eventually(t, func() bool {
-		jwt1 = service.GetCachedJWT(0)
-		cwt1 = service.GetCachedCWT(0)
+		jwt1 = service.GetCachedJWT(suite.ctx, 0)
+		cwt1 = service.GetCachedCWT(suite.ctx, 0)
 		return jwt1 != "" && len(cwt1) > 0
 	}, 15*time.Second, 200*time.Millisecond, "JWT and CWT cache should be populated")
 
 	// Get them again - should be the same (cached)
-	jwt2 := service.GetCachedJWT(0)
+	jwt2 := service.GetCachedJWT(suite.ctx, 0)
 	assert.Equal(t, jwt1, jwt2, "JWT should be consistent")
 
-	cwt2 := service.GetCachedCWT(0)
+	cwt2 := service.GetCachedCWT(suite.ctx, 0)
 	assert.Equal(t, cwt1, cwt2, "CWT should be consistent")
 }
 

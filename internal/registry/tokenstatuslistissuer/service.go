@@ -89,9 +89,9 @@ func (s *Service) Close(ctx context.Context) error {
 }
 
 // GetCachedJWT returns a cached JWT for the given section, or empty string if not cached
-func (s *Service) GetCachedJWT(section int64) string {
+func (s *Service) GetCachedJWT(ctx context.Context, section int64) string {
 	key := strconv.FormatInt(section, 10)
-	v, ok := s.cacheService.JWT.Get(context.Background(), key)
+	v, ok := s.cacheService.JWT.Get(ctx, key)
 	if !ok {
 		return ""
 	}
@@ -99,9 +99,9 @@ func (s *Service) GetCachedJWT(section int64) string {
 }
 
 // GetCachedCWT returns a cached CWT for the given section, or nil if not cached
-func (s *Service) GetCachedCWT(section int64) []byte {
+func (s *Service) GetCachedCWT(ctx context.Context, section int64) []byte {
 	key := strconv.FormatInt(section, 10)
-	v, ok := s.cacheService.CWT.Get(context.Background(), key)
+	v, ok := s.cacheService.CWT.Get(ctx, key)
 	if !ok {
 		return nil
 	}

@@ -67,7 +67,7 @@ func (c *Client) TokenStatusLists(ctx context.Context, req *TokenStatusListsRequ
 	switch req.Accept {
 	case tokenstatuslist.MediaTypeCWT:
 		// CWT format requested - get from cache
-		cwtBytes := c.tokenStatusListIssuer.GetCachedCWT(req.ID)
+		cwtBytes := c.tokenStatusListIssuer.GetCachedCWT(ctx, req.ID)
 		if cwtBytes == nil {
 			c.log.Info("CWT not found in cache", "section", req.ID)
 			return nil, tokenstatuslist.ErrSectionNotFound
@@ -76,7 +76,7 @@ func (c *Client) TokenStatusLists(ctx context.Context, req *TokenStatusListsRequ
 		contentType = tokenstatuslist.MediaTypeCWT
 	default:
 		// JWT format (default) - get from cache
-		jwtStr := c.tokenStatusListIssuer.GetCachedJWT(req.ID)
+		jwtStr := c.tokenStatusListIssuer.GetCachedJWT(ctx, req.ID)
 		if jwtStr == "" {
 			c.log.Info("JWT not found in cache", "section", req.ID)
 			return nil, tokenstatuslist.ErrSectionNotFound
