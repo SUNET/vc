@@ -167,29 +167,24 @@ func (s *Service) endpointUserInfo(ctx context.Context, c *gin.Context) (any, er
 
 	s.log.Debug("endpointUserInfo called")
 
-	// Extract bearer token
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		span.SetStatus(codes.Error, "Missing Authorization header")
+	// Parse request (binds Authorization header)
+	request := &apiv1.UserInfoRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		c.Header("WWW-Authenticate", "Bearer")
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return nil, nil
 	}
 
-	parts := strings.SplitN(authHeader, " ", 2)
+	// Extract bearer token from Authorization header
+	parts := strings.SplitN(request.Authorization, " ", 2)
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		span.SetStatus(codes.Error, "Invalid Authorization header")
 		c.Header("WWW-Authenticate", "Bearer")
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return nil, nil
 	}
-
-	accessToken := parts[1]
-
-	// Get user info
-	request := &apiv1.UserInfoRequest{
-		AccessToken: accessToken,
-	}
+	request.AccessToken = parts[1]
 
 	response, err := s.apiv1.GetUserInfo(ctx, request)
 	if err != nil {
