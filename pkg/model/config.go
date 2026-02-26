@@ -769,8 +769,8 @@ type APIGW struct {
 type TokenStatusLists struct {
 	// KeyConfig holds the key configuration for signing Token Status List tokens.
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
-	// TokenRefreshInterval is how often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours)
-	TokenRefreshInterval int64 `yaml:"token_refresh_interval" default:"43200"`
+	// TokenRefreshInterval is how often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours). Min: 301 (>5 minutes), Max: 86400 (24 hours)
+	TokenRefreshInterval int64 `yaml:"token_refresh_interval" validate:"min=301,max=86400" default:"43200"`
 	// SectionSize is the number of entries (decoys) per section. Default: 1000000 (1 million)
 	SectionSize int64 `yaml:"section_size" default:"1000000"`
 	// RateLimitRequestsPerMinute is the maximum requests per minute per IP for token status list endpoints. Default: 60

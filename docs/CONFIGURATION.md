@@ -724,12 +724,12 @@ Configuration for the Registry service that manages credential status.
 
 > **Path:** `.registry.token_status_lists`
 
-| Field                            | Type     | Description                                                                                  | Example | Default   | Required |
-| -------------------------------- | -------- | -------------------------------------------------------------------------------------------- | ------- | --------- | -------- |
-| `key_config`                     | `object` | Key configuration for signing Token Status List tokens.                                      | -       | -         | Yes      |
-| `token_refresh_interval`         | `int64`  | How often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours) | -       | `43200`   | No       |
-| `section_size`                   | `int64`  | Number of entries (decoys) per section. Default: 1000000 (1 million)                         | -       | `1000000` | No       |
-| `rate_limit_requests_per_minute` | `int`    | Maximum requests per minute per IP for token status list endpoints. Default: 60              | -       | `60`      | No       |
+| Field                            | Type     | Description                                                                                                                                | Example | Default   | Required |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- | --------- | -------- |
+| `key_config`                     | `object` | Key configuration for signing Token Status List tokens.                                                                                    | -       | -         | Yes      |
+| `token_refresh_interval`         | `int64`  | How often (in seconds) new Token Status List tokens are generated. Default: 43200 (12 hours). Min: 301 (>5 minutes), Max: 86400 (24 hours) | -       | `43200`   | No       |
+| `section_size`                   | `int64`  | Number of entries (decoys) per section. Default: 1000000 (1 million)                                                                       | -       | `1000000` | No       |
+| `rate_limit_requests_per_minute` | `int`    | Maximum requests per minute per IP for token status list endpoints. Default: 60                                                            | -       | `60`      | No       |
 
 ### `admin_gui`
 
