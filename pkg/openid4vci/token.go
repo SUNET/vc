@@ -19,7 +19,7 @@ type TokenRequest struct {
 	GrantType string `form:"grant_type" json:"grant_type" validate:"required,oneof=authorization_code"`
 
 	// Code REQUIRED.  The authorization code received from the authorization server.
-	Code string `form:"code" json:"code" validate:"required"`
+	Code string `form:"code" json:"code" validate:"required,max=128,printascii"`
 
 	// RedirectURI	REQUIRED, if the "redirect_uri" parameter was included in the authorization request as described in Section 4.1.1, and their values MUST be identical.
 	RedirectURI string `form:"redirect_uri" json:"redirect_uri" validate:"required"`
