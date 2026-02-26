@@ -45,9 +45,13 @@ func testTracer(t *testing.T, cfg *model.Cfg, log *logger.Log) *trace.Tracer {
 }
 
 func isDockerAvailable() bool {
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "docker", "version").Run() == nil
+	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil
 }
 
 func startMongoContainer(t *testing.T) (*mongo.Client, func()) {

@@ -47,19 +47,19 @@ import (
 
 // Stack service addresses (Docker bridge IPs on vc-dev-net)
 var (
-	apigwURL    = envOrDefault("STACK_APIGW_URL", "http://172.16.50.2:8080")
-	verifierURL = envOrDefault("STACK_VERIFIER_URL", "http://172.16.50.6:8080")
-	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "http://172.16.50.13:8080")
+	apigwURL    = envOrDefault("STACK_APIGW_URL", "http://172.16.50.2:8080")    // NOSONAR
+	verifierURL = envOrDefault("STACK_VERIFIER_URL", "http://172.16.50.6:8080") // NOSONAR
+	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "http://172.16.50.13:8080")  // NOSONAR
 
 	// The public URLs the services use for self-referencing
-	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "http://apigw.vc.docker:8080")
-	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "http://verifier.vc.docker:8080")
+	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "http://apigw.vc.docker:8080")       // NOSONAR
+	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "http://verifier.vc.docker:8080") // NOSONAR
 
 	// OAuth client config matching config.yaml
-	oauthClientID = "1003"
-	oauthRedirect = "https://dev.wallet.sunet.se"
-	testUsername  = "wallet_test_user"
-	testPassword  = "wallet_test_pass_42"
+	oauthClientID = "1003"                        // NOSONAR
+	oauthRedirect = "https://dev.wallet.sunet.se" // NOSONAR
+	testUsername  = "wallet_test_user"            // NOSONAR
+	testPassword  = "wallet_test_pass_42"         // NOSONAR
 
 	// Shared VP client (registered once via sync.Once to avoid rate limiting)
 	sharedVPClient     *verifierClient
