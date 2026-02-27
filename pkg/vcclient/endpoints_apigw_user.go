@@ -18,8 +18,8 @@ type userHandler struct {
 }
 
 type AddPIDRequest struct {
-	Username string          `json:"username" validate:"required"`
-	Password string          `json:"password" validate:"required"`
+	Username string          `json:"username" validate:"required,max=128,printascii"`
+	Password string          `json:"password" validate:"required,max=128,printascii"`
 	Identity *model.Identity `json:"identity,omitempty" validate:"required"`
 	Meta     *model.MetaData `json:"meta,omitempty" validate:"required"`
 }
@@ -40,8 +40,8 @@ func (s *userHandler) AddPID(ctx context.Context, body *AddPIDRequest) (*http.Re
 }
 
 type LoginPIDUserRequest struct {
-	Username string `json:"username" form:"username" validate:"required"`
-	Password string `json:"password" form:"password" validate:"required"`
+	Username string `json:"username" form:"username" validate:"required,max=128,printascii"`
+	Password string `json:"password" form:"password" validate:"required,max=128,printascii"`
 
 	// RequestURI comes from session cookie
 	RequestURI string `json:"-" validate:"omitempty,max=128,printascii"`
@@ -63,7 +63,7 @@ func (s *userHandler) LoginPIDUser(ctx context.Context, body *LoginPIDUserReques
 }
 
 type GetPIDRequest struct {
-	Username string `json:"username" form:"username" validate:"required"`
+	Username string `json:"username" form:"username" validate:"required,max=128,printascii"`
 }
 
 type GetPIDReply struct {
@@ -94,10 +94,10 @@ type UserLookupReply struct {
 }
 
 type UserAuthenticSourceLookupRequest struct {
-	AuthenticSource string `json:"authentic_source,omitempty"`
+	AuthenticSource string `json:"authentic_source,omitempty" validate:"omitempty,max=128,printascii"`
 	SessionID       string `json:"-"`
 }
 
 type UserAuthenticSourceLookupReply struct {
-	AuthenticSources []string `json:"authentic_sources,omitempty"`
+	AuthenticSources []string `json:"authentic_sources,omitempty" validate:"omitempty,dive,max=128,printascii"`
 }
