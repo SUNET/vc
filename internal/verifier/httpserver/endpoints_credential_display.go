@@ -15,7 +15,7 @@ func (s *Service) endpointSessionPreference(ctx context.Context, c *gin.Context)
 	defer span.End()
 
 	request := &apiv1.UpdateSessionPreferenceRequest{}
-	if err := c.ShouldBindJSON(request); err != nil {
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "Failed to bind session preference request")
 		c.AbortWithStatus(http.StatusBadRequest)
@@ -38,18 +38,14 @@ func (s *Service) endpointCredentialDisplay(ctx context.Context, c *gin.Context)
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointCredentialDisplay")
 	defer span.End()
 
-	sessionID := c.Param("session_id")
-	if sessionID == "" {
-		span.SetStatus(codes.Error, "Missing session_id")
+	request := &apiv1.GetCredentialDisplayDataRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, nil
 	}
 
 	// Get display data
-	request := &apiv1.GetCredentialDisplayDataRequest{
-		SessionID: sessionID,
-	}
-
 	response, err := s.apiv1.GetCredentialDisplayData(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -87,22 +83,15 @@ func (s *Service) endpointConfirmCredentialDisplay(ctx context.Context, c *gin.C
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointConfirmCredentialDisplay")
 	defer span.End()
 
-	sessionID := c.Param("session_id")
-	if sessionID == "" {
-		span.SetStatus(codes.Error, "Missing session_id")
-		c.AbortWithStatus(http.StatusBadRequest)
-		return nil, nil
-	}
-
 	request := &apiv1.ConfirmCredentialDisplayRequest{}
-	if err := c.ShouldBindJSON(request); err != nil {
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "Failed to bind confirmation request")
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, nil
 	}
 
-	response, err := s.apiv1.ConfirmCredentialDisplay(ctx, sessionID, request)
+	response, err := s.apiv1.ConfirmCredentialDisplay(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "Failed to confirm credential display")

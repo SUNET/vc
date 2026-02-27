@@ -20,7 +20,7 @@ import (
 )
 
 type VerificationRequestObjectRequest struct {
-	ID string `form:"id" uri:"id"`
+	ID string `form:"id" uri:"id" validate:"required,max=128,printascii"`
 }
 
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {

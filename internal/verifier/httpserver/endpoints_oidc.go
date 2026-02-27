@@ -52,7 +52,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 
 	// Parse request
 	request := &apiv1.AuthorizeRequest{}
-	if err := c.ShouldBindQuery(request); err != nil {
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "Failed to bind authorization request")
 		c.AbortWithStatus(http.StatusBadRequest)
@@ -116,7 +116,7 @@ func (s *Service) endpointToken(ctx context.Context, c *gin.Context) (any, error
 
 	// Parse request
 	request := &apiv1.TokenRequest{}
-	if err := c.ShouldBind(request); err != nil {
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "Failed to bind token request")
 		return s.tokenError("invalid_request", "Invalid request parameters"), nil

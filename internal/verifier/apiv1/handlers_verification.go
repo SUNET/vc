@@ -18,7 +18,7 @@ import (
 )
 
 type VerificationRequestObjectRequest struct {
-	ID string `form:"id" uri:"id"`
+	ID string `form:"id" uri:"id" validate:"required,max=128,printascii"`
 	//SessionID string `json:"-"`
 }
 
@@ -214,8 +214,6 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
-
-
 
 	reply := &VerificationDirectPostResponse{}
 

@@ -40,12 +40,12 @@ type Apiv1 interface {
 
 	// Dynamic Client Registration (RFC 7591/7592)
 	RegisterClient(ctx context.Context, req *apiv1.ClientRegistrationRequest) (*apiv1.ClientRegistrationResponse, error)
-	GetClientInformation(ctx context.Context, clientID string, registrationAccessToken string) (*apiv1.ClientInformationResponse, error)
-	UpdateClient(ctx context.Context, clientID string, registrationAccessToken string, req *apiv1.ClientRegistrationRequest) (*apiv1.ClientRegistrationResponse, error)
-	DeleteClient(ctx context.Context, clientID string, registrationAccessToken string) error
+	GetClientInformation(ctx context.Context, req *apiv1.GetClientInformationRequest) (*apiv1.ClientInformationResponse, error)
+	UpdateClient(ctx context.Context, req *apiv1.UpdateClientRequest) (*apiv1.ClientRegistrationResponse, error)
+	DeleteClient(ctx context.Context, req *apiv1.DeleteClientRequest) error
 
 	// Session/Credential Display
 	UpdateSessionPreference(ctx context.Context, req *apiv1.UpdateSessionPreferenceRequest) (*apiv1.UpdateSessionPreferenceResponse, error)
-	ConfirmCredentialDisplay(ctx context.Context, sessionID string, req *apiv1.ConfirmCredentialDisplayRequest) (*apiv1.ConfirmCredentialDisplayResponse, error)
+	ConfirmCredentialDisplay(ctx context.Context, req *apiv1.ConfirmCredentialDisplayRequest) (*apiv1.ConfirmCredentialDisplayResponse, error)
 	GetCredentialDisplayData(ctx context.Context, req *apiv1.GetCredentialDisplayDataRequest) (*apiv1.GetCredentialDisplayDataResponse, error)
 }

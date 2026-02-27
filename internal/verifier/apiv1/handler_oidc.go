@@ -9,13 +9,14 @@ import (
 	"image/png"
 	"maps"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
-	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/jose"
+	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -80,7 +81,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate redirect URI
-	if !utils.ValidateRedirectURI(req.RedirectURI, client.RedirectURIs) {
+	if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
 		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI)
 		return nil, ErrInvalidRequest
 	}
@@ -91,11 +92,13 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		return nil, ErrInvalidRequest
 	}
 
-	// Validate scope
+	// Validate scope - ensure every requested scope is in the client's allow-list
 	requestedScopes := strings.Split(req.Scope, " ")
-	if !utils.ValidateScopes(requestedScopes, client.AllowedScopes) {
-		c.log.Info("Invalid scope requested")
-		return nil, ErrInvalidScope
+	for _, scope := range requestedScopes {
+		if !slices.Contains(client.AllowedScopes, scope) {
+			c.log.Info("Invalid scope requested", "scope", scope)
+			return nil, ErrInvalidScope
+		}
 	}
 
 	// Validate PKCE if required
@@ -305,7 +308,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Validate PKCE if present
 	if authCtx.CodeChallenge != "" {
-		if err := utils.ValidatePKCE(req.CodeVerifier, authCtx.CodeChallenge, authCtx.CodeChallengeMethod); err != nil {
+		if err := oauth2.ValidatePKCE(req.CodeVerifier, authCtx.CodeChallenge, authCtx.CodeChallengeMethod); err != nil {
 			c.log.Info("PKCE validation failed")
 			return nil, ErrInvalidGrant
 		}
@@ -494,7 +497,7 @@ func (c *Client) GetJWKS(ctx context.Context) (*jose.JWKS, error) {
 
 // GetRequestObjectRequest represents a request to get an OpenID4VP request object
 type GetRequestObjectRequest struct {
-	SessionID string
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
 }
 
 // GetRequestObjectResponse contains the signed JWT request object
@@ -546,10 +549,10 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 
 // DirectPostRequest represents a direct_post callback from a wallet
 type DirectPostRequest struct {
-	State                  string `form:"state" binding:"required"`
-	VPToken                string `form:"vp_token"`                // For standard direct_post
-	PresentationSubmission string `form:"presentation_submission"` // For standard direct_post
-	Response               string `form:"response"`                // For DC API encrypted JWT response
+	State                  string `json:"state" form:"state" binding:"required"`
+	VPToken                string `json:"vp_token" form:"vp_token"`                // For standard direct_post
+	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission"` // For standard direct_post
+	Response               string `json:"response" form:"response"`                // For DC API encrypted JWT response
 }
 
 // DirectPostResponse contains the response to a direct_post request
@@ -748,7 +751,7 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 
 // GetQRCodeRequest represents a request for a QR code image
 type GetQRCodeRequest struct {
-	SessionID string
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
 }
 
 // GetQRCodeResponse contains the QR code image data
@@ -796,7 +799,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 
 // PollSessionRequest represents a polling request for session status
 type PollSessionRequest struct {
-	SessionID string
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
 }
 
 // PollSessionResponse contains the session status
@@ -839,7 +842,7 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 
 // UserInfoRequest represents a UserInfo endpoint request
 type UserInfoRequest struct {
-	Authorization string `header:"Authorization" validate:"required"`
+	Authorization string `json:"-" header:"Authorization" validate:"required"`
 	AccessToken   string `json:"-"` // Parsed from Authorization header
 }
 
@@ -882,3 +885,4 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 
 	return response, nil
 }
+

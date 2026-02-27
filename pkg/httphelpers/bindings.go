@@ -6,6 +6,7 @@ import (
 	"vc/pkg/helpers"
 	"vc/pkg/logger"
 
+	"github.com/creasty/defaults"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 )
@@ -27,6 +28,12 @@ func (b *bindingHandler) FastAndSimple(ctx context.Context, c *gin.Context, v an
 func (b *bindingHandler) Request(ctx context.Context, c *gin.Context, v any) error {
 	_, span := b.client.tracer.Start(ctx, "httpserver:bindRequest")
 	defer span.End()
+
+	// Apply struct default tags (github.com/creasty/defaults) before binding,
+	// so that request values override defaults.
+	if err := defaults.Set(v); err != nil {
+		return err
+	}
 
 	// Bind URI parameters (e.g., /path/:id) - without validation
 	if err := c.ShouldBindUri(v); err != nil {

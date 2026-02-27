@@ -3,6 +3,7 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"reflect"
 	"slices"
@@ -88,6 +89,116 @@ func NewValidator() (*validator.Validate, error) {
 		// Ensure host is present (url.Parse accepts "http://" without host)
 		if parsedURL.Host == "" {
 			return false
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for httpsurl - validates URLs with https scheme and host.
+	// Used by OIDC dynamic client registration (RFC 7591 Section 2) for metadata URIs
+	// such as logo_uri, client_uri, policy_uri, and tos_uri.
+	err = validate.RegisterValidation("httpsurl", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if parsedURL.Scheme != "https" {
+			return false
+		}
+
+		if parsedURL.Host == "" {
+			return false
+		}
+
+		if parsedURL.Fragment != "" {
+			return false
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
+	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
+	// Per RFC 6749: must have a scheme and must not contain a fragment.
+	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if parsedURL.Scheme == "" {
+			return false
+		}
+
+		if parsedURL.Fragment != "" {
+			return false
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for safe_uri - validates URI with SSRF prevention.
+	// Blocks private IP ranges, loopback, link-local addresses, and localhost.
+	// No fragment allowed. When combined with httpsurl, also enforces HTTPS scheme.
+	err = validate.RegisterValidation("safe_uri", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if parsedURL.Scheme == "" {
+			return false
+		}
+
+		if parsedURL.Fragment != "" {
+			return false
+		}
+
+		hostname := parsedURL.Hostname()
+		if hostname == "" {
+			return false
+		}
+
+		// Block localhost
+		if strings.ToLower(hostname) == "localhost" {
+			return false
+		}
+
+		// Resolve hostname and check IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			return false
+		}
+
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return false
+			}
 		}
 
 		return true

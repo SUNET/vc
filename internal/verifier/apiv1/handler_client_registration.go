@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
 
 	"golang.org/x/crypto/bcrypt"
@@ -20,27 +19,27 @@ import (
 // ClientRegistrationRequest represents RFC 7591 client registration request
 type ClientRegistrationRequest struct {
 	// REQUIRED or OPTIONAL OAuth 2.0 parameters
-	RedirectURIs            []string `json:"redirect_uris,omitempty"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"` // Default: "client_secret_basic"
-	GrantTypes              []string `json:"grant_types,omitempty"`                // Default: ["authorization_code"]
-	ResponseTypes           []string `json:"response_types,omitempty"`             // Default: ["code"]
+	RedirectURIs            []string `json:"redirect_uris,omitempty" validate:"required,min=1,dive,redirect_uri"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty" default:"client_secret_basic" validate:"omitempty,oneof=client_secret_basic client_secret_post none"`
+	GrantTypes              []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code refresh_token"`
+	ResponseTypes           []string `json:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
 	ClientName              string   `json:"client_name,omitempty"`
-	ClientURI               string   `json:"client_uri,omitempty"`
-	LogoURI                 string   `json:"logo_uri,omitempty"`
-	Scope                   string   `json:"scope,omitempty"`
+	ClientURI               string   `json:"client_uri,omitempty" validate:"omitempty,httpsurl"`
+	LogoURI                 string   `json:"logo_uri,omitempty" validate:"omitempty,httpsurl"`
+	Scope                   string   `json:"scope,omitempty" default:"openid"`
 	Contacts                []string `json:"contacts,omitempty"`
-	TosURI                  string   `json:"tos_uri,omitempty"`
-	PolicyURI               string   `json:"policy_uri,omitempty"`
-	JWKSUri                 string   `json:"jwks_uri,omitempty"`
+	TosURI                  string   `json:"tos_uri,omitempty" validate:"omitempty,httpsurl"`
+	PolicyURI               string   `json:"policy_uri,omitempty" validate:"omitempty,httpsurl"`
+	JWKSUri                 string   `json:"jwks_uri,omitempty" validate:"omitempty,excluded_with=JWKS"`
 	JWKS                    any      `json:"jwks,omitempty"`
 	SoftwareID              string   `json:"software_id,omitempty"`
 	SoftwareVersion         string   `json:"software_version,omitempty"`
 
 	// OpenID Connect specific
-	ApplicationType         string   `json:"application_type,omitempty"` // "web" or "native"
+	ApplicationType         string   `json:"application_type,omitempty" default:"web" validate:"omitempty,oneof=web native"`
 	SectorIdentifierURI     string   `json:"sector_identifier_uri,omitempty"`
-	SubjectType             string   `json:"subject_type,omitempty"` // "public" or "pairwise"
-	IDTokenSignedRespAlg    string   `json:"id_token_signed_response_alg,omitempty"`
+	SubjectType             string   `json:"subject_type,omitempty" default:"public" validate:"omitempty,oneof=public pairwise"`
+	IDTokenSignedRespAlg    string   `json:"id_token_signed_response_alg,omitempty" default:"RS256"`
 	IDTokenEncryptedRespAlg string   `json:"id_token_encrypted_response_alg,omitempty"`
 	IDTokenEncryptedRespEnc string   `json:"id_token_encrypted_response_enc,omitempty"`
 	UserinfoSignedRespAlg   string   `json:"userinfo_signed_response_alg,omitempty"`
@@ -52,7 +51,7 @@ type ClientRegistrationRequest struct {
 	RequestURIs             []string `json:"request_uris,omitempty"`
 
 	// PKCE (RFC 7636)
-	CodeChallengeMethod string `json:"code_challenge_method,omitempty"` // "S256" or "plain"
+	CodeChallengeMethod string `json:"code_challenge_method,omitempty" default:"S256" validate:"omitempty,oneof=S256 plain"`
 }
 
 // ClientRegistrationResponse represents RFC 7591 client registration response
@@ -94,23 +93,10 @@ type ClientRegistrationResponse struct {
 	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
 }
 
-// ClientInformationResponse represents RFC 7592 client information response (GET)
-type ClientInformationResponse struct {
-	ClientRegistrationResponse
-}
-
 // RegisterClient handles dynamic client registration (RFC 7591)
 func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequest) (*ClientRegistrationResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:register_client")
 	defer span.End()
-
-	// Validate request
-	if err := c.validateRegistrationRequest(req); err != nil {
-		return nil, err
-	}
-
-	// Apply defaults
-	c.applyRegistrationDefaults(req)
 
 	// Generate client credentials
 	clientID, err := generateClientID()
@@ -236,13 +222,27 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 	return response, nil
 }
 
+// ClientInformationResponse represents RFC 7592 client information response (GET)
+type ClientInformationResponse struct {
+	ClientRegistrationResponse
+}
+
+// GetClientInformationRequest represents a request to get client information
+type GetClientInformationRequest struct {
+	ClientID                string `json:"-" uri:"client_id" validate:"required,max=128,printascii"`
+	RegistrationAccessToken string `json:"-" header:"Authorization" validate:"required"`
+}
+
 // GetClientInformation retrieves client configuration (RFC 7592)
-func (c *Client) GetClientInformation(ctx context.Context, clientID string, registrationAccessToken string) (*ClientInformationResponse, error) {
+func (c *Client) GetClientInformation(ctx context.Context, req *GetClientInformationRequest) (*ClientInformationResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:get_client_information")
 	defer span.End()
 
+	// Extract bearer token from Authorization header
+	registrationAccessToken := extractBearerToken(req.RegistrationAccessToken)
+
 	// Get client from database
-	client, err := c.db.Clients.GetByClientID(ctx, clientID)
+	client, err := c.db.Clients.GetByClientID(ctx, req.ClientID)
 	if err != nil {
 		return nil, err
 	}
@@ -258,14 +258,14 @@ func (c *Client) GetClientInformation(ctx context.Context, clientID string, regi
 	// Build response
 	scope := strings.Join(client.AllowedScopes, " ")
 
-	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", clientID)
+	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", req.ClientID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct registration client URI: %w", err)
 	}
 
 	response := &ClientInformationResponse{
 		ClientRegistrationResponse: ClientRegistrationResponse{
-			ClientID:                clientID,
+			ClientID:                req.ClientID,
 			ClientIDIssuedAt:        client.ClientIDIssuedAt,
 			ClientSecretExpiresAt:   client.ClientSecretExpiresAt,
 			RedirectURIs:            client.RedirectURIs,
@@ -300,13 +300,22 @@ func (c *Client) GetClientInformation(ctx context.Context, clientID string, regi
 	return response, nil
 }
 
+// DeleteClientRequest represents a request to delete a client
+type DeleteClientRequest struct {
+	ClientID                string `json:"-" uri:"client_id" validate:"required,max=128,printascii"`
+	RegistrationAccessToken string `json:"-" header:"Authorization" validate:"required"`
+}
+
 // DeleteClient deletes a client registration (RFC 7592)
-func (c *Client) DeleteClient(ctx context.Context, clientID string, registrationAccessToken string) error {
+func (c *Client) DeleteClient(ctx context.Context, req *DeleteClientRequest) error {
 	ctx, span := c.tracer.Start(ctx, "apiv1:delete_client")
 	defer span.End()
 
+	// Extract bearer token from Authorization header
+	registrationAccessToken := extractBearerToken(req.RegistrationAccessToken)
+
 	// Get existing client
-	client, err := c.db.Clients.GetByClientID(ctx, clientID)
+	client, err := c.db.Clients.GetByClientID(ctx, req.ClientID)
 	if err != nil {
 		return err
 	}
@@ -320,16 +329,26 @@ func (c *Client) DeleteClient(ctx context.Context, clientID string, registration
 	}
 
 	// Delete client
-	return c.db.Clients.Delete(ctx, clientID)
+	return c.db.Clients.Delete(ctx, req.ClientID)
+}
+
+// UpdateClientRequest represents a request to update client configuration
+type UpdateClientRequest struct {
+	ClientID                string `json:"-" uri:"client_id" validate:"required,max=128,printascii"`
+	RegistrationAccessToken string `json:"-" header:"Authorization" validate:"required"`
+	ClientRegistrationRequest
 }
 
 // UpdateClient updates client configuration (RFC 7592)
-func (c *Client) UpdateClient(ctx context.Context, clientID string, registrationAccessToken string, req *ClientRegistrationRequest) (*ClientRegistrationResponse, error) {
+func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*ClientRegistrationResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:update_client")
 	defer span.End()
 
+	// Extract bearer token from Authorization header
+	registrationAccessToken := extractBearerToken(req.RegistrationAccessToken)
+
 	// Get existing client
-	client, err := c.db.Clients.GetByClientID(ctx, clientID)
+	client, err := c.db.Clients.GetByClientID(ctx, req.ClientID)
 	if err != nil {
 		return nil, err
 	}
@@ -342,59 +361,53 @@ func (c *Client) UpdateClient(ctx context.Context, clientID string, registration
 		return nil, ErrInvalidToken
 	}
 
-	// Validate update request
-	if err := c.validateRegistrationRequest(req); err != nil {
-		return nil, err
-	}
-
-	// Apply defaults
-	c.applyRegistrationDefaults(req)
+	clientReg := &req.ClientRegistrationRequest
 
 	// Update client fields
-	if req.RedirectURIs != nil {
-		client.RedirectURIs = req.RedirectURIs
+	if clientReg.RedirectURIs != nil {
+		client.RedirectURIs = clientReg.RedirectURIs
 	}
-	if req.GrantTypes != nil {
-		client.GrantTypes = req.GrantTypes
+	if clientReg.GrantTypes != nil {
+		client.GrantTypes = clientReg.GrantTypes
 	}
-	if req.ResponseTypes != nil {
-		client.ResponseTypes = req.ResponseTypes
+	if clientReg.ResponseTypes != nil {
+		client.ResponseTypes = clientReg.ResponseTypes
 	}
-	if req.TokenEndpointAuthMethod != "" {
-		client.TokenEndpointAuthMethod = req.TokenEndpointAuthMethod
+	if clientReg.TokenEndpointAuthMethod != "" {
+		client.TokenEndpointAuthMethod = clientReg.TokenEndpointAuthMethod
 	}
-	if req.Scope != "" {
-		client.AllowedScopes = strings.Split(req.Scope, " ")
+	if clientReg.Scope != "" {
+		client.AllowedScopes = strings.Split(clientReg.Scope, " ")
 	}
-	if req.SubjectType != "" {
-		client.SubjectType = req.SubjectType
+	if clientReg.SubjectType != "" {
+		client.SubjectType = clientReg.SubjectType
 	}
-	if req.JWKSUri != "" {
-		client.JWKSUri = req.JWKSUri
+	if clientReg.JWKSUri != "" {
+		client.JWKSUri = clientReg.JWKSUri
 	}
-	if req.JWKS != nil {
-		client.JWKS = req.JWKS
+	if clientReg.JWKS != nil {
+		client.JWKS = clientReg.JWKS
 	}
-	if req.ClientName != "" {
-		client.ClientName = req.ClientName
+	if clientReg.ClientName != "" {
+		client.ClientName = clientReg.ClientName
 	}
-	if req.ClientURI != "" {
-		client.ClientURI = req.ClientURI
+	if clientReg.ClientURI != "" {
+		client.ClientURI = clientReg.ClientURI
 	}
-	if req.LogoURI != "" {
-		client.LogoURI = req.LogoURI
+	if clientReg.LogoURI != "" {
+		client.LogoURI = clientReg.LogoURI
 	}
-	if req.Contacts != nil {
-		client.Contacts = req.Contacts
+	if clientReg.Contacts != nil {
+		client.Contacts = clientReg.Contacts
 	}
-	if req.TosURI != "" {
-		client.TosURI = req.TosURI
+	if clientReg.TosURI != "" {
+		client.TosURI = clientReg.TosURI
 	}
-	if req.PolicyURI != "" {
-		client.PolicyURI = req.PolicyURI
+	if clientReg.PolicyURI != "" {
+		client.PolicyURI = clientReg.PolicyURI
 	}
-	if req.CodeChallengeMethod != "" {
-		client.CodeChallengeMethod = req.CodeChallengeMethod
+	if clientReg.CodeChallengeMethod != "" {
+		client.CodeChallengeMethod = clientReg.CodeChallengeMethod
 		client.RequirePKCE = true
 		client.RequireCodeChallenge = true
 	}
@@ -408,13 +421,13 @@ func (c *Client) UpdateClient(ctx context.Context, clientID string, registration
 	// Build response (same as GET)
 	scope := strings.Join(client.AllowedScopes, " ")
 
-	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", clientID)
+	registrationClientURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "register", req.ClientID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct registration client URI: %w", err)
 	}
 
 	response := &ClientRegistrationResponse{
-		ClientID:                clientID,
+		ClientID:                req.ClientID,
 		ClientIDIssuedAt:        client.ClientIDIssuedAt,
 		ClientSecretExpiresAt:   client.ClientSecretExpiresAt,
 		RedirectURIs:            client.RedirectURIs,
@@ -446,139 +459,6 @@ func (c *Client) UpdateClient(ctx context.Context, clientID string, registration
 	}
 
 	return response, nil
-}
-
-// validateRegistrationRequest validates RFC 7591 client registration request
-func (c *Client) validateRegistrationRequest(req *ClientRegistrationRequest) error {
-	// Validate redirect URIs
-	if len(req.RedirectURIs) == 0 {
-		return fmt.Errorf("%w: redirect_uris is required", ErrInvalidRequest)
-	}
-
-	// Basic validation - each URI should be parseable
-	for _, uri := range req.RedirectURIs {
-		if err := utils.ValidateRedirectURIFormat(uri); err != nil {
-			return fmt.Errorf("%w: invalid redirect_uri: %s - %v", ErrInvalidRequest, uri, err)
-		}
-	}
-
-	// Validate token endpoint auth method
-	if req.TokenEndpointAuthMethod != "" {
-		validMethods := map[string]bool{
-			"client_secret_basic": true,
-			"client_secret_post":  true,
-			"none":                true,
-		}
-		if !validMethods[req.TokenEndpointAuthMethod] {
-			return fmt.Errorf("%w: unsupported token_endpoint_auth_method", ErrInvalidRequest)
-		}
-	}
-
-	// Validate grant types
-	if len(req.GrantTypes) > 0 {
-		validGrantTypes := map[string]bool{
-			"authorization_code": true,
-			"refresh_token":      true,
-		}
-		for _, gt := range req.GrantTypes {
-			if !validGrantTypes[gt] {
-				return fmt.Errorf("%w: unsupported grant_type: %s", ErrInvalidRequest, gt)
-			}
-		}
-	}
-
-	// Validate response types
-	if len(req.ResponseTypes) > 0 {
-		validResponseTypes := map[string]bool{
-			"code": true,
-		}
-		for _, rt := range req.ResponseTypes {
-			if !validResponseTypes[rt] {
-				return fmt.Errorf("%w: unsupported response_type: %s", ErrInvalidRequest, rt)
-			}
-		}
-	}
-
-	// Validate subject type
-	if req.SubjectType != "" {
-		if req.SubjectType != "public" && req.SubjectType != "pairwise" {
-			return fmt.Errorf("%w: subject_type must be 'public' or 'pairwise'", ErrInvalidRequest)
-		}
-	}
-
-	// Validate PKCE code challenge method
-	if req.CodeChallengeMethod != "" {
-		if req.CodeChallengeMethod != "S256" && req.CodeChallengeMethod != "plain" {
-			return fmt.Errorf("%w: code_challenge_method must be 'S256' or 'plain'", ErrInvalidRequest)
-		}
-	}
-
-	// Validate JWKS (either jwks_uri or jwks, not both)
-	if req.JWKSUri != "" && req.JWKS != nil {
-		return fmt.Errorf("%w: cannot specify both jwks_uri and jwks", ErrInvalidRequest)
-	}
-
-	// Validate logo_uri (RFC 7591 Section 2)
-	if req.LogoURI != "" {
-		if err := utils.ValidateHTTPSURI(req.LogoURI, "logo_uri"); err != nil {
-			return fmt.Errorf("%w: invalid logo_uri: %v", ErrInvalidRequest, err)
-		}
-	}
-
-	// Validate client_uri
-	if req.ClientURI != "" {
-		if err := utils.ValidateHTTPSURI(req.ClientURI, "client_uri"); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
-		}
-	}
-
-	// Validate policy_uri
-	if req.PolicyURI != "" {
-		if err := utils.ValidateHTTPSURI(req.PolicyURI, "policy_uri"); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
-		}
-	}
-
-	// Validate tos_uri
-	if req.TosURI != "" {
-		if err := utils.ValidateHTTPSURI(req.TosURI, "tos_uri"); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
-		}
-	}
-
-	return nil
-}
-
-// applyRegistrationDefaults applies default values per RFC 7591
-func (c *Client) applyRegistrationDefaults(req *ClientRegistrationRequest) {
-	if req.TokenEndpointAuthMethod == "" {
-		req.TokenEndpointAuthMethod = "client_secret_basic"
-	}
-
-	if len(req.GrantTypes) == 0 {
-		req.GrantTypes = []string{"authorization_code"}
-	}
-
-	if len(req.ResponseTypes) == 0 {
-		req.ResponseTypes = []string{"code"}
-	}
-
-	if req.SubjectType == "" {
-		req.SubjectType = "public"
-	}
-
-	if req.ApplicationType == "" {
-		req.ApplicationType = "web"
-	}
-
-	if req.IDTokenSignedRespAlg == "" {
-		req.IDTokenSignedRespAlg = "RS256"
-	}
-
-	// Default scope if not specified
-	if req.Scope == "" {
-		req.Scope = "openid"
-	}
 }
 
 // Helper functions
@@ -628,4 +508,13 @@ func verifyRegistrationAccessToken(token, hash string) error {
 		return ErrInvalidToken
 	}
 	return nil
+}
+
+// extractBearerToken extracts the token from a "Bearer <token>" Authorization header value
+func extractBearerToken(authHeader string) string {
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+		return ""
+	}
+	return parts[1]
 }

@@ -2,7 +2,6 @@ package httpserver
 
 import (
 	"context"
-	"strings"
 
 	"vc/internal/verifier/apiv1"
 
@@ -15,7 +14,7 @@ func (s *Service) endpointRegisterClient(ctx context.Context, c *gin.Context) (a
 
 	// Parse request body
 	var req apiv1.ClientRegistrationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := s.httpHelpers.Binding.Request(ctx, c, &req); err != nil {
 		s.log.Debug("Failed to parse registration request", "err", err)
 		return nil, apiv1.NewInvalidRequestError("Invalid client metadata in request body")
 	}
@@ -34,19 +33,13 @@ func (s *Service) endpointRegisterClient(ctx context.Context, c *gin.Context) (a
 func (s *Service) endpointGetClientConfiguration(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointGetClientConfiguration called")
 
-	clientID := c.Param("client_id")
-	if clientID == "" {
+	request := &apiv1.GetClientInformationRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, apiv1.NewInvalidRequestError("Missing client_id parameter")
 	}
 
-	// Extract registration access token from Authorization header
-	registrationAccessToken := extractBearerToken(c)
-	if registrationAccessToken == "" {
-		return nil, apiv1.ErrInvalidToken
-	}
-
 	// Delegate to apiv1 layer
-	response, err := s.apiv1.GetClientInformation(ctx, clientID, registrationAccessToken)
+	response, err := s.apiv1.GetClientInformation(ctx, request)
 	if err != nil {
 		s.log.Debug("Get client configuration failed", "err", err)
 		return nil, err
@@ -59,26 +52,14 @@ func (s *Service) endpointGetClientConfiguration(ctx context.Context, c *gin.Con
 func (s *Service) endpointUpdateClient(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointUpdateClient called")
 
-	clientID := c.Param("client_id")
-	if clientID == "" {
-		return nil, apiv1.NewInvalidRequestError("Missing client_id parameter")
-	}
-
-	// Extract registration access token from Authorization header
-	registrationAccessToken := extractBearerToken(c)
-	if registrationAccessToken == "" {
-		return nil, apiv1.ErrInvalidToken
-	}
-
-	// Parse request body
-	var req apiv1.ClientRegistrationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	request := &apiv1.UpdateClientRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		s.log.Debug("Failed to parse update request", "err", err)
 		return nil, apiv1.NewInvalidRequestError("Invalid client metadata in request body")
 	}
 
 	// Delegate to apiv1 layer
-	response, err := s.apiv1.UpdateClient(ctx, clientID, registrationAccessToken, &req)
+	response, err := s.apiv1.UpdateClient(ctx, request)
 	if err != nil {
 		s.log.Debug("Client update failed", "err", err)
 		return nil, err
@@ -91,38 +72,17 @@ func (s *Service) endpointUpdateClient(ctx context.Context, c *gin.Context) (any
 func (s *Service) endpointDeleteClient(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointDeleteClient called")
 
-	clientID := c.Param("client_id")
-	if clientID == "" {
+	request := &apiv1.DeleteClientRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, apiv1.NewInvalidRequestError("Missing client_id parameter")
 	}
 
-	// Extract registration access token from Authorization header
-	registrationAccessToken := extractBearerToken(c)
-	if registrationAccessToken == "" {
-		return nil, apiv1.ErrInvalidToken
-	}
-
 	// Delegate to apiv1 layer
-	err := s.apiv1.DeleteClient(ctx, clientID, registrationAccessToken)
+	err := s.apiv1.DeleteClient(ctx, request)
 	if err != nil {
 		s.log.Debug("Client deletion failed", "err", err)
 		return nil, err
 	}
 
 	return nil, nil
-}
-
-// extractBearerToken extracts the bearer token from Authorization header
-func extractBearerToken(c *gin.Context) string {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		return ""
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return ""
-	}
-
-	return parts[1]
 }

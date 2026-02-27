@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"vc/internal/verifier/apiv1/utils"
 	internalcache "vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/jose"
 	"vc/pkg/model"
+	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -284,7 +284,7 @@ func TestPKCEValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := utils.ValidatePKCE(tt.codeVerifier, tt.codeChallenge, tt.codeChallengeMethod)
+			err := oauth2.ValidatePKCE(tt.codeVerifier, tt.codeChallenge, tt.codeChallengeMethod)
 			if tt.expectValid {
 				assert.NoError(t, err)
 			} else {

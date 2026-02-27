@@ -145,10 +145,11 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 			}
 
 			req := &ConfirmCredentialDisplayRequest{
+				SessionID: tt.sessionID,
 				Confirmed: tt.confirmed,
 			}
 
-			response, err := client.ConfirmCredentialDisplay(ctx, tt.sessionID, req)
+			response, err := client.ConfirmCredentialDisplay(ctx, req)
 
 			if tt.expectError {
 				assert.Error(t, err)
