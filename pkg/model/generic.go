@@ -37,12 +37,12 @@ type Document struct {
 
 // IDMapping is a generic type for ID mapping
 type IDMapping struct {
-	AuthenticSourcePersonID string `json:"authentic_source_person_id"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
 }
 
 // CredentialOffer https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html 4.1.1 Credential Offer Parameters
 type CredentialOffer struct {
-	CredentialIssuer           string                       `json:"credential_issuer"`
+	CredentialIssuer           string                       `json:"credential_issuer" validate:"omitempty,max=128,printascii"`
 	CredentialConfigurationIDs []string                     `json:"credential_configuration_ids"`
 	Grants                     map[string]map[string]string `json:"grants"`
 }
@@ -51,11 +51,11 @@ type CredentialOffer struct {
 type Consent struct {
 	// required: true
 	// example: "Using my data for research"
-	ConsentTo string `json:"consent_to,omitempty" bson:"consent_to" validate:"required"`
+	ConsentTo string `json:"consent_to,omitempty" bson:"consent_to" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: "sess-123"
-	SessionID string `json:"session_id,omitempty" bson:"session_id" validate:"required"`
+	SessionID string `json:"session_id,omitempty" bson:"session_id" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 509567558
@@ -67,7 +67,7 @@ type Consent struct {
 type Collect struct {
 	// required: false
 	// example: 98fe67fc-c03f-11ee-bbee-4345224d414f
-	ID string `json:"id,omitempty" bson:"id"`
+	ID string `json:"id,omitempty" bson:"id" validate:"omitempty,max=128,printascii"`
 
 	// required: false
 	// example: 509567558
@@ -79,7 +79,7 @@ type Collect struct {
 type MetaData struct {
 	// required: true
 	// example: SUNET
-	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"required"`
+	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: "1.0.0"
@@ -88,16 +88,16 @@ type MetaData struct {
 	// VCT is the Verifiable Credential Type
 	// required: true
 	// example: "urn:eudi:pid:1"
-	VCT string `json:"vct,omitempty" bson:"vct" validate:"required"`
+	VCT string `json:"vct,omitempty" bson:"vct" validate:"required,max=128,printascii"`
 
 	// Scope is the credential configuration ID scope
 	// required: false
 	// example: "ehic", "pda1"
-	Scope string `json:"scope,omitempty" bson:"scope" validate:"required"`
+	Scope string `json:"scope,omitempty" bson:"scope" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
-	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"required"`
+	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"required,max=128,printascii"`
 
 	// RealData is a flag to indicate if the document contains real data
 	// required: true
@@ -122,14 +122,14 @@ type MetaData struct {
 	// required: false
 	// example: file://path/to/schema.json or http://example.com/schema.json
 	// format: string
-	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation"`
+	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation" validate:"omitempty,max=128,printascii"`
 }
 
 // RevocationReference refer to a document
 type RevocationReference struct {
-	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source"`
-	VCT             string `json:"vct,omitempty" bson:"vct"`
-	DocumentID      string `json:"document_id,omitempty" bson:"document_id"`
+	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"omitempty,max=128,printascii"`
+	VCT             string `json:"vct,omitempty" bson:"vct" validate:"omitempty,max=128,printascii"`
+	DocumentID      string `json:"document_id,omitempty" bson:"document_id" validate:"omitempty,max=128,printascii"`
 }
 
 // Revocation is a collection of fields representing a revocation
@@ -138,7 +138,7 @@ type Revocation struct {
 	// ID is the ID of the revocation
 	// required: false
 	// example: 8dbd2680-c03f-11ee-a21b-034aafe41222
-	ID string `json:"id,omitempty" bson:"id"`
+	ID string `json:"id,omitempty" bson:"id" validate:"omitempty,max=128,printascii"`
 
 	// Revoked is a flag to indicate if the document has been revoked
 	// required: false
@@ -156,14 +156,14 @@ type Revocation struct {
 	// Reason is the reason for revocation
 	// required: false
 	// example: lost or stolen
-	Reason string `json:"reason,omitempty" bson:"reason"`
+	Reason string `json:"reason,omitempty" bson:"reason" validate:"omitempty,max=128,printascii"`
 }
 
 // IdentitySchema is a collection of fields representing an identity schema
 type IdentitySchema struct {
 	// required: true
 	// example: "SE"
-	Name string `json:"name" bson:"name" validate:"required"`
+	Name string `json:"name" bson:"name" validate:"required,max=128,printascii"`
 
 	// required: false
 	// example: "1.0.0"
@@ -174,7 +174,7 @@ type IdentitySchema struct {
 type Identity struct {
 	// required: true
 	// example: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a
-	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" bson:"authentic_source_person_id"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" bson:"authentic_source_person_id" validate:"required,max=128,printascii"`
 
 	Schema *IdentitySchema `json:"schema,omitempty" bson:"schema" validate:"required"`
 
