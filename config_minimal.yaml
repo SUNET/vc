@@ -1,0 +1,128 @@
+---
+# Minimal configuration for getting started with VC.
+# Only fields that have NO defaults and are required are listed here.
+# All other values use built-in defaults (see pkg/model/config.go).
+#
+# Usage:
+#   export VC_CONFIG_YAML=config_minimal.yaml
+#
+# For a full-featured example, see config.yaml.
+
+common:
+  production: false            # default: true — set false for local development
+  mongo:
+    uri: mongodb://mongo:27017
+
+# credential_constructor is required by apigw, issuer, and verifier.
+# At least one entry is needed. "pid_1_5" is a minimal example.
+credential_constructor:
+  pid_1_5:
+    vctm_file_path: "metadata/vctm_pid_arf_1_5.json"
+    auth_method: basic
+    format: "dc+sd-jwt"
+
+issuer:
+  api_server:
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_issuer.crt"
+      key_file_path: "/pki/tls_issuer.key"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  issuer_url: "https://apigw.vc.docker:8080"
+  jwt_attribute:
+    issuer: "https://apigw.vc.docker:8080"
+    verifiable_credential_type: "https://credential.example.com/identity"
+  registry_client:
+    addr: registry.vc.docker:8090
+
+verifier:
+  api_server:
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_verifier.crt"
+      key_file_path: "/pki/tls_verifier.key"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  public_url: "https://verifier.vc.docker:8080"
+  oauth_server:
+    token_endpoint: "https://verifier.vc.docker:8080/token"
+    clients:
+      "1003":
+        type: "public"
+        redirect_uri: "http://localhost:3000/cb"
+        scopes:
+          - "pid_1_5"
+  openid4vp:
+    supported_credentials:
+      - vct: "urn:eudi:pid:arf-1.5:1"
+        scopes:
+          - "pid_1_5"
+
+registry:
+  api_server:
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_registry.crt"
+      key_file_path: "/pki/tls_registry.key"
+  public_url: "https://registry.vc.docker:8080"
+  token_status_lists:
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+  admin_gui:
+    password: "admin_1234"     # username defaults to "admin"
+
+apigw:
+  api_server:
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_apigw.crt"
+      key_file_path: "/pki/tls_apigw.key"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  public_url: "https://apigw.vc.docker:8080"
+  registry_public_url: "https://registry.vc.docker:8080"
+  issuer_client:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
+  credential_offers:
+    issuer_url: "https://apigw.vc.docker:8080"
+    wallets:
+      local:
+        label: "Local Wallet"
+        redirect_uri: "http://localhost:3000/cb"
+  oauth_server:
+    token_endpoint: "https://apigw.vc.docker:8080/token"
+    clients:
+      "1003":
+        type: "public"
+        redirect_uri: "http://localhost:3000"
+        scopes:
+          - "pid_1_5"
+
+mock_as:
+  api_server:
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_mockas.crt"
+      key_file_path: "/pki/tls_mockas.key"
+  datastore_url: "https://apigw.vc.docker:8080"
+
+ui:
+  api_server:
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_ui.crt"
+      key_file_path: "/pki/tls_ui.key"
+  password: "secret123"
+  services:
+    apigw:
+      base_url: "https://apigw.vc.docker:8080"
+    mockas:
+      base_url: "https://mockas.vc.docker:8080"
+    verifier:
+      base_url: "https://verifier.vc.docker:8080"
