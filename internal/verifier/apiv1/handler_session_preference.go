@@ -11,7 +11,7 @@ import (
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference
 type UpdateSessionPreferenceRequest struct {
-	SessionID             string `json:"session_id" binding:"required"`
+	SessionID             string `json:"session_id" binding:"required" validate:"required,max=128,printascii"`
 	ShowCredentialDetails bool   `json:"show_credential_details"`
 }
 

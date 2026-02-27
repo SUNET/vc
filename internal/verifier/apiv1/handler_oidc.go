@@ -26,22 +26,22 @@ import (
 
 // AuthorizeRequest represents an OIDC authorization request
 type AuthorizeRequest struct {
-	ResponseType        string `form:"response_type" binding:"required"`
-	ClientID            string `form:"client_id" binding:"required"`
-	RedirectURI         string `form:"redirect_uri" binding:"required"`
-	Scope               string `form:"scope" binding:"required"`
-	State               string `form:"state"`
-	Nonce               string `form:"nonce"`
-	CodeChallenge       string `form:"code_challenge"`
-	CodeChallengeMethod string `form:"code_challenge_method"`
-	ResponseMode        string `form:"response_mode"`
-	Display             string `form:"display"`
-	Prompt              string `form:"prompt"`
+	ResponseType        string `form:"response_type" binding:"required" validate:"required,max=128,printascii"`
+	ClientID            string `form:"client_id" binding:"required" validate:"required,max=128,printascii"`
+	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=128,printascii"`
+	Scope               string `form:"scope" binding:"required" validate:"required,max=128,printascii"`
+	State               string `form:"state" validate:"omitempty,max=128,printascii"`
+	Nonce               string `form:"nonce" validate:"omitempty,max=128,printascii"`
+	CodeChallenge       string `form:"code_challenge" validate:"omitempty,max=128,printascii"`
+	CodeChallengeMethod string `form:"code_challenge_method" validate:"omitempty,max=128,printascii"`
+	ResponseMode        string `form:"response_mode" validate:"omitempty,max=128,printascii"`
+	Display             string `form:"display" validate:"omitempty,max=128,printascii"`
+	Prompt              string `form:"prompt" validate:"omitempty,max=128,printascii"`
 	MaxAge              int    `form:"max_age"`
-	UILocales           string `form:"ui_locales"`
-	IDTokenHint         string `form:"id_token_hint"`
-	LoginHint           string `form:"login_hint"`
-	ACRValues           string `form:"acr_values"`
+	UILocales           string `form:"ui_locales" validate:"omitempty,max=128,printascii"`
+	IDTokenHint         string `form:"id_token_hint" validate:"omitempty,max=128,printascii"`
+	LoginHint           string `form:"login_hint" validate:"omitempty,max=128,printascii"`
+	ACRValues           string `form:"acr_values" validate:"omitempty,max=128,printascii"`
 }
 
 // AuthorizeResponse represents the response to an authorization request
@@ -221,13 +221,13 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 // TokenRequest represents an OIDC token request
 type TokenRequest struct {
-	GrantType    string `form:"grant_type" binding:"required"`
-	Code         string `form:"code" validate:"max=128,printascii"`
-	RedirectURI  string `form:"redirect_uri"`
-	ClientID     string `form:"client_id"`
-	ClientSecret string `form:"client_secret"`
-	CodeVerifier string `form:"code_verifier"`
-	RefreshToken string `form:"refresh_token"`
+	GrantType    string `form:"grant_type" binding:"required" validate:"required,max=128,printascii"`
+	Code         string `form:"code" validate:"omitempty,max=128,printascii"`
+	RedirectURI  string `form:"redirect_uri" validate:"omitempty,max=128,printascii"`
+	ClientID     string `form:"client_id" validate:"omitempty,max=128,printascii"`
+	ClientSecret string `form:"client_secret" validate:"omitempty,max=128,printascii"`
+	CodeVerifier string `form:"code_verifier" validate:"omitempty,max=128,printascii"`
+	RefreshToken string `form:"refresh_token" validate:"omitempty,max=128,printascii"`
 }
 
 // TokenResponse represents an OIDC token response
@@ -415,6 +415,7 @@ func (c *Client) authenticateOIDCClient(client *db.Client, clientSecret string) 
 
 	return bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret))
 }
+
 // DiscoveryMetadata represents OpenID Provider metadata
 type DiscoveryMetadata struct {
 	Issuer                            string   `json:"issuer"`
@@ -549,10 +550,10 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 
 // DirectPostRequest represents a direct_post callback from a wallet
 type DirectPostRequest struct {
-	State                  string `json:"state" form:"state" binding:"required"`
-	VPToken                string `json:"vp_token" form:"vp_token"`                // For standard direct_post
-	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission"` // For standard direct_post
-	Response               string `json:"response" form:"response"`                // For DC API encrypted JWT response
+	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=128,printascii"`
+	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty,max=128,printascii"`                               // For standard direct_post
+	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty,max=128,printascii"` // For standard direct_post
+	Response               string `json:"response" form:"response" validate:"omitempty,max=128,printascii"`                               // For DC API encrypted JWT response
 }
 
 // DirectPostResponse contains the response to a direct_post request
@@ -686,9 +687,9 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 // CallbackRequest represents a callback request
 type CallbackRequest struct {
-	State string `form:"state" binding:"required"`
-	Code  string `form:"code"`
-	Error string `form:"error"`
+	State string `form:"state" binding:"required" validate:"required,max=128,printascii"`
+	Code  string `form:"code" validate:"omitempty,max=128,printascii"`
+	Error string `form:"error" validate:"omitempty,max=1000,printascii"`
 }
 
 // CallbackResponse contains the redirect URI
@@ -842,7 +843,7 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 
 // UserInfoRequest represents a UserInfo endpoint request
 type UserInfoRequest struct {
-	Authorization string `json:"-" header:"Authorization" validate:"required"`
+	Authorization string `json:"-" header:"Authorization" validate:"required,max=256,printascii"`
 	AccessToken   string `json:"-"` // Parsed from Authorization header
 }
 
@@ -885,4 +886,3 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 
 	return response, nil
 }
-

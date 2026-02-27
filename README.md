@@ -59,6 +59,137 @@ The full configuration with all options is in `config.yaml`. See [docs/CONFIGURA
 | **mockas** | Mock Authorization Server for development and testing                     |
 | **ui**     | Web UI for credential issuance and presentation                           |
 
+## Architecture
+
+### Credential Verification
+
+A relying party (e.g. Keycloak) connects to the **Verifier** as a standard OIDC Provider.
+The Verifier translates the OIDC request into an **OpenID4VP** presentation request toward the wallet.
+
+```text
+  ┌────────────┐         OIDC            ┌──────────────────────────┐
+  │  Relying   │ ──────────────────────► │        VERIFIER          │
+  │  Party     │  authorize, token,      │                          │
+  │ (Keycloak) │  userinfo              │  OIDC Provider (OP)      │
+  └────────────┘ ◄────────────────────── │  OpenID4VP Verifier      │
+                                         └────────────┬─────────────┘
+                                                      │
+                                                      │ OpenID4VP
+                                                      │ (present credential)
+                                                      ▼
+                                         ┌──────────────────────────┐
+                                         │         WALLET           │
+                                         │       (phone app)        │
+                                         └──────────────────────────┘
+```
+
+### Credential Issuance — Two Paths
+
+PID issuance and non-PID issuance follow **different authentication paths**
+determined by `auth_method` in the credential configuration.
+
+```text
+                           Wallet requests credential
+                           via OpenID4VCI (PAR → Authorize)
+                                       │
+                          ┌────────────┴────────────┐
+                          │                         │
+                   auth_method: basic        auth_method: pid_auth
+                          │                         │
+               ┌──────────▼──────────┐   ┌──────────▼───────────────┐
+               │  PATH 1: PID        │   │  PATH 2: OTHER           │
+               │  (pid_1_5, pid_1_8) │   │  (ehic, diploma, pda1,   │
+               │                     │   │   elm, eduid, micro...)   │
+               │  User authenticates │   │                           │
+               │  via external IdP:  │   │  Wallet presents existing │
+               │                     │   │  PID credential back to   │
+               │  • SAML IdP         │   │  APIGW via OpenID4VP      │
+               │  • OIDC Provider    │   │                           │
+               │  • Username/Pass    │   │  APIGW verifies PID,      │
+               │    (dev/test)       │   │  extracts identity, looks  │
+               │                     │   │  up document in datastore  │
+               └──────────┬──────────┘   └──────────┬────────────────┘
+                          │                         │
+                          └────────────┬────────────┘
+                                       │
+                                       ▼
+                          ┌──────────────────────────┐
+                          │          APIGW            │
+                          │   OAuth AS (OpenID4VCI)   │
+                          │   Consent → Token →       │
+                          │   Credential              │
+                          └─────┬──────────────┬──────┘
+                                │ gRPC         │
+                                ▼              ▼
+                     ┌──────────────┐  ┌──────────────┐
+                     │   ISSUER     │  │  REGISTRY    │
+                     │              │  │              │
+                     │  Signs cred  │  │  Token       │
+                     │  (SD-JWT VC, │  │  Status List │
+                     │  mdoc,       │  │  (revocation)│
+                     │  W3C VC)     │  │              │
+                     └──────────────┘  └──────────────┘
+```
+
+### Full System Overview
+
+```text
+                                                                ┌────────────┐
+                                                                │ SAML IdP / │
+  ┌────────────┐                                                │ OIDC IdP   │
+  │  Relying   │                                                │ (external) │
+  │  Party     │                                                └──────┬─────┘
+  │ (Keycloak) │                                                       │
+  └─────┬──────┘                                   SAML / OIDC RP      │
+        │ OIDC                                     (PID issuance auth) │
+        ▼                                                              │
+  ┌──────────────────┐        OpenID4VP         ┌──────────────┐       │
+  │    VERIFIER      │ ◄─────────────────────── │              │       │
+  │                  │   (present credential)   │              │       │
+  │  OIDC Provider   │ ───────────────────────► │    WALLET    │       │
+  │  OpenID4VP       │   (request presentation) │  (phone app) │       │
+  └──────────────────┘                          │              │       │
+                                                │              │       │
+                 OpenID4VCI                      │              │       │
+                 (receive new credential)        │              │       │
+          ┌──────────────────────────────────────┤              │       │
+          │      OpenID4VP                       │              │       │
+          │      (present PID for non-PID issue) │              │       │
+          │  ┌───────────────────────────────────┤              │       │
+          │  │                                   └──────────────┘       │
+          ▼  ▼                                                         │
+  ┌────────────────────────────────────────────────────────────────┐    │
+  │                           APIGW                                │    │
+  │                                                                │◄───┘
+  │  OAuth AS (OpenID4VCI)   — issue credentials to wallet         │
+  │  OpenID4VP Verifier      — verify PID before non-PID issuance  │
+  │  SAML SP (optional)      — authenticate for PID issuance       │
+  │  OIDC RP (optional)      — authenticate for PID issuance       │
+  └──────────┬──────────────────────────────┬──────────────────────┘
+             │ gRPC                         │
+             ▼                              ▼
+  ┌──────────────────┐           ┌──────────────────┐
+  │     ISSUER       │           │    REGISTRY      │
+  │  Signs creds     │           │  Token Status    │
+  │  (SD-JWT VC,     │           │  List            │
+  │   mdoc, W3C VC)  │           │  (revocation)    │
+  └──────────────────┘           └──────────────────┘
+
+  ┌──────────────────┐           ┌──────────────────┐
+  │       UI         │           │    MOCK AS       │
+  │  Admin web       │──────────►│  Test users &    │
+  │  interface       │           │  bootstrapping   │
+  └──────────────────┘           └──────────────────┘
+```
+
+| Component    | Server Role                               | Client Role                                           |
+| ------------ | ----------------------------------------- | ----------------------------------------------------- |
+| **Verifier** | OIDC Provider (OP) toward relying parties  | OpenID4VP verifier toward wallets                     |
+| **APIGW**    | OAuth AS (OpenID4VCI) toward wallets       | SAML SP + OIDC RP toward external IdPs (PID issuance) |
+|              | OpenID4VP verifier (non-PID issuance auth) |                                                       |
+| **Issuer**   | gRPC credential signing service            | —                                                     |
+| **Registry** | Token Status List (revocation)             | —                                                     |
+
 ## Capabilities
 
 - Issue verifiable credentials via [OpenID4VCI 1.0](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html)
