@@ -173,7 +173,7 @@ func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationReq
 type IdentityMappingRequest struct {
 	// required: true
 	// example: SUNET
-	AuthenticSource string          `json:"authentic_source" validate:"required"`
+	AuthenticSource string          `json:"authentic_source" validate:"required,max=128,printascii"`
 	Identity        *model.Identity `json:"identity" validate:"required"`
 }
 

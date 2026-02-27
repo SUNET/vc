@@ -180,19 +180,19 @@ type Identity struct {
 
 	// required: true
 	// example: Svensson
-	FamilyName string `json:"family_name" bson:"family_name" validate:"required,min=1,max=100"`
+	FamilyName string `json:"family_name" bson:"family_name" validate:"required,min=1,max=100,printascii"`
 
 	// required: true
 	// example: Magnus
-	GivenName string `json:"given_name" bson:"given_name" validate:"required,min=1,max=100"`
+	GivenName string `json:"given_name" bson:"given_name" validate:"required,min=1,max=100,printascii"`
 
 	// required: true
 	// example: 1970-01-01 TODO: Day, month, and year?
-	BirthDate string `json:"birth_date" bson:"birth_date" validate:"required,datetime=2006-01-02"`
+	BirthDate string `json:"birth_date" bson:"birth_date" validate:"required,datetime=2006-01-02,printascii"`
 
 	// required: true
 	// example: Stockholm
-	BirthPlace string `json:"birth_place,omitempty" bson:"birth_place,omitempty" validate:"omitempty,min=2,max=100"`
+	BirthPlace string `json:"birth_place,omitempty" bson:"birth_place,omitempty" validate:"omitempty,min=2,max=100,printascii"`
 
 	// required: true
 	// example: SE
@@ -200,15 +200,15 @@ type Identity struct {
 
 	// required: false
 	// example: <personnummer>
-	PersonalAdministrativeNumber string `json:"personal_administrative_number,omitempty" bson:"personal_administrative_number,omitempty" validate:"omitempty,min=4,max=50"`
+	PersonalAdministrativeNumber string `json:"personal_administrative_number,omitempty" bson:"personal_administrative_number,omitempty" validate:"omitempty,min=4,max=50,printascii"`
 
 	// required: false
 	// example: facial image compliant with ISO 19794-5 or ISO 39794 specifications
 	Picture string `json:"picture,omitempty" bson:"picture,omitempty"`
 
-	BirthFamilyName string `json:"birth_family_name,omitempty" bson:"birth_family_name,omitempty" validate:"omitempty,min=1,max=100"`
+	BirthFamilyName string `json:"birth_family_name,omitempty" bson:"birth_family_name,omitempty" validate:"omitempty,min=1,max=100,printascii"`
 
-	BirthGivenName string `json:"birth_given_name,omitempty" bson:"birth_given_name,omitempty" validate:"omitempty,min=1,max=100"`
+	BirthGivenName string `json:"birth_given_name,omitempty" bson:"birth_given_name,omitempty" validate:"omitempty,min=1,max=100,printascii"`
 
 	// required: false
 	// example: 0 = not known, 1 = male, 2 = female, ...
@@ -224,26 +224,26 @@ type Identity struct {
 
 	// required: false
 	// example: 221b Baker street
-	ResidentAddress string `json:"resident_address,omitempty" bson:"resident_address,omitempty"`
+	ResidentAddress string `json:"resident_address,omitempty" bson:"resident_address,omitempty" validate:"omitempty,printascii"`
 
 	// required: false
 	// example: Baker street
-	ResidentStreetAddress string `json:"resident_street_address,omitempty" bson:"resident_street_address,omitempty" validate:"omitempty,min=1,max=100"`
+	ResidentStreetAddress string `json:"resident_street_address,omitempty" bson:"resident_street_address,omitempty" validate:"omitempty,min=1,max=100,printascii"`
 
 	// required: false
 	// example: 221b
-	ResidentHouseNumber string `json:"resident_house_number,omitempty" bson:"resident_house_number,omitempty"`
+	ResidentHouseNumber string `json:"resident_house_number,omitempty" bson:"resident_house_number,omitempty" validate:"omitempty,printascii"`
 
 	// required: false
 	// example: W1U 6SG
-	ResidentPostalCode string `json:"resident_postal_code,omitempty" bson:"resident_postal_code,omitempty"`
+	ResidentPostalCode string `json:"resident_postal_code,omitempty" bson:"resident_postal_code,omitempty" validate:"omitempty,printascii"`
 
 	// required: false
 	// example: London
-	ResidentCity string `json:"resident_city,omitempty" bson:"resident_city,omitempty"`
+	ResidentCity string `json:"resident_city,omitempty" bson:"resident_city,omitempty" validate:"omitempty,printascii"`
 	// required: false
 	// example: england
-	ResidentState string `json:"resident_state,omitempty" bson:"resident_state,omitempty"`
+	ResidentState string `json:"resident_state,omitempty" bson:"resident_state,omitempty" validate:"omitempty,printascii"`
 	// required: false
 	// example: England
 	ResidentCountry string `json:"resident_country,omitempty" bson:"resident_country,omitempty" validate:"omitempty,iso3166_1_alpha2"`
@@ -264,7 +264,7 @@ type Identity struct {
 
 	// required: false
 	// example:
-	IssuingAuthority string `json:"issuing_authority,omitempty" bson:"issuing_authority,omitempty"`
+	IssuingAuthority string `json:"issuing_authority,omitempty" bson:"issuing_authority,omitempty" validate:"omitempty,printascii"`
 	// required: false
 	// example:
 	IssuingCountry string `json:"issuing_country,omitempty" bson:"issuing_country,omitempty" validate:"omitempty,iso3166_1_alpha2"`
@@ -277,13 +277,13 @@ type Identity struct {
 
 	// required: false
 	// example:
-	DocumentNumber string `json:"document_number,omitempty" bson:"document_number,omitempty"`
+	DocumentNumber string `json:"document_number,omitempty" bson:"document_number,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// required: false
 	// example:
-	IssuingJurisdiction string `json:"issuing_jurisdiction,omitempty" bson:"issuing_jurisdiction,omitempty"`
+	IssuingJurisdiction string `json:"issuing_jurisdiction,omitempty" bson:"issuing_jurisdiction,omitempty" validate:"omitempty,max=128,printascii"`
 
-	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty"`
+	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // isLeapYear checks if a year is a leap year
@@ -297,13 +297,13 @@ func ageThresholdDate(birthDate time.Time, years int) time.Time {
 	targetYear := birthDate.Year() + years
 	month := birthDate.Month()
 	day := birthDate.Day()
-	
+
 	// Handle leap year birthday (Feb 29) in non-leap target year
 	if month == 2 && day == 29 && !isLeapYear(targetYear) {
 		// Use Feb 28 instead of letting Go normalize to March 1
 		return time.Date(targetYear, 2, 28, 0, 0, 0, 0, birthDate.Location())
 	}
-	
+
 	return birthDate.AddDate(years, 0, 0)
 }
 

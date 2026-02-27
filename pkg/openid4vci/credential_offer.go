@@ -45,7 +45,7 @@ type TXCode struct {
 }
 
 type CredentialOfferURIRequest struct {
-	CredentialOfferUUID string `uri:"credential_offer_uuid" binding:"required"`
+	CredentialOfferUUID string `uri:"credential_offer_uuid" binding:"required" validate:"required,max=128,printascii"`
 }
 
 type CredentialOfferURIResponse struct{}
