@@ -30,7 +30,7 @@ type AuthorizeRequest struct {
 	ClientID            string `form:"client_id" binding:"required" validate:"required,max=128,printascii"`
 	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=128,printascii"`
 	Scope               string `form:"scope" binding:"required" validate:"required,max=128,printascii"`
-	State               string `form:"state" validate:"omitempty,max=128,printascii"`
+	State               string `form:"state" validate:"omitempty,max=500,printascii"`
 	Nonce               string `form:"nonce" validate:"omitempty,max=128,printascii"`
 	CodeChallenge       string `form:"code_challenge" validate:"omitempty,max=128,printascii"`
 	CodeChallengeMethod string `form:"code_challenge_method" validate:"omitempty,max=128,printascii"`
