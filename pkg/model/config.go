@@ -417,7 +417,7 @@ type Registry struct {
 // AdminGUI holds the admin GUI configuration
 type AdminGUI struct {
 	// Enable enables the admin GUI
-	Enable *bool `yaml:"enable" default:"true"`
+	Enable *bool `yaml:"enable" default:"false"`
 	// Username is the admin username
 	Username string `yaml:"username" validate:"required_if=Enable true" default:"admin"`
 	// Password is the admin password

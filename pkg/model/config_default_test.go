@@ -156,7 +156,7 @@ func TestAdminGUIDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotNil(t, cfg.Enable)
-	assert.True(t, *cfg.Enable)
+	assert.False(t, *cfg.Enable)
 	assert.Equal(t, "admin", cfg.Username)
 }
 
