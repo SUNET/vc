@@ -43,7 +43,7 @@ type AuthorizationContext struct {
 	// Client and authorization fields
 	ClientID            string   `json:"client_id" bson:"client_id" validate:"omitempty,max=128,printascii"`
 	Scopes              []string `json:"scopes,omitempty" bson:"scopes,omitempty"`
-	State               string   `json:"state,omitempty" bson:"state,omitempty" validate:"omitempty,max=128,printascii"`
+	State               string   `json:"state,omitempty" bson:"state,omitempty" validate:"omitempty,max=500,printascii"`
 	Nonce               string   `json:"nonce,omitempty" bson:"nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	CodeChallenge       string   `json:"code_challenge,omitempty" bson:"code_challenge,omitempty" validate:"omitempty,max=128,printascii"`
 	CodeChallengeMethod string   `json:"code_challenge_method,omitempty" bson:"code_challenge_method,omitempty" validate:"omitempty,max=16,printascii"`

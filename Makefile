@@ -62,6 +62,9 @@ BUILD_CONFIGS           := \
 	test-wallet-stack-vci test-wallet-stack-vp test-wallet-stack-e2e test-wallet-stack-security \
 	test-workflows test-workflows-run \
 	w3c-test create-w3c-test-suite run-w3c-test \
+	oidc-conformance-setup oidc-conformance-stop oidc-conformance-clean \
+	oidc-conformance-test oidc-conformance-test-vci oidc-conformance-test-vp oidc-conformance-test-oidc \
+	oidc-conformance-status \
 	release check_current_branch ci_build
 
 # ==============================================================================
@@ -88,10 +91,19 @@ help: ## Show this help message
 	$(info   make build-apigw-all      - Build apigw with all features)
 	$(info   make build-issuer-hsm     - Build issuer with PKCS#11 HSM support)
 	$(info )
+	$(info OpenID Conformance Suite:)
+	$(info   make oidc-conformance-setup      - Start conformance suite)
+	$(info   make oidc-conformance-test-vci   - Test OpenID4VCI issuer)
+	$(info   make oidc-conformance-test-vp    - Test OpenID4VP verifier)
+	$(info   make oidc-conformance-test-oidc  - Test OIDC OP)
+	$(info   make oidc-conformance-status     - Show results)
+	$(info   make oidc-conformance-clean      - Cleanup)
+	$(info )
 	$(info Environment Variables:)
 	$(info   VERSION               - Docker image version (default: latest))
 	$(info   NEWTAG                - Target tag for docker-tag operations (default: VERSION))
 	$(info   W3C_TEST_PORT         - W3C test server port (default: 8888))
+	$(info   OIDC_CONFORMANCE_URL  - Conformance suite URL (default: https://localhost:8443))
 	@:
 
 # ==============================================================================
@@ -149,7 +161,7 @@ $(foreach service,$(SERVICES),$(eval $(call TEST_TEMPLATE,$(service))))
 
 test-env: ## Set up test environment
 	$(info Setting up test environment)
-	sudo apt-get update && sudo apt-get install -y softhsm2 opensc
+	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
 
 # Test targets with build tags
 test-saml: ## Test with SAML build tag
@@ -544,6 +556,67 @@ w3c-test: build-vc20-test-server ## Run W3C test suite (managed)
 	$(info $$(grep -c '❌' /tmp/w3c-test.log 2>/dev/null || printf '0') failing tests)
 
 # ==============================================================================
+# OpenID Foundation Conformance Suite
+# ==============================================================================
+# Tests OpenID4VCI (Issuer), OpenID4VP (Verifier), and OIDC OP conformance
+# using the OpenID Foundation Conformance Suite (https://openid.net/certification/)
+#
+# Prerequisites:
+#   1. VC dev stack running: make start
+#   2. Conformance suite started: make oidc-conformance-setup
+#
+# Quick start:
+#   make start                        # Start VC services
+#   make oidc-conformance-setup        # Start conformance suite
+#   make oidc-conformance-test-vci     # Test OpenID4VCI issuer
+#   make oidc-conformance-test-vp      # Test OpenID4VP verifier
+#   make oidc-conformance-test-oidc    # Test OIDC OP (verifier)
+#   make oidc-conformance-status       # Check results
+#   make oidc-conformance-clean        # Cleanup
+# ==============================================================================
+
+OIDC_CONFORMANCE_URL    ?= https://localhost:8443
+OIDC_CONFORMANCE_LOG    := /tmp/oidc-conformance
+
+oidc-conformance-setup: ## Clone, build & start the OpenID Conformance Suite
+	$(info Setting up OpenID Conformance Suite)
+	@chmod +x ./scripts/oidc-conformance.sh
+	CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh setup
+
+oidc-conformance-stop: ## Stop the OpenID Conformance Suite
+	$(info Stopping OpenID Conformance Suite)
+	@chmod +x ./scripts/oidc-conformance.sh
+	CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh stop
+
+oidc-conformance-clean: ## Stop and remove all conformance suite data
+	$(info Cleaning up OpenID Conformance Suite)
+	@chmod +x ./scripts/oidc-conformance.sh
+	CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh clean
+	rm -rf $(OIDC_CONFORMANCE_LOG)
+
+# Conformance test targets — each creates a test plan via the suite API
+oidc-conformance-test: oidc-conformance-test-vci oidc-conformance-test-vp oidc-conformance-test-oidc ## Run all OpenID conformance tests
+
+oidc-conformance-test-vci: ## Test OpenID4VCI issuer conformance
+	$(info Running OpenID4VCI Issuer conformance test)
+	@chmod +x ./scripts/oidc-conformance.sh
+	CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh test-vci
+
+oidc-conformance-test-vp: ## Test OpenID4VP verifier conformance
+	$(info Running OpenID4VP Verifier conformance test)
+	@chmod +x ./scripts/oidc-conformance.sh
+	CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh test-vp
+
+oidc-conformance-test-oidc: ## Test OIDC OP (verifier) conformance
+	$(info Running OIDC OP conformance test)
+	@chmod +x ./scripts/oidc-conformance.sh
+	CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh test-oidc
+
+oidc-conformance-status: ## Show OpenID conformance test results
+	@chmod +x ./scripts/oidc-conformance.sh
+	@CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh status
+
+# ==============================================================================
 # Development Tools
 # ==============================================================================
 
@@ -578,6 +651,9 @@ vscode: test-env ## Set up VS Code development environment
 		protobuf-compiler \
 		netcat-openbsd \
 		plantuml
+	$(info Installing yq)
+	sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\
+    sudo chmod +x /usr/local/bin/yq
 	$(info Installing act for local GitHub Actions testing)
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
 	$(info Installing go packages)
