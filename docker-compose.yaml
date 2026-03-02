@@ -113,7 +113,7 @@ services:
       - ./config_minimal.yaml:/config.yaml:ro
     depends_on:
       apigw:
-        condition: service_healthy
+        condition: service_started
     networks:
       vc-dev-net:
         ipv4_address: 172.16.50.13
