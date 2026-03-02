@@ -34,10 +34,17 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 
 	// When HA, connect to MongoDB for shared secrets.
 	if cfg.Common.HA {
-		connCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		connTimeout := 20 * time.Second
+
+		connCtx, cancel := context.WithTimeout(ctx, connTimeout)
 		defer cancel()
 
-		client, err := mongo.Connect(options.Client().ApplyURI(cfg.Common.Mongo.URI))
+		client, err := mongo.Connect(
+			options.Client().
+				ApplyURI(cfg.Common.Mongo.URI).
+				SetConnectTimeout(connTimeout).
+				SetTimeout(connTimeout),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("cache: mongo connect: %w", err)
 		}
