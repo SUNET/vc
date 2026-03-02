@@ -1,7 +1,7 @@
 # dario.cat/mergo v1.0.2
 ## explicit; go 1.13
 dario.cat/mergo
-# filippo.io/edwards25519 v1.1.0
+# filippo.io/edwards25519 v1.1.1
 ## explicit; go 1.20
 filippo.io/edwards25519
 filippo.io/edwards25519/field
@@ -1196,5 +1196,3 @@ gotest.tools/v3/internal/assert
 gotest.tools/v3/internal/difflib
 gotest.tools/v3/internal/format
 gotest.tools/v3/internal/source
-# nhooyr.io/websocket v1.8.17
-## explicit; go 1.19
