@@ -190,7 +190,7 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 	for scope, credential := range c.cfg.CredentialConstructor {
 		vctm := credential.VCTM
 		if vctm == nil {
-			c.log.Warn(fmt.Sprintf("credential constructor for scope %q has nil VCTM; failing CreateCredentialOfferLookupMetadata", scope))
+			c.log.Warn("credential constructor has nil VCTM; failing CreateCredentialOfferLookupMetadata", "scope", scope)
 			return fmt.Errorf("credential constructor for scope %q has no VCTM configured", scope)
 		}
 
