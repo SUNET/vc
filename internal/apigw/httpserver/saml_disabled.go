@@ -4,7 +4,7 @@ package httpserver
 
 import "context"
 
-// SAMLService is a stub type when SAML is not enabled
-type SAMLService interface {
+// SAMLSPService is a stub type when SAML is not enabled
+type SAMLSPService interface {
 	Close(ctx context.Context) error
 }

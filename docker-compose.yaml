@@ -3,11 +3,11 @@ services:
   apigw:
     container_name: "vc_dev_apigw"
     hostname: "apigw.vc.docker"
-    image: docker.sunet.se/dc4eu/apigw:latest
+    image: docker.sunet.se/iam_vc/apigw:latest
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
+      - ./config_minimal.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
     depends_on:
@@ -17,22 +17,17 @@ services:
         ipv4_address: 172.16.50.2
     environment:
       - "VC_CONFIG_YAML=config.yaml"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      # Trust the dev rootCA for inter-service TLS (Go reads SSL_CERT_FILE)
+      - "SSL_CERT_FILE=/pki/rootCA.crt"
 
   ui:
     container_name: "vc_dev_ui"
     hostname: "ui.vc.docker"
-    image: docker.sunet.se/dc4eu/ui:latest
+    image: docker.sunet.se/iam_vc/ui:latest
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
-      - ./developer_tools/private_ec256.pem:/private_ec256.pem:ro
+      - ./config_minimal.yaml:/config.yaml:ro
     depends_on:
       #      apigw:
       #        condition: service_started
@@ -50,16 +45,16 @@ services:
         ipv4_address: 172.16.50.50
     environment:
       - "VC_CONFIG_YAML=config.yaml"
+      - "SSL_CERT_FILE=/pki/rootCA.crt"
 
   issuer:
     container_name: "vc_dev_issuer"
     hostname: "issuer.vc.docker"
-    image: docker.sunet.se/dc4eu/issuer:latest
+    image: docker.sunet.se/iam_vc/issuer:latest
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
-      - ./developer_tools/private_ec256.pem:/private_ec256.pem:ro
+      - ./config_minimal.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
     depends_on:
@@ -69,21 +64,17 @@ services:
         ipv4_address: 172.16.50.4
     environment:
       - "VC_CONFIG_YAML=config.yaml"
+      - "SSL_CERT_FILE=/pki/rootCA.crt"
 
   verifier:
     container_name: "vc_dev_verifier"
     hostname: "verifier.vc.docker"
-    image: docker.sunet.se/dc4eu/verifier:latest
+    image: docker.sunet.se/iam_vc/verifier:latest
     restart: always
     volumes:
-      - ./config.yaml:/config.yaml:ro
+      - ./config_minimal.yaml:/config.yaml:ro
       - ./developer_tools/pki/:/pki:ro
       - ./metadata/:/metadata/:ro
-      - ./developer_tools/private_verifier_ec256.pem:/private_verifier_ec256.pem:ro
-      - ./developer_tools/public_verifier_ec256.pem:/public_verifier_ec256.pem:ro
-      - ./developer_tools/private_verifier_rsa.pem:/private_verifier_rsa.pem:ro
-      - ./developer_tools/public_verifier_rsa.pem:/public_verifier_rsa.pem:ro
-      - ./developer_tools/verifier_x509_cert.pem:/verifier_x509_cert.pem:ro
       - ./internal/verifier/static:/static:ro
       - ./presentation_requests:/presentation_requests:ro
     depends_on:
@@ -93,15 +84,16 @@ services:
         ipv4_address: 172.16.50.6
     environment:
       - "VC_CONFIG_YAML=config.yaml"
+      - "SSL_CERT_FILE=/pki/rootCA.crt"
 
   registry:
     container_name: "vc_dev_registry"
     hostname: "registry.vc.docker"
-    image: docker.sunet.se/dc4eu/registry:latest
+    image: docker.sunet.se/iam_vc/registry:latest
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
+      - ./config_minimal.yaml:/config.yaml:ro
     depends_on:
       - mongo
     networks:
@@ -109,39 +101,26 @@ services:
         ipv4_address: 172.16.50.8
     environment:
       - "VC_CONFIG_YAML=config.yaml"
+      - "SSL_CERT_FILE=/pki/rootCA.crt"
 
   mockas:
     container_name: "vc_dev_mockas"
     hostname: "mockas.vc.docker"
-    image: docker.sunet.se/dc4eu/mockas:latest
+    image: docker.sunet.se/iam_vc/mockas:latest
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
+      - ./config_minimal.yaml:/config.yaml:ro
     depends_on:
       apigw:
-        condition: service_healthy
+        condition: service_started
     networks:
       vc-dev-net:
         ipv4_address: 172.16.50.13
     environment:
       - "VC_CONFIG_YAML=config.yaml"
+      - "SSL_CERT_FILE=/pki/rootCA.crt"
 
-
-  #  mockas2:
-  #    container_name: "vc_dev_mockas2"
-  #    image: docker.sunet.se/dc4eu/mockas:latest
-  #    restart: always
-  #    volumes:
-  #      - ./config.yaml:/config.yaml:ro
-  #    depends_on:
-  #      - kafka0
-  #      - kafka1
-  #    networks:
-  #      vc-dev-net:
-  #        ipv4_address: 172.16.50.23
-  #    environment:
-  #      - "VC_CONFIG_YAML=config.yaml"
 
   mongo:
     image: mongo:7.0
@@ -159,20 +138,20 @@ services:
       vc-dev-net:
         ipv4_address: 172.16.50.20
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: vc_dev_jaeger
-    hostname: "jaeger.vc.docker"
-    restart: always
-    expose:
-      - 16686
-      - 4317
-      - 4318
-    networks:
-      vc-dev-net:
-        ipv4_address: 172.16.50.22
-    environment:
-      - "COLLECTOR_OTLP_ENABLED=true"
+ # jaeger:
+ #   image: jaegertracing/all-in-one:latest
+ #   container_name: vc_dev_jaeger
+ #   hostname: "jaeger.vc.docker"
+ #   restart: always
+ #   expose:
+ #     - 16686
+ #     - 4317
+ #     - 4318
+ #   networks:
+ #     vc-dev-net:
+ #       ipv4_address: 172.16.50.22
+ #   environment:
+ #     - "COLLECTOR_OTLP_ENABLED=true"
 
 #  kafka0:
 #    container_name: "vc_dev_kafka0"

@@ -11,43 +11,132 @@ var mockProofJWT ProofJWTToken = "eyJhbGciOiJFUzI1NiIsInR5cCI6Im9wZW5pZDR2Y2ktcH
 
 func TestCredentialValidation(t *testing.T) {
 	tts := []struct {
-		name              string
-		credentialRequest *CredentialRequest
-		tokenResponse     *TokenResponse
-		want              error
+		name                 string
+		credentialRequest    *CredentialRequest
+		authorizationDetails []AuthorizationDetailsParameter
+		wantErr              bool
+		errContains          string
 	}{
 		{
-			name: "test",
+			name: "scope-based flow with credential_configuration_id",
 			credentialRequest: &CredentialRequest{
 				CredentialConfigurationID: "vc+ldp",
 			},
-			tokenResponse: &TokenResponse{
-				AccessToken:     "",
-				TokenType:       "",
-				ExpiresIn:       0,
-				Scope:           "",
-				State:           "",
-				CNonce:          "",
-				CNonceExpiresIn: 0,
-				AuthorizationDetails: []AuthorizationDetailsParameter{
-					{
-						Type:                      "",
-						CredentialConfigurationID: "vc+ldp",
-						Format:                    "",
-						VCT:                       "",
-						Claims:                    map[string]any{},
-					},
+			authorizationDetails: nil,
+			wantErr:              false,
+		},
+		{
+			name: "authorization_details flow with valid credential_identifier",
+			credentialRequest: &CredentialRequest{
+				CredentialIdentifier: "cred-id-1",
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "vc+ldp",
+					CredentialIdentifiers:     []string{"cred-id-1"},
 				},
 			},
-			want: nil,
+			wantErr: false,
+		},
+		{
+			name: "authorization_details flow with unknown credential_identifier",
+			credentialRequest: &CredentialRequest{
+				CredentialIdentifier: "unknown-id",
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "vc+ldp",
+					CredentialIdentifiers:     []string{"cred-id-1"},
+				},
+			},
+			wantErr:     true,
+			errContains: "not found in Token Response",
+		},
+		{
+			name: "authorization_details flow without credential_identifier",
+			credentialRequest: &CredentialRequest{
+				CredentialConfigurationID: "vc+ldp",
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "vc+ldp",
+					CredentialIdentifiers:     []string{"cred-id-1"},
+				},
+			},
+			wantErr:     true,
+			errContains: "credential_identifier is required",
+		},
+		{
+			name: "authorization_details flow with both identifier and configuration_id",
+			credentialRequest: &CredentialRequest{
+				CredentialIdentifier:      "cred-id-1",
+				CredentialConfigurationID: "vc+ldp",
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "vc+ldp",
+					CredentialIdentifiers:     []string{"cred-id-1"},
+				},
+			},
+			wantErr:     true,
+			errContains: "credential_configuration_id must not be present",
+		},
+		{
+			name: "scope-based flow without credential_configuration_id",
+			credentialRequest: &CredentialRequest{
+				CredentialIdentifier: "some-id",
+			},
+			authorizationDetails: nil,
+			wantErr:              true,
+			errContains:          "credential_configuration_id is required",
+		},
+		{
+			name: "scope-based flow with both identifier and configuration_id",
+			credentialRequest: &CredentialRequest{
+				CredentialConfigurationID: "vc+ldp",
+				CredentialIdentifier:      "some-id",
+			},
+			authorizationDetails: nil,
+			wantErr:              true,
+			errContains:          "credential_identifier must not be present",
+		},
+		{
+			name: "credential_identifier matches second authorization_details entry",
+			credentialRequest: &CredentialRequest{
+				CredentialIdentifier: "cred-id-2",
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "config-a",
+					CredentialIdentifiers:     []string{"cred-id-1"},
+				},
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "config-b",
+					CredentialIdentifiers:     []string{"cred-id-2", "cred-id-3"},
+				},
+			},
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			got := tt.credentialRequest.Validate(ctx, tt.tokenResponse)
-			assert.NoError(t, got)
+			err := tt.credentialRequest.Validate(ctx, tt.authorizationDetails)
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

@@ -62,7 +62,7 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 	}
 
 	// Parse and prepare destinations
-	if cfg.Issuer != nil && cfg.Issuer.AuditLog != nil && cfg.Issuer.AuditLog.Enabled {
+	if cfg.Issuer != nil && cfg.Issuer.AuditLog != nil && cfg.Issuer.AuditLog.Enable {
 		service.fileSyncInterval = cfg.Issuer.AuditLog.FileSyncInterval
 
 		var err error

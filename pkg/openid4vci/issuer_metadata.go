@@ -10,36 +10,39 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// CredentialIssuerMetadataParameters https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-p
+// CredentialIssuerMetadataParameters https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 type CredentialIssuerMetadataParameters struct {
-	// CredentialIssuer: REQUIRED. The Credential Issuer's identifier, as defined in Section 11.2.1.
+	// CredentialIssuer: REQUIRED. The Credential Issuer's identifier, as defined in Section 12.2.1.
 	CredentialIssuer string `json:"credential_issuer" yaml:"credential_issuer" validate:"required"`
 
-	//AuthorizationServers: OPTIONAL. Array of strings, where each string is an identifier of the OAuth 2.0 Authorization Server (as defined in [RFC8414]) the Credential Issuer relies on for authorization. If this parameter is omitted, the entity providing the Credential Issuer is also acting as the Authorization Server, i.e., the Credential Issuer's identifier is used to obtain the Authorization Server metadata. The actual OAuth 2.0 Authorization Server metadata is obtained from the oauth-authorization-server well-known location as defined in Section 3 of [RFC8414]. When there are multiple entries in the array, the Wallet may be able to determine which Authorization Server to use by querying the metadata; for example, by examining the grant_types_supported values, the Wallet can filter the server to use based on the grant type it plans to use. When the Wallet is using authorization_server parameter in the Credential Offer as a hint to determine which Authorization Server to use out of multiple, the Wallet MUST NOT proceed with the flow if the authorization_server Credential Offer parameter value does not match any of the entries in the authorization_servers array.
+	// AuthorizationServers: OPTIONAL. A non-empty array of strings, where each string is an identifier of the OAuth 2.0 Authorization Server (as defined in [RFC8414]) the Credential Issuer relies on for authorization.
 	AuthorizationServers []string `json:"authorization_servers,omitempty" yaml:"authorization_servers,omitempty"`
 
-	//CredentialEndpoint  REQUIRED. URL of the Credential Issuer's Credential Endpoint, as defined in Section 7.2. This URL MUST use the https scheme and MAY contain port, path, and query parameter components.
+	// CredentialEndpoint: REQUIRED. URL of the Credential Issuer's Credential Endpoint, as defined in Section 8.2. This URL MUST use the https scheme and MAY contain port, path, and query parameter components.
 	CredentialEndpoint string `json:"credential_endpoint" yaml:"credential_endpoint" validate:"required"`
+
+	// NonceEndpoint: OPTIONAL. URL of the Credential Issuer's Nonce Endpoint, as defined in Section 7. This URL MUST use the https scheme and MAY contain port, path, and query parameter components. If omitted, the Credential Issuer does not require the use of c_nonce.
+	NonceEndpoint string `json:"nonce_endpoint,omitempty" yaml:"nonce_endpoint,omitempty"`
 
 	// DeferredCredentialEndpoint: OPTIONAL. URL of the Credential Issuer's Deferred Credential Endpoint, as defined in Section 9. This URL MUST use the https scheme and MAY contain port, path, and query parameter components. If omitted, the Credential Issuer does not support the Deferred Credential Endpoint.
 	DeferredCredentialEndpoint string `json:"deferred_credential_endpoint,omitempty" yaml:"deferred_credential_endpoint,omitempty"`
 
-	// NotificationEndpoint: OPTIONAL. URL of the Credential Issuer's Notification Endpoint, as defined in Section 10. This URL MUST use the https scheme and MAY contain port, path, and query parameter components. If omitted, the Credential Issuer does not support the Notification Endpoint.
+	// NotificationEndpoint: OPTIONAL. URL of the Credential Issuer's Notification Endpoint, as defined in Section 11. This URL MUST use the https scheme and MAY contain port, path, and query parameter components. If omitted, the Credential Issuer does not support the Notification Endpoint.
 	NotificationEndpoint string `json:"notification_endpoint,omitempty" yaml:"notification_endpoint,omitempty"`
 
-	// CredentialResponseEncryption: OPTIONAL. Object containing information about whether the Credential Issuer supports encryption of the Credential and Batch Credential Response on top of TLS
+	// CredentialResponseEncryption: OPTIONAL. Object containing information about whether the Credential Issuer supports encryption of the Credential Response on top of TLS.
 	CredentialResponseEncryption *MetadataCredentialResponseEncryption `json:"credential_response_encryption,omitempty" yaml:"credential_response_encryption" validate:"omitempty"`
 
-	// BatchCredentialIssuance OPTIONAL. Object containing information about the Credential Issuer's supports for batch issuance of Credentials on the Credential Endpoint. The presence of this parameter means that the issuer supports the proofs parameter in the Credential Request so can issue more than one Verifiable Credential for the same Credential Dataset in a single request/response.
+	// BatchCredentialIssuance: OPTIONAL. Object containing information about the Credential Issuer's support for batch issuance of Credentials on the Credential Endpoint.
 	BatchCredentialIssuance *BatchCredentialIssuance `json:"batch_credential_issuance,omitempty" yaml:"batch_credential_issuance,omitempty"`
 
-	//SignedMetadata: OPTIONAL. String that is a signed JWT. This JWT contains Credential Issuer metadata parameters as claims. The signed metadata MUST be secured using JSON Web Signature (JWS) [RFC7515] and MUST contain an iat (Issued At) claim, an iss (Issuer) claim denoting the party attesting to the claims in the signed metadata, and sub (Subject) claim matching the Credential Issuer identifier. If the Wallet supports signed metadata, metadata values conveyed in the signed JWT MUST take precedence over the corresponding values conveyed using plain JSON elements. If the Credential Issuer wants to enforce use of signed metadata, it omits the respective metadata parameters from the unsigned part of the Credential Issuer metadata. A signed_metadata metadata value MUST NOT appear as a claim in the JWT. The Wallet MUST establish trust in the signer of the metadata, and obtain the keys to validate the signature before processing the metadata. The concrete mechanism how to do that is out of scope of this specification and MAY be defined in the profiles of this specification.
-	SignedMetadata string `json:"signed_metadata,omitempty" yaml:"signed_metadata,omitempty"`
-
-	// Display: OPTIONAL. Array of objects, where each object contains display properties of a Credential Issuer for a certain language. Below is a non-exhaustive list of valid parameters that MAY be included:
+	// Display: OPTIONAL. A non-empty array of objects, where each object contains display properties of a Credential Issuer for a certain language.
 	Display []MetadataDisplay `json:"display,omitempty" yaml:"display,omitempty"`
 
-	// CredentialConfigurationsSupported: REQUIRED. Object that describes specifics of the Credential that the Credential Issuer supports issuance of. This object contains a list of name/value pairs, where each name is a unique identifier of the supported Credential being described. This identifier is used in the Credential Offer as defined in Section 4.1.1 to communicate to the Wallet which Credential is being offered. The value is an object that contains metadata about a specific Credential and contains the following parameters defined by this specification
+	// SignedMetadata: OPTIONAL. A JWT that contains Credential Issuer metadata parameters as claims.
+	SignedMetadata string `json:"signed_metadata,omitempty" yaml:"signed_metadata,omitempty"`
+
+	// CredentialConfigurationsSupported: REQUIRED. Object that describes specifics of the Credential that the Credential Issuer supports issuance of. This object contains a list of name/value pairs, where each name is a unique identifier of the supported Credential being described.
 	CredentialConfigurationsSupported map[string]CredentialConfigurationsSupported `json:"credential_configurations_supported" yaml:"credential_configurations_supported" validate:"required"`
 }
 
@@ -55,16 +58,14 @@ func (c *CredentialIssuerMetadataParameters) Marshal() (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// Sign creates a signed JWT of the metadata using pki.Signer.
-// The pki.Signer interface supports both software keys and HSM.
+// Sign creates a signed JWT representation of the metadata and sets the signed_metadata field.
+// Per OID4VCI 1.0 Section 12.2.4, signed_metadata is an OPTIONAL JWT that contains the
+// Credential Issuer metadata parameters as claims, using typ "openidvci-issuer-metadata+jwt".
 func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pki.Signer, x5c []string) (*CredentialIssuerMetadataParameters, error) {
 	header := jwt.MapClaims{
-		"typ": "JWT",
+		"typ": "openidvci-issuer-metadata+jwt",
 		"x5c": x5c,
 	}
-
-	// ensure that signed_metadata is empty
-	c.SignedMetadata = ""
 
 	body, err := c.Marshal()
 	if err != nil {
@@ -74,6 +75,9 @@ func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pk
 	body["iat"] = time.Now().Unix()
 	body["iss"] = c.CredentialIssuer
 	body["sub"] = c.CredentialIssuer
+
+	// Remove signed_metadata from the JWT payload to avoid self-referencing
+	delete(body, "signed_metadata")
 
 	reply, err := jose.MakeJWT(ctx, header, body, signer)
 	if err != nil {
@@ -124,36 +128,41 @@ type MetadataLogo struct {
 }
 
 // CredentialConfigurationsSupported Object that describes specifics of the Credential that the Credential Issuer supports issuance of.
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 type CredentialConfigurationsSupported struct {
-	// Format: REQUIRED. A JSON string identifying the format of this Credential, i.e., jwt_vc_json or ldp_vc. Depending on the format value, the object contains further elements defining the type and (optionally) particular claims the Credential MAY contain and information about how to display the Credential. Appendix A contains Credential Format Profiles introduced by this specification.
+	// Format: REQUIRED. A JSON string identifying the format of this Credential, e.g., dc+sd-jwt, mso_mdoc, jwt_vc_json, ldp_vc.
 	Format string `json:"format" yaml:"format" validate:"required"`
 
-	// Doctype MDOC specific parameter
-	Doctype string `json:"doctype,omitempty" yaml:"doctype,omitempty"`
-
-	// Cryptosuite: OPTIONAL. For ldp_vc and vc+ld+json formats, identifies the cryptographic suite used for
-	// Data Integrity Proofs. Valid values include: ecdsa-rdfc-2019, ecdsa-sd-2023, eddsa-rdfc-2022.
-	Cryptosuite string `json:"cryptosuite,omitempty" yaml:"cryptosuite,omitempty"`
-
-	// Scope: OPTIONAL. A JSON string identifying the scope value that this Credential Issuer supports for this particular Credential. The value can be the same across multiple credential_configurations_supported objects. The Authorization Server MUST be able to uniquely identify the Credential Issuer based on the scope value. The Wallet can use this value in the Authorization Request as defined in Section 5.1.2. Scope values in this Credential Issuer metadata MAY duplicate those in the scopes_supported parameter of the Authorization Server.
+	// Scope: OPTIONAL. A JSON string identifying the scope value that this Credential Issuer supports for this particular Credential.
 	Scope string `json:"scope,omitempty" yaml:"scope,omitempty"`
 
-	// CryptographicBindingMethodsSupported: OPTIONAL. Array of case sensitive strings that identify the representation of the cryptographic key material that the issued Credential is bound to, as defined in Section 7.1. Support for keys in JWK format [RFC7517] is indicated by the value jwk. Support for keys expressed as a COSE Key object [RFC8152] (for example, used in [ISO.18013-5]) is indicated by the value cose_key. When the Cryptographic Binding Method is a DID, valid values are a did: prefix followed by a method-name using a syntax as defined in Section 3.1 of [DID-Core], but without a :and method-specific-id. For example, support for the DID method with a method-name "example" would be represented by did:example.
-	CryptographicBindingMethodsSupported []string `json:"cryptographic_binding_methods_supported,omitempty" yaml:"cryptographic_binding_methods_supported,omitempty" validate:"omitempty,dive,oneof=jwk cose_key did:example"`
-
-	// CredentialSigningAlgValuesSupported: OPTIONAL. Array of case sensitive strings that identify the algorithms that the Issuer uses to sign the issued Credential. Algorithm names used are determined by the Credential format and are defined in Appendix A.
+	// CredentialSigningAlgValuesSupported: OPTIONAL. A non-empty array of algorithm identifiers that the Issuer uses to sign the issued Credential.
 	// For dc+sd-jwt format, these are strings like "ES256". For mso_mdoc format, these are COSE algorithm identifiers (integers like -7 for ES256).
 	CredentialSigningAlgValuesSupported []any `json:"credential_signing_alg_values_supported,omitempty" yaml:"credential_signing_alg_values_supported,omitempty"`
 
-	// ProofTypesSupported: OPTIONAL. Object that describes specifics of the key proof(s) that the Credential Issuer supports. This object contains a list of name/value pairs, where each name is a unique identifier of the supported proof type(s). Valid values are defined in Section 7.2.1, other values MAY be used. This identifier is also used by the Wallet in the Credential Request as defined in Section 7.2. The value in the name/value pair is an object that contains metadata about the key proof and contains the following parameters defined by this specification:
-	ProofTypesSupported map[string]ProofsTypesSupported `json:"proof_types_supported" yaml:"proof_types_supported"`
+	// CryptographicBindingMethodsSupported: OPTIONAL. A non-empty array of case sensitive strings that identify the representation of the cryptographic key material that the issued Credential is bound to.
+	// Valid values include "jwk", "cose_key", and DID method prefixes like "did:key", "did:web", "did:jwk", etc.
+	CryptographicBindingMethodsSupported []string `json:"cryptographic_binding_methods_supported,omitempty" yaml:"cryptographic_binding_methods_supported,omitempty"`
 
-	// Display: OPTIONAL. Array of objects, where each object contains the display properties of the supported Credential for a certain language. Below is a non-exhaustive list of parameters that MAY be included.
-	Display []CredentialMetadataDisplay `json:"display,omitempty" yaml:"display,omitempty"`
+	// ProofTypesSupported: OPTIONAL. Object that describes specifics of the key proof(s) that the Credential Issuer supports.
+	ProofTypesSupported map[string]ProofsTypesSupported `json:"proof_types_supported,omitempty" yaml:"proof_types_supported,omitempty"`
 
-	// CredentialDefinition REQUIRED. Object containing the detailed description of the Credential type. It consists of at least the following two parameters
-	CredentialDefinition CredentialDefinition `json:"credential_definition" yaml:"credential_definition" validate:"required"`
-	VCT                  string               `json:"vct,omitempty" yaml:"vct,omitempty"`
+	// CredentialMetadata: OPTIONAL. Object containing information relevant to the usage and display of issued Credentials.
+	CredentialMetadata *CredentialMetadata `json:"credential_metadata,omitempty" yaml:"credential_metadata,omitempty"`
+
+	// --- Format-specific parameters (Appendix A) ---
+
+	// VCT: REQUIRED for dc+sd-jwt format. String designating the type of the Credential, as defined in SD-JWT VC.
+	VCT string `json:"vct,omitempty" yaml:"vct,omitempty"`
+
+	// CredentialDefinition: REQUIRED for jwt_vc_json and ldp_vc formats. Object containing the detailed description of the Credential type.
+	CredentialDefinition *CredentialDefinition `json:"credential_definition,omitempty" yaml:"credential_definition,omitempty"`
+
+	// Doctype: REQUIRED for mso_mdoc format. String identifying the Credential type, as defined in ISO 18013-5.
+	Doctype string `json:"doctype,omitempty" yaml:"doctype,omitempty"`
+
+	// Cryptosuite: OPTIONAL. For ldp_vc and vc+ld+json formats, identifies the cryptographic suite used for Data Integrity Proofs.
+	Cryptosuite string `json:"cryptosuite,omitempty" yaml:"cryptosuite,omitempty"`
 }
 
 // ProofsTypesSupported Object that describes specifics of the key proof(s) that the Credential Issuer supports.
@@ -162,19 +171,47 @@ type ProofsTypesSupported struct {
 	ProofSigningAlgValuesSupported []string `json:"proof_signing_alg_values_supported" yaml:"proof_signing_alg_values_supported" validate:"required"`
 }
 
-type CredentialSubject struct {
-	//Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim in the issued Credential. If set to false, the claim is not included in the issued Credential if the wallet did not request the inclusion of the claim, and/or if the Credential Issuer chose to not include the claim. If the mandatory parameter is omitted, the default value is false.
-	Mandatory bool `json:"mandatory,omitempty" yaml:"mandatory,omitempty"`
-
-	//ValueType: OPTIONAL. String value determining the type of value of the claim. Valid values defined by this specification are string, number, and image media types such as image/jpeg as defined in IANA media type registry for images (https://www.iana.org/assignments/media-types/media-types.xhtml#image). Other values MAY also be used.
-	ValueType string `json:"value_type,omitempty" yaml:"value_type,omitempty"`
-
+// CredentialMetadata contains information relevant to the usage and display of issued Credentials.
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
+type CredentialMetadata struct {
+	// Display: OPTIONAL. A non-empty array of objects, where each object contains the display properties of the supported Credential for a certain language.
 	Display []CredentialMetadataDisplay `json:"display,omitempty" yaml:"display,omitempty"`
+
+	// Claims: OPTIONAL. A non-empty array of claims description objects as defined in Appendix B.2.
+	Claims []ClaimDescription `json:"claims,omitempty" yaml:"claims,omitempty"`
 }
 
+// ClaimDescription describes a claim within a Credential for display purposes.
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-claims-description-for-issu
+type ClaimDescription struct {
+	// Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential.
+	Path []string `json:"path" yaml:"path" validate:"required"`
+
+	// Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.
+	Mandatory bool `json:"mandatory,omitempty" yaml:"mandatory,omitempty"`
+
+	// Display: OPTIONAL. A non-empty array of objects containing display properties for the claim.
+	Display []ClaimDisplayProperties `json:"display,omitempty" yaml:"display,omitempty"`
+}
+
+// ClaimDisplayProperties contains display properties for a claim.
+type ClaimDisplayProperties struct {
+	// Name: OPTIONAL. String value of a display name for the claim.
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+
+	// Locale: OPTIONAL. String value that identifies the language of this object.
+	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
+}
+
+// CredentialDefinition describes the Credential type for W3C VC formats (jwt_vc_json, ldp_vc).
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#appendix-A.1.1.2
 type CredentialDefinition struct {
-	// Type REQUIRED. Array designating the types a certain Credential type supports, according to [VC_DATA], Section 4.3.
+	// Type: REQUIRED. Array designating the types a certain Credential type supports, according to [VC_DATA], Section 4.3.
 	Type []string `json:"type" yaml:"type" validate:"required"`
+
+	// Context: REQUIRED for ldp_vc. Array as defined in [VC_DATA], Section 4.1.
+	// Note: conditionally required — must be enforced at the application level based on format.
+	Context []string `json:"@context,omitempty" yaml:"@context,omitempty"`
 }
 
 // CredentialMetadataDisplay displays properties of the supported Credential for a certain language.

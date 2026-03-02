@@ -37,12 +37,12 @@ type Document struct {
 
 // IDMapping is a generic type for ID mapping
 type IDMapping struct {
-	AuthenticSourcePersonID string `json:"authentic_source_person_id"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
 }
 
 // CredentialOffer https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html 4.1.1 Credential Offer Parameters
 type CredentialOffer struct {
-	CredentialIssuer           string                       `json:"credential_issuer"`
+	CredentialIssuer           string                       `json:"credential_issuer" validate:"omitempty,max=128,printascii"`
 	CredentialConfigurationIDs []string                     `json:"credential_configuration_ids"`
 	Grants                     map[string]map[string]string `json:"grants"`
 }
@@ -51,11 +51,11 @@ type CredentialOffer struct {
 type Consent struct {
 	// required: true
 	// example: "Using my data for research"
-	ConsentTo string `json:"consent_to,omitempty" bson:"consent_to" validate:"required"`
+	ConsentTo string `json:"consent_to,omitempty" bson:"consent_to" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: "sess-123"
-	SessionID string `json:"session_id,omitempty" bson:"session_id" validate:"required"`
+	SessionID string `json:"session_id,omitempty" bson:"session_id" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 509567558
@@ -67,7 +67,7 @@ type Consent struct {
 type Collect struct {
 	// required: false
 	// example: 98fe67fc-c03f-11ee-bbee-4345224d414f
-	ID string `json:"id,omitempty" bson:"id"`
+	ID string `json:"id,omitempty" bson:"id" validate:"omitempty,max=128,printascii"`
 
 	// required: false
 	// example: 509567558
@@ -79,7 +79,7 @@ type Collect struct {
 type MetaData struct {
 	// required: true
 	// example: SUNET
-	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"required"`
+	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: "1.0.0"
@@ -88,16 +88,16 @@ type MetaData struct {
 	// VCT is the Verifiable Credential Type
 	// required: true
 	// example: "urn:eudi:pid:1"
-	VCT string `json:"vct,omitempty" bson:"vct" validate:"required"`
+	VCT string `json:"vct,omitempty" bson:"vct" validate:"required,max=128,printascii"`
 
 	// Scope is the credential configuration ID scope
 	// required: false
 	// example: "ehic", "pda1"
-	Scope string `json:"scope,omitempty" bson:"scope" validate:"required"`
+	Scope string `json:"scope,omitempty" bson:"scope" validate:"required,max=128,printascii"`
 
 	// required: true
 	// example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
-	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"required"`
+	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"required,max=128,printascii"`
 
 	// RealData is a flag to indicate if the document contains real data
 	// required: true
@@ -122,14 +122,14 @@ type MetaData struct {
 	// required: false
 	// example: file://path/to/schema.json or http://example.com/schema.json
 	// format: string
-	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation"`
+	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation" validate:"omitempty,max=128,printascii"`
 }
 
 // RevocationReference refer to a document
 type RevocationReference struct {
-	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source"`
-	VCT             string `json:"vct,omitempty" bson:"vct"`
-	DocumentID      string `json:"document_id,omitempty" bson:"document_id"`
+	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"omitempty,max=128,printascii"`
+	VCT             string `json:"vct,omitempty" bson:"vct" validate:"omitempty,max=128,printascii"`
+	DocumentID      string `json:"document_id,omitempty" bson:"document_id" validate:"omitempty,max=128,printascii"`
 }
 
 // Revocation is a collection of fields representing a revocation
@@ -138,7 +138,7 @@ type Revocation struct {
 	// ID is the ID of the revocation
 	// required: false
 	// example: 8dbd2680-c03f-11ee-a21b-034aafe41222
-	ID string `json:"id,omitempty" bson:"id"`
+	ID string `json:"id,omitempty" bson:"id" validate:"omitempty,max=128,printascii"`
 
 	// Revoked is a flag to indicate if the document has been revoked
 	// required: false
@@ -156,14 +156,14 @@ type Revocation struct {
 	// Reason is the reason for revocation
 	// required: false
 	// example: lost or stolen
-	Reason string `json:"reason,omitempty" bson:"reason"`
+	Reason string `json:"reason,omitempty" bson:"reason" validate:"omitempty,max=128,printascii"`
 }
 
 // IdentitySchema is a collection of fields representing an identity schema
 type IdentitySchema struct {
 	// required: true
 	// example: "SE"
-	Name string `json:"name" bson:"name" validate:"required"`
+	Name string `json:"name" bson:"name" validate:"required,max=128,printascii"`
 
 	// required: false
 	// example: "1.0.0"
@@ -174,25 +174,25 @@ type IdentitySchema struct {
 type Identity struct {
 	// required: true
 	// example: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a
-	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" bson:"authentic_source_person_id"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" bson:"authentic_source_person_id" validate:"required,max=128,printascii"`
 
 	Schema *IdentitySchema `json:"schema,omitempty" bson:"schema" validate:"required"`
 
 	// required: true
 	// example: Svensson
-	FamilyName string `json:"family_name" bson:"family_name" validate:"required,min=1,max=100"`
+	FamilyName string `json:"family_name" bson:"family_name" validate:"required,min=1,max=100,printascii"`
 
 	// required: true
 	// example: Magnus
-	GivenName string `json:"given_name" bson:"given_name" validate:"required,min=1,max=100"`
+	GivenName string `json:"given_name" bson:"given_name" validate:"required,min=1,max=100,printascii"`
 
 	// required: true
 	// example: 1970-01-01 TODO: Day, month, and year?
-	BirthDate string `json:"birth_date" bson:"birth_date" validate:"required,datetime=2006-01-02"`
+	BirthDate string `json:"birth_date" bson:"birth_date" validate:"required,datetime=2006-01-02,printascii"`
 
 	// required: true
 	// example: Stockholm
-	BirthPlace string `json:"birth_place,omitempty" bson:"birth_place,omitempty" validate:"omitempty,min=2,max=100"`
+	BirthPlace string `json:"birth_place,omitempty" bson:"birth_place,omitempty" validate:"omitempty,min=2,max=100,printascii"`
 
 	// required: true
 	// example: SE
@@ -200,15 +200,15 @@ type Identity struct {
 
 	// required: false
 	// example: <personnummer>
-	PersonalAdministrativeNumber string `json:"personal_administrative_number,omitempty" bson:"personal_administrative_number,omitempty" validate:"omitempty,min=4,max=50"`
+	PersonalAdministrativeNumber string `json:"personal_administrative_number,omitempty" bson:"personal_administrative_number,omitempty" validate:"omitempty,min=4,max=50,printascii"`
 
 	// required: false
 	// example: facial image compliant with ISO 19794-5 or ISO 39794 specifications
 	Picture string `json:"picture,omitempty" bson:"picture,omitempty"`
 
-	BirthFamilyName string `json:"birth_family_name,omitempty" bson:"birth_family_name,omitempty" validate:"omitempty,min=1,max=100"`
+	BirthFamilyName string `json:"birth_family_name,omitempty" bson:"birth_family_name,omitempty" validate:"omitempty,min=1,max=100,printascii"`
 
-	BirthGivenName string `json:"birth_given_name,omitempty" bson:"birth_given_name,omitempty" validate:"omitempty,min=1,max=100"`
+	BirthGivenName string `json:"birth_given_name,omitempty" bson:"birth_given_name,omitempty" validate:"omitempty,min=1,max=100,printascii"`
 
 	// required: false
 	// example: 0 = not known, 1 = male, 2 = female, ...
@@ -224,26 +224,26 @@ type Identity struct {
 
 	// required: false
 	// example: 221b Baker street
-	ResidentAddress string `json:"resident_address,omitempty" bson:"resident_address,omitempty"`
+	ResidentAddress string `json:"resident_address,omitempty" bson:"resident_address,omitempty" validate:"omitempty,printascii"`
 
 	// required: false
 	// example: Baker street
-	ResidentStreetAddress string `json:"resident_street_address,omitempty" bson:"resident_street_address,omitempty" validate:"omitempty,min=1,max=100"`
+	ResidentStreetAddress string `json:"resident_street_address,omitempty" bson:"resident_street_address,omitempty" validate:"omitempty,min=1,max=100,printascii"`
 
 	// required: false
 	// example: 221b
-	ResidentHouseNumber string `json:"resident_house_number,omitempty" bson:"resident_house_number,omitempty"`
+	ResidentHouseNumber string `json:"resident_house_number,omitempty" bson:"resident_house_number,omitempty" validate:"omitempty,printascii"`
 
 	// required: false
 	// example: W1U 6SG
-	ResidentPostalCode string `json:"resident_postal_code,omitempty" bson:"resident_postal_code,omitempty"`
+	ResidentPostalCode string `json:"resident_postal_code,omitempty" bson:"resident_postal_code,omitempty" validate:"omitempty,printascii"`
 
 	// required: false
 	// example: London
-	ResidentCity string `json:"resident_city,omitempty" bson:"resident_city,omitempty"`
+	ResidentCity string `json:"resident_city,omitempty" bson:"resident_city,omitempty" validate:"omitempty,printascii"`
 	// required: false
 	// example: england
-	ResidentState string `json:"resident_state,omitempty" bson:"resident_state,omitempty"`
+	ResidentState string `json:"resident_state,omitempty" bson:"resident_state,omitempty" validate:"omitempty,printascii"`
 	// required: false
 	// example: England
 	ResidentCountry string `json:"resident_country,omitempty" bson:"resident_country,omitempty" validate:"omitempty,iso3166_1_alpha2"`
@@ -264,7 +264,7 @@ type Identity struct {
 
 	// required: false
 	// example:
-	IssuingAuthority string `json:"issuing_authority,omitempty" bson:"issuing_authority,omitempty"`
+	IssuingAuthority string `json:"issuing_authority,omitempty" bson:"issuing_authority,omitempty" validate:"omitempty,printascii"`
 	// required: false
 	// example:
 	IssuingCountry string `json:"issuing_country,omitempty" bson:"issuing_country,omitempty" validate:"omitempty,iso3166_1_alpha2"`
@@ -277,13 +277,13 @@ type Identity struct {
 
 	// required: false
 	// example:
-	DocumentNumber string `json:"document_number,omitempty" bson:"document_number,omitempty"`
+	DocumentNumber string `json:"document_number,omitempty" bson:"document_number,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// required: false
 	// example:
-	IssuingJurisdiction string `json:"issuing_jurisdiction,omitempty" bson:"issuing_jurisdiction,omitempty"`
+	IssuingJurisdiction string `json:"issuing_jurisdiction,omitempty" bson:"issuing_jurisdiction,omitempty" validate:"omitempty,max=128,printascii"`
 
-	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty"`
+	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // isLeapYear checks if a year is a leap year
@@ -297,13 +297,13 @@ func ageThresholdDate(birthDate time.Time, years int) time.Time {
 	targetYear := birthDate.Year() + years
 	month := birthDate.Month()
 	day := birthDate.Day()
-	
+
 	// Handle leap year birthday (Feb 29) in non-leap target year
 	if month == 2 && day == 29 && !isLeapYear(targetYear) {
 		// Use Feb 28 instead of letting Go normalize to March 1
 		return time.Date(targetYear, 2, 28, 0, 0, 0, 0, birthDate.Location())
 	}
-	
+
 	return birthDate.AddDate(years, 0, 0)
 }
 

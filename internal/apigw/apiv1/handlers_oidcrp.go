@@ -10,7 +10,7 @@ import (
 
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
 	"vc/pkg/grpchelpers"
-	"vc/pkg/oidcrp"
+	"vc/internal/apigw/oidcrp"
 	"vc/pkg/openid4vci"
 
 	"go.opentelemetry.io/otel/codes"
@@ -82,7 +82,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	// Retrieve session to get credential type
-	session, err := service.GetSession(req.State)
+	session, err := service.GetSession(ctx, req.State)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
@@ -136,7 +136,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	// Clean up session
-	service.DeleteSession(req.State)
+	service.DeleteSession(ctx, req.State)
 
 	c.log.Info("Credential issued successfully via OIDC RP",
 		"credential_type", session.CredentialType,

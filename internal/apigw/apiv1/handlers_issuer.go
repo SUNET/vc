@@ -16,8 +16,6 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
-
-	"github.com/jellydator/ttlcache/v3"
 )
 
 // VCICredentialOffer implements OpenID4VCI credential offer endpoint
@@ -59,7 +57,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	if c.dpopJTICache.Has(jti) {
+	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
 		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
 		return nil, oauth2.ErrJTIReplay
 	}
@@ -70,7 +68,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	c.dpopJTICache.Set(jti, true, ttlcache.DefaultTTL)
+	c.cacheService.DPopJTI.Set(ctx, jti, true)
 
 	// Validate HTU matches credential endpoint
 	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
@@ -88,9 +86,15 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
 
-	authContext, err := c.authContextCache.GetWithAccessToken(ctx, accessToken)
+	authContext, err := c.cacheService.AuthContext.GetWithAccessToken(ctx, accessToken)
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
+		return nil, err
+	}
+
+	// Validate credential request against authorization details per OID4VCI 1.0 Section 7.1
+	if err := req.Validate(ctx, authContext.AuthorizationDetails); err != nil {
+		c.log.Error(err, "credential request validation failed")
 		return nil, err
 	}
 
@@ -119,7 +123,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
 			Meta: &model.MetaData{
 				AuthenticSource: authContext.AuthenticSource,
-				VCT:             credentialConstructor.GetVCT(),
+				VCT:             credentialConstructor.VCTM.VCT,
 			},
 			Identity: authContext.Identity,
 		})
@@ -130,8 +134,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	default:
 		// Auth methods from config (e.g., pid_auth): retrieve from session cache
 		// These credentials require presenting another credential for authentication
-		docs := c.documentCache.Get(authContext.SessionID).Value()
-		if docs == nil {
+		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)
+		if !ok {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
 			return nil, errors.New("no documents found for session " + authContext.SessionID)
 		}
@@ -300,7 +304,9 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	if req.CredentialConfigurationID != "" && c.issuerMetadata != nil {
 		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
 			cryptosuite = config.Cryptosuite
-			credentialTypes = config.CredentialDefinition.Type
+			if config.CredentialDefinition != nil {
+				credentialTypes = config.CredentialDefinition.Type
+			}
 			// Mandatory pointers could be specified in config in future
 		}
 	}
@@ -419,18 +425,23 @@ func (c *Client) VCINotification(ctx context.Context, req *openid4vci.Notificati
 	return nil
 }
 
-// VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
+// VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	c.log.Debug("metadata request")
 
-	signedMetadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
-	if err != nil {
-		return nil, err
-	}
-	if err := helpers.Check(ctx, c.cfg, signedMetadata, c.log); err != nil {
+	if err := helpers.Check(ctx, c.cfg, c.issuerMetadata, c.log); err != nil {
 		c.log.Error(err, "failed to check metadata")
 		return nil, err
 	}
 
-	return signedMetadata, nil
+	if c.pkiSigner != nil {
+		metadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+		if err != nil {
+			c.log.Error(err, "failed to sign metadata")
+			return nil, err
+		}
+		return metadata, nil
+	}
+
+	return c.issuerMetadata, nil
 }

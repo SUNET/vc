@@ -62,15 +62,6 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		return nil, err
 	}
 
-	for scope, credentialInfo := range cfg.CredentialConstructor {
-		if err := credentialInfo.LoadVCTMetadata(ctx, scope); err != nil {
-			c.log.Error(err, "Failed to load credential constructor", "scope", scope)
-			return nil, err
-		}
-
-		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
-	}
-
 	// Initialize mDL issuer if certificate chain is configured
 	if err := c.initMDocIssuer(ctx); err != nil {
 		c.log.Info("mDL issuer not initialized", "error", err)

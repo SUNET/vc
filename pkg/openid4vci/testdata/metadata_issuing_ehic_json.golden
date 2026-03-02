@@ -33,82 +33,25 @@
       "cryptographic_binding_methods_supported": ["did:example"],
       "credential_signing_alg_values_supported": ["ES256"],
       "credential_definition": {
-        "type": ["VerifiableCredential", "EHICCredential"],
-        "credentialSubject": {
-          "social_security_pin": {
-          "mandatory": true,
-          "value_type": "string",
-          "display": 
-            [
-              {
-              "name": "Social Security Number",
-              "locale": "en-US",
-              "description": "The social security number of the EHIC holder"
-              }
-            ]
+        "type": ["VerifiableCredential", "EHICCredential"]
+      },
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "European Health Insurance Card Credential",
+          "locale": "en-US",
+          "logo": {
+            "uri": "https://example.edu/public/logo.png",
+            "alt_text": "a square logo of a EHIC card"
           },
-        "institution_country": {
-          "mandatory": true,
-          "value_type": "string",
-          "display": [
-            {
-            "name": "Issuer Country",
-              "locale": "en-US",
-              "description": "The issuer country of the EHIC holder"
-            }
-          ]
+          "background_color": "#12107c",
+          "background_image": {
+            "uri":  "https://example.edu/public/background.png"
         },
-        "institution_id": {
-          "mandatory": true,
-          "value_type": "string",
-          "display": [
-              {
-              "name": "Issuer Institution Code",
-              "locale": "en-US",
-              "description": "The issuer institution code of the EHIC holder"
-            }
-        ]
-        },
-        "document_id": {
-          "mandatory": true,
-          "value_type": "string",
-          "display": [
-              {
-              "name": "Identification card number",
-              "locale": "en-US",
-              "description": "The Identification card number of the EHIC holder"
-              }
-            ]
-        },
-        "ending_date":{
-          "mandatory": true,
-          "value_type": "string",
-          "display": 
-            [
-              {
-              "name": "Expiry Date",
-              "locale": "en-US",
-              "description": "The date and time expired this credential"
-              }
-            ]
-          }
-        }
-      },
-      "display": [
-        {
-          "name": "European Health Insurance Card Credential",
-        "locale": "en-US",
-        "logo": {
-          "uri": "https://example.edu/public/logo.png",
-          "alt_text": "a square logo of a EHIC card"
-        },
-        "background_color": "#12107c",
-        "background_image": {
-          "uri":  "https://example.edu/public/background.png"
-      },
-        "text_color": "#FFFFFF"
-    }
-    ]
+          "text_color": "#FFFFFF"
+      }
+      ]
+      }
   }
 }
 }

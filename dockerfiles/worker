@@ -1,5 +1,5 @@
 # Compile
-FROM docker.sunet.se/dc4eu/gobuild:latest AS builder
+FROM docker.sunet.se/iam_vc/gobuild:latest AS builder
 
 ARG SERVICE_NAME
 ARG BUILDTAG

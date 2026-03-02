@@ -342,6 +342,8 @@ github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp
 github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
 github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280 h1:9xXylH++9mXY/JYsftp7Es7DBwSNN2UkJfmqwHk7t/0=
 github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280/go.mod h1:x2q0DHfpzuOO64X9gqdt2HlfzysiXm+gMlCk28Ou/Jk=
+github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8 h1:wlKUcYuYF4ovnaA9dvUogx3sp9dMZH1BmwLk/FKBrj4=
+github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8/go.mod h1:a6WtxG5hnsUzcqUt5iHmSMvyX4PLUPMDFK7FLoDMSMs=
 github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c h1:2cVyQIEZFVthrh7HoVktJTG1IJ13iZCnDxAKL4QicI0=
 github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c/go.mod h1:nGi9Dvk7dQ56a/Wgr7jAgU3bKtHaF1UkQAqML3vUfYY=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=

@@ -15,10 +15,16 @@
     }
     </script>
     <script src="/static/offers.js" type="module"></script>
+    <link rel="icon" href="/static/favicon.png" type="image/png">
 </head>
 <body>
     <section class="section" x-data="app()" x-init="init()">
         <div class="container is-max-tablet" style="max-width: 500px;">
+            <div class="has-text-centered mb-4">
+                <a href="https://www.sunet.se" target="_blank" rel="noopener noreferrer">
+                    <img src="/static/logo.png" alt="Sunet" style="height: 48px;">
+                </a>
+            </div>
             <h1 class="title has-text-centered has-text-weight-bold is-size-2" x-ref="title">Credential Offers</h1>
             <template x-if="error">
                 <div class="notification is-danger">

@@ -35,12 +35,16 @@ docs/design/
 config.conformance.yaml
 .ngrok-url
 ngrok.log
-verifier-proxy.log
+verifier.log
 playwright-screenshots/
 
 # VS Code MCP configuration (contains personal tokens)
 .vscode/mcp.json
 
+# MDOC manual
 ISO_IEC_18013_5_2021_EN.pdf
 # Temporary debug/test files
 tmp/
+
+# Runtime secrets – never commit real values
+secrets.yaml

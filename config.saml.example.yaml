@@ -20,7 +20,7 @@ issuer:
   # SAML Service Provider Configuration
   saml:
     # Enable or disable SAML authentication (default: false)
-    enabled: true
+    enable: true
     
     # SAML Entity ID for this Service Provider
     # This should be a unique identifier, typically a URL
@@ -43,7 +43,7 @@ issuer:
     acs_endpoint: "https://issuer.sunet.se/saml/acs"
     
     # Session duration in seconds (default: 3600 = 1 hour)
-    session_duration: 3600
+    session_duration: 300
     
     # Metadata cache TTL in seconds (default: 86400 = 24 hours)
     metadata_cache_ttl: 86400

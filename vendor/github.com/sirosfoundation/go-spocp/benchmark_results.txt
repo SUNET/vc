@@ -1,0 +1,37 @@
+goos: linux
+goarch: amd64
+pkg: github.com/sirosfoundation/go-spocp
+cpu: Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz
+BenchmarkIndexed_SmallRuleset_100-8             	 5121148	       734.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNonIndexed_SmallRuleset_100-8          	 1565446	      2338 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_MediumRuleset_1k-8             	  490318	      7364 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNonIndexed_MediumRuleset_1k-8          	  138121	     29047 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_LargeRuleset_10k-8             	   38408	     95566 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNonIndexed_LargeRuleset_10k-8          	   12229	    279023 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_VeryLargeRuleset_50k-8         	    3201	   1055105 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNonIndexed_VeryLargeRuleset_50k-8      	    1898	   1913802 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_UniformDistribution_10k-8      	   78915	     43529 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNonIndexed_UniformDistribution_10k-8   	   15662	    226181 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_HighlySkewed_10k-8             	56330016	        65.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNonIndexed_HighlySkewed_10k-8          	   24663	    139188 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_AddRule-8                      	18132592	       214.7 ns/op	     204 B/op	       5 allocs/op
+BenchmarkNonIndexed_AddRule-8                   	19278206	       188.9 ns/op	     179 B/op	       5 allocs/op
+BenchmarkIndexed_BestCase_10k-8                 	56641701	        71.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_WorstCase_10k-8                	    5167	    678400 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_SmallRuleset-8                  	 2875695	      1695 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_MediumRuleset-8                 	  572124	      7893 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_LargeRuleset-8                  	  128018	     26413 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_VeryLargeRuleset-8              	   12600	    292930 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_QueryBestCase-8                 	86590869	        41.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_QueryWorstCase-8                	158967019	        23.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEngine_AddRule-8                       	15199329	       427.4 ns/op	     127 B/op	       0 allocs/op
+BenchmarkStarForm_Wildcard-8                    	1000000000	         0.6222 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStarForm_Prefix-8                      	368315505	        10.82 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStarForm_Suffix-8                      	391534846	        15.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStarForm_Set-8                         	353199526	         9.933 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStarForm_Range-8                       	129455535	        23.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParser_SimpleAtom-8                    	69363138	        50.35 ns/op	      16 B/op	       1 allocs/op
+BenchmarkParser_SimpleList-8                    	18686835	       212.8 ns/op	      96 B/op	       4 allocs/op
+BenchmarkParser_ComplexNested-8                 	 4101609	      1367 ns/op	     464 B/op	      17 allocs/op
+PASS
+ok  	github.com/sirosfoundation/go-spocp	179.464s

@@ -10,7 +10,7 @@ PKI_DIR="${SCRIPT_DIR}/../pki"
 mkdir -p "${PKI_DIR}"
 
 # Service TLS certificates
-service_names="apigw verifier ui registry issuer mockas verifier_proxy vc"
+service_names="apigw verifier ui registry issuer mockas vc"
 
 # Generate CA key and cert
 cat > ca.conf <<EOF
@@ -32,7 +32,9 @@ if [ ! -f "${PKI_DIR}/rootCA.key" ]; then
     echo Creating Root CA
 
     openssl genrsa -out "${PKI_DIR}/rootCA.key" 2048
-    openssl req -x509 -new -nodes -key "${PKI_DIR}/rootCA.key" -sha256 -days 3650 -out "${PKI_DIR}/rootCA.crt" -config ca.conf
+    openssl req -x509 -new -nodes -key "${PKI_DIR}/rootCA.key" -sha256 -days 3650 -out "${PKI_DIR}/rootCA.crt" -config ca.conf \
+        -addext "basicConstraints=critical,CA:TRUE" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign"
 fi
 
 # Create leaf certificates for each service

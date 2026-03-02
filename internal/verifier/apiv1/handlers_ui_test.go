@@ -26,11 +26,15 @@ func TestUIMetadata(t *testing.T) {
 				"pid": {
 					AuthMethod:   "client_secret",
 					VCTMFilePath: "/path/to/vctm",
-					VCTM:         &sdjwtvc.VCTM{},
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+					Attributes: map[string]map[string][]string{
+						"en-US": {"given_name": {"given_name"}},
+					},
 				},
 				"diploma": {
 					AuthMethod:   "client_secret",
 					VCTMFilePath: "/path/to/diploma_vctm",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
 				},
 			},
 			supportedWallets: map[string]string{
@@ -52,6 +56,7 @@ func TestUIMetadata(t *testing.T) {
 			credentials: map[string]*model.CredentialConstructor{
 				"ehic": {
 					AuthMethod: "bearer_token",
+					VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 				},
 			},
 			supportedWallets:  nil,
@@ -82,11 +87,11 @@ func TestUIMetadata(t *testing.T) {
 				assert.Len(t, reply.Credentials, 0)
 			} else {
 				assert.Len(t, reply.Credentials, tt.expectCredentials)
-				// Verify sensitive fields are cleared
-				for _, cred := range reply.Credentials {
-					assert.Empty(t, cred.AuthMethod, "AuthMethod should be cleared")
-					assert.Empty(t, cred.VCTMFilePath, "VCTMFilePath should be cleared")
-					assert.Nil(t, cred.VCTM, "VCTM should be cleared")
+				for scope, cred := range reply.Credentials {
+					srcCred := tt.credentials[scope]
+					if srcCred != nil && srcCred.VCTM != nil {
+						assert.Equal(t, srcCred.VCTM.VCT, cred.VCT, "VCT should be populated from VCTM")
+					}
 				}
 			}
 

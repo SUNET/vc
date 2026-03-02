@@ -9,8 +9,8 @@ import (
 
 // TokenStatusListIssuer defines the interface for the Token Status List issuer service
 type TokenStatusListIssuer interface {
-	GetCachedJWT(section int64) string
-	GetCachedCWT(section int64) []byte
+	GetCachedJWT(ctx context.Context, section int64) string
+	GetCachedCWT(ctx context.Context, section int64) []byte
 	GetAllSections(ctx context.Context) ([]int64, error)
 }
 

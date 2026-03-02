@@ -9,11 +9,13 @@ import (
 	"syscall"
 	"time"
 	"vc/internal/verifier/apiv1"
+	"vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/httpserver"
 	"vc/internal/verifier/notify"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
+	"vc/pkg/model"
 	"vc/pkg/trace"
 )
 
@@ -34,7 +36,7 @@ func main() {
 		serviceName string = "verifier"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -43,7 +45,7 @@ func main() {
 		panic("verifier configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}
@@ -62,18 +64,23 @@ func main() {
 		panic(err)
 	}
 
+	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
+	if err != nil {
+		panic(err)
+	}
+
 	notifyService, err := notify.New(ctx, cfg, log)
 	services["notifyService"] = notifyService
 	if err != nil {
 		panic(err)
 	}
 
-	apiv1, err := apiv1.New(ctx, dbService, notifyService, cfg, tracer, log)
+	apiv1, err := apiv1.New(ctx, dbService, notifyService, cacheService, cfg, tracer, log)
 	if err != nil {
 		panic(err)
 	}
 
-	httpserver, err := httpserver.New(ctx, cfg, apiv1, notifyService, tracer, log)
+	httpserver, err := httpserver.New(ctx, cfg, apiv1, notifyService, tracer, cacheService, log)
 	services["httpserver"] = httpserver
 	if err != nil {
 		panic(err)

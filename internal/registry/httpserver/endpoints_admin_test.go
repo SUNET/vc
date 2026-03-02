@@ -64,10 +64,9 @@ func setupTestService(t *testing.T) *Service {
 	cfg := &model.Cfg{
 		Registry: &model.Registry{
 			AdminGUI: model.AdminGUI{
-				Enabled:       true,
-				Username:      "admin",
-				Password:      "secret123",
-				SessionSecret: "test-secret-key-32-bytes-long!!",
+				Enable:   model.BoolPtr(true),
+				Username: "admin",
+				Password: "secret123",
 			},
 		},
 	}
@@ -83,8 +82,8 @@ func setupTestService(t *testing.T) *Service {
 		httpHelpers: httpHelpers,
 	}
 
-	// Setup session store
-	s.sessionStore = sessions.NewCookieStore([]byte(cfg.Registry.AdminGUI.SessionSecret))
+	// Setup session store with test keys (encryption key must be exactly 32 bytes for AES-256)
+	s.sessionStore = sessions.NewCookieStore([]byte("test-secret-key-32-bytes-long!!"), []byte("12345678901234567890123456789012"))
 	s.sessionStore.Options = &sessions.Options{
 		Path:     "/admin",
 		MaxAge:   3600,

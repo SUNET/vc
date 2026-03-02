@@ -20,7 +20,7 @@ type serverHandler struct {
 
 // ListenAndServe starts the HTTP server with TLS or without based on the APIServer.TLS configuration
 func (s *serverHandler) ListenAndServe(ctx context.Context, server *http.Server, apiConfig model.APIServer) error {
-	if apiConfig.TLS.Enabled {
+	if apiConfig.TLS.Enable {
 		server.TLSConfig = s.client.TLS.Standard(ctx)
 
 		err := server.ListenAndServeTLS(apiConfig.TLS.CertFilePath, apiConfig.TLS.KeyFilePath)
@@ -83,10 +83,9 @@ func (s *serverHandler) RegStreamEndpoint(ctx context.Context, rg *gin.RouterGro
 
 // SetGinProductionMode sets the gin mode to production or debug
 func (s *serverHandler) SetGinProductionMode() {
-	switch s.client.cfg.Common.Production {
-	case true:
+	if model.BoolVal(s.client.cfg.Common.Production, true) {
 		gin.SetMode(gin.ReleaseMode)
-	case false:
+	} else {
 		gin.SetMode(gin.DebugMode)
 	}
 }

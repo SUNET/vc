@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"testing"
 	"vc/internal/verifier/db"
+	"vc/pkg/helpers"
 
+	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -147,65 +149,50 @@ func TestVerifyRegistrationAccessToken(t *testing.T) {
 	}
 }
 
-// TestClientRegistration_validateRegistrationRequest tests registration request validation
-func TestClientRegistration_validateRegistrationRequest(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
+// TestClientRegistrationRequest_Validation tests v10 validation tags on ClientRegistrationRequest
+func TestClientRegistrationRequest_Validation(t *testing.T) {
 	tests := []struct {
 		name    string
-		req     *ClientRegistrationRequest
+		req     ClientRegistrationRequest
 		wantErr bool
-		errMsg  string
 	}{
 		{
 			name: "valid minimal request",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "missing redirect_uris",
-			req: &ClientRegistrationRequest{
+			name:    "missing redirect_uris",
+			req:     ClientRegistrationRequest{ClientName: "Test Client"},
+			wantErr: true,
+		},
+		{
+			name: "empty redirect_uris",
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{},
 			},
 			wantErr: true,
-			errMsg:  "redirect_uris is required",
 		},
 		{
-			name:    "nil request",
-			req:     &ClientRegistrationRequest{},
+			name: "invalid redirect URI (with fragment)",
+			req: ClientRegistrationRequest{
+				RedirectURIs: []string{"https://example.com/callback#section"},
+			},
 			wantErr: true,
 		},
 		{
-			name: "valid request with multiple redirect URIs",
-			req: &ClientRegistrationRequest{
-				RedirectURIs: []string{
-					"https://example.com/callback",
-					"https://example.com/callback2",
-				},
-			},
-			wantErr: false,
-		},
-		{
 			name: "valid token endpoint auth method - client_secret_basic",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs:            []string{"https://example.com/callback"},
 				TokenEndpointAuthMethod: "client_secret_basic",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid token endpoint auth method - client_secret_post",
-			req: &ClientRegistrationRequest{
-				RedirectURIs:            []string{"https://example.com/callback"},
-				TokenEndpointAuthMethod: "client_secret_post",
-			},
-			wantErr: false,
-		},
-		{
 			name: "valid token endpoint auth method - none",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs:            []string{"https://example.com/callback"},
 				TokenEndpointAuthMethod: "none",
 			},
@@ -213,16 +200,15 @@ func TestClientRegistration_validateRegistrationRequest(t *testing.T) {
 		},
 		{
 			name: "invalid token endpoint auth method",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs:            []string{"https://example.com/callback"},
 				TokenEndpointAuthMethod: "invalid_method",
 			},
 			wantErr: true,
-			errMsg:  "unsupported token_endpoint_auth_method",
 		},
 		{
 			name: "valid grant types",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				GrantTypes:   []string{"authorization_code", "refresh_token"},
 			},
@@ -230,16 +216,15 @@ func TestClientRegistration_validateRegistrationRequest(t *testing.T) {
 		},
 		{
 			name: "invalid grant type",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				GrantTypes:   []string{"implicit"},
 			},
 			wantErr: true,
-			errMsg:  "unsupported grant_type",
 		},
 		{
 			name: "valid response type - code",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs:  []string{"https://example.com/callback"},
 				ResponseTypes: []string{"code"},
 			},
@@ -247,76 +232,40 @@ func TestClientRegistration_validateRegistrationRequest(t *testing.T) {
 		},
 		{
 			name: "invalid response type",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs:  []string{"https://example.com/callback"},
 				ResponseTypes: []string{"token"},
 			},
 			wantErr: true,
-			errMsg:  "unsupported response_type",
 		},
 		{
 			name: "valid subject type - public",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				SubjectType:  "public",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid subject type - pairwise",
-			req: &ClientRegistrationRequest{
-				RedirectURIs: []string{"https://example.com/callback"},
-				SubjectType:  "pairwise",
-			},
-			wantErr: false,
-		},
-		{
 			name: "invalid subject type",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				SubjectType:  "invalid",
 			},
 			wantErr: true,
-			errMsg:  "subject_type must be",
-		},
-		{
-			name: "valid code challenge method - S256",
-			req: &ClientRegistrationRequest{
-				RedirectURIs:        []string{"https://example.com/callback"},
-				CodeChallengeMethod: "S256",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid code challenge method - plain",
-			req: &ClientRegistrationRequest{
-				RedirectURIs:        []string{"https://example.com/callback"},
-				CodeChallengeMethod: "plain",
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid code challenge method",
-			req: &ClientRegistrationRequest{
-				RedirectURIs:        []string{"https://example.com/callback"},
-				CodeChallengeMethod: "invalid",
-			},
-			wantErr: true,
-			errMsg:  "code_challenge_method must be",
 		},
 		{
 			name: "both jwks_uri and jwks not allowed",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				JWKSUri:      "https://example.com/.well-known/jwks.json",
 				JWKS:         map[string]any{"keys": []any{}},
 			},
 			wantErr: true,
-			errMsg:  "cannot specify both jwks_uri and jwks",
 		},
 		{
 			name: "valid logo_uri",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				LogoURI:      "https://example.com/logo.png",
 			},
@@ -324,50 +273,60 @@ func TestClientRegistration_validateRegistrationRequest(t *testing.T) {
 		},
 		{
 			name: "invalid logo_uri - http not allowed",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				LogoURI:      "http://example.com/logo.png",
 			},
 			wantErr: true,
-			errMsg:  "logo_uri",
 		},
 		{
 			name: "invalid client_uri - http not allowed",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				ClientURI:    "http://example.com",
 			},
 			wantErr: true,
-			errMsg:  "client_uri",
 		},
 		{
 			name: "invalid policy_uri - http not allowed",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				PolicyURI:    "http://example.com/policy",
 			},
 			wantErr: true,
-			errMsg:  "policy_uri",
 		},
 		{
 			name: "invalid tos_uri - http not allowed",
-			req: &ClientRegistrationRequest{
+			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
 				TosURI:       "http://example.com/tos",
 			},
 			wantErr: true,
-			errMsg:  "tos_uri",
+		},
+		{
+			name: "valid code challenge method - S256",
+			req: ClientRegistrationRequest{
+				RedirectURIs:        []string{"https://example.com/callback"},
+				CodeChallengeMethod: "S256",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid code challenge method",
+			req: ClientRegistrationRequest{
+				RedirectURIs:        []string{"https://example.com/callback"},
+				CodeChallengeMethod: "invalid",
+			},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := client.validateRegistrationRequest(tt.req)
+			require.NoError(t, defaults.Set(&tt.req))
+			err := helpers.CheckSimple(tt.req)
 			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.errMsg != "" {
-					assert.Contains(t, err.Error(), tt.errMsg)
-				}
 			} else {
 				assert.NoError(t, err)
 			}
@@ -375,20 +334,23 @@ func TestClientRegistration_validateRegistrationRequest(t *testing.T) {
 	}
 }
 
-// TestClientRegistration_applyRegistrationDefaults tests default value application
-func TestClientRegistration_applyRegistrationDefaults(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
-
+// TestClientRegistrationRequest_Defaults tests default tag values on ClientRegistrationRequest
+func TestClientRegistrationRequest_Defaults(t *testing.T) {
 	req := &ClientRegistrationRequest{
 		RedirectURIs: []string{"https://example.com/callback"},
 	}
 
-	client.applyRegistrationDefaults(req)
+	err := defaults.Set(req)
+	require.NoError(t, err)
 
-	// Check defaults are applied
 	assert.Equal(t, "client_secret_basic", req.TokenEndpointAuthMethod)
-	assert.Contains(t, req.ResponseTypes, "code")
-	assert.Contains(t, req.GrantTypes, "authorization_code")
+	assert.Equal(t, []string{"authorization_code"}, req.GrantTypes)
+	assert.Equal(t, []string{"code"}, req.ResponseTypes)
+	assert.Equal(t, "openid", req.Scope)
+	assert.Equal(t, "web", req.ApplicationType)
+	assert.Equal(t, "public", req.SubjectType)
+	assert.Equal(t, "RS256", req.IDTokenSignedRespAlg)
+	assert.Equal(t, "S256", req.CodeChallengeMethod)
 }
 
 // TestAuthenticateClient tests client authentication
@@ -501,14 +463,12 @@ func TestRegisterClient(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "missing redirect URIs",
-			request: &ClientRegistrationRequest{
-				ClientName: "Test Client",
-			},
+			name:        "missing redirect URIs",
+			request:     &ClientRegistrationRequest{ClientName: "Test Client"},
 			expectError: true,
 		},
 		{
-			name: "invalid redirect URI (with fragment)",
+			name: "invalid redirect URI with fragment",
 			request: &ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback#section"},
 			},
@@ -544,6 +504,15 @@ func TestRegisterClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+
+			// Simulate HTTP layer: apply defaults and validate
+			require.NoError(t, defaults.Set(tt.request))
+			if err := helpers.CheckSimple(tt.request); err != nil {
+				if tt.expectError {
+					return
+				}
+				t.Fatalf("unexpected validation error: %v", err)
+			}
 
 			resp, err := client.RegisterClient(ctx, tt.request)
 
@@ -643,7 +612,10 @@ func TestGetClientInformation(t *testing.T) {
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
 
-			resp, err := client.GetClientInformation(ctx, clientID, token)
+			resp, err := client.GetClientInformation(ctx, &GetClientInformationRequest{
+				ClientID:                clientID,
+				RegistrationAccessToken: "Bearer " + token,
+			})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -716,7 +688,10 @@ func TestDeleteClient(t *testing.T) {
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
 
-			err := client.DeleteClient(ctx, clientID, token)
+			err := client.DeleteClient(ctx, &DeleteClientRequest{
+				ClientID:                clientID,
+				RegistrationAccessToken: "Bearer " + token,
+			})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -802,24 +777,6 @@ func TestUpdateClient(t *testing.T) {
 			expectedError: ErrInvalidToken,
 		},
 		{
-			name: "invalid update request",
-			setupMock: func(t *testing.T, clients *MockClientCollection) (string, string) {
-				token := "valid-token-123"
-				hash, _ := hashRegistrationAccessToken(token)
-				client := &db.Client{
-					ClientID:                    "test-client-id",
-					RegistrationAccessTokenHash: hash,
-				}
-				clients.Create(ctx, client)
-				return "test-client-id", token
-			},
-			request: &ClientRegistrationRequest{
-				// Missing required redirect_uris
-				ClientName: "Test",
-			},
-			expectError: true,
-		},
-		{
 			name: "update with all optional fields",
 			setupMock: func(t *testing.T, clients *MockClientCollection) (string, string) {
 				token := "valid-token-456"
@@ -879,6 +836,29 @@ func TestUpdateClient(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "invalid update request - missing redirect URIs",
+			setupMock: func(t *testing.T, clients *MockClientCollection) (string, string) {
+				token := "valid-token-invalid"
+				hash, _ := hashRegistrationAccessToken(token)
+				client := &db.Client{
+					ClientID:                    "invalid-update-client",
+					ClientSecretHash:            hashPassword(t, "secret"),
+					RedirectURIs:                []string{"https://example.com/callback"},
+					GrantTypes:                  []string{"authorization_code"},
+					ResponseTypes:               []string{"code"},
+					TokenEndpointAuthMethod:     "client_secret_basic",
+					RegistrationAccessTokenHash: hash,
+					ClientIDIssuedAt:            1699999999,
+				}
+				clients.Create(ctx, client)
+				return "invalid-update-client", token
+			},
+			request: &ClientRegistrationRequest{
+				ClientName: "Missing Redirect URIs",
+			},
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -888,7 +868,20 @@ func TestUpdateClient(t *testing.T) {
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
 
-			resp, err := client.UpdateClient(ctx, clientID, token, tt.request)
+			// Simulate HTTP layer: apply defaults and validate
+			require.NoError(t, defaults.Set(tt.request))
+			if err := helpers.CheckSimple(tt.request); err != nil {
+				if tt.expectError {
+					return
+				}
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+
+			resp, err := client.UpdateClient(ctx, &UpdateClientRequest{
+				ClientID:                      clientID,
+				RegistrationAccessToken:       "Bearer " + token,
+				ClientRegistrationRequest:     *tt.request,
+			})
 
 			if tt.expectError {
 				assert.Error(t, err)

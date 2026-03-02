@@ -43,7 +43,7 @@ func TestNew_ConsoleDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"console",
 				},
@@ -76,7 +76,7 @@ func TestNew_FileDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					logFile,
 				},
@@ -107,7 +107,7 @@ func TestNew_WebhookDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"http://example.com/webhook",
 					"https://example.com/webhook2",
@@ -143,7 +143,7 @@ func TestNew_MultipleDestinations(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"console",
 					logFile,
@@ -173,7 +173,7 @@ func TestNew_InvalidFileDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"/invalid/path/that/does/not/exist/audit.log",
 				},
@@ -194,7 +194,7 @@ func TestParseDestinations_EmptyStrings(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"",
 					"  ",
@@ -230,7 +230,7 @@ func TestAddAuditLog(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					logFile,
 				},
@@ -272,7 +272,7 @@ func TestClose(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile, "console"},
 			},
 		},
@@ -308,7 +308,7 @@ func TestDestinationWorker(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -380,7 +380,7 @@ func TestSendToDestination_UnknownType(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},

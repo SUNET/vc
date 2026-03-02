@@ -32,8 +32,8 @@ func New(ctx context.Context, cfg *model.Cfg, serviceName string, log *logger.Lo
 	var exp sdktrace.SpanExporter
 	var err error
 
-	// Use no-op exporter if cfg.Common is nil (test environment) or tracing is not configured
-	if cfg == nil || cfg.Common == nil || cfg.Common.Tracing.Addr == "" {
+	// Use no-op exporter if cfg.Common is nil (test environment) or tracing is not enabled
+	if cfg == nil || cfg.Common == nil || !cfg.Common.Tracing.Enable {
 		exp, err = newNoOpExporter()
 	} else {
 		exp, err = newExporter(ctx, cfg)

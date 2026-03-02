@@ -243,7 +243,7 @@ func TestNewServerOptions_Disabled(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled: false,
+			Enable: false,
 		},
 	}
 
@@ -257,7 +257,7 @@ func TestNewServerOptions_InvalidCert(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: "/nonexistent/cert.pem",
 			KeyFilePath:  "/nonexistent/key.pem",
 		},
@@ -281,7 +281,7 @@ func TestNewServerOptions_InvalidClientCA(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: "/nonexistent/ca.pem",
@@ -311,7 +311,7 @@ func TestNewServerOptions_InvalidClientCAPEM(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caPath,
@@ -336,7 +336,7 @@ func TestNewServerOptions_ValidTLS(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 		},
@@ -364,7 +364,7 @@ func TestNewServerOptions_ValidMTLS(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -393,7 +393,7 @@ func TestNewServerOptions_WithFingerprints(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -488,7 +488,7 @@ func TestVerifyClientFingerprint_NotAllowed(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.PermissionDenied, st.Code())
-	assert.Contains(t, st.Message(), "fingerprint not in allowlist")
+	assert.Contains(t, st.Message(), "not in allowlist")
 }
 
 // TestVerifyClientFingerprint_Allowed tests verification with cert in allowlist
@@ -572,7 +572,803 @@ func TestFingerprintUnaryInterceptor(t *testing.T) {
 	})
 }
 
+// TestCanonicalizeDN tests the canonical DN normalization function
+func TestCanonicalizeDN(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple CN",
+			input:    "CN=test",
+			expected: "cn=test",
+		},
+		{
+			name:     "with organization",
+			input:    "CN=apigw,O=SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "with leading/trailing whitespace",
+			input:    "  CN=apigw,O=SUNET  ",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "mixed case - sorted by attribute type",
+			input:    "CN=MyClient,O=MyOrg,C=SE",
+			expected: "c=se,cn=myclient,o=myorg",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "different attribute order produces same result",
+			input:    "O=SUNET,CN=apigw",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "reverse order with country",
+			input:    "C=SE,O=SUNET,CN=apigw",
+			expected: "c=se,cn=apigw,o=sunet",
+		},
+		{
+			name:     "spaces around equals and commas",
+			input:    "CN = apigw , O = SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "semicolons as separators",
+			input:    "CN=apigw;O=SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "long attribute type names",
+			input:    "commonName=apigw,organizationName=SUNET,countryName=SE",
+			expected: "c=se,cn=apigw,o=sunet",
+		},
+		{
+			name:     "OID notation",
+			input:    "2.5.4.3=apigw,2.5.4.10=SUNET",
+			expected: "cn=apigw,o=sunet",
+		},
+		{
+			name:     "OU attribute",
+			input:    "CN=apigw,OU=IT,O=SUNET",
+			expected: "cn=apigw,o=sunet,ou=it",
+		},
+		{
+			name:     "escaped comma in value",
+			input:    "CN=Last\\, First,O=Org",
+			expected: "cn=last\\, first,o=org",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := canonicalizeDN(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestCertDN tests the certificate DN extraction
+func TestCertDN(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "test-client",
+		Organization: []string{"TestOrg"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+
+	dn := CertDN(cert)
+
+	// Go's pkix.Name.String() uses RFC 2253 order (most specific first)
+	assert.Contains(t, dn, "test-client")
+	assert.Contains(t, dn, "TestOrg")
+	assert.Contains(t, dn, "SE")
+}
+
+// TestCertCanonicalDN tests the certificate canonical DN extraction
+func TestCertCanonicalDN(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "test-client",
+		Organization: []string{"TestOrg"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+
+	canonical := certCanonicalDN(cert)
+
+	// Canonical form sorts by attribute type alphabetically and lowercases everything
+	assert.Equal(t, "c=se,cn=test-client,o=testorg", canonical)
+}
+
+// TestCanonicalizeDN_MatchesCertCanonicalDN tests that canonicalizeDN on a config string
+// produces the same result as certCanonicalDN for the same certificate, regardless of
+// attribute ordering in the config string.
+func TestCanonicalizeDN_MatchesCertCanonicalDN(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+	certDN := certCanonicalDN(cert)
+
+	// All these config string variants should match the cert's canonical DN
+	configVariants := []string{
+		"CN=apigw,O=SUNET,C=SE",
+		"C=SE,O=SUNET,CN=apigw",
+		"O=SUNET,C=SE,CN=apigw",
+		"cn=apigw,o=sunet,c=se",
+		"CN=apigw, O=SUNET, C=SE",
+		"  CN=apigw , O=SUNET , C=SE  ",
+		"commonName=apigw,organizationName=SUNET,countryName=SE",
+	}
+
+	for _, variant := range configVariants {
+		t.Run(variant, func(t *testing.T) {
+			assert.Equal(t, certDN, canonicalizeDN(variant),
+				"config DN %q should match cert canonical DN %q", variant, certDN)
+		})
+	}
+}
+
+// TestVerifyClientIdentity_DNOrderIndependent tests that DN allowlist matching works
+// regardless of the attribute order in the config DN string.
+func TestVerifyClientIdentity_DNOrderIndependent(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+		Country:      []string{"SE"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	// Config DN written in a different order than Go's cert.Subject.String() would produce
+	configDN := "C=SE,O=SUNET,CN=apigw"
+	allowedDNs := map[string]string{canonicalizeDN(configDN): "apigw-prod"}
+
+	err := verifyClientIdentity(ctx, nil, allowedDNs)
+	require.NoError(t, err, "DN matching should be order-independent")
+}
+
+// TestVerifyClientIdentity_DNAllowed tests verification passes when DN matches allowlist
+func TestVerifyClientIdentity_DNAllowed(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+	dn := certCanonicalDN(cert)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	allowedDNs := map[string]string{dn: "apigw-prod"}
+
+	err := verifyClientIdentity(ctx, nil, allowedDNs)
+	require.NoError(t, err)
+}
+
+// TestVerifyClientIdentity_DNNotAllowed tests verification fails when DN doesn't match
+func TestVerifyClientIdentity_DNNotAllowed(t *testing.T) {
+	cert := generateTestCertWithSubject(t, pkix.Name{
+		CommonName:   "unknown-client",
+		Organization: []string{"SomeOrg"},
+	}, nil, nil)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	allowedDNs := map[string]string{"cn=apigw,o=sunet": "apigw-prod"}
+
+	err := verifyClientIdentity(ctx, nil, allowedDNs)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+	assert.Contains(t, st.Message(), "not in allowlist")
+}
+
+// TestVerifyClientIdentity_DNMatchesFingerprintDoesNot tests that DN match is sufficient
+// even when no fingerprint allowlist is configured
+func TestVerifyClientIdentity_DNMatchesFingerprintDoesNot(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+	dn := certCanonicalDN(cert)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	// Fingerprint won't match, but DN will
+	wrongFingerprints := map[string]string{"0000000000000000000000000000000000000000000000000000000000000000": "other"}
+	allowedDNs := map[string]string{dn: "apigw-prod"}
+
+	err := verifyClientIdentity(ctx, wrongFingerprints, allowedDNs)
+	require.NoError(t, err)
+}
+
+// TestVerifyClientIdentity_FingerprintMatchesDNDoesNot tests that fingerprint match is sufficient
+// even when DN doesn't match
+func TestVerifyClientIdentity_FingerprintMatchesDNDoesNot(t *testing.T) {
+	cert := generateTestCertWithSubject(t, pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+	}, nil, nil)
+	fingerprint := CertFingerprint(cert)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	allowedFingerprints := map[string]string{fingerprint: "apigw"}
+	wrongDNs := map[string]string{"cn=something-else,o=other": "wrong"}
+
+	err := verifyClientIdentity(ctx, allowedFingerprints, wrongDNs)
+	require.NoError(t, err)
+}
+
+// TestVerifyClientIdentity_NeitherMatches tests that both failing results in PermissionDenied
+func TestVerifyClientIdentity_NeitherMatches(t *testing.T) {
+	cert := generateTestCertWithSubject(t, pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+	}, nil, nil)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	wrongFingerprints := map[string]string{"0000000000000000000000000000000000000000000000000000000000000000": "other"}
+	wrongDNs := map[string]string{"cn=something-else,o=other": "wrong"}
+
+	err := verifyClientIdentity(ctx, wrongFingerprints, wrongDNs)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+	assert.Contains(t, st.Message(), "not in allowlist")
+}
+
+// TestNewServerOptions_WithDNs tests server options with DN allowlist
+func TestNewServerOptions_WithDNs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Generate CA
+	caCert, _ := generateTestCA(t)
+	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
+
+	// Generate server cert
+	serverCert, serverKey := generateTestCertAndKey(t, "server")
+	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
+	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
+
+	cfg := model.GRPCServer{
+		Addr: "localhost:0",
+		TLS: model.GRPCTLS{
+			Enable:      true,
+			CertFilePath: serverCertPath,
+			KeyFilePath:  serverKeyPath,
+			ClientCAPath: caCertPath,
+			AllowedClientDNs: map[string]string{
+				"CN=apigw,O=SUNET": "apigw-prod",
+			},
+		},
+	}
+
+	opts, err := NewServerOptions(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, opts)
+	// TLS credentials + unary interceptor + stream interceptor
+	assert.Len(t, opts, 3)
+}
+
+// TestNewServerOptions_WithBothFingerprintsAndDNs tests server options with both allowlists
+func TestNewServerOptions_WithBothFingerprintsAndDNs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	caCert, _ := generateTestCA(t)
+	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
+
+	serverCert, serverKey := generateTestCertAndKey(t, "server")
+	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
+	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
+
+	cfg := model.GRPCServer{
+		Addr: "localhost:0",
+		TLS: model.GRPCTLS{
+			Enable:      true,
+			CertFilePath: serverCertPath,
+			KeyFilePath:  serverKeyPath,
+			ClientCAPath: caCertPath,
+			AllowedClientFingerprints: map[string]string{
+				"SHA256:a1:b2:c3:d4": "pinned-client",
+			},
+			AllowedClientDNs: map[string]string{
+				"CN=apigw,O=SUNET": "apigw-acme",
+			},
+		},
+	}
+
+	opts, err := NewServerOptions(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, opts)
+	assert.Len(t, opts, 3)
+}
+
+// TestVerifyClientIdentity_BothFingerprintAndDNMatch tests that when both fingerprint and DN
+// are present and valid, the request is always allowed deterministically.
+func TestVerifyClientIdentity_BothFingerprintAndDNMatch(t *testing.T) {
+	subject := pkix.Name{
+		CommonName:   "apigw",
+		Organization: []string{"SUNET"},
+	}
+	cert := generateTestCertWithSubject(t, subject, nil, nil)
+	fingerprint := CertFingerprint(cert)
+	dn := certCanonicalDN(cert)
+
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		},
+	}
+	ctx := peer.NewContext(t.Context(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
+		AuthInfo: tlsInfo,
+	})
+
+	allowedFingerprints := map[string]string{fingerprint: "apigw-pinned"}
+	allowedDNs := map[string]string{dn: "apigw-dn"}
+
+	// Run 100 times to assert deterministic behavior
+	for i := range 100 {
+		err := verifyClientIdentity(ctx, allowedFingerprints, allowedDNs)
+		require.NoError(t, err, "iteration %d should succeed when both fingerprint and DN match", i)
+	}
+}
+
+// TestIntegration_mTLS_BothFingerprintAndDNMatch tests a real gRPC server/client scenario
+// where both the fingerprint AND DN match. Verifies deterministic success across multiple RPCs.
+func TestIntegration_mTLS_BothFingerprintAndDNMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	caCert, caKey := generateTestCA(t)
+	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
+
+	serverCert, serverKey := generateTestCertSignedByCA(t, "localhost", caCert, caKey)
+	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
+	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
+
+	clientSubject := pkix.Name{
+		CommonName:   "client",
+		Organization: []string{"SUNET"},
+	}
+	clientCert, clientKey := generateTestCertWithSubjectSignedByCA(t, clientSubject, caCert, caKey)
+	clientCertPath := writeCertToFile(t, tmpDir, "client.pem", clientCert)
+	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
+
+	clientFingerprint := CertFingerprint(clientCert)
+	clientDN := certCanonicalDN(clientCert)
+	t.Logf("Client fingerprint: %s", FormatFingerprint(clientFingerprint))
+	t.Logf("Client DN: %q", clientDN)
+
+	// Configure server with BOTH fingerprint AND DN matching the client
+	serverCfg := model.GRPCServer{
+		Addr: "127.0.0.1:0",
+		TLS: model.GRPCTLS{
+			Enable:      true,
+			CertFilePath: serverCertPath,
+			KeyFilePath:  serverKeyPath,
+			ClientCAPath: caCertPath,
+			AllowedClientFingerprints: map[string]string{
+				clientFingerprint: "client-pinned",
+			},
+			AllowedClientDNs: map[string]string{
+				clientDN: "client-dn",
+			},
+		},
+	}
+
+	serverOpts, err := NewServerOptions(serverCfg)
+	require.NoError(t, err)
+
+	callCount := 0
+	unknownHandler := func(srv any, stream grpc.ServerStream) error {
+		callCount++
+		return nil
+	}
+	serverOpts = append(serverOpts, grpc.UnknownServiceHandler(unknownHandler))
+
+	server := grpc.NewServer(serverOpts...)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	clientCfg := model.GRPCClientTLS{
+		Addr:         listener.Addr().String(),
+		TLS:          true,
+		CAFilePath:   caCertPath,
+		CertFilePath: clientCertPath,
+		KeyFilePath:  clientKeyPath,
+		ServerName:   "localhost",
+	}
+
+	conn, err := NewClientConn(clientCfg)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// Make 10 RPCs — every single one must pass the auth check deterministically
+	const rpcCount = 10
+	for i := range rpcCount {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
+		cancel()
+
+		if err != nil {
+			st, ok := status.FromError(err)
+			require.True(t, ok)
+			assert.NotEqual(t, codes.PermissionDenied, st.Code(),
+				"RPC %d: should not get PermissionDenied when both fingerprint and DN match", i)
+		}
+	}
+	assert.Equal(t, rpcCount, callCount,
+		"All %d RPCs should have reached the handler (auth check passed every time)", rpcCount)
+}
+
+// TestIntegration_mTLS_DNInAllowlist tests a real gRPC server/client scenario
+// where the client's DN IS in the allowlist. The RPC should succeed.
+func TestIntegration_mTLS_DNInAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	caCert, caKey := generateTestCA(t)
+	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
+
+	serverCert, serverKey := generateTestCertSignedByCA(t, "localhost", caCert, caKey)
+	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
+	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
+
+	clientSubject := pkix.Name{
+		CommonName:   "client",
+		Organization: []string{"SUNET"},
+		Country:      []string{"SE"},
+	}
+	clientCert, clientKey := generateTestCertWithSubjectSignedByCA(t, clientSubject, caCert, caKey)
+	clientCertPath := writeCertToFile(t, tmpDir, "client.pem", clientCert)
+	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
+
+	// Use the actual DN (canonical) from the client cert
+	clientDN := certCanonicalDN(clientCert)
+	t.Logf("Client cert DN: %q (canonical: %q)", CertDN(clientCert), clientDN)
+
+	serverCfg := model.GRPCServer{
+		Addr: "127.0.0.1:0",
+		TLS: model.GRPCTLS{
+			Enable:      true,
+			CertFilePath: serverCertPath,
+			KeyFilePath:  serverKeyPath,
+			ClientCAPath: caCertPath,
+			AllowedClientDNs: map[string]string{
+				clientDN: "allowed-by-dn",
+			},
+		},
+	}
+
+	serverOpts, err := NewServerOptions(serverCfg)
+	require.NoError(t, err)
+
+	handlerCalled := false
+	unknownHandler := func(srv any, stream grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	}
+	serverOpts = append(serverOpts, grpc.UnknownServiceHandler(unknownHandler))
+
+	server := grpc.NewServer(serverOpts...)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	clientCfg := model.GRPCClientTLS{
+		Addr:         listener.Addr().String(),
+		TLS:          true,
+		CAFilePath:   caCertPath,
+		CertFilePath: clientCertPath,
+		KeyFilePath:  clientKeyPath,
+		ServerName:   "localhost",
+	}
+
+	conn, err := NewClientConn(clientCfg)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
+	if err != nil {
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.NotEqual(t, codes.PermissionDenied, st.Code(),
+			"should not get PermissionDenied when DN is in allowlist")
+	}
+	assert.True(t, handlerCalled, "Handler should have been called (DN check passed)")
+}
+
+// TestIntegration_mTLS_DNNotInAllowlist tests a real gRPC server/client scenario
+// where the client's DN is NOT in the allowlist. Should be rejected with PermissionDenied.
+func TestIntegration_mTLS_DNNotInAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	caCert, caKey := generateTestCA(t)
+	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
+
+	serverCert, serverKey := generateTestCertSignedByCA(t, "localhost", caCert, caKey)
+	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
+	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
+
+	clientCert, clientKey := generateTestCertSignedByCA(t, "client", caCert, caKey)
+	clientCertPath := writeCertToFile(t, tmpDir, "client.pem", clientCert)
+	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
+
+	serverCfg := model.GRPCServer{
+		Addr: "127.0.0.1:0",
+		TLS: model.GRPCTLS{
+			Enable:      true,
+			CertFilePath: serverCertPath,
+			KeyFilePath:  serverKeyPath,
+			ClientCAPath: caCertPath,
+			AllowedClientDNs: map[string]string{
+				"cn=some-other-client,o=other-org": "not-our-client",
+			},
+		},
+	}
+
+	serverOpts, err := NewServerOptions(serverCfg)
+	require.NoError(t, err)
+
+	unknownHandler := func(srv any, stream grpc.ServerStream) error { return nil }
+	serverOpts = append(serverOpts, grpc.UnknownServiceHandler(unknownHandler))
+
+	server := grpc.NewServer(serverOpts...)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	clientCfg := model.GRPCClientTLS{
+		Addr:         listener.Addr().String(),
+		TLS:          true,
+		CAFilePath:   caCertPath,
+		CertFilePath: clientCertPath,
+		KeyFilePath:  clientKeyPath,
+		ServerName:   "localhost",
+	}
+
+	conn, err := NewClientConn(clientCfg)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "expected gRPC status error, got: %v", err)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+	assert.Contains(t, st.Message(), "not in allowlist")
+}
+
+// TestIntegration_mTLS_DNAllowedFingerprintNot tests that DN match is sufficient
+// in a real gRPC scenario even when fingerprint doesn't match
+func TestIntegration_mTLS_DNAllowedFingerprintNot(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	caCert, caKey := generateTestCA(t)
+	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
+
+	serverCert, serverKey := generateTestCertSignedByCA(t, "localhost", caCert, caKey)
+	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
+	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
+
+	clientSubject := pkix.Name{
+		CommonName:   "client",
+		Organization: []string{"SUNET"},
+	}
+	clientCert, clientKey := generateTestCertWithSubjectSignedByCA(t, clientSubject, caCert, caKey)
+	clientCertPath := writeCertToFile(t, tmpDir, "client.pem", clientCert)
+	clientKeyPath := writeKeyToFile(t, tmpDir, "client-key.pem", clientKey)
+
+	clientDN := certCanonicalDN(clientCert)
+
+	// Configure with WRONG fingerprint but CORRECT DN
+	serverCfg := model.GRPCServer{
+		Addr: "127.0.0.1:0",
+		TLS: model.GRPCTLS{
+			Enable:      true,
+			CertFilePath: serverCertPath,
+			KeyFilePath:  serverKeyPath,
+			ClientCAPath: caCertPath,
+			AllowedClientFingerprints: map[string]string{
+				"0000000000000000000000000000000000000000000000000000000000000000": "wrong-fingerprint",
+			},
+			AllowedClientDNs: map[string]string{
+				clientDN: "allowed-by-dn",
+			},
+		},
+	}
+
+	serverOpts, err := NewServerOptions(serverCfg)
+	require.NoError(t, err)
+
+	handlerCalled := false
+	unknownHandler := func(srv any, stream grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	}
+	serverOpts = append(serverOpts, grpc.UnknownServiceHandler(unknownHandler))
+
+	server := grpc.NewServer(serverOpts...)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	clientCfg := model.GRPCClientTLS{
+		Addr:         listener.Addr().String(),
+		TLS:          true,
+		CAFilePath:   caCertPath,
+		CertFilePath: clientCertPath,
+		KeyFilePath:  clientKeyPath,
+		ServerName:   "localhost",
+	}
+
+	conn, err := NewClientConn(clientCfg)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
+	if err != nil {
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.NotEqual(t, codes.PermissionDenied, st.Code(),
+			"should not get PermissionDenied when DN is in allowlist")
+	}
+	assert.True(t, handlerCalled, "Handler should have been called (DN fallback passed)")
+}
+
 // Helper functions for generating test certificates
+
+// generateTestCertWithSubject generates a test certificate with a full pkix.Name subject.
+func generateTestCertWithSubject(t *testing.T, subject pkix.Name, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) *x509.Certificate {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               subject,
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+
+	parent := template
+	signingKey := key
+	if caCert != nil && caKey != nil {
+		parent = caCert
+		signingKey = caKey
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, parent, &key.PublicKey, signingKey)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(certDER)
+	require.NoError(t, err)
+
+	return cert
+}
+
+// generateTestCertWithSubjectSignedByCA generates a client/server cert with a full subject, signed by CA.
+func generateTestCertWithSubjectSignedByCA(t *testing.T, subject pkix.Name, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	cn := subject.CommonName
+	if cn == "" {
+		cn = "localhost"
+	}
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               subject,
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{cn, "localhost"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &key.PublicKey, caKey)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(certDER)
+	require.NoError(t, err)
+
+	return cert, key
+}
 
 func generateTestCertAndKey(t *testing.T, cn string) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
@@ -761,7 +1557,7 @@ func TestIntegration_mTLS_FingerprintNotInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -819,7 +1615,7 @@ func TestIntegration_mTLS_FingerprintNotInAllowlist(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok, "expected gRPC status error, got: %v", err)
 	assert.Equal(t, codes.PermissionDenied, st.Code(), "expected PermissionDenied, got %s: %s", st.Code(), st.Message())
-	assert.Contains(t, st.Message(), "fingerprint not in allowlist")
+	assert.Contains(t, st.Message(), "not in allowlist")
 }
 
 // TestIntegration_mTLS_FingerprintInAllowlist tests a real gRPC server/client scenario
@@ -850,7 +1646,7 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -946,7 +1742,7 @@ func TestIntegration_mTLS_InvalidClientCert(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enabled:      true,
+			Enable:      true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath, // Only trusts the first CA

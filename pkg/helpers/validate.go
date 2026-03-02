@@ -3,8 +3,10 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"vc/pkg/logger"
@@ -95,6 +97,116 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
+	// Register custom validation for httpsurl - validates URLs with https scheme and host.
+	// Used by OIDC dynamic client registration (RFC 7591 Section 2) for metadata URIs
+	// such as logo_uri, client_uri, policy_uri, and tos_uri.
+	err = validate.RegisterValidation("httpsurl", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if parsedURL.Scheme != "https" {
+			return false
+		}
+
+		if parsedURL.Host == "" {
+			return false
+		}
+
+		if parsedURL.Fragment != "" {
+			return false
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
+	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
+	// Per RFC 6749: must have a scheme and must not contain a fragment.
+	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if parsedURL.Scheme == "" {
+			return false
+		}
+
+		if parsedURL.Fragment != "" {
+			return false
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for safe_uri - validates URI with SSRF prevention.
+	// Blocks private IP ranges, loopback, link-local addresses, and localhost.
+	// No fragment allowed. When combined with httpsurl, also enforces HTTPS scheme.
+	err = validate.RegisterValidation("safe_uri", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if parsedURL.Scheme == "" {
+			return false
+		}
+
+		if parsedURL.Fragment != "" {
+			return false
+		}
+
+		hostname := parsedURL.Hostname()
+		if hostname == "" {
+			return false
+		}
+
+		// Block localhost
+		if strings.ToLower(hostname) == "localhost" {
+			return false
+		}
+
+		// Resolve hostname and check IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			return false
+		}
+
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return false
+			}
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Register custom validation for vcts_exist - validates that VCTs in AuthMethods exist in CredentialConstructors
 	err = validate.RegisterValidation("vcts_exist", func(fl validator.FieldLevel) bool {
 		// Get the AuthMethods map
@@ -124,12 +236,15 @@ func NewValidator() (*validator.Validate, error) {
 		// Build a map of VCT -> format for quick lookup
 		vctToFormat := make(map[string]string)
 		for _, constructor := range credentialConstructors {
-			if constructor != nil {
-				vct := constructor.GetVCT()
-				if vct != "" {
-					vctToFormat[vct] = constructor.Format
-				}
+			if constructor != nil && constructor.VCTM != nil && constructor.VCTM.VCT != "" {
+				vctToFormat[constructor.VCTM.VCT] = constructor.Format
 			}
+		}
+
+		// If no VCTMs are loaded (e.g. services like ui, mockas, registry that
+		// share the config but don't load VCTM files), skip cross-reference validation.
+		if len(vctToFormat) == 0 {
+			return true
 		}
 
 		// Validate each AuthMethod
@@ -166,6 +281,37 @@ func NewValidator() (*validator.Validate, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Register struct-level validation for SAMLConfig
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.SAMLConfig)
+		if !cfg.Enable {
+			return
+		}
+
+		hasMDQ := cfg.MDQServer != ""
+		hasStatic := cfg.StaticIDPMetadata != nil
+
+		if !hasMDQ && !hasStatic {
+			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_required", "")
+		}
+		if hasMDQ && hasStatic {
+			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_exclusive", "")
+		}
+	}, model.SAMLConfig{})
+
+	// Register struct-level validation for OIDCRPConfig
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.OIDCRPConfig)
+		if !cfg.Enable {
+			return
+		}
+
+		// 'openid' scope is mandatory for OIDC
+		if !slices.Contains(cfg.Scopes, "openid") {
+			sl.ReportError(cfg.Scopes, "Scopes", "Scopes", "oidc_openid_scope_required", "")
+		}
+	}, model.OIDCRPConfig{})
 
 	return validate, nil
 }

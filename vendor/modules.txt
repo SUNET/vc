@@ -480,6 +480,7 @@ github.com/lestrrat-go/httprc/v3/proxysink
 github.com/lestrrat-go/httprc/v3/tracesink
 # github.com/lestrrat-go/jwx/v3 v3.0.13
 ## explicit; go 1.24.0
+github.com/lestrrat-go/jwx/v3
 github.com/lestrrat-go/jwx/v3/cert
 github.com/lestrrat-go/jwx/v3/internal/base64
 github.com/lestrrat-go/jwx/v3/internal/ecutil
@@ -503,6 +504,9 @@ github.com/lestrrat-go/jwx/v3/jws
 github.com/lestrrat-go/jwx/v3/jws/internal/keytype
 github.com/lestrrat-go/jwx/v3/jws/jwsbb
 github.com/lestrrat-go/jwx/v3/jws/legacy
+github.com/lestrrat-go/jwx/v3/jwt
+github.com/lestrrat-go/jwx/v3/jwt/internal/errors
+github.com/lestrrat-go/jwx/v3/jwt/internal/types
 github.com/lestrrat-go/jwx/v3/transform
 # github.com/lestrrat-go/option/v2 v2.0.0
 ## explicit; go 1.23
@@ -701,6 +705,13 @@ github.com/shopspring/decimal
 # github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280
 ## explicit; go 1.25.1
 github.com/sirosfoundation/g119612/pkg/logging
+# github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8
+## explicit; go 1.23
+github.com/sirosfoundation/go-spocp
+github.com/sirosfoundation/go-spocp/pkg/compare
+github.com/sirosfoundation/go-spocp/pkg/persist
+github.com/sirosfoundation/go-spocp/pkg/sexp
+github.com/sirosfoundation/go-spocp/pkg/starform
 # github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c
 ## explicit; go 1.25.1
 github.com/sirosfoundation/go-trust/pkg/api

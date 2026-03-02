@@ -12,7 +12,7 @@ This service acts as a protocol translator, presenting:
 - **OpenID4VP interface** to EU Digital Identity Wallets (presentation request, direct post)
 - **Direct verification API** for custom integrations
 
-> **Note**: In previous versions, the OIDC provider functionality was a separate "verifier-proxy" service. As of ADR-06, these have been merged into a single unified verifier service.
+> **Note**: The OIDC provider functionality and credential verification are provided by a single unified verifier service (see ADR-06).
 
 ### Important: Terminology Clarification
 
@@ -104,7 +104,7 @@ make docker-build-verifier
 
 ### Configuration
 
-Create or update `config.yaml`. The verifier uses both `verifier` and `verifier_proxy` configuration sections:
+Create or update `config.yaml`:
 
 ```yaml
 verifier:
@@ -114,13 +114,7 @@ verifier:
       enabled: false
   external_url: "http://localhost:8080"
 
-verifier_proxy:
-  api_server:
-    addr: :8080
-    tls:
-      enabled: false
-  
-  external_url: "http://localhost:8080"
+  # OIDC and OpenID4VP settings (nested under verifier)
   
   oidc:
     # OIDC Provider identifier - identifies this verifier service
@@ -320,14 +314,7 @@ go test ./internal/verifier/...
 go test -cover ./internal/verifier/...
 ```
 
-## Migration from verifier-proxy
 
-If you were previously running a separate verifier-proxy service:
-
-1. **Configuration**: Your existing `verifier_proxy` configuration section continues to work - no changes needed
-2. **Docker**: Update `docker-compose.yaml` to remove the `verifier-proxy` service; the unified `verifier` now handles both roles
-3. **MongoDB**: Sessions and clients can remain in the same database
-4. **Clients**: Existing client registrations continue to work
 
 ## Troubleshooting
 

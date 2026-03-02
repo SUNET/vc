@@ -1,5 +1,5 @@
 # Compile
-FROM docker.sunet.se/dc4eu/gobuild:latest AS builder
+FROM docker.sunet.se/iam_vc/gobuild:latest AS builder
 
 # Build Delve
 RUN go install github.com/go-delve/delve/cmd/dlv@latest

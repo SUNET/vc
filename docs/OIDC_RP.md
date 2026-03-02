@@ -122,7 +122,7 @@ apigw:
       - "openid"
       - "profile"
       - "email"
-    session_duration: 3600
+    session_duration: 300
     credential_mappings:
       pid:
         credential_config_id: "urn:eudi:pid:1"
@@ -377,7 +377,7 @@ When `storage_path` is configured, registered credentials are cached in JSON for
   "registration_access_token": "optional-token-for-updates",
   "registration_client_uri": "https://provider.com/clients/a1b2c3d4...",
   "client_secret_expires_at": 1735689600,
-  "cached_at": "2024-01-15T10:30:00Z"
+  "registered_at": "2024-01-15T10:30:00Z"
 }
 ```
 

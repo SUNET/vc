@@ -9,10 +9,10 @@ import (
 
 // AddConsentRequest is the request for AddConsent
 type AddConsentRequest struct {
-	AuthenticSource         string `json:"authentic_source" validate:"required"`
-	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"required"`
-	ConsentTo               string `json:"consent_to"`
-	SessionID               string `json:"session_id"`
+	AuthenticSource         string `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
+	ConsentTo               string `json:"consent_to" validate:"required,max=128,printascii"`
+	SessionID               string `json:"session_id" validate:"required,max=128,printascii"`
 }
 
 // AddConsent adds a consent to a document
@@ -46,8 +46,8 @@ func (c *Client) AddConsent(ctx context.Context, req *AddConsentRequest) error {
 
 // GetConsentRequest is the request for GetConsent
 type GetConsentRequest struct {
-	AuthenticSource         string `json:"authentic_source" validate:"required"`
-	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"required"`
+	AuthenticSource         string `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
 }
 
 // GetConsent gets a consent for a document

@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"vc/pkg/logger"
@@ -72,6 +73,11 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 			},
 		},
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	// Load VCTMs (normally done by configuration.New)
+	for scope, cc := range client.cfg.CredentialConstructor {
+		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
 	// Execute the function
@@ -168,6 +174,93 @@ func TestCreateCredentialOfferLookupMetadata_EmptyConfig(t *testing.T) {
 	assert.Empty(t, metadata.Wallets)
 }
 
+func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
+	ctx := t.Context()
+
+	// Simulate a constructor with VCTMFilePath set but VCTM not loaded.
+	// This should now return an error because VCTM is nil.
+	client := &Client{
+		log: logger.NewSimple("test"),
+		cfg: &model.Cfg{
+			CredentialConstructor: map[string]*model.CredentialConstructor{
+				"diploma": {
+					VCTMFilePath: "../../../metadata/vctm_diploma.json",
+					// VCTM intentionally NOT loaded
+				},
+			},
+			APIGW: &model.APIGW{
+				CredentialOffers: model.CredentialOffers{
+					Wallets: map[string]model.CredentialOfferWallets{},
+				},
+			},
+		},
+		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	err := client.CreateCredentialOfferLookupMetadata(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `credential constructor for scope "diploma" has no VCTM configured`)
+}
+
+func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
+	ctx := t.Context()
+
+	// A constructor without VCTMFilePath still has nil VCTM and must error.
+	client := &Client{
+		log: logger.NewSimple("test"),
+		cfg: &model.Cfg{
+			CredentialConstructor: map[string]*model.CredentialConstructor{
+				"empty_scope": {
+					// No VCTMFilePath, no VCTM – must still be caught
+				},
+			},
+			APIGW: &model.APIGW{
+				CredentialOffers: model.CredentialOffers{
+					Wallets: map[string]model.CredentialOfferWallets{},
+				},
+			},
+		},
+		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	err := client.CreateCredentialOfferLookupMetadata(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `credential constructor for scope "empty_scope" has no VCTM configured`)
+}
+
+func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) {
+	ctx := t.Context()
+
+	// One constructor with a loaded VCTM and one without – should still error.
+	diplomaCC := &model.CredentialConstructor{
+		VCTMFilePath: "../../../metadata/vctm_diploma.json",
+	}
+	require.NoError(t, diplomaCC.LoadVCTMetadata(context.Background(), "diploma"))
+
+	client := &Client{
+		log: logger.NewSimple("test"),
+		cfg: &model.Cfg{
+			CredentialConstructor: map[string]*model.CredentialConstructor{
+				"diploma":     diplomaCC,
+				"broken_scope": {
+					VCTMFilePath: "nonexistent.json",
+					// VCTM not loaded
+				},
+			},
+			APIGW: &model.APIGW{
+				CredentialOffers: model.CredentialOffers{
+					Wallets: map[string]model.CredentialOfferWallets{},
+				},
+			},
+		},
+		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	err := client.CreateCredentialOfferLookupMetadata(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "has no VCTM configured")
+}
+
 func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 	ctx := t.Context()
 
@@ -200,6 +293,11 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 			},
 		},
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
+	}
+
+	// Load VCTMs (normally done by configuration.New)
+	for scope, cc := range client.cfg.CredentialConstructor {
+		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
 	// Execute the function

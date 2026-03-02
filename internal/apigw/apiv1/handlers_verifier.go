@@ -14,20 +14,19 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 type VerificationRequestObjectRequest struct {
-	ID string `form:"id" uri:"id"`
+	ID string `form:"id" uri:"id" validate:"required,max=128,printascii"`
 }
 
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
 	c.log.Debug("Verification request object", "req", req)
 
-	authorizationContext, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{
+	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
 		VerifierResponseCode: req.ID,
 	})
 	if err != nil {
@@ -90,10 +89,18 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		},
 	}
 
+	// Persist the DCQL query in the auth context so VerificationDirectPost
+	// can use it for VP Token validation later.
+	authorizationContext.DCQLQuery = dcql
+	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+		c.log.Error(err, "failed to update authorization context with DCQL query")
+		return "", fmt.Errorf("failed to update authorization context: %w", err)
+	}
+
 	// Derive VP formats from issuer metadata
 	vf := deriveVPFormatsFromMetadata(c.issuerMetadata)
 
-	_, ephemeralPublicJWK, err := c.EphemeralEncryptionKey(authorizationContext.EphemeralEncryptionKeyID)
+	_, ephemeralPublicJWK, err := c.EphemeralEncryptionKey(ctx, authorizationContext.EphemeralEncryptionKeyID)
 	if err != nil {
 		return "", err
 	}
@@ -181,8 +188,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Get ephemeral private key from cache
-	privateEphemeralJWK := c.ephemeralEncryptionKeyCache.Get(kid).Value()
-	if privateEphemeralJWK == nil {
+	privateEphemeralJWK, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
+	if !ok {
 		c.log.Debug("No ephemeral key found in cache", "kid", kid)
 		return nil, errors.New("ephemeral key not found in cache")
 	}
@@ -204,7 +211,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Get authorization context
-	authCtx, err := c.authContextCache.Get(ctx, &cache.AuthorizationContext{EphemeralEncryptionKeyID: kid})
+	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{EphemeralEncryptionKeyID: kid})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
@@ -264,7 +271,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scopes[0])
 	}
 
-	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.GetVCT())
+	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.VCTM.VCT)
 
 	// Extract identity from validated credential
 	identity := &model.Identity{}
@@ -280,10 +287,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Retrieve documents matching the identity
 	// Use authorizationContext.VCT which should be set to the VCT value
-	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.GetVCT(), "identity", identity)
+	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.VCTM.VCT, "identity", identity)
 	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
 		Meta: &model.MetaData{
-			VCT: credentialConstructorCfg.GetVCT(),
+			VCT: credentialConstructorCfg.VCTM.VCT,
 		},
 		Identity: identity,
 	})
@@ -300,7 +307,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Cache PID documents for session
-	c.documentCache.Set(authCtx.SessionID, documents, ttlcache.DefaultTTL)
+	c.cacheService.Document.Set(ctx, authCtx.SessionID, documents)
 
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 

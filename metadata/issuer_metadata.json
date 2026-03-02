@@ -1,6 +1,7 @@
 {
   "credential_issuer": "http://vc_dev_apigw:8080",
   "credential_endpoint": "http://vc_dev_apigw:8080/credential",
+  "nonce_endpoint": "http://vc_dev_apigw:8080/nonce",
   "display": [
     {
       "name": "SUNET dev Issuer (vc project)",
@@ -9,20 +10,22 @@
   ],
   "credential_configurations_supported": {
     "diploma": {
+      "format": "dc+sd-jwt",
       "scope": "diploma",
       "vct": "urn:eudi:diploma:1",
-      "format": "dc+sd-jwt",
-      "display": [
-        {
-          "name": "Bachelor Diploma - SD-JWT VC",
-          "logo": {
-            "uri": "https://raw.githubusercontent.com/dc4eu/vc/10d96c0b1e8d1568a41c7a0a1a095ce1fcc8aec4/images/diploma-logo.svg"
-          },
-          "background_color": "#b1d3ff",
-          "text_color": "#ffffff",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "Bachelor Diploma - SD-JWT VC",
+            "logo": {
+              "uri": "https://raw.githubusercontent.com/dc4eu/vc/10d96c0b1e8d1568a41c7a0a1a095ce1fcc8aec4/images/diploma-logo.svg"
+            },
+            "background_color": "#b1d3ff",
+            "text_color": "#ffffff",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -38,21 +41,23 @@
       }
     },
     "pid_1_5": {
+      "format": "dc+sd-jwt",
       "scope": "pid_1_5",
       "vct": "urn:eudi:pid:arf-1.5:1",
-      "format": "dc+sd-jwt",
-      "display": [
-        {
-          "name": "PID SD-JWT VC ARF 1.5",
-          "description": "Person Identification Data",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "PID SD-JWT VC ARF 1.5",
+            "description": "Person Identification Data",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -68,21 +73,23 @@
       }
     },
     "pid_1_5_mdoc": {
+      "format": "mso_mdoc",
       "scope": "pid_1_5",
       "doctype": "eu.europa.ec.eudi.pid.1",
-      "format": "mso_mdoc",
-      "display": [
-        {
-          "name": "PID mDoc ARF 1.5",
-          "description": "Person Identification Data (ISO 18013-5 mdoc)",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "PID mDoc ARF 1.5",
+            "description": "Person Identification Data (ISO 18013-5 mdoc)",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "cose_key"
       ],
@@ -98,21 +105,23 @@
       }
     },
     "pid_1_8": {
+      "format": "dc+sd-jwt",
       "scope": "pid_1_8",
       "vct": "urn:eudi:pid:arf-1.8:1",
-      "format": "dc+sd-jwt",
-      "display": [
-        {
-          "name": "PID SD-JWT VC ARF 1.8",
-          "description": "Person Identification Data",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "PID SD-JWT VC ARF 1.8",
+            "description": "Person Identification Data",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -128,21 +137,23 @@
       }
     },
     "ehic": {
+      "format": "dc+sd-jwt",
       "scope": "ehic",
       "vct": "urn:eudi:ehic:1",
-      "format": "dc+sd-jwt",
-      "display": [
-        {
-          "name": "EHIC - SD-JWT VC",
-          "description": "European Health Insurance Card",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "EHIC - SD-JWT VC",
+            "description": "European Health Insurance Card",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -158,21 +169,23 @@
       }
     },
     "pda1": {
+      "format": "dc+sd-jwt",
       "scope": "pda1",
       "vct": "urn:eudi:pda1:1",
-      "format": "dc+sd-jwt",
-      "display": [
-        {
-          "name": "PDA1 - SD-JWT VC",
-          "description": "European Portable Document Application",
-          "background_image": {
-            "uri": "http://vc_dev_apigw:8080/images/background-image.png"
-          },
-          "background_color": "#1b263b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "PDA1 - SD-JWT VC",
+            "description": "European Portable Document Application",
+            "background_image": {
+              "uri": "http://vc_dev_apigw:8080/images/background-image.png"
+            },
+            "background_color": "#1b263b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],
@@ -188,21 +201,23 @@
       }
     },
     "eduid": {
+      "format": "dc+sd-jwt",
       "scope": "eduid",
       "vct": "urn:credential:eduid:1",
-      "format": "dc+sd-jwt",
-      "display": [
-        {
-          "name": "eduID Credential",
-          "description": "Educational Identity Credential",
-          "logo": {
-            "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-logo.svg"
-          },
-          "background_color": "#0d4f8b",
-          "text_color": "#FFFFFF",
-          "locale": "en-US"
-        }
-      ],
+      "credential_metadata": {
+        "display": [
+          {
+            "name": "eduID Credential",
+            "description": "Educational Identity Credential",
+            "logo": {
+              "uri": "https://raw.githubusercontent.com/dc4eu/vc/main/images/eduid-logo.svg"
+            },
+            "background_color": "#0d4f8b",
+            "text_color": "#FFFFFF",
+            "locale": "en-US"
+          }
+        ]
+      },
       "cryptographic_binding_methods_supported": [
         "jwk"
       ],

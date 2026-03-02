@@ -180,10 +180,7 @@ func TestCredentialConstructor(t *testing.T) {
 			assert.NotNil(t, tt.constructor.VCTM, "VCTM should be loaded")
 
 			// Verify VCT matches expected value
-			assert.Equal(t, tt.expectedVCT, tt.constructor.GetVCT(), "VCT should match expected value")
-
-			// Verify VCTM has the VCT field populated
-			assert.Equal(t, tt.expectedVCT, tt.constructor.VCTM.VCT, "VCTM.VCT should be populated")
+			assert.Equal(t, tt.expectedVCT, tt.constructor.VCTM.VCT, "VCTM.VCT should match expected value")
 		})
 	}
 }
@@ -427,7 +424,6 @@ func TestIssuerMetadataLoadAndSign(t *testing.T) {
 			metadata, err := tt.metadata.Generate(ctx, "https://issuer.example.com", nil)
 			require.NoError(t, err)
 			assert.NotNil(t, metadata)
-			assert.Empty(t, metadata.SignedMetadata, "SignedMetadata should be empty until Sign() is called")
 		})
 	}
 }

@@ -16,7 +16,7 @@ import (
 
 // New creates a new Kafka event consumer instance used by mockas
 func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, log *logger.Log) (messagebroker.EventConsumer, error) {
-	if !cfg.Common.Kafka.Enabled {
+	if !cfg.Common.Kafka.Enable {
 		log.Info("Kafka disabled - no consumer created")
 		return nil, nil
 	}

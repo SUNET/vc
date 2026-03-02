@@ -3,13 +3,12 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"net/http"
 	"time"
 	"vc/internal/apigw/apiv1"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/staticembed"
-	"vc/pkg/crypto"
 	"vc/pkg/httphelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -40,12 +39,12 @@ type Service struct {
 	sessionsEncKey  string
 	sessionsAuthKey string
 	sessionsName    string
-	samlService     SAMLService
+	samlSPService     SAMLSPService
 	oidcrpService   OIDCRPService
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlService SAMLService, oidcrpService OIDCRPService, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlSPService SAMLSPService, oidcrpService OIDCRPService, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	s := &Service{
 		cfg:    cfg,
 		log:    log.New("httpserver"),
@@ -56,7 +55,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			ReadHeaderTimeout: 3 * time.Second,
 		},
 		eventPublisher:  eventPublisher,
-		samlService:     samlService,
+		samlSPService:     samlSPService,
 		oidcrpService:   oidcrpService,
 		sessionsName:    "oauth_user_session",
 		sessionsOptions: sessions.Options{
@@ -69,23 +68,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		},
 	}
 
-	if s.cfg.APIGW.APIServer.TLS.Enabled {
+	if s.cfg.APIGW.APIServer.TLS.Enable {
 		s.sessionsOptions.Secure = true
 		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}
 
-	// Generate session keys
+	// Session keys resolved by the cache service (HA-shared or ephemeral).
+	s.sessionsAuthKey = cacheService.SessionAuthKey
+	s.sessionsEncKey = cacheService.SessionEncKey
+
 	var err error
-	s.sessionsAuthKey, err = crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate session auth key: %w", err)
-	}
-
-	s.sessionsEncKey, err = crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate session encryption key: %w", err)
-	}
-
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
@@ -114,21 +106,27 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	s.gin.SetHTMLTemplate(f)
 
-	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
-	if err != nil {
-		return nil, err
-	}
-
-	// Configure CORS from config if present and has origins
+	// Configure CORS at the engine level (before route registration) so that
+	// OPTIONS preflight requests are handled correctly. Placing CORS on a
+	// router group causes preflight requests to hit Gin's NoRoute handler
+	// (404) because no explicit OPTIONS route is registered.
 	if s.cfg.APIGW.APIServer.CORS != nil && len(s.cfg.APIGW.APIServer.CORS.AllowedOrigins) > 0 {
 		corsConfig := cors.Config{
 			AllowOrigins:     s.cfg.APIGW.APIServer.CORS.AllowedOrigins,
 			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-			AllowHeaders:     []string{"Content-Type", "Authorization"},
+			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
 			AllowCredentials: true,
 			MaxAge:           12 * time.Hour,
 		}
-		rgRoot.Use(cors.New(corsConfig))
+		s.gin.Use(cors.New(corsConfig))
+	}
+	// If no CORS configuration is provided, do not enable CORS middleware by default.
+	// This avoids unintentionally allowing cross-origin access when operators have
+	// not explicitly configured allowed origins.
+
+	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
+	if err != nil {
+		return nil, err
 	}
 
 	rgRestricted, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
@@ -136,7 +134,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRestricted.Use(s.httpHelpers.Middleware.BasicAuth(ctx, s.cfg.APIGW.APIServer.BasicAuth.Users))
+	rgRestricted.Use(s.httpHelpers.Middleware.BasicAuth(ctx, s.cfg.APIGW.APIServer.APIAuth.BasicAuth.Users))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -173,9 +171,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	rgAPIv1 := rgRoot.Group("api/v1")
 
-	if s.cfg.APIGW.APIServer.BasicAuth.Enabled {
-		rgAPIv1.Use(s.httpHelpers.Middleware.BasicAuth(ctx, s.cfg.APIGW.APIServer.BasicAuth.Users))
-	}
+	rgAPIv1.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/upload", http.StatusOK, s.endpointUpload)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/notification", http.StatusOK, s.endpointNotification)

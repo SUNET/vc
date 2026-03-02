@@ -78,7 +78,7 @@ func TestCreateRequestObject(t *testing.T) {
 			require.NoError(t, client.SetSigningKeyForTesting(key))
 
 			// Configure Digital Credentials API
-			client.cfg.Verifier.DigitalCredentials.Enabled = tt.dcEnabled
+			client.cfg.Verifier.DigitalCredentials.Enable = tt.dcEnabled
 			if tt.dcResponseMode != "" {
 				client.cfg.Verifier.DigitalCredentials.ResponseMode = tt.dcResponseMode
 			}
@@ -273,7 +273,7 @@ func TestHandleDirectPost(t *testing.T) {
 			if tt.authCtxSetup != nil {
 				authCtx := createTestDBSession(tt.sessionID)
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 
@@ -285,7 +285,7 @@ func TestHandleDirectPost(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Verify session was updated
-				authCtx, _ := client.authContextCache.GetByID(ctx, tt.sessionID)
+				authCtx, _ := client.cacheService.AuthContext.GetByID(ctx, tt.sessionID)
 				assert.NotNil(t, authCtx)
 				assert.Equal(t, tt.vpToken, authCtx.VPToken)
 				assert.Equal(t, cache.SessionStatusCodeIssued, authCtx.Status)
@@ -343,7 +343,7 @@ func TestGetPollStatus(t *testing.T) {
 			if tt.authCtxSetup != nil {
 				authCtx := createTestDBSession(tt.sessionID)
 				tt.authCtxSetup(authCtx)
-				err := client.authContextCache.Create(ctx, authCtx)
+				err := client.cacheService.AuthContext.Create(ctx, authCtx)
 				require.NoError(t, err)
 			}
 

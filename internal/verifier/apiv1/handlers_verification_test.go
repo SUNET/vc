@@ -151,7 +151,7 @@ func TestVerificationCallback(t *testing.T) {
 						},
 					},
 				}
-				client.credentialCache.Set(tt.responseCode, credentials, 0)
+				client.cacheService.Credential.Set(ctx, tt.responseCode, credentials)
 			}
 
 			req := &VerificationCallbackRequest{

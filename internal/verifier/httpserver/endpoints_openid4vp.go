@@ -16,18 +16,14 @@ func (s *Service) endpointOIDCRequestObject(ctx context.Context, c *gin.Context)
 
 	s.log.Debug("endpointOIDCRequestObject called")
 
-	sessionID := c.Param("session_id")
-	if sessionID == "" {
-		span.SetStatus(codes.Error, "Missing session_id")
+	request := &apiv1.GetRequestObjectRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, nil
 	}
 
 	// Get request object
-	request := &apiv1.GetRequestObjectRequest{
-		SessionID: sessionID,
-	}
-
 	response, err := s.apiv1.GetOIDCRequestObject(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -54,26 +50,13 @@ func (s *Service) endpointOIDCDirectPost(ctx context.Context, c *gin.Context) (a
 
 	s.log.Debug("endpointOIDCDirectPost called")
 
-	// Parse request - support both form-encoded and JSON
+	// Parse request - httpHelpers.Binding.Request handles JSON, form-encoded, and query params
 	request := &apiv1.DirectPostRequest{}
-	contentType := c.GetHeader("Content-Type")
-
-	if contentType == "application/json" {
-		// DC API may send JSON
-		if err := c.ShouldBindJSON(request); err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			s.log.Error(err, "Failed to bind JSON direct_post request")
-			c.AbortWithStatus(http.StatusBadRequest)
-			return nil, nil
-		}
-	} else {
-		// Standard form-encoded
-		if err := c.ShouldBind(request); err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			s.log.Error(err, "Failed to bind direct_post request")
-			c.AbortWithStatus(http.StatusBadRequest)
-			return nil, nil
-		}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "Failed to bind direct_post request")
+		c.AbortWithStatus(http.StatusBadRequest)
+		return nil, nil
 	}
 
 	// Process VP token
@@ -111,7 +94,7 @@ func (s *Service) endpointOIDCCallback(ctx context.Context, c *gin.Context) (any
 	s.log.Debug("endpointOIDCCallback called")
 
 	request := &apiv1.CallbackRequest{}
-	if err := c.ShouldBindQuery(request); err != nil {
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "Failed to bind callback request")
 		c.AbortWithStatus(http.StatusBadRequest)
@@ -141,15 +124,11 @@ func (s *Service) endpointQRCode(ctx context.Context, c *gin.Context) (any, erro
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointQRCode")
 	defer span.End()
 
-	sessionID := c.Param("session_id")
-	if sessionID == "" {
-		span.SetStatus(codes.Error, "Missing session_id")
+	request := &apiv1.GetQRCodeRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, nil
-	}
-
-	request := &apiv1.GetQRCodeRequest{
-		SessionID: sessionID,
 	}
 
 	response, err := s.apiv1.GetQRCode(ctx, request)
@@ -176,15 +155,11 @@ func (s *Service) endpointPollSession(ctx context.Context, c *gin.Context) (any,
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPollSession")
 	defer span.End()
 
-	sessionID := c.Param("session_id")
-	if sessionID == "" {
-		span.SetStatus(codes.Error, "Missing session_id")
+	request := &apiv1.PollSessionRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, nil
-	}
-
-	request := &apiv1.PollSessionRequest{
-		SessionID: sessionID,
 	}
 
 	response, err := s.apiv1.PollSession(ctx, request)

@@ -87,7 +87,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		ctx,
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
-		credentialConstructor.GetVCT(),
+		credentialConstructor.VCTM.VCT,
 		req.DocumentData,
 		req.JWK,
 		vctm,

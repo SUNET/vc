@@ -7,11 +7,13 @@ import (
 	"sync"
 	"syscall"
 	"vc/internal/apigw/apiv1"
+	"vc/internal/apigw/cache"
 	"vc/internal/apigw/db"
 	"vc/internal/apigw/httpserver"
 	"vc/internal/apigw/inbound"
 	"vc/internal/apigw/outbound"
 	"vc/pkg/configuration"
+	"vc/pkg/model"
 	"vc/pkg/logger"
 	"vc/pkg/trace"
 )
@@ -28,7 +30,7 @@ func main() {
 		serviceName string = "apigw"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -37,7 +39,7 @@ func main() {
 		panic("apigw configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}
@@ -56,8 +58,13 @@ func main() {
 		panic(err)
 	}
 
+	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
+	if err != nil {
+		panic(err)
+	}
+
 	var eventPublisher apiv1.EventPublisher
-	if cfg.Common.Kafka.Enabled {
+	if cfg.Common.Kafka.Enable {
 		var err error
 		eventPublisher, err = outbound.New(ctx, cfg, tracer, log)
 		services["eventPublisher"] = eventPublisher
@@ -68,32 +75,32 @@ func main() {
 		mainLog.Info("EventPublisher disabled in config")
 	}
 
-	apiv1Client, err := apiv1.New(ctx, dbService, tracer, cfg, log)
+	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, cfg, log)
 	if err != nil {
 		panic(err)
 	}
 
 	// Initialize SAML service if enabled
-	samlService, err := initSAMLService(ctx, cfg, mainLog)
+	samlSPService, err := initSAMLSPService(ctx, cfg, cacheService, mainLog)
 	if err != nil {
 		mainLog.Error(err, "Failed to initialize SAML service")
 		panic(err)
 	}
 
 	// Initialize OIDC RP service if enabled
-	oidcrpService, err := initOIDCRPService(ctx, cfg, mainLog)
+	oidcrpService, err := initOIDCRPService(ctx, cfg, cacheService, dbService, mainLog)
 	if err != nil {
 		mainLog.Error(err, "Failed to initialize OIDC RP service")
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, eventPublisher, samlService, oidcrpService, log)
+	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, eventPublisher, samlSPService, oidcrpService, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)
 	}
 
-	if cfg.Common.Kafka.Enabled {
+	if cfg.Common.Kafka.Enable {
 		eventConsumer, err := inbound.New(ctx, cfg, apiv1Client, tracer, log.New("eventConsumer"))
 		services["eventConsumer"] = eventConsumer
 		if err != nil {

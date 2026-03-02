@@ -1,0 +1,59 @@
+builders:
+  - script
+
+triggers:
+  github_push: true
+
+slack:
+  room: "dc4eu-builds"
+
+pre_build_script:
+  - "apt-get update && apt-get install -y protobuf-compiler"
+
+script:
+  - |
+    set -e
+
+    # Determine version tag based on branch
+    VERSION=$(cat VERSION | tr -d '[:space:]')
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    SHORT_SHA=$(git rev-parse --short=8 HEAD)
+
+    if [ "$BRANCH" = "main" ]; then
+      BUILD_TAG="${VERSION}"
+      PUSH_LATEST=true
+    else
+      PR_NUM=$(echo "$BRANCH" | grep -oP '\d+' | head -1)
+      if [ -n "$PR_NUM" ]; then
+        BUILD_TAG="${VERSION}-rc.${PR_NUM}.${SHORT_SHA}"
+      else
+        BUILD_TAG="${VERSION}-rc.${SHORT_SHA}"
+      fi
+      PUSH_LATEST=false
+    fi
+
+    echo "Branch: ${BRANCH}"
+    echo "Build tag: ${BUILD_TAG}"
+    echo "Push latest: ${PUSH_LATEST}"
+
+    # Build and push Docker images (vanilla, no build tags)
+    make docker-build VERSION=${BUILD_TAG}
+    make docker-push VERSION=${BUILD_TAG}
+
+    # Build and push Docker images with PKCS#11 HSM support
+    make docker-build VERSION=${BUILD_TAG}-hsm GO_BUILD_TAGS=pkcs11
+    make docker-push VERSION=${BUILD_TAG}-hsm
+
+    # Tag and push dev on RC builds
+    if [ "$PUSH_LATEST" = "false" ]; then
+      make docker-tag VERSION=${BUILD_TAG} NEWTAG=dev
+      make docker-push VERSION=dev
+    fi
+
+    # Tag and push latest on main branch
+    if [ "$PUSH_LATEST" = "true" ]; then
+      make docker-tag VERSION=${BUILD_TAG} NEWTAG=latest
+      make docker-push VERSION=latest
+    fi
+
+clean_workspace: true

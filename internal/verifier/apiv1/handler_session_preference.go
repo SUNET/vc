@@ -6,11 +6,12 @@ import (
 	"time"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
+	"vc/pkg/model"
 )
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference
 type UpdateSessionPreferenceRequest struct {
-	SessionID             string `json:"session_id" binding:"required"`
+	SessionID             string `json:"session_id" binding:"required" validate:"required,max=128,printascii"`
 	ShowCredentialDetails bool   `json:"show_credential_details"`
 }
 
@@ -22,7 +23,7 @@ type UpdateSessionPreferenceResponse struct {
 // UpdateSessionPreference updates the session's credential display preference
 func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSessionPreferenceRequest) (*UpdateSessionPreferenceResponse, error) {
 	// Get session
-	authCtx, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -33,7 +34,7 @@ func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSession
 	// Update preference
 	authCtx.ShowCredentialDetails = req.ShowCredentialDetails
 
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session preference")
 		return nil, ErrServerError
 	}
@@ -43,7 +44,8 @@ func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSession
 
 // ConfirmCredentialDisplayRequest represents a confirmation from the credential display page
 type ConfirmCredentialDisplayRequest struct {
-	Confirmed bool `json:"confirmed"`
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+	Confirmed bool   `json:"confirmed"`
 }
 
 // ConfirmCredentialDisplayResponse contains the redirect URI
@@ -52,9 +54,9 @@ type ConfirmCredentialDisplayResponse struct {
 }
 
 // ConfirmCredentialDisplay handles user confirmation after viewing credential details
-func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string, req *ConfirmCredentialDisplayRequest) (*ConfirmCredentialDisplayResponse, error) {
+func (c *Client) ConfirmCredentialDisplay(ctx context.Context, req *ConfirmCredentialDisplayRequest) (*ConfirmCredentialDisplayResponse, error) {
 	// Get session
-	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -64,15 +66,15 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 
 	// Verify session is in the right state
 	if authCtx.Status != cache.SessionStatusAwaitingPresentation {
-		c.log.Info("Session not awaiting confirmation", "session_id", sessionID, "status", authCtx.Status)
+		c.log.Info("Session not awaiting confirmation", "session_id", req.SessionID, "status", authCtx.Status)
 		return nil, ErrInvalidRequest
 	}
 
 	if !req.Confirmed {
 		// User cancelled - return error to RP
-		c.log.Info("User cancelled credential display", "session_id", sessionID)
+		c.log.Info("User cancelled credential display", "session_id", req.SessionID)
 		authCtx.Status = cache.SessionStatusError
-		if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session after cancellation")
 			return nil, ErrServerError
 		}
@@ -109,12 +111,12 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 	authCtx.Code = code
 	authCtx.CodeExpiresAt = codeExpiry.Unix()
 
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session after confirmation")
 		return nil, ErrServerError
 	}
 
-	c.log.Info("User confirmed credential display, code issued", "session_id", sessionID)
+	c.log.Info("User confirmed credential display, code issued", "session_id", req.SessionID)
 
 	// Return redirect URI with code
 	redirectURI := ""
@@ -138,7 +140,7 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, sessionID string,
 
 // GetCredentialDisplayDataRequest represents a request to get display data
 type GetCredentialDisplayDataRequest struct {
-	SessionID string
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
 }
 
 // GetCredentialDisplayDataResponse contains data for the credential display page
@@ -159,7 +161,7 @@ type GetCredentialDisplayDataResponse struct {
 // GetCredentialDisplayData retrieves data needed for the credential display page
 func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentialDisplayDataRequest) (*GetCredentialDisplayDataResponse, error) {
 	// Get session
-	authCtx, err := c.authContextCache.GetByID(ctx, req.SessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -182,7 +184,7 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 		RedirectURI:       authCtx.RedirectURI,
 		State:             authCtx.State,
 		ShowRawCredential: c.cfg.Verifier.CredentialDisplay.ShowRawCredential,
-		ShowClaims:        c.cfg.Verifier.CredentialDisplay.ShowClaims,
+		ShowClaims:        model.BoolVal(c.cfg.Verifier.CredentialDisplay.ShowClaims, true),
 		PrimaryColor:      c.cfg.Verifier.AuthorizationPageCSS.PrimaryColor,
 		SecondaryColor:    c.cfg.Verifier.AuthorizationPageCSS.SecondaryColor,
 		CustomCSS:         c.cfg.Verifier.AuthorizationPageCSS.CustomCSS,

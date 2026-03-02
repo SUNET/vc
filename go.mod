@@ -6,6 +6,7 @@ require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/IBM/sarama v1.46.3
 	github.com/PaesslerAG/jsonpath v0.1.1
+	github.com/beevik/etree v1.6.0
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/brianvoe/gofakeit/v7 v7.14.0
 	github.com/coreos/go-oidc/v3 v3.17.0
@@ -38,6 +39,8 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.7.0
+	github.com/russellhaering/goxmldsig v1.5.0
+	github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8
 	github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/stretchr/testify v1.11.1
@@ -69,7 +72,6 @@ require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/PaesslerAG/gval v1.2.4 // indirect
-	github.com/beevik/etree v1.6.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
@@ -174,7 +176,6 @@ require (
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/richardlehane/mscfb v1.0.6 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
-	github.com/russellhaering/goxmldsig v1.5.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect

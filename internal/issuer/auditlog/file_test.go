@@ -23,7 +23,7 @@ func TestFile_SendToDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -61,7 +61,7 @@ func TestFile_FileSyncEveryWrite(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:          true,
+				Enable:          true,
 				Destinations:     []string{logFile},
 				FileSyncInterval: 0, // 0 = fsync every write
 			},
@@ -100,7 +100,7 @@ func TestFile_DeferredSync(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:          true,
+				Enable:          true,
 				Destinations:     []string{logFile},
 				FileSyncInterval: 100 * time.Millisecond,
 			},
@@ -149,7 +149,7 @@ func TestFile_DestinationParsing(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					logFile,
 				},
@@ -180,7 +180,7 @@ func TestFile_InvalidPath(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"/invalid/path/that/does/not/exist/audit.log",
 				},
@@ -201,7 +201,7 @@ func TestFile_WriteToFile_NilFile(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -238,7 +238,7 @@ func TestFile_MultipleWrites(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -278,7 +278,7 @@ func TestFile_MessageDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -318,7 +318,7 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{logFile},
 			},
 		},

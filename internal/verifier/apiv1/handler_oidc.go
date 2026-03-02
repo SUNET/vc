@@ -1,41 +1,47 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"maps"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
-	"vc/internal/verifier/apiv1/utils"
 	"vc/internal/verifier/db"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/jose"
+	"vc/pkg/oauth2"
+	"vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthorizeRequest represents an OIDC authorization request
 type AuthorizeRequest struct {
-	ResponseType        string `form:"response_type" binding:"required"`
-	ClientID            string `form:"client_id" binding:"required"`
-	RedirectURI         string `form:"redirect_uri" binding:"required"`
-	Scope               string `form:"scope" binding:"required"`
-	State               string `form:"state"`
-	Nonce               string `form:"nonce"`
-	CodeChallenge       string `form:"code_challenge"`
-	CodeChallengeMethod string `form:"code_challenge_method"`
-	ResponseMode        string `form:"response_mode"`
-	Display             string `form:"display"`
-	Prompt              string `form:"prompt"`
+	ResponseType        string `form:"response_type" binding:"required" validate:"required,max=128,printascii"`
+	ClientID            string `form:"client_id" binding:"required" validate:"required,max=128,printascii"`
+	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=128,printascii"`
+	Scope               string `form:"scope" binding:"required" validate:"required,max=128,printascii"`
+	State               string `form:"state" validate:"omitempty,max=500,printascii"`
+	Nonce               string `form:"nonce" validate:"omitempty,max=128,printascii"`
+	CodeChallenge       string `form:"code_challenge" validate:"omitempty,max=128,printascii"`
+	CodeChallengeMethod string `form:"code_challenge_method" validate:"omitempty,max=128,printascii"`
+	ResponseMode        string `form:"response_mode" validate:"omitempty,max=128,printascii"`
+	Display             string `form:"display" validate:"omitempty,max=128,printascii"`
+	Prompt              string `form:"prompt" validate:"omitempty,max=128,printascii"`
 	MaxAge              int    `form:"max_age"`
-	UILocales           string `form:"ui_locales"`
-	IDTokenHint         string `form:"id_token_hint"`
-	LoginHint           string `form:"login_hint"`
-	ACRValues           string `form:"acr_values"`
+	UILocales           string `form:"ui_locales" validate:"omitempty,max=128,printascii"`
+	IDTokenHint         string `form:"id_token_hint" validate:"omitempty,max=128,printascii"`
+	LoginHint           string `form:"login_hint" validate:"omitempty,max=128,printascii"`
+	ACRValues           string `form:"acr_values" validate:"omitempty,max=128,printascii"`
 }
 
 // AuthorizeResponse represents the response to an authorization request
@@ -75,7 +81,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate redirect URI
-	if !utils.ValidateRedirectURI(req.RedirectURI, client.RedirectURIs) {
+	if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
 		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI)
 		return nil, ErrInvalidRequest
 	}
@@ -86,11 +92,13 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		return nil, ErrInvalidRequest
 	}
 
-	// Validate scope
+	// Validate scope - ensure every requested scope is in the client's allow-list
 	requestedScopes := strings.Split(req.Scope, " ")
-	if !utils.ValidateScopes(requestedScopes, client.AllowedScopes) {
-		c.log.Info("Invalid scope requested")
-		return nil, ErrInvalidScope
+	for _, scope := range requestedScopes {
+		if !slices.Contains(client.AllowedScopes, scope) {
+			c.log.Info("Invalid scope requested", "scope", scope)
+			return nil, ErrInvalidScope
+		}
 	}
 
 	// Validate PKCE if required
@@ -115,8 +123,8 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	authCtx := &cache.AuthorizationContext{
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
-		// Session expires after the configured duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.SessionDuration) * time.Second).Unix(),
+		// Authorization request expires after the code duration
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -131,7 +139,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Save session
-	if err := c.authContextCache.Create(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Create(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to create session")
 		return nil, ErrServerError
 	}
@@ -171,7 +179,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Add Digital Credentials API configuration
-	if c.cfg.Verifier.DigitalCredentials.Enabled {
+	if c.cfg.Verifier.DigitalCredentials.Enable {
 		response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
 		response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
 		response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
@@ -213,13 +221,13 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 // TokenRequest represents an OIDC token request
 type TokenRequest struct {
-	GrantType    string `form:"grant_type" binding:"required"`
-	Code         string `form:"code"`
-	RedirectURI  string `form:"redirect_uri"`
-	ClientID     string `form:"client_id"`
-	ClientSecret string `form:"client_secret"`
-	CodeVerifier string `form:"code_verifier"`
-	RefreshToken string `form:"refresh_token"`
+	GrantType    string `form:"grant_type" binding:"required" validate:"required,max=128,printascii"`
+	Code         string `form:"code" validate:"omitempty,max=128,printascii"`
+	RedirectURI  string `form:"redirect_uri" validate:"omitempty,max=128,printascii"`
+	ClientID     string `form:"client_id" validate:"omitempty,max=128,printascii"`
+	ClientSecret string `form:"client_secret" validate:"omitempty,max=128,printascii"`
+	CodeVerifier string `form:"code_verifier" validate:"omitempty,max=128,printascii"`
+	RefreshToken string `form:"refresh_token" validate:"omitempty,max=128,printascii"`
 }
 
 // TokenResponse represents an OIDC token response
@@ -249,7 +257,7 @@ func (c *Client) Token(ctx context.Context, req *TokenRequest) (*TokenResponse, 
 
 func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
 	// Get session by authorization code
-	authCtx, err := c.authContextCache.GetByAuthorizationCode(ctx, req.Code)
+	authCtx, err := c.cacheService.AuthContext.GetByAuthorizationCode(ctx, req.Code)
 	if err != nil {
 		c.log.Info("Session not found for code", "error", err)
 		return nil, ErrInvalidGrant
@@ -300,14 +308,14 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Validate PKCE if present
 	if authCtx.CodeChallenge != "" {
-		if err := utils.ValidatePKCE(req.CodeVerifier, authCtx.CodeChallenge, authCtx.CodeChallengeMethod); err != nil {
+		if err := oauth2.ValidatePKCE(req.CodeVerifier, authCtx.CodeChallenge, authCtx.CodeChallengeMethod); err != nil {
 			c.log.Info("PKCE validation failed")
 			return nil, ErrInvalidGrant
 		}
 	}
 
 	// Mark code as forfeited
-	if err := c.authContextCache.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
+	if err := c.cacheService.AuthContext.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
 		c.log.Error(err, "Failed to forfeit code")
 		return nil, ErrServerError
 	}
@@ -340,7 +348,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
 
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}
@@ -406,4 +414,475 @@ func (c *Client) authenticateOIDCClient(client *db.Client, clientSecret string) 
 	}
 
 	return bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret))
+}
+
+// DiscoveryMetadata represents OpenID Provider metadata
+type DiscoveryMetadata struct {
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	UserInfoEndpoint                  string   `json:"userinfo_endpoint"`
+	JwksURI                           string   `json:"jwks_uri"`
+	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"` // RFC 7591
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	SubjectTypesSupported             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
+	ScopesSupported                   []string `json:"scopes_supported"`
+	ClaimsSupported                   []string `json:"claims_supported"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
+}
+
+// GetDiscoveryMetadata returns OpenID Provider configuration
+func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
+	authorizationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/authorize")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct authorization endpoint URL: %w", err)
+	}
+	tokenEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/token")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct token endpoint URL: %w", err)
+	}
+	userInfoEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/userinfo")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct userinfo endpoint URL: %w", err)
+	}
+	jwksURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/jwks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct jwks URI: %w", err)
+	}
+	registrationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/register")
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct registration endpoint URL: %w", err)
+	}
+
+	metadata := &DiscoveryMetadata{
+		Issuer:                           c.cfg.Verifier.OIDC.Issuer,
+		AuthorizationEndpoint:            authorizationEndpoint,
+		TokenEndpoint:                    tokenEndpoint,
+		UserInfoEndpoint:                 userInfoEndpoint,
+		JwksURI:                          jwksURI,
+		RegistrationEndpoint:             registrationEndpoint,
+		ResponseTypesSupported:           []string{"code", "id_token", "token id_token"},
+		SubjectTypesSupported:            []string{"public", "pairwise"},
+		IDTokenSigningAlgValuesSupported: []string{"RS256", "ES256"},
+		ScopesSupported:                  []string{"openid", "profile", "email"},
+		ClaimsSupported: []string{
+			"sub", "name", "given_name", "family_name", "email",
+			"email_verified", "birthdate", "address",
+		},
+		GrantTypesSupported:               []string{"authorization_code", "implicit", "refresh_token"},
+		CodeChallengeMethodsSupported:     []string{"S256"},
+		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
+	}
+
+	// Add configured credential scopes
+	for _, cred := range c.cfg.Verifier.OpenID4VP.GetSupportedCredentials() {
+		for _, scope := range cred.Scopes {
+			metadata.ScopesSupported = append(metadata.ScopesSupported, scope)
+		}
+	}
+
+	return metadata, nil
+}
+
+// GetJWKS returns the JSON Web Key Set
+func (c *Client) GetJWKS(ctx context.Context) (*jose.JWKS, error) {
+	if c.pkiSigner == nil {
+		return nil, fmt.Errorf("signing key not loaded")
+	}
+
+	return jose.CreateJWKSFromSigner(c.pkiSigner, "")
+}
+
+// GetRequestObjectRequest represents a request to get an OpenID4VP request object
+type GetRequestObjectRequest struct {
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+}
+
+// GetRequestObjectResponse contains the signed JWT request object
+type GetRequestObjectResponse struct {
+	RequestObject string
+}
+
+// GetOIDCRequestObject generates and returns a signed JWT request object for OpenID4VP
+func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObjectRequest) (*GetRequestObjectResponse, error) {
+	// Get session
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
+	if err != nil {
+		return nil, ErrSessionNotFound
+	}
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	// Check if session is expired
+	if time.Now().Unix() > session.ExpiresAt {
+		return nil, ErrSessionExpired
+	}
+
+	// Generate nonce for this request
+	nonce, err := crypto.GenerateSecureToken(32, 0)
+	if err != nil {
+		c.log.Error(err, "Failed to generate nonce")
+		return nil, ErrServerError
+	}
+	session.RequestObjectNonce = nonce
+	if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
+		c.log.Error(err, "Failed to update session with nonce")
+		return nil, ErrServerError
+	}
+
+	// Create and sign request object using DCQL from session
+	signedJWT, err := c.CreateRequestObject(ctx, session.SessionID, session.DCQLQuery, nonce)
+	if err != nil {
+		c.log.Error(err, "Failed to create request object")
+		return nil, ErrServerError
+	}
+
+	c.log.Debug("Request object signed", "session_id", session.SessionID)
+
+	return &GetRequestObjectResponse{
+		RequestObject: signedJWT,
+	}, nil
+}
+
+// DirectPostRequest represents a direct_post callback from a wallet
+type DirectPostRequest struct {
+	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=128,printascii"`
+	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty,max=128,printascii"`                               // For standard direct_post
+	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty,max=128,printascii"` // For standard direct_post
+	Response               string `json:"response" form:"response" validate:"omitempty,max=128,printascii"`                               // For DC API encrypted JWT response
+}
+
+// DirectPostResponse contains the response to a direct_post request
+type DirectPostResponse struct {
+	RedirectURI string
+}
+
+// ProcessDirectPost processes a direct_post response from a wallet
+func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) (*DirectPostResponse, error) {
+	// Get session by state
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.State)
+	if err != nil {
+		return nil, ErrSessionNotFound
+	}
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	var vpToken string
+	var presentationSubmission any
+
+	// Check if this is a DC API response (encrypted JWT) or standard form-encoded
+	if req.Response != "" {
+		// DC API response - decrypt and extract vp_token
+		c.log.Debug("Processing DC API encrypted response", "state", req.State)
+
+		// TODO: Implement JWT decryption using OIDC keys
+		// For now, treat response as the vp_token
+		vpToken = req.Response
+
+		c.log.Info("DC API response decryption not yet implemented, treating response as vp_token")
+	} else if req.VPToken != "" {
+		// Standard direct_post with form-encoded parameters
+		vpToken = req.VPToken
+
+		// Parse presentation submission if provided
+		if req.PresentationSubmission != "" {
+			if err := json.Unmarshal([]byte(req.PresentationSubmission), &presentationSubmission); err != nil {
+				c.log.Error(err, "Failed to parse presentation submission")
+				// Continue anyway - presentation submission is optional
+			}
+		}
+	} else {
+		c.log.Error(nil, "Neither vp_token nor response parameter provided")
+		return nil, ErrInvalidRequest
+	}
+
+	// Validate and parse VP token
+	c.log.Debug("Processing VP token", "state", req.State, "vp_token_length", len(vpToken))
+
+	// Extract and map claims from VP token
+	oidcClaims, err := c.extractAndMapClaims(ctx, vpToken, strings.Join(session.Scopes, " "))
+	if err != nil {
+		c.log.Error(err, "Failed to extract and map claims from VP token")
+		return nil, ErrInvalidVP
+	}
+
+	c.log.Debug("Mapped OIDC claims from VP", "claims", oidcClaims)
+
+	// Update session with VP data
+	session.VPToken = vpToken
+	session.PresentationSubmission = presentationSubmission
+	session.VerifiedClaims = oidcClaims
+
+	// Extract wallet ID from claims
+	if sub, ok := oidcClaims["sub"].(string); ok {
+		session.WalletID = sub
+	}
+
+	// Check if user requested credential display
+	if session.ShowCredentialDetails {
+		session.Status = cache.SessionStatusAwaitingPresentation
+
+		if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
+			c.log.Error(err, "Failed to update session")
+			return nil, ErrServerError
+		}
+
+		c.log.Info("Redirecting to credential display page", "session_id", session.SessionID)
+
+		displayURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "display", session.SessionID)
+		if err != nil {
+			c.log.Error(err, "Failed to construct display URI")
+			return nil, ErrServerError
+		}
+
+		return &DirectPostResponse{
+			RedirectURI: displayURI,
+		}, nil
+	}
+
+	// Otherwise, issue authorization code immediately
+	session.Status = cache.SessionStatusCodeIssued
+
+	code, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		c.log.Error(err, "Failed to generate authorization code")
+		return nil, ErrServerError
+	}
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
+
+	session.Code = code
+	session.CodeExpiresAt = codeExpiry.Unix()
+
+	if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
+		c.log.Error(err, "Failed to update session")
+		return nil, ErrServerError
+	}
+
+	c.log.Info("VP processed successfully", "session_id", session.SessionID, "claims_count", len(oidcClaims))
+
+	// Return redirect URI if present
+	redirectURI := ""
+	if session.RedirectURI != "" {
+		u, err := url.Parse(session.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("code", code)
+		q.Set("state", session.State)
+		u.RawQuery = q.Encode()
+		redirectURI = u.String()
+	}
+
+	return &DirectPostResponse{
+		RedirectURI: redirectURI,
+	}, nil
+}
+
+// CallbackRequest represents a callback request
+type CallbackRequest struct {
+	State string `form:"state" binding:"required" validate:"required,max=128,printascii"`
+	Code  string `form:"code" validate:"omitempty,max=128,printascii"`
+	Error string `form:"error" validate:"omitempty,max=1000,printascii"`
+}
+
+// CallbackResponse contains the redirect URI
+type CallbackResponse struct {
+	RedirectURI string
+}
+
+// ProcessCallback processes a callback request
+func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*CallbackResponse, error) {
+	// Get session
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.State)
+	if err != nil {
+		return nil, ErrSessionNotFound
+	}
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	// Handle error response
+	if req.Error != "" {
+		session.Status = cache.SessionStatusError
+		if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
+			c.log.Error(err, "Failed to update session")
+			return nil, ErrServerError
+		}
+
+		u, err := url.Parse(session.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("error", req.Error)
+		q.Set("state", session.State)
+		u.RawQuery = q.Encode()
+
+		resp := &CallbackResponse{
+			RedirectURI: u.String(),
+		}
+		return resp, nil
+	}
+
+	// Build redirect URI with code
+	u, err := url.Parse(session.RedirectURI)
+	if err != nil {
+		c.log.Error(err, "Failed to parse redirect URI")
+		return nil, ErrServerError
+	}
+	q := u.Query()
+	q.Set("code", req.Code)
+	q.Set("state", session.State)
+	u.RawQuery = q.Encode()
+
+	resp := &CallbackResponse{
+		RedirectURI: u.String(),
+	}
+
+	return resp, nil
+}
+
+// GetQRCodeRequest represents a request for a QR code image
+type GetQRCodeRequest struct {
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+}
+
+// GetQRCodeResponse contains the QR code image data
+type GetQRCodeResponse struct {
+	ImageData []byte
+}
+
+// GetQRCode generates a QR code image for a session
+func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCodeResponse, error) {
+	// Get session
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
+	if err != nil {
+		return nil, ErrSessionNotFound
+	}
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	// Generate authorization request URI
+	requestObject := &openid4vp.RequestObject{
+		ClientID: c.cfg.Verifier.OIDC.Issuer,
+	}
+	authReqURI, err := requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+	}
+
+	// Generate QR code
+	qr, err := qrcode.New(authReqURI, qrcode.Medium)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate QR code: %w", err)
+	}
+
+	// Encode to PNG
+	var buf bytes.Buffer
+	img := qr.Image(256)
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, fmt.Errorf("failed to encode QR code: %w", err)
+	}
+
+	return &GetQRCodeResponse{
+		ImageData: buf.Bytes(),
+	}, nil
+}
+
+// PollSessionRequest represents a polling request for session status
+type PollSessionRequest struct {
+	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+}
+
+// PollSessionResponse contains the session status
+type PollSessionResponse struct {
+	Status      string
+	RedirectURI string
+}
+
+// PollSession returns the current status of a session
+func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*PollSessionResponse, error) {
+	// Get session
+	session, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
+	if err != nil {
+		return nil, ErrSessionNotFound
+	}
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	response := &PollSessionResponse{
+		Status: string(session.Status),
+	}
+
+	// If code is issued, provide redirect URI
+	if session.Status == cache.SessionStatusCodeIssued {
+		u, err := url.Parse(session.RedirectURI)
+		if err != nil {
+			c.log.Error(err, "Failed to parse redirect URI")
+			return nil, ErrServerError
+		}
+		q := u.Query()
+		q.Set("code", session.Code)
+		q.Set("state", session.State)
+		u.RawQuery = q.Encode()
+		response.RedirectURI = u.String()
+	}
+
+	return response, nil
+}
+
+// UserInfoRequest represents a UserInfo endpoint request
+type UserInfoRequest struct {
+	Authorization string `json:"-" header:"Authorization" validate:"required,max=256,printascii"`
+	AccessToken   string `json:"-"` // Parsed from Authorization header
+}
+
+// UserInfoResponse contains user claims
+type UserInfoResponse map[string]any
+
+// GetUserInfo returns user claims based on access token
+func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
+	// Get session by access token
+	session, err := c.cacheService.AuthContext.GetByAccessToken(ctx, req.AccessToken)
+	if err != nil {
+		return nil, ErrInvalidGrant
+	}
+	if session == nil {
+		return nil, ErrInvalidGrant
+	}
+
+	// Check if access token is expired
+	if time.Now().Unix() > session.AccessTokenExpiresAt {
+		return nil, ErrInvalidGrant
+	}
+
+	// Generate subject identifier
+	walletID := ""
+	if val, ok := session.VerifiedClaims["sub"]; ok {
+		if str, ok := val.(string); ok {
+			walletID = str
+		}
+	}
+
+	subject := c.generateSubjectIdentifier(walletID, session.ClientID)
+
+	// Return verified claims
+	response := UserInfoResponse{
+		"sub": subject,
+	}
+
+	// Add verified claims from VP
+	maps.Copy(response, session.VerifiedClaims)
+
+	return response, nil
 }

@@ -24,14 +24,14 @@ type Apiv1 interface {
 	UIInteraction(ctx context.Context, req *apiv1.UIInteractionRequest) (*apiv1.UIInteractionReply, error)
 	UIMetadata(ctx context.Context) (*apiv1.UIMetadataReply, error)
 
-	// OIDC Provider (from verifier-proxy merge)
+	// OIDC Provider
 	GetDiscoveryMetadata(ctx context.Context) (*apiv1.DiscoveryMetadata, error)
 	GetJWKS(ctx context.Context) (*jose.JWKS, error)
 	Authorize(ctx context.Context, req *apiv1.AuthorizeRequest) (*apiv1.AuthorizeResponse, error)
 	Token(ctx context.Context, req *apiv1.TokenRequest) (*apiv1.TokenResponse, error)
 	GetUserInfo(ctx context.Context, req *apiv1.UserInfoRequest) (apiv1.UserInfoResponse, error)
 
-	// OpenID4VP (from verifier-proxy merge)
+	// OpenID4VP
 	GetOIDCRequestObject(ctx context.Context, req *apiv1.GetRequestObjectRequest) (*apiv1.GetRequestObjectResponse, error)
 	ProcessDirectPost(ctx context.Context, req *apiv1.DirectPostRequest) (*apiv1.DirectPostResponse, error)
 	ProcessCallback(ctx context.Context, req *apiv1.CallbackRequest) (*apiv1.CallbackResponse, error)
@@ -40,12 +40,12 @@ type Apiv1 interface {
 
 	// Dynamic Client Registration (RFC 7591/7592)
 	RegisterClient(ctx context.Context, req *apiv1.ClientRegistrationRequest) (*apiv1.ClientRegistrationResponse, error)
-	GetClientInformation(ctx context.Context, clientID string, registrationAccessToken string) (*apiv1.ClientInformationResponse, error)
-	UpdateClient(ctx context.Context, clientID string, registrationAccessToken string, req *apiv1.ClientRegistrationRequest) (*apiv1.ClientRegistrationResponse, error)
-	DeleteClient(ctx context.Context, clientID string, registrationAccessToken string) error
+	GetClientInformation(ctx context.Context, req *apiv1.GetClientInformationRequest) (*apiv1.ClientInformationResponse, error)
+	UpdateClient(ctx context.Context, req *apiv1.UpdateClientRequest) (*apiv1.ClientRegistrationResponse, error)
+	DeleteClient(ctx context.Context, req *apiv1.DeleteClientRequest) error
 
-	// Session/Credential Display (from verifier-proxy merge)
+	// Session/Credential Display
 	UpdateSessionPreference(ctx context.Context, req *apiv1.UpdateSessionPreferenceRequest) (*apiv1.UpdateSessionPreferenceResponse, error)
-	ConfirmCredentialDisplay(ctx context.Context, sessionID string, req *apiv1.ConfirmCredentialDisplayRequest) (*apiv1.ConfirmCredentialDisplayResponse, error)
+	ConfirmCredentialDisplay(ctx context.Context, req *apiv1.ConfirmCredentialDisplayRequest) (*apiv1.ConfirmCredentialDisplayResponse, error)
 	GetCredentialDisplayData(ctx context.Context, req *apiv1.GetCredentialDisplayDataRequest) (*apiv1.GetCredentialDisplayDataResponse, error)
 }

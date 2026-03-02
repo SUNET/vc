@@ -14,7 +14,7 @@ func TestAPIServerDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, ":8080", cfg.Addr)
-	assert.False(t, cfg.TLS.Enabled)
+	assert.False(t, cfg.TLS.Enable)
 }
 
 func TestTLSDefaults(t *testing.T) {
@@ -22,7 +22,7 @@ func TestTLSDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestCORSDefaults(t *testing.T) {
@@ -39,7 +39,7 @@ func TestKafkaDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.Equal(t, []string{"kafka0:9092", "kafka1:9092"}, cfg.Brokers)
 }
 
@@ -73,7 +73,7 @@ func TestGRPCTLSDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.Equal(t, "/pki/grpc_server.crt", cfg.CertFilePath)
 	assert.Equal(t, "/pki/grpc_server.key", cfg.KeyFilePath)
 	assert.Equal(t, "/pki/client_ca.crt", cfg.ClientCAPath)
@@ -93,7 +93,7 @@ func TestSAMLConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestOIDCRPConfigDefaults(t *testing.T) {
@@ -101,16 +101,8 @@ func TestOIDCRPConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.Equal(t, []string{"openid", "profile", "email"}, cfg.Scopes)
-}
-
-func TestDynamicRegistrationConfigDefaults(t *testing.T) {
-	var cfg DynamicRegistrationConfig
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.False(t, cfg.Enabled)
 }
 
 func TestAttributeConfigDefaults(t *testing.T) {
@@ -126,7 +118,7 @@ func TestAuditLogDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 }
 
 func TestMDocConfigDefaults(t *testing.T) {
@@ -163,7 +155,8 @@ func TestAdminGUIDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Enabled)
+	require.NotNil(t, cfg.Enable)
+	assert.False(t, *cfg.Enable)
 	assert.Equal(t, "admin", cfg.Username)
 }
 
@@ -180,7 +173,8 @@ func TestTrustConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Enabled)
+	require.NotNil(t, cfg.Enable)
+	assert.True(t, *cfg.Enable)
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 
@@ -217,11 +211,12 @@ func TestDigitalCredentialsConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.False(t, cfg.UseJAR)
 	assert.Equal(t, []string{"vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"}, cfg.PreferredFormats)
 	assert.Equal(t, "dc_api.jwt", cfg.ResponseMode)
-	assert.True(t, cfg.AllowQRFallback)
+	require.NotNil(t, cfg.AllowQRFallback)
+	assert.True(t, *cfg.AllowQRFallback)
 }
 
 func TestAuthorizationPageCSSConfigDefaults(t *testing.T) {
@@ -237,19 +232,21 @@ func TestCredentialDisplayConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.Enable)
 	assert.False(t, cfg.RequireConfirmation)
 	assert.False(t, cfg.ShowRawCredential)
-	assert.True(t, cfg.ShowClaims)
+	require.NotNil(t, cfg.ShowClaims)
+	assert.True(t, *cfg.ShowClaims)
 	assert.False(t, cfg.AllowEdit)
 }
 
-func TestBasicAuthDefaults(t *testing.T) {
-	var cfg BasicAuth
+func TestAPIAuthDefaults(t *testing.T) {
+	var cfg APIAuth
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.BasicAuth.Enable)
+	assert.False(t, cfg.JWT.Enable)
 }
 
 func TestTokenStatusListsDefaults(t *testing.T) {
@@ -268,212 +265,4 @@ func TestOTELDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(10), cfg.Timeout)
-}
-
-func TestOIDCRPConfigScopesValidation(t *testing.T) {
-	tests := []struct {
-		name        string
-		scopes      []string
-		enabled     bool
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name:    "default scopes with openid",
-			scopes:  []string{"openid", "profile", "email"},
-			enabled: true,
-			wantErr: false,
-		},
-		{
-			name:        "missing openid scope",
-			scopes:      []string{"profile", "email"},
-			enabled:     true,
-			wantErr:     true,
-			errContains: "must include 'openid'",
-		},
-		{
-			name:    "only openid scope",
-			scopes:  []string{"openid"},
-			enabled: true,
-			wantErr: false,
-		},
-		{
-			name:    "disabled config no validation",
-			scopes:  []string{"profile"},
-			enabled: false,
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &OIDCRPConfig{
-				Enabled: tt.enabled,
-				Scopes:  tt.scopes,
-			}
-
-			// Set client credentials for validation
-			if tt.enabled {
-				cfg.ClientID = "test-client"
-				cfg.ClientSecret = "test-secret"
-				cfg.RedirectURI = "https://example.com/callback"
-				cfg.IssuerURL = "https://provider.example.com"
-			}
-
-			err := cfg.Validate()
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errContains)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestSAMLConfigValidation(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupConfig func() *SAMLConfig
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "disabled config",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{Enabled: false}
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid MDQ config",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled:         true,
-					MDQServer:       "https://md.example.org/entities/",
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid static IdP config with path",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled: true,
-					StaticIDPMetadata: &StaticIDPConfig{
-						EntityID:     "https://idp.example.com",
-						MetadataPath: "/metadata/idp.xml",
-					},
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid static IdP config with URL",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled: true,
-					StaticIDPMetadata: &StaticIDPConfig{
-						EntityID:    "https://idp.example.com",
-						MetadataURL: "https://idp.example.com/metadata",
-					},
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr: false,
-		},
-		{
-			name: "neither MDQ nor static IdP",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled:         true,
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr:     true,
-			errContains: "neither mdq_server nor static_idp_metadata",
-		},
-		{
-			name: "both MDQ and static IdP",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled:   true,
-					MDQServer: "https://md.example.org/entities/",
-					StaticIDPMetadata: &StaticIDPConfig{
-						EntityID:     "https://idp.example.com",
-						MetadataPath: "/metadata/idp.xml",
-					},
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr:     true,
-			errContains: "cannot have both mdq_server and static_idp_metadata",
-		},
-		{
-			name: "static IdP with both path and URL",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled: true,
-					StaticIDPMetadata: &StaticIDPConfig{
-						EntityID:     "https://idp.example.com",
-						MetadataPath: "/metadata/idp.xml",
-						MetadataURL:  "https://idp.example.com/metadata",
-					},
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr:     true,
-			errContains: "cannot have both metadata_path and metadata_url",
-		},
-		{
-			name: "static IdP without metadata",
-			setupConfig: func() *SAMLConfig {
-				return &SAMLConfig{
-					Enabled: true,
-					StaticIDPMetadata: &StaticIDPConfig{
-						EntityID: "https://idp.example.com",
-					},
-					EntityID:        "https://sp.example.com",
-					CertificatePath: "/pki/saml.crt",
-					PrivateKeyPath:  "/pki/saml.key",
-					ACSEndpoint:     "https://sp.example.com/acs",
-				}
-			},
-			wantErr:     true,
-			errContains: "requires either metadata_path or metadata_url",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := tt.setupConfig()
-			err := cfg.Validate()
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errContains)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
 }

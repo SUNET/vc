@@ -1,5 +1,5 @@
 /**
- * W3C Digital Credentials API Client for Verifier Proxy
+ * W3C Digital Credentials API Client for Verifier
  * 
  * Implements browser-based credential presentation using the W3C Digital Credentials API
  * with support for multiple formats (SD-JWT, mdoc) and graceful fallback to QR codes.
@@ -36,7 +36,7 @@ export class DigitalCredentialsClient {
     /**
      * @param {Object} config Configuration options
      * @param {string} config.sessionId Session identifier
-     * @param {string} config.baseUrl Base URL of verifier-proxy
+     * @param {string} config.baseUrl Base URL of verifier
      * @param {string[]} config.preferredFormats Ordered list of preferred credential formats
      * @param {boolean} config.useJAR Whether to use JWT Authorization Request
      * @param {string} config.responseMode OpenID4VP response mode (dc_api.jwt, direct_post.jwt, direct_post)
@@ -83,7 +83,7 @@ export class DigitalCredentialsClient {
             
             this.onProgress('Submitting credential...');
             
-            // Submit the credential response to verifier-proxy
+            // Submit the credential response to verifier
             await this.submitCredentialResponse(credential);
             
             this.onSuccess('Credential verified successfully');
@@ -95,7 +95,7 @@ export class DigitalCredentialsClient {
     }
 
     /**
-     * Fetch authorization request from verifier-proxy
+     * Fetch authorization request from verifier
      * Returns either a signed JWT (JAR) or plain request object
      * @returns {Promise<string|Object>}
      */
@@ -166,7 +166,7 @@ export class DigitalCredentialsClient {
     }
 
     /**
-     * Submit credential response to verifier-proxy
+     * Submit credential response to verifier
      * @param {DigitalCredential} credential The digital credential from wallet
      * @returns {Promise<void>}
      */
@@ -272,7 +272,7 @@ export function generateDeepLink(authRequestURI, deepLinkScheme = 'openid4vp://'
 /**
  * Utility: Create QR code data URL for fallback
  * @param {string} sessionId Session identifier
- * @param {string} baseUrl Base URL of verifier-proxy
+ * @param {string} baseUrl Base URL of verifier
  * @returns {string} QR code image URL
  */
 export function getQRCodeURL(sessionId, baseUrl = window.location.origin) {

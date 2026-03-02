@@ -7,9 +7,9 @@ import (
 
 // SearchPersonRequest is the request for searching credential subjects by person info
 type SearchPersonRequest struct {
-	FirstName   string `form:"first_name"`
-	LastName    string `form:"last_name"`
-	DateOfBirth string `form:"date_of_birth"`
+	FirstName   string `form:"first_name" validate:"omitempty,max=128,printascii"`
+	LastName    string `form:"last_name" validate:"omitempty,max=128,printascii"`
+	DateOfBirth string `form:"date_of_birth" validate:"omitempty,max=128,printascii"`
 }
 
 // PersonResult represents a person with their Token Status List info and current status
@@ -69,8 +69,8 @@ type UpdateStatusRequest struct {
 	Index   int64 `form:"index" validate:"gte=0"`
 	Status  uint8 `form:"status" validate:"gte=0,lte=255"`
 	// Search parameters to preserve after update
-	SearchFirstName   string `form:"search_first_name"`
-	SearchLastName    string `form:"search_last_name"`
+	SearchFirstName   string `form:"search_first_name" validate:"omitempty,max=128,printascii"`
+	SearchLastName    string `form:"search_last_name" validate:"omitempty,max=128,printascii"`
 	SearchDateOfBirth string `form:"search_date_of_birth"`
 }
 

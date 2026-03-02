@@ -54,7 +54,7 @@ func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
 	credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
 	require.True(t, exists)
 	// Without VCTM loaded, there's no display
-	require.Len(t, credConfig.Display, 0)
+	require.Nil(t, credConfig.CredentialMetadata)
 }
 
 func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
@@ -88,11 +88,12 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 
 	credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
 	require.True(t, exists)
-	require.Len(t, credConfig.Display, 1)
+	require.NotNil(t, credConfig.CredentialMetadata)
+	require.Len(t, credConfig.CredentialMetadata.Display, 1)
 
-	assert.Equal(t, "VCTM Display Name", credConfig.Display[0].Name)
-	assert.Equal(t, "en-US", credConfig.Display[0].Locale)
-	assert.Equal(t, "VCTM Description", credConfig.Display[0].Description)
+	assert.Equal(t, "VCTM Display Name", credConfig.CredentialMetadata.Display[0].Name)
+	assert.Equal(t, "en-US", credConfig.CredentialMetadata.Display[0].Locale)
+	assert.Equal(t, "VCTM Description", credConfig.CredentialMetadata.Display[0].Description)
 }
 
 func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
@@ -316,8 +317,8 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 	jwtProof := credConfig.ProofTypesSupported["jwt"]
 	assert.Equal(t, []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}, jwtProof.ProofSigningAlgValuesSupported, "Should use default proof algorithms")
 
-	// Check credential definition
-	assert.Equal(t, []string{"VerifiableCredential"}, credConfig.CredentialDefinition.Type)
+	// Check credential definition (vc+sd-jwt is not a W3C VC format, so no credential_definition)
+	assert.Nil(t, credConfig.CredentialDefinition, "vc+sd-jwt should not have credential_definition")
 }
 
 func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {

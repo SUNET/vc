@@ -28,7 +28,7 @@ func NewTokenStatusListMetadataColl(ctx context.Context, collName string, servic
 		Service: service,
 	}
 
-	c.Coll = c.Service.mongoClient.Database(databaseName).Collection(collName)
+	c.Coll = c.Service.MongoClient.Database(databaseName).Collection(collName)
 
 	if err := c.initMetadataDoc(ctx); err != nil {
 		return nil, err

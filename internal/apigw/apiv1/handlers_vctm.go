@@ -12,6 +12,7 @@ import (
 	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
+	"vc/pkg/vcclient"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -103,23 +104,16 @@ func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequ
 	return vctm, nil
 }
 
+// SVGTemplateRequest holds the request for fetching an SVG template.
 type SVGTemplateRequest struct {
 	VCTM *sdjwtvc.VCTM `json:"-"`
 }
 
-type SVGTemplateReply struct {
-	Template string `json:"template"`
-}
-
-func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) (*SVGTemplateReply, error) {
+func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) (*vcclient.SVGTemplateReply, error) {
 	svgTemplateURI := req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
 
-	if c.svgTemplateCache.Has(svgTemplateURI) {
-		cachedSvgTemplateReply := c.svgTemplateCache.Get(svgTemplateURI)
-
-		cachedReply := cachedSvgTemplateReply.Value()
-
-		return &cachedReply, nil
+	if cached, ok := c.cacheService.SVGTemplate.Get(ctx, svgTemplateURI); ok {
+		return &vcclient.SVGTemplateReply{Template: cached}, nil
 	}
 
 	c.log.Debug("SVG template not available in cache, fetching from origin")
@@ -147,11 +141,11 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 
 	template := base64.StdEncoding.EncodeToString([]byte(responseData))
 
-	reply := &SVGTemplateReply{
+	reply := &vcclient.SVGTemplateReply{
 		Template: template,
 	}
 
-	c.svgTemplateCache.Set(svgTemplateURI, *reply, 2*time.Hour)
+	c.cacheService.SVGTemplate.SetWithTTL(ctx, svgTemplateURI, reply.Template, 2*time.Hour)
 
 	return reply, nil
 }

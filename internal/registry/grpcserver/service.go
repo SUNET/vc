@@ -52,7 +52,7 @@ func New(ctx context.Context, tokenStatusListIssuer TokenStatusListIssuer, apiv1
 		}
 	}()
 
-	if cfg.Registry.GRPCServer.TLS.Enabled {
+	if cfg.Registry.GRPCServer.TLS.Enable {
 		s.log.Info("Started", "tls", "mTLS enabled")
 	} else {
 		s.log.Info("Started", "tls", "disabled (insecure)")

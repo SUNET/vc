@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 	"vc/internal/registry/apiv1"
+	"vc/internal/registry/cache"
 	"vc/pkg/httphelpers"
 	"vc/pkg/logger"
 	"vc/pkg/model"
@@ -28,7 +29,7 @@ type Service struct {
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.Tracer, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	// Initialize rate limiter for statuslists endpoints
 	rateLimitRequestsPerMinute := cfg.Registry.TokenStatusLists.RateLimitRequestsPerMinute
 	if rateLimitRequestsPerMinute <= 0 {
@@ -70,13 +71,13 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 	s.httpHelpers.Server.RegEndpoint(ctx, rgStatuslists, http.MethodGet, ":id", http.StatusOK, s.endpointStatusLists)
 
 	// Admin GUI endpoints for managing Token Status Lists
-	if s.cfg.Registry.AdminGUI.Enabled {
-		s.sessionStore = sessions.NewCookieStore([]byte(s.cfg.Registry.AdminGUI.SessionSecret))
+	if model.BoolVal(s.cfg.Registry.AdminGUI.Enable, true) {
+		s.sessionStore = sessions.NewCookieStore([]byte(cacheService.SessionAuthKey), []byte(cacheService.SessionEncKey))
 		s.sessionStore.Options = &sessions.Options{
 			Path:     "/admin",
-			MaxAge:   3600, // 1 hour
+			MaxAge:   3600,
 			HttpOnly: true,
-			Secure:   s.cfg.Registry.APIServer.TLS.Enabled,
+			Secure:   s.cfg.Registry.APIServer.TLS.Enable,
 			SameSite: http.SameSiteStrictMode,
 		}
 

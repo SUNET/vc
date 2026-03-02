@@ -24,7 +24,7 @@ func (s *Service) endpointUpload(ctx context.Context, c *gin.Context) (any, erro
 		return nil, err
 	}
 
-	if s.cfg.Common.Kafka.Enabled {
+	if s.cfg.Common.Kafka.Enable {
 		err := s.eventPublisher.Upload(request)
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
@@ -342,7 +342,7 @@ func (s *Service) endpointVCINotification(ctx context.Context, c *gin.Context) (
 	return nil, nil
 }
 
-// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-ID1.html#name-credential-issuer-metadata-
+// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointMetadata")
 	defer span.End()

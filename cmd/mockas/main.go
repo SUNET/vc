@@ -12,6 +12,7 @@ import (
 	"vc/internal/mockas/inbound"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
+	"vc/pkg/model"
 	"vc/pkg/trace"
 )
 
@@ -27,7 +28,7 @@ func main() {
 		serviceName string = "mockas"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -36,7 +37,7 @@ func main() {
 		panic("mock_as configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}
@@ -71,7 +72,7 @@ func main() {
 		panic(err)
 	}
 
-	if cfg.Common.Kafka.Enabled {
+	if cfg.Common.Kafka.Enable {
 		eventConsumer, err := inbound.New(ctx, cfg, apiv1Client, tracer, log.New("eventConsumer"))
 		services["eventConsumer"] = eventConsumer
 		if err != nil {

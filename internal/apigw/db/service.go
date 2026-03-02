@@ -29,16 +29,17 @@ type DB interface {
 
 // Service is the database service
 type Service struct {
-	dbClient   *mongo.Client
-	cfg        *model.Cfg
-	log        *logger.Log
-	tracer     *trace.Tracer
-	probeStore *apiv1_status.StatusProbeStore
+	MongoClient *mongo.Client
+	cfg         *model.Cfg
+	log         *logger.Log
+	tracer      *trace.Tracer
+	probeStore  *apiv1_status.StatusProbeStore
 
-	VCDatastoreColl            *VCDatastoreColl
-	VCConsentColl              *VCConsentColl
-	VCUsersColl                *VCUsersColl
-	VCCredentialOfferColl      *VCCredentialOfferColl
+	VCDatastoreColl       *VCDatastoreColl
+	VCConsentColl         *VCConsentColl
+	VCUsersColl           *VCUsersColl
+	VCCredentialOfferColl *VCCredentialOfferColl
+	VCDynamicRegistrationColl *VCDynamicRegistrationColl
 }
 
 // New creates a new database service
@@ -59,7 +60,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 
 	service.VCDatastoreColl = &VCDatastoreColl{
 		Service: service,
-		Coll:    service.dbClient.Database("vc").Collection("datastore"),
+		Coll:    service.MongoClient.Database("vc").Collection("datastore"),
 		log:     log.New("VCDatastoreColl"),
 	}
 	if err := service.VCDatastoreColl.createIndex(ctx); err != nil {
@@ -68,7 +69,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 
 	service.VCConsentColl = &VCConsentColl{
 		Service: service,
-		Coll:    service.dbClient.Database("vc").Collection("consent"),
+		Coll:    service.MongoClient.Database("vc").Collection("consent"),
 		log:     log.New("VCConsentColl"),
 	}
 	if err := service.VCConsentColl.createIndex(ctx); err != nil {
@@ -89,6 +90,12 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		return nil, err
 	}
 
+	service.VCDynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
+	if err != nil {
+		service.log.Error(err, "failed to create dynamic registration collection")
+		return nil, err
+	}
+
 	service.log.Info("Started")
 
 	return service, nil
@@ -103,7 +110,7 @@ func (s *Service) connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.dbClient = client
+	s.MongoClient = client
 
 	return nil
 }
@@ -123,7 +130,7 @@ func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
 		LastCheckedTS: timestamppb.Now(),
 	}
 
-	if err := s.dbClient.Ping(ctx, nil); err != nil {
+	if err := s.MongoClient.Ping(ctx, nil); err != nil {
 		probe.Message = err.Error()
 		probe.Healthy = false
 	}
@@ -136,7 +143,7 @@ func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
 
 // Close closes the database connection
 func (s *Service) Close(ctx context.Context) error {
-	if err := s.dbClient.Disconnect(ctx); err != nil {
+	if err := s.MongoClient.Disconnect(ctx); err != nil {
 		return err
 	}
 	ctx.Done()

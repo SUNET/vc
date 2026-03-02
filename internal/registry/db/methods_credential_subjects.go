@@ -33,7 +33,7 @@ func NewCredentialSubjectsColl(ctx context.Context, collName string, service *Se
 		Service: service,
 	}
 
-	c.Coll = c.Service.mongoClient.Database(databaseName).Collection(collName)
+	c.Coll = c.Service.MongoClient.Database(databaseName).Collection(collName)
 
 	if err := c.createIndexes(ctx); err != nil {
 		return nil, err

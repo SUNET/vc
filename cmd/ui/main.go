@@ -9,9 +9,11 @@ import (
 	"syscall"
 	"time"
 	"vc/internal/ui/apiv1"
+	"vc/internal/ui/cache"
 	"vc/internal/ui/httpserver"
 	"vc/internal/ui/outbound"
 	"vc/pkg/configuration"
+	"vc/pkg/model"
 	"vc/pkg/logger"
 	"vc/pkg/trace"
 )
@@ -33,7 +35,7 @@ func main() {
 		serviceName string = "ui"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +44,7 @@ func main() {
 		panic("ui configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}
@@ -56,7 +58,7 @@ func main() {
 	}
 
 	var eventPublisher apiv1.EventPublisher
-	if cfg.Common.Kafka.Enabled {
+	if cfg.Common.Kafka.Enable {
 		var err error
 		eventPublisher, err = outbound.New(ctx, cfg, tracer, log)
 		services["eventPublisher"] = eventPublisher
@@ -72,7 +74,13 @@ func main() {
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiClient, tracer, log)
+	cacheService, err := cache.New(ctx, cfg, log)
+	if err != nil {
+		panic(err)
+	}
+	services["cacheService"] = cacheService
+
+	httpService, err := httpserver.New(ctx, cfg, apiClient, tracer, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)

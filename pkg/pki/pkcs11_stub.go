@@ -8,10 +8,20 @@ import (
 
 // PKCS11Config holds configuration for PKCS#11 HSM connection.
 type PKCS11Config struct {
+	// ModulePath is the path to the PKCS#11 library
+	// Example: "/usr/lib/softhsm/libsofthsm2.so"
 	ModulePath string `yaml:"module_path"`
+	// SlotID is the HSM slot ID
+	// Example: 0
 	SlotID     uint   `yaml:"slot_id"`
+	// PIN is the user PIN for the slot
+	// Example: "1234"
 	PIN        string `yaml:"pin"`
+	// KeyLabel is the label of the key to use
+	// Example: "my-signing-key"
 	KeyLabel   string `yaml:"key_label"`
+	// KeyID is the identifier for the JWT kid header
+	// Example: "key-1"
 	KeyID      string `yaml:"key_id"`
 }
 

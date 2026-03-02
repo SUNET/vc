@@ -57,7 +57,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					server.URL,
 				},
@@ -150,7 +150,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					server1.URL,
 					server2.URL,
@@ -207,7 +207,7 @@ func TestIntegration_HighVolumeWebhooks(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					server.URL,
 				},
@@ -277,7 +277,7 @@ func TestIntegration_WebhookRetryOnFailure(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					server.URL,
 				},
@@ -328,7 +328,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled:      true,
+				Enable:      true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -396,7 +396,7 @@ func TestIntegration_MixedDestinations(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enabled: true,
+				Enable: true,
 				Destinations: []string{
 					"console",
 					logFile,

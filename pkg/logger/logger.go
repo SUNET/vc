@@ -69,6 +69,11 @@ func (l *Log) Info(msg string, args ...any) {
 	l.Logger.V(0).WithValues(args...).Info(msg)
 }
 
+// Warn log - same verbosity as Info but signals a potential problem
+func (l *Log) Warn(msg string, args ...any) {
+	l.Logger.V(0).WithValues(args...).Info("WARN: " + msg)
+}
+
 // Debug log
 func (l *Log) Debug(msg string, args ...any) {
 	l.Logger.V(1).WithValues(args...).Info(msg)

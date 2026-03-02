@@ -2,7 +2,7 @@
 
 ## Overview
 
-The verifier-proxy now supports the **W3C Digital Credentials API** for browser-based credential presentation. This modern approach allows users to present digital credentials directly from their browser's built-in wallet, providing a seamless user experience without requiring QR code scanning.
+The verifier now supports the **W3C Digital Credentials API** for browser-based credential presentation. This modern approach allows users to present digital credentials directly from their browser's built-in wallet, providing a seamless user experience without requiring QR code scanning.
 
 ## What is the W3C Digital Credentials API?
 
@@ -17,7 +17,7 @@ The [W3C Digital Credentials API](https://wicg.github.io/digital-credentials/) i
 
 ```
 ┌─────────────────┐                    ┌──────────────────┐
-│  Relying Party  │                    │ Verifier-Proxy   │
+│  Relying Party  │                    │    Verifier      │
 │    (Your App)   │                    │   (This Service) │
 └────────┬────────┘                    └────────┬─────────┘
          │                                      │
@@ -56,7 +56,7 @@ The [W3C Digital Credentials API](https://wicg.github.io/digital-credentials/) i
 ### Key Benefits for RPs
 
 1. **Zero changes required** - RPs use standard OIDC authorization code flow
-2. **No wallet knowledge needed** - Verifier-proxy handles all wallet interactions
+2. **No wallet knowledge needed** - Verifier handles all wallet interactions
 3. **Automatic fallback** - QR code flow works when DC API is unavailable
 4. **Standard claims** - Receive verified claims in standard OIDC ID tokens
 
@@ -65,7 +65,7 @@ The [W3C Digital Credentials API](https://wicg.github.io/digital-credentials/) i
 Enable the W3C Digital Credentials API in your `config.yaml`:
 
 ```yaml
-verifier_proxy:
+verifier:
   digital_credentials:
     enabled: true
     use_jar: true
@@ -100,7 +100,7 @@ verifier_proxy:
 Customize the authorization page appearance:
 
 ```yaml
-verifier_proxy:
+verifier:
   authorization_page_css:
     title: "Employee Verification"
     subtitle: "Present your employee credential to access this service"
@@ -136,7 +136,7 @@ The W3C Digital Credentials API is currently supported in:
 
 ### JWT Authorization Request (JAR)
 
-When `use_jar: true`, the verifier-proxy:
+When `use_jar: true`, the verifier:
 
 1. Creates a signed JWT containing the authorization request
 2. Wallet validates the signature before processing
@@ -156,7 +156,7 @@ When `use_jar: true`, the verifier-proxy:
 
 ## Format Negotiation
 
-The verifier-proxy requests credentials in **order of preference**:
+The verifier requests credentials in **order of preference**:
 
 ```yaml
 preferred_formats:
@@ -165,7 +165,7 @@ preferred_formats:
   - "mso_mdoc"     # Last resort
 ```
 
-The wallet selects the **first supported format** and returns credentials accordingly. The verifier-proxy automatically extracts claims from any format.
+The wallet selects the **first supported format** and returns credentials accordingly. The verifier automatically extracts claims from any format.
 
 ### Format-Specific Processing
 
@@ -210,13 +210,13 @@ const { id_token } = await tokenResponse.json();
 1. **Browser Detection**: Page checks if `navigator.credentials` API exists
 2. **Format Selection**: Sends `vp_formats` preference to wallet
 3. **User Consent**: Browser shows native credential selection UI
-4. **Credential Presentation**: Wallet returns VP token to verifier-proxy
-5. **Claim Extraction**: Verifier-proxy maps credential claims to OIDC claims
+4. **Credential Presentation**: Wallet returns VP token to verifier
+5. **Claim Extraction**: Verifier maps credential claims to OIDC claims
 6. **Code Issuance**: Returns standard OIDC authorization code to RP
 
 ## Credential Display & Debugging
 
-The verifier-proxy includes an optional **credential display feature** that shows users the credential details before completing authorization. This serves two purposes:
+The verifier includes an optional **credential display feature** that shows users the credential details before completing authorization. This serves two purposes:
 
 1. **Debugging Tool** - Developers can see the raw credential and extracted claims
 2. **Transparency/Consent** - Users can review what data is being shared with the RP
@@ -224,7 +224,7 @@ The verifier-proxy includes an optional **credential display feature** that show
 ### Configuration
 
 ```yaml
-verifier_proxy:
+verifier:
   credential_display:
     enabled: true                   # Show checkbox on authorization page
     require_confirmation: false     # Make it optional (true = mandatory)
@@ -291,7 +291,7 @@ When `show_raw_credential: true`, the full credential (including potentially und
 
 2. **Configure Test Credentials**:
    ```yaml
-   verifier_proxy:
+   verifier:
      digital_credentials:
        enabled: true
        use_jar: false              # Easier debugging
@@ -306,7 +306,7 @@ When `show_raw_credential: true`, the full credential (including potentially und
 
 ### Integration Testing
 
-The verifier-proxy includes automated tests for:
+The verifier includes automated tests for:
 
 - DC API request object generation
 - Format negotiation (mdoc vs SD-JWT)
@@ -375,4 +375,4 @@ response_mode: "direct_post"
 For questions or issues:
 - Open an issue on GitHub
 - Check existing documentation in `/docs`
-- Review example configuration in `config.digital-credentials-example.yaml`
+- Review example configuration in `config.yaml`

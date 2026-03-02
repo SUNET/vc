@@ -1,68 +1,40 @@
-name: build-main
+name: release-tag
 on:
   pull_request:
     types:
       - closed
 
+permissions:
+  contents: write
+
 jobs:
-  if_merged:
+  tag:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    outputs:
-      release_tag: ${{ steps.set_tag.outputs.release_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set release tag with timestamp
-        id: set_tag
+      - name: Read version
+        id: version
         run: |
-          # Generate ISO8601-style timestamp with milliseconds
-          # Format: YYYY_MM_DD_HHMMSSmmm (e.g., 2025_12_08_123052345)
-          TIMESTAMP=$(date -u +'%Y_%m_%d_%H%M%S%3N')
-          echo "release_tag=${TIMESTAMP}" >> $GITHUB_OUTPUT
-          echo "Release tag: ${TIMESTAMP}"
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          RELEASE_TAG="v${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}, Release tag: ${RELEASE_TAG}"
 
-      - name: Install Go
-        uses: actions/setup-go@v4
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: "**/*.sum"
-
-      - name: Install deb packages
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: protobuf-compiler
-          version: 1.0
-
-      - name: Install go packages
+      - name: Create git tag
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          go install github.com/swaggo/swag/cmd/swag@latest
-
-      - name: Build
-        run: make build
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: release_${{ steps.set_tag.outputs.release_tag }}
-          name: Release ${{ steps.set_tag.outputs.release_tag }}
-          body: |
-            ## Docker Images
-            All services tagged with: `${{ steps.set_tag.outputs.release_tag }}`
-
-            ### Services
-            - apigw_${{ steps.set_tag.outputs.release_tag }}
-            - verifier_${{ steps.set_tag.outputs.release_tag }}
-            - registry_${{ steps.set_tag.outputs.release_tag }}
-            - mockas_${{ steps.set_tag.outputs.release_tag }}
-            - issuer_${{ steps.set_tag.outputs.release_tag }}
-            - ui_${{ steps.set_tag.outputs.release_tag }}
-            - verifier-proxy_${{ steps.set_tag.outputs.release_tag }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG="${{ steps.version.outputs.release_tag }}"
+          if git rev-parse "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_TAG} already exists — skipping"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}"
+            git push origin "${RELEASE_TAG}"
+            echo "Created and pushed tag ${RELEASE_TAG}"
+          fi

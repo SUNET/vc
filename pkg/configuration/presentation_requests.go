@@ -142,11 +142,11 @@ func LoadPresentationRequests(ctx context.Context, dirPath string) (*Presentatio
 
 	// Load each file
 	for _, filePath := range files {
-		template, err := loadTemplateFile(filePath)
+		templates, err := loadTemplateFile(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", filePath, err)
 		}
-		config.Templates = append(config.Templates, template)
+		config.Templates = append(config.Templates, templates...)
 	}
 
 	// Validate no duplicate IDs
@@ -189,13 +189,34 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 	return &config, nil
 }
 
-// loadTemplateFile loads a single template from a file
-func loadTemplateFile(filePath string) (*PresentationRequestTemplate, error) {
+// loadTemplateFile loads templates from a YAML file.
+// Each file may contain a single template (top-level fields) or multiple
+// templates wrapped in a "templates:" list.
+func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Try loading as a config with a "templates:" list first
+	var cfg PresentationRequestConfig
+	if err := yaml.Unmarshal(fileBytes, &cfg); err == nil && len(cfg.Templates) > 0 {
+		hasID := false
+		for _, t := range cfg.Templates {
+			if t.ID != "" {
+				hasID = true
+			}
+			if !t.Enabled {
+				t.Enabled = true
+			}
+		}
+		if hasID {
+			return cfg.Templates, nil
+		}
+		return nil, fmt.Errorf("invalid templates configuration in %s: templates list present but all entries missing id", filePath)
+	}
+
+	// Fall back to a single template
 	var template PresentationRequestTemplate
 	if err := yaml.Unmarshal(fileBytes, &template); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
@@ -206,7 +227,7 @@ func loadTemplateFile(filePath string) (*PresentationRequestTemplate, error) {
 		template.Enabled = true
 	}
 
-	return &template, nil
+	return []*PresentationRequestTemplate{&template}, nil
 }
 
 // validateUniqueIDs checks that all template IDs are unique

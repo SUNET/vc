@@ -6,12 +6,14 @@ import (
 	"os/signal"
 	"syscall"
 	"vc/internal/registry/apiv1"
+	"vc/internal/registry/cache"
 	"vc/internal/registry/db"
 	"vc/internal/registry/grpcserver"
 	"vc/internal/registry/httpserver"
 	"vc/internal/registry/tokenstatuslistissuer"
 	"vc/pkg/configuration"
 	"vc/pkg/logger"
+	"vc/pkg/model"
 	"vc/pkg/trace"
 )
 
@@ -26,7 +28,7 @@ func main() {
 		serviceName string = "registry"
 	)
 
-	cfg, err := configuration.New(ctx)
+	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
 		panic(err)
 	}
@@ -35,7 +37,7 @@ func main() {
 		panic("registry configuration is required but not found in config file")
 	}
 
-	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, cfg.Common.Production)
+	log, err := logger.New(serviceName, cfg.Common.Log.FolderPath, model.BoolVal(cfg.Common.Production, true))
 	if err != nil {
 		panic(err)
 	}
@@ -54,7 +56,12 @@ func main() {
 		panic(err)
 	}
 
-	tokenStatusListIssuerService, err := tokenstatuslistissuer.New(ctx, cfg, dbService, log)
+	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
+	if err != nil {
+		panic(err)
+	}
+
+	tokenStatusListIssuerService, err := tokenstatuslistissuer.New(ctx, cfg, cacheService, dbService, log)
 	services["tokenStatusListIssuerService"] = tokenStatusListIssuerService
 	if err != nil {
 		panic(err)
@@ -71,7 +78,7 @@ func main() {
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, log)
+	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)

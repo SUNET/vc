@@ -14,22 +14,32 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
+// UICredentialInfo is a sanitized view of a credential for the UI.
+type UICredentialInfo struct {
+	VCT        string                         `json:"vct"`
+	Attributes map[string]map[string][]string `json:"attributes"`
+}
+
 type UIMetadataReply struct {
-	Credentials      map[string]*model.CredentialConstructor `json:"credentials"`
-	SupportedWallets map[string]string                       `json:"supported_wallets"`
+	Credentials      map[string]*UICredentialInfo `json:"credentials"`
+	SupportedWallets map[string]string            `json:"supported_wallets"`
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
-	reply := &UIMetadataReply{}
-	reply.Credentials = c.cfg.CredentialConstructor
-
-	for _, constructor := range reply.Credentials {
-		constructor.AuthMethod = ""
-		constructor.VCTMFilePath = ""
-		constructor.VCTM = nil
+	reply := &UIMetadataReply{
+		Credentials:      make(map[string]*UICredentialInfo),
+		SupportedWallets: c.cfg.Verifier.SupportedWallets,
 	}
 
-	reply.SupportedWallets = c.cfg.Verifier.SupportedWallets
+	for scope, constructor := range c.cfg.CredentialConstructor {
+		info := &UICredentialInfo{
+			Attributes: constructor.Attributes,
+		}
+		if constructor.VCTM != nil {
+			info.VCT = constructor.VCTM.VCT
+		}
+		reply.Credentials[scope] = info
+	}
 
 	return reply, nil
 }
@@ -125,7 +135,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		VerifierInfo:     []openid4vp.VerifierInfo{},
 	}
 
-	if err := c.authContextCache.Save(ctx, authorizationContext); err != nil {
+	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {
 		return nil, err
 	}
 

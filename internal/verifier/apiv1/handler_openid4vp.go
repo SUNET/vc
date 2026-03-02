@@ -15,7 +15,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 
 	// Determine response mode based on Digital Credentials API configuration
 	responseMode := "direct_post"
-	if c.cfg.Verifier.DigitalCredentials.Enabled {
+	if c.cfg.Verifier.DigitalCredentials.Enable {
 		if c.cfg.Verifier.DigitalCredentials.ResponseMode != "" {
 			responseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 		} else {
@@ -43,7 +43,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled
-	if c.cfg.Verifier.DigitalCredentials.Enabled && c.cfg.Verifier.PreferredVPFormats != nil {
+	if c.cfg.Verifier.DigitalCredentials.Enable && c.cfg.Verifier.PreferredVPFormats != nil {
 		requestObject.ClientMetadata = &openid4vp.ClientMetadata{
 			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
 		}
@@ -57,7 +57,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Cache the request object
-	c.requestObjectCache.Set(sessionID, requestObject, 5*time.Minute)
+	c.cacheService.RequestObject.SetWithTTL(ctx, sessionID, requestObject, 5*time.Minute)
 
 	return signedJWT, nil
 }
@@ -101,12 +101,12 @@ func (c *Client) GetRequestObject(ctx context.Context, sessionID string) (*openi
 	ctx, span := c.tracer.Start(ctx, "apiv1:get_request_object")
 	defer span.End()
 
-	item := c.requestObjectCache.Get(sessionID)
-	if item == nil {
+	val, ok := c.cacheService.RequestObject.Get(ctx, sessionID)
+	if !ok {
 		return nil, ErrNotFound
 	}
 
-	return item.Value(), nil
+	return val, nil
 }
 
 // HandleDirectPost processes the OpenID4VP direct_post response from a wallet
@@ -115,7 +115,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	defer span.End()
 
 	// Get the session
-	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to get session")
 		return ErrServerError
@@ -134,7 +134,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	if err != nil {
 		c.log.Error(err, "Failed to extract claims from VP token")
 		authCtx.Status = "error"
-		if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session with error status")
 		}
 		return err
@@ -154,7 +154,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	authCtx.Status = "code_issued"
 
 	// Update session
-	if err := c.authContextCache.Update(ctx, authCtx); err != nil {
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return ErrServerError
 	}
@@ -187,7 +187,7 @@ func (c *Client) GetPollStatus(ctx context.Context, sessionID string) (*SessionP
 	ctx, span := c.tracer.Start(ctx, "apiv1:get_poll_status")
 	defer span.End()
 
-	authCtx, err := c.authContextCache.GetByID(ctx, sessionID)
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		c.log.Error(err, "Failed to get session")
 		return nil, ErrServerError
