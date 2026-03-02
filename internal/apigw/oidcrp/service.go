@@ -59,7 +59,7 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cac
 	if cfg.Registration.Preconfigured != nil && cfg.Registration.Preconfigured.Enable {
 		clientID = cfg.Registration.Preconfigured.ClientID
 		clientSecret = cfg.Registration.Preconfigured.ClientSecret
-	} else if cfg.Registration.Dynamic.Enable {
+	} else if cfg.Registration.Dynamic != nil && cfg.Registration.Dynamic.Enable {
 		log.Info("Dynamic client registration enabled, attempting registration")
 
 		// Check if we have stored credentials
@@ -130,7 +130,7 @@ func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cac
 		"issuer", cfg.IssuerURL,
 		"client_id", clientID,
 		"redirect_uri", cfg.RedirectURI,
-		"dynamic_registration", cfg.Registration.Dynamic.Enable)
+		"dynamic_registration", cfg.Registration.Dynamic != nil && cfg.Registration.Dynamic.Enable)
 
 	return s, nil
 }
