@@ -633,7 +633,7 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 		// Find encryption (E) purpose key
 		for _, key := range keys {
 			if key.Purpose == 'E' {
-				return l.decodeMultikeyX25519(key.Multikey)
+				return decodeMultikeyX25519(key.Multikey)
 			}
 		}
 		// Fallback: try to convert first V key from Ed25519 to X25519
@@ -656,7 +656,7 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 			return ed25519ToX25519(edKey)
 		}
 		// Try as direct X25519
-		return l.decodeMultikeyX25519(multikey)
+		return decodeMultikeyX25519(multikey)
 	}
 
 	if strings.HasPrefix(baseDID, "did:key:") {
@@ -666,7 +666,7 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 			return ed25519ToX25519(edKey)
 		}
 		// Try as direct X25519
-		return l.decodeMultikeyX25519(multikey)
+		return decodeMultikeyX25519(multikey)
 	}
 
 	// Handle did:jwk
@@ -675,7 +675,7 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 		if err != nil {
 			return nil, err
 		}
-		return jwkToX25519(jwk)
+		return JWKToX25519(jwk)
 	}
 
 	return nil, fmt.Errorf("cannot resolve X25519 key from: %s", did)
@@ -757,32 +757,6 @@ func parseServiceEntry(did, encodedService string) (*DIDCommService, error) {
 	}, nil
 }
 
-// decodeMultikeyX25519 decodes an X25519 key from multibase format.
-// X25519 multicodec is 0xec (236), varint encoded as 0xec 0x01
-func (l *LocalResolver) decodeMultikeyX25519(multikey string) (*ecdh.PublicKey, error) {
-	if len(multikey) == 0 {
-		return nil, fmt.Errorf("empty multikey")
-	}
-
-	// Decode multibase
-	_, decoded, err := multibase.Decode(multikey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode multibase: %w", err)
-	}
-
-	// Check length (2 bytes multicodec + 32 bytes key)
-	if len(decoded) != 34 {
-		return nil, fmt.Errorf("invalid multikey length: expected 34, got %d", len(decoded))
-	}
-
-	// Check X25519 multicodec prefix (0xec, 0x01)
-	if decoded[0] != 0xec || decoded[1] != 0x01 {
-		return nil, fmt.Errorf("not an X25519 multikey: multicodec 0x%02x%02x", decoded[0], decoded[1])
-	}
-
-	return ecdh.X25519().NewPublicKey(decoded[2:])
-}
-
 // ed25519ToX25519 converts an Ed25519 public key to X25519 for key agreement.
 func ed25519ToX25519(edPub ed25519.PublicKey) (*ecdh.PublicKey, error) {
 	if len(edPub) != ed25519.PublicKeySize {
@@ -800,28 +774,6 @@ func ed25519ToX25519(edPub ed25519.PublicKey) (*ecdh.PublicKey, error) {
 	// This is a placeholder - the actual conversion should use proper curve math
 	// For production, import filippo.io/edwards25519 and use BytesMontgomery()
 	return nil, fmt.Errorf("Ed25519 to X25519 conversion requires curve arithmetic - use native X25519 keys")
-}
-
-// jwkToX25519 extracts an X25519 key from a JWK.
-func jwkToX25519(jwk map[string]any) (*ecdh.PublicKey, error) {
-	kty, _ := jwk["kty"].(string)
-	crv, _ := jwk["crv"].(string)
-
-	if kty != "OKP" || crv != "X25519" {
-		return nil, fmt.Errorf("not an X25519 JWK: kty=%s, crv=%s", kty, crv)
-	}
-
-	x, ok := jwk["x"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing x coordinate in X25519 JWK")
-	}
-
-	pubBytes, err := base64.RawURLEncoding.DecodeString(x)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode x coordinate: %w", err)
-	}
-
-	return ecdh.X25519().NewPublicKey(pubBytes)
 }
 
 // StaticResolver provides a simple key->value resolver for testing
