@@ -18,7 +18,7 @@ import (
 )
 
 type VerificationRequestObjectRequest struct {
-	ID string `form:"id" uri:"id" validate:"required,max=128,printascii"`
+	ID string `json:"-" form:"id" uri:"id" validate:"required,max=128,printascii"`
 	//SessionID string `json:"-"`
 }
 

@@ -158,6 +158,7 @@ func (c *Client) containsOIDC(slice []string, value string) bool {
 	return false
 }
 
+// TODO(masv): deadcode?
 // authenticateClient validates client credentials for the token endpoint
 func (c *Client) authenticateClient(ctx context.Context, clientID, clientSecret string) (*db.Client, error) {
 	client, err := c.db.Clients.GetByClientID(ctx, clientID)

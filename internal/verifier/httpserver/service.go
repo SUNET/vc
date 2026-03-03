@@ -182,6 +182,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 
 	// UI Endpoints
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "qr/:session_id", http.StatusOK, s.endpointQRCode)
+	// TODO(masv): no polling, use WebSocket or Server-Sent Events instead
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "poll/:session_id", http.StatusOK, s.endpointPollSession)
 
 	rgUI := rgOAuthSession.Group("/ui")
