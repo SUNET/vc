@@ -118,8 +118,14 @@ func copyDCQL(src *DCQL) *DCQL {
 	}
 
 	dst := &DCQL{
-		Credentials:    make([]CredentialQuery, len(src.Credentials)),
-		CredentialSets: make([]CredentialSetQuery, len(src.CredentialSets)),
+		Credentials: make([]CredentialQuery, len(src.Credentials)),
+		// CredentialSets is only set if source has elements (keep it nil otherwise
+		// to pass `omitempty` validation)
+	}
+
+	// Only create CredentialSets if source has elements
+	if len(src.CredentialSets) > 0 {
+		dst.CredentialSets = make([]CredentialSetQuery, len(src.CredentialSets))
 	}
 
 	// Copy credentials
