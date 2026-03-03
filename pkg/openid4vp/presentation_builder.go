@@ -85,23 +85,18 @@ func (pb *PresentationBuilder) BuildFromTemplate(ctx context.Context, templateID
 	return dcql, template, nil
 }
 
-// BuildDCQLQuery creates a DCQL query from OIDC scopes
-// This attempts to find matching templates, and falls back to a generic DCQL query if none are found
+// BuildDCQLQuery creates a DCQL query from OIDC scopes.
+// This attempts to find matching templates, and falls back to a generic DCQL query if none are found.
+// All scopes are considered for matching, including standard OIDC scopes like "openid".
+// This allows standard OIDC scopes to optionally map to credentials if configured.
 func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []string) (*DCQL, error) {
 	if len(scopes) == 0 {
 		// Return a generic DCQL query when no scopes provided
 		return pb.createGenericDCQL(), nil
 	}
 
-	// Filter out standard OIDC scopes
-	credentialScopes := filterStandardScopes(scopes)
-	if len(credentialScopes) == 0 {
-		// No credential-specific scopes, return generic DCQL
-		return pb.createGenericDCQL(), nil
-	}
-
-	// Try to find a template for the first credential scope
-	for _, scope := range credentialScopes {
+	// Try to find a template for any scope (including standard OIDC scopes)
+	for _, scope := range scopes {
 		if templateID, ok := pb.scopeIndex[scope]; ok {
 			template := pb.templates[templateID]
 			dcql := template.GetDCQLQuery()
@@ -196,20 +191,28 @@ func (pb *PresentationBuilder) createGenericDCQL() *DCQL {
 	}
 }
 
-// filterStandardScopes removes standard OIDC scopes from the list
-func filterStandardScopes(scopes []string) []string {
-	standardScopes := map[string]bool{
-		"openid":         true,
-		"profile":        true,
-		"email":          true,
-		"address":        true,
-		"phone":          true,
-		"offline_access": true,
-	}
+// StandardOIDCScopes contains scopes defined by OpenID Connect Core.
+// These are protocol-level scopes that are optional for credential matching.
+// The "openid" scope is REQUIRED by the OIDC specification and will always
+// be present, but it does not need to be mapped to a credential.
+var StandardOIDCScopes = map[string]bool{
+	"openid":         true,
+	"profile":        true,
+	"email":          true,
+	"address":        true,
+	"phone":          true,
+	"offline_access": true,
+}
 
+// FilterStandardScopes removes standard OIDC scopes from the list.
+// This is a utility function that can be used when you specifically need
+// to identify scopes that are not standard OIDC scopes. Note that credential
+// matching logic does NOT use this - all scopes (including standard ones)
+// are considered for matching to allow optional credential mappings.
+func FilterStandardScopes(scopes []string) []string {
 	filtered := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if !standardScopes[scope] {
+		if !StandardOIDCScopes[scope] {
 			filtered = append(filtered, scope)
 		}
 	}
@@ -234,24 +237,17 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 	return nil
 }
 
-// scopesMatch checks if the requested scopes match the template scopes
-// A template matches if it contains at least one of the requested scopes
-// (excluding standard OIDC scopes like "openid", "profile", "email")
+// scopesMatch checks if the requested scopes match the template scopes.
+// A template matches if it contains at least one of the requested scopes.
+// All scopes are considered for matching, including standard OIDC scopes like "openid".
+// This allows standard OIDC scopes to optionally map to credentials if configured.
 func scopesMatch(requestedScopes []string, templateScopes []string) bool {
-	// Filter out standard OIDC scopes from requested scopes
-	credentialScopes := make([]string, 0)
-	for _, scope := range requestedScopes {
-		if scope != "openid" && scope != "profile" && scope != "email" {
-			credentialScopes = append(credentialScopes, scope)
-		}
-	}
-
-	if len(credentialScopes) == 0 {
+	if len(requestedScopes) == 0 {
 		return false
 	}
 
-	// Check if template contains any of the credential scopes
-	for _, requestedScope := range credentialScopes {
+	// Check if template contains any of the requested scopes
+	for _, requestedScope := range requestedScopes {
 		for _, templateScope := range templateScopes {
 			if requestedScope == templateScope {
 				return true // Match found

@@ -205,15 +205,14 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 	return c.buildLegacyDCQLQuery(scopes)
 }
 
-// buildLegacyDCQLQuery builds a DCQL query using credential constructor config
+// buildLegacyDCQLQuery builds a DCQL query using credential constructor config.
+// All scopes are considered for matching, including standard OIDC scopes like "openid".
+// Scopes that don't have a corresponding credential configuration are silently skipped,
+// making standard OIDC scopes optional - they can match if configured, but are not required.
 func (c *Client) buildLegacyDCQLQuery(scopes []string) (*openid4vp.DCQL, error) {
 	var credentials []openid4vp.CredentialQuery
 
 	for _, scope := range scopes {
-		if scope == "openid" {
-			continue
-		}
-
 		credInfo, ok := c.cfg.CredentialConstructor[scope]
 		if !ok {
 			continue
