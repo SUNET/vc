@@ -20,6 +20,14 @@ func TestValidationIdentity(t *testing.T) {
 				Title: "validation_error",
 				Err: []map[string]any{
 					{
+						"field":           "authentic_source_person_id",
+						"namespace":       "authentic_source_person_id",
+						"type":            "string",
+						"validation":      "required",
+						"validationParam": "",
+						"value":           "",
+					},
+					{
 						"field":           "schema",
 						"namespace":       "schema",
 						"type":            "ptr",
@@ -57,6 +65,7 @@ func TestValidationIdentity(t *testing.T) {
 		{
 			name: "ok",
 			have: &model.Identity{
+				AuthenticSourcePersonID: "person-123",
 				Schema: &model.IdentitySchema{
 					Name:    "SE",
 					Version: "1.0.0",
@@ -70,6 +79,7 @@ func TestValidationIdentity(t *testing.T) {
 		{
 			name: "wrong datetime format",
 			have: &model.Identity{
+				AuthenticSourcePersonID: "person-123",
 				Schema: &model.IdentitySchema{
 					Name: "SE",
 				},
@@ -161,6 +171,7 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 			Have: myStruct{
 				ID: []model.Identity{
 					{
+						AuthenticSourcePersonID: "person-123",
 						Schema: &model.IdentitySchema{
 							Name: "SE",
 						},
@@ -177,6 +188,7 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 			Have: myStruct{
 				ID: []model.Identity{
 					{
+						AuthenticSourcePersonID: "person-123",
 						Schema: &model.IdentitySchema{
 							Name: "SE",
 						},

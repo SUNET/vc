@@ -55,6 +55,22 @@ func TestCreateJSONSourceFiles(t *testing.T) {
 	err := c.makeIdentities("testdata/users_paris.xlsx")
 	assert.NoError(t, err)
 
+	bootstrapDir := "../../../bootstrapping"
+	err = os.MkdirAll(bootstrapDir, 0755)
+	require.NoError(t, err)
+
+	// idp_user must run first because pid-1-5, pid-1-8, and eduid read idp_user.json
+	t.Run("idp_user", func(t *testing.T) {
+		client, err := NewIDPUserClient(ctx, c)
+		assert.NoError(t, err)
+
+		err = client.makeSourceData("")
+		assert.NoError(t, err)
+
+		err = client.save2Disk()
+		assert.NoError(t, err)
+	})
+
 	t.Run("ehic", func(t *testing.T) {
 		client, err := NewEHICClient(ctx, c)
 		assert.NoError(t, err)
@@ -142,16 +158,6 @@ func TestCreateJSONSourceFiles(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("idp_user", func(t *testing.T) {
-		client, err := NewIDPUserClient(ctx, c)
-		assert.NoError(t, err)
-
-		err = client.makeSourceData("")
-		assert.NoError(t, err)
-
-		err = client.save2Disk()
-		assert.NoError(t, err)
-	})
 }
 
 func TestUserUpload(t *testing.T) {

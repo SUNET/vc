@@ -60,6 +60,7 @@ func TestSave_WithAllIndices(t *testing.T) {
 		RequestObjectID:          "request-obj-def",
 		Token: &Token{
 			AccessToken: "access-token-xyz",
+			ExpiresAt:   time.Now().Add(5 * time.Minute).Unix(),
 		},
 	}
 
@@ -264,6 +265,7 @@ func TestGetWithAccessToken_Success(t *testing.T) {
 		SessionID: "session-token",
 		Token: &Token{
 			AccessToken: "unique-access-token-xyz",
+			ExpiresAt:   time.Now().Add(5 * time.Minute).Unix(),
 		},
 	}
 	require.NoError(t, cache.Save(ctx, doc))
