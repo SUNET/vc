@@ -46,15 +46,14 @@ const (
 	ed25519MultibaseKeyLen = 34
 )
 
-// ExtractEd25519FromMetadata extracts an Ed25519 public key from a DID document
-// or entity configuration returned in the trust_metadata field of an AuthZEN response.
-func ExtractEd25519FromMetadata(metadata any, verificationMethod string) (ed25519.PublicKey, error) {
+// findMatchingVerificationMethod finds a verification method in metadata that matches the given identifier.
+// Returns the verification method map if found, nil otherwise.
+func findMatchingVerificationMethod(metadata any, verificationMethod string) (map[string]any, error) {
 	doc, ok := metadata.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid metadata format: expected map, got %T", metadata)
 	}
 
-	// Find verification method in document
 	vms, err := getVerificationMethods(doc)
 	if err != nil {
 		return nil, err
@@ -65,83 +64,68 @@ func ExtractEd25519FromMetadata(metadata any, verificationMethod string) (ed2551
 		if !ok {
 			continue
 		}
-
-		// Check if this is the verification method we're looking for
-		if !matchesVerificationMethod(vmMap, verificationMethod, doc) {
-			continue
-		}
-
-		// Try publicKeyMultibase first (preferred for Ed25519)
-		if multibase, ok := vmMap["publicKeyMultibase"].(string); ok {
-			key, err := decodeMultikeyEd25519(multibase)
-			if err == nil {
-				return key, nil
-			}
-			// Fall through to try other formats
-		}
-
-		// Try publicKeyJwk
-		if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
-			key, err := JWKToEd25519(jwk)
-			if err == nil {
-				return key, nil
-			}
-		}
-
-		// Try publicKeyBase58 (legacy format)
-		if keyBase58, ok := vmMap["publicKeyBase58"].(string); ok {
-			key, err := decodeBase58Ed25519(keyBase58)
-			if err == nil {
-				return key, nil
-			}
+		if matchesVerificationMethod(vmMap, verificationMethod, doc) {
+			return vmMap, nil
 		}
 	}
+	return nil, nil
+}
 
+// ExtractEd25519FromMetadata extracts an Ed25519 public key from a DID document
+// or entity configuration returned in the trust_metadata field of an AuthZEN response.
+func ExtractEd25519FromMetadata(metadata any, verificationMethod string) (ed25519.PublicKey, error) {
+	vmMap, err := findMatchingVerificationMethod(metadata, verificationMethod)
+	if err != nil {
+		return nil, err
+	}
+	if vmMap == nil {
+		return nil, fmt.Errorf("Ed25519 verification method not found: %s", verificationMethod)
+	}
+
+	// Try publicKeyMultibase first (preferred for Ed25519)
+	if multibase, ok := vmMap["publicKeyMultibase"].(string); ok {
+		if key, err := decodeMultikeyEd25519(multibase); err == nil {
+			return key, nil
+		}
+	}
+	// Try publicKeyJwk
+	if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
+		if key, err := JWKToEd25519(jwk); err == nil {
+			return key, nil
+		}
+	}
+	// Try publicKeyBase58 (legacy format)
+	if keyBase58, ok := vmMap["publicKeyBase58"].(string); ok {
+		if key, err := decodeBase58Ed25519(keyBase58); err == nil {
+			return key, nil
+		}
+	}
 	return nil, fmt.Errorf("Ed25519 verification method not found: %s", verificationMethod)
 }
 
 // ExtractECDSAFromMetadata extracts an ECDSA public key from a DID document
 // or entity configuration returned in the trust_metadata field.
 func ExtractECDSAFromMetadata(metadata any, verificationMethod string) (*ecdsa.PublicKey, error) {
-	doc, ok := metadata.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("invalid metadata format: expected map, got %T", metadata)
-	}
-
-	// Find verification method in document
-	vms, err := getVerificationMethods(doc)
+	vmMap, err := findMatchingVerificationMethod(metadata, verificationMethod)
 	if err != nil {
 		return nil, err
 	}
-
-	for _, vm := range vms {
-		vmMap, ok := vm.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Check if this is the verification method we're looking for
-		if !matchesVerificationMethod(vmMap, verificationMethod, doc) {
-			continue
-		}
-
-		// Try publicKeyJwk (preferred for ECDSA)
-		if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
-			key, err := JWKToECDSA(jwk)
-			if err == nil {
-				return key, nil
-			}
-		}
-
-		// Try publicKeyMultibase (P-256 multicodec is 0x1200)
-		if multibase, ok := vmMap["publicKeyMultibase"].(string); ok {
-			key, err := decodeMultikeyECDSA(multibase)
-			if err == nil {
-				return key, nil
-			}
-		}
+	if vmMap == nil {
+		return nil, fmt.Errorf("ECDSA verification method not found: %s", verificationMethod)
 	}
 
+	// Try publicKeyJwk (preferred for ECDSA)
+	if jwk, ok := vmMap["publicKeyJwk"].(map[string]any); ok {
+		if key, err := JWKToECDSA(jwk); err == nil {
+			return key, nil
+		}
+	}
+	// Try publicKeyMultibase (P-256 multicodec is 0x1200)
+	if multibase, ok := vmMap["publicKeyMultibase"].(string); ok {
+		if key, err := decodeMultikeyECDSA(multibase); err == nil {
+			return key, nil
+		}
+	}
 	return nil, fmt.Errorf("ECDSA verification method not found: %s", verificationMethod)
 }
 
