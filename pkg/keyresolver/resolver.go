@@ -17,6 +17,13 @@ import (
 	"github.com/multiformats/go-multibase"
 )
 
+// Error format constants to avoid SonarCloud duplication warnings.
+const (
+	keyFragmentFormat = "key-%d"
+	errInvalidFragFmt = "invalid key fragment format: %s"
+	errKeyNotFoundFmt = "key not found: #%s"
+)
+
 // Resolver provides methods to resolve public keys from verification methods.
 // Implementations may support one or both key types.
 type Resolver interface {
@@ -585,8 +592,8 @@ func parseDidPeer2Keys(didPeer string) ([]didPeerKey, error) {
 func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment string) (ed25519.PublicKey, error) {
 	// Parse fragment as "key-N"
 	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
-		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
+		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
 	}
 
 	for _, key := range keys {
@@ -595,14 +602,14 @@ func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment str
 		}
 	}
 
-	return nil, fmt.Errorf("key not found: #%s", fragment)
+	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
 }
 
 // findECDSAKeyByFragment finds an ECDSA key by its fragment identifier.
 func findECDSAKeyByFragment(keys []didPeerKey, fragment string) (*ecdsa.PublicKey, error) {
 	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
-		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
+		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
 	}
 
 	for _, key := range keys {
@@ -611,15 +618,15 @@ func findECDSAKeyByFragment(keys []didPeerKey, fragment string) (*ecdsa.PublicKe
 		}
 	}
 
-	return nil, fmt.Errorf("key not found: #%s", fragment)
+	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
 }
 
 // findX25519KeyByFragment finds an X25519 (or Ed25519 convertible to X25519) key by fragment.
 // For E (encryption) keys, decodes as X25519. For V keys, converts Ed25519 to X25519.
 func findX25519KeyByFragment(keys []didPeerKey, fragment string, l *LocalResolver) (*ecdh.PublicKey, error) {
 	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
-		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
+		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
 	}
 
 	for _, key := range keys {
@@ -640,7 +647,7 @@ func findX25519KeyByFragment(keys []didPeerKey, fragment string, l *LocalResolve
 		}
 	}
 
-	return nil, fmt.Errorf("key not found: #%s", fragment)
+	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
 }
 
 // ResolveX25519 resolves an X25519 key agreement key from a local DID.
