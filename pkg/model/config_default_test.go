@@ -176,32 +176,6 @@ func TestTrustConfigDefaults(t *testing.T) {
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 
-func TestTrustConfig_GetPDPURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfg      TrustConfig
-		expected string
-	}{
-		{
-			name:     "returns PDPURL when set",
-			cfg:      TrustConfig{PDPURL: "https://pdp.example.com"},
-			expected: "https://pdp.example.com",
-		},
-		{
-			name:     "empty when not set",
-			cfg:      TrustConfig{},
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.GetPDPURL()
-			assert.Equal(t, tt.expected, got)
-		})
-	}
-}
-
 func TestTrustPolicyConfigDefaults(t *testing.T) {
 	var cfg TrustPolicyConfig
 	err := defaults.Set(&cfg)

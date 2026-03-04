@@ -511,34 +511,6 @@ func TestNewResolverFromConfig_WithPDP(t *testing.T) {
 	}
 }
 
-func TestResolverConfig_GetPDPURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfg      ResolverConfig
-		expected string
-	}{
-		{
-			name:     "returns PDPURL when set",
-			cfg:      ResolverConfig{PDPURL: "https://pdp.example.com"},
-			expected: "https://pdp.example.com",
-		},
-		{
-			name:     "empty when not set",
-			cfg:      ResolverConfig{},
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.GetPDPURL()
-			if got != tt.expected {
-				t.Errorf("GetPDPURL() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestNewResolverWithPDP(t *testing.T) {
 	smart := NewResolverWithPDP("https://trust.example.com/pdp")
 

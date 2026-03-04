@@ -24,10 +24,18 @@ func NewAllowAllEvaluator() *AllowAllEvaluator {
 	return &AllowAllEvaluator{}
 }
 
-// Evaluate implements TrustEvaluator. Always returns trusted=true.
+// Evaluate implements TrustEvaluator. Always returns trusted=true for supported key types.
 func (e *AllowAllEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest) (*TrustDecision, error) {
 	if req == nil {
 		return nil, fmt.Errorf("%s", ErrMsgNilRequest)
+	}
+
+	// Validate key type to maintain consistency with other evaluators
+	if !e.SupportsKeyType(req.KeyType) {
+		return &TrustDecision{
+			Trusted: false,
+			Reason:  fmt.Sprintf("unsupported key type: %s", req.KeyType),
+		}, nil
 	}
 
 	return &TrustDecision{

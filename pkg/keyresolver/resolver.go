@@ -605,17 +605,12 @@ type ResolverConfig struct {
 	LocalDIDMethods []string
 }
 
-// GetPDPURL returns the PDP URL for trust evaluation.
-func (cfg *ResolverConfig) GetPDPURL() string {
-	return cfg.PDPURL
-}
-
 // NewResolverFromConfig creates a key resolver based on configuration.
 // If a PDP URL is configured, creates a SmartResolver that uses LocalResolver for
 // self-contained DIDs (did:key, did:jwk) and GoTrustResolver for everything else.
 // If no PDP URL is configured, creates a LocalResolver that only handles self-contained DIDs.
 func NewResolverFromConfig(cfg ResolverConfig) (Resolver, error) {
-	pdpURL := cfg.GetPDPURL()
+	pdpURL := cfg.PDPURL
 
 	// If no PDP URL, only local resolution is possible
 	if pdpURL == "" {

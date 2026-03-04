@@ -486,11 +486,6 @@ type TrustConfig struct {
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
 }
 
-// GetPDPURL returns the PDP URL for trust evaluation.
-func (c *TrustConfig) GetPDPURL() string {
-	return c.PDPURL
-}
-
 // TrustPolicyConfig defines trust policy settings for a specific role.
 type TrustPolicyConfig struct {
 	// TrustFrameworks lists the accepted trust frameworks for this role.

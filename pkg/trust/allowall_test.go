@@ -11,9 +11,10 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 	eval := NewAllowAllEvaluator()
 
 	tests := []struct {
-		name    string
-		req     *EvaluationRequest
-		wantErr bool
+		name        string
+		req         *EvaluationRequest
+		wantErr     bool
+		wantTrusted bool
 	}{
 		{
 			name: "accepts JWK",
@@ -24,7 +25,8 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 					Key:       map[string]any{"kty": "EC"},
 				},
 			},
-			wantErr: false,
+			wantErr:     false,
+			wantTrusted: true,
 		},
 		{
 			name: "accepts X5C",
@@ -35,12 +37,25 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 					Key:       []string{"base64cert"},
 				},
 			},
-			wantErr: false,
+			wantErr:     false,
+			wantTrusted: true,
 		},
 		{
 			name:    "rejects nil request",
 			req:     nil,
 			wantErr: true,
+		},
+		{
+			name: "rejects unsupported key type",
+			req: &EvaluationRequest{
+				EvaluationRequest: trustapi.EvaluationRequest{
+					SubjectID: "https://issuer.example.com",
+					KeyType:   "unknown",
+					Key:       map[string]any{},
+				},
+			},
+			wantErr:     false,
+			wantTrusted: false,
 		},
 	}
 
@@ -59,11 +74,11 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if !decision.Trusted {
-				t.Error("expected Trusted=true in allow-all mode")
+			if decision.Trusted != tt.wantTrusted {
+				t.Errorf("expected Trusted=%v, got %v", tt.wantTrusted, decision.Trusted)
 			}
 
-			if decision.TrustFramework != TrustFrameworkNone {
+			if tt.wantTrusted && decision.TrustFramework != TrustFrameworkNone {
 				t.Errorf("expected TrustFramework=%q, got %s", TrustFrameworkNone, decision.TrustFramework)
 			}
 		})
