@@ -21,6 +21,20 @@ type GoTrustEvaluator struct {
 	client *authzenclient.Client
 }
 
+// NewTrustEvaluatorFromConfig creates the appropriate TrustEvaluator based on configuration.
+// If pdpURL is empty, returns an AllowAllEvaluator (trusted=true for all requests).
+// If pdpURL is set, returns a GoTrustEvaluator that queries the PDP for trust decisions.
+//
+// This provides harmonized trust management across applications:
+//   - Empty PDP URL: "allow all" mode - resolved keys are always considered trusted
+//   - Non-empty PDP URL: "default deny" mode - trust decisions require PDP approval
+func NewTrustEvaluatorFromConfig(pdpURL string) TrustEvaluator {
+	if pdpURL == "" {
+		return NewAllowAllEvaluator()
+	}
+	return NewGoTrustEvaluator(pdpURL)
+}
+
 // NewGoTrustEvaluator creates a trust evaluator using go-trust with a known PDP URL.
 func NewGoTrustEvaluator(pdpURL string) *GoTrustEvaluator {
 	client := authzenclient.New(pdpURL)
@@ -44,7 +58,7 @@ func NewGoTrustEvaluatorWithClient(client *authzenclient.Client) *GoTrustEvaluat
 // Evaluate implements TrustEvaluator.
 func (e *GoTrustEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest) (*TrustDecision, error) {
 	if req == nil {
-		return nil, fmt.Errorf("evaluation request is nil")
+		return nil, fmt.Errorf("%s", ErrMsgNilRequest)
 	}
 
 	var authzenReq *authzen.EvaluationRequest

@@ -9,7 +9,13 @@ import (
 )
 
 // LocalTrustEvaluator implements TrustEvaluator using local trust anchors.
-// This is useful for offline validation or when go-trust is not available.
+//
+// Deprecated: LocalTrustEvaluator performs trust evaluation locally without
+// consulting an AuthZEN PDP. For harmonized trust management across applications,
+// use NewTrustEvaluatorFromConfig instead, which returns AllowAllEvaluator when
+// no PDP URL is configured (returning trusted=true for all requests).
+//
+// LocalTrustEvaluator is retained for backward compatibility and testing purposes.
 type LocalTrustEvaluator struct {
 	mu              sync.RWMutex
 	trustedRoots    []*x509.Certificate
@@ -19,6 +25,8 @@ type LocalTrustEvaluator struct {
 }
 
 // LocalTrustConfig configures a LocalTrustEvaluator.
+//
+// Deprecated: See LocalTrustEvaluator deprecation notice.
 type LocalTrustConfig struct {
 	// TrustedRoots are the trusted root certificates.
 	TrustedRoots []*x509.Certificate
@@ -70,7 +78,7 @@ func (e *LocalTrustEvaluator) AddTrustedRoot(cert *x509.Certificate) {
 // Evaluate implements TrustEvaluator.
 func (e *LocalTrustEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest) (*TrustDecision, error) {
 	if req == nil {
-		return nil, fmt.Errorf("evaluation request is nil")
+		return nil, fmt.Errorf("%s", ErrMsgNilRequest)
 	}
 
 	// Check role if restricted
