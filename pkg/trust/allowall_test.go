@@ -63,8 +63,8 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 				t.Error("expected Trusted=true in allow-all mode")
 			}
 
-			if decision.TrustFramework != "none" {
-				t.Errorf("expected TrustFramework='none', got %s", decision.TrustFramework)
+			if decision.TrustFramework != TrustFrameworkNone {
+				t.Errorf("expected TrustFramework=%q, got %s", TrustFrameworkNone, decision.TrustFramework)
 			}
 		})
 	}

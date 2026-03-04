@@ -27,13 +27,13 @@ func NewAllowAllEvaluator() *AllowAllEvaluator {
 // Evaluate implements TrustEvaluator. Always returns trusted=true.
 func (e *AllowAllEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest) (*TrustDecision, error) {
 	if req == nil {
-		return nil, fmt.Errorf("evaluation request is nil")
+		return nil, fmt.Errorf("%s", ErrMsgNilRequest)
 	}
 
 	return &TrustDecision{
 		Trusted:        true,
 		Reason:         "allow all mode: no PDP configured",
-		TrustFramework: "none",
+		TrustFramework: TrustFrameworkNone,
 	}, nil
 }
 

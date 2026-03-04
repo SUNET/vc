@@ -58,7 +58,7 @@ func NewGoTrustEvaluatorWithClient(client *authzenclient.Client) *GoTrustEvaluat
 // Evaluate implements TrustEvaluator.
 func (e *GoTrustEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest) (*TrustDecision, error) {
 	if req == nil {
-		return nil, fmt.Errorf("evaluation request is nil")
+		return nil, fmt.Errorf("%s", ErrMsgNilRequest)
 	}
 
 	var authzenReq *authzen.EvaluationRequest

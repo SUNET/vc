@@ -78,7 +78,7 @@ func (e *LocalTrustEvaluator) AddTrustedRoot(cert *x509.Certificate) {
 // Evaluate implements TrustEvaluator.
 func (e *LocalTrustEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest) (*TrustDecision, error) {
 	if req == nil {
-		return nil, fmt.Errorf("evaluation request is nil")
+		return nil, fmt.Errorf("%s", ErrMsgNilRequest)
 	}
 
 	// Check role if restricted
