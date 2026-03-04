@@ -186,8 +186,8 @@ func TestTrustPolicyConfigDefaults(t *testing.T) {
 	assert.False(t, cfg.RequireRevocationCheck)
 }
 
-func TestOIDCConfigDefaults(t *testing.T) {
-	var cfg OIDCConfig
+func TestOIDCOPConfigDefaults(t *testing.T) {
+	var cfg OIDCOPConfig
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 

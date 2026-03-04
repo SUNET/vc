@@ -27,14 +27,15 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 	// TODO(masv): should request-object-id be associated with a particular session?
 	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
-		RequestObjectID: req.ID,
+		SessionID: req.ID,
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return "", err
 	}
 
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.RequestObjectID)
+	// TODO(masv): should requestObjectCache be using cache lib
+	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.SessionID)
 	if !found {
 		c.log.Error(nil, "request object not found in cache", "requestObjectID", authorizationContext.RequestObjectID)
 		return "", errors.New("request object not found")

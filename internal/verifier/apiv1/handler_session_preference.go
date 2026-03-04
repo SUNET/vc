@@ -105,7 +105,7 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, req *ConfirmCrede
 		c.log.Error(err, "Failed to generate authorization code")
 		return nil, ErrServerError
 	}
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second)
 
 	authCtx.Status = cache.SessionStatusCodeIssued
 	authCtx.Code = code

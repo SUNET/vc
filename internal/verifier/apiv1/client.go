@@ -131,19 +131,19 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 // generateSubjectIdentifier creates a subject identifier for the user
 // This can be either public (same across all RPs) or pairwise (different per RP)
 func (c *Client) generateSubjectIdentifier(walletID string, clientID string) string {
-	subjectType := c.cfg.Verifier.OIDC.SubjectType
+	subjectType := c.cfg.Verifier.OIDCOP.SubjectType
 
 	switch subjectType {
 	case "pairwise":
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(clientID))
-		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.OIDCOP.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	default:
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
-		hash.Write([]byte(c.cfg.Verifier.OIDC.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.OIDCOP.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	}
 }

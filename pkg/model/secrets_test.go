@@ -38,7 +38,7 @@ func TestClearSecrets(t *testing.T) {
 			},
 		},
 		Verifier: &Verifier{
-			OIDC: &OIDCConfig{
+			OIDCOP: &OIDCOPConfig{
 				SubjectSalt: "salt-value", //NOSONAR
 			},
 		},
@@ -54,7 +54,7 @@ func TestClearSecrets(t *testing.T) {
 	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret, "APIGW.OIDCRP.Registration.Preconfigured.ClientSecret should be cleared") //NOSONAR
 	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken, "APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken should be cleared") //NOSONAR
 	assert.Empty(t, cfg.Registry.AdminGUI.Password, "Registry.AdminGUI.Password should be cleared")                                                     //NOSONAR
-	assert.Empty(t, cfg.Verifier.OIDC.SubjectSalt, "Verifier.OIDC.SubjectSalt should be cleared")                                                       //NOSONAR
+	assert.Empty(t, cfg.Verifier.OIDCOP.SubjectSalt, "Verifier.OIDCOP.SubjectSalt should be cleared")                                                       //NOSONAR
 	assert.Empty(t, cfg.UI.Password, "UI.Password should be cleared")                                                                                   //NOSONAR
 }
 
@@ -103,7 +103,7 @@ func TestApplySecrets(t *testing.T) {
 			},
 		},
 		Verifier: &VerifierSecrets{
-			OIDC: OIDCSecrets{
+			OIDCOP: OIDCOPSecrets{
 				SubjectSalt: "secret-salt", //NOSONAR
 			},
 		},
@@ -119,7 +119,7 @@ func TestApplySecrets(t *testing.T) {
 	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret) //NOSONAR
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                              //NOSONAR
-	assert.Equal(t, "secret-salt", cfg.Verifier.OIDC.SubjectSalt)                                     //NOSONAR
+	assert.Equal(t, "secret-salt", cfg.Verifier.OIDCOP.SubjectSalt)                                     //NOSONAR
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                //NOSONAR
 }
 
@@ -202,7 +202,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		Verifier: &Verifier{
-			OIDC: &OIDCConfig{
+			OIDCOP: &OIDCOPConfig{
 				SubjectSalt: "config-salt", //NOSONAR
 			},
 		},
@@ -247,7 +247,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		Verifier: &VerifierSecrets{
-			OIDC: OIDCSecrets{
+			OIDCOP: OIDCOPSecrets{
 				SubjectSalt: "secret-salt", //NOSONAR
 			},
 		},
@@ -262,6 +262,6 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret) //NOSONAR
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                              //NOSONAR
-	assert.Equal(t, "secret-salt", cfg.Verifier.OIDC.SubjectSalt)                                     //NOSONAR
+	assert.Equal(t, "secret-salt", cfg.Verifier.OIDCOP.SubjectSalt)                                     //NOSONAR
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                //NOSONAR
 }

@@ -940,10 +940,10 @@ func TestGenerateIDToken(t *testing.T) {
 	ctx := t.Context()
 
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDC.Issuer = "https://issuer.example.com"
-	client.cfg.Verifier.OIDC.IDTokenDuration = 3600
-	client.cfg.Verifier.OIDC.SubjectType = "public"
-	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDCOP.Issuer = "https://issuer.example.com"
+	client.cfg.Verifier.OIDCOP.IDTokenDuration = 3600
+	client.cfg.Verifier.OIDCOP.SubjectType = "public"
+	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
@@ -1230,7 +1230,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-			client.cfg.Verifier.OIDC.SessionDuration = 900
+			client.cfg.Verifier.OIDCOP.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
 			client.cfg.Verifier.DigitalCredentials.UseJAR = true
@@ -1301,7 +1301,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDC.SessionDuration = 900
+	client.cfg.Verifier.OIDCOP.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enable = false
 	// Clear CSS title to test default fallback
@@ -2136,7 +2136,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2211,7 +2211,7 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2265,7 +2265,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
 					PublicURL: tt.externalURL,
-					OIDC: &model.OIDCConfig{
+					OIDCOP: &model.OIDCOPConfig{
 						Issuer:      tt.externalURL,
 						SubjectType: "public",
 						SubjectSalt: "test-salt",
@@ -2296,7 +2296,7 @@ func TestGetJWKS(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2382,7 +2382,7 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2410,7 +2410,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",

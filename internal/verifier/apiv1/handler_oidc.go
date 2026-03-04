@@ -124,7 +124,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix(),
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -342,10 +342,10 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Update session with tokens
 	authCtx.AccessToken = accessToken
-	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.AccessTokenDuration) * time.Second).Unix()
+	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.AccessTokenDuration) * time.Second).Unix()
 	authCtx.IDToken = idToken
 	authCtx.RefreshToken = refreshToken
-	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second).Unix()
+	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
@@ -356,7 +356,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.Verifier.OIDC.AccessTokenDuration,
+		ExpiresIn:    c.cfg.Verifier.OIDCOP.AccessTokenDuration,
 		RefreshToken: refreshToken,
 		IDToken:      idToken,
 		Scope:        strings.Join(authCtx.Scopes, " "),
@@ -377,10 +377,10 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
-	idTokenTTL := time.Duration(c.cfg.Verifier.OIDC.IDTokenDuration) * time.Second
+	idTokenTTL := time.Duration(c.cfg.Verifier.OIDCOP.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.Verifier.OIDC.Issuer,
+		"iss":   c.cfg.Verifier.OIDCOP.Issuer,
 		"sub":   sub,
 		"aud":   client.ClientID,
 		"exp":   now.Add(idTokenTTL).Unix(),
@@ -458,7 +458,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	metadata := &DiscoveryMetadata{
-		Issuer:                           c.cfg.Verifier.OIDC.Issuer,
+		Issuer:                           c.cfg.Verifier.OIDCOP.Issuer,
 		AuthorizationEndpoint:            authorizationEndpoint,
 		TokenEndpoint:                    tokenEndpoint,
 		UserInfoEndpoint:                 userInfoEndpoint,
@@ -653,7 +653,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Error(err, "Failed to generate authorization code")
 		return nil, ErrServerError
 	}
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second)
 
 	session.Code = code
 	session.CodeExpiresAt = codeExpiry.Unix()
@@ -773,7 +773,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 
 	// Generate authorization request URI
 	requestObject := &openid4vp.RequestObject{
-		ClientID: c.cfg.Verifier.OIDC.Issuer,
+		ClientID: c.cfg.Verifier.OIDCOP.Issuer,
 	}
 	authReqURI, err := requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
 	if err != nil {

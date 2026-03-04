@@ -30,11 +30,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		return "", err
 	}
 	requestObject := &openid4vp.RequestObject{
-		ISS:          c.cfg.Verifier.OIDC.Issuer,
+		ISS:          c.cfg.Verifier.OIDCOP.Issuer,
 		AUD:          "https://self-issued.me/v2",
 		IAT:          time.Now().Unix(),
 		ResponseType: "vp_token",
-		ClientID:     c.cfg.Verifier.OIDC.Issuer,
+		ClientID:     c.cfg.Verifier.OIDCOP.Issuer,
 		Nonce:        nonce,
 		ResponseMode: responseMode,
 		ResponseURI:  responseURI,
@@ -150,7 +150,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		return err
 	}
 	authCtx.Code = authCode
-	authCtx.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix()
+	authCtx.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix()
 	authCtx.Status = "code_issued"
 
 	// Update session

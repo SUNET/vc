@@ -62,7 +62,7 @@ ui:
 
 	// Verify Verifier secrets
 	require.NotNil(t, secrets.Verifier)
-	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDC.SubjectSalt)
+	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDCOP.SubjectSalt)
 
 	// Verify UI secrets
 	require.NotNil(t, secrets.UI)

@@ -128,8 +128,8 @@ type GRPCTLS struct {
 	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.crt"` // Server certificate
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enable true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                       // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
-	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns"`                                                                // Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod")
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                      // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
+	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns"`                                                               // Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod")
 }
 
 // JWTAttribute holds the jwt attribute configuration.
@@ -450,8 +450,8 @@ type Verifier struct {
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
-	// OIDC holds the OIDC Provider configuration
-	OIDC *OIDCConfig `yaml:"oidc,omitempty" validate:"omitempty"`
+	// OIDCOP holds the OIDC Provider configuration
+	OIDCOP *OIDCOPConfig `yaml:"oidc_op,omitempty" validate:"omitempty"`
 	// OpenID4VP holds the OpenID4VP configuration
 	OpenID4VP *OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
 	// DigitalCredentials holds the W3C Digital Credentials API configuration
@@ -501,11 +501,11 @@ type TrustPolicyConfig struct {
 	RequireRevocationCheck bool `yaml:"require_revocation_check,omitempty" default:"false"`
 }
 
-// OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider.
+// OIDCOPConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider.
 // This configures how the verifier issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 // The signing key is shared from the parent Verifier.KeyConfig.
-type OIDCConfig struct {
+type OIDCOPConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
@@ -523,7 +523,7 @@ type OIDCConfig struct {
 	RefreshTokenDuration int `yaml:"refresh_token_duration" validate:"required" default:"86400"`
 	// SubjectType is the subject type: "public" or "pairwise"
 	SubjectType string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
-	// SubjectSalt is the salt for pairwise subject generation
+	// SubjectSalt is a secret salt used for subject identifier generation (both public and pairwise)
 	SubjectSalt string `yaml:"subject_salt" validate:"required"`
 }
 
