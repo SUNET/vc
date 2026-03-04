@@ -141,8 +141,9 @@ func copyDCQL(src *DCQL) *DCQL {
 
 	dst := &DCQL{
 		Credentials: make([]CredentialQuery, len(src.Credentials)),
-		// CredentialSets is only set if source has elements (keep it nil otherwise
-		// to pass `omitempty` validation)
+		// CredentialSets is only set if source has elements.
+		// We use nil (not empty slice) to ensure consistent behavior:
+		// nil is unambiguous for both JSON omitempty and validator omitempty.
 	}
 
 	// Only create CredentialSets if source has elements

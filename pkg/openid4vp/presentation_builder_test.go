@@ -323,18 +323,38 @@ func TestPresentationBuilder_GetTemplate(t *testing.T) {
 // over standard OIDC scopes. This prevents "openid" (which typically appears first in
 // OIDC requests) from always being selected when both standard and non-standard scopes
 // are configured with templates.
+//
+// The test fixture (scope_priority_test.yaml) includes an "openid" template to ensure
+// the prioritization logic is actually exercised - without it, pid/ehic would be selected
+// simply because there's no openid template to compete with.
 func TestPresentationBuilder_ScopePriority(t *testing.T) {
 	ctx := t.Context()
 
-	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/multi_template.yaml")
+	// Use dedicated fixture with openid template for proper priority testing
+	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/scope_priority_test.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load test config: %v", err)
 	}
 
 	builder := openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
 
-	// Even though "openid" appears before "pid", "pid" should be selected
-	// because non-standard scopes take priority
+	// Verify the fixture has an openid template (this test is meaningless without it)
+	templates := config.GetEnabledTemplates()
+	hasOpenIDTemplate := false
+	for _, tmpl := range templates {
+		for _, scope := range tmpl.OIDCScopes {
+			if scope == "openid" {
+				hasOpenIDTemplate = true
+				break
+			}
+		}
+	}
+	if !hasOpenIDTemplate {
+		t.Fatal("Test fixture must include an 'openid' template to properly test priority behavior")
+	}
+
+	// Even though "openid" appears first AND has a matching template,
+	// "pid" should be selected because non-standard scopes take priority
 	scopes := []string{"openid", "pid"}
 	dcql, err := builder.BuildDCQLQuery(ctx, scopes)
 	if err != nil {
@@ -345,7 +365,7 @@ func TestPresentationBuilder_ScopePriority(t *testing.T) {
 		t.Fatal("Expected DCQL but got nil")
 	}
 
-	// Should select pid_credential, not a generic or openid-based credential
+	// Should select pid_credential, NOT openid_credential
 	if len(dcql.Credentials) == 0 {
 		t.Fatal("Expected at least one credential")
 	}
@@ -353,6 +373,16 @@ func TestPresentationBuilder_ScopePriority(t *testing.T) {
 	if dcql.Credentials[0].ID != "pid_credential" {
 		t.Errorf("Expected pid_credential to be selected (non-standard scope priority), got %s",
 			dcql.Credentials[0].ID)
+	}
+
+	// Verify that openid-only requests still work and select the openid template
+	scopes = []string{"openid"}
+	dcql, err = builder.BuildDCQLQuery(ctx, scopes)
+	if err != nil {
+		t.Fatalf("BuildDCQLQuery failed for openid-only: %v", err)
+	}
+	if dcql != nil && len(dcql.Credentials) > 0 && dcql.Credentials[0].ID != "openid_credential" {
+		t.Errorf("Expected openid_credential for openid-only request, got %s", dcql.Credentials[0].ID)
 	}
 
 	// Also test with multiple non-standard scopes - first non-standard scope wins
