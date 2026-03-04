@@ -178,6 +178,37 @@ func TestTrustConfigDefaults(t *testing.T) {
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 
+func TestTrustConfig_GetPDPURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      TrustConfig
+		expected string
+	}{
+		{
+			name:     "PDPURL takes precedence",
+			cfg:      TrustConfig{PDPURL: "https://new.example.com", GoTrustURL: "https://old.example.com"},
+			expected: "https://new.example.com",
+		},
+		{
+			name:     "fallback to GoTrustURL for backward compatibility",
+			cfg:      TrustConfig{GoTrustURL: "https://old.example.com"},
+			expected: "https://old.example.com",
+		},
+		{
+			name:     "empty when both empty",
+			cfg:      TrustConfig{},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.GetPDPURL()
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
 func TestTrustPolicyConfigDefaults(t *testing.T) {
 	var cfg TrustPolicyConfig
 	err := defaults.Set(&cfg)

@@ -465,10 +465,9 @@ func TestSmartResolver_GetResolvers(t *testing.T) {
 
 // Factory function tests
 
-func TestNewResolverFromConfig_NoGoTrust(t *testing.T) {
+func TestNewResolverFromConfig_NoPDP(t *testing.T) {
 	cfg := ResolverConfig{
-		GoTrustURL: "",
-		Enabled:    true,
+		PDPURL: "",
 	}
 
 	resolver, err := NewResolverFromConfig(cfg)
@@ -490,10 +489,9 @@ func TestNewResolverFromConfig_NoGoTrust(t *testing.T) {
 	}
 }
 
-func TestNewResolverFromConfig_WithGoTrust(t *testing.T) {
+func TestNewResolverFromConfig_WithPDP(t *testing.T) {
 	cfg := ResolverConfig{
-		GoTrustURL: "https://trust.example.com/pdp",
-		Enabled:    true,
+		PDPURL: "https://trust.example.com/pdp",
 	}
 
 	resolver, err := NewResolverFromConfig(cfg)
@@ -513,11 +511,62 @@ func TestNewResolverFromConfig_WithGoTrust(t *testing.T) {
 	}
 }
 
-func TestNewResolverWithGoTrust(t *testing.T) {
-	smart := NewResolverWithGoTrust("https://trust.example.com/pdp")
+func TestNewResolverFromConfig_BackwardCompat(t *testing.T) {
+	// Test backward compatibility with deprecated GoTrustURL field
+	cfg := ResolverConfig{
+		GoTrustURL: "https://trust.example.com/pdp",
+	}
+
+	resolver, err := NewResolverFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should be SmartResolver (using deprecated GoTrustURL)
+	_, ok := resolver.(*SmartResolver)
+	if !ok {
+		t.Errorf("expected SmartResolver from deprecated GoTrustURL, got %T", resolver)
+	}
+}
+
+func TestResolverConfig_GetPDPURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      ResolverConfig
+		expected string
+	}{
+		{
+			name:     "PDPURL takes precedence",
+			cfg:      ResolverConfig{PDPURL: "https://new.example.com", GoTrustURL: "https://old.example.com"},
+			expected: "https://new.example.com",
+		},
+		{
+			name:     "fallback to GoTrustURL",
+			cfg:      ResolverConfig{GoTrustURL: "https://old.example.com"},
+			expected: "https://old.example.com",
+		},
+		{
+			name:     "empty when both empty",
+			cfg:      ResolverConfig{},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.GetPDPURL()
+			if got != tt.expected {
+				t.Errorf("GetPDPURL() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNewResolverWithPDP(t *testing.T) {
+	smart := NewResolverWithPDP("https://trust.example.com/pdp")
 
 	if smart == nil {
-		t.Fatal("NewResolverWithGoTrust returned nil")
+		t.Fatal("NewResolverWithPDP returned nil")
 	}
 
 	if smart.GetLocalResolver() == nil {

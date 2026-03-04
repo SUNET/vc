@@ -128,8 +128,8 @@ type GRPCTLS struct {
 	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.crt"` // Server certificate
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enable true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                       // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
-	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns"`                                                                // Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod")
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints"`                                                      // SHA256 fingerprint -> friendly name (e.g., "a1b2c3..." -> "issuer-prod")
+	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns"`                                                               // Certificate Subject DN -> friendly name (e.g., "CN=apigw,O=SUNET" -> "apigw-prod")
 }
 
 // JWTAttribute holds the jwt attribute configuration.
@@ -466,10 +466,20 @@ type Verifier struct {
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
 // This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
+//
+// Trust evaluation operates in one of two modes:
+//   - When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
+//   - When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
 type TrustConfig struct {
-	// GoTrustURL is the URL of the go-trust PDP (Policy Decision Point) service.
+	// PDPURL is the URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation.
 	// Example: "https://trust.sunet.se/pdp"
-	// If empty, trust evaluation is disabled and only local DID methods will work.
+	// When set, operates in "default deny" mode - trust decisions require PDP approval.
+	// When empty, operates in "allow all" mode - resolved keys are always considered trusted.
+	PDPURL string `yaml:"pdp_url,omitempty"`
+
+	// GoTrustURL is deprecated. Use PDPURL instead.
+	// Retained for backward compatibility - if PDPURL is empty and GoTrustURL is set, GoTrustURL is used.
+	// Deprecated: This field will be removed in a future release.
 	GoTrustURL string `yaml:"go_trust_url,omitempty"`
 
 	// LocalDIDMethods specifies which DID methods can be resolved locally without go-trust.
@@ -481,9 +491,18 @@ type TrustConfig struct {
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
 
 	// Enable controls whether trust evaluation is enabled.
-	// When false, keys are resolved but not validated against trust frameworks.
-	// Default: true
+	// Deprecated: This field is ignored. Use PDPURL to control trust mode:
+	//   - PDPURL set: default deny (trust evaluation via PDP)
+	//   - PDPURL empty: allow all (resolved keys are trusted)
 	Enable *bool `yaml:"enable,omitempty" default:"true"`
+}
+
+// GetPDPURL returns the effective PDP URL, preferring PDPURL over the deprecated GoTrustURL.
+func (c *TrustConfig) GetPDPURL() string {
+	if c.PDPURL != "" {
+		return c.PDPURL
+	}
+	return c.GoTrustURL
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.

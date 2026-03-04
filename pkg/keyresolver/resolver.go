@@ -595,8 +595,14 @@ func (s *StaticResolver) ResolveECDSA(verificationMethod string) (*ecdsa.PublicK
 // ResolverConfig holds configuration for creating a key resolver.
 // This mirrors the TrustConfig from the application config.
 type ResolverConfig struct {
-	// GoTrustURL is the URL of the go-trust PDP service.
-	// If empty, only local DID methods will be supported.
+	// PDPURL is the URL of the AuthZEN PDP service for trust evaluation.
+	// When set, operates in "default deny" mode - trust decisions require PDP approval.
+	// When empty, operates in "allow all" mode - resolved keys are always considered trusted.
+	PDPURL string
+
+	// GoTrustURL is deprecated. Use PDPURL instead.
+	// Retained for backward compatibility - if PDPURL is empty and GoTrustURL is set, GoTrustURL is used.
+	// Deprecated: This field will be removed in a future release.
 	GoTrustURL string
 
 	// LocalDIDMethods specifies additional DID methods to resolve locally.
@@ -604,35 +610,52 @@ type ResolverConfig struct {
 	LocalDIDMethods []string
 
 	// Enabled controls whether trust evaluation is performed.
-	// When false, keys are resolved but not validated against trust frameworks.
+	// Deprecated: This field is ignored. Use PDPURL to control trust mode.
 	Enabled bool
 }
 
+// GetPDPURL returns the effective PDP URL, preferring PDPURL over the deprecated GoTrustURL.
+func (cfg *ResolverConfig) GetPDPURL() string {
+	if cfg.PDPURL != "" {
+		return cfg.PDPURL
+	}
+	return cfg.GoTrustURL
+}
+
 // NewResolverFromConfig creates a key resolver based on configuration.
-// If GoTrustURL is set, creates a SmartResolver that uses LocalResolver for
+// If a PDP URL is configured, creates a SmartResolver that uses LocalResolver for
 // self-contained DIDs (did:key, did:jwk) and GoTrustResolver for everything else.
-// If GoTrustURL is empty, creates a LocalResolver that only handles self-contained DIDs.
+// If no PDP URL is configured, creates a LocalResolver that only handles self-contained DIDs.
 func NewResolverFromConfig(cfg ResolverConfig) (Resolver, error) {
-	// If no go-trust URL, only local resolution is possible
-	if cfg.GoTrustURL == "" {
+	// Get effective PDP URL (PDPURL preferred, fallback to GoTrustURL)
+	pdpURL := cfg.GetPDPURL()
+
+	// If no PDP URL, only local resolution is possible
+	if pdpURL == "" {
 		return NewLocalResolver(), nil
 	}
 
 	// Create go-trust resolver for remote DIDs
-	goTrustResolver := NewGoTrustResolver(cfg.GoTrustURL)
+	goTrustResolver := NewGoTrustResolver(pdpURL)
 
 	// Create smart resolver that routes based on DID method
 	return NewSmartResolver(goTrustResolver), nil
 }
 
 // NewResolverWithGoTrust creates a SmartResolver with go-trust integration.
-// This is a convenience function for common use cases.
+// Deprecated: Use NewResolverWithPDP instead.
 func NewResolverWithGoTrust(goTrustURL string) *SmartResolver {
 	return NewSmartResolver(NewGoTrustResolver(goTrustURL))
 }
 
+// NewResolverWithPDP creates a SmartResolver with PDP integration.
+// This is a convenience function for common use cases.
+func NewResolverWithPDP(pdpURL string) *SmartResolver {
+	return NewSmartResolver(NewGoTrustResolver(pdpURL))
+}
+
 // NewLocalOnlyResolver creates a resolver that only handles local DIDs.
-// Use this when go-trust is not available or not needed.
+// Use this when operating in "allow all" mode without a PDP.
 func NewLocalOnlyResolver() *LocalResolver {
 	return NewLocalResolver()
 }
