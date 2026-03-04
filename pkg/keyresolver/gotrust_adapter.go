@@ -45,6 +45,31 @@ func NewGoTrustResolverWithClient(client *authzenclient.Client) *GoTrustResolver
 	return &GoTrustResolver{client: client}
 }
 
+// resolveAndExtractMetadata is a helper that performs the common resolution pattern.
+// It resolves the identifier via the PDP and returns the trust_metadata if successful.
+func (g *GoTrustResolver) resolveAndExtractMetadata(ctx context.Context, identifier string) (any, error) {
+	resp, err := g.client.Resolve(ctx, identifier)
+	if err != nil {
+		return nil, fmt.Errorf("resolution request failed: %w", err)
+	}
+
+	if !resp.Decision {
+		reason := "unknown"
+		if resp.Context != nil && resp.Context.Reason != nil {
+			if r, ok := resp.Context.Reason["error"].(string); ok {
+				reason = r
+			}
+		}
+		return nil, fmt.Errorf("resolution denied for %s: %s", identifier, reason)
+	}
+
+	if resp.Context == nil || resp.Context.TrustMetadata == nil {
+		return nil, fmt.Errorf("no trust_metadata in response for %s", identifier)
+	}
+
+	return resp.Context.TrustMetadata, nil
+}
+
 // ResolveEd25519 resolves an Ed25519 public key from a verification method identifier.
 // It sends a resolution-only request to the PDP and extracts the key from the returned
 // trust_metadata (DID document or entity configuration).
@@ -55,26 +80,11 @@ func (g *GoTrustResolver) ResolveEd25519(verificationMethod string) (ed25519.Pub
 
 // ResolveEd25519WithContext resolves an Ed25519 key with a provided context.
 func (g *GoTrustResolver) ResolveEd25519WithContext(ctx context.Context, verificationMethod string) (ed25519.PublicKey, error) {
-	resp, err := g.client.Resolve(ctx, verificationMethod)
+	metadata, err := g.resolveAndExtractMetadata(ctx, verificationMethod)
 	if err != nil {
-		return nil, fmt.Errorf("resolution request failed: %w", err)
+		return nil, err
 	}
-
-	if !resp.Decision {
-		reason := "unknown"
-		if resp.Context != nil && resp.Context.Reason != nil {
-			if r, ok := resp.Context.Reason["error"].(string); ok {
-				reason = r
-			}
-		}
-		return nil, fmt.Errorf("resolution denied for %s: %s", verificationMethod, reason)
-	}
-
-	if resp.Context == nil || resp.Context.TrustMetadata == nil {
-		return nil, fmt.Errorf("no trust_metadata in response for %s", verificationMethod)
-	}
-
-	return ExtractEd25519FromMetadata(resp.Context.TrustMetadata, verificationMethod)
+	return ExtractEd25519FromMetadata(metadata, verificationMethod)
 }
 
 // ResolveECDSA resolves an ECDSA public key from a verification method identifier.
@@ -85,26 +95,11 @@ func (g *GoTrustResolver) ResolveECDSA(verificationMethod string) (*ecdsa.Public
 
 // ResolveECDSAWithContext resolves an ECDSA key with a provided context.
 func (g *GoTrustResolver) ResolveECDSAWithContext(ctx context.Context, verificationMethod string) (*ecdsa.PublicKey, error) {
-	resp, err := g.client.Resolve(ctx, verificationMethod)
+	metadata, err := g.resolveAndExtractMetadata(ctx, verificationMethod)
 	if err != nil {
-		return nil, fmt.Errorf("resolution request failed: %w", err)
+		return nil, err
 	}
-
-	if !resp.Decision {
-		reason := "unknown"
-		if resp.Context != nil && resp.Context.Reason != nil {
-			if r, ok := resp.Context.Reason["error"].(string); ok {
-				reason = r
-			}
-		}
-		return nil, fmt.Errorf("resolution denied for %s: %s", verificationMethod, reason)
-	}
-
-	if resp.Context == nil || resp.Context.TrustMetadata == nil {
-		return nil, fmt.Errorf("no trust_metadata in response for %s", verificationMethod)
-	}
-
-	return ExtractECDSAFromMetadata(resp.Context.TrustMetadata, verificationMethod)
+	return ExtractECDSAFromMetadata(metadata, verificationMethod)
 }
 
 // EvaluateTrustEd25519 validates an Ed25519 key binding via go-trust.
@@ -159,26 +154,11 @@ func (g *GoTrustResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 
 // ResolveX25519WithContext resolves an X25519 key with a provided context.
 func (g *GoTrustResolver) ResolveX25519WithContext(ctx context.Context, did string) (*ecdh.PublicKey, error) {
-	resp, err := g.client.Resolve(ctx, did)
+	metadata, err := g.resolveAndExtractMetadata(ctx, did)
 	if err != nil {
-		return nil, fmt.Errorf("resolution request failed: %w", err)
+		return nil, err
 	}
-
-	if !resp.Decision {
-		reason := "unknown"
-		if resp.Context != nil && resp.Context.Reason != nil {
-			if r, ok := resp.Context.Reason["error"].(string); ok {
-				reason = r
-			}
-		}
-		return nil, fmt.Errorf("resolution denied for %s: %s", did, reason)
-	}
-
-	if resp.Context == nil || resp.Context.TrustMetadata == nil {
-		return nil, fmt.Errorf("no trust_metadata in response for %s", did)
-	}
-
-	return ExtractX25519FromMetadata(resp.Context.TrustMetadata, did)
+	return ExtractX25519FromMetadata(metadata, did)
 }
 
 // ResolveService resolves a DIDCommMessaging service endpoint via go-trust.
@@ -190,53 +170,24 @@ func (g *GoTrustResolver) ResolveService(did string) (*DIDCommService, error) {
 
 // ResolveServiceWithContext resolves a service with a provided context.
 func (g *GoTrustResolver) ResolveServiceWithContext(ctx context.Context, did string) (*DIDCommService, error) {
-	resp, err := g.client.Resolve(ctx, did)
+	metadata, err := g.resolveAndExtractMetadata(ctx, did)
 	if err != nil {
-		return nil, fmt.Errorf("resolution request failed: %w", err)
+		return nil, err
 	}
-
-	if !resp.Decision {
-		reason := "unknown"
-		if resp.Context != nil && resp.Context.Reason != nil {
-			if r, ok := resp.Context.Reason["error"].(string); ok {
-				reason = r
-			}
-		}
-		return nil, fmt.Errorf("resolution denied for %s: %s", did, reason)
-	}
-
-	if resp.Context == nil || resp.Context.TrustMetadata == nil {
-		return nil, fmt.Errorf("no trust_metadata in response for %s", did)
-	}
-
-	return ExtractServiceFromMetadata(resp.Context.TrustMetadata, did)
+	return ExtractServiceFromMetadata(metadata, did)
 }
 
 // ResolveMetadata resolves the full trust_metadata for a DID.
 // This is useful when you need access to the full DID document or entity configuration.
 func (g *GoTrustResolver) ResolveMetadata(ctx context.Context, did string) (map[string]any, error) {
-	resp, err := g.client.Resolve(ctx, did)
+	metadata, err := g.resolveAndExtractMetadata(ctx, did)
 	if err != nil {
-		return nil, fmt.Errorf("resolution request failed: %w", err)
+		return nil, err
 	}
 
-	if !resp.Decision {
-		reason := "unknown"
-		if resp.Context != nil && resp.Context.Reason != nil {
-			if r, ok := resp.Context.Reason["error"].(string); ok {
-				reason = r
-			}
-		}
-		return nil, fmt.Errorf("resolution denied for %s: %s", did, reason)
-	}
-
-	if resp.Context == nil || resp.Context.TrustMetadata == nil {
-		return nil, fmt.Errorf("no trust_metadata in response for %s", did)
-	}
-
-	doc, ok := resp.Context.TrustMetadata.(map[string]any)
+	doc, ok := metadata.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("invalid trust_metadata format: expected map, got %T", resp.Context.TrustMetadata)
+		return nil, fmt.Errorf("invalid trust_metadata format: expected map, got %T", metadata)
 	}
 
 	return doc, nil
