@@ -89,14 +89,36 @@ func (pb *PresentationBuilder) BuildFromTemplate(ctx context.Context, templateID
 // This attempts to find matching templates, and falls back to a generic DCQL query if none are found.
 // All scopes are considered for matching, including standard OIDC scopes like "openid".
 // This allows standard OIDC scopes to optionally map to credentials if configured.
+// Non-standard scopes are prioritized over standard scopes to prevent "openid" from
+// always being selected when it appears first in the request.
 func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []string) (*DCQL, error) {
 	if len(scopes) == 0 {
 		// Return a generic DCQL query when no scopes provided
 		return pb.createGenericDCQL(), nil
 	}
 
-	// Try to find a template for any scope (including standard OIDC scopes)
+	// Prioritize non-standard scopes over standard OIDC scopes.
+	// This prevents "openid" (which typically appears first) from always being selected.
+	// First, try non-standard scopes
 	for _, scope := range scopes {
+		if StandardOIDCScopes[scope] {
+			continue // Skip standard scopes in first pass
+		}
+		if templateID, ok := pb.scopeIndex[scope]; ok {
+			template := pb.templates[templateID]
+			dcql := template.GetDCQLQuery()
+			if dcql != nil {
+				// Return a copy to avoid modifications to the template
+				return copyDCQL(dcql), nil
+			}
+		}
+	}
+
+	// Then, try standard OIDC scopes (if configured with a template)
+	for _, scope := range scopes {
+		if !StandardOIDCScopes[scope] {
+			continue // Already tried non-standard scopes
+		}
 		if templateID, ok := pb.scopeIndex[scope]; ok {
 			template := pb.templates[templateID]
 			dcql := template.GetDCQLQuery()
