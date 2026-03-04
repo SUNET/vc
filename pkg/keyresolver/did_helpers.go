@@ -14,6 +14,38 @@ import (
 	"github.com/multiformats/go-multibase"
 )
 
+// Multicodec constants for public key types.
+// These are varint-encoded multicodec values as defined in the multicodec table.
+// See: https://github.com/multiformats/multicodec
+const (
+	// multicodecEd25519Byte1 and multicodecEd25519Byte2 form the Ed25519 public key multicodec (0xed01).
+	multicodecEd25519Byte1 = 0xed
+	multicodecEd25519Byte2 = 0x01
+
+	// multicodecX25519Byte1 and multicodecX25519Byte2 form the X25519 public key multicodec (0xec01).
+	multicodecX25519Byte1 = 0xec
+	multicodecX25519Byte2 = 0x01
+
+	// ECDSA P-256 multicodec (0x1200) varint-encoded as 0x80 0x24.
+	multicodecP256Byte1 = 0x80
+	multicodecP256Byte2 = 0x24
+
+	// ECDSA P-384 multicodec (0x1201) varint-encoded as 0x81 0x24.
+	multicodecP384Byte1 = 0x81
+	multicodecP384Byte2 = 0x24
+
+	// ECDSA P-521 multicodec (0x1202) varint-encoded as 0x82 0x24.
+	multicodecP521Byte1 = 0x82
+	multicodecP521Byte2 = 0x24
+
+	// multicodecPrefixLen is the length of the multicodec prefix (2 bytes).
+	multicodecPrefixLen = 2
+
+	// ed25519MultibaseKeyLen is the expected length for Ed25519/X25519 multibase keys:
+	// 2 bytes multicodec prefix + 32 bytes key.
+	ed25519MultibaseKeyLen = 34
+)
+
 // ExtractEd25519FromMetadata extracts an Ed25519 public key from a DID document
 // or entity configuration returned in the trust_metadata field of an AuthZEN response.
 func ExtractEd25519FromMetadata(metadata any, verificationMethod string) (ed25519.PublicKey, error) {
@@ -345,16 +377,16 @@ func decodeMultikeyX25519(multikey string) (*ecdh.PublicKey, error) {
 	}
 
 	// Check length (2 bytes multicodec + 32 bytes key)
-	if len(decoded) != 34 {
-		return nil, fmt.Errorf("invalid multikey length: expected 34, got %d", len(decoded))
+	if len(decoded) != ed25519MultibaseKeyLen {
+		return nil, fmt.Errorf("invalid multikey length: expected %d, got %d", ed25519MultibaseKeyLen, len(decoded))
 	}
 
-	// Check X25519 multicodec prefix (0xec, 0x01)
-	if decoded[0] != 0xec || decoded[1] != 0x01 {
+	// Check X25519 multicodec prefix
+	if decoded[0] != multicodecX25519Byte1 || decoded[1] != multicodecX25519Byte2 {
 		return nil, fmt.Errorf("not an X25519 multikey: multicodec 0x%02x%02x", decoded[0], decoded[1])
 	}
 
-	return ecdh.X25519().NewPublicKey(decoded[2:])
+	return ecdh.X25519().NewPublicKey(decoded[multicodecPrefixLen:])
 }
 
 // getVerificationMethods extracts the verification methods array from a DID document.
@@ -481,16 +513,16 @@ func decodeMultikeyEd25519(multikey string) (ed25519.PublicKey, error) {
 	}
 
 	// Check length (2 bytes multicodec + 32 bytes key)
-	if len(decoded) != 34 {
-		return nil, fmt.Errorf("invalid multikey length: expected 34, got %d", len(decoded))
+	if len(decoded) != ed25519MultibaseKeyLen {
+		return nil, fmt.Errorf("invalid multikey length: expected %d, got %d", ed25519MultibaseKeyLen, len(decoded))
 	}
 
-	// Check Ed25519 multicodec prefix (0xed, 0x01)
-	if decoded[0] != 0xed || decoded[1] != 0x01 {
+	// Check Ed25519 multicodec prefix
+	if decoded[0] != multicodecEd25519Byte1 || decoded[1] != multicodecEd25519Byte2 {
 		return nil, fmt.Errorf("not an Ed25519 multikey: multicodec 0x%02x%02x", decoded[0], decoded[1])
 	}
 
-	return ed25519.PublicKey(decoded[2:]), nil
+	return ed25519.PublicKey(decoded[multicodecPrefixLen:]), nil
 }
 
 // decodeMultikeyECDSA decodes a multikey-encoded ECDSA public key.
@@ -512,24 +544,21 @@ func decodeMultikeyECDSA(multikey string) (*ecdsa.PublicKey, error) {
 	}
 
 	// Check multicodec prefix for ECDSA curves
-	// P-256 compressed public key multicodec: 0x1200 encoded as varint is 0x80 0x24
-	// P-384 compressed public key multicodec: 0x1201 encoded as varint is 0x81 0x24
-	// P-521 compressed public key multicodec: 0x1202 encoded as varint is 0x82 0x24
 	var curve elliptic.Curve
 	var keyData []byte
 
-	if len(decoded) >= 2 && decoded[0] == 0x80 && decoded[1] == 0x24 {
+	if len(decoded) >= multicodecPrefixLen && decoded[0] == multicodecP256Byte1 && decoded[1] == multicodecP256Byte2 {
 		// P-256 compressed public key
 		curve = elliptic.P256()
-		keyData = decoded[2:]
-	} else if len(decoded) >= 2 && decoded[0] == 0x81 && decoded[1] == 0x24 {
+		keyData = decoded[multicodecPrefixLen:]
+	} else if len(decoded) >= multicodecPrefixLen && decoded[0] == multicodecP384Byte1 && decoded[1] == multicodecP384Byte2 {
 		// P-384 compressed public key
 		curve = elliptic.P384()
-		keyData = decoded[2:]
-	} else if len(decoded) >= 2 && decoded[0] == 0x82 && decoded[1] == 0x24 {
+		keyData = decoded[multicodecPrefixLen:]
+	} else if len(decoded) >= multicodecPrefixLen && decoded[0] == multicodecP521Byte1 && decoded[1] == multicodecP521Byte2 {
 		// P-521 compressed public key
 		curve = elliptic.P521()
-		keyData = decoded[2:]
+		keyData = decoded[multicodecPrefixLen:]
 	} else {
 		// Not a recognized ECDSA multicodec
 		return nil, fmt.Errorf("unrecognized ECDSA multicodec: 0x%02x 0x%02x", decoded[0], decoded[1])
