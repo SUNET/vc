@@ -24,11 +24,11 @@ make test-oidcrp            # Test with OIDC RP build tag
 make test-all-tags          # Test with all build tags
 
 # Docker
-make docker-build                          # Build all images
-make docker-build VERSION=1.2.3           # Build with version
-make docker-build-SERVICE VERSION=1.2.3   # Build specific service
-make docker-push VERSION=1.2.3            # Push all images
-make docker-tag VERSION=1.2.3 NEWTAG=prod # Retag images
+make docker-build                          # Build all images (VERSION=local)
+make docker-build VERSION=myfeature       # Build with custom version
+make docker-build-SERVICE VERSION=myfeature # Build specific service
+make docker-push VERSION=myfeature         # Push all images
+make docker-tag VERSION=myfeature NEWTAG=staging # Retag images
 
 # Docker Compose
 make start       # Start services
@@ -58,10 +58,15 @@ make install-tools # Install required tools
 ## Environment Variables
 
 ```bash
-VERSION=1.2.3        # Docker image version (default: latest)
-NEWTAG=prod          # Target tag for docker-tag operations (default: VERSION)
+VERSION=local        # Docker image version (default: local)
+NEWTAG=staging       # Target tag for docker-tag operations (default: VERSION)
 W3C_TEST_PORT=8888   # W3C test server port (default: 8888)
 ```
+
+> **Note:** Reserved tags (`vX.Y.Z`, `latest`, `testing`, `demo`, `dev`) cannot be
+> used with `VERSION` or `NEWTAG` directly. They are exclusively managed by
+> `make release`, `make release-prod`, and `make release-demo`.
+> See [Reserved Tag Guard](#reserved-tag-guard) for details.
 
 ## Architecture
 
@@ -175,66 +180,121 @@ make test-oidcrp
 make test-all-tags
 
 # Docker build with tags
-make docker-build-apigw-saml VERSION=1.2.3
-make docker-build-issuer-hsm VERSION=1.2.3
+make docker-build-apigw-saml VERSION=myfeature
+make docker-build-issuer-hsm VERSION=myfeature
 ```
 
 ## Docker Workflows
 
 ### Standard Build and Push
 ```bash
-# Build all services with version 1.2.3
-make docker-build VERSION=1.2.3
+# Build all services (default VERSION=local)
+make docker-build
+
+# Build with a custom tag
+make docker-build VERSION=myfeature
 
 # Push to registry
-make docker-push VERSION=1.2.3
+make docker-push VERSION=myfeature
 ```
 
 ### Retagging Images
 ```bash
-# Build as version 1.2.3
-make docker-build VERSION=1.2.3
+# Build with a custom tag
+make docker-build VERSION=myfeature
 
-# Retag as production
-make docker-tag VERSION=1.2.3 NEWTAG=prod
+# Retag to another custom tag
+make docker-tag VERSION=myfeature NEWTAG=staging
 
-# Push production tag
-make docker-push VERSION=prod
-
-# Retag as latest
-make docker-tag VERSION=prod NEWTAG=latest
-make docker-push VERSION=latest
+# Push the new tag
+make docker-push VERSION=staging
 ```
+
+> **Note:** Retagging to reserved tags (`latest`, `demo`, etc.) is only allowed
+> through the release targets. See [Reserved Tag Guard](#reserved-tag-guard).
 
 ### Building Specific Services
 ```bash
 # Build only the API gateway
-make docker-build-apigw VERSION=1.2.3
+make docker-build-apigw VERSION=myfeature
 
 # Build with SAML support
-make docker-build-apigw-saml VERSION=1.2.3
+make docker-build-apigw-saml VERSION=myfeature
 
 # Build with all features
-make docker-build-apigw-all VERSION=1.2.3
+make docker-build-apigw-all VERSION=myfeature
+```
+
+## Reserved Tag Guard
+
+The following Docker image tags are **reserved** and cannot be set directly via
+`VERSION` or `NEWTAG`:
+
+| Tag | Purpose | Managed by |
+|---|---|---|
+| `vX.Y.Z` (semver) | Versioned releases | `make release` |
+| `latest` | Current production | `make release-prod` |
+| `testing` | Testing environment | (reserved) |
+| `demo` | Demo environment | `make release-demo` |
+| `dev` | Latest development build | `make release` |
+
+Attempting to use a reserved tag directly will produce an error:
+
+```bash
+$ make VERSION=dev docker-build
+Error: 'dev' is a reserved tag. Use 'make release', 'make release-prod', or 'make release-demo' instead.
+```
+
+For local development, use any non-reserved tag (the default `local` works well):
+
+```bash
+make docker-build                   # uses VERSION=local (default)
+make docker-build VERSION=myfeature  # any non-reserved string
 ```
 
 ## Release Process
 
-The `release` target automates the full release workflow:
+Three targets manage the release lifecycle. Only these targets are allowed to
+produce reserved Docker tags.
+
+### `make release` — Create a new versioned release
+
+Bumps the latest `vX.Y.Z` git tag and builds/pushes Docker images.
 
 ```bash
-make release VERSION=1.2.3 NEWTAG=prod
+make release                        # patch bump (default)
+make release BUMP=minor             # minor bump
+make release BUMP=major             # major bump
+make release FORCE=true             # release from any branch
+make release BUMP=minor FORCE=true  # combine options
 ```
 
 This performs:
-1. Verifies you're on the `main` branch
-2. Creates and pushes git tag `1.2.3`
-3. Builds all Docker images with version `1.2.3`
-4. Pushes images with version `1.2.3`
-5. Retags all images to `prod`
-6. Pushes images with `prod` tag
-7. Retags all images to `latest`
-8. Pushes images with `latest` tag
+1. Verifies you're on the `main` branch (unless `FORCE=true`)
+2. Verifies the working tree is clean (unless `FORCE=true`)
+3. Bumps the latest `vX.Y.Z` tag according to `BUMP`
+4. Creates and pushes the new git tag
+5. Builds all Docker images tagged `:vX.Y.Z`
+6. Pushes images tagged `:vX.Y.Z`
+7. Retags and pushes all images as `:dev`
+
+### `make release-prod` — Promote to production
+
+Pulls existing `:vX.Y.Z` images and retags them as `:latest`. No rebuild.
+
+```bash
+make release-prod                   # promotes latest vX.Y.Z tag
+make release-prod TAG=v1.2.3        # promotes a specific version
+```
+
+### `make release-demo` — Promote to demo
+
+Pulls existing `:vX.Y.Z` images and retags them as `:demo`. No rebuild.
+
+```bash
+make release-demo                   # promotes latest vX.Y.Z tag
+make release-demo TAG=v1.2.3        # promotes a specific version
+```
 
 ## Development Setup
 
@@ -289,7 +349,7 @@ make -n docker-build-apigw
 ```bash
 # Show what would be executed (dry run)
 make -n build-verifier
-make -n docker-push-registry VERSION=1.2.3
+make -n docker-push-registry VERSION=myfeature
 ```
 
 ## Maintenance Notes

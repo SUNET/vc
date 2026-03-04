@@ -3,7 +3,7 @@
 # ==============================================================================
 
 NAME                    := vc
-VERSION                 ?= latest
+VERSION                 ?= local
 NEWTAG                  ?= $(VERSION)
 CURRENT_BRANCH          := $(shell git rev-parse --abbrev-ref HEAD)
 W3C_TEST_PORT           ?= 8888
@@ -27,6 +27,10 @@ WORKER_SERVICES         := registry mockas apigw issuer
 DOCKER_REGISTRY         := docker.sunet.se/iam_vc
 DOCKER_BUILD_FLAGS      := 
 GO_BUILD_TAGS           ?=
+
+# Release Guard Configuration
+_RELEASE_MODE           ?=
+RESERVED_TAGS           := latest testing demo dev
 
 # Build Tags for Optional Features
 SAML_TAG                := saml
@@ -65,7 +69,8 @@ BUILD_CONFIGS           := \
 	oidc-conformance-setup oidc-conformance-stop oidc-conformance-clean \
 	oidc-conformance-test oidc-conformance-test-vci oidc-conformance-test-vp oidc-conformance-test-oidc \
 	oidc-conformance-status \
-	release check_current_branch ci_build
+	_check-reserved-tag \
+	release release-prod release-demo check_current_branch
 
 # ==============================================================================
 # Help Target
@@ -129,6 +134,27 @@ endef
 define docker-tag
 $(DOCKER_REGISTRY)/$1:$2
 endef
+
+# ==============================================================================
+# Reserved Tag Guard
+# ==============================================================================
+# Prevents reserved Docker tags from being used outside of release targets.
+# Reserved: semver (vX.Y.Z), latest, testing, demo, dev.
+# Only 'make release', 'make release-prod', and 'make release-demo' may use them.
+
+_check-reserved-tag:
+ifneq ($(_RELEASE_MODE),1)
+	@for val in "$(VERSION)" "$(NEWTAG)"; do \
+		if echo "$$val" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+			echo "Error: '$$val' is a reserved semver tag. Use 'make release', 'make release-prod', or 'make release-demo' instead."; exit 1; \
+		fi; \
+		for reserved in $(RESERVED_TAGS); do \
+			if [ "$$val" = "$$reserved" ]; then \
+				echo "Error: '$$val' is a reserved tag. Use 'make release', 'make release-prod', or 'make release-demo' instead."; exit 1; \
+			fi; \
+		done; \
+	done
+endif
 
 # ==============================================================================
 # PKI Management
@@ -293,7 +319,7 @@ build-wallet: ## Build wallet test tool
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
 
-docker-build-wallet: ## Build Docker image for wallet test tool
+docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test tool
 	$(info Docker Building wallet with tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=wallet \
 		--tag $(call docker-tag,wallet,$(VERSION)) \
@@ -335,7 +361,7 @@ docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
 # Generate docker-build targets for web workers
 define DOCKER_BUILD_WEB_TEMPLATE
-docker-build-$(1): ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
@@ -348,7 +374,7 @@ $(foreach service,$(WEB_SERVICES),$(eval $(call DOCKER_BUILD_WEB_TEMPLATE,$(serv
 
 # Generate docker-build targets for workers
 define DOCKER_BUILD_WORKER_TEMPLATE
-docker-build-$(1): ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
@@ -361,35 +387,35 @@ endef
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
 # Docker builds with optional features
-docker-build-apigw-saml: ## Build apigw Docker image with SAML support
+docker-build-apigw-saml: _check-reserved-tag ## Build apigw Docker image with SAML support
 	$(info Docker building apigw with SAML support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS=$(SAML_TAG) \
 		--tag $(call docker-tag,apigw-saml,$(VERSION)) \
 		--file dockerfiles/worker .
 
-docker-build-apigw-oidcrp: ## Build apigw Docker image with OIDC RP support
+docker-build-apigw-oidcrp: _check-reserved-tag ## Build apigw Docker image with OIDC RP support
 	$(info Docker building apigw with OIDC RP support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS=$(OIDCRP_TAG) \
 		--tag $(call docker-tag,apigw-oidcrp,$(VERSION)) \
 		--file dockerfiles/worker .
 
-docker-build-apigw-all: ## Build apigw Docker image with all features
+docker-build-apigw-all: _check-reserved-tag ## Build apigw Docker image with all features
 	$(info Docker building apigw with all features - SAML and OIDC RP, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS="$(ALL_TAGS)" \
 		--tag $(call docker-tag,apigw-full,$(VERSION)) \
 		--file dockerfiles/worker .
 
-docker-build-issuer-hsm: ## Build issuer Docker image with PKCS#11 HSM support
+docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS=$(PKCS11_TAG) \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
 		--file dockerfiles/worker .
 
-docker-build-gobuild: ## Build gobuild Docker image
+docker-build-gobuild: _check-reserved-tag ## Build gobuild Docker image
 	$(info Docker Building gobuild with tag: $(VERSION))
 	docker build --tag $(call docker-tag,gobuild,$(VERSION)) --file dockerfiles/gobuild .
 
@@ -401,7 +427,7 @@ docker-push: $(addprefix docker-push-,$(SERVICES)) ## Push all Docker images
 
 # Generate docker-push targets dynamically
 define DOCKER_PUSH_TEMPLATE
-docker-push-$(1): ## Push Docker image for $(1)
+docker-push-$(1): _check-reserved-tag ## Push Docker image for $(1)
 	$$(info Pushing docker image $(1))
 	docker push $$(call docker-tag,$(1),$$(VERSION))
 
@@ -410,23 +436,23 @@ endef
 $(foreach service,$(SERVICES),$(eval $(call DOCKER_PUSH_TEMPLATE,$(service))))
 
 # Push targets for optional feature builds
-docker-push-apigw-saml: ## Push apigw Docker image with SAML support
+docker-push-apigw-saml: _check-reserved-tag ## Push apigw Docker image with SAML support
 	$(info Pushing docker image apigw-saml)
 	docker push $(call docker-tag,apigw-saml,$(VERSION))
 
-docker-push-apigw-oidcrp: ## Push apigw Docker image with OIDC RP support
+docker-push-apigw-oidcrp: _check-reserved-tag ## Push apigw Docker image with OIDC RP support
 	$(info Pushing docker image apigw-oidcrp)
 	docker push $(call docker-tag,apigw-oidcrp,$(VERSION))
 
-docker-push-apigw-all: ## Push apigw Docker image with all features
+docker-push-apigw-all: _check-reserved-tag ## Push apigw Docker image with all features
 	$(info Pushing docker image apigw-full)
 	docker push $(call docker-tag,apigw-full,$(VERSION))
 
-docker-push-issuer-hsm: ## Push issuer Docker image with PKCS#11 HSM support
+docker-push-issuer-hsm: _check-reserved-tag ## Push issuer Docker image with PKCS#11 HSM support
 	$(info Pushing docker image issuer-hsm)
 	docker push $(call docker-tag,issuer-hsm,$(VERSION))
 
-docker-push-gobuild: ## Push gobuild Docker image
+docker-push-gobuild: _check-reserved-tag ## Push gobuild Docker image
 	$(info Pushing docker image gobuild)
 	docker push $(call docker-tag,gobuild,$(VERSION))
 
@@ -438,7 +464,7 @@ docker-tag: $(addprefix docker-tag-,$(SERVICES)) ## Tag all Docker images
 
 # Generate docker-tag targets dynamically
 define DOCKER_TAG_TEMPLATE
-docker-tag-$(1): ## Tag Docker image for $(1)
+docker-tag-$(1): _check-reserved-tag ## Tag Docker image for $(1)
 	$$(info Tagging docker image $(1))
 	docker tag $$(call docker-tag,$(1),$$(VERSION)) $$(call docker-tag,$(1),$$(NEWTAG))
 
@@ -450,11 +476,11 @@ $(foreach service,$(SERVICES),$(eval $(call DOCKER_TAG_TEMPLATE,$(service))))
 # Docker Utilities
 # ==============================================================================
 
-docker-pull: ## Pull all Docker images
+docker-pull: _check-reserved-tag ## Pull all Docker images
 	$(info Pulling docker images)
 	$(foreach service,$(SERVICES),docker pull $(call docker-tag,$(service),$(VERSION));)
 
-docker-archive: ## Create Docker archive
+docker-archive: _check-reserved-tag ## Create Docker archive
 	docker save --output docker_archives/vc_$(VERSION).tar \
 		$(call docker-tag,verifier,$(VERSION)) \
 		$(call docker-tag,registry,$(VERSION))
@@ -687,30 +713,123 @@ test-workflows-run: ## Run all GitHub Actions workflows locally
 # Release Management
 # ==============================================================================
 
-VERSION_FILE            := VERSION
-RELEASE_VERSION         := $(shell cat $(VERSION_FILE) 2>/dev/null | tr -d '[:space:]')
+BUMP                    ?= patch
+FORCE                   ?=
 
 check_current_branch: ## Verify current branch is main
 	$(info Current branch: $(CURRENT_BRANCH))
 ifeq ($(CURRENT_BRANCH),main)
 	$(info On main branch)
 else
-	$(error Not on main branch)
+ifneq ($(FORCE),true)
+	$(error Not on main branch — use FORCE=true to override)
+else
+	$(warning Not on main branch — continuing because FORCE=true)
+endif
 endif
 
-get_release-tag: ## Show current release version from VERSION file
-	@echo "$(RELEASE_VERSION)"
+get_release-tag: ## Show current release version from latest git tag
+	@git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1 || echo "v0.0.0"
 
-release: check_current_branch ## Create and push a git tag from VERSION file
-	$(info Release version: v$(RELEASE_VERSION))
-	git tag -a v$(RELEASE_VERSION) -m "Release v$(RELEASE_VERSION)"
-	git push origin v$(RELEASE_VERSION)
-	$(info Release v$(RELEASE_VERSION) tagged — Jenkins will build and push Docker images)
+#### Release target
+# Creates a vX.Y.Z tag by bumping the latest existing tag.
+# Usage:
+#   make release                       # defaults to patch bump
+#   make release BUMP=minor            # minor bump
+#   make release BUMP=major            # major bump
+#   make release FORCE=true            # release from any branch
+#   make release BUMP=minor FORCE=true # combine options
+release: check_current_branch ## Create and push a git tag (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing version tags found, starting at v0.0.0"; \
+		LATEST="v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="v$${MAJOR}.$${MINOR}.$${PATCH}"; \
+	echo ""; \
+	echo "Bumping $$LATEST -> $$NEW_TAG ($(BUMP))"; \
+	echo ""; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> Release $$NEW_TAG created and pushed"; \
+	echo ""; \
+	echo "Building and pushing Docker images for $$NEW_TAG..."; \
+	echo ""; \
+	$(MAKE) docker-build VERSION=$$NEW_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=$$NEW_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-tag VERSION=$$NEW_TAG NEWTAG=dev _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=dev _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Docker images built and pushed for $$NEW_TAG (:dev)"; \
+	echo ""
 
-ci_build: ## CI build: vanilla + HSM Docker images (used by Jenkins)
-	$(info CI Build: VERSION=$(VERSION))
-	make docker-build VERSION=$(VERSION)
-	make docker-push VERSION=$(VERSION)
-	make docker-build VERSION=$(VERSION)-hsm GO_BUILD_TAGS=pkcs11
-	make docker-push VERSION=$(VERSION)-hsm
-	$(info CI Build complete)
+#### Prod promotion
+# Promotes a version to prod by locally pulling :vX.Y.Z images
+# and re-tagging/pushing as :latest. No rebuild.
+# Usage:
+#   make release-prod              # promotes latest vX.Y.Z tag to prod
+#   make release-prod TAG=v1.2.3   # promotes v1.2.3 to prod
+release-prod: ## Promote a release tag to prod
+	@set -e; \
+	if [ -n "$(TAG)" ]; then \
+		SRC_TAG=$$(echo "$(TAG)" | sed 's#^refs/tags/##'); \
+	else \
+		SRC_TAG=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+		if [ -z "$$SRC_TAG" ]; then \
+			echo "Error: no version tags found. Run 'make release' first."; exit 1; \
+		fi; \
+	fi; \
+	echo "$$SRC_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || \
+		{ echo "Error: TAG must match vX.Y.Z (got: $$SRC_TAG)"; exit 1; }; \
+	echo ""; \
+	echo "Promoting $$SRC_TAG -> prod"; \
+	echo ""; \
+	$(MAKE) docker-pull VERSION=$$SRC_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-tag VERSION=$$SRC_TAG NEWTAG=latest _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=latest _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Prod promotion complete for $$SRC_TAG (:latest)"; \
+	echo ""
+
+#### Demo promotion
+# Promotes a version to demo by pulling :vX.Y.Z images
+# and re-tagging/pushing as :demo. No rebuild.
+# Usage:
+#   make release-demo              # promotes latest vX.Y.Z tag to demo
+#   make release-demo TAG=v1.2.3   # promotes v1.2.3 to demo
+release-demo: ## Promote a release tag to demo
+	@set -e; \
+	if [ -n "$(TAG)" ]; then \
+		SRC_TAG=$$(echo "$(TAG)" | sed 's#^refs/tags/##'); \
+	else \
+		SRC_TAG=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+		if [ -z "$$SRC_TAG" ]; then \
+			echo "Error: no version tags found. Run 'make release' first."; exit 1; \
+		fi; \
+	fi; \
+	echo "$$SRC_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || \
+		{ echo "Error: TAG must match vX.Y.Z (got: $$SRC_TAG)"; exit 1; }; \
+	echo ""; \
+	echo "Promoting $$SRC_TAG -> demo"; \
+	echo ""; \
+	$(MAKE) docker-pull VERSION=$$SRC_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-tag VERSION=$$SRC_TAG NEWTAG=demo _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=demo _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Demo promotion complete for $$SRC_TAG (:demo)"; \
+	echo ""

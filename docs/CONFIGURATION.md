@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-02-26
+**Generated:** 2026-03-04
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -548,7 +548,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | `oauth_server`           | `object` | OAuth2 server configuration                                  | -                             | -       | Yes      |
 | `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets | -                             | -       | No       |
 | `supported_wallets`      | `object` | Supported wallet configurations                              | -                             | -       | No       |
-| `oidc`                   | `object` | OIDC Provider configuration                                  | -                             | -       | No       |
+| `oidc_op`                | `object` | OIDC Provider configuration                                  | -                             | -       | No       |
 | `openid4vp`              | `object` | OpenID4VP configuration                                      | -                             | -       | No       |
 | `digital_credentials`    | `object` | W3C Digital Credentials API configuration                    | -                             | -       | No       |
 | `authorization_page_css` | `object` | Authorization page styling configuration                     | -                             | -       | No       |
@@ -603,24 +603,24 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 | `issuerauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers | -       | -       | No       |
 | `deviceauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers | -       | -       | No       |
 
-### `oidc`
+### `oidc_op`
 
-> **Path:** `.verifier.oidc`
+> **Path:** `.verifier.oidc_op`
 
 This configures how the verifier issues ID tokens and access tokens to relying parties.
 Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 The signing key is shared from the parent Verifier.KeyConfig.
 
-| Field                    | Type     | Description                                                                | Example                       | Default | Required |
-| ------------------------ | -------- | -------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
-| `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata. | `"https://verifier.sunet.se"` | -       | Yes      |
-| `session_duration`       | `int`    | Session duration in seconds                                                | -                             | `3600`  | No       |
-| `code_duration`          | `int`    | Authorization code duration in seconds                                     | -                             | `300`   | No       |
-| `access_token_duration`  | `int`    | Access token duration in seconds                                           | -                             | `3600`  | No       |
-| `id_token_duration`      | `int`    | ID token duration in seconds                                               | -                             | `3600`  | No       |
-| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                          | -                             | `86400` | No       |
-| `subject_type`           | `string` | Subject type: "public" or "pairwise"                                       | -                             | -       | Yes      |
-| `subject_salt`           | `string` | Salt for pairwise subject generation                                       | -                             | -       | Yes      |
+| Field                    | Type     | Description                                                                   | Example                       | Default | Required |
+| ------------------------ | -------- | ----------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
+| `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata.    | `"https://verifier.sunet.se"` | -       | Yes      |
+| `session_duration`       | `int`    | Session duration in seconds                                                   | -                             | `3600`  | No       |
+| `code_duration`          | `int`    | Authorization code duration in seconds                                        | -                             | `300`   | No       |
+| `access_token_duration`  | `int`    | Access token duration in seconds                                              | -                             | `3600`  | No       |
+| `id_token_duration`      | `int`    | ID token duration in seconds                                                  | -                             | `3600`  | No       |
+| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                             | -                             | `86400` | No       |
+| `subject_type`           | `string` | Subject type: "public" or "pairwise"                                          | -                             | -       | Yes      |
+| `subject_salt`           | `string` | Secret salt used for subject identifier generation (both public and pairwise) | -                             | -       | Yes      |
 
 ### `openid4vp`
 
@@ -737,7 +737,7 @@ Configuration for the Registry service that manages credential status.
 
 | Field      | Type     | Description    | Example | Default | Required         |
 | ---------- | -------- | -------------- | ------- | ------- | ---------------- |
-| `enable`   | `bool`   | The admin GUI  | -       | `true`  | No               |
+| `enable`   | `bool`   | The admin GUI  | -       | `false` | No               |
 | `username` | `string` | Admin username | -       | `admin` | Yes (if enabled) |
 | `password` | `string` | Admin password | -       | -       | Yes (if enabled) |
 
@@ -942,7 +942,7 @@ Fields omitted or left empty here remain at their zero value.
 
 | Field  | Type     | Description | Example | Default | Required |
 | ------ | -------- | ----------- | ------- | ------- | -------- |
-| `oidc` | `object` | OIDC        | -       | -       | No       |
+| `oidc` | `object` | OIDCOP      | -       | -       | No       |
 
 ### `oidc`
 
