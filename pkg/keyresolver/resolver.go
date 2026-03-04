@@ -600,26 +600,14 @@ type ResolverConfig struct {
 	// When empty, operates in "allow all" mode - resolved keys are always considered trusted.
 	PDPURL string
 
-	// GoTrustURL is deprecated. Use PDPURL instead.
-	// Retained for backward compatibility - if PDPURL is empty and GoTrustURL is set, GoTrustURL is used.
-	// Deprecated: This field will be removed in a future release.
-	GoTrustURL string
-
 	// LocalDIDMethods specifies additional DID methods to resolve locally.
 	// did:key and did:jwk are always resolved locally.
 	LocalDIDMethods []string
-
-	// Enabled controls whether trust evaluation is performed.
-	// Deprecated: This field is ignored. Use PDPURL to control trust mode.
-	Enabled bool
 }
 
-// GetPDPURL returns the effective PDP URL, preferring PDPURL over the deprecated GoTrustURL.
+// GetPDPURL returns the PDP URL for trust evaluation.
 func (cfg *ResolverConfig) GetPDPURL() string {
-	if cfg.PDPURL != "" {
-		return cfg.PDPURL
-	}
-	return cfg.GoTrustURL
+	return cfg.PDPURL
 }
 
 // NewResolverFromConfig creates a key resolver based on configuration.
@@ -627,7 +615,6 @@ func (cfg *ResolverConfig) GetPDPURL() string {
 // self-contained DIDs (did:key, did:jwk) and GoTrustResolver for everything else.
 // If no PDP URL is configured, creates a LocalResolver that only handles self-contained DIDs.
 func NewResolverFromConfig(cfg ResolverConfig) (Resolver, error) {
-	// Get effective PDP URL (PDPURL preferred, fallback to GoTrustURL)
 	pdpURL := cfg.GetPDPURL()
 
 	// If no PDP URL, only local resolution is possible
@@ -640,12 +627,6 @@ func NewResolverFromConfig(cfg ResolverConfig) (Resolver, error) {
 
 	// Create smart resolver that routes based on DID method
 	return NewSmartResolver(goTrustResolver), nil
-}
-
-// NewResolverWithGoTrust creates a SmartResolver with go-trust integration.
-// Deprecated: Use NewResolverWithPDP instead.
-func NewResolverWithGoTrust(goTrustURL string) *SmartResolver {
-	return NewSmartResolver(NewGoTrustResolver(goTrustURL))
 }
 
 // NewResolverWithPDP creates a SmartResolver with PDP integration.

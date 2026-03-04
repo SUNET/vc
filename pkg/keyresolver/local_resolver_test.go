@@ -511,24 +511,6 @@ func TestNewResolverFromConfig_WithPDP(t *testing.T) {
 	}
 }
 
-func TestNewResolverFromConfig_BackwardCompat(t *testing.T) {
-	// Test backward compatibility with deprecated GoTrustURL field
-	cfg := ResolverConfig{
-		GoTrustURL: "https://trust.example.com/pdp",
-	}
-
-	resolver, err := NewResolverFromConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should be SmartResolver (using deprecated GoTrustURL)
-	_, ok := resolver.(*SmartResolver)
-	if !ok {
-		t.Errorf("expected SmartResolver from deprecated GoTrustURL, got %T", resolver)
-	}
-}
-
 func TestResolverConfig_GetPDPURL(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -536,17 +518,12 @@ func TestResolverConfig_GetPDPURL(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "PDPURL takes precedence",
-			cfg:      ResolverConfig{PDPURL: "https://new.example.com", GoTrustURL: "https://old.example.com"},
-			expected: "https://new.example.com",
+			name:     "returns PDPURL when set",
+			cfg:      ResolverConfig{PDPURL: "https://pdp.example.com"},
+			expected: "https://pdp.example.com",
 		},
 		{
-			name:     "fallback to GoTrustURL",
-			cfg:      ResolverConfig{GoTrustURL: "https://old.example.com"},
-			expected: "https://old.example.com",
-		},
-		{
-			name:     "empty when both empty",
+			name:     "empty when not set",
 			cfg:      ResolverConfig{},
 			expected: "",
 		},

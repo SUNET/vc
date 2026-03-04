@@ -173,8 +173,6 @@ func TestTrustConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	require.NotNil(t, cfg.Enable)
-	assert.True(t, *cfg.Enable)
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 
@@ -185,17 +183,12 @@ func TestTrustConfig_GetPDPURL(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "PDPURL takes precedence",
-			cfg:      TrustConfig{PDPURL: "https://new.example.com", GoTrustURL: "https://old.example.com"},
-			expected: "https://new.example.com",
+			name:     "returns PDPURL when set",
+			cfg:      TrustConfig{PDPURL: "https://pdp.example.com"},
+			expected: "https://pdp.example.com",
 		},
 		{
-			name:     "fallback to GoTrustURL for backward compatibility",
-			cfg:      TrustConfig{GoTrustURL: "https://old.example.com"},
-			expected: "https://old.example.com",
-		},
-		{
-			name:     "empty when both empty",
+			name:     "empty when not set",
 			cfg:      TrustConfig{},
 			expected: "",
 		},

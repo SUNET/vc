@@ -477,11 +477,6 @@ type TrustConfig struct {
 	// When empty, operates in "allow all" mode - resolved keys are always considered trusted.
 	PDPURL string `yaml:"pdp_url,omitempty"`
 
-	// GoTrustURL is deprecated. Use PDPURL instead.
-	// Retained for backward compatibility - if PDPURL is empty and GoTrustURL is set, GoTrustURL is used.
-	// Deprecated: This field will be removed in a future release.
-	GoTrustURL string `yaml:"go_trust_url,omitempty"`
-
 	// LocalDIDMethods specifies which DID methods can be resolved locally without go-trust.
 	// Self-contained methods like "did:key" and "did:jwk" are always resolved locally.
 	LocalDIDMethods []string `yaml:"local_did_methods,omitempty" default:"[\"did:key\", \"did:jwk\"]"`
@@ -489,20 +484,11 @@ type TrustConfig struct {
 	// TrustPolicies configures per-role trust evaluation policies.
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
-
-	// Enable controls whether trust evaluation is enabled.
-	// Deprecated: This field is ignored. Use PDPURL to control trust mode:
-	//   - PDPURL set: default deny (trust evaluation via PDP)
-	//   - PDPURL empty: allow all (resolved keys are trusted)
-	Enable *bool `yaml:"enable,omitempty" default:"true"`
 }
 
-// GetPDPURL returns the effective PDP URL, preferring PDPURL over the deprecated GoTrustURL.
+// GetPDPURL returns the PDP URL for trust evaluation.
 func (c *TrustConfig) GetPDPURL() string {
-	if c.PDPURL != "" {
-		return c.PDPURL
-	}
-	return c.GoTrustURL
+	return c.PDPURL
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
