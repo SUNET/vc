@@ -37,9 +37,9 @@ func (e *AllowAllEvaluator) Evaluate(ctx context.Context, req *EvaluationRequest
 	}, nil
 }
 
-// SupportsKeyType implements TrustEvaluator. Supports all key types.
+// SupportsKeyType implements TrustEvaluator. Supports JWK and X5C key types.
 func (e *AllowAllEvaluator) SupportsKeyType(kt KeyType) bool {
-	// Support all key types in allow-all mode
+	// Support known key types in allow-all mode
 	return kt == KeyTypeJWK || kt == KeyTypeX5C
 }
 

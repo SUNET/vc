@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -591,7 +592,7 @@ func TestGoTrustEvaluator_ResolveKey_MethodNotFound(t *testing.T) {
 	}
 }
 
-// Helper function for string matching
+// Helper function for string matching uses strings.Contains for efficiency.
 func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[:len(substr)] == substr || containsSubstring(s[1:], substr)))
+	return strings.Contains(s, substr)
 }

@@ -12,8 +12,8 @@ import (
 //
 // Deprecated: LocalTrustEvaluator performs trust evaluation locally without
 // consulting an AuthZEN PDP. For harmonized trust management across applications,
-// use GoTrustEvaluator instead. When no PDP URL is configured, GoTrustEvaluator
-// operates in "allow all" mode (returns trusted=true for all requests).
+// use NewTrustEvaluatorFromConfig instead, which returns AllowAllEvaluator when
+// no PDP URL is configured (returning trusted=true for all requests).
 //
 // LocalTrustEvaluator is retained for backward compatibility and testing purposes.
 type LocalTrustEvaluator struct {

@@ -487,7 +487,10 @@ func TestLocalTrustEvaluator_AddTrustedRoot(t *testing.T) {
 	}
 
 	// Add a root
-	rootKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
 	rootTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "Added Root"},
@@ -497,8 +500,14 @@ func TestLocalTrustEvaluator_AddTrustedRoot(t *testing.T) {
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageCertSign,
 	}
-	rootDER, _ := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
-	rootCert, _ := x509.ParseCertificate(rootDER)
+	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatalf("failed to create certificate: %v", err)
+	}
+	rootCert, err := x509.ParseCertificate(rootDER)
+	if err != nil {
+		t.Fatalf("failed to parse certificate: %v", err)
+	}
 
 	eval.AddTrustedRoot(rootCert)
 
