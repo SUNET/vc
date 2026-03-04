@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"vc/pkg/keyresolver"
@@ -181,7 +182,8 @@ func (r *Resolver) ResolveVerification(ctx context.Context, did string) ([]Verif
 func (r *Resolver) ResolveService(ctx context.Context, did string) (*DIDCommService, error) {
 	svc, err := r.smart.ResolveService(did)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrServiceNotFound, err)
+		// Use errors.Join to preserve both ErrServiceNotFound for callers and the original error
+		return nil, errors.Join(ErrServiceNotFound, err)
 	}
 
 	return &DIDCommService{

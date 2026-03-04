@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"filippo.io/edwards25519"
 	"github.com/multiformats/go-multibase"
 )
 
@@ -613,14 +614,46 @@ func findECDSAKeyByFragment(keys []didPeerKey, fragment string) (*ecdsa.PublicKe
 	return nil, fmt.Errorf("key not found: #%s", fragment)
 }
 
+// findX25519KeyByFragment finds an X25519 (or Ed25519 convertible to X25519) key by fragment.
+// For E (encryption) keys, decodes as X25519. For V keys, converts Ed25519 to X25519.
+func findX25519KeyByFragment(keys []didPeerKey, fragment string, l *LocalResolver) (*ecdh.PublicKey, error) {
+	var keyIndex int
+	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
+		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	}
+
+	for _, key := range keys {
+		if key.Index == keyIndex {
+			// Try to decode as X25519 first (E keys)
+			if key.Purpose == 'E' {
+				return decodeMultikeyX25519(key.Multikey)
+			}
+			// For V keys, convert Ed25519 to X25519
+			if key.Purpose == 'V' {
+				edKey, err := l.decodeMultikey(key.Multikey)
+				if err != nil {
+					return nil, fmt.Errorf("failed to decode key: %w", err)
+				}
+				return ed25519ToX25519(edKey)
+			}
+			return nil, fmt.Errorf("key #%s is not suitable for key agreement (purpose: %c)", fragment, key.Purpose)
+		}
+	}
+
+	return nil, fmt.Errorf("key not found: #%s", fragment)
+}
+
 // ResolveX25519 resolves an X25519 key agreement key from a local DID.
 // For did:peer:2, this extracts the E (encryption) purpose key.
 // For did:key with Ed25519, this converts to X25519.
+// If a fragment is provided (e.g., did:peer:2...#key-1), it selects the specific key.
 func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 	// Extract fragment if present
 	baseDID := did
+	fragment := ""
 	if idx := strings.Index(did, "#"); idx > 0 {
 		baseDID = did[:idx]
+		fragment = did[idx+1:]
 	}
 
 	// Handle did:peer:2 - look for E (encryption) purpose keys
@@ -630,7 +663,12 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 			return nil, err
 		}
 
-		// Find encryption (E) purpose key
+		// If a fragment is specified, find the key by index
+		if fragment != "" {
+			return findX25519KeyByFragment(keys, fragment, l)
+		}
+
+		// No fragment - find first encryption (E) purpose key
 		for _, key := range keys {
 			if key.Purpose == 'E' {
 				return decodeMultikeyX25519(key.Multikey)
@@ -749,6 +787,11 @@ func parseServiceEntry(did, encodedService string) (*DIDCommService, error) {
 		return nil, fmt.Errorf("not a DIDCommMessaging service: %s", svc.Type)
 	}
 
+	// Validate that service endpoint is present
+	if svc.ServiceEndpoint == "" {
+		return nil, fmt.Errorf("empty service endpoint in did:peer:2 service entry")
+	}
+
 	return &DIDCommService{
 		ID:              did + "#service-1",
 		ServiceEndpoint: svc.ServiceEndpoint,
@@ -758,22 +801,26 @@ func parseServiceEntry(did, encodedService string) (*DIDCommService, error) {
 }
 
 // ed25519ToX25519 converts an Ed25519 public key to X25519 for key agreement.
+// This implements the birational equivalence between Ed25519 (Edwards curve) and
+// X25519 (Montgomery curve) using: u = (1 + y) / (1 - y)
 func ed25519ToX25519(edPub ed25519.PublicKey) (*ecdh.PublicKey, error) {
 	if len(edPub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("invalid Ed25519 public key size: got %d, want %d", len(edPub), ed25519.PublicKeySize)
 	}
 
-	// Import edwards25519 for the conversion
-	// The conversion uses the birational equivalence between Ed25519 and X25519
-	// u = (1 + y) / (1 - y) where y is the Edwards y-coordinate
-	//
-	// For now, we use a simplified approach that works for most keys
-	// by interpreting the Ed25519 key bytes directly
-	// A full implementation would use filippo.io/edwards25519
-	
-	// This is a placeholder - the actual conversion should use proper curve math
-	// For production, import filippo.io/edwards25519 and use BytesMontgomery()
-	return nil, fmt.Errorf("Ed25519 to X25519 conversion requires curve arithmetic - use native X25519 keys")
+	// Use filippo.io/edwards25519 for proper curve point handling
+	// SetBytes interprets the 32-byte Ed25519 public key as an Edwards curve point
+	point, err := new(edwards25519.Point).SetBytes(edPub)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Ed25519 public key: %w", err)
+	}
+
+	// BytesMontgomery converts the Edwards point to Montgomery u-coordinate
+	// This implements the birational equivalence correctly
+	xBytes := point.BytesMontgomery()
+
+	// Convert to ecdh.PublicKey (X25519)
+	return ecdh.X25519().NewPublicKey(xBytes)
 }
 
 // StaticResolver provides a simple key->value resolver for testing

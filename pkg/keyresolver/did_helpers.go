@@ -237,15 +237,20 @@ func getKeyAgreementMethods(doc map[string]any) ([]any, error) {
 
 // resolveKeyAgreementRefs resolves keyAgreement references to full verification methods.
 // keyAgreement can contain either full verification methods or string references.
+// References can be:
+//   - Full ID: "did:example:123#key-1"
+//   - Fragment only: "#key-1"
+//   - Bare fragment: "key-1" (legacy)
 func resolveKeyAgreementRefs(kas []any, doc map[string]any) ([]any, error) {
 	vms, _ := getVerificationMethods(doc)
+	docID, _ := doc["id"].(string)
 	result := make([]any, 0, len(kas))
 
 	for _, ka := range kas {
-		switch v := ka.(type) {
+		switch ref := ka.(type) {
 		case map[string]any:
 			// Already a full verification method
-			result = append(result, v)
+			result = append(result, ref)
 		case string:
 			// Reference to a verification method - resolve it
 			for _, vm := range vms {
@@ -253,7 +258,28 @@ func resolveKeyAgreementRefs(kas []any, doc map[string]any) ([]any, error) {
 				if !ok {
 					continue
 				}
-				if id, ok := vmMap["id"].(string); ok && (id == v || strings.HasSuffix(v, "#"+id)) {
+				id, ok := vmMap["id"].(string)
+				if !ok {
+					continue
+				}
+				// Match using same logic as matchesVerificationMethod:
+				// 1. Direct ID match
+				if id == ref {
+					result = append(result, vmMap)
+					break
+				}
+				// 2. ref is a fragment reference (#key-1) and id is the full ID
+				if strings.HasPrefix(ref, "#") && strings.HasSuffix(id, ref) {
+					result = append(result, vmMap)
+					break
+				}
+				// 3. id is a fragment (#key-1) and ref is the full ID
+				if strings.HasPrefix(id, "#") && docID+id == ref {
+					result = append(result, vmMap)
+					break
+				}
+				// 4. ref is just the fragment part without # (legacy)
+				if strings.HasSuffix(id, "#"+ref) {
 					result = append(result, vmMap)
 					break
 				}
@@ -297,6 +323,7 @@ func parseServiceMap(svcMap map[string]any) (*DIDCommService, error) {
 	}
 
 	// ServiceEndpoint can be string, array, or object
+	// Also extract routingKeys/accept from serviceEndpoint object if present
 	switch ep := svcMap["serviceEndpoint"].(type) {
 	case string:
 		svc.ServiceEndpoint = ep
@@ -308,28 +335,35 @@ func parseServiceMap(svcMap map[string]any) (*DIDCommService, error) {
 				if uri, ok := obj["uri"].(string); ok {
 					svc.ServiceEndpoint = uri
 				}
+				// Extract routingKeys/accept from object endpoint
+				extractRoutingKeysAccept(obj, svc)
 			}
 		}
 	case map[string]any:
 		if uri, ok := ep["uri"].(string); ok {
 			svc.ServiceEndpoint = uri
 		}
+		// Extract routingKeys/accept from object endpoint
+		extractRoutingKeysAccept(ep, svc)
 	}
 
-	// RoutingKeys
-	if rks, ok := svcMap["routingKeys"].([]any); ok {
-		for _, rk := range rks {
-			if s, ok := rk.(string); ok {
-				svc.RoutingKeys = append(svc.RoutingKeys, s)
+	// Also check for routingKeys/accept at service level (fallback)
+	if len(svc.RoutingKeys) == 0 {
+		if rks, ok := svcMap["routingKeys"].([]any); ok {
+			for _, rk := range rks {
+				if s, ok := rk.(string); ok {
+					svc.RoutingKeys = append(svc.RoutingKeys, s)
+				}
 			}
 		}
 	}
 
-	// Accept
-	if accepts, ok := svcMap["accept"].([]any); ok {
-		for _, a := range accepts {
-			if s, ok := a.(string); ok {
-				svc.Accept = append(svc.Accept, s)
+	if len(svc.Accept) == 0 {
+		if accepts, ok := svcMap["accept"].([]any); ok {
+			for _, a := range accepts {
+				if s, ok := a.(string); ok {
+					svc.Accept = append(svc.Accept, s)
+				}
 			}
 		}
 	}
@@ -339,6 +373,24 @@ func parseServiceMap(svcMap map[string]any) (*DIDCommService, error) {
 	}
 
 	return svc, nil
+}
+
+// extractRoutingKeysAccept extracts routingKeys and accept from a serviceEndpoint object.
+func extractRoutingKeysAccept(epObj map[string]any, svc *DIDCommService) {
+	if rks, ok := epObj["routingKeys"].([]any); ok {
+		for _, rk := range rks {
+			if s, ok := rk.(string); ok {
+				svc.RoutingKeys = append(svc.RoutingKeys, s)
+			}
+		}
+	}
+	if accepts, ok := epObj["accept"].([]any); ok {
+		for _, a := range accepts {
+			if s, ok := a.(string); ok {
+				svc.Accept = append(svc.Accept, s)
+			}
+		}
+	}
 }
 
 // JWKToX25519 extracts an X25519 public key from a JWK.

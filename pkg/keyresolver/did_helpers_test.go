@@ -306,3 +306,348 @@ func TestDecodeMultikeyEd25519_TooShort(t *testing.T) {
 		t.Fatal("expected error for too short multikey")
 	}
 }
+
+// Tests for X25519 key agreement extraction
+
+func TestExtractX25519FromMetadata_JWK(t *testing.T) {
+	// X25519 JWK test
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"keyAgreement": []any{
+			map[string]any{
+				"id":         "did:web:example.com#key-x25519-1",
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+				"publicKeyJwk": map[string]any{
+					"kty": "OKP",
+					"crv": "X25519",
+					// Test vector X25519 public key (32 bytes, base64url-encoded)
+					"x": "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+				},
+			},
+		},
+	}
+
+	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract X25519 key: %v", err)
+	}
+	if key == nil {
+		t.Fatal("extracted key is nil")
+	}
+}
+
+func TestExtractX25519FromMetadata_Multibase(t *testing.T) {
+	// X25519 multicodec is 0xec, 0x01
+	x25519Pub := make([]byte, 32)
+	for i := range x25519Pub {
+		x25519Pub[i] = byte(i + 1)
+	}
+
+	multicodec := []byte{0xec, 0x01}
+	multikeyBytes := append(multicodec, x25519Pub...)
+	multikey := encodeMultibase(multikeyBytes)
+
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"keyAgreement": []any{
+			map[string]any{
+				"id":                 "did:web:example.com#key-x25519-1",
+				"type":               "X25519KeyAgreementKey2020",
+				"controller":         "did:web:example.com",
+				"publicKeyMultibase": multikey,
+			},
+		},
+	}
+
+	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract X25519 key: %v", err)
+	}
+	if key == nil {
+		t.Fatal("extracted key is nil")
+	}
+}
+
+func TestExtractX25519FromMetadata_ReferenceResolution(t *testing.T) {
+	// Test keyAgreement as string reference to verificationMethod
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"verificationMethod": []any{
+			map[string]any{
+				"id":         "did:web:example.com#key-x25519-1",
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+				"publicKeyJwk": map[string]any{
+					"kty": "OKP",
+					"crv": "X25519",
+					"x":   "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+				},
+			},
+		},
+		"keyAgreement": []any{
+			"did:web:example.com#key-x25519-1", // String reference
+		},
+	}
+
+	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract X25519 key via reference: %v", err)
+	}
+	if key == nil {
+		t.Fatal("extracted key is nil")
+	}
+}
+
+func TestExtractX25519FromMetadata_FragmentReference(t *testing.T) {
+	// Test keyAgreement with fragment-only reference (#key-1)
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"verificationMethod": []any{
+			map[string]any{
+				"id":         "did:web:example.com#key-x25519-1",
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+				"publicKeyJwk": map[string]any{
+					"kty": "OKP",
+					"crv": "X25519",
+					"x":   "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
+				},
+			},
+		},
+		"keyAgreement": []any{
+			"#key-x25519-1", // Fragment reference
+		},
+	}
+
+	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract X25519 key via fragment reference: %v", err)
+	}
+	if key == nil {
+		t.Fatal("extracted key is nil")
+	}
+}
+
+// Tests for service resolution
+
+func TestExtractServiceFromMetadata_String(t *testing.T) {
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"service": []any{
+			map[string]any{
+				"id":              "did:web:example.com#didcomm-1",
+				"type":            "DIDCommMessaging",
+				"serviceEndpoint": "https://example.com/didcomm",
+			},
+		},
+	}
+
+	svc, err := ExtractServiceFromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract service: %v", err)
+	}
+	if svc.ServiceEndpoint != "https://example.com/didcomm" {
+		t.Errorf("wrong endpoint: got %q, want %q", svc.ServiceEndpoint, "https://example.com/didcomm")
+	}
+}
+
+func TestExtractServiceFromMetadata_Array(t *testing.T) {
+	// Test serviceEndpoint as array
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"service": []any{
+			map[string]any{
+				"id":   "did:web:example.com#didcomm-1",
+				"type": "DIDCommMessaging",
+				"serviceEndpoint": []any{
+					"https://example.com/didcomm",
+					"https://backup.example.com/didcomm",
+				},
+			},
+		},
+	}
+
+	svc, err := ExtractServiceFromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract service: %v", err)
+	}
+	if svc.ServiceEndpoint != "https://example.com/didcomm" {
+		t.Errorf("wrong endpoint: got %q, want %q", svc.ServiceEndpoint, "https://example.com/didcomm")
+	}
+}
+
+func TestExtractServiceFromMetadata_Object(t *testing.T) {
+	// Test serviceEndpoint as object with uri field
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"service": []any{
+			map[string]any{
+				"id":   "did:web:example.com#didcomm-1",
+				"type": "DIDCommMessaging",
+				"serviceEndpoint": map[string]any{
+					"uri":         "https://example.com/didcomm",
+					"routingKeys": []any{"did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"},
+					"accept":      []any{"didcomm/v2"},
+				},
+			},
+		},
+	}
+
+	svc, err := ExtractServiceFromMetadata(metadata, "did:web:example.com")
+	if err != nil {
+		t.Fatalf("failed to extract service: %v", err)
+	}
+	if svc.ServiceEndpoint != "https://example.com/didcomm" {
+		t.Errorf("wrong endpoint: got %q, want %q", svc.ServiceEndpoint, "https://example.com/didcomm")
+	}
+	if len(svc.RoutingKeys) != 1 || svc.RoutingKeys[0] != "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK" {
+		t.Errorf("wrong routing keys: %v", svc.RoutingKeys)
+	}
+	if len(svc.Accept) != 1 || svc.Accept[0] != "didcomm/v2" {
+		t.Errorf("wrong accept: %v", svc.Accept)
+	}
+}
+
+func TestExtractServiceFromMetadata_NotFound(t *testing.T) {
+	metadata := map[string]any{
+		"@context": []string{"https://www.w3.org/ns/did/v1"},
+		"id":       "did:web:example.com",
+		"service": []any{
+			map[string]any{
+				"id":              "did:web:example.com#linked-domain",
+				"type":            "LinkedDomains",
+				"serviceEndpoint": "https://example.com",
+			},
+		},
+	}
+
+	_, err := ExtractServiceFromMetadata(metadata, "did:web:example.com")
+	if err == nil {
+		t.Fatal("expected error when DIDCommMessaging service not found")
+	}
+}
+
+// Tests for resolveKeyAgreementRefs
+
+func TestResolveKeyAgreementRefs_EmbeddedMethod(t *testing.T) {
+	doc := map[string]any{
+		"id":                 "did:web:example.com",
+		"verificationMethod": []any{},
+		"keyAgreement": []any{
+			map[string]any{
+				"id":         "did:web:example.com#key-x25519-1",
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+			},
+		},
+	}
+
+	kas, ok := doc["keyAgreement"].([]any)
+	if !ok {
+		t.Fatal("keyAgreement not found")
+	}
+
+	result, err := resolveKeyAgreementRefs(kas, doc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+}
+
+func TestResolveKeyAgreementRefs_FullIDReference(t *testing.T) {
+	doc := map[string]any{
+		"id": "did:web:example.com",
+		"verificationMethod": []any{
+			map[string]any{
+				"id":         "did:web:example.com#key-x25519-1",
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+			},
+		},
+		"keyAgreement": []any{
+			"did:web:example.com#key-x25519-1", // Full ID reference
+		},
+	}
+
+	kas, ok := doc["keyAgreement"].([]any)
+	if !ok {
+		t.Fatal("keyAgreement not found")
+	}
+
+	result, err := resolveKeyAgreementRefs(kas, doc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+}
+
+func TestResolveKeyAgreementRefs_FragmentReference(t *testing.T) {
+	doc := map[string]any{
+		"id": "did:web:example.com",
+		"verificationMethod": []any{
+			map[string]any{
+				"id":         "did:web:example.com#key-x25519-1",
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+			},
+		},
+		"keyAgreement": []any{
+			"#key-x25519-1", // Fragment-only reference
+		},
+	}
+
+	kas, ok := doc["keyAgreement"].([]any)
+	if !ok {
+		t.Fatal("keyAgreement not found")
+	}
+
+	result, err := resolveKeyAgreementRefs(kas, doc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+}
+
+func TestResolveKeyAgreementRefs_FragmentOnlyVM(t *testing.T) {
+	// Test when verification method ID is fragment-only but reference is full
+	doc := map[string]any{
+		"id": "did:web:example.com",
+		"verificationMethod": []any{
+			map[string]any{
+				"id":         "#key-x25519-1", // Fragment-only ID in VM
+				"type":       "X25519KeyAgreementKey2020",
+				"controller": "did:web:example.com",
+			},
+		},
+		"keyAgreement": []any{
+			"did:web:example.com#key-x25519-1", // Full ID reference
+		},
+	}
+
+	kas, ok := doc["keyAgreement"].([]any)
+	if !ok {
+		t.Fatal("keyAgreement not found")
+	}
+
+	result, err := resolveKeyAgreementRefs(kas, doc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+}
