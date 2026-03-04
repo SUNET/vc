@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -18,6 +19,8 @@ import (
 	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
 	"vc/pkg/trace"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Client holds the public api object
@@ -158,9 +161,57 @@ func (c *Client) containsOIDC(slice []string, value string) bool {
 	return false
 }
 
-// authenticateClient validates client credentials for the token endpoint
-func (c *Client) authenticateClient(ctx context.Context, clientID, clientSecret string) (*db.Client, error) {
+// verifyPlaintextSecret performs constant-time comparison of plaintext secrets
+func verifyPlaintextSecret(provided, stored string) bool {
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(stored)) == 1
+}
+
+// getClientByID looks up a client by ID, checking both database and static configuration.
+// Returns the client and a boolean indicating if it's a static client (plaintext secret).
+func (c *Client) getClientByID(ctx context.Context, clientID string) (*db.Client, bool, error) {
+	// First, try to find the client in the database (dynamically registered clients)
 	client, err := c.db.Clients.GetByClientID(ctx, clientID)
+	if err != nil {
+		return nil, false, err
+	}
+	if client != nil {
+		return client, false, nil
+	}
+
+	// If not found in database, check static clients from configuration
+	if c.cfg.Verifier.OIDC != nil {
+		for _, staticClient := range c.cfg.Verifier.OIDC.StaticClients {
+			if staticClient.ClientID == clientID {
+				// Determine allowed scopes: empty means all scopes allowed
+				allowedScopes := staticClient.AllowedScopes
+				if len(allowedScopes) == 0 {
+					// Default to common OIDC scopes when not specified
+					allowedScopes = []string{"openid", "profile", "email", "address", "phone"}
+				}
+
+				// Convert static client config to db.Client for consistent handling
+				return &db.Client{
+					ClientID:                clientID,
+					ClientSecretHash:        staticClient.ClientSecret, // Plaintext for static clients
+					RedirectURIs:            staticClient.RedirectURIs,
+					GrantTypes:              getOrDefault(staticClient.GrantTypes, []string{"authorization_code"}),
+					ResponseTypes:           getOrDefault(staticClient.ResponseTypes, []string{"code"}),
+					TokenEndpointAuthMethod: getOrDefaultString(staticClient.TokenEndpointAuthMethod, "client_secret_basic"),
+					AllowedScopes:           allowedScopes,
+					ClientName:              staticClient.ClientName,
+				}, true, nil // true = static client (plaintext secret)
+			}
+		}
+	}
+
+	return nil, false, nil
+}
+
+// authenticateClient validates client credentials for the token endpoint.
+// It first checks dynamically registered clients in the database, then falls back
+// to static clients configured in config.yaml.
+func (c *Client) authenticateClient(ctx context.Context, clientID, clientSecret string) (*db.Client, error) {
+	client, isStatic, err := c.getClientByID(ctx, clientID)
 	if err != nil {
 		return nil, err
 	}
@@ -168,26 +219,41 @@ func (c *Client) authenticateClient(ctx context.Context, clientID, clientSecret 
 		return nil, ErrInvalidClient
 	}
 
-	// Verify client secret using constant-time comparison via hash
-	secretHash := sha256.Sum256([]byte(clientSecret))
-	storedHash := sha256.Sum256([]byte(client.ClientSecretHash))
-	if !hmacEqual(secretHash[:], storedHash[:]) {
-		return nil, ErrInvalidClient
+	// Public clients don't require secret verification
+	if client.TokenEndpointAuthMethod == "none" {
+		return client, nil
+	}
+
+	// Verify secret based on client type
+	if isStatic {
+		// Static clients have plaintext secrets in config
+		if !verifyPlaintextSecret(clientSecret, client.ClientSecretHash) {
+			return nil, ErrInvalidClient
+		}
+	} else {
+		// DB clients have bcrypt-hashed secrets
+		if bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)) != nil {
+			return nil, ErrInvalidClient
+		}
 	}
 
 	return client, nil
 }
 
-// hmacEqual performs constant-time comparison of two byte slices
-func hmacEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
+// getOrDefault returns the slice if non-empty, otherwise returns the default value
+func getOrDefault(s, defaultVal []string) []string {
+	if len(s) > 0 {
+		return s
 	}
-	var result byte
-	for i := 0; i < len(a); i++ {
-		result |= a[i] ^ b[i]
+	return defaultVal
+}
+
+// getOrDefaultString returns the string if non-empty, otherwise returns the default value
+func getOrDefaultString(s, defaultVal string) string {
+	if s != "" {
+		return s
 	}
-	return result == 0
+	return defaultVal
 }
 
 // createDCQLQuery creates a DCQL query based on the requested scopes

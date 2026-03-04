@@ -69,8 +69,8 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	ctx, span := c.tracer.Start(ctx, "apiv1:authorize")
 	defer span.End()
 
-	// Validate client
-	client, err := c.db.Clients.GetByClientID(ctx, req.ClientID)
+	// Validate client (includes static clients from config)
+	client, _, err := c.getClientByID(ctx, req.ClientID)
 	if err != nil {
 		c.log.Error(err, "Failed to get client")
 		return nil, ErrServerError
@@ -279,19 +279,15 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		return nil, ErrInvalidGrant
 	}
 
-	// Authenticate client
-	client, err := c.db.Clients.GetByClientID(ctx, req.ClientID)
+	// Authenticate client (includes static clients from config)
+	client, err := c.authenticateClient(ctx, req.ClientID, req.ClientSecret)
 	if err != nil {
-		c.log.Error(err, "Failed to get client")
+		if err == ErrInvalidClient {
+			c.log.Info("Client authentication failed")
+			return nil, ErrInvalidClient
+		}
+		c.log.Error(err, "Failed to authenticate client")
 		return nil, ErrServerError
-	}
-	if client == nil {
-		return nil, ErrInvalidClient
-	}
-
-	if err := c.authenticateOIDCClient(client, req.ClientSecret); err != nil {
-		c.log.Info("Client authentication failed")
-		return nil, ErrInvalidClient
 	}
 
 	// Verify client ID matches
