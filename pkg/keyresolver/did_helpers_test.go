@@ -9,26 +9,60 @@ import (
 	"testing"
 )
 
+// Test DID constants to avoid duplication
+const (
+	testDIDWeb     = "did:web:example.com"
+	testDIDContext = "https://www.w3.org/ns/did/v1"
+	// Test vector X25519 public key (base64url-encoded)
+	testX25519JWKx = "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo"
+)
+
+// makeTestDIDDoc creates a basic DID document structure for testing
+func makeTestDIDDoc(id string, vms []any) map[string]any {
+	return map[string]any{
+		"@context":           []string{testDIDContext},
+		"id":                 id,
+		"verificationMethod": vms,
+	}
+}
+
+// makeTestDIDDocWithKA creates a DID document with keyAgreement section
+func makeTestDIDDocWithKA(id string, vms []any, kas []any) map[string]any {
+	doc := makeTestDIDDoc(id, vms)
+	doc["keyAgreement"] = kas
+	return doc
+}
+
+// makeTestX25519JWK creates a test X25519 JWK
+func makeTestX25519JWK() map[string]any {
+	return map[string]any{"kty": "OKP", "crv": "X25519", "x": testX25519JWKx}
+}
+
+// makeTestVM creates a verification method for testing
+func makeTestVM(id, vmType, controller string, keyData map[string]any) map[string]any {
+	vm := map[string]any{
+		"id":         id,
+		"type":       vmType,
+		"controller": controller,
+	}
+	for k, v := range keyData {
+		vm[k] = v
+	}
+	return vm
+}
+
 func TestExtractEd25519FromMetadata_JWK(t *testing.T) {
 	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
 	}
 
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":           "did:web:example.com#key-1",
-				"type":         "JsonWebKey2020",
-				"controller":   "did:web:example.com",
-				"publicKeyJwk": Ed25519ToJWK(pubKey),
-			},
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#key-1", "JsonWebKey2020", testDIDWeb, map[string]any{
+		"publicKeyJwk": Ed25519ToJWK(pubKey),
+	})
+	metadata := makeTestDIDDoc(testDIDWeb, []any{vm})
 
-	extracted, err := ExtractEd25519FromMetadata(metadata, "did:web:example.com#key-1")
+	extracted, err := ExtractEd25519FromMetadata(metadata, testDIDWeb+"#key-1")
 	if err != nil {
 		t.Fatalf("failed to extract key: %v", err)
 	}
@@ -39,8 +73,6 @@ func TestExtractEd25519FromMetadata_JWK(t *testing.T) {
 }
 
 func TestExtractEd25519FromMetadata_Multibase(t *testing.T) {
-	// Test with a known Ed25519 multikey
-	// z6Mk... format: multibase(z) + multicodec(0xed01) + 32 bytes
 	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
@@ -49,24 +81,14 @@ func TestExtractEd25519FromMetadata_Multibase(t *testing.T) {
 	// Create multikey: 0xed (237) + 0x01 (prefix) + public key bytes
 	multicodec := []byte{0xed, 0x01}
 	multikeyBytes := append(multicodec, pubKey...)
-
-	// Encode as base58-btc with 'z' prefix
 	multikey := encodeMultibase(multikeyBytes)
 
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":                 "did:web:example.com#key-1",
-				"type":               "Ed25519VerificationKey2020",
-				"controller":         "did:web:example.com",
-				"publicKeyMultibase": multikey,
-			},
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#key-1", "Ed25519VerificationKey2020", testDIDWeb, map[string]any{
+		"publicKeyMultibase": multikey,
+	})
+	metadata := makeTestDIDDoc(testDIDWeb, []any{vm})
 
-	extracted, err := ExtractEd25519FromMetadata(metadata, "did:web:example.com#key-1")
+	extracted, err := ExtractEd25519FromMetadata(metadata, testDIDWeb+"#key-1")
 	if err != nil {
 		t.Fatalf("failed to extract key: %v", err)
 	}
@@ -119,20 +141,12 @@ func TestExtractEd25519FromMetadata_FragmentMatch(t *testing.T) {
 	}
 
 	// Test when verification method ID is just a fragment
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":           "#key-1",
-				"type":         "JsonWebKey2020",
-				"controller":   "did:web:example.com",
-				"publicKeyJwk": Ed25519ToJWK(pubKey),
-			},
-		},
-	}
+	vm := makeTestVM("#key-1", "JsonWebKey2020", testDIDWeb, map[string]any{
+		"publicKeyJwk": Ed25519ToJWK(pubKey),
+	})
+	metadata := makeTestDIDDoc(testDIDWeb, []any{vm})
 
-	extracted, err := ExtractEd25519FromMetadata(metadata, "did:web:example.com#key-1")
+	extracted, err := ExtractEd25519FromMetadata(metadata, testDIDWeb+"#key-1")
 	if err != nil {
 		t.Fatalf("failed to extract key: %v", err)
 	}
@@ -143,25 +157,17 @@ func TestExtractEd25519FromMetadata_FragmentMatch(t *testing.T) {
 }
 
 func TestExtractEd25519FromMetadata_NotFound(t *testing.T) {
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":   "did:web:example.com#other-key",
-				"type": "JsonWebKey2020",
-			},
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#other-key", "JsonWebKey2020", testDIDWeb, nil)
+	metadata := makeTestDIDDoc(testDIDWeb, []any{vm})
 
-	_, err := ExtractEd25519FromMetadata(metadata, "did:web:example.com#key-1")
+	_, err := ExtractEd25519FromMetadata(metadata, testDIDWeb+"#key-1")
 	if err == nil {
 		t.Fatal("expected error when key not found")
 	}
 }
 
 func TestExtractEd25519FromMetadata_InvalidFormat(t *testing.T) {
-	_, err := ExtractEd25519FromMetadata("not a map", "did:web:example.com#key-1")
+	_, err := ExtractEd25519FromMetadata("not a map", testDIDWeb+"#key-1")
 	if err == nil {
 		t.Fatal("expected error for invalid metadata format")
 	}
@@ -169,11 +175,11 @@ func TestExtractEd25519FromMetadata_InvalidFormat(t *testing.T) {
 
 func TestExtractEd25519FromMetadata_NoVerificationMethods(t *testing.T) {
 	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
+		"@context": []string{testDIDContext},
+		"id":       testDIDWeb,
 	}
 
-	_, err := ExtractEd25519FromMetadata(metadata, "did:web:example.com#key-1")
+	_, err := ExtractEd25519FromMetadata(metadata, testDIDWeb+"#key-1")
 	if err == nil {
 		t.Fatal("expected error when no verification methods")
 	}
@@ -298,9 +304,7 @@ func TestDecodeMultikeyEd25519_WrongMulticodec(t *testing.T) {
 }
 
 func TestDecodeMultikeyEd25519_TooShort(t *testing.T) {
-	// Create multikey that's too short
 	multikey := encodeMultibase([]byte{0xed, 0x01})
-
 	_, err := decodeMultikeyEd25519(multikey)
 	if err == nil {
 		t.Fatal("expected error for too short multikey")
@@ -310,26 +314,12 @@ func TestDecodeMultikeyEd25519_TooShort(t *testing.T) {
 // Tests for X25519 key agreement extraction
 
 func TestExtractX25519FromMetadata_JWK(t *testing.T) {
-	// X25519 JWK test
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"keyAgreement": []any{
-			map[string]any{
-				"id":         "did:web:example.com#key-x25519-1",
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-				"publicKeyJwk": map[string]any{
-					"kty": "OKP",
-					"crv": "X25519",
-					// Test vector X25519 public key (32 bytes, base64url-encoded)
-					"x": "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
-				},
-			},
-		},
-	}
+	ka := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, map[string]any{
+		"publicKeyJwk": makeTestX25519JWK(),
+	})
+	metadata := makeTestDIDDocWithKA(testDIDWeb, nil, []any{ka})
 
-	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	key, err := ExtractX25519FromMetadata(metadata, testDIDWeb)
 	if err != nil {
 		t.Fatalf("failed to extract X25519 key: %v", err)
 	}
@@ -339,30 +329,20 @@ func TestExtractX25519FromMetadata_JWK(t *testing.T) {
 }
 
 func TestExtractX25519FromMetadata_Multibase(t *testing.T) {
-	// X25519 multicodec is 0xec, 0x01
 	x25519Pub := make([]byte, 32)
 	for i := range x25519Pub {
 		x25519Pub[i] = byte(i + 1)
 	}
-
 	multicodec := []byte{0xec, 0x01}
 	multikeyBytes := append(multicodec, x25519Pub...)
 	multikey := encodeMultibase(multikeyBytes)
 
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"keyAgreement": []any{
-			map[string]any{
-				"id":                 "did:web:example.com#key-x25519-1",
-				"type":               "X25519KeyAgreementKey2020",
-				"controller":         "did:web:example.com",
-				"publicKeyMultibase": multikey,
-			},
-		},
-	}
+	ka := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, map[string]any{
+		"publicKeyMultibase": multikey,
+	})
+	metadata := makeTestDIDDocWithKA(testDIDWeb, nil, []any{ka})
 
-	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	key, err := ExtractX25519FromMetadata(metadata, testDIDWeb)
 	if err != nil {
 		t.Fatalf("failed to extract X25519 key: %v", err)
 	}
@@ -372,28 +352,12 @@ func TestExtractX25519FromMetadata_Multibase(t *testing.T) {
 }
 
 func TestExtractX25519FromMetadata_ReferenceResolution(t *testing.T) {
-	// Test keyAgreement as string reference to verificationMethod
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":         "did:web:example.com#key-x25519-1",
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-				"publicKeyJwk": map[string]any{
-					"kty": "OKP",
-					"crv": "X25519",
-					"x":   "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
-				},
-			},
-		},
-		"keyAgreement": []any{
-			"did:web:example.com#key-x25519-1", // String reference
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, map[string]any{
+		"publicKeyJwk": makeTestX25519JWK(),
+	})
+	metadata := makeTestDIDDocWithKA(testDIDWeb, []any{vm}, []any{testDIDWeb + "#key-x25519-1"})
 
-	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	key, err := ExtractX25519FromMetadata(metadata, testDIDWeb)
 	if err != nil {
 		t.Fatalf("failed to extract X25519 key via reference: %v", err)
 	}
@@ -403,28 +367,12 @@ func TestExtractX25519FromMetadata_ReferenceResolution(t *testing.T) {
 }
 
 func TestExtractX25519FromMetadata_FragmentReference(t *testing.T) {
-	// Test keyAgreement with fragment-only reference (#key-1)
-	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":         "did:web:example.com#key-x25519-1",
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-				"publicKeyJwk": map[string]any{
-					"kty": "OKP",
-					"crv": "X25519",
-					"x":   "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo",
-				},
-			},
-		},
-		"keyAgreement": []any{
-			"#key-x25519-1", // Fragment reference
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, map[string]any{
+		"publicKeyJwk": makeTestX25519JWK(),
+	})
+	metadata := makeTestDIDDocWithKA(testDIDWeb, []any{vm}, []any{"#key-x25519-1"})
 
-	key, err := ExtractX25519FromMetadata(metadata, "did:web:example.com")
+	key, err := ExtractX25519FromMetadata(metadata, testDIDWeb)
 	if err != nil {
 		t.Fatalf("failed to extract X25519 key via fragment reference: %v", err)
 	}
@@ -437,18 +385,18 @@ func TestExtractX25519FromMetadata_FragmentReference(t *testing.T) {
 
 func TestExtractServiceFromMetadata_String(t *testing.T) {
 	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
+		"@context": []string{testDIDContext},
+		"id":       testDIDWeb,
 		"service": []any{
 			map[string]any{
-				"id":              "did:web:example.com#didcomm-1",
+				"id":              testDIDWeb + "#didcomm-1",
 				"type":            "DIDCommMessaging",
 				"serviceEndpoint": "https://example.com/didcomm",
 			},
 		},
 	}
 
-	svc, err := ExtractServiceFromMetadata(metadata, "did:web:example.com")
+	svc, err := ExtractServiceFromMetadata(metadata, testDIDWeb)
 	if err != nil {
 		t.Fatalf("failed to extract service: %v", err)
 	}
@@ -458,13 +406,12 @@ func TestExtractServiceFromMetadata_String(t *testing.T) {
 }
 
 func TestExtractServiceFromMetadata_Array(t *testing.T) {
-	// Test serviceEndpoint as array
 	metadata := map[string]any{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:example.com",
+		"@context": []string{testDIDContext},
+		"id":       testDIDWeb,
 		"service": []any{
 			map[string]any{
-				"id":   "did:web:example.com#didcomm-1",
+				"id":   testDIDWeb + "#didcomm-1",
 				"type": "DIDCommMessaging",
 				"serviceEndpoint": []any{
 					"https://example.com/didcomm",
@@ -529,7 +476,7 @@ func TestExtractServiceFromMetadata_NotFound(t *testing.T) {
 		},
 	}
 
-	_, err := ExtractServiceFromMetadata(metadata, "did:web:example.com")
+	_, err := ExtractServiceFromMetadata(metadata, testDIDWeb)
 	if err == nil {
 		t.Fatal("expected error when DIDCommMessaging service not found")
 	}
@@ -538,17 +485,8 @@ func TestExtractServiceFromMetadata_NotFound(t *testing.T) {
 // Tests for resolveKeyAgreementRefs
 
 func TestResolveKeyAgreementRefs_EmbeddedMethod(t *testing.T) {
-	doc := map[string]any{
-		"id":                 "did:web:example.com",
-		"verificationMethod": []any{},
-		"keyAgreement": []any{
-			map[string]any{
-				"id":         "did:web:example.com#key-x25519-1",
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-			},
-		},
-	}
+	ka := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, nil)
+	doc := makeTestDIDDocWithKA(testDIDWeb, []any{}, []any{ka})
 
 	kas, ok := doc["keyAgreement"].([]any)
 	if !ok {
@@ -565,25 +503,10 @@ func TestResolveKeyAgreementRefs_EmbeddedMethod(t *testing.T) {
 }
 
 func TestResolveKeyAgreementRefs_FullIDReference(t *testing.T) {
-	doc := map[string]any{
-		"id": "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":         "did:web:example.com#key-x25519-1",
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-			},
-		},
-		"keyAgreement": []any{
-			"did:web:example.com#key-x25519-1", // Full ID reference
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, nil)
+	doc := makeTestDIDDocWithKA(testDIDWeb, []any{vm}, []any{testDIDWeb + "#key-x25519-1"})
 
-	kas, ok := doc["keyAgreement"].([]any)
-	if !ok {
-		t.Fatal("keyAgreement not found")
-	}
-
+	kas := doc["keyAgreement"].([]any)
 	result, err := resolveKeyAgreementRefs(kas, doc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -594,25 +517,10 @@ func TestResolveKeyAgreementRefs_FullIDReference(t *testing.T) {
 }
 
 func TestResolveKeyAgreementRefs_FragmentReference(t *testing.T) {
-	doc := map[string]any{
-		"id": "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":         "did:web:example.com#key-x25519-1",
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-			},
-		},
-		"keyAgreement": []any{
-			"#key-x25519-1", // Fragment-only reference
-		},
-	}
+	vm := makeTestVM(testDIDWeb+"#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, nil)
+	doc := makeTestDIDDocWithKA(testDIDWeb, []any{vm}, []any{"#key-x25519-1"})
 
-	kas, ok := doc["keyAgreement"].([]any)
-	if !ok {
-		t.Fatal("keyAgreement not found")
-	}
-
+	kas := doc["keyAgreement"].([]any)
 	result, err := resolveKeyAgreementRefs(kas, doc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -624,25 +532,10 @@ func TestResolveKeyAgreementRefs_FragmentReference(t *testing.T) {
 
 func TestResolveKeyAgreementRefs_FragmentOnlyVM(t *testing.T) {
 	// Test when verification method ID is fragment-only but reference is full
-	doc := map[string]any{
-		"id": "did:web:example.com",
-		"verificationMethod": []any{
-			map[string]any{
-				"id":         "#key-x25519-1", // Fragment-only ID in VM
-				"type":       "X25519KeyAgreementKey2020",
-				"controller": "did:web:example.com",
-			},
-		},
-		"keyAgreement": []any{
-			"did:web:example.com#key-x25519-1", // Full ID reference
-		},
-	}
+	vm := makeTestVM("#key-x25519-1", "X25519KeyAgreementKey2020", testDIDWeb, nil)
+	doc := makeTestDIDDocWithKA(testDIDWeb, []any{vm}, []any{testDIDWeb + "#key-x25519-1"})
 
-	kas, ok := doc["keyAgreement"].([]any)
-	if !ok {
-		t.Fatal("keyAgreement not found")
-	}
-
+	kas := doc["keyAgreement"].([]any)
 	result, err := resolveKeyAgreementRefs(kas, doc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
