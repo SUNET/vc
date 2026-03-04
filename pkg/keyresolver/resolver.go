@@ -588,66 +588,62 @@ func parseDidPeer2Keys(didPeer string) ([]didPeerKey, error) {
 	return keys, nil
 }
 
-// findEd25519KeyByFragment finds an Ed25519 key by its fragment identifier (e.g., "key-1").
-func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment string) (ed25519.PublicKey, error) {
-	// Parse fragment as "key-N"
+// findKeyByFragment finds a key entry by its fragment identifier (e.g., "key-1").
+// Returns the key's purpose and multikey string for type-specific decoding.
+func findKeyByFragment(keys []didPeerKey, fragment string) (*didPeerKey, error) {
 	var keyIndex int
 	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
 		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
 	}
 
-	for _, key := range keys {
-		if key.Index == keyIndex {
-			return l.decodeMultikey(key.Multikey)
+	for i := range keys {
+		if keys[i].Index == keyIndex {
+			return &keys[i], nil
 		}
 	}
 
 	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
 }
 
+// findEd25519KeyByFragment finds an Ed25519 key by its fragment identifier (e.g., "key-1").
+func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment string) (ed25519.PublicKey, error) {
+	key, err := findKeyByFragment(keys, fragment)
+	if err != nil {
+		return nil, err
+	}
+	return l.decodeMultikey(key.Multikey)
+}
+
 // findECDSAKeyByFragment finds an ECDSA key by its fragment identifier.
 func findECDSAKeyByFragment(keys []didPeerKey, fragment string) (*ecdsa.PublicKey, error) {
-	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
-		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
+	key, err := findKeyByFragment(keys, fragment)
+	if err != nil {
+		return nil, err
 	}
-
-	for _, key := range keys {
-		if key.Index == keyIndex {
-			return decodeMultikeyECDSA(key.Multikey)
-		}
-	}
-
-	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
+	return decodeMultikeyECDSA(key.Multikey)
 }
 
 // findX25519KeyByFragment finds an X25519 (or Ed25519 convertible to X25519) key by fragment.
 // For E (encryption) keys, decodes as X25519. For V keys, converts Ed25519 to X25519.
 func findX25519KeyByFragment(keys []didPeerKey, fragment string, l *LocalResolver) (*ecdh.PublicKey, error) {
-	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
-		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
+	key, err := findKeyByFragment(keys, fragment)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, key := range keys {
-		if key.Index == keyIndex {
-			// Try to decode as X25519 first (E keys)
-			if key.Purpose == 'E' {
-				return decodeMultikeyX25519(key.Multikey)
-			}
-			// For V keys, convert Ed25519 to X25519
-			if key.Purpose == 'V' {
-				edKey, err := l.decodeMultikey(key.Multikey)
-				if err != nil {
-					return nil, fmt.Errorf("failed to decode key: %w", err)
-				}
-				return ed25519ToX25519(edKey)
-			}
-			return nil, fmt.Errorf("key #%s is not suitable for key agreement (purpose: %c)", fragment, key.Purpose)
+	// Try to decode as X25519 first (E keys)
+	if key.Purpose == 'E' {
+		return decodeMultikeyX25519(key.Multikey)
+	}
+	// For V keys, convert Ed25519 to X25519
+	if key.Purpose == 'V' {
+		edKey, err := l.decodeMultikey(key.Multikey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode key: %w", err)
 		}
+		return ed25519ToX25519(edKey)
 	}
-
-	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
+	return nil, fmt.Errorf("key #%s is not suitable for key agreement (purpose: %c)", fragment, key.Purpose)
 }
 
 // ResolveX25519 resolves an X25519 key agreement key from a local DID.
