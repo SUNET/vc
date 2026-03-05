@@ -41,7 +41,7 @@ func NewValidator() (*validator.Validate, error) {
 		}
 
 		// Navigate up the struct hierarchy to get the Cfg
-		// CredentialConstructor -> map value -> map[string]*CredentialConstructor -> Cfg
+		// CredentialConstructor -> map value -> map[string]*CredentialConstructor -> Common -> Cfg
 		top := fl.Top()
 		if top.Kind() == reflect.Ptr {
 			top = top.Elem()
@@ -52,8 +52,14 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		// Get AuthMethods field from Cfg
-		authMethodsField := top.FieldByName("AuthMethods")
+		// Get Common field from Cfg, then AuthMethods from Common
+		commonField := top.FieldByName("Common")
+		if !commonField.IsValid() || commonField.IsNil() {
+			return false
+		}
+		common := commonField.Elem()
+
+		authMethodsField := common.FieldByName("AuthMethods")
 		if !authMethodsField.IsValid() || authMethodsField.IsNil() {
 			return false
 		}
@@ -225,8 +231,14 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		// Get CredentialConstructor field from Cfg
-		credentialConstructorField := top.FieldByName("CredentialConstructor")
+		// Get Common field from Cfg, then CredentialConstructor from Common
+		commonField := top.FieldByName("Common")
+		if !commonField.IsValid() || commonField.IsNil() {
+			return true // No Common to validate against
+		}
+		common := commonField.Elem()
+
+		credentialConstructorField := common.FieldByName("CredentialConstructor")
 		if !credentialConstructorField.IsValid() || credentialConstructorField.IsNil() {
 			return true // No constructors to validate against
 		}

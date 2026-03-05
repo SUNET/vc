@@ -89,7 +89,7 @@ type GetVCTMFromScopeRequest struct {
 }
 
 func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error) {
-	credentialConstructor, ok := c.cfg.CredentialConstructor[req.Scope]
+	credentialConstructor, ok := c.cfg.Common.CredentialConstructor[req.Scope]
 	if !ok {
 		err := errors.New("scope is not valid credential")
 		return nil, err

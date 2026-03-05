@@ -11,14 +11,12 @@ Complete reference for all configuration parameters in the VC system.
 
 - [Environment Variables](#environment-variables)
 - [Common](#common-top-level)
-- [Authentication Methods](#auth_methods-top-level)
 - [API Gateway (APIGW)](#apigw-top-level)
 - [Issuer](#issuer-top-level)
 - [Verifier](#verifier-top-level)
 - [Registry](#registry-top-level)
 - [Mock AS](#mock_as-top-level)
 - [UI](#ui-top-level)
-- [Credential Constructor](#credential_constructor-top-level)
 - [Secrets File Reference](#secrets-file-reference)
 
 ## Environment Variables
@@ -38,16 +36,18 @@ Shared configuration used across all services.
 
 > **Path:** `.common`
 
-| Field                 | Type     | Description                                                                                                                                                      | Example                  | Default | Required |
-| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
-| `production`          | `bool`   | Production mode                                                                                                                                                  | -                        | `true`  | No       |
-| `log`                 | `object` | Logging configuration                                                                                                                                            | -                        | -       | No       |
-| `mongo`               | `object` | MongoDB configuration                                                                                                                                            | -                        | -       | No       |
-| `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                              | -                        | -       | No       |
-| `kafka`               | `object` | Kafka message broker configuration                                                                                                                               | -                        | -       | No       |
-| `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                                                | -                        | -       | No       |
-| `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. | `"/etc/vc/secrets.yaml"` | -       | No       |
-| `ha`                  | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                                         | -                        | `false` | No       |
+| Field                    | Type     | Description                                                                                                                                                      | Example                  | Default | Required |
+| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
+| `production`             | `bool`   | Production mode                                                                                                                                                  | -                        | `true`  | No       |
+| `log`                    | `object` | Logging configuration                                                                                                                                            | -                        | -       | No       |
+| `mongo`                  | `object` | MongoDB configuration                                                                                                                                            | -                        | -       | No       |
+| `tracing`                | `object` | OpenTelemetry tracing configuration                                                                                                                              | -                        | -       | No       |
+| `kafka`                  | `object` | Kafka message broker configuration                                                                                                                               | -                        | -       | No       |
+| `credential_offer_qr`    | `object` | Credential offer QR code settings                                                                                                                                | -                        | -       | No       |
+| `secret_file_path`       | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. | `"/etc/vc/secrets.yaml"` | -       | No       |
+| `ha`                     | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                                         | -                        | `false` | No       |
+| `auth_methods`           | `object` | Authentication methods for credential issuance, required by apigw, issuer, and verifier                                                                          | -                        | -       | No       |
+| `credential_constructor` | `object` | OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier                                                                  | -                        | -       | No       |
 
 ### `log`
 
@@ -102,13 +102,9 @@ Shared configuration used across all services.
 | `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
 | `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
 
-## `auth_methods` (Top-level)
+### `auth_methods` entry
 
-The authentication method configuration for credential issuance.
-
-### `auth_methods`
-
-> **Path:** `.auth_methods.<key>`
+> **Path:** `.common.auth_methods.<key>`
 
 This specifies what credentials the wallet must present for authentication
 The format of the credentials is determined by looking up the VCTs in the credential_constructor
@@ -117,6 +113,17 @@ The format of the credentials is determined by looking up the VCTs in the creden
 | -------- | ---------- | --------------------------------------------------------------------- | ------- | ------- | -------- |
 | `vcts`   | `[]string` | List of acceptable Verifiable Credential Type URNs for authentication | -       | -       | Yes      |
 | `claims` | `[]string` | Identity claims to extract from the authentication credential         | -       | -       | Yes      |
+
+### `credential_constructor` entry
+
+> **Path:** `.common.credential_constructor.<key>`
+
+| Field            | Type     | Description    | Example | Default | Required |
+| ---------------- | -------- | -------------- | ------- | ------- | -------- |
+| `vctm_file_path` | `string` | VCTM File Path | -       | -       | Yes      |
+| `format`         | `string` | Format         | -       | -       | Yes      |
+| `auth_method`    | `string` | Auth Method    | -       | -       | Yes      |
+| `attributes`     | `object` | Attributes     | -       | -       | Yes      |
 
 ## `apigw` (Top-level)
 
@@ -611,16 +618,35 @@ This configures how the verifier issues ID tokens and access tokens to relying p
 Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 The signing key is shared from the parent Verifier.KeyConfig.
 
-| Field                    | Type     | Description                                                                   | Example                       | Default | Required |
-| ------------------------ | -------- | ----------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
-| `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata.    | `"https://verifier.sunet.se"` | -       | Yes      |
-| `session_duration`       | `int`    | Session duration in seconds                                                   | -                             | `3600`  | No       |
-| `code_duration`          | `int`    | Authorization code duration in seconds                                        | -                             | `300`   | No       |
-| `access_token_duration`  | `int`    | Access token duration in seconds                                              | -                             | `3600`  | No       |
-| `id_token_duration`      | `int`    | ID token duration in seconds                                                  | -                             | `3600`  | No       |
-| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                             | -                             | `86400` | No       |
-| `subject_type`           | `string` | Subject type: "public" or "pairwise"                                          | -                             | -       | Yes      |
-| `subject_salt`           | `string` | Secret salt used for subject identifier generation (both public and pairwise) | -                             | -       | Yes      |
+| Field                    | Type     | Description                                                                | Example                       | Default | Required |
+| ------------------------ | -------- | -------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
+| `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata. | `"https://verifier.sunet.se"` | -       | Yes      |
+| `session_duration`       | `int`    | Session duration in seconds                                                | -                             | `3600`  | No       |
+| `code_duration`          | `int`    | Authorization code duration in seconds                                     | -                             | `300`   | No       |
+| `access_token_duration`  | `int`    | Access token duration in seconds                                           | -                             | `3600`  | No       |
+| `id_token_duration`      | `int`    | ID token duration in seconds                                               | -                             | `3600`  | No       |
+| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                          | -                             | `86400` | No       |
+| `subject_type`           | `string` | Subject type: "public" or "pairwise"                                       | -                             | -       | Yes      |
+| `subject_salt`           | `string` | Salt for pairwise subject generation                                       | -                             | -       | Yes      |
+| `static_clients`         | `array`  | List of pre-configured OIDC clients                                        | -                             | -       | No       |
+
+### `static_clients` entry
+
+> **Path:** `.verifier.oidc_op.static_clients[]`
+
+Static clients are configured in YAML and do not require dynamic registration.
+These clients are checked in addition to dynamically registered clients stored in the database.
+
+| Field                        | Type       | Description                                       | Example | Default                  | Required |
+| ---------------------------- | ---------- | ------------------------------------------------- | ------- | ------------------------ | -------- |
+| `client_id`                  | `string`   | Unique identifier for the client                  | -       | -                        | Yes      |
+| `client_secret`              | `string`   | Client secret for authentication.                 | -       | -                        | No       |
+| `redirect_uris`              | `[]string` | List of allowed redirect URIs for this client     | -       | -                        | Yes      |
+| `allowed_scopes`             | `[]string` | List of scopes this client is allowed to request. | -       | -                        | No       |
+| `token_endpoint_auth_method` | `string`   | Authentication method for the token endpoint.     | -       | `client_secret_basic`    | No       |
+| `grant_types`                | `[]string` | List of allowed grant types.                      | -       | `["authorization_code"]` | No       |
+| `response_types`             | `[]string` | List of allowed response types.                   | -       | `["code"]`               | No       |
+| `client_name`                | `string`   | Optional human-readable name for the client       | -       | -                        | No       |
 
 ### `openid4vp`
 
@@ -807,19 +833,6 @@ Configuration for the User Interface service.
 | Field      | Type     | Description | Example | Default | Required |
 | ---------- | -------- | ----------- | ------- | ------- | -------- |
 | `base_url` | `string` | Base URL    | -       | -       | No       |
-
-## `credential_constructor` (Top-level)
-
-### `credential_constructor`
-
-> **Path:** `.credential_constructor.<key>`
-
-| Field            | Type     | Description    | Example | Default | Required |
-| ---------------- | -------- | -------------- | ------- | ------- | -------- |
-| `vctm_file_path` | `string` | VCTM File Path | -       | -       | Yes      |
-| `format`         | `string` | Format         | -       | -       | Yes      |
-| `auth_method`    | `string` | Auth Method    | -       | -       | Yes      |
-| `attributes`     | `object` | Attributes     | -       | -       | Yes      |
 
 ## Secrets File Reference
 

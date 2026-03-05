@@ -18,36 +18,38 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 	client := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
-			CredentialConstructor: map[string]*model.CredentialConstructor{
-				"diploma": {
-					VCTMFilePath: "../../../metadata/vctm_diploma.json",
-				},
-				"ehic": {
-					VCTMFilePath: "../../../metadata/vctm_ehic.json",
-				},
-				"elm": {
-					VCTMFilePath: "../../../metadata/vctm_elm.json",
-				},
-				"micro_credential": {
-					VCTMFilePath: "../../../metadata/vctm_microcredential.json",
-				},
-				"openbadge_basic": {
-					VCTMFilePath: "../../../metadata/vctm_elm.json", // Reusing elm for test
-				},
-				"openbadge_complete": {
-					VCTMFilePath: "../../../metadata/vctm_elm.json", // Reusing elm for test
-				},
-				"openbadge_endorsements": {
-					VCTMFilePath: "../../../metadata/vctm_elm.json", // Reusing elm for test
-				},
-				"pda1": {
-					VCTMFilePath: "../../../metadata/vctm_pda1.json",
-				},
-				"pid_1_5": {
-					VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json",
-				},
-				"pid_1_8": {
-					VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json",
+			Common: &model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma": {
+						VCTMFilePath: "../../../metadata/vctm_diploma.json",
+					},
+					"ehic": {
+						VCTMFilePath: "../../../metadata/vctm_ehic.json",
+					},
+					"elm": {
+						VCTMFilePath: "../../../metadata/vctm_elm.json",
+					},
+					"micro_credential": {
+						VCTMFilePath: "../../../metadata/vctm_microcredential.json",
+					},
+					"openbadge_basic": {
+						VCTMFilePath: "../../../metadata/vctm_elm.json", // Reusing elm for test
+					},
+					"openbadge_complete": {
+						VCTMFilePath: "../../../metadata/vctm_elm.json", // Reusing elm for test
+					},
+					"openbadge_endorsements": {
+						VCTMFilePath: "../../../metadata/vctm_elm.json", // Reusing elm for test
+					},
+					"pda1": {
+						VCTMFilePath: "../../../metadata/vctm_pda1.json",
+					},
+					"pid_1_5": {
+						VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json",
+					},
+					"pid_1_8": {
+						VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json",
+					},
 				},
 			},
 			APIGW: &model.APIGW{
@@ -76,7 +78,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 	}
 
 	// Load VCTMs (normally done by configuration.New)
-	for scope, cc := range client.cfg.CredentialConstructor {
+	for scope, cc := range client.cfg.Common.CredentialConstructor {
 		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
@@ -153,7 +155,9 @@ func TestCreateCredentialOfferLookupMetadata_EmptyConfig(t *testing.T) {
 	client := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
-			CredentialConstructor: map[string]*model.CredentialConstructor{},
+			Common: &model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{},
+			},
 			APIGW: &model.APIGW{
 				CredentialOffers: model.CredentialOffers{
 					Wallets: map[string]model.CredentialOfferWallets{},
@@ -182,10 +186,12 @@ func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
 	client := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
-			CredentialConstructor: map[string]*model.CredentialConstructor{
-				"diploma": {
-					VCTMFilePath: "../../../metadata/vctm_diploma.json",
-					// VCTM intentionally NOT loaded
+			Common: &model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma": {
+						VCTMFilePath: "../../../metadata/vctm_diploma.json",
+						// VCTM intentionally NOT loaded
+					},
 				},
 			},
 			APIGW: &model.APIGW{
@@ -209,9 +215,11 @@ func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
 	client := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
-			CredentialConstructor: map[string]*model.CredentialConstructor{
-				"empty_scope": {
-					// No VCTMFilePath, no VCTM – must still be caught
+			Common: &model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"empty_scope": {
+						// No VCTMFilePath, no VCTM – must still be caught
+					},
 				},
 			},
 			APIGW: &model.APIGW{
@@ -240,11 +248,13 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 	client := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
-			CredentialConstructor: map[string]*model.CredentialConstructor{
-				"diploma":     diplomaCC,
-				"broken_scope": {
-					VCTMFilePath: "nonexistent.json",
-					// VCTM not loaded
+			Common: &model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma":      diplomaCC,
+					"broken_scope": {
+						VCTMFilePath: "nonexistent.json",
+						// VCTM not loaded
+					},
 				},
 			},
 			APIGW: &model.APIGW{
@@ -268,17 +278,19 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 	client := &Client{
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
-			CredentialConstructor: map[string]*model.CredentialConstructor{
-				"diploma":                {VCTMFilePath: "../../../metadata/vctm_diploma.json"},
-				"ehic":                   {VCTMFilePath: "../../../metadata/vctm_ehic.json"},
-				"elm":                    {VCTMFilePath: "../../../metadata/vctm_elm.json"},
-				"micro_credential":       {VCTMFilePath: "../../../metadata/vctm_microcredential.json"},
-				"openbadge_basic":        {VCTMFilePath: "../../../metadata/vctm_elm.json"},
-				"openbadge_complete":     {VCTMFilePath: "../../../metadata/vctm_elm.json"},
-				"openbadge_endorsements": {VCTMFilePath: "../../../metadata/vctm_elm.json"},
-				"pda1":                   {VCTMFilePath: "../../../metadata/vctm_pda1.json"},
-				"pid_1_5":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json"},
-				"pid_1_8":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json"},
+			Common: &model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma":                {VCTMFilePath: "../../../metadata/vctm_diploma.json"},
+					"ehic":                   {VCTMFilePath: "../../../metadata/vctm_ehic.json"},
+					"elm":                    {VCTMFilePath: "../../../metadata/vctm_elm.json"},
+					"micro_credential":       {VCTMFilePath: "../../../metadata/vctm_microcredential.json"},
+					"openbadge_basic":        {VCTMFilePath: "../../../metadata/vctm_elm.json"},
+					"openbadge_complete":     {VCTMFilePath: "../../../metadata/vctm_elm.json"},
+					"openbadge_endorsements": {VCTMFilePath: "../../../metadata/vctm_elm.json"},
+					"pda1":                   {VCTMFilePath: "../../../metadata/vctm_pda1.json"},
+					"pid_1_5":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json"},
+					"pid_1_8":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json"},
+				},
 			},
 			APIGW: &model.APIGW{
 				CredentialOffers: model.CredentialOffers{
@@ -296,7 +308,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 	}
 
 	// Load VCTMs (normally done by configuration.New)
-	for scope, cc := range client.cfg.CredentialConstructor {
+	for scope, cc := range client.cfg.Common.CredentialConstructor {
 		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 

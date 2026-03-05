@@ -42,7 +42,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	// Get auth method configuration (guaranteed to exist by config validation)
-	authMethod := c.cfg.AuthMethods[credentialConstructor.AuthMethod]
+	authMethod := c.cfg.Common.AuthMethods[credentialConstructor.AuthMethod]
 
 	// Get format from credential constructor based on VCT
 	// All VCTs in the same auth method should have the same format (validated at config load)

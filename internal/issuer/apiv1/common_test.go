@@ -40,43 +40,45 @@ func (m *mockRegistryClient) SaveCredentialSubject(ctx context.Context, in *apiv
 
 func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logger.Log) *Client {
 	cfg := &model.Cfg{
-		CredentialConstructor: map[string]*model.CredentialConstructor{
-			// OAuth2 scope based keys
-			"diploma": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"pid": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"ehic": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"pda1": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"micro_credential": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"elm": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"openbadge_complete": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"openbadge_basic": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"openbadge_endorsements": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
+		Common: &model.Common{
+			CredentialConstructor: map[string]*model.CredentialConstructor{
+				// OAuth2 scope based keys
+				"diploma": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"pid": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"ehic": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"pda1": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"micro_credential": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"elm": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"openbadge_complete": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"openbadge_basic": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
+				"openbadge_endorsements": {
+					VCTMFilePath: "testdata/vctm_test.json",
+					AuthMethod:   "basic",
+				},
 			},
 		},
 		Issuer: &model.Issuer{
@@ -106,7 +108,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 	assert.NoError(t, err)
 
 	// Load VCTM files for all credential constructors
-	for scope, constructor := range cfg.CredentialConstructor {
+	for scope, constructor := range cfg.Common.CredentialConstructor {
 		err := constructor.LoadVCTMetadata(ctx, scope)
 		assert.NoError(t, err)
 	}

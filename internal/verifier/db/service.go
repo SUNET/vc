@@ -44,10 +44,14 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 
 	// Initialize OIDC collections
 	oidcDB := service.MongoClient.Database("verifier")
-	service.Clients = &ClientCollection{
+	clientsColl := &ClientCollection{
 		Service:    service,
 		collection: oidcDB.Collection("clients"),
 	}
+	if err := clientsColl.createIndex(ctx); err != nil {
+		return nil, err
+	}
+	service.Clients = clientsColl
 
 	service.log.Info("Started")
 

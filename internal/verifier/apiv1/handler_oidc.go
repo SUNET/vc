@@ -28,20 +28,20 @@ import (
 type AuthorizeRequest struct {
 	ResponseType        string `form:"response_type" binding:"required" validate:"required,max=128,printascii"`
 	ClientID            string `form:"client_id" binding:"required" validate:"required,max=128,printascii"`
-	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=128,printascii"`
-	Scope               string `form:"scope" binding:"required" validate:"required,max=128,printascii"`
+	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=2048,printascii"`
+	Scope               string `form:"scope" binding:"required" validate:"required,max=1024,printascii"`
 	State               string `form:"state" validate:"omitempty,max=500,printascii"`
-	Nonce               string `form:"nonce" validate:"omitempty,max=128,printascii"`
+	Nonce               string `form:"nonce" validate:"omitempty,max=256,printascii"`
 	CodeChallenge       string `form:"code_challenge" validate:"omitempty,max=128,printascii"`
 	CodeChallengeMethod string `form:"code_challenge_method" validate:"omitempty,max=128,printascii"`
 	ResponseMode        string `form:"response_mode" validate:"omitempty,max=128,printascii"`
 	Display             string `form:"display" validate:"omitempty,max=128,printascii"`
 	Prompt              string `form:"prompt" validate:"omitempty,max=128,printascii"`
 	MaxAge              int    `form:"max_age"`
-	UILocales           string `form:"ui_locales" validate:"omitempty,max=128,printascii"`
-	IDTokenHint         string `form:"id_token_hint" validate:"omitempty,max=128,printascii"`
-	LoginHint           string `form:"login_hint" validate:"omitempty,max=128,printascii"`
-	ACRValues           string `form:"acr_values" validate:"omitempty,max=128,printascii"`
+	UILocales           string `form:"ui_locales" validate:"omitempty,max=256,printascii"`
+	IDTokenHint         string `form:"id_token_hint" validate:"omitempty,max=8192,printascii"`
+	LoginHint           string `form:"login_hint" validate:"omitempty,max=256,printascii"`
+	ACRValues           string `form:"acr_values" validate:"omitempty,max=512,printascii"`
 }
 
 // AuthorizeResponse represents the response to an authorization request
@@ -81,7 +81,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate redirect URI
-	if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
+	if !c.matchRedirectURI(client.RedirectURIs, req.RedirectURI) {
 		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI, "allowed_redirect_uris", client.RedirectURIs, "client_id", req.ClientID)
 		return nil, ErrInvalidRequest
 	}
@@ -222,12 +222,12 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 // TokenRequest represents an OIDC token request
 type TokenRequest struct {
 	GrantType    string `form:"grant_type" binding:"required" validate:"required,max=128,printascii"`
-	Code         string `form:"code" validate:"omitempty,max=128,printascii"`
-	RedirectURI  string `form:"redirect_uri" validate:"omitempty,max=128,printascii"`
+	Code         string `form:"code" validate:"omitempty,max=256,printascii"`
+	RedirectURI  string `form:"redirect_uri" validate:"omitempty,max=2048,printascii"`
 	ClientID     string `form:"client_id" validate:"omitempty,max=128,printascii"`
-	ClientSecret string `form:"client_secret" validate:"omitempty,max=128,printascii"`
+	ClientSecret string `form:"client_secret" validate:"omitempty,max=256,printascii"`
 	CodeVerifier string `form:"code_verifier" validate:"omitempty,max=128,printascii"`
-	RefreshToken string `form:"refresh_token" validate:"omitempty,max=128,printascii"`
+	RefreshToken string `form:"refresh_token" validate:"omitempty,max=256,printascii"`
 }
 
 // TokenResponse represents an OIDC token response
@@ -297,7 +297,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 
 	// Verify redirect URI matches
-	if authCtx.RedirectURI != req.RedirectURI {
+	if normalizeRedirectURI(authCtx.RedirectURI) != normalizeRedirectURI(req.RedirectURI) {
 		c.log.Info("Redirect URI mismatch")
 		return nil, ErrInvalidGrant
 	}
@@ -546,10 +546,10 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 
 // DirectPostRequest represents a direct_post callback from a wallet
 type DirectPostRequest struct {
-	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=128,printascii"`
-	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty,max=128,printascii"`                               // For standard direct_post
-	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty,max=128,printascii"` // For standard direct_post
-	Response               string `json:"response" form:"response" validate:"omitempty,max=128,printascii"`                               // For DC API encrypted JWT response
+	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=256,printascii"`
+	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty"`                               // For standard direct_post (JWT, can be very large)
+	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty"` // For standard direct_post (JSON, can be large)
+	Response               string `json:"response" form:"response" validate:"omitempty"`                               // For DC API encrypted JWT response (can be very large)
 }
 
 // DirectPostResponse contains the response to a direct_post request
@@ -881,4 +881,28 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 	maps.Copy(response, session.VerifiedClaims)
 
 	return response, nil
+}
+
+// normalizeRedirectURI normalizes a redirect URI for comparison.
+// Decodes percent-encoding so that e.g. "Test%20Realm" and "Test Realm"
+// compare as equal. Uses PathUnescape (not QueryUnescape) so that "+" is
+// left intact — it is a valid path character.
+func normalizeRedirectURI(uri string) string {
+	decoded, err := url.PathUnescape(uri)
+	if err != nil {
+		return uri
+	}
+	return decoded
+}
+
+// matchRedirectURI checks whether reqURI matches any of the registered URIs
+// using normalized comparison per RFC 3986 Section 6.
+func (c *Client) matchRedirectURI(registered []string, reqURI string) bool {
+	normReq := normalizeRedirectURI(reqURI)
+	for _, r := range registered {
+		if normalizeRedirectURI(r) == normReq {
+			return true
+		}
+	}
+	return false
 }

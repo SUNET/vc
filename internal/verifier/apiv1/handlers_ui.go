@@ -31,7 +31,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		SupportedWallets: c.cfg.Verifier.SupportedWallets,
 	}
 
-	for scope, constructor := range c.cfg.CredentialConstructor {
+	for scope, constructor := range c.cfg.Common.CredentialConstructor {
 		info := &UICredentialInfo{
 			Attributes: constructor.Attributes,
 		}

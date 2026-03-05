@@ -85,14 +85,14 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	// and the requirement check. Other services (ui, mockas, registry) share
 	// the same config file but do not use credential constructors at all.
 	if servicesRequiringVCTM[serviceName] {
-		if len(cfg.CredentialConstructor) == 0 {
-			return nil, fmt.Errorf("credential_constructor is required for the %s service", serviceName)
+		if cfg.Common == nil || len(cfg.Common.CredentialConstructor) == 0 {
+			return nil, fmt.Errorf("common.credential_constructor is required for the %s service", serviceName)
 		}
 
 		// Load VCTM data and derive Attributes before validation so the
 		// vcts_exist validator can cross-reference auth_methods.vcts against
 		// actual VCT values.
-		for scope, constructor := range cfg.CredentialConstructor {
+		for scope, constructor := range cfg.Common.CredentialConstructor {
 			if constructor == nil || constructor.VCTMFilePath == "" {
 				continue
 			}

@@ -1344,6 +1344,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	assert.Equal(t, "Credential Verification", resp.Title)
 	assert.Equal(t, "Please present your digital credential to continue", resp.Subtitle)
 }
+
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
 	ctx := t.Context()
@@ -2129,6 +2130,7 @@ func TestContainsOIDC(t *testing.T) {
 		})
 	}
 }
+
 // TestGetDiscoveryMetadata tests the OIDC discovery metadata endpoint
 func TestGetDiscoveryMetadata(t *testing.T) {
 	ctx := t.Context()
@@ -2424,5 +2426,152 @@ func BenchmarkGetJWKS(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ctx := b.Context()
 		_, _ = client.GetJWKS(ctx)
+	}
+}
+
+func TestNormalizeRedirectURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      string
+		expected string
+	}{
+		{
+			name:     "plain URI unchanged",
+			uri:      "https://example.com/callback",
+			expected: "https://example.com/callback",
+		},
+		{
+			name:     "percent-encoded space decoded",
+			uri:      "https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+			expected: "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+		},
+		{
+			name:     "literal space unchanged",
+			uri:      "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected: "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+		},
+		{
+			name:     "plus sign preserved (not decoded to space)",
+			uri:      "https://example.com/path+name/callback",
+			expected: "https://example.com/path+name/callback",
+		},
+		{
+			name:     "multiple encoded segments",
+			uri:      "https://sso.example.org/realms/My%20Test%20Realm/broker/my%20idp/endpoint",
+			expected: "https://sso.example.org/realms/My Test Realm/broker/my idp/endpoint",
+		},
+		{
+			name:     "encoded slash preserved via PathUnescape",
+			uri:      "https://example.com/a%2Fb/callback",
+			expected: "https://example.com/a/b/callback",
+		},
+		{
+			name:     "empty string",
+			uri:      "",
+			expected: "",
+		},
+		{
+			name:     "query parameters with encoding",
+			uri:      "https://example.com/callback?foo=bar%20baz",
+			expected: "https://example.com/callback?foo=bar baz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeRedirectURI(tt.uri)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestMatchRedirectURI(t *testing.T) {
+	cfg := &model.Cfg{
+		Verifier: &model.Verifier{
+			PublicURL: "https://verifier.example.com",
+			OIDCOP: &model.OIDCOPConfig{
+				Issuer: "https://verifier.example.com",
+			},
+		},
+	}
+	client, _ := CreateTestClientWithMock(cfg)
+
+	tests := []struct {
+		name       string
+		registered []string
+		reqURI     string
+		expected   bool
+	}{
+		{
+			name:       "exact match",
+			registered: []string{"https://example.com/callback"},
+			reqURI:     "https://example.com/callback",
+			expected:   true,
+		},
+		{
+			name:       "percent-encoded registered vs decoded request",
+			registered: []string{"https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "decoded registered vs percent-encoded request",
+			registered: []string{"https://sso.example.org/realms/Test Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "both percent-encoded",
+			registered: []string{"https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "both decoded (literal space)",
+			registered: []string{"https://sso.example.org/realms/Test Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "no match",
+			registered: []string{"https://example.com/callback"},
+			reqURI:     "https://example.com/other",
+			expected:   false,
+		},
+		{
+			name:       "empty registered list",
+			registered: []string{},
+			reqURI:     "https://example.com/callback",
+			expected:   false,
+		},
+		{
+			name: "match among multiple registered URIs",
+			registered: []string{
+				"https://example.com/callback1",
+				"https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+				"https://example.com/callback3",
+			},
+			reqURI:   "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected: true,
+		},
+		{
+			name:       "plus sign is not treated as space",
+			registered: []string{"https://example.com/path+name/callback"},
+			reqURI:     "https://example.com/path name/callback",
+			expected:   false,
+		},
+		{
+			name:       "keycloak realistic URL",
+			registered: []string{"https://sso.common.siros.org/realms/Test Realm/broker/test2/endpoint"},
+			reqURI:     "https://sso.common.siros.org/realms/Test%20Realm/broker/test2/endpoint",
+			expected:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.matchRedirectURI(tt.registered, tt.reqURI)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }

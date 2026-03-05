@@ -283,7 +283,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
-				CredentialConstructor: tt.credentialConstructor,
+				Common: &model.Common{
+					CredentialConstructor: tt.credentialConstructor,
+				},
 			}
 			client, _ := CreateTestClientWithMock(cfg)
 
@@ -343,7 +345,9 @@ func TestClient_createDCQLQuery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
-				CredentialConstructor: tt.credentialConstructor,
+				Common: &model.Common{
+					CredentialConstructor: tt.credentialConstructor,
+				},
 			}
 			client, _ := CreateTestClientWithMock(cfg)
 

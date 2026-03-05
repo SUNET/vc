@@ -5,6 +5,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Client represents an OIDC client (Relying Party)
@@ -57,6 +58,25 @@ type Client struct {
 type ClientCollection struct {
 	Service    *Service
 	collection *mongo.Collection
+}
+
+// createIndex creates required indexes for the clients collection.
+// A unique index on client_id is critical for correct behaviour in HA /
+// replica-set deployments: without it, FindOne by client_id performs a full
+// collection scan that may miss recently-written documents on secondaries,
+// and uniqueness of client_id is not enforced.
+func (c *ClientCollection) createIndex(ctx context.Context) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:clients:createIndex")
+	defer span.End()
+
+	indexClientIDUniq := mongo.IndexModel{
+		Keys: bson.D{
+			bson.E{Key: "client_id", Value: 1},
+		},
+		Options: options.Index().SetName("client_id_uniq").SetUnique(true),
+	}
+	_, err := c.collection.Indexes().CreateMany(ctx, []mongo.IndexModel{indexClientIDUniq})
+	return err
 }
 
 // GetByClientID retrieves a client by client ID

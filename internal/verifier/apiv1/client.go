@@ -91,7 +91,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 
 	// Override Attributes with filtered variant (excludes nested object claims)
 	// since verifier only exposes leaf-level attributes to the UI.
-	for _, credentialInfo := range cfg.CredentialConstructor {
+	for _, credentialInfo := range cfg.Common.CredentialConstructor {
 		credentialInfo.Attributes = credentialInfo.VCTM.AttributesWithoutObjects()
 	}
 
@@ -279,7 +279,7 @@ func (c *Client) buildLegacyDCQLQuery(scopes []string) (*openid4vp.DCQL, error) 
 	var credentials []openid4vp.CredentialQuery
 
 	for _, scope := range scopes {
-		credInfo, ok := c.cfg.CredentialConstructor[scope]
+		credInfo, ok := c.cfg.Common.CredentialConstructor[scope]
 		if !ok {
 			continue
 		}

@@ -96,6 +96,12 @@ type Common struct {
 	// HA enables high-availability mode. When true, caches use MongoDB (Common.Mongo.URI)
 	// instead of in-memory storage so state is shared across instances.
 	HA bool `yaml:"ha" default:"false"`
+	// AuthMethods defines authentication methods for credential issuance, required by apigw, issuer, and verifier
+	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,vcts_exist,dive"`
+	// CredentialConstructor maps OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier
+	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
+	// The constructor contains the VCT URN and other configuration for issuing that credential type
+	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
 }
 
 // CredentialOfferQRConfig holds credential offer QR code settings
@@ -858,23 +864,21 @@ type UI struct {
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common      *Common                `yaml:"common"`
-	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,vcts_exist,dive"`
-	APIGW       *APIGW                 `yaml:"apigw" validate:"omitempty"`
-	Issuer      *Issuer                `yaml:"issuer" validate:"omitempty"`
-	Verifier    *Verifier              `yaml:"verifier" validate:"omitempty"`
-	Registry    *Registry              `yaml:"registry" validate:"omitempty"`
-	MockAS      *MockAS                `yaml:"mock_as" validate:"omitempty"`
-	UI          *UI                    `yaml:"ui" validate:"omitempty"`
-	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
-	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
-	// The constructor contains the VCT URN and other configuration for issuing that credential type
-	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
+	Common   *Common   `yaml:"common"`
+	APIGW    *APIGW    `yaml:"apigw" validate:"omitempty"`
+	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
+	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
+	Registry *Registry `yaml:"registry" validate:"omitempty"`
+	MockAS   *MockAS   `yaml:"mock_as" validate:"omitempty"`
+	UI       *UI       `yaml:"ui" validate:"omitempty"`
 }
 
 // GetCredentialConstructorAuthMethod returns the auth method for the given credential type or "basic" if not found
 func (c *Cfg) GetCredentialConstructorAuthMethod(credentialType string) string {
-	if constructor, ok := c.CredentialConstructor[credentialType]; ok {
+	if c.Common == nil {
+		return "basic"
+	}
+	if constructor, ok := c.Common.CredentialConstructor[credentialType]; ok {
 		return constructor.AuthMethod
 	}
 	return "basic"
@@ -882,8 +886,11 @@ func (c *Cfg) GetCredentialConstructorAuthMethod(credentialType string) string {
 
 // GetCredentialConstructor returns the credential constructor for a given scope
 func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
+	if c.Common == nil {
+		return nil
+	}
 	// Direct lookup by scope (map key)
-	if constructor, ok := c.CredentialConstructor[scope]; ok {
+	if constructor, ok := c.Common.CredentialConstructor[scope]; ok {
 		return constructor
 	}
 
@@ -893,7 +900,10 @@ func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
 // GetFormatForVCT returns the format for a given VCT by looking it up in credential constructors
 // Returns empty string if not found
 func (c *Cfg) GetFormatForVCT(vct string) string {
-	for _, constructor := range c.CredentialConstructor {
+	if c.Common == nil {
+		return ""
+	}
+	for _, constructor := range c.Common.CredentialConstructor {
 		if constructor != nil && constructor.VCTM.VCT == vct {
 			return constructor.Format
 		}
