@@ -56,6 +56,20 @@ const (
 	RoleAny                = trustapi.RoleAny
 )
 
+// TrustFramework constants for common trust framework identifiers.
+const (
+	// TrustFrameworkNone indicates no trust framework validation occurred.
+	// Used by AllowAllEvaluator when operating without a PDP.
+	TrustFrameworkNone = "none"
+)
+
+// Error messages for trust evaluation. These are package-level constants
+// to ensure consistency across evaluator implementations.
+const (
+	// ErrMsgNilRequest is returned when an evaluation request is nil.
+	ErrMsgNilRequest = "evaluation request is nil"
+)
+
 // EvaluationRequest contains the parameters for a trust evaluation.
 // This embeds trustapi.EvaluationRequest and adds vc-specific methods.
 type EvaluationRequest struct {

@@ -465,10 +465,9 @@ func TestSmartResolver_GetResolvers(t *testing.T) {
 
 // Factory function tests
 
-func TestNewResolverFromConfig_NoGoTrust(t *testing.T) {
+func TestNewResolverFromConfig_NoPDP(t *testing.T) {
 	cfg := ResolverConfig{
-		GoTrustURL: "",
-		Enabled:    true,
+		PDPURL: "",
 	}
 
 	resolver, err := NewResolverFromConfig(cfg)
@@ -490,10 +489,9 @@ func TestNewResolverFromConfig_NoGoTrust(t *testing.T) {
 	}
 }
 
-func TestNewResolverFromConfig_WithGoTrust(t *testing.T) {
+func TestNewResolverFromConfig_WithPDP(t *testing.T) {
 	cfg := ResolverConfig{
-		GoTrustURL: "https://trust.example.com/pdp",
-		Enabled:    true,
+		PDPURL: "https://trust.example.com/pdp",
 	}
 
 	resolver, err := NewResolverFromConfig(cfg)
@@ -513,11 +511,11 @@ func TestNewResolverFromConfig_WithGoTrust(t *testing.T) {
 	}
 }
 
-func TestNewResolverWithGoTrust(t *testing.T) {
-	smart := NewResolverWithGoTrust("https://trust.example.com/pdp")
+func TestNewResolverWithPDP(t *testing.T) {
+	smart := NewResolverWithPDP("https://trust.example.com/pdp")
 
 	if smart == nil {
-		t.Fatal("NewResolverWithGoTrust returned nil")
+		t.Fatal("NewResolverWithPDP returned nil")
 	}
 
 	if smart.GetLocalResolver() == nil {

@@ -455,3 +455,217 @@ func TestTrustOptions(t *testing.T) {
 		t.Error("expected BypassCache to be true")
 	}
 }
+
+func TestNewEvaluationRequest(t *testing.T) {
+	subjectID := "https://issuer.example.com"
+	keyType := KeyTypeJWK
+	key := map[string]any{"kty": "EC"}
+
+	req := NewEvaluationRequest(subjectID, keyType, key)
+
+	if req == nil {
+		t.Fatal("NewEvaluationRequest returned nil")
+	}
+	if req.SubjectID != subjectID {
+		t.Errorf("SubjectID = %q, want %q", req.SubjectID, subjectID)
+	}
+	if req.KeyType != keyType {
+		t.Errorf("KeyType = %q, want %q", req.KeyType, keyType)
+	}
+	if req.Key == nil {
+		t.Error("Key should not be nil")
+	}
+}
+
+func TestLocalTrustEvaluator_AddTrustedRoot(t *testing.T) {
+	eval := NewLocalTrustEvaluator(LocalTrustConfig{})
+
+	// Initially no trusted roots
+	roots := eval.GetTrustedRoots()
+	if len(roots) != 0 {
+		t.Errorf("expected 0 trusted roots initially, got %d", len(roots))
+	}
+
+	// Add a root
+	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	rootTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Added Root"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatalf("failed to create certificate: %v", err)
+	}
+	rootCert, err := x509.ParseCertificate(rootDER)
+	if err != nil {
+		t.Fatalf("failed to parse certificate: %v", err)
+	}
+
+	eval.AddTrustedRoot(rootCert)
+
+	// Now should have 1 root
+	roots = eval.GetTrustedRoots()
+	if len(roots) != 1 {
+		t.Errorf("expected 1 trusted root after add, got %d", len(roots))
+	}
+	if roots[0].Subject.CommonName != "Added Root" {
+		t.Errorf("unexpected root CN: %s", roots[0].Subject.CommonName)
+	}
+}
+
+func TestLocalTrustEvaluator_GetTrustedRoots(t *testing.T) {
+	chain, rootCert, _ := createTestCertChain(t)
+	_ = chain // not used here
+
+	eval := NewLocalTrustEvaluator(LocalTrustConfig{
+		TrustedRoots: []*x509.Certificate{rootCert},
+	})
+
+	roots := eval.GetTrustedRoots()
+	if len(roots) != 1 {
+		t.Errorf("expected 1 trusted root, got %d", len(roots))
+	}
+}
+
+func TestLocalTrustEvaluator_EmptyCertChain(t *testing.T) {
+	_, rootCert, _ := createTestCertChain(t)
+
+	eval := NewLocalTrustEvaluator(LocalTrustConfig{
+		TrustedRoots: []*x509.Certificate{rootCert},
+	})
+
+	// Empty certificate chain
+	decision, err := eval.Evaluate(t.Context(), &EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			KeyType: KeyTypeX5C,
+			Key:     []*x509.Certificate{},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.Trusted {
+		t.Error("expected untrusted for empty cert chain")
+	}
+	if decision.Reason != "empty certificate chain" {
+		t.Errorf("unexpected reason: %s", decision.Reason)
+	}
+}
+
+func TestLocalTrustEvaluator_CertificateMatchesSubject(t *testing.T) {
+	chain, rootCert, _ := createTestCertChain(t)
+
+	eval := NewLocalTrustEvaluator(LocalTrustConfig{
+		TrustedRoots: []*x509.Certificate{rootCert},
+	})
+
+	ctx := t.Context()
+
+	tests := []struct {
+		name      string
+		subjectID string
+		trusted   bool
+	}{
+		{
+			name:      "matches CN exactly",
+			subjectID: "https://issuer.example.com",
+			trusted:   true,
+		},
+		{
+			name:      "does not match CN",
+			subjectID: "https://different.example.com",
+			trusted:   false,
+		},
+		{
+			name:      "empty subject ID (no validation)",
+			subjectID: "",
+			trusted:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision, err := eval.Evaluate(ctx, &EvaluationRequest{
+				EvaluationRequest: trustapi.EvaluationRequest{
+					SubjectID: tt.subjectID,
+					KeyType:   KeyTypeX5C,
+					Key:       chain,
+				},
+			})
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if decision.Trusted != tt.trusted {
+				t.Errorf("Trusted = %v, want %v (reason: %s)", decision.Trusted, tt.trusted, decision.Reason)
+			}
+		})
+	}
+}
+
+func TestLocalTrustEvaluator_X5CCertChainType(t *testing.T) {
+	chain, rootCert, _ := createTestCertChain(t)
+
+	eval := NewLocalTrustEvaluator(LocalTrustConfig{
+		TrustedRoots: []*x509.Certificate{rootCert},
+	})
+
+	// Use X5CCertChain type explicitly
+	certChain := X5CCertChain(chain)
+
+	decision, err := eval.Evaluate(t.Context(), &EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			SubjectID: "https://issuer.example.com",
+			KeyType:   KeyTypeX5C,
+			Key:       certChain,
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !decision.Trusted {
+		t.Errorf("expected trusted, got: %s", decision.Reason)
+	}
+}
+
+func TestLocalTrustEvaluator_InvalidX5CKeyType(t *testing.T) {
+	_, rootCert, _ := createTestCertChain(t)
+
+	eval := NewLocalTrustEvaluator(LocalTrustConfig{
+		TrustedRoots: []*x509.Certificate{rootCert},
+	})
+
+	// Invalid key type for X5C
+	_, err := eval.Evaluate(t.Context(), &EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			KeyType: KeyTypeX5C,
+			Key:     "not-a-cert-chain",
+		},
+	})
+
+	if err == nil {
+		t.Error("expected error for invalid X5C key type")
+	}
+}
+
+func TestTrustFrameworkNone_Constant(t *testing.T) {
+	if TrustFrameworkNone != "none" {
+		t.Errorf("TrustFrameworkNone = %q, want 'none'", TrustFrameworkNone)
+	}
+}
+
+func TestErrMsgNilRequest_Constant(t *testing.T) {
+	if ErrMsgNilRequest != "evaluation request is nil" {
+		t.Errorf("ErrMsgNilRequest = %q, want 'evaluation request is nil'", ErrMsgNilRequest)
+	}
+}

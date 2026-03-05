@@ -173,8 +173,6 @@ func TestTrustConfigDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	require.NotNil(t, cfg.Enable)
-	assert.True(t, *cfg.Enable)
 	assert.Equal(t, []string{"did:key", "did:jwk"}, cfg.LocalDIDMethods)
 }
 

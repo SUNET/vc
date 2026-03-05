@@ -466,11 +466,16 @@ type Verifier struct {
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
 // This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
+//
+// Trust evaluation operates in one of two modes:
+//   - When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
+//   - When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
 type TrustConfig struct {
-	// GoTrustURL is the URL of the go-trust PDP (Policy Decision Point) service.
+	// PDPURL is the URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation.
 	// Example: "https://trust.sunet.se/pdp"
-	// If empty, trust evaluation is disabled and only local DID methods will work.
-	GoTrustURL string `yaml:"go_trust_url,omitempty"`
+	// When set, operates in "default deny" mode - trust decisions require PDP approval.
+	// When empty, operates in "allow all" mode - resolved keys are always considered trusted.
+	PDPURL string `yaml:"pdp_url,omitempty"`
 
 	// LocalDIDMethods specifies which DID methods can be resolved locally without go-trust.
 	// Self-contained methods like "did:key" and "did:jwk" are always resolved locally.
@@ -479,11 +484,6 @@ type TrustConfig struct {
 	// TrustPolicies configures per-role trust evaluation policies.
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
-
-	// Enable controls whether trust evaluation is enabled.
-	// When false, keys are resolved but not validated against trust frameworks.
-	// Default: true
-	Enable *bool `yaml:"enable,omitempty" default:"true"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
