@@ -501,6 +501,39 @@ type TrustPolicyConfig struct {
 	RequireRevocationCheck bool `yaml:"require_revocation_check,omitempty" default:"false"`
 }
 
+// StaticOIDCClient defines a pre-configured OIDC client for the verifier's OIDC Provider.
+// Static clients are configured in YAML and do not require dynamic registration.
+// These clients are checked in addition to dynamically registered clients stored in the database.
+type StaticOIDCClient struct {
+	// ClientID is the unique identifier for the client
+	ClientID string `yaml:"client_id" validate:"required"`
+	// ClientSecret is the client secret for authentication.
+	// Note: This is stored in plaintext in config.yaml. The secrets.yaml mechanism
+	// currently only supports oidc.subject_salt, not static client secrets.
+	// For production deployments, consider using dynamic client registration instead.
+	// Required unless TokenEndpointAuthMethod is "none" (public client).
+	ClientSecret string `yaml:"client_secret" validate:"required_unless=TokenEndpointAuthMethod none"`
+	// RedirectURIs is the list of allowed redirect URIs for this client
+	RedirectURIs []string `yaml:"redirect_uris" validate:"required,min=1,dive,redirect_uri"`
+	// AllowedScopes is the list of scopes this client is allowed to request.
+	// If empty, defaults to standard OIDC scopes (openid, profile, email, address, phone).
+	AllowedScopes []string `yaml:"allowed_scopes,omitempty"`
+	// TokenEndpointAuthMethod is the authentication method for the token endpoint.
+	// Supported values: client_secret_basic, client_secret_post, none (public client)
+	// Default: "client_secret_basic"
+	TokenEndpointAuthMethod string `yaml:"token_endpoint_auth_method,omitempty" default:"client_secret_basic" validate:"omitempty,oneof=client_secret_basic client_secret_post none"`
+	// GrantTypes is the list of allowed grant types.
+	// Supported values: authorization_code, refresh_token
+	// Default: ["authorization_code"]
+	GrantTypes []string `yaml:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code refresh_token"`
+	// ResponseTypes is the list of allowed response types.
+	// Supported values: code
+	// Default: ["code"]
+	ResponseTypes []string `yaml:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
+	// ClientName is an optional human-readable name for the client
+	ClientName string `yaml:"client_name,omitempty"`
+}
+
 // OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider.
 // This configures how the verifier issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
@@ -525,6 +558,9 @@ type OIDCConfig struct {
 	SubjectType string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
 	// SubjectSalt is the salt for pairwise subject generation
 	SubjectSalt string `yaml:"subject_salt" validate:"required"`
+	// StaticClients is a list of pre-configured OIDC clients
+	// These clients are checked in addition to dynamically registered clients
+	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
