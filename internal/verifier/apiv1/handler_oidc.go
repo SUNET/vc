@@ -82,13 +82,13 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 	// Validate redirect URI
 	if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
-		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI)
+		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI, "allowed_redirect_uris", client.RedirectURIs, "client_id", req.ClientID)
 		return nil, ErrInvalidRequest
 	}
 
 	// Validate response type
 	if !c.containsOIDC(client.ResponseTypes, req.ResponseType) {
-		c.log.Info("Unsupported response type", "response_type", req.ResponseType)
+		c.log.Info("Unsupported response type", "response_type", req.ResponseType, "allowed_response_types", client.ResponseTypes, "client_id", req.ClientID)
 		return nil, ErrInvalidRequest
 	}
 
