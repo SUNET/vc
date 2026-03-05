@@ -32,8 +32,10 @@ func generateECDSAKey(t *testing.T) *ecdsa.PrivateKey {
 type mockResolver struct {
 	ed25519Keys map[string]ed25519.PublicKey
 	ecdsaKeys   map[string]*ecdsa.PublicKey
+	services    map[string]*keyresolver.DIDCommService
 	ed25519Err  error
 	ecdsaErr    error
+	serviceErr  error
 }
 
 func (m *mockResolver) ResolveEd25519(verificationMethod string) (ed25519.PublicKey, error) {
@@ -56,6 +58,17 @@ func (m *mockResolver) ResolveECDSA(verificationMethod string) (*ecdsa.PublicKey
 		return nil, errors.New("key not found")
 	}
 	return key, nil
+}
+
+func (m *mockResolver) ResolveService(did string) (*keyresolver.DIDCommService, error) {
+	if m.serviceErr != nil {
+		return nil, m.serviceErr
+	}
+	svc, ok := m.services[did]
+	if !ok {
+		return nil, errors.New("service not found")
+	}
+	return svc, nil
 }
 
 // TestNewResolver tests resolver creation.
@@ -330,18 +343,77 @@ func TestResolveVerification_NoKeys(t *testing.T) {
 	}
 }
 
-// TestResolveService tests service resolution (not implemented).
+// TestResolveService tests service resolution via SmartResolver.
 func TestResolveService(t *testing.T) {
-	r := NewResolver("http://localhost:8080/pdp")
-	ctx := context.Background()
+	t.Run("service not found", func(t *testing.T) {
+		r := NewResolver("http://localhost:8080/pdp")
+		ctx := context.Background()
 
-	_, err := r.ResolveService(ctx, "did:example:alice")
-	if err == nil {
-		t.Error("Expected error (service resolution not implemented)")
-	}
-	if !errors.Is(err, ErrServiceNotFound) {
-		t.Errorf("Expected ErrServiceNotFound, got %v", err)
-	}
+		_, err := r.ResolveService(ctx, "did:example:alice")
+		if err == nil {
+			t.Error("Expected error for service not found")
+		}
+		if !errors.Is(err, ErrServiceNotFound) {
+			t.Errorf("Expected ErrServiceNotFound, got %v", err)
+		}
+	})
+
+	t.Run("successful resolution", func(t *testing.T) {
+		mock := &mockResolver{
+			ed25519Keys: make(map[string]ed25519.PublicKey),
+			ecdsaKeys:   make(map[string]*ecdsa.PublicKey),
+			services: map[string]*keyresolver.DIDCommService{
+				"did:example:bob": {
+					ID:              "did:example:bob#didcomm-1",
+					ServiceEndpoint: "https://example.com/didcomm",
+					RoutingKeys:     []string{"did:key:router1"},
+					Accept:          []string{"didcomm/v2"},
+				},
+			},
+		}
+
+		r := NewResolverWithBase(mock)
+		ctx := context.Background()
+
+		svc, err := r.ResolveService(ctx, "did:example:bob")
+		if err != nil {
+			t.Fatalf("ResolveService() error = %v", err)
+		}
+
+		if svc.ServiceEndpoint != "https://example.com/didcomm" {
+			t.Errorf("ServiceEndpoint = %v, want https://example.com/didcomm", svc.ServiceEndpoint)
+		}
+		if len(svc.RoutingKeys) != 1 || svc.RoutingKeys[0] != "did:key:router1" {
+			t.Errorf("RoutingKeys = %v, want [did:key:router1]", svc.RoutingKeys)
+		}
+		if len(svc.Accept) != 1 || svc.Accept[0] != "didcomm/v2" {
+			t.Errorf("Accept = %v, want [didcomm/v2]", svc.Accept)
+		}
+	})
+
+	t.Run("error preserves chain", func(t *testing.T) {
+		testErr := errors.New("test error")
+		mock := &mockResolver{
+			ed25519Keys: make(map[string]ed25519.PublicKey),
+			ecdsaKeys:   make(map[string]*ecdsa.PublicKey),
+			services:    make(map[string]*keyresolver.DIDCommService),
+			serviceErr:  testErr,
+		}
+
+		r := NewResolverWithBase(mock)
+		ctx := context.Background()
+
+		_, err := r.ResolveService(ctx, "did:example:alice")
+		if err == nil {
+			t.Fatal("Expected error")
+		}
+		if !errors.Is(err, ErrServiceNotFound) {
+			t.Errorf("Expected ErrServiceNotFound in chain, got %v", err)
+		}
+		if !errors.Is(err, testErr) {
+			t.Errorf("Expected test error in chain, got %v", err)
+		}
+	})
 }
 
 // TestResolveKeyAgreement_MockDidKey tests resolution with mock did:key format.

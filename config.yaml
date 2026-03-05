@@ -171,6 +171,26 @@ verifier:
     refresh_token_duration: 86400        # Refresh token duration in seconds (24 hours)
     subject_type: "pairwise"
     subject_salt: "change-this-in-production"
+    # Static OIDC clients (optional)
+    # Pre-configured clients that don't require dynamic registration
+    # These are checked in addition to dynamically registered clients in the database
+    # Note: secrets.yaml currently only supports oidc.subject_salt, not static client secrets.
+    # For production, consider using dynamic client registration or environment variables.
+    # static_clients:
+    #   - client_id: "example-client-id"
+    #     client_secret: ""  # Set via environment variable or leave empty for public clients
+    #     redirect_uris:
+    #       - "https://example.com/callback"
+    #     allowed_scopes:  # If omitted, defaults to openid, profile, email, address, phone
+    #       - "openid"
+    #       - "profile"
+    #       - "pid"
+    #     token_endpoint_auth_method: "none"  # Use "none" for public clients (no secret required)
+    #     grant_types:  # Optional, default: ["authorization_code"]
+    #       - "authorization_code"
+    #     response_types:  # Optional, default: ["code"]
+    #       - "code"
+    #     client_name: "Example Static Client"  # Optional
   openid4vp:
     presentation_timeout: 300
     # Template-based presentation requests (optional)

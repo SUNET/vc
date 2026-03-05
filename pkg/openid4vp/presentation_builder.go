@@ -85,23 +85,40 @@ func (pb *PresentationBuilder) BuildFromTemplate(ctx context.Context, templateID
 	return dcql, template, nil
 }
 
-// BuildDCQLQuery creates a DCQL query from OIDC scopes
-// This attempts to find matching templates, and falls back to a generic DCQL query if none are found
+// BuildDCQLQuery creates a DCQL query from OIDC scopes.
+// This attempts to find matching templates, and falls back to a generic DCQL query if none are found.
+// All scopes are considered for matching, including standard OIDC scopes like "openid".
+// This allows standard OIDC scopes to optionally map to credentials if configured.
+// Non-standard scopes are prioritized over standard scopes to prevent "openid" from
+// always being selected when it appears first in the request.
 func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []string) (*DCQL, error) {
 	if len(scopes) == 0 {
 		// Return a generic DCQL query when no scopes provided
 		return pb.createGenericDCQL(), nil
 	}
 
-	// Filter out standard OIDC scopes
-	credentialScopes := filterStandardScopes(scopes)
-	if len(credentialScopes) == 0 {
-		// No credential-specific scopes, return generic DCQL
-		return pb.createGenericDCQL(), nil
+	// Prioritize non-standard scopes over standard OIDC scopes.
+	// This prevents "openid" (which typically appears first) from always being selected.
+	// First, try non-standard scopes
+	for _, scope := range scopes {
+		if StandardOIDCScopes[scope] {
+			continue // Skip standard scopes in first pass
+		}
+		if templateID, ok := pb.scopeIndex[scope]; ok {
+			template := pb.templates[templateID]
+			dcql := template.GetDCQLQuery()
+			if dcql != nil {
+				// Return a copy to avoid modifications to the template
+				return copyDCQL(dcql), nil
+			}
+		}
 	}
 
-	// Try to find a template for the first credential scope
-	for _, scope := range credentialScopes {
+	// Then, try standard OIDC scopes (if configured with a template)
+	for _, scope := range scopes {
+		if !StandardOIDCScopes[scope] {
+			continue // Already tried non-standard scopes
+		}
 		if templateID, ok := pb.scopeIndex[scope]; ok {
 			template := pb.templates[templateID]
 			dcql := template.GetDCQLQuery()
@@ -123,8 +140,15 @@ func copyDCQL(src *DCQL) *DCQL {
 	}
 
 	dst := &DCQL{
-		Credentials:    make([]CredentialQuery, len(src.Credentials)),
-		CredentialSets: make([]CredentialSetQuery, len(src.CredentialSets)),
+		Credentials: make([]CredentialQuery, len(src.Credentials)),
+		// CredentialSets is only set if source has elements.
+		// We use nil (not empty slice) to ensure consistent behavior:
+		// nil is unambiguous for both JSON omitempty and validator omitempty.
+	}
+
+	// Only create CredentialSets if source has elements
+	if len(src.CredentialSets) > 0 {
+		dst.CredentialSets = make([]CredentialSetQuery, len(src.CredentialSets))
 	}
 
 	// Copy credentials
@@ -196,20 +220,28 @@ func (pb *PresentationBuilder) createGenericDCQL() *DCQL {
 	}
 }
 
-// filterStandardScopes removes standard OIDC scopes from the list
-func filterStandardScopes(scopes []string) []string {
-	standardScopes := map[string]bool{
-		"openid":         true,
-		"profile":        true,
-		"email":          true,
-		"address":        true,
-		"phone":          true,
-		"offline_access": true,
-	}
+// StandardOIDCScopes contains scopes defined by OpenID Connect Core.
+// These are protocol-level scopes that are optional for credential matching.
+// The "openid" scope is REQUIRED by the OIDC specification and will always
+// be present, but it does not need to be mapped to a credential.
+var StandardOIDCScopes = map[string]bool{
+	"openid":         true,
+	"profile":        true,
+	"email":          true,
+	"address":        true,
+	"phone":          true,
+	"offline_access": true,
+}
 
+// FilterStandardScopes removes standard OIDC scopes from the list.
+// This is a utility function that can be used when you specifically need
+// to identify scopes that are not standard OIDC scopes. Note that credential
+// matching logic does NOT use this - all scopes (including standard ones)
+// are considered for matching to allow optional credential mappings.
+func FilterStandardScopes(scopes []string) []string {
 	filtered := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if !standardScopes[scope] {
+		if !StandardOIDCScopes[scope] {
 			filtered = append(filtered, scope)
 		}
 	}
@@ -234,24 +266,17 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 	return nil
 }
 
-// scopesMatch checks if the requested scopes match the template scopes
-// A template matches if it contains at least one of the requested scopes
-// (excluding standard OIDC scopes like "openid", "profile", "email")
+// scopesMatch checks if the requested scopes match the template scopes.
+// A template matches if it contains at least one of the requested scopes.
+// All scopes are considered for matching, including standard OIDC scopes like "openid".
+// This allows standard OIDC scopes to optionally map to credentials if configured.
 func scopesMatch(requestedScopes []string, templateScopes []string) bool {
-	// Filter out standard OIDC scopes from requested scopes
-	credentialScopes := make([]string, 0)
-	for _, scope := range requestedScopes {
-		if scope != "openid" && scope != "profile" && scope != "email" {
-			credentialScopes = append(credentialScopes, scope)
-		}
-	}
-
-	if len(credentialScopes) == 0 {
+	if len(requestedScopes) == 0 {
 		return false
 	}
 
-	// Check if template contains any of the credential scopes
-	for _, requestedScope := range credentialScopes {
+	// Check if template contains any of the requested scopes
+	for _, requestedScope := range requestedScopes {
 		for _, templateScope := range templateScopes {
 			if requestedScope == templateScope {
 				return true // Match found

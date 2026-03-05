@@ -4,6 +4,7 @@
 package keyresolver
 
 import (
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -12,7 +13,15 @@ import (
 	"fmt"
 	"strings"
 
+	"filippo.io/edwards25519"
 	"github.com/multiformats/go-multibase"
+)
+
+// Error format constants to avoid SonarCloud duplication warnings.
+const (
+	keyFragmentFormat = "key-%d"
+	errInvalidFragFmt = "invalid key fragment format: %s"
+	errKeyNotFoundFmt = "key not found: #%s"
 )
 
 // Resolver provides methods to resolve public keys from verification methods.
@@ -28,6 +37,40 @@ type ECDSAResolver interface {
 	Resolver
 	// ResolveECDSA resolves an ECDSA public key from a verification method identifier
 	ResolveECDSA(verificationMethod string) (*ecdsa.PublicKey, error)
+}
+
+// X25519Resolver extends Resolver with X25519 key agreement key resolution.
+// This is used for DIDComm encryption (ECDH-ES key agreement).
+type X25519Resolver interface {
+	Resolver
+	// ResolveX25519 resolves an X25519 key agreement key from a DID or verification method
+	ResolveX25519(did string) (*ecdh.PublicKey, error)
+}
+
+// ServiceResolver provides service endpoint resolution from DID documents.
+type ServiceResolver interface {
+	// ResolveService resolves a DIDCommMessaging service endpoint for a DID
+	ResolveService(did string) (*DIDCommService, error)
+}
+
+// DIDCommService represents a DIDCommMessaging service endpoint from a DID document.
+type DIDCommService struct {
+	// ID is the service ID
+	ID string
+	// ServiceEndpoint is the URI for message delivery
+	ServiceEndpoint string
+	// RoutingKeys are the keys to use for routing/mediation
+	RoutingKeys []string
+	// Accept lists the accepted media types
+	Accept []string
+}
+
+// FullResolver combines all resolution capabilities.
+type FullResolver interface {
+	Resolver
+	ECDSAResolver
+	X25519Resolver
+	ServiceResolver
 }
 
 // MultiResolver combines multiple resolvers with fallback behavior
@@ -136,6 +179,34 @@ func (s *SmartResolver) GetLocalResolver() *LocalResolver {
 // GetRemoteResolver returns the remote resolver for direct access if needed.
 func (s *SmartResolver) GetRemoteResolver() Resolver {
 	return s.remote
+}
+
+// ResolveX25519 resolves an X25519 key agreement key.
+// Local DIDs are resolved locally; all network DIDs delegate to go-trust.
+func (s *SmartResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
+	if CanResolveLocally(did) {
+		return s.local.ResolveX25519(did)
+	}
+
+	// Delegate to remote resolver (go-trust)
+	if x25519Resolver, ok := s.remote.(X25519Resolver); ok {
+		return x25519Resolver.ResolveX25519(did)
+	}
+	return nil, fmt.Errorf("remote resolver does not support X25519")
+}
+
+// ResolveService resolves DIDCommMessaging service endpoints.
+// Local DIDs (did:peer) can have inline services; network DIDs delegate to go-trust.
+func (s *SmartResolver) ResolveService(did string) (*DIDCommService, error) {
+	if CanResolveLocally(did) {
+		return s.local.ResolveService(did)
+	}
+
+	// Delegate to remote resolver (go-trust)
+	if serviceResolver, ok := s.remote.(ServiceResolver); ok {
+		return serviceResolver.ResolveService(did)
+	}
+	return nil, fmt.Errorf("remote resolver does not support service resolution")
 }
 
 // DID method prefixes
@@ -517,37 +588,242 @@ func parseDidPeer2Keys(didPeer string) ([]didPeerKey, error) {
 	return keys, nil
 }
 
-// findEd25519KeyByFragment finds an Ed25519 key by its fragment identifier (e.g., "key-1").
-func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment string) (ed25519.PublicKey, error) {
-	// Parse fragment as "key-N"
+// findKeyByFragment finds a key entry by its fragment identifier (e.g., "key-1").
+// Returns the key's purpose and multikey string for type-specific decoding.
+func findKeyByFragment(keys []didPeerKey, fragment string) (*didPeerKey, error) {
 	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
-		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	if _, err := fmt.Sscanf(fragment, keyFragmentFormat, &keyIndex); err != nil {
+		return nil, fmt.Errorf(errInvalidFragFmt, fragment)
 	}
 
-	for _, key := range keys {
-		if key.Index == keyIndex {
-			return l.decodeMultikey(key.Multikey)
+	for i := range keys {
+		if keys[i].Index == keyIndex {
+			return &keys[i], nil
 		}
 	}
 
-	return nil, fmt.Errorf("key not found: #%s", fragment)
+	return nil, fmt.Errorf(errKeyNotFoundFmt, fragment)
+}
+
+// findEd25519KeyByFragment finds an Ed25519 key by its fragment identifier (e.g., "key-1").
+func (l *LocalResolver) findEd25519KeyByFragment(keys []didPeerKey, fragment string) (ed25519.PublicKey, error) {
+	key, err := findKeyByFragment(keys, fragment)
+	if err != nil {
+		return nil, err
+	}
+	return l.decodeMultikey(key.Multikey)
 }
 
 // findECDSAKeyByFragment finds an ECDSA key by its fragment identifier.
 func findECDSAKeyByFragment(keys []didPeerKey, fragment string) (*ecdsa.PublicKey, error) {
-	var keyIndex int
-	if _, err := fmt.Sscanf(fragment, "key-%d", &keyIndex); err != nil {
-		return nil, fmt.Errorf("invalid key fragment format: %s", fragment)
+	key, err := findKeyByFragment(keys, fragment)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMultikeyECDSA(key.Multikey)
+}
+
+// findX25519KeyByFragment finds an X25519 (or Ed25519 convertible to X25519) key by fragment.
+// For E (encryption) keys, decodes as X25519. For V keys, converts Ed25519 to X25519.
+func findX25519KeyByFragment(keys []didPeerKey, fragment string, l *LocalResolver) (*ecdh.PublicKey, error) {
+	key, err := findKeyByFragment(keys, fragment)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, key := range keys {
-		if key.Index == keyIndex {
-			return decodeMultikeyECDSA(key.Multikey)
+	// Try to decode as X25519 first (E keys)
+	if key.Purpose == 'E' {
+		return decodeMultikeyX25519(key.Multikey)
+	}
+	// For V keys, convert Ed25519 to X25519
+	if key.Purpose == 'V' {
+		edKey, err := l.decodeMultikey(key.Multikey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode key: %w", err)
+		}
+		return ed25519ToX25519(edKey)
+	}
+	return nil, fmt.Errorf("key #%s is not suitable for key agreement (purpose: %c)", fragment, key.Purpose)
+}
+
+// ResolveX25519 resolves an X25519 key agreement key from a local DID.
+// For did:peer:2, this extracts the E (encryption) purpose key.
+// For did:key with Ed25519, this converts to X25519.
+// If a fragment is provided (e.g., did:peer:2...#key-1), it selects the specific key.
+func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
+	// Extract fragment if present
+	baseDID := did
+	fragment := ""
+	if idx := strings.Index(did, "#"); idx > 0 {
+		baseDID = did[:idx]
+		fragment = did[idx+1:]
+	}
+
+	// Handle did:peer:2 - look for E (encryption) purpose keys
+	if strings.HasPrefix(baseDID, didPeer2Prefix) {
+		keys, err := parseDidPeer2Keys(baseDID)
+		if err != nil {
+			return nil, err
+		}
+
+		// If a fragment is specified, find the key by index
+		if fragment != "" {
+			return findX25519KeyByFragment(keys, fragment, l)
+		}
+
+		// No fragment - find first encryption (E) purpose key
+		for _, key := range keys {
+			if key.Purpose == 'E' {
+				return decodeMultikeyX25519(key.Multikey)
+			}
+		}
+		// Fallback: try to convert first V key from Ed25519 to X25519
+		for _, key := range keys {
+			if key.Purpose == 'V' {
+				edKey, err := l.decodeMultikey(key.Multikey)
+				if err == nil {
+					return ed25519ToX25519(edKey)
+				}
+			}
+		}
+		return nil, fmt.Errorf("no key agreement key found in did:peer:2: %s", baseDID)
+	}
+
+	// Handle did:peer:0 and did:key - convert Ed25519 to X25519
+	if strings.HasPrefix(baseDID, didPeer0Prefix) {
+		multikey := strings.TrimPrefix(baseDID, didPeer0Prefix)
+		edKey, err := l.decodeMultikey(multikey)
+		if err == nil {
+			return ed25519ToX25519(edKey)
+		}
+		// Try as direct X25519
+		return decodeMultikeyX25519(multikey)
+	}
+
+	if strings.HasPrefix(baseDID, "did:key:") {
+		multikey := strings.TrimPrefix(baseDID, "did:key:")
+		edKey, err := l.decodeMultikey(multikey)
+		if err == nil {
+			return ed25519ToX25519(edKey)
+		}
+		// Try as direct X25519
+		return decodeMultikeyX25519(multikey)
+	}
+
+	// Handle did:jwk
+	if strings.HasPrefix(baseDID, "did:jwk:") {
+		jwk, err := l.parseDidJwk(baseDID)
+		if err != nil {
+			return nil, err
+		}
+		return JWKToX25519(jwk)
+	}
+
+	return nil, fmt.Errorf("cannot resolve X25519 key from: %s", did)
+}
+
+// ResolveService resolves a DIDCommMessaging service from a local DID.
+// For did:peer:2, this extracts inline service endpoints (S purpose).
+func (l *LocalResolver) ResolveService(did string) (*DIDCommService, error) {
+	// Extract base DID without fragment
+	baseDID := did
+	if idx := strings.Index(did, "#"); idx > 0 {
+		baseDID = did[:idx]
+	}
+
+	// Only did:peer:2 has inline services
+	if !strings.HasPrefix(baseDID, didPeer2Prefix) {
+		return nil, fmt.Errorf("service resolution not supported for: %s (only did:peer:2 has inline services)", did)
+	}
+
+	// Parse service entries from did:peer:2
+	return parseDidPeer2Service(baseDID)
+}
+
+// parseDidPeer2Service extracts the first DIDCommMessaging service from a did:peer:2 identifier.
+func parseDidPeer2Service(didPeer string) (*DIDCommService, error) {
+	// Remove "did:peer:2" prefix
+	content := strings.TrimPrefix(didPeer, "did:peer:2")
+	if content == "" {
+		return nil, fmt.Errorf("empty did:peer:2 identifier")
+	}
+
+	// Split by "." (each element starts with ".")
+	parts := strings.Split(content, ".")
+
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+
+		purpose := part[0]
+		data := part[1:]
+
+		// S = Service entry (base64url-encoded JSON)
+		if purpose == 'S' {
+			return parseServiceEntry(didPeer, data)
 		}
 	}
 
-	return nil, fmt.Errorf("key not found: #%s", fragment)
+	return nil, fmt.Errorf("no service entry found in did:peer:2: %s", didPeer)
+}
+
+// parseServiceEntry decodes a base64url-encoded service entry from did:peer:2.
+func parseServiceEntry(did, encodedService string) (*DIDCommService, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(encodedService)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode service entry: %w", err)
+	}
+
+	var svc struct {
+		Type            string   `json:"t"`
+		ServiceEndpoint string   `json:"s"`
+		RoutingKeys     []string `json:"r,omitempty"`
+		Accept          []string `json:"a,omitempty"`
+	}
+	if err := json.Unmarshal(decoded, &svc); err != nil {
+		return nil, fmt.Errorf("failed to parse service entry: %w", err)
+	}
+
+	// Check for DIDCommMessaging service type
+	if svc.Type != "dm" && svc.Type != "DIDCommMessaging" {
+		return nil, fmt.Errorf("not a DIDCommMessaging service: %s", svc.Type)
+	}
+
+	// Validate that service endpoint is present
+	if svc.ServiceEndpoint == "" {
+		return nil, fmt.Errorf("empty service endpoint in did:peer:2 service entry")
+	}
+
+	return &DIDCommService{
+		ID:              did + "#service-1",
+		ServiceEndpoint: svc.ServiceEndpoint,
+		RoutingKeys:     svc.RoutingKeys,
+		Accept:          svc.Accept,
+	}, nil
+}
+
+// ed25519ToX25519 converts an Ed25519 public key to X25519 for key agreement.
+// This implements the birational equivalence between Ed25519 (Edwards curve) and
+// X25519 (Montgomery curve) using: u = (1 + y) / (1 - y)
+func ed25519ToX25519(edPub ed25519.PublicKey) (*ecdh.PublicKey, error) {
+	if len(edPub) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid Ed25519 public key size: got %d, want %d", len(edPub), ed25519.PublicKeySize)
+	}
+
+	// Use filippo.io/edwards25519 for proper curve point handling
+	// SetBytes interprets the 32-byte Ed25519 public key as an Edwards curve point
+	point, err := new(edwards25519.Point).SetBytes(edPub)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Ed25519 public key: %w", err)
+	}
+
+	// BytesMontgomery converts the Edwards point to Montgomery u-coordinate
+	// This implements the birational equivalence correctly
+	xBytes := point.BytesMontgomery()
+
+	// Convert to ecdh.PublicKey (X25519)
+	return ecdh.X25519().NewPublicKey(xBytes)
 }
 
 // StaticResolver provides a simple key->value resolver for testing

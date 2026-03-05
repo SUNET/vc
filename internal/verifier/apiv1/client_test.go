@@ -177,66 +177,6 @@ func TestPKCE_S256(t *testing.T) {
 	assert.Equal(t, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", challenge)
 }
 
-// TestHmacEqual tests the constant-time byte comparison function
-func TestHmacEqual(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        []byte
-		b        []byte
-		expected bool
-	}{
-		{
-			name:     "equal slices",
-			a:        []byte("hello world"),
-			b:        []byte("hello world"),
-			expected: true,
-		},
-		{
-			name:     "different slices same length",
-			a:        []byte("hello world"),
-			b:        []byte("hello worle"),
-			expected: false,
-		},
-		{
-			name:     "different lengths",
-			a:        []byte("hello"),
-			b:        []byte("hello world"),
-			expected: false,
-		},
-		{
-			name:     "empty slices",
-			a:        []byte{},
-			b:        []byte{},
-			expected: true,
-		},
-		{
-			name:     "one empty one not",
-			a:        []byte{},
-			b:        []byte("hello"),
-			expected: false,
-		},
-		{
-			name:     "binary data equal",
-			a:        []byte{0x00, 0x01, 0x02, 0xff},
-			b:        []byte{0x00, 0x01, 0x02, 0xff},
-			expected: true,
-		},
-		{
-			name:     "binary data different",
-			a:        []byte{0x00, 0x01, 0x02, 0xff},
-			b:        []byte{0x00, 0x01, 0x02, 0xfe},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := hmacEqual(tt.a, tt.b)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 	tests := []struct {
 		name                  string

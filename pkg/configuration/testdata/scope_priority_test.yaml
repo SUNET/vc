@@ -1,0 +1,67 @@
+# Test fixture for scope priority tests
+# This includes an "openid" template to properly test that non-standard scopes
+# take priority over standard OIDC scopes.
+
+templates:
+  - id: "basic_pid"
+    name: "Basic PID"
+    description: "Basic personal identification"
+    version: "1.0"
+    oidc_scopes:
+      - "pid"
+    dcql:
+      credentials:
+        - id: "pid_credential"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eu.europa.ec.eudi:pid:1"
+          claims:
+            - path: ["given_name"]
+            - path: ["family_name"]
+    claim_mappings:
+      given_name: "given_name"
+      family_name: "family_name"
+    enabled: true
+
+  - id: "basic_ehic"
+    name: "Basic EHIC"
+    description: "Basic health insurance card"
+    version: "1.0"
+    oidc_scopes:
+      - "ehic"
+    dcql:
+      credentials:
+        - id: "ehic_credential"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eu.europa.ec.eudi:ehic:1"
+          claims:
+            - path: ["card_number"]
+    claim_mappings:
+      card_number: "ehic_number"
+    enabled: true
+
+  # Standard OIDC scope template - used to test scope prioritization
+  # This should NOT be selected when non-standard scopes are also present
+  - id: "openid_basic"
+    name: "OpenID Basic"
+    description: "Basic OpenID identity"
+    version: "1.0"
+    oidc_scopes:
+      - "openid"
+    dcql:
+      credentials:
+        - id: "openid_credential"
+          format: "vc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:openid:basic:1"
+          claims:
+            - path: ["sub"]
+    claim_mappings:
+      sub: "subject"
+    enabled: true
+
+default_template: "basic_pid"
