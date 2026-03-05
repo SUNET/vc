@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-04
+**Generated:** 2026-03-05
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -687,12 +687,15 @@ The signing key is shared from the parent Verifier.KeyConfig.
 
 This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
 
-| Field               | Type       | Description                                                 | Example                        | Default                  | Required |
-| ------------------- | ---------- | ----------------------------------------------------------- | ------------------------------ | ------------------------ | -------- |
-| `go_trust_url`      | `string`   | URL of the go-trust PDP (Policy Decision Point) service.    | `"https://trust.sunet.se/pdp"` | -                        | No       |
-| `local_did_methods` | `[]string` | Which DID methods can be resolved locally without go-trust. | -                              | `["did:key", "did:jwk"]` | No       |
-| `trust_policies`    | `object`   | Per-role trust evaluation policies.                         | -                              | -                        | No       |
-| `enable`            | `bool`     | Whether trust evaluation is enabled.                        | -                              | `true`                   | No       |
+Trust evaluation operates in one of two modes:
+- When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
+- When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
+
+| Field               | Type       | Description                                                                  | Example                        | Default                  | Required |
+| ------------------- | ---------- | ---------------------------------------------------------------------------- | ------------------------------ | ------------------------ | -------- |
+| `pdp_url`           | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation. | `"https://trust.sunet.se/pdp"` | -                        | No       |
+| `local_did_methods` | `[]string` | Which DID methods can be resolved locally without go-trust.                  | -                              | `["did:key", "did:jwk"]` | No       |
+| `trust_policies`    | `object`   | Per-role trust evaluation policies.                                          | -                              | -                        | No       |
 
 ### `trust_policies` entry
 
