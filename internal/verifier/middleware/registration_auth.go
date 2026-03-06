@@ -17,6 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	errCodeInvalidToken                            = "invalid_token"
+	errDescInvalidRegistrationAuthorizationToken   = "invalid registration authorization token"
+	errDescMissingOrInvalidBearerToken            = "missing or invalid bearer token"
+)
+
 // RegistrationAuthValidator validates initial access tokens for dynamic client registration.
 type RegistrationAuthValidator interface {
 	Validate(ctx context.Context, token string) error
@@ -35,7 +41,7 @@ func (e *registrationAuthError) Error() string {
 func unauthorizedRegistrationError(description string) *registrationAuthError {
 	return &registrationAuthError{
 		status:      http.StatusUnauthorized,
-		errorCode:   "invalid_token",
+		errorCode:   errCodeInvalidToken,
 		description: description,
 	}
 }
@@ -50,35 +56,19 @@ func unauthorizedRegistrationError(description string) *registrationAuthError {
 // Future option (not implemented): external introspection.
 func NewRegistrationAuthMiddleware(cfg *model.Cfg, log *logger.Log) (gin.HandlerFunc, error) {
 	passThrough := func(c *gin.Context) { c.Next() }
-
-	if cfg == nil || cfg.Verifier == nil || cfg.Verifier.Outbound.OIDCProvider == nil || cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationAuth == nil {
+	authCfg := getDynamicRegistrationAuthConfig(cfg)
+	if authCfg == nil {
 		return passThrough, nil
 	}
 
-	authCfg := cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationAuth
 	mode := strings.ToLower(strings.TrimSpace(authCfg.Mode))
 	if mode == "" || mode == "open" {
 		return passThrough, nil
 	}
 
-	var validator RegistrationAuthValidator
-	switch mode {
-	case "static":
-		v, err := newStaticBearerValidator(authCfg.StaticBearerTokenFile)
-		if err != nil {
-			return nil, err
-		}
-		validator = v
-	case "jwt":
-		v, err := newJWTBearerValidator(authCfg.JWT)
-		if err != nil {
-			return nil, err
-		}
-		validator = v
-	case "introspection":
-		return nil, fmt.Errorf("verifier OIDC dynamic registration auth mode 'introspection' is not implemented yet")
-	default:
-		return nil, fmt.Errorf("unsupported verifier OIDC dynamic registration auth mode: %s", mode)
+	validator, err := buildRegistrationAuthValidator(mode, authCfg)
+	if err != nil {
+		return nil, err
 	}
 
 	if log != nil {
@@ -88,7 +78,7 @@ func NewRegistrationAuthMiddleware(cfg *model.Cfg, log *logger.Log) (gin.Handler
 	return func(c *gin.Context) {
 		token, err := extractBearerToken(c.GetHeader("Authorization"))
 		if err != nil {
-			writeRegistrationAuthError(c, unauthorizedRegistrationError("missing or invalid bearer token"))
+			writeRegistrationAuthError(c, unauthorizedRegistrationError(errDescMissingOrInvalidBearerToken))
 			return
 		}
 
@@ -99,12 +89,33 @@ func NewRegistrationAuthMiddleware(cfg *model.Cfg, log *logger.Log) (gin.Handler
 				return
 			}
 
-			writeRegistrationAuthError(c, unauthorizedRegistrationError("invalid registration authorization token"))
+			writeRegistrationAuthError(c, unauthorizedRegistrationError(errDescInvalidRegistrationAuthorizationToken))
 			return
 		}
 
 		c.Next()
 	}, nil
+}
+
+func getDynamicRegistrationAuthConfig(cfg *model.Cfg) *model.DynamicRegistrationAuthConfig {
+	if cfg == nil || cfg.Verifier == nil || cfg.Verifier.Outbound.OIDCProvider == nil {
+		return nil
+	}
+
+	return cfg.Verifier.Outbound.OIDCProvider.DynamicRegistrationAuth
+}
+
+func buildRegistrationAuthValidator(mode string, authCfg *model.DynamicRegistrationAuthConfig) (RegistrationAuthValidator, error) {
+	switch mode {
+	case "static":
+		return newStaticBearerValidator(authCfg.StaticBearerTokenFile)
+	case "jwt":
+		return newJWTBearerValidator(authCfg.JWT)
+	case "introspection":
+		return nil, fmt.Errorf("verifier OIDC dynamic registration auth mode 'introspection' is not implemented yet")
+	default:
+		return nil, fmt.Errorf("unsupported verifier OIDC dynamic registration auth mode: %s", mode)
+	}
 }
 
 func writeRegistrationAuthError(c *gin.Context, authErr *registrationAuthError) {
@@ -154,7 +165,7 @@ func newStaticBearerValidator(tokenFilePath string) (*staticBearerValidator, err
 
 func (v *staticBearerValidator) Validate(_ context.Context, token string) error {
 	if subtle.ConstantTimeCompare([]byte(token), []byte(v.token)) != 1 {
-		return unauthorizedRegistrationError("invalid registration authorization token")
+		return unauthorizedRegistrationError(errDescInvalidRegistrationAuthorizationToken)
 	}
 
 	return nil
@@ -194,7 +205,7 @@ func (v *jwtBearerValidator) Validate(ctx context.Context, token string) error {
 	defer cancel()
 
 	if _, err := v.verifier.Verify(verifyCtx, token); err != nil {
-		return unauthorizedRegistrationError("invalid registration authorization token")
+		return unauthorizedRegistrationError(errDescInvalidRegistrationAuthorizationToken)
 	}
 
 	return nil
