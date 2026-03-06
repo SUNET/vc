@@ -2,7 +2,9 @@ package openid4vp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"vc/pkg/sdjwtvc"
@@ -30,20 +32,59 @@ func NewClaimsExtractor() *ClaimsExtractor {
 }
 
 // ExtractClaimsFromVPToken extracts claims from a VP token.
-// Automatically detects the format (SD-JWT or mdoc) and extracts claims accordingly.
-// Returns a map of disclosed claims from the credential.
+// Automatically detects the format:
+//   - DCQL response: JSON object mapping credential query IDs to individual tokens
+//   - mdoc: CBOR-based mobile document
+//   - SD-JWT: dot-separated JWT with selective disclosures
+//
+// Returns a merged map of disclosed claims from all credentials.
 func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken string) (map[string]any, error) {
 	if vpToken == "" {
 		return nil, fmt.Errorf("VP token is empty")
 	}
 
+	// Check if this is a DCQL response (JSON object mapping credential IDs to tokens)
+	trimmed := strings.TrimSpace(vpToken)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		return ce.extractClaimsFromDCQLResponse(ctx, trimmed)
+	}
+
+	return ce.extractClaimsFromSingleToken(vpToken)
+}
+
+// extractClaimsFromDCQLResponse parses a DCQL vp_token response where the value
+// is a JSON object mapping credential query IDs to their individual VP tokens.
+// Claims from all credentials are merged into a single map.
+func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vpToken string) (map[string]any, error) {
+	var dcqlResponse map[string]string
+	if err := json.Unmarshal([]byte(vpToken), &dcqlResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse DCQL vp_token as JSON object: %w", err)
+	}
+
+	if len(dcqlResponse) == 0 {
+		return nil, fmt.Errorf("DCQL vp_token contains no credentials")
+	}
+
+	merged := make(map[string]any)
+	for credID, token := range dcqlResponse {
+		claims, err := ce.extractClaimsFromSingleToken(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract claims from credential %q: %w", credID, err)
+		}
+		maps.Copy(merged, claims)
+	}
+
+	return merged, nil
+}
+
+// extractClaimsFromSingleToken extracts claims from a single VP token (SD-JWT or mdoc).
+func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[string]any, error) {
 	// Check if this is an mdoc format token
 	if IsMDocFormat(vpToken) {
 		return ExtractMDocClaims(vpToken)
 	}
 
 	// Default to SD-JWT format
-	// Use sdjwtvc.Token.Parse() to extract disclosed claims
 	parsed, err := sdjwtvc.Token(vpToken).Parse()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse VP token: %w", err)

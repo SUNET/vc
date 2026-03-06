@@ -177,7 +177,7 @@ func TestPKCE_S256(t *testing.T) {
 	assert.Equal(t, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", challenge)
 }
 
-func TestClient_buildLegacyDCQLQuery(t *testing.T) {
+func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 	tests := []struct {
 		name                  string
 		scopes                []string
@@ -190,6 +190,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
 					},
@@ -203,11 +204,13 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma", "ehic"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
 					},
 				},
 				"ehic": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:ehic",
 					},
@@ -221,6 +224,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"openid", "diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
 					},
@@ -254,7 +258,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT:  "urn:credential:diploma",
 						Name: "Diploma Credential",
@@ -289,7 +293,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			}
 			client, _ := CreateTestClientWithMock(cfg)
 
-			dcql, err := client.buildLegacyDCQLQuery(tt.scopes)
+			dcql, err := client.buildDCQLQueryFromConfig(tt.scopes)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -299,9 +303,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 				require.NotNil(t, dcql)
 				assert.Equal(t, tt.expectedCredCount, len(dcql.Credentials))
 
-				// Verify credential format is vc+sd-jwt
+				// Verify credential format matches config
 				for _, cred := range dcql.Credentials {
-					assert.Equal(t, "vc+sd-jwt", cred.Format)
+					assert.Equal(t, "dc+sd-jwt", cred.Format)
 				}
 			}
 		})

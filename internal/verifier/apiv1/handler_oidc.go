@@ -44,24 +44,32 @@ type AuthorizeRequest struct {
 	ACRValues           string `form:"acr_values" validate:"omitempty,max=512,printascii"`
 }
 
+// WalletLink represents a clickable link to a known web wallet
+type WalletLink struct {
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	QRCodeImageURL string `json:"qr_code_image_url"` // QR code image URL for cross-device flow
+}
+
 // AuthorizeResponse represents the response to an authorization request
 type AuthorizeResponse struct {
-	SessionID        string   `json:"session_id"`
-	QRCodeData       string   `json:"qr_code_data"`
-	QRCodeImageURL   string   `json:"qr_code_image_url"`
-	DeepLinkURL      string   `json:"deep_link_url"`
-	PollURL          string   `json:"poll_url"`
-	PreferredFormats []string `json:"preferred_formats"`
-	UseJAR           bool     `json:"use_jar"`
-	ResponseMode     string   `json:"response_mode"`
-	Title            string   `json:"title"`
-	Subtitle         string   `json:"subtitle"`
-	PrimaryColor     string   `json:"primary_color"`
-	SecondaryColor   string   `json:"secondary_color"`
-	Theme            string   `json:"theme"`
-	CustomCSS        string   `json:"custom_css"`
-	CSSFile          string   `json:"css_file"`
-	LogoURL          string   `json:"logo_url"`
+	SessionID        string       `json:"session_id"`
+	QRCodeData       string       `json:"qr_code_data"`
+	QRCodeImageURL   string       `json:"qr_code_image_url"`
+	DeepLinkURL      string       `json:"deep_link_url"`
+	PollURL          string       `json:"poll_url"`
+	WalletLinks      []WalletLink `json:"wallet_links,omitempty"`
+	PreferredFormats []string     `json:"preferred_formats"`
+	UseJAR           bool         `json:"use_jar"`
+	ResponseMode     string       `json:"response_mode"`
+	Title            string       `json:"title"`
+	Subtitle         string       `json:"subtitle"`
+	PrimaryColor     string       `json:"primary_color"`
+	SecondaryColor   string       `json:"secondary_color"`
+	Theme            string       `json:"theme"`
+	CustomCSS        string       `json:"custom_css"`
+	CSSFile          string       `json:"css_file"`
+	LogoURL          string       `json:"logo_url"`
 }
 
 // Authorize handles the OIDC authorization request
@@ -152,10 +160,12 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Construct OpenID4VP authorization request URL with query parameters
+	// Use x509_san_dns: prefix so wallets know how to verify the client identity
+	oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"))
 	q := url.Values{}
-	q.Set("client_id", c.cfg.Verifier.PublicURL)
+	q.Set("client_id", oidc4vpClientID)
 	q.Set("request_uri", requestObjectPath)
-	authzReqURL := "openid4vp://?" + q.Encode()
+	authzReqURL := "openid4vp://cb?" + q.Encode()
 
 	qrCodeImageURL, err := url.JoinPath("/qr", sessionID)
 	if err != nil {
@@ -178,17 +188,30 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		PollURL:        pollURL,
 	}
 
-	// Add Digital Credentials API configuration
-	if c.cfg.Verifier.DigitalCredentials.Enable {
-		response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
-		response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
-		response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
-	} else {
-		// Defaults
-		response.PreferredFormats = []string{"vc+sd-jwt"}
-		response.UseJAR = false
-		response.ResponseMode = "direct_post"
+	// Build wallet links from supported_wallets config
+	// Each wallet URL gets the same client_id + request_uri params appended
+	for name, walletBaseURL := range c.cfg.Verifier.SupportedWallets {
+		walletLink := walletBaseURL + "?" + q.Encode()
+
+		// Build QR code image URL for cross-device flow
+		walletQRURL, err := url.JoinPath("/qr", sessionID)
+		if err != nil {
+			c.log.Error(err, "Failed to construct wallet QR code URL")
+			return nil, ErrServerError
+		}
+		walletQRURL += "?wallet=" + url.QueryEscape(name)
+
+		response.WalletLinks = append(response.WalletLinks, WalletLink{
+			Name:           name,
+			URL:            walletLink,
+			QRCodeImageURL: walletQRURL,
+		})
 	}
+
+	// Add Digital Credentials API configuration
+	response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
+	response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
+	response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 
 	// Add CSS customization configuration
 	cssConfig := c.cfg.Verifier.AuthorizationPageCSS
@@ -748,7 +771,8 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 
 // GetQRCodeRequest represents a request for a QR code image
 type GetQRCodeRequest struct {
-	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+	SessionID  string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+	WalletName string `json:"-" form:"wallet" validate:"omitempty,max=128,printascii"` // Optional: generate QR for a specific web wallet
 }
 
 // GetQRCodeResponse contains the QR code image data
@@ -767,17 +791,38 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 		return nil, ErrSessionNotFound
 	}
 
-	// Generate authorization request URI
-	requestObject := &openid4vp.RequestObject{
-		ClientID: c.cfg.Verifier.OIDCOP.Issuer,
-	}
-	authReqURI, err := requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+	var qrData string
+
+	if req.WalletName != "" {
+		// Cross-device web wallet flow: generate QR for a specific web wallet URL
+		walletBaseURL, ok := c.cfg.Verifier.SupportedWallets[req.WalletName]
+		if !ok {
+			return nil, ErrInvalidRequest
+		}
+
+		// Build the web wallet URL with the same authorization params
+		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", req.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to construct request object path: %w", err)
+		}
+
+		q := url.Values{}
+		q.Set("client_id", fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")))
+		q.Set("request_uri", requestObjectPath)
+		qrData = walletBaseURL + "?" + q.Encode()
+	} else {
+		// Standard flow: generate QR for openid4vp:// URI (native wallet)
+		requestObject := &openid4vp.RequestObject{
+			ClientID: fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")),
+		}
+		qrData, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+		}
 	}
 
 	// Generate QR code
-	qr, err := qrcode.New(authReqURI, qrcode.Medium)
+	qr, err := qrcode.New(qrData, qrcode.Medium)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate QR code: %w", err)
 	}
@@ -801,8 +846,8 @@ type PollSessionRequest struct {
 
 // PollSessionResponse contains the session status
 type PollSessionResponse struct {
-	Status      string
-	RedirectURI string
+	Status      string `json:"status"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 // PollSession returns the current status of a session

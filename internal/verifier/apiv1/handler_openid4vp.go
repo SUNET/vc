@@ -2,7 +2,9 @@ package apiv1
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"strings"
 	"time"
 	"vc/pkg/crypto"
 	"vc/pkg/openid4vp"
@@ -24,17 +26,22 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Create request object
-	responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/direct_post")
+	// Use the OIDC direct_post endpoint which does not require a browser session,
+	// so that external wallets can POST the VP token back.
+	responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/oidc-direct_post")
 	if err != nil {
 		c.log.Error(err, "Failed to construct response URI")
 		return "", err
 	}
+	// Build x509_san_dns client_id: strip scheme to get the DNS name (+ optional port)
+	clientID := fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"))
+
 	requestObject := &openid4vp.RequestObject{
 		ISS:          c.cfg.Verifier.OIDCOP.Issuer,
 		AUD:          "https://self-issued.me/v2",
 		IAT:          time.Now().Unix(),
 		ResponseType: "vp_token",
-		ClientID:     c.cfg.Verifier.OIDCOP.Issuer,
+		ClientID:     clientID,
 		Nonce:        nonce,
 		ResponseMode: responseMode,
 		ResponseURI:  responseURI,
@@ -49,8 +56,8 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		}
 	}
 
-	// Sign the request object
-	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, nil)
+	// Sign the request object with X.509 certificate chain for x509_san_dns verification
+	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "Failed to sign request object")
 		return "", err
@@ -60,40 +67,6 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	c.cacheService.RequestObject.SetWithTTL(ctx, sessionID, requestObject, 5*time.Minute)
 
 	return signedJWT, nil
-}
-
-// buildVPFormats constructs the vp_formats object based on configured preferred formats
-func (c *Client) buildVPFormats() *openid4vp.VPFormatsSupported {
-	result := &openid4vp.VPFormatsSupported{}
-
-	preferredFormats := c.cfg.Verifier.DigitalCredentials.PreferredFormats
-	if len(preferredFormats) == 0 {
-		// Default to SD-JWT if no preferences specified
-		preferredFormats = []string{"vc+sd-jwt"}
-	}
-
-	for _, format := range preferredFormats {
-		switch format {
-		case "vc+sd-jwt", "dc+sd-jwt":
-			// SD-JWT format with supported algorithms
-			if result.SDJWT == nil {
-				result.SDJWT = &openid4vp.SDJWTVCFormat{
-					SDJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
-					KBJWTAlgValues: []string{"ES256", "ES384", "ES512", "RS256"},
-				}
-			}
-		case "mso_mdoc":
-			// mdoc format with COSE algorithm identifiers
-			if result.MsoMdoc == nil {
-				result.MsoMdoc = &openid4vp.MsoMdocFormat{
-					IssuerAuthAlgValues: []int{-7, -35, -36}, // ES256, ES384, ES512
-					DeviceAuthAlgValues: []int{-7, -35, -36},
-				}
-			}
-		}
-	}
-
-	return result
 }
 
 // GetRequestObject retrieves a request object by session ID

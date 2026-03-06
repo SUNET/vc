@@ -1,0 +1,104 @@
+# EUDI eduID (Educational Identity) Presentation Request
+# Educational identity credential based on PID ARF 1.8
+templates:
+  - id: "eduid_basic"
+    name: "eduID - Basic Profile"
+    description: "Request basic educational identity data"
+    version: "1.0"
+    oidc_scopes:
+      - "eduid"
+      - "profile"
+    dcql:
+      credentials:
+        - id: "eduid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:credential:eduid:1"
+          claims:
+            - path: ["given_name"]
+            - path: ["family_name"]
+            - path: ["birthdate"]
+            - path: ["email"]
+            - path: ["nationalities"]
+    claim_mappings:
+      given_name: "given_name"
+      family_name: "family_name"
+      birthdate: "birthdate"
+      email: "email"
+      nationalities: "nationalities"
+    enabled: true
+
+  - id: "eduid_full"
+    name: "eduID - Full Profile"
+    description: "Request complete educational identity data"
+    version: "1.0"
+    oidc_scopes:
+      - "eduid_full"
+    dcql:
+      credentials:
+        - id: "eduid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:credential:eduid:1"
+          claims:
+            - path: ["given_name"]
+            - path: ["family_name"]
+            - path: ["birthdate"]
+            - path: ["email"]
+            - path: ["phone_number"]
+            - path: ["nationalities"]
+            - path: ["personal_administrative_number"]
+            - path: ["address"]
+            - path: ["place_of_birth"]
+            - path: ["sex"]
+            - path: ["picture"]
+            - path: ["age_equal_or_over"]
+            - path: ["issuing_authority"]
+            - path: ["issuing_country"]
+            - path: ["date_of_expiry"]
+            - path: ["date_of_issuance"]
+            - path: ["document_number"]
+    claim_mappings:
+      given_name: "given_name"
+      family_name: "family_name"
+      birthdate: "birthdate"
+      email: "email"
+      phone_number: "phone_number"
+      nationalities: "nationalities"
+      personal_administrative_number: "personal_administrative_number"
+      address: "address"
+      place_of_birth: "place_of_birth"
+      sex: "sex"
+      picture: "picture"
+      age_equal_or_over: "age_equal_or_over"
+      issuing_authority: "issuing_authority"
+      issuing_country: "issuing_country"
+      date_of_expiry: "date_of_expiry"
+      date_of_issuance: "date_of_issuance"
+      document_number: "document_number"
+    enabled: true
+
+  - id: "eduid_age_verification"
+    name: "eduID - Age Verification"
+    description: "Request only age verification from eduID"
+    version: "1.0"
+    oidc_scopes:
+      - "eduid_age"
+    dcql:
+      credentials:
+        - id: "eduid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:credential:eduid:1"
+          claims:
+            - path: ["age_equal_or_over", "18"]
+            - path: ["given_name"]
+            - path: ["family_name"]
+    claim_mappings:
+      age_over_18: "age_equal_or_over.18"
+      given_name: "given_name"
+      family_name: "family_name"
+    enabled: true

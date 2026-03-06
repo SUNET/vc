@@ -116,6 +116,10 @@ issuer:
 verifier:
   api_server:
     addr: :8080
+    cors:
+      allowed_origins:
+        - "https://dev.wallet.sunet.se"
+        - "https://sunetwallet-dev.app.siros.org"
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
   public_url: "http://verifier.vc.docker:8080"
   # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP

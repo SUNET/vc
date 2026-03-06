@@ -349,6 +349,35 @@
                     📱 Open in Wallet App
                 </a>
             </div>
+
+            {{/* Web wallet links from supported_wallets config */}}
+            {{if .WalletLinks}}
+            <div id="wallet-links-section" style="margin-top: 24px; border-top: 1px solid var(--border-color, #e2e8f0); padding-top: 20px;">
+                <p style="margin-bottom: 12px; font-weight: 500; color: var(--text-primary); font-size: 14px;">
+                    Or use a web wallet:
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    {{range .WalletLinks}}
+                    <div class="wallet-link-item" style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <a href="{{.URL}}" class="btn btn-secondary" style="text-decoration: none; text-align: center; flex: 1;">
+                                🌐 Open {{.Name}}
+                            </a>
+                            <button class="btn btn-secondary wallet-qr-toggle" data-wallet-name="{{.Name}}" style="white-space: nowrap; padding: 8px 12px;" title="Show QR code to scan from another device">
+                                📷 QR
+                            </button>
+                        </div>
+                        <div class="wallet-qr hidden" data-wallet-qr="{{.Name}}" style="text-align: center;">
+                            <p style="font-size: 12px; color: var(--text-secondary); margin: 8px 0;">
+                                Scan to open <strong>{{.Name}}</strong> on another device
+                            </p>
+                            <img src="{{.QRCodeImageURL}}" alt="QR Code for {{.Name}}" style="max-width: 200px; margin: 0 auto;">
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
         </div>
 
         <div id="loader" class="loader hidden"></div>
@@ -508,11 +537,11 @@
         function startPolling() {
             pollInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`/verification/poll/${config.sessionId}`);
+                    const response = await fetch(`/poll/${config.sessionId}`);
                     if (response.ok) {
                         const data = await response.json();
                         
-                        if (data.status === 'completed') {
+                        if (data.status === 'code_issued' || data.status === 'completed') {
                             clearInterval(pollInterval);
                             showSuccess('Credential verified! Redirecting...');
                             
@@ -521,7 +550,7 @@
                                     window.location.href = data.redirect_uri;
                                 }
                             }, 1000);
-                        } else if (data.status === 'failed') {
+                        } else if (data.status === 'failed' || data.status === 'error') {
                             clearInterval(pollInterval);
                             showError('Verification failed. Please try again.');
                         }
@@ -581,6 +610,18 @@
         if (btnShowQR) {
             btnShowQR.addEventListener('click', toggleToQR);
         }
+
+        // Web wallet QR code toggle buttons
+        document.querySelectorAll('.wallet-qr-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const walletName = btn.getAttribute('data-wallet-name');
+                const qrDiv = document.querySelector(`.wallet-qr[data-wallet-qr="${walletName}"]`);
+                if (qrDiv) {
+                    const isHidden = qrDiv.classList.toggle('hidden');
+                    btn.textContent = isHidden ? '📷 QR' : '✕ Hide QR';
+                }
+            });
+        });
 
         // Initialize
         initializeUI();

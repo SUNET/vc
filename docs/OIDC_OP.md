@@ -9,8 +9,8 @@ From your application's point of view, the verifier looks and behaves like any o
 ### How It Works
 
 1. Your application sends the user to the verifier's login page.
-2. The verifier shows a QR code (or deep link on mobile).
-3. The user scans the QR code with their wallet app and presents their credential.
+2. The verifier presents a way to connect to the user's wallet — a QR code on desktop, or a deep link / browser-mediated prompt on mobile (see [Wallet Interaction Methods](#wallet-interaction-methods) for details).
+3. The user presents their credential from the wallet app.
 4. The verifier checks the credential, then sends the user back to your application with a login token containing the verified identity information.
 
 ```text
@@ -630,10 +630,72 @@ If you're not sure, choose **confidential** for server-side apps and **public** 
 
 ## What the User Sees
 
-When a user is sent to the verifier's authorization page, they see:
+When a user is sent to the verifier's authorization page, the experience adapts to their device:
 
-1. **On desktop:** A QR code they scan with their wallet app on their phone.
-2. **On mobile:** A button or deep link that opens their wallet app directly.
+1. **On desktop:** A QR code is displayed for the user to scan with the wallet app on their **phone** (cross-device flow).
+2. **On mobile:** A deep link button opens the wallet app directly on the **same device**, or — if the W3C Digital Credentials API is enabled and supported — the browser itself prompts the user to present a credential without switching apps.
+
+### Wallet Interaction Methods
+
+The authorization page automatically adapts to the user's device. The method used depends on whether the user is on a desktop or mobile device, their browser capabilities, and the verifier's configuration.
+
+#### Desktop (user browses on a computer)
+
+On a desktop computer the wallet app lives on the user's phone, so the page must bridge the two devices:
+
+| Method | When shown | How it works |
+| --- | --- | --- |
+| **QR Code** (`openid4vp://`) | Always shown by default | The page displays a QR code encoding an `openid4vp://` URI. The user scans it with a native wallet app on their **phone**. This is the standard **cross-device** flow (desktop browser ↔ mobile wallet). |
+| **Web wallet links** | When `supported_wallets` is configured | Clickable HTTPS links to known web wallets that open in the **desktop browser** itself. Each link also has a **QR code button** — clicking it reveals a QR code that, when scanned from a phone, opens the web wallet on the phone instead. This enables **cross-device** flow with web wallets (desktop browser ↔ mobile web wallet). |
+
+> On desktop, the "Open in Wallet" deep link is hidden because there is typically no native wallet app installed on the computer.
+
+#### Mobile (user browses on a phone or tablet)
+
+On a mobile device the wallet app is on the **same device** as the browser, so the page can open it directly:
+
+| Method | When shown | How it works |
+| --- | --- | --- |
+| **"Open in Wallet" deep link** | Automatically shown on mobile | A tappable `openid4vp://` link that launches the user's installed native wallet app directly. This is the primary **same-device** flow (mobile browser → mobile wallet app). |
+| **W3C Digital Credentials API** | `digital_credentials.enable: true` in config AND the browser supports it (Chrome 128+ on Android) | The browser itself mediates wallet selection via `navigator.credentials.get()` — no QR code or app-switch needed. This is a **same-device, same-browser** flow where the credential is presented entirely within the browser's built-in wallet UI. |
+| **QR Code** (`openid4vp://`) | Shown as a fallback | Still available on mobile, but typically less useful since the user cannot easily scan a QR code displayed on the same screen. Useful if the credential is in a wallet on a **second** device. |
+| **Web wallet links** | When `supported_wallets` is configured | Same as on desktop — clickable HTTPS links to known web wallets, opening in the mobile browser. Each also has an optional QR code for use on a second device. |
+
+#### How the page decides what to show
+
+```text
+User opens authorization page
+│
+├─ Desktop browser
+│   ├─ Show QR code (primary — opens native wallet on phone)
+│   ├─ Show web wallet links with QR toggle (if configured)
+│   │   ├─ Click link → opens web wallet in desktop browser (same-device)
+│   │   └─ Click QR → shows QR code → scan opens web wallet on phone (cross-device)
+│   └─ Show "Present from Browser" button (if DC API enabled + supported)
+│
+└─ Mobile browser
+    ├─ Show "Open in Wallet" deep link (primary)
+    ├─ Show web wallet links with QR toggle (if configured)
+    ├─ Show "Present from Browser" button (if DC API enabled + supported)
+    └─ Show QR code (as fallback)
+```
+
+#### Configuration example
+
+```yaml
+verifier:
+  # Web wallet links shown on the authorization page (desktop & mobile)
+  supported_wallets:
+    "SUNET Wallet": "https://wallet.sunet.se/cb"
+    "Test Wallet":  "https://test-wallet.example.com/authorize"
+
+  # W3C Digital Credentials API — browser-mediated wallet selection (mobile only today)
+  digital_credentials:
+    enable: true
+    allow_qr_fallback: true
+```
+
+All methods result in the same outcome: the wallet presents a credential, the verifier validates it, the session completes, and the user is redirected back to the relying party application. The authorization page polls for completion regardless of which method was used.
 
 The wallet app shows the user:
 

@@ -107,14 +107,14 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Check if templates directory is configured
 	templatesDir := c.cfg.Verifier.OpenID4VP.GetPresentationRequestsDir()
 	if templatesDir == "" {
-		c.log.Info("Presentation requests directory not configured, using legacy scope mapping")
+		c.log.Info("Presentation requests directory not configured, using credential config scope mapping")
 		return nil
 	}
 
 	// Load templates from directory
 	config, err := configuration.LoadPresentationRequests(ctx, templatesDir)
 	if err != nil {
-		c.log.Info("Failed to load presentation request templates, falling back to legacy scope mapping", "error", err, "dir", templatesDir)
+		c.log.Info("Failed to load presentation request templates, falling back to credential config scope mapping", "error", err, "dir", templatesDir)
 		return nil
 	}
 
@@ -258,46 +258,56 @@ func getOrDefaultString(s, defaultVal string) string {
 
 // createDCQLQuery creates a DCQL query based on the requested scopes
 func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4vp.DCQL, error) {
+	c.log.Info("Creating DCQL query", "scopes", scopes)
+
 	// If we have a presentation builder with templates, use it
 	if c.presentationBuilder != nil {
 		dcql, err := c.presentationBuilder.BuildDCQLQuery(ctx, scopes)
 		if err == nil && dcql != nil {
+			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
-		// Fall through to legacy if template not found
+		c.log.Info("No presentation template matched, falling back to credential config")
 	}
 
 	// Fallback to building DCQL query from credential config
-	return c.buildLegacyDCQLQuery(scopes)
+	return c.buildDCQLQueryFromConfig(scopes)
 }
 
-// buildLegacyDCQLQuery builds a DCQL query using credential constructor config.
+// buildDCQLQueryFromConfig builds a DCQL query using credential constructor config.
 // All scopes are considered for matching, including standard OIDC scopes like "openid".
 // Scopes that don't have a corresponding credential configuration are silently skipped,
 // making standard OIDC scopes optional - they can match if configured, but are not required.
-func (c *Client) buildLegacyDCQLQuery(scopes []string) (*openid4vp.DCQL, error) {
+func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, error) {
 	var credentials []openid4vp.CredentialQuery
 
 	for _, scope := range scopes {
 		credInfo, ok := c.cfg.Common.CredentialConstructor[scope]
 		if !ok {
+			c.log.Debug("Scope has no credential constructor, skipping", "scope", scope)
 			continue
 		}
 
+		c.log.Info("Matched scope to credential", "scope", scope, "vct", credInfo.VCTM.VCT, "format", credInfo.Format)
+
 		cred := openid4vp.CredentialQuery{
 			ID:     scope,
-			Format: "vc+sd-jwt",
+			Format: credInfo.Format,
 			Meta: openid4vp.MetaQuery{
 				VCTValues: []string{credInfo.VCTM.VCT},
 			},
 			Claims: make([]openid4vp.ClaimQuery, 0),
 		}
 
-		// Add claims from credential attributes
+		// Add claims from VCTM claim paths
 		if credInfo.VCTM != nil {
-			for attrName := range credInfo.VCTM.AttributesWithoutObjects() {
+			for _, claim := range credInfo.VCTM.Claims {
+				// Skip object claims (nested paths) — only leaf claims
+				if len(claim.Path) != 1 || claim.Path[0] == nil {
+					continue
+				}
 				cred.Claims = append(cred.Claims, openid4vp.ClaimQuery{
-					Path: []string{attrName},
+					Path: []string{*claim.Path[0]},
 				})
 			}
 		}

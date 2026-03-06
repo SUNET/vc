@@ -89,6 +89,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		"QRCodeData":       response.QRCodeData,
 		"DeepLinkURL":      response.DeepLinkURL,
 		"PollURL":          response.PollURL,
+		"WalletLinks":      response.WalletLinks,
 		"PreferredFormats": response.PreferredFormats,
 		"UseJAR":           response.UseJAR,
 		"ResponseMode":     response.ResponseMode,

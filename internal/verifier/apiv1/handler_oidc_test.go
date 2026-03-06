@@ -1263,6 +1263,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				assert.NotEmpty(t, resp.DeepLinkURL)
 				assert.NotEmpty(t, resp.PollURL)
 				assert.Contains(t, resp.QRCodeData, "openid4vp://")
+				assert.Contains(t, resp.DeepLinkURL, "openid4vp://")
 				assert.Contains(t, resp.QRCodeImageURL, "/qr/")
 				assert.Contains(t, resp.PollURL, "/poll/")
 
@@ -1335,20 +1336,131 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	assert.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Verify default DC API configuration is applied
-	assert.Equal(t, []string{"vc+sd-jwt"}, resp.PreferredFormats)
-	assert.False(t, resp.UseJAR)
-	assert.Equal(t, "direct_post", resp.ResponseMode)
+	// Verify DC API configuration from struct defaults is applied
+	assert.Equal(t, resp.PreferredFormats, client.cfg.Verifier.DigitalCredentials.PreferredFormats)
+	assert.Equal(t, resp.UseJAR, client.cfg.Verifier.DigitalCredentials.UseJAR)
+	assert.Equal(t, resp.ResponseMode, client.cfg.Verifier.DigitalCredentials.ResponseMode)
 
 	// Verify default title/subtitle are applied
 	assert.Equal(t, "Credential Verification", resp.Title)
 	assert.Equal(t, "Please present your digital credential to continue", resp.Subtitle)
 }
 
+// TestAuthorize_WalletLinks tests that supported_wallets config generates wallet links
+func TestAuthorize_WalletLinks(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.SupportedWallets = map[string]string{
+		"SUNET Wallet":  "https://wallet.sunet.se/cb",
+		"Test Wallet":   "https://test-wallet.example.com/authorize",
+	}
+
+	// Add presentation template
+	template := createSimplePresentationTemplate(t, []string{"openid", "profile"})
+	client.AddPresentationTemplateForTesting(template)
+
+	// Setup client
+	dbClient := &db.Client{
+		ClientID:      "wallet-links-client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		ResponseTypes: []string{"code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}
+	mockDB.Clients.Create(ctx, dbClient)
+
+	req := &AuthorizeRequest{
+		ResponseType: "code",
+		ClientID:     "wallet-links-client",
+		RedirectURI:  "https://example.com/callback",
+		Scope:        "openid profile",
+		State:        "test-state",
+		Nonce:        "test-nonce",
+	}
+
+	resp, err := client.Authorize(ctx, req)
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// QR code should still be openid4vp://
+	assert.Contains(t, resp.QRCodeData, "openid4vp://")
+
+	// Should have wallet links
+	assert.Len(t, resp.WalletLinks, 2)
+
+	// Each wallet link should contain the authorization params and a QR code URL
+	for _, link := range resp.WalletLinks {
+		assert.NotEmpty(t, link.Name)
+		assert.Contains(t, link.URL, "client_id=")
+		assert.Contains(t, link.URL, "request_uri=")
+
+		// Wallet links should use HTTPS
+		assert.Contains(t, link.URL, "https://")
+		assert.NotContains(t, link.URL, "openid4vp://")
+
+		// Each wallet link should have a QR code image URL for cross-device flow
+		assert.NotEmpty(t, link.QRCodeImageURL)
+		assert.Contains(t, link.QRCodeImageURL, "/qr/")
+		assert.Contains(t, link.QRCodeImageURL, "wallet=")
+	}
+
+	// Check specific wallet URLs
+	walletNames := make(map[string]string)
+	for _, link := range resp.WalletLinks {
+		walletNames[link.Name] = link.URL
+	}
+	assert.Contains(t, walletNames["SUNET Wallet"], "https://wallet.sunet.se/cb?")
+	assert.Contains(t, walletNames["Test Wallet"], "https://test-wallet.example.com/authorize?")
+}
+
+// TestAuthorize_NoWalletLinks tests that no wallet links when supported_wallets is empty
+func TestAuthorize_NoWalletLinks(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	// No supported wallets configured
+	client.cfg.Verifier.SupportedWallets = nil
+
+	template := createSimplePresentationTemplate(t, []string{"openid", "profile"})
+	client.AddPresentationTemplateForTesting(template)
+
+	dbClient := &db.Client{
+		ClientID:      "no-wallets-client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		ResponseTypes: []string{"code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}
+	mockDB.Clients.Create(ctx, dbClient)
+
+	req := &AuthorizeRequest{
+		ResponseType: "code",
+		ClientID:     "no-wallets-client",
+		RedirectURI:  "https://example.com/callback",
+		Scope:        "openid profile",
+		State:        "test-state",
+		Nonce:        "test-nonce",
+	}
+
+	resp, err := client.Authorize(ctx, req)
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.WalletLinks)
+}
+
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
 	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.SupportedWallets = map[string]string{
+		"SUNET Wallet": "https://wallet.sunet.se/cb",
+		"Test Wallet":  "https://test-wallet.example.com/authorize",
+	}
 
 	// Create a test session
 	authCtx := &cache.AuthorizationContext{
@@ -1385,6 +1497,27 @@ func TestGetQRCode(t *testing.T) {
 				SessionID: "nonexistent-session",
 			},
 			wantErr: ErrSessionNotFound,
+		},
+		{
+			name: "valid web wallet QR code",
+			req: &GetQRCodeRequest{
+				SessionID:  "test-session-123",
+				WalletName: "SUNET Wallet",
+			},
+			wantErr: nil,
+			checkResp: func(t *testing.T, resp *GetQRCodeResponse) {
+				assert.NotNil(t, resp)
+				assert.NotEmpty(t, resp.ImageData)
+				assert.True(t, len(resp.ImageData) > 0)
+			},
+		},
+		{
+			name: "unknown wallet name returns error",
+			req: &GetQRCodeRequest{
+				SessionID:  "test-session-123",
+				WalletName: "Unknown Wallet",
+			},
+			wantErr: ErrInvalidRequest,
 		},
 	}
 

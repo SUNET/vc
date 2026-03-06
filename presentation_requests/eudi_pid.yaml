@@ -11,9 +11,10 @@ templates:
     dcql:
       credentials:
         - id: "eudi_pid"
-          format: "vc+sd-jwt"
+          format: "dc+sd-jwt"
           meta:
             vct_values:
+              - "urn:eudi:pid:arf-1.5:1"
               - "urn:eudi:pid:1"
               - "urn:eu.europa.ec.eudi:pid:1"  # Alternative VCT format
           claims:
@@ -39,9 +40,10 @@ templates:
     dcql:
       credentials:
         - id: "eudi_pid"
-          format: "vc+sd-jwt"
+          format: "dc+sd-jwt"
           meta:
             vct_values:
+              - "urn:eudi:pid:arf-1.5:1"
               - "urn:eudi:pid:1"
               - "urn:eu.europa.ec.eudi:pid:1"
           claims:
@@ -69,9 +71,10 @@ templates:
     dcql:
       credentials:
         - id: "eudi_pid_age"
-          format: "vc+sd-jwt"
+          format: "dc+sd-jwt"
           meta:
             vct_values:
+              - "urn:eudi:pid:arf-1.5:1"
               - "urn:eudi:pid:1"
               - "urn:eu.europa.ec.eudi:pid:1"
           claims:

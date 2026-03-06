@@ -15,6 +15,7 @@ import (
 	"vc/pkg/model"
 	"vc/pkg/trace"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/sessions"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -83,6 +84,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
+	}
+
+	// Configure CORS at the engine level (before route registration) so that
+	// OPTIONS preflight requests are handled correctly. Placing CORS on a
+	// router group causes preflight requests to hit Gin's NoRoute handler
+	// (404) because no explicit OPTIONS route is registered.
+	if s.cfg.Verifier.APIServer.CORS != nil && len(s.cfg.Verifier.APIServer.CORS.AllowedOrigins) > 0 {
+		corsConfig := cors.Config{
+			AllowOrigins:     s.cfg.Verifier.APIServer.CORS.AllowedOrigins,
+			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
+			AllowCredentials: true,
+			MaxAge:           12 * time.Hour,
+		}
+		s.gin.Use(cors.New(corsConfig))
 	}
 
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Verifier.APIServer.Addr)
