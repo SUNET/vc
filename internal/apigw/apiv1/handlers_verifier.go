@@ -72,10 +72,8 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 				Meta: openid4vp.MetaQuery{
 					VCTValues: authMethod.VCTs,
 				},
-				TrustedAuthorities:                []openid4vp.TrustedAuthority{},
 				RequireCryptographicHolderBinding: false,
 				Claims:                            claimQueries,
-				ClaimSet:                          []string{},
 			},
 		},
 		CredentialSets: []openid4vp.CredentialSetQuery{
