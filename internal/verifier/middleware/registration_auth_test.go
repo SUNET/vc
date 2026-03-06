@@ -21,7 +21,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRegistrationAuthMiddleware_OpenMode(t *testing.T) {
+const (
+	registerPath       = "/register"
+	issuerExampleURL   = "https://issuer.example.com"
+	registerAudience   = "vc-verifier-register"
+	jwtKid             = "kid-1"
+)
+
+func TestRegistrationAuthMiddlewareOpenMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &model.Cfg{
@@ -36,18 +43,18 @@ func TestRegistrationAuthMiddleware_OpenMode(t *testing.T) {
 	require.NoError(t, err)
 
 	r := gin.New()
-	r.POST("/register", mw, func(c *gin.Context) {
+	r.POST(registerPath, mw, func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/register", nil)
+	req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
 	assert.Equal(t, http.StatusNoContent, resp.Code)
 }
 
-func TestRegistrationAuthMiddleware_StaticMode(t *testing.T) {
+func TestRegistrationAuthMiddlewareStaticMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tokenFile := filepath.Join(t.TempDir(), "registration.token")
@@ -68,12 +75,12 @@ func TestRegistrationAuthMiddleware_StaticMode(t *testing.T) {
 	require.NoError(t, err)
 
 	r := gin.New()
-	r.POST("/register", mw, func(c *gin.Context) {
+	r.POST(registerPath, mw, func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/register", nil)
+		req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 		req.Header.Set("Authorization", "Bearer test-static-token")
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
@@ -81,14 +88,14 @@ func TestRegistrationAuthMiddleware_StaticMode(t *testing.T) {
 	})
 
 	t.Run("missing token", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/register", nil)
+		req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
 		assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	})
 
 	t.Run("invalid token", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/register", nil)
+		req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 		req.Header.Set("Authorization", "Bearer wrong-token")
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
@@ -96,7 +103,7 @@ func TestRegistrationAuthMiddleware_StaticMode(t *testing.T) {
 	})
 }
 
-func TestRegistrationAuthMiddleware_StaticModeRequiresFile(t *testing.T) {
+func TestRegistrationAuthMiddlewareStaticModeRequiresFile(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			Outbound: model.VerifierOutbound{OIDCProvider: &model.OIDCOP{
@@ -110,7 +117,7 @@ func TestRegistrationAuthMiddleware_StaticModeRequiresFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "static_bearer_token_file")
 }
 
-func TestRegistrationAuthMiddleware_JWTMode(t *testing.T) {
+func TestRegistrationAuthMiddlewareJWTMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -119,7 +126,7 @@ func TestRegistrationAuthMiddleware_JWTMode(t *testing.T) {
 	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		key, err := jwk.Import(privateKey.Public())
 		require.NoError(t, err)
-		require.NoError(t, key.Set(jwk.KeyIDKey, "kid-1"))
+		require.NoError(t, key.Set(jwk.KeyIDKey, jwtKid))
 
 		set := jwk.NewSet()
 		require.NoError(t, set.AddKey(key))
@@ -136,8 +143,8 @@ func TestRegistrationAuthMiddleware_JWTMode(t *testing.T) {
 					Mode: "jwt",
 					JWT: &model.DynamicRegistrationJWTAuthConfig{
 						JWKSURI:           jwksServer.URL,
-						Issuer:            "https://issuer.example.com",
-						Audience:          "vc-verifier-register",
+						Issuer:            issuerExampleURL,
+						Audience:          registerAudience,
 						AllowedSigningAlgs: []string{"RS256"},
 					},
 				},
@@ -149,48 +156,48 @@ func TestRegistrationAuthMiddleware_JWTMode(t *testing.T) {
 	require.NoError(t, err)
 
 	r := gin.New()
-	r.POST("/register", mw, func(c *gin.Context) {
+	r.POST(registerPath, mw, func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 
 	validClaims := jwt.MapClaims{
-		"iss": "https://issuer.example.com",
-		"aud": "vc-verifier-register",
+		"iss": issuerExampleURL,
+		"aud": registerAudience,
 		"sub": "client-reg-admin",
 		"exp": time.Now().Add(5 * time.Minute).Unix(),
 		"iat": time.Now().Unix(),
 	}
 	validToken := jwt.NewWithClaims(jwt.SigningMethodRS256, validClaims)
-	validToken.Header["kid"] = "kid-1"
+	validToken.Header["kid"] = jwtKid
 	validTokenString, err := validToken.SignedString(privateKey)
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/register", nil)
+	req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 	req.Header.Set("Authorization", "Bearer "+validTokenString)
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 	assert.Equal(t, http.StatusNoContent, resp.Code)
 
 	invalidClaims := jwt.MapClaims{
-		"iss": "https://issuer.example.com",
+		"iss": issuerExampleURL,
 		"aud": "wrong-audience",
 		"sub": "client-reg-admin",
 		"exp": time.Now().Add(5 * time.Minute).Unix(),
 		"iat": time.Now().Unix(),
 	}
 	invalidToken := jwt.NewWithClaims(jwt.SigningMethodRS256, invalidClaims)
-	invalidToken.Header["kid"] = "kid-1"
+	invalidToken.Header["kid"] = jwtKid
 	invalidTokenString, err := invalidToken.SignedString(privateKey)
 	require.NoError(t, err)
 
-	req2 := httptest.NewRequest(http.MethodPost, "/register", nil)
+	req2 := httptest.NewRequest(http.MethodPost, registerPath, nil)
 	req2.Header.Set("Authorization", "Bearer "+invalidTokenString)
 	resp2 := httptest.NewRecorder()
 	r.ServeHTTP(resp2, req2)
 	assert.Equal(t, http.StatusUnauthorized, resp2.Code)
 }
 
-func TestRegistrationAuthMiddleware_IntrospectionModeNotImplemented(t *testing.T) {
+func TestRegistrationAuthMiddlewareIntrospectionModeNotImplemented(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			Outbound: model.VerifierOutbound{OIDCProvider: &model.OIDCOP{
@@ -204,7 +211,7 @@ func TestRegistrationAuthMiddleware_IntrospectionModeNotImplemented(t *testing.T
 	assert.Contains(t, err.Error(), "not implemented")
 }
 
-func TestStaticBearerValidator_ConstantTimeComparison(t *testing.T) {
+func TestStaticBearerValidatorConstantTimeComparison(t *testing.T) {
 	validator := &staticBearerValidator{token: "expected-token"}
 
 	err := validator.Validate(t.Context(), "expected-token")
@@ -217,7 +224,7 @@ func TestStaticBearerValidator_ConstantTimeComparison(t *testing.T) {
 	assert.Equal(t, "invalid_token", authErr.errorCode)
 }
 
-func TestJWTBearerValidator_RequiresConfig(t *testing.T) {
+func TestJWTBearerValidatorRequiresConfig(t *testing.T) {
 	_, err := newJWTBearerValidator(nil)
 	require.Error(t, err)
 
@@ -225,9 +232,9 @@ func TestJWTBearerValidator_RequiresConfig(t *testing.T) {
 	require.Error(t, err)
 
 	_, err = newJWTBearerValidator(&model.DynamicRegistrationJWTAuthConfig{
-		JWKSURI:  "https://issuer.example.com/jwks",
-		Issuer:   "https://issuer.example.com",
-		Audience: "vc-verifier-register",
+		JWKSURI:  issuerExampleURL + "/jwks",
+		Issuer:   issuerExampleURL,
+		Audience: registerAudience,
 	})
 	assert.NoError(t, err)
 }
@@ -244,7 +251,7 @@ func TestExtractBearerToken(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestExtractBearerToken_CaseInsensitiveScheme(t *testing.T) {
+func TestExtractBearerTokenCaseInsensitiveScheme(t *testing.T) {
 	token, err := extractBearerToken("bearer token-value")
 	require.NoError(t, err)
 	assert.Equal(t, "token-value", token)
