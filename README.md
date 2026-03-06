@@ -199,6 +199,42 @@ determined by `auth_method` in the credential configuration.
 - OpenTelemetry distributed tracing
 - Static Linux/amd64 binaries for containerized deployment
 
+## Verifier Dynamic Client Registration Authorization
+
+The verifier exposes OAuth 2.0 Dynamic Client Registration at `POST /register`.
+You can protect this endpoint with an initial access token policy.
+
+Supported modes:
+
+- `open` (default): registration is open (rate-limited)
+- `static`: requires a fixed bearer token loaded from local file
+- `jwt`: requires a signed JWT bearer token validated with configured `issuer`, `audience`, and `jwks_uri`
+
+Example (`config.yaml`):
+
+```yaml
+verifier:
+      oidc:
+            dynamic_registration_auth:
+                  mode: "static"
+                  static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
+```
+
+```yaml
+verifier:
+      oidc:
+            dynamic_registration_auth:
+                  mode: "jwt"
+                  jwt:
+                        jwks_uri: "https://auth.example.com/.well-known/jwks.json"
+                        issuer: "https://auth.example.com"
+                        audience: "vc-verifier-register"
+                        allowed_signing_algs: ["RS256", "ES256"]
+                        clock_skew_seconds: 60
+```
+
+Note: `introspection` is reserved for future implementation and is not enabled yet.
+
 ## Docker release version
 
 `latest` tracks the latest tag available and is built from branch `main`.

@@ -778,6 +778,49 @@ type OIDCOP struct {
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
+
+	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
+	// Modes:
+	//   - open: no authorization required (default)
+	//   - static: require a bearer token loaded from a local file
+	//   - jwt: require a signed JWT validated against configured JWKS/issuer/audience
+	//
+	// Future option (not implemented yet): introspection via external authorization server.
+	DynamicRegistrationAuth *DynamicRegistrationAuthConfig `yaml:"dynamic_registration_auth,omitempty" validate:"omitempty"`
+}
+
+// DynamicRegistrationAuthConfig configures how the verifier authorizes dynamic client registration requests.
+type DynamicRegistrationAuthConfig struct {
+	// Mode controls registration authorization behavior.
+	// Supported values: open, static, jwt.
+	//
+	// Future option (not implemented yet): introspection.
+	Mode string `yaml:"mode,omitempty" default:"open" validate:"omitempty,oneof=open static jwt introspection"`
+
+	// StaticBearerTokenFile points to a file containing the expected bearer token (single line).
+	// Required when Mode=static.
+	StaticBearerTokenFile string `yaml:"static_bearer_token_file,omitempty" validate:"required_if=Mode static"`
+
+	// JWT config for Mode=jwt.
+	JWT *DynamicRegistrationJWTAuthConfig `yaml:"jwt,omitempty" validate:"required_if=Mode jwt"`
+}
+
+// DynamicRegistrationJWTAuthConfig configures JWT verification for registration authorization.
+type DynamicRegistrationJWTAuthConfig struct {
+	// JWKSURI is the URL to fetch signing keys from.
+	JWKSURI string `yaml:"jwks_uri" validate:"required,httpurl"`
+
+	// Issuer is the required issuer claim (iss).
+	Issuer string `yaml:"issuer" validate:"required,httpurl"`
+
+	// Audience is the required audience claim (aud).
+	Audience string `yaml:"audience" validate:"required"`
+
+	// AllowedSigningAlgs restricts accepted JWT signing algorithms.
+	AllowedSigningAlgs []string `yaml:"allowed_signing_algs,omitempty" default:"[\"RS256\",\"ES256\"]"`
+
+	// ClockSkewSeconds configures tolerated clock skew for exp/nbf/iat validation.
+	ClockSkewSeconds int `yaml:"clock_skew_seconds,omitempty" default:"60"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
