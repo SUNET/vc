@@ -343,6 +343,24 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		return fmt.Errorf("failed to parse JWT header: %w", err)
 	}
 
+	// SECURITY: Validate algorithm early before any other processing.
+	// The "none" algorithm and other weak algorithms must be rejected immediately.
+	alg := token.Method.Alg()
+	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
+	if len(allowedAlgs) == 0 {
+		allowedAlgs = defaultAllowedAlgorithms
+	}
+	algAllowed := false
+	for _, allowed := range allowedAlgs {
+		if alg == allowed {
+			algAllowed = true
+			break
+		}
+	}
+	if !algAllowed || alg == "none" || alg == "None" || alg == "NONE" {
+		return fmt.Errorf("JWT uses disallowed algorithm: %s", alg)
+	}
+
 	// Extract issuer identifier and credential type from claims
 	issuerID := ""
 	credentialType := ""
@@ -440,7 +458,7 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 	}
 
 	// CRITICAL: Verify the JWT signature using the extracted public key
-	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
+	// allowedAlgs already set earlier for algorithm validation
 	if err := verifyJWTSignature(issuerJWT, publicKey, allowedAlgs); err != nil {
 		c.log.Warn("JWT signature verification failed",
 			"scope", scope,
