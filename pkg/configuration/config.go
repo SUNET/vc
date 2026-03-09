@@ -107,7 +107,31 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := validateCrossServiceConfig(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+func validateCrossServiceConfig(cfg *model.Cfg) error {
+	if cfg == nil || cfg.Issuer == nil {
+		return nil
+	}
+
+	if cfg.Issuer.RegistryClient.Addr == "" {
+		return nil
+	}
+
+	if cfg.Registry == nil {
+		return fmt.Errorf("registry.public_url is required when issuer.registry_client is configured")
+	}
+
+	if cfg.Registry.PublicURL == "" {
+		return fmt.Errorf("registry.public_url is required when issuer.registry_client is configured")
+	}
+
+	return nil
 }
 
 // LoadSecrets reads and parses the secrets YAML file.
