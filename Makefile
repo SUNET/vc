@@ -387,6 +387,33 @@ endef
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
 # Docker builds with optional features
+ZK_LIB_SRC := build/longfellow-zk/lib
+ZK_SRC := build/longfellow-zk/reference/verifier-service/server/zk
+ZK_CERT_SRC := build/longfellow-zk/reference/verifier-service/server/certs.pem
+ZK_DST := internal/verifier/zk
+ZK_LIB_DST := internal/verifier/zk/lib
+DOCKER_TAG_VERIFIER		:= docker.sunet.se/dc4eu/verifier:$(VERSION)
+
+# Fetch ZK libraries
+zk:
+	$(info Fetching Longfellow ZK)
+	mkdir -p build
+	if [ -d build/longfellow-zk ]; then \
+		cd build/longfellow-zk && git pull; \
+	else \
+		git clone https://github.com/google/longfellow-zk.git build/longfellow-zk; \
+	fi
+	rm -rf $(ZK_DST)
+	cp -r $(ZK_SRC) $(ZK_DST)
+	cp -r $(ZK_LIB_SRC) $(ZK_LIB_DST)
+	cp -r $(ZK_CERT_SRC) $(ZK_DST)
+
+
+docker-build-verifier: zk
+	$(info Building Docker image 'verifier')
+	docker build -f dockerfiles/verifier.Dockerfile -t verifier .
+	docker tag verifier ${DOCKER_TAG_VERIFIER}
+
 docker-build-apigw-saml: _check-reserved-tag ## Build apigw Docker image with SAML support
 	$(info Docker building apigw with SAML support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
