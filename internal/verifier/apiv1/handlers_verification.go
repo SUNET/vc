@@ -25,9 +25,9 @@ type VerificationRequestObjectRequest struct {
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
 	c.log.Debug("Verification request object", "req", req)
 
-	// TODO(masv): should request-object-id be associated with a particular session?
+	// Query by RequestObjectID since that's what the wallet sends via ?id= parameter
 	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
-		SessionID: req.ID,
+		RequestObjectID: req.ID,
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
@@ -35,7 +35,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	// TODO(masv): should requestObjectCache be using cache lib
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.SessionID)
+	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.RequestObjectID)
 	if !found {
 		c.log.Error(nil, "request object not found in cache", "requestObjectID", authorizationContext.RequestObjectID)
 		return "", errors.New("request object not found")
