@@ -446,3 +446,33 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestMakeSDJWT_MissingRegistryConfigDoesNotPanic(t *testing.T) {
+	ctx := t.Context()
+	log := logger.NewSimple("test")
+	client := mockNewClient(ctx, t, "ecdsa", log)
+
+	client.cfg.Registry = nil
+
+	req := &CreateCredentialRequest{
+		Scope:        "ehic",
+		DocumentData: mockEhic,
+		JWK: &apiv1_issuer.Jwk{
+			Kty: "EC",
+			Crv: "P-256",
+			X:   "f83OJ3D2xF4c3hXhN3k1j5x5mX5Z5x5Z5x5Z5x5Z5x5Z",
+			Y:   "x_FEzRu9mX5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5",
+		},
+	}
+
+	var (
+		got *CreateCredentialReply
+		err error
+	)
+	require.NotPanics(t, func() {
+		got, err = client.MakeSDJWT(ctx, req)
+	})
+
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "registry public URL not configured")
+}

@@ -64,6 +64,12 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	if c.registryClient == nil {
 		return nil, fmt.Errorf("registry client not configured")
 	}
+	if c.cfg == nil || c.cfg.Registry == nil {
+		return nil, fmt.Errorf("registry public URL not configured")
+	}
+	if c.cfg.Registry.PublicURL == "" {
+		return nil, fmt.Errorf("registry public URL is empty")
+	}
 
 	grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
 		Status: 0, // VALID status for new credential
