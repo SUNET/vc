@@ -10,6 +10,9 @@ import (
 )
 
 // VPTokenValidator validates VP Token according to Section 8.6
+// NOTE: This validator performs format and protocol validation only.
+// ACTUAL CRYPTOGRAPHIC SIGNATURE VERIFICATION must be done separately
+// using TrustEvaluator which verifies signatures and validates trust anchors.
 type VPTokenValidator struct {
 	// Nonce from the Authorization Request
 	Nonce string
@@ -17,7 +20,11 @@ type VPTokenValidator struct {
 	// ClientID (or Origin for DC API)
 	ClientID string
 
-	// VerifySignature enables signature verification
+	// VerifySignature enables signature FORMAT validation (not cryptographic verification).
+	// This only validates that the JWT structure is parseable - it does NOT verify
+	// the actual cryptographic signature. Callers MUST use TrustEvaluator for
+	// real signature verification and trust anchor validation.
+	// Deprecated: Always use TrustEvaluator for actual signature verification.
 	VerifySignature bool
 
 	// CheckRevocation enables revocation status checks
@@ -186,14 +193,17 @@ func parseKeyBindingJWT(kbJWT string) (map[string]any, error) {
 	return claims, nil
 }
 
-// verifySignature verifies the cryptographic signature
+// verifySignature validates JWT FORMAT only - NOT CRYPTOGRAPHIC SIGNATURE.
+// This only checks that the VP token can be parsed as a valid SD-JWT structure.
+// IMPORTANT: Callers MUST use TrustEvaluator for actual cryptographic signature
+// verification and trust anchor validation. This method is INSUFFICIENT for security.
 func (v *VPTokenValidator) verifySignature(vpToken string) error {
-	// For now, we validate format - full signature verification
-	// would require the issuer's public key
+	// WARNING: This does NOT verify the cryptographic signature!
+	// It only validates the JWT format is parseable.
 	token := sdjwtvc.Token(vpToken)
 	_, err := token.Parse()
 	if err != nil {
-		return fmt.Errorf("signature verification failed: %w", err)
+		return fmt.Errorf("JWT format validation failed: %w", err)
 	}
 
 	return nil

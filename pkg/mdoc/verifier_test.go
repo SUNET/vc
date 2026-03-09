@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,9 +10,36 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"vc/pkg/trust"
+
+	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
-func createTestTrustList(t *testing.T) (*IACATrustList, *x509.Certificate, *ecdsa.PrivateKey, []*x509.Certificate) {
+// mockTrustEvaluator is a test implementation of TrustEvaluator that always trusts certificates.
+type mockTrustEvaluator struct {
+	trusted bool
+	reason  string
+}
+
+func (m *mockTrustEvaluator) Evaluate(ctx context.Context, req *trust.EvaluationRequest) (*trustapi.TrustDecision, error) {
+	return &trustapi.TrustDecision{
+		Trusted:        m.trusted,
+		Reason:         m.reason,
+		TrustFramework: "test-mock",
+	}, nil
+}
+
+func (m *mockTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
+	return kt == trust.KeyTypeX5C
+}
+
+// createTestTrustEvaluator creates a mock TrustEvaluator for testing.
+func createTestTrustEvaluator(trusted bool) trust.TrustEvaluator {
+	return &mockTrustEvaluator{trusted: trusted, reason: "test decision"}
+}
+
+func createTestTrustList(t *testing.T) (trust.TrustEvaluator, *x509.Certificate, *ecdsa.PrivateKey, []*x509.Certificate) {
 	t.Helper()
 
 	// Generate IACA key pair
@@ -77,13 +105,10 @@ func createTestTrustList(t *testing.T) (*IACATrustList, *x509.Certificate, *ecds
 		t.Fatalf("failed to parse DS certificate: %v", err)
 	}
 
-	// Create trust list
-	trustList := NewIACATrustList()
-	if err := trustList.AddTrustedIACA(iacaCert); err != nil {
-		t.Fatalf("failed to add trusted IACA: %v", err)
-	}
+	// Create mock trust evaluator that always trusts
+	trustEvaluator := createTestTrustEvaluator(true)
 
-	return trustList, dsCert, dsKey, []*x509.Certificate{dsCert, iacaCert}
+	return trustEvaluator, dsCert, dsKey, []*x509.Certificate{dsCert, iacaCert}
 }
 
 func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain []*x509.Certificate) *DeviceResponse {
@@ -147,10 +172,10 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 }
 
 func TestNewVerifier(t *testing.T) {
-	trustList := NewIACATrustList()
+	trustEvaluator := createTestTrustEvaluator(true)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList: trustList,
+		TrustEvaluator: trustEvaluator,
 	})
 
 	if err != nil {
@@ -161,20 +186,20 @@ func TestNewVerifier(t *testing.T) {
 	}
 }
 
-func TestNewVerifier_MissingTrustList(t *testing.T) {
+func TestNewVerifier_MissingTrustEvaluator(t *testing.T) {
 	_, err := NewVerifier(VerifierConfig{})
 
 	if err == nil {
-		t.Fatal("NewVerifier() expected error for missing trust list")
+		t.Fatal("NewVerifier() expected error for missing TrustEvaluator")
 	}
 }
 
 func TestVerifier_VerifyDeviceResponse(t *testing.T) {
-	trustList, dsCert, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, dsCert, dsKey, certChain := createTestTrustList(t)
 	_ = dsCert
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -198,10 +223,10 @@ func TestVerifier_VerifyDeviceResponse(t *testing.T) {
 }
 
 func TestVerifier_VerifyDocument(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -235,10 +260,10 @@ func TestVerifier_VerifyDocument(t *testing.T) {
 }
 
 func TestVerifier_VerifyDocument_InvalidVersion(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -256,10 +281,10 @@ func TestVerifier_VerifyDocument_InvalidVersion(t *testing.T) {
 }
 
 func TestVerifier_VerifyDocument_InvalidStatus(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -277,39 +302,18 @@ func TestVerifier_VerifyDocument_InvalidStatus(t *testing.T) {
 }
 
 func TestVerifier_UntrustedIssuer(t *testing.T) {
-	// Create a trust list with a different IACA
-	trustList := NewIACATrustList()
-
-	// Generate a different IACA that is NOT trusted
-	differentIACAKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	differentIACATemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(99),
-		Subject: pkix.Name{
-			CommonName: "Different IACA",
-		},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(20 * 365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}
-	differentIACACertDER, _ := x509.CreateCertificate(rand.Reader, differentIACATemplate, differentIACATemplate, &differentIACAKey.PublicKey, differentIACAKey)
-	differentIACACert, _ := x509.ParseCertificate(differentIACACertDER)
-
-	// Add a different IACA to trust list
-	if err := trustList.AddTrustedIACA(differentIACACert); err != nil {
-		t.Fatalf("failed to add trusted IACA: %v", err)
-	}
+	// Create a TrustEvaluator that does NOT trust the issuer
+	untrustedEvaluator := createTestTrustEvaluator(false)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      untrustedEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
 		t.Fatalf("NewVerifier() error = %v", err)
 	}
 
-	// Create a response with an untrusted issuer
+	// Create a response with an issuer that the evaluator doesn't trust
 	_, _, dsKey, certChain := createTestTrustList(t)
 	response := createTestDeviceResponse(t, dsKey, certChain)
 
@@ -321,10 +325,10 @@ func TestVerifier_UntrustedIssuer(t *testing.T) {
 }
 
 func TestVerificationResult_ExtractElements(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -350,10 +354,10 @@ func TestVerificationResult_ExtractElements(t *testing.T) {
 }
 
 func TestVerificationResult_GetElement(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -378,10 +382,10 @@ func TestVerificationResult_GetElement(t *testing.T) {
 }
 
 func TestVerificationResult_GetMDocElements(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -407,10 +411,10 @@ func TestVerificationResult_GetMDocElements(t *testing.T) {
 }
 
 func TestVerificationResult_VerifyAgeOver(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -606,10 +610,10 @@ func TestRequestBuilder_BuildDeviceRequest(t *testing.T) {
 }
 
 func TestVerifier_VerifyIssuerSigned(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -638,7 +642,7 @@ func TestVerifier_VerifyIssuerSigned(t *testing.T) {
 }
 
 func TestVerifier_WithCustomClock(t *testing.T) {
-	trustList, _, dsKey, certChain := createTestTrustList(t)
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
 	// Create a verifier with a clock set to the future (after cert expiry)
 	futureClock := func() time.Time {
@@ -646,7 +650,7 @@ func TestVerifier_WithCustomClock(t *testing.T) {
 	}
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 		Clock:               futureClock,
 	})

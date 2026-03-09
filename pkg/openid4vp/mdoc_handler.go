@@ -9,21 +9,24 @@ import (
 	"strings"
 
 	"vc/pkg/mdoc"
+	"vc/pkg/trust"
 )
 
 // MDocHandler handles mdoc format credentials in OpenID4VP flows.
 type MDocHandler struct {
-	verifier  *mdoc.Verifier
-	trustList *mdoc.IACATrustList
+	verifier       *mdoc.Verifier
+	trustEvaluator trust.TrustEvaluator
 }
 
 // MDocHandlerOption configures an MDocHandler.
 type MDocHandlerOption func(*MDocHandler)
 
-// WithMDocTrustList sets the trust list for mdoc verification.
-func WithMDocTrustList(trustList *mdoc.IACATrustList) MDocHandlerOption {
+// WithMDocTrustEvaluator sets the trust evaluator for mdoc verification.
+// This is the preferred way to configure trust - it delegates to go-trust
+// which can use mdociaca, ETSI TSL, OpenID Federation, etc.
+func WithMDocTrustEvaluator(te trust.TrustEvaluator) MDocHandlerOption {
 	return func(h *MDocHandler) {
-		h.trustList = trustList
+		h.trustEvaluator = te
 	}
 }
 
@@ -35,6 +38,7 @@ func WithMDocVerifier(v *mdoc.Verifier) MDocHandlerOption {
 }
 
 // NewMDocHandler creates a new mdoc handler for OpenID4VP.
+// Either WithMDocTrustEvaluator or WithMDocVerifier must be provided.
 func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 	h := &MDocHandler{}
 
@@ -44,13 +48,12 @@ func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 
 	// Create verifier if not provided
 	if h.verifier == nil {
-		if h.trustList == nil {
-			// Create empty trust list (won't trust any issuers - for testing only)
-			h.trustList = mdoc.NewIACATrustList()
+		if h.trustEvaluator == nil {
+			return nil, errors.New("either TrustEvaluator or pre-configured Verifier is required")
 		}
 		var err error
 		h.verifier, err = mdoc.NewVerifier(mdoc.VerifierConfig{
-			TrustList: h.trustList,
+			TrustEvaluator: h.trustEvaluator,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create verifier: %w", err)

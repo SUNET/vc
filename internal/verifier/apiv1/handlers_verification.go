@@ -176,52 +176,99 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			return nil, fmt.Errorf("invalid response for scope %s: %w", scope, err)
 		}
 
-		// Validate VP Token using VPTokenValidator
-		validator := &openid4vp.VPTokenValidator{
-			Nonce:           authCtx.Nonce,
-			ClientID:        authCtx.ClientID,
-			VerifySignature: true,
-			CheckRevocation: false,
+		// Detect credential format and process accordingly
+		format := detectCredentialFormat(vpToken)
+		c.log.Debug("Detected credential format", "scope", scope, "format", format)
+
+		switch format {
+		case FormatSDJWT:
+			// SD-JWT: Use VPTokenValidator for format validation, then evaluateIssuerTrust for sig+trust
+			validator := &openid4vp.VPTokenValidator{
+				Nonce:           authCtx.Nonce,
+				ClientID:        authCtx.ClientID,
+				VerifySignature: false, // We do real signature verification in evaluateIssuerTrust
+				CheckRevocation: false,
+			}
+
+			if err := validator.Validate(responseParams.VPToken); err != nil {
+				c.log.Error(err, "VP Token validation failed", "scope", scope)
+				return nil, fmt.Errorf("VP Token validation failed for scope %s: %w", scope, err)
+			}
+
+			c.log.Debug("VP Token format validated successfully", "scope", scope)
+
+			// Evaluate trust (includes signature verification) via TrustEvaluator
+			if err := c.evaluateIssuerTrust(ctx, responseParams.VPToken, scope); err != nil {
+				c.log.Error(err, "issuer trust evaluation failed", "scope", scope)
+				return nil, fmt.Errorf("issuer trust evaluation failed for scope %s: %w", scope, err)
+			}
+
+			// Parse SD-JWT credential
+			_, _, _, selectiveDisclosure, _, err := sdjwtvc.Token(responseParams.VPToken).Split()
+			if err != nil {
+				c.log.Error(err, "failed to split sd-jwt", "scope", scope)
+				return nil, err
+			}
+
+			// Parse credential claims
+			parsed, err := sdjwtvc.Token(responseParams.VPToken).Parse()
+			if err != nil {
+				c.log.Error(err, "failed to parse sd-jwt credential", "scope", scope)
+				return nil, err
+			}
+
+			selectiveDisclosureClaims, err := sdjwtvc.ParseSelectiveDisclosure(selectiveDisclosure)
+			if err != nil {
+				c.log.Error(err, "failed to parse selective disclosures", "scope", scope)
+				return nil, err
+			}
+
+			// Add to credential cache array
+			credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
+				Credential: parsed.Claims,
+				Claims:     selectiveDisclosureClaims,
+			})
+
+		case FormatMDoc:
+			// mDOC: Use MDocHandler which delegates to TrustEvaluator
+			if c.trustEvaluator == nil {
+				c.log.Error(nil, "TrustEvaluator required for mDOC verification", "scope", scope)
+				return nil, fmt.Errorf("TrustEvaluator not configured for mDOC verification")
+			}
+
+			mdocHandler, err := openid4vp.NewMDocHandler(
+				openid4vp.WithMDocTrustEvaluator(c.trustEvaluator),
+			)
+			if err != nil {
+				c.log.Error(err, "failed to create mDOC handler", "scope", scope)
+				return nil, fmt.Errorf("failed to create mDOC handler for scope %s: %w", scope, err)
+			}
+
+			mdocResult, err := mdocHandler.VerifyAndExtract(ctx, vpToken)
+			if err != nil {
+				c.log.Error(err, "mDOC verification failed", "scope", scope)
+				return nil, fmt.Errorf("mDOC verification failed for scope %s: %w", scope, err)
+			}
+
+			c.log.Debug("mDOC verified successfully", "scope", scope, "doc_count", len(mdocResult.Documents))
+
+			// Convert mDOC claims to credential cache format
+			for docType, docClaims := range mdocResult.Documents {
+				// Convert map claims to []Discloser format
+				disclosers := mapToDisclosers(docClaims.GetClaims())
+				credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
+					Credential: map[string]any{
+						"docType":    docType,
+						"namespaces": docClaims.Namespaces,
+					},
+					Claims: disclosers,
+				})
+			}
+
+		default:
+			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
+			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
 		}
-
-		if err := validator.Validate(responseParams.VPToken); err != nil {
-			c.log.Error(err, "VP Token validation failed", "scope", scope)
-			return nil, fmt.Errorf("VP Token validation failed for scope %s: %w", scope, err)
-		}
-
-		c.log.Debug("VP Token validated successfully", "scope", scope)
-
-		// Evaluate trust using AuthZEN PDP if configured
-		if err := c.evaluateIssuerTrust(ctx, responseParams.VPToken, scope); err != nil {
-			c.log.Error(err, "issuer trust evaluation failed", "scope", scope)
-			return nil, fmt.Errorf("issuer trust evaluation failed for scope %s: %w", scope, err)
-		}
-
-		// Parse SD-JWT credential
-		_, _, _, selectiveDisclosure, _, err := sdjwtvc.Token(responseParams.VPToken).Split()
-		if err != nil {
-			c.log.Error(err, "failed to split sd-jwt", "scope", scope)
-			return nil, err
-		}
-
-		// Parse credential claims
-		parsed, err := sdjwtvc.Token(responseParams.VPToken).Parse()
-		if err != nil {
-			c.log.Error(err, "failed to parse sd-jwt credential", "scope", scope)
-			return nil, err
-		}
-
-		selectiveDisclosureClaims, err := sdjwtvc.ParseSelectiveDisclosure(selectiveDisclosure)
-		if err != nil {
-			c.log.Error(err, "failed to parse selective disclosures", "scope", scope)
-			return nil, err
-		}
-
-		// Add to credential cache array
-		credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
-			Credential: parsed.Claims,
-			Claims:     selectiveDisclosureClaims,
-		})
 	}
 
 	// Cache validated credentials
@@ -505,4 +552,66 @@ func verifyJWTSignature(jwtString string, publicKey crypto.PublicKey, allowedAlg
 	}
 
 	return nil
+}
+
+// CredentialFormat represents the format of a verifiable credential.
+type CredentialFormat string
+
+const (
+	// FormatSDJWT represents SD-JWT Verifiable Credentials (vc+sd-jwt, dc+sd-jwt)
+	FormatSDJWT CredentialFormat = "vc+sd-jwt"
+	// FormatMDoc represents ISO/IEC 18013-5 mDOC credentials (mso_mdoc)
+	FormatMDoc CredentialFormat = "mso_mdoc"
+	// FormatUnknown represents an unrecognized format
+	FormatUnknown CredentialFormat = "unknown"
+)
+
+// detectCredentialFormat determines the credential format from the VP token.
+// SD-JWT: contains ~ separators (disclosure markers) and JWT dots
+// mDOC: base64url-encoded CBOR (doesn't look like JWT - no dots, or random data without ~)
+func detectCredentialFormat(vpToken string) CredentialFormat {
+	// SD-JWT format: <issuer-jwt>~<disclosure1>~<disclosure2>~...[~<kb-jwt>]
+	// Must contain at least one ~ and the first part must look like a JWT (has 2 dots)
+	if strings.Contains(vpToken, "~") {
+		parts := strings.Split(vpToken, "~")
+		if len(parts) > 0 && strings.Count(parts[0], ".") == 2 {
+			return FormatSDJWT
+		}
+	}
+
+	// Plain JWT without SD (still vc+sd-jwt format per spec, but no disclosures)
+	if strings.Count(vpToken, ".") == 2 && !strings.Contains(vpToken, "~") {
+		// Could be a plain JWT - check if it's valid base64url
+		headerPart := strings.Split(vpToken, ".")[0]
+		if _, err := base64.RawURLEncoding.DecodeString(headerPart); err == nil {
+			return FormatSDJWT
+		}
+	}
+
+	// mDOC: base64url-encoded CBOR DeviceResponse
+	// Try to decode as base64url - if successful and doesn't look like JWT, assume mDOC
+	if !strings.Contains(vpToken, ".") && !strings.Contains(vpToken, "~") {
+		if _, err := base64.RawURLEncoding.DecodeString(vpToken); err == nil {
+			return FormatMDoc
+		}
+		// Also try standard base64 (some implementations use this)
+		if _, err := base64.StdEncoding.DecodeString(vpToken); err == nil {
+			return FormatMDoc
+		}
+	}
+
+	return FormatUnknown
+}
+
+// mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.
+// This is used for mDOC credentials where claims are extracted as a map.
+func mapToDisclosers(claims map[string]any) []sdjwtvc.Discloser {
+	disclosers := make([]sdjwtvc.Discloser, 0, len(claims))
+	for name, value := range claims {
+		disclosers = append(disclosers, sdjwtvc.Discloser{
+			ClaimName: name,
+			Value:     value,
+		})
+	}
+	return disclosers
 }
