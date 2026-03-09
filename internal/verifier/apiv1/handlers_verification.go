@@ -336,29 +336,15 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		return fmt.Errorf("empty issuer JWT in VP token")
 	}
 
-	// Parse JWT header to check for key material
+	// Parse JWT header to extract key material and claims for trust evaluation.
+	// NOTE: ParseUnverified is used intentionally here because we need to inspect the header
+	// (x5c/jwk) to determine which key to use for verification. The actual cryptographic
+	// signature verification is performed below by verifyJWTSignature() which enforces
+	// a strict algorithm allowlist and rejects "none" and other weak algorithms.
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
 	token, _, err := parser.ParseUnverified(issuerJWT, jwt.MapClaims{})
 	if err != nil {
 		return fmt.Errorf("failed to parse JWT header: %w", err)
-	}
-
-	// SECURITY: Validate algorithm early before any other processing.
-	// The "none" algorithm and other weak algorithms must be rejected immediately.
-	alg := token.Method.Alg()
-	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
-	if len(allowedAlgs) == 0 {
-		allowedAlgs = defaultAllowedAlgorithms
-	}
-	algAllowed := false
-	for _, allowed := range allowedAlgs {
-		if alg == allowed {
-			algAllowed = true
-			break
-		}
-	}
-	if !algAllowed || alg == "none" || alg == "None" || alg == "NONE" {
-		return fmt.Errorf("JWT uses disallowed algorithm: %s", alg)
 	}
 
 	// Extract issuer identifier and credential type from claims
@@ -458,7 +444,7 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 	}
 
 	// CRITICAL: Verify the JWT signature using the extracted public key
-	// allowedAlgs already set earlier for algorithm validation
+	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
 	if err := verifyJWTSignature(issuerJWT, publicKey, allowedAlgs); err != nil {
 		c.log.Warn("JWT signature verification failed",
 			"scope", scope,
