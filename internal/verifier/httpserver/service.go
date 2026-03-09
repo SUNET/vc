@@ -55,7 +55,10 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		notify: notify,
 		tracer: tracer,
 		server: &http.Server{
-			ReadHeaderTimeout: 3 * time.Second,
+			ReadHeaderTimeout: 300 * time.Second, 
+			ReadTimeout:       300 * time.Second, 
+			WriteTimeout:      300 * time.Second,
+			IdleTimeout:       300 * time.Second,	
 		},
 		sessionsName:     "verifier_user_session",
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
@@ -196,6 +199,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "display/:session_id", http.StatusOK, s.endpointCredentialDisplay)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "confirm/:session_id", http.StatusOK, s.endpointConfirmCredentialDisplay)
 
+	// Longfellow-zk verifier
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "verify", http.StatusOK, s.endpointVerify)
+	
 	// UI Endpoints
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "qr/:session_id", http.StatusOK, s.endpointQRCode)
 	// TODO(masv): no polling, use WebSocket or Server-Sent Events instead

@@ -15,6 +15,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
+	
+	"encoding/hex"
+	"vc/internal/verifier/zk"
+
 )
 
 type VerificationRequestObjectRequest struct {
@@ -242,6 +246,21 @@ type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
 }
 
+type VerifyRequest struct {
+	Transcript           string `json:"Transcript"`
+	ZKDeviceResponseCBOR string `json:"ZKDeviceResponseCBOR"`
+}
+
+type ClaimElement struct {
+	ElementIdentifier string `json:"ElementIdentifier"`
+	ElementValue      string `json:"ElementValue"`
+}
+
+type VerifyResponse struct {
+	Status bool                      `json:"Status"`
+	Claims map[string][]ClaimElement `json:"Claims"`
+}
+
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {
 	c.log.Debug("verificationCallback", "req", req)
 
@@ -252,6 +271,55 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 
 	reply := &VerificationCallbackResponse{
 		CredentialData: credential,
+	}
+
+	return reply, nil
+}
+
+func (c *Client) Verify(ctx context.Context, req *VerifyRequest) (*VerifyResponse, error) {
+	c.log.Debug("Processing ZK Proof", "transcript_len", len(req.Transcript))
+	transcriptBytes, err := base64.StdEncoding.DecodeString(req.Transcript)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode transcript: %w", err)
+	}
+
+	cborBytes, err := base64.StdEncoding.DecodeString(req.ZKDeviceResponseCBOR)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode device response: %w", err)
+	}
+
+	vreq, err := zk.ProcessDeviceResponse(cborBytes)
+	if err != nil {
+		c.log.Error(err, "CBOR processing failed")
+		return nil, fmt.Errorf("error processing cbor request: %w", err)
+	}
+
+	vreq.Transcript = transcriptBytes
+	ok, err := zk.VerifyProofRequest(vreq)
+
+	apiClaims := make([]ClaimElement, 0)
+
+	for _, items := range vreq.Claims {
+		for _, item := range items {
+			hexValue := hex.EncodeToString(item.ElementValue)
+
+			apiClaims = append(apiClaims, ClaimElement{
+				ElementIdentifier: item.ElementIdentifier,
+				ElementValue:      hexValue,
+			})
+		}
+	}
+
+	//TODO: support more vc types
+	reply := &VerifyResponse{
+		Status: ok,
+		Claims: map[string][]ClaimElement{
+			"org.iso.18013.5.1": apiClaims,
+		},
+	}
+
+	if err != nil {
+		c.log.Error(err, "invalid proof detected")
 	}
 
 	return reply, nil

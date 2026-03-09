@@ -19,6 +19,7 @@ type Apiv1 interface {
 	VerificationRequestObject(ctx context.Context, req *apiv1.VerificationRequestObjectRequest) (string, error)
 	VerificationDirectPost(ctx context.Context, req *apiv1.VerificationDirectPostRequest) (*apiv1.VerificationDirectPostResponse, error)
 	VerificationCallback(ctx context.Context, req *apiv1.VerificationCallbackRequest) (*apiv1.VerificationCallbackResponse, error)
+	Verify(ctx context.Context, req *apiv1.VerifyRequest) (*apiv1.VerifyResponse, error)
 
 	// UI
 	UIInteraction(ctx context.Context, req *apiv1.UIInteractionRequest) (*apiv1.UIInteractionReply, error)

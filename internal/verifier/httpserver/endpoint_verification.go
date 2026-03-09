@@ -66,3 +66,19 @@ func (s *Service) endpointVerificationCallback(ctx context.Context, c *gin.Conte
 
 	return nil, nil
 }
+
+func (s *Service) endpointVerify(ctx context.Context, c *gin.Context) (any, error) {
+	s.log.Debug("endpointVerificationDirectPost called")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2*1024*1024)
+	request := &apiv1.VerifyRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		s.log.Error(err, "binding failed")
+		return nil, err
+	}
+	reply, err := s.apiv1.Verify(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
