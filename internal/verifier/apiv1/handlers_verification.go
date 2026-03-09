@@ -430,7 +430,7 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 	// signature verification is performed below by verifyJWTSignature() which enforces
 	// a strict algorithm allowlist and rejects "none" and other weak algorithms.
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	token, _, err := parser.ParseUnverified(issuerJWT, jwt.MapClaims{})
+	token, _, err := parser.ParseUnverified(issuerJWT, jwt.MapClaims{}) // NOSONAR (go:S5659) - ParseUnverified is intentional; signature is verified below by verifyJWTSignature()
 	if err != nil {
 		return fmt.Errorf("failed to parse JWT header: %w", err)
 	}

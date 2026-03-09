@@ -186,7 +186,7 @@ func TestNewVerifier(t *testing.T) {
 	}
 }
 
-func TestNewVerifier_MissingTrustEvaluator(t *testing.T) {
+func TestNewVerifierMissingTrustEvaluator(t *testing.T) {
 	_, err := NewVerifier(VerifierConfig{})
 
 	if err == nil {

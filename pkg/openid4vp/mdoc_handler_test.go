@@ -44,7 +44,7 @@ func TestNewMDocHandler(t *testing.T) {
 	}
 }
 
-func TestNewMDocHandler_WithTrustEvaluator(t *testing.T) {
+func TestNewMDocHandlerWithTrustEvaluator(t *testing.T) {
 	te := &mockTrustEvaluator{trusted: true}
 
 	h, err := NewMDocHandler(WithMDocTrustEvaluator(te))
