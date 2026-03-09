@@ -66,7 +66,6 @@ type VerificationDirectPostRequest struct {
 }
 
 func (v *VerificationDirectPostRequest) GetKID() (string, error) {
-	fmt.Println("Kid")
 	header := strings.Split(v.Response, ".")[0]
 	b, err := base64.RawStdEncoding.DecodeString(header)
 	if err != nil {
