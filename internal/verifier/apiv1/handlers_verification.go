@@ -269,8 +269,8 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 
 // evaluateIssuerTrust evaluates the trust of the credential issuer using the configured TrustEvaluator.
 // For SD-JWT credentials with x5c header, it extracts the certificate chain and evaluates trust
-// against the AuthZEN PDP. If no x5c header is present or no TrustEvaluator is configured,
-// the function succeeds (allow-all mode).
+// against the AuthZEN PDP. For credentials with jwk header, it evaluates the embedded JWK.
+// If neither x5c nor jwk header is present, the function succeeds (issuer key not available for evaluation).
 func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
 	// Split the SD-JWT to get the issuer JWT
 	parts := strings.Split(vpToken, "~")
@@ -280,25 +280,11 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 
 	issuerJWT := parts[0]
 
-	// Parse JWT header to check for x5c
+	// Parse JWT header to check for key material
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
 	token, _, err := parser.ParseUnverified(issuerJWT, jwt.MapClaims{})
 	if err != nil {
 		return fmt.Errorf("failed to parse JWT header: %w", err)
-	}
-
-	// Check for x5c header
-	x5cRaw, ok := token.Header["x5c"]
-	if !ok {
-		// No x5c header - trust evaluation not applicable for this credential format
-		c.log.Debug("No x5c header in credential, skipping trust evaluation", "scope", scope)
-		return nil
-	}
-
-	// Parse x5c certificate chain
-	certChain, err := parseX5CHeader(x5cRaw)
-	if err != nil {
-		return fmt.Errorf("failed to parse x5c header: %w", err)
 	}
 
 	// Extract issuer identifier and credential type from claims
@@ -313,23 +299,57 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		}
 	}
 
-	// Fallback to leaf certificate CN for issuer ID
-	if issuerID == "" && len(certChain) > 0 {
-		issuerID = certChain[0].Subject.CommonName
-	}
+	// Determine key type and extract key material from header
+	var keyType trust.KeyType
+	var keyMaterial any
 
-	c.log.Debug("Evaluating issuer trust",
-		"scope", scope,
-		"issuer_id", issuerID,
-		"credential_type", credentialType,
-		"cert_chain_length", len(certChain))
+	if x5cRaw, ok := token.Header["x5c"]; ok {
+		// x5c header - certificate chain
+		certChain, err := parseX5CHeader(x5cRaw)
+		if err != nil {
+			return fmt.Errorf("failed to parse x5c header: %w", err)
+		}
+		keyType = trust.KeyTypeX5C
+		keyMaterial = certChain
+
+		// Fallback to leaf certificate CN for issuer ID
+		if issuerID == "" && len(certChain) > 0 {
+			issuerID = certChain[0].Subject.CommonName
+		}
+
+		c.log.Debug("Evaluating issuer trust via x5c",
+			"scope", scope,
+			"issuer_id", issuerID,
+			"credential_type", credentialType,
+			"cert_chain_length", len(certChain))
+	} else if jwkRaw, ok := token.Header["jwk"]; ok {
+		// jwk header - embedded JWK
+		jwkMap, ok := jwkRaw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("invalid jwk header format: expected map, got %T", jwkRaw)
+		}
+		keyType = trust.KeyTypeJWK
+		keyMaterial = jwkMap
+
+		c.log.Debug("Evaluating issuer trust via jwk",
+			"scope", scope,
+			"issuer_id", issuerID,
+			"credential_type", credentialType)
+	} else {
+		// No x5c or jwk header - credential lacks key material for trust evaluation
+		// This is a protocol error - credentials must include issuer key material
+		c.log.Warn("Credential missing x5c or jwk header - cannot evaluate issuer trust",
+			"scope", scope,
+			"issuer_id", issuerID)
+		return fmt.Errorf("credential missing x5c or jwk header required for trust evaluation")
+	}
 
 	// Evaluate trust via AuthZEN PDP
 	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		EvaluationRequest: trustapi.EvaluationRequest{
 			SubjectID:      issuerID,
-			KeyType:        trust.KeyTypeX5C,
-			Key:            certChain,
+			KeyType:        keyType,
+			Key:            keyMaterial,
 			Role:           trust.RoleCredentialIssuer,
 			CredentialType: credentialType,
 		},
@@ -342,6 +362,7 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		c.log.Warn("Issuer not trusted",
 			"scope", scope,
 			"issuer_id", issuerID,
+			"key_type", keyType,
 			"reason", decision.Reason,
 			"trust_framework", decision.TrustFramework)
 		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
@@ -350,6 +371,7 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 	c.log.Info("Issuer trust verified",
 		"scope", scope,
 		"issuer_id", issuerID,
+		"key_type", keyType,
 		"trust_framework", decision.TrustFramework)
 
 	return nil
