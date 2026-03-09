@@ -270,7 +270,8 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 // evaluateIssuerTrust evaluates the trust of the credential issuer using the configured TrustEvaluator.
 // For SD-JWT credentials with x5c header, it extracts the certificate chain and evaluates trust
 // against the AuthZEN PDP. For credentials with jwk header, it evaluates the embedded JWK.
-// If neither x5c nor jwk header is present, the function succeeds (issuer key not available for evaluation).
+// If neither x5c nor jwk header is present but the issuer is a DID, it attempts to resolve
+// the key via go-trust's DID resolution. If key material cannot be obtained, evaluation fails.
 func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
 	// Split the SD-JWT to get the issuer JWT
 	parts := strings.Split(vpToken, "~")
@@ -335,13 +336,43 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 			"scope", scope,
 			"issuer_id", issuerID,
 			"credential_type", credentialType)
+	} else if strings.HasPrefix(issuerID, "did:") {
+		// No x5c or jwk header, but issuer is a DID - try to resolve key via go-trust
+		resolver, ok := c.trustEvaluator.(trust.KeyResolver)
+		if !ok {
+			c.log.Warn("Issuer is DID but trust evaluator does not support key resolution",
+				"scope", scope,
+				"issuer_id", issuerID)
+			return fmt.Errorf("cannot resolve DID issuer key: trust evaluator does not support key resolution")
+		}
+
+		c.log.Debug("Resolving issuer key via DID",
+			"scope", scope,
+			"issuer_id", issuerID,
+			"credential_type", credentialType)
+
+		resolvedKey, err := resolver.ResolveKey(ctx, issuerID)
+		if err != nil {
+			c.log.Warn("Failed to resolve DID issuer key",
+				"scope", scope,
+				"issuer_id", issuerID,
+				"error", err)
+			return fmt.Errorf("failed to resolve DID issuer key: %w", err)
+		}
+
+		keyType = trust.KeyTypeJWK
+		keyMaterial = resolvedKey
+
+		c.log.Debug("Evaluating issuer trust via resolved DID key",
+			"scope", scope,
+			"issuer_id", issuerID,
+			"credential_type", credentialType)
 	} else {
-		// No x5c or jwk header - credential lacks key material for trust evaluation
-		// This is a protocol error - credentials must include issuer key material
-		c.log.Warn("Credential missing x5c or jwk header - cannot evaluate issuer trust",
+		// No x5c, jwk, or DID - credential lacks key material for trust evaluation
+		c.log.Warn("Credential missing x5c or jwk header and issuer is not a DID - cannot evaluate issuer trust",
 			"scope", scope,
 			"issuer_id", issuerID)
-		return fmt.Errorf("credential missing x5c or jwk header required for trust evaluation")
+		return fmt.Errorf("credential missing x5c or jwk header and issuer is not a DID")
 	}
 
 	// Evaluate trust via AuthZEN PDP
