@@ -25,7 +25,7 @@ type MongoSecrets struct {
 // APIGWSecrets holds API gateway secrets
 type APIGWSecrets struct {
 	APIServer APIServerSecrets `yaml:"api_server,omitempty"`
-	OIDCRP    OIDCRPSecrets    `yaml:"oidcrp,omitempty"`
+	OIDCRP    OIDCRPSecrets    `yaml:"oidc_rp,omitempty"`
 }
 
 // APIServerSecrets holds API server secrets (basic auth passwords)

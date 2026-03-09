@@ -794,13 +794,10 @@ type APIGW struct {
 	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
 	// Example: "https://issuer.sunet.se"
 	PublicURL string `yaml:"public_url" validate:"required,httpurl"`
-	// RegistryPublicURL is the public URL of the registry service for constructing status list URIs
-	// Example: "https://registry.sunet.se"
-	RegistryPublicURL string `yaml:"registry_public_url" validate:"required,httpurl"`
 	// SAML holds the SAML Service Provider configuration
 	SAML SAMLConfig `yaml:"saml,omitempty" validate:"omitempty"`
 	// OIDCRP holds the OIDC Relying Party configuration
-	OIDCRP OIDCRPConfig `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	OIDCRP OIDCRPConfig `yaml:"oidc_rp,omitempty" validate:"omitempty"`
 	// IssuerClient is the gRPC client config for issuer
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry

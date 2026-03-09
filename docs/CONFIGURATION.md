@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-05
+**Generated:** 2026-03-09
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -133,19 +133,18 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw`
 
-| Field                 | Type     | Description                                                          | Example                       | Default | Required |
-| --------------------- | -------- | -------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
-| `api_server`          | `object` | HTTP API server configuration                                        | -                             | -       | Yes      |
-| `key_config`          | `object` | Signing key configuration                                            | -                             | -       | Yes      |
-| `credential_offers`   | `object` | Credential offer wallet configurations                               | -                             | -       | No       |
-| `oauth_server`        | `object` | OAuth2 server configuration                                          | -                             | -       | No       |
-| `issuer_metadata`     | `object` | OpenID4VCI issuer metadata                                           | -                             | -       | No       |
-| `public_url`          | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)            | `"https://issuer.sunet.se"`   | -       | Yes      |
-| `registry_public_url` | `string` | Public URL of the registry service for constructing status list URIs | `"https://registry.sunet.se"` | -       | Yes      |
-| `saml`                | `object` | SAML Service Provider configuration                                  | -                             | -       | No       |
-| `oidcrp`              | `object` | OIDC Relying Party configuration                                     | -                             | -       | No       |
-| `issuer_client`       | `object` | GRPC client config for issuer                                        | -                             | -       | Yes      |
-| `registry_client`     | `object` | GRPC client config for registry                                      | -                             | -       | Yes      |
+| Field               | Type     | Description                                               | Example                     | Default | Required |
+| ------------------- | -------- | --------------------------------------------------------- | --------------------------- | ------- | -------- |
+| `api_server`        | `object` | HTTP API server configuration                             | -                           | -       | Yes      |
+| `key_config`        | `object` | Signing key configuration                                 | -                           | -       | Yes      |
+| `credential_offers` | `object` | Credential offer wallet configurations                    | -                           | -       | No       |
+| `oauth_server`      | `object` | OAuth2 server configuration                               | -                           | -       | No       |
+| `issuer_metadata`   | `object` | OpenID4VCI issuer metadata                                | -                           | -       | No       |
+| `public_url`        | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | `"https://issuer.sunet.se"` | -       | Yes      |
+| `saml`              | `object` | SAML Service Provider configuration                       | -                           | -       | No       |
+| `oidc_rp`           | `object` | OIDC Relying Party configuration                          | -                           | -       | No       |
+| `issuer_client`     | `object` | GRPC client config for issuer                             | -                           | -       | Yes      |
+| `registry_client`   | `object` | GRPC client config for registry                           | -                           | -       | Yes      |
 
 ### `api_server`
 
@@ -373,7 +372,7 @@ Supports both file-based and HSM-based keys with explicit control.
 
 ### `credential_mappings` entry
 
-> **Path:** `.apigw.saml.credential_mappings.<key>`, `.apigw.oidcrp.credential_mappings.<key>`
+> **Path:** `.apigw.saml.credential_mappings.<key>`, `.apigw.oidc_rp.credential_mappings.<key>`
 
 The credential type identifier (map key) is used in API requests and session state
 
@@ -385,7 +384,7 @@ The credential type identifier (map key) is used in API requests and session sta
 
 ### `attributes` entry
 
-> **Path:** `.apigw.saml.credential_mappings.<key>.attributes.<key>`, `.apigw.oidcrp.credential_mappings.<key>.attributes.<key>`
+> **Path:** `.apigw.saml.credential_mappings.<key>.attributes.<key>`, `.apigw.oidc_rp.credential_mappings.<key>.attributes.<key>`
 
 Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
 
@@ -396,9 +395,9 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `transform` | `string` | Optional transformation to apply                                               | -                                       | -       | No       |
 | `default`   | `string` | Optional default value if attribute is missing                                 | -                                       | -       | No       |
 
-### `oidcrp`
+### `oidc_rp`
 
-> **Path:** `.apigw.oidcrp`
+> **Path:** `.apigw.oidc_rp`
 
 | Field                 | Type       | Description                                                                   | Example                                     | Default                          | Required         |
 | --------------------- | ---------- | ----------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | ---------------- |
@@ -418,7 +417,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 ### `registration`
 
-> **Path:** `.apigw.oidcrp.registration`
+> **Path:** `.apigw.oidc_rp.registration`
 
 Exactly one of Preconfigured or Dynamic must be set.
 
@@ -429,7 +428,7 @@ Exactly one of Preconfigured or Dynamic must be set.
 
 ### `preconfigured`
 
-> **Path:** `.apigw.oidcrp.registration.preconfigured`
+> **Path:** `.apigw.oidc_rp.registration.preconfigured`
 
 | Field           | Type     | Description                                       | Example | Default | Required         |
 | --------------- | -------- | ------------------------------------------------- | ------- | ------- | ---------------- |
@@ -439,7 +438,7 @@ Exactly one of Preconfigured or Dynamic must be set.
 
 ### `dynamic`
 
-> **Path:** `.apigw.oidcrp.registration.dynamic`
+> **Path:** `.apigw.oidc_rp.registration.dynamic`
 
 When set, client credentials are obtained automatically at startup and
 persisted in the database.
@@ -877,7 +876,7 @@ Fields omitted or left empty here remain at their zero value.
 | Field        | Type     | Description | Example | Default | Required |
 | ------------ | -------- | ----------- | ------- | ------- | -------- |
 | `api_server` | `object` | API Server  | -       | -       | No       |
-| `oidcrp`     | `object` | OIDCRP      | -       | -       | No       |
+| `oidc_rp`    | `object` | OIDCRP      | -       | -       | No       |
 
 ### `api_server`
 
@@ -903,9 +902,9 @@ Fields omitted or left empty here remain at their zero value.
 | ------- | -------- | ----------- | ------- | ------- | -------- |
 | `users` | `object` | Users       | -       | -       | No       |
 
-### `oidcrp`
+### `oidc_rp`
 
-> **Path:** `.apigw.oidcrp`
+> **Path:** `.apigw.oidc_rp`
 
 | Field          | Type     | Description  | Example | Default | Required |
 | -------------- | -------- | ------------ | ------- | ------- | -------- |
@@ -913,7 +912,7 @@ Fields omitted or left empty here remain at their zero value.
 
 ### `registration`
 
-> **Path:** `.apigw.oidcrp.registration`
+> **Path:** `.apigw.oidc_rp.registration`
 
 | Field           | Type     | Description   | Example | Default | Required |
 | --------------- | -------- | ------------- | ------- | ------- | -------- |
@@ -922,7 +921,7 @@ Fields omitted or left empty here remain at their zero value.
 
 ### `preconfigured`
 
-> **Path:** `.apigw.oidcrp.registration.preconfigured`
+> **Path:** `.apigw.oidc_rp.registration.preconfigured`
 
 | Field           | Type     | Description   | Example | Default | Required |
 | --------------- | -------- | ------------- | ------- | ------- | -------- |
@@ -930,7 +929,7 @@ Fields omitted or left empty here remain at their zero value.
 
 ### `dynamic`
 
-> **Path:** `.apigw.oidcrp.registration.dynamic`
+> **Path:** `.apigw.oidc_rp.registration.dynamic`
 
 | Field                  | Type     | Description          | Example | Default | Required |
 | ---------------------- | -------- | -------------------- | ------- | ------- | -------- |
@@ -956,13 +955,13 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.verifier`
 
-| Field  | Type     | Description | Example | Default | Required |
-| ------ | -------- | ----------- | ------- | ------- | -------- |
-| `oidc` | `object` | OIDCOP      | -       | -       | No       |
+| Field     | Type     | Description | Example | Default | Required |
+| --------- | -------- | ----------- | ------- | ------- | -------- |
+| `oidc_op` | `object` | OIDCOP      | -       | -       | No       |
 
-### `oidc`
+### `oidc_op`
 
-> **Path:** `.verifier.oidc`
+> **Path:** `.verifier.oidc_op`
 
 | Field          | Type     | Description  | Example | Default | Required |
 | -------------- | -------- | ------------ | ------- | ------- | -------- |
@@ -990,7 +989,7 @@ apigw:
       basic_auth:
         users:
           <username>: "<password>"
-  oidcrp:
+  oidc_rp:
     registration:
       preconfigured:
         client_secret: "your-oidc-client-secret"
@@ -1000,7 +999,7 @@ registry:
   admin_gui:
     password: "change-me-in-production"
 verifier:
-  oidc:
+  oidc_op:
     subject_salt: "random-salt-for-pairwise-subjects"
 ui:
   password: "change-me-in-production"

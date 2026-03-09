@@ -387,7 +387,7 @@ apigw:
   #   preconfigured: pre-registered client_id and client_secret
   #   dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
   #
-  oidcrp:
+  oidc_rp:
     enable: false
     # --- Option A: Pre-registered credentials ---
     registration:
