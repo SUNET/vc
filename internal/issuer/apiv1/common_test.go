@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"fmt"
+	"net/url"
 	"testing"
 	"vc/internal/gen/registry/apiv1_registry"
 	"vc/internal/issuer/auditlog"
@@ -24,9 +26,12 @@ type mockRegistryClient struct {
 
 func (m *mockRegistryClient) TokenStatusListAddStatus(ctx context.Context, in *apiv1_registry.TokenStatusListAddStatusRequest, opts ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
 	m.index++
+	u, _ := url.Parse("https://test-registry.sunet.se")
+	u.Path, _ = url.JoinPath(u.Path, "statuslists", fmt.Sprintf("%d", m.section))
 	return &apiv1_registry.TokenStatusListAddStatusReply{
-		Section: m.section,
-		Index:   m.index,
+		Section:       m.section,
+		Index:         m.index,
+		StatusListUri: u.String(),
 	}, nil
 }
 
@@ -95,9 +100,6 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 				Status:                   "",
 				Kid:                      "",
 			},
-		},
-		Registry: &model.Registry{
-			PublicURL: "https://test-registry.sunet.se",
 		},
 	}
 

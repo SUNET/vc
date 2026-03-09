@@ -73,13 +73,11 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
-	// Construct status URI based on registry endpoint and section
-	statusURI := fmt.Sprintf("%s/statuslists/%d", c.cfg.Registry.PublicURL, grpcReply.GetSection())
 	opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
 		Index: grpcReply.GetIndex(),
-		URI:   statusURI,
+		URI:   grpcReply.GetStatusListUri(),
 	}
-	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", statusURI)
+	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", grpcReply.GetStatusListUri())
 
 	// Build SD-JWT using sdjwtvc package with the signer interface
 	sdClient := sdjwtvc.New()
