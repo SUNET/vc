@@ -410,7 +410,7 @@ func (c *Client) extractJWTKeyMaterial(ctx context.Context, token *jwt.Token, is
 // For SD-JWT credentials with x5c header, it extracts the certificate chain, verifies the signature,
 // and evaluates trust against the AuthZEN PDP. For credentials with jwk header, it uses the embedded JWK.
 // If neither x5c nor jwk header is present but the issuer is a DID, it attempts to resolve
-// the key via go-trust's DID resolution. Signature verification happens before trust evaluation.
+// the key via go-trust's DID resolution. Signature verification happens as part of jwt.Parse.
 func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
 	if c.trustEvaluator == nil {
 		c.log.Error(nil, "Trust evaluator not initialized - this should never happen")
@@ -424,39 +424,63 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		return fmt.Errorf("empty issuer JWT in VP token")
 	}
 
-	// Parse JWT header to extract key material and claims for trust evaluation.
-	// NOTE: ParseUnverified is used intentionally here because we need to inspect the header
-	// (x5c/jwk) to determine which key to use for verification. The actual cryptographic
-	// signature verification is performed below by verifyJWTSignature() which enforces
-	// a strict algorithm allowlist and rejects "none" and other weak algorithms.
-	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	token, _, err := parser.ParseUnverified(issuerJWT, jwt.MapClaims{}) // NOSONAR (go:S5659) - ParseUnverified is intentional; signature is verified below by verifyJWTSignature()
-	if err != nil {
-		return fmt.Errorf("failed to parse JWT header: %w", err)
-	}
-
-	issuerID, credentialType := extractJWTClaimsInfo(token)
-
-	keyInfo, err := c.extractJWTKeyMaterial(ctx, token, issuerID, scope, credentialType)
-	if err != nil {
-		return err
-	}
-
-	// CRITICAL: Verify the JWT signature using the extracted public key
+	// Build the algorithm allowlist for signature verification
 	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
-	if err := verifyJWTSignature(issuerJWT, keyInfo.publicKey, allowedAlgs); err != nil {
+	allowedSet := buildAllowedAlgorithmSet(allowedAlgs)
+
+	// keyInfo is captured by the keyfunc closure and populated during jwt.Parse.
+	// The keyfunc inspects the JWT header (x5c/jwk) and claims (iss for DID resolution)
+	// to determine which public key to use for signature verification.
+	var keyInfo *jwtKeyMaterial
+
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, err := parser.Parse(issuerJWT, func(token *jwt.Token) (any, error) {
+		alg := token.Method.Alg()
+
+		// Check algorithm allowlist - "none" is never permitted
+		if !allowedSet[alg] {
+			return nil, fmt.Errorf("algorithm %q is not in the allowed list", alg)
+		}
+
+		// Extract issuer and credential type from claims (available in keyfunc)
+		issuerID, credentialType := extractJWTClaimsInfo(token)
+
+		// Extract key material from header (x5c, jwk, or DID resolution)
+		ki, err := c.extractJWTKeyMaterial(ctx, token, issuerID, scope, credentialType)
+		if err != nil {
+			return nil, err
+		}
+		keyInfo = ki
+
+		// Validate the signing method matches the key type
+		if err := validateSigningMethodForKey(token, ki.publicKey); err != nil {
+			return nil, err
+		}
+
+		return ki.publicKey, nil
+	})
+	if err != nil {
 		c.log.Warn("JWT signature verification failed",
-			"scope", scope, "issuer_id", keyInfo.issuerID, "error", err)
+			"scope", scope, "error", err)
 		return fmt.Errorf("JWT signature verification failed: %w", err)
 	}
 
+	// At this point the JWT signature is verified. Extract claims for trust evaluation.
+	issuerID := keyInfo.issuerID
+	credentialType := ""
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		if vct, ok := claims["vct"].(string); ok {
+			credentialType = vct
+		}
+	}
+
 	c.log.Debug("JWT signature verified successfully",
-		"scope", scope, "issuer_id", keyInfo.issuerID)
+		"scope", scope, "issuer_id", issuerID)
 
 	// Evaluate trust via AuthZEN PDP
 	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID:      keyInfo.issuerID,
+			SubjectID:      issuerID,
 			KeyType:        keyInfo.keyType,
 			Key:            keyInfo.keyMaterial,
 			Role:           trust.RoleCredentialIssuer,
@@ -469,14 +493,14 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 
 	if !decision.Trusted {
 		c.log.Warn("Issuer not trusted",
-			"scope", scope, "issuer_id", keyInfo.issuerID,
+			"scope", scope, "issuer_id", issuerID,
 			"key_type", keyInfo.keyType, "reason", decision.Reason,
 			"trust_framework", decision.TrustFramework)
 		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
 	}
 
 	c.log.Info("Issuer trust verified",
-		"scope", scope, "issuer_id", keyInfo.issuerID,
+		"scope", scope, "issuer_id", issuerID,
 		"key_type", keyInfo.keyType, "trust_framework", decision.TrustFramework)
 
 	return nil
@@ -489,6 +513,23 @@ var defaultAllowedAlgorithms = []string{
 	"RS256", "RS384", "RS512", // RSA PKCS#1 v1.5
 	"PS256", "PS384", "PS512", // RSA-PSS
 	"EdDSA", // Ed25519
+}
+
+// buildAllowedAlgorithmSet creates a set of allowed algorithms for O(1) lookup.
+// The "none" algorithm is NEVER allowed regardless of configuration.
+func buildAllowedAlgorithmSet(allowedAlgorithms []string) map[string]bool {
+	if len(allowedAlgorithms) == 0 {
+		allowedAlgorithms = defaultAllowedAlgorithms
+	}
+	allowedSet := make(map[string]bool, len(allowedAlgorithms))
+	for _, alg := range allowedAlgorithms {
+		allowedSet[alg] = true
+	}
+	// SECURITY: "none" algorithm is NEVER allowed, even if misconfigured
+	delete(allowedSet, "none")
+	delete(allowedSet, "None")
+	delete(allowedSet, "NONE")
+	return allowedSet
 }
 
 // validateSigningMethodForKey checks that the JWT signing method is compatible with the provided public key type.
@@ -512,49 +553,6 @@ func validateSigningMethodForKey(token *jwt.Token, publicKey crypto.PublicKey) e
 	default:
 		return fmt.Errorf("unsupported public key type: %T", publicKey)
 	}
-	return nil
-}
-
-// verifyJWTSignature verifies the JWT signature using the provided public key.
-// allowedAlgorithms restricts which algorithms are accepted. If empty, defaults to defaultAllowedAlgorithms.
-// The "none" algorithm is NEVER allowed regardless of configuration.
-func verifyJWTSignature(jwtString string, publicKey crypto.PublicKey, allowedAlgorithms []string) error {
-	// Use defaults if no algorithms specified
-	if len(allowedAlgorithms) == 0 {
-		allowedAlgorithms = defaultAllowedAlgorithms
-	}
-
-	// Build a set for O(1) lookup
-	allowedSet := make(map[string]bool, len(allowedAlgorithms))
-	for _, alg := range allowedAlgorithms {
-		allowedSet[alg] = true
-	}
-
-	// SECURITY: "none" algorithm is NEVER allowed, even if misconfigured
-	delete(allowedSet, "none")
-	delete(allowedSet, "None")
-	delete(allowedSet, "NONE")
-
-	// Parse and verify the JWT with the extracted public key
-	_, err := jwt.Parse(jwtString, func(token *jwt.Token) (any, error) {
-		alg := token.Method.Alg()
-
-		// Check algorithm whitelist
-		if !allowedSet[alg] {
-			return nil, fmt.Errorf("algorithm %q is not in the allowed list", alg)
-		}
-
-		// Validate the signing method matches the key type
-		if err := validateSigningMethodForKey(token, publicKey); err != nil {
-			return nil, err
-		}
-		return publicKey, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("signature verification failed: %w", err)
-	}
-
 	return nil
 }
 

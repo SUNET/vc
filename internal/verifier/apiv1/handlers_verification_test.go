@@ -181,66 +181,66 @@ func TestVerificationCallback(t *testing.T) {
 	}
 }
 
-// TestVerifyJWTSignature tests JWT signature verification with algorithm whitelist
-func TestVerifyJWTSignature(t *testing.T) {
-	// Generate test key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	// Create a valid JWT
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss": "test-issuer",
-		"sub": "test-subject",
-	})
-	signedJWT, err := token.SignedString(privateKey)
-	require.NoError(t, err)
-
+// TestBuildAllowedAlgorithmSet tests algorithm allowlist construction
+func TestBuildAllowedAlgorithmSet(t *testing.T) {
 	tests := []struct {
 		name        string
-		allowedAlgs []string
-		expectErr   bool
-		errContains string
+		input       []string
+		expectAlg   string
+		expectAllow bool
 	}{
 		{
 			name:        "ES256 allowed by default",
-			allowedAlgs: nil, // use defaults
-			expectErr:   false,
+			input:       nil,
+			expectAlg:   "ES256",
+			expectAllow: true,
 		},
 		{
 			name:        "ES256 explicitly allowed",
-			allowedAlgs: []string{"ES256", "ES384"},
-			expectErr:   false,
+			input:       []string{"ES256", "ES384"},
+			expectAlg:   "ES256",
+			expectAllow: true,
 		},
 		{
-			name:        "ES256 not in allowed list",
-			allowedAlgs: []string{"RS256", "RS384"},
-			expectErr:   true,
-			errContains: "not in the allowed list",
+			name:        "RS256 not in custom list",
+			input:       []string{"ES256"},
+			expectAlg:   "RS256",
+			expectAllow: false,
 		},
 		{
-			name:        "none algorithm rejected even if in list",
-			allowedAlgs: []string{"none", "ES256"},
-			expectErr:   false, // ES256 is allowed, none is stripped
+			name:        "none algorithm stripped even if in list",
+			input:       []string{"none", "ES256"},
+			expectAlg:   "none",
+			expectAllow: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := verifyJWTSignature(signedJWT, &privateKey.PublicKey, tt.allowedAlgs)
-
-			if tt.expectErr {
-				assert.Error(t, err)
-				if tt.errContains != "" {
-					assert.Contains(t, err.Error(), tt.errContains)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
+			allowed := buildAllowedAlgorithmSet(tt.input)
+			assert.Equal(t, tt.expectAllow, allowed[tt.expectAlg])
 		})
 	}
 }
 
-// TestVerifyJWTSignature_InvalidSignature tests that invalid signatures are rejected
+// TestValidateSigningMethodForKey tests signing method / key type compatibility
+func TestValidateSigningMethodForKey(t *testing.T) {
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	// ECDSA key with ECDSA method - should pass
+	ecToken := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{})
+	err = validateSigningMethodForKey(ecToken, &ecKey.PublicKey)
+	assert.NoError(t, err)
+
+	// ECDSA key with RSA method - should fail
+	rsaToken := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{})
+	err = validateSigningMethodForKey(rsaToken, &ecKey.PublicKey)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected signing method")
+}
+
+// TestVerifyJWTSignatureInvalidSignature tests that invalid signatures are rejected via evaluateIssuerTrust
 func TestVerifyJWTSignatureInvalidSignature(t *testing.T) {
 	// Generate two different keys
 	key1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -248,17 +248,27 @@ func TestVerifyJWTSignatureInvalidSignature(t *testing.T) {
 	key2, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	// Sign with key1
+	// Sign with key1, embed key2 in jwk header (mismatch)
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 		"iss": "test-issuer",
 	})
+	// Embed key2's public key as jwk so extractJWTKeyMaterial uses key2
+	token.Header["jwk"] = map[string]any{
+		"kty": "EC",
+		"crv": "P-256",
+		"x":   base64.RawURLEncoding.EncodeToString(key2.PublicKey.X.Bytes()),
+		"y":   base64.RawURLEncoding.EncodeToString(key2.PublicKey.Y.Bytes()),
+	}
 	signedJWT, err := token.SignedString(key1)
 	require.NoError(t, err)
 
-	// Verify with key2 - should fail
-	err = verifyJWTSignature(signedJWT, &key2.PublicKey, nil)
+	client, _ := CreateTestClientWithMock(nil)
+	client.trustEvaluator = &mockTrustEvaluator{trustDecision: true}
+
+	ctx := context.Background()
+	err = client.evaluateIssuerTrust(ctx, signedJWT+"~", testScope)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "signature verification failed")
+	assert.Contains(t, err.Error(), "JWT signature verification failed")
 }
 
 // mockTrustEvaluator is a mock implementation for testing
