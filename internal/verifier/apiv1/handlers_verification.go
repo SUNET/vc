@@ -35,7 +35,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	// TODO(masv): should requestObjectCache be using cache lib
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.SessionID)
+	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.RequestObjectID)
 	if !found {
 		c.log.Error(nil, "request object not found in cache", "requestObjectID", authorizationContext.RequestObjectID)
 		return "", errors.New("request object not found")
