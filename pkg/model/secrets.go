@@ -76,7 +76,7 @@ type AdminGUISecrets struct {
 
 // VerifierSecrets holds verifier secrets
 type VerifierSecrets struct {
-	OIDCOP OIDCOPSecrets `yaml:"oidc,omitempty"`
+	OIDCOP OIDCOPSecrets `yaml:"oidc_op,omitempty"`
 }
 
 // OIDCOPSecrets holds OIDC OP configuration secrets
