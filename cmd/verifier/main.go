@@ -17,6 +17,9 @@ import (
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/trace"
+
+	"flag"
+	"vc/internal/verifier/zk"
 )
 
 func init() {
@@ -34,7 +37,22 @@ func main() {
 		ctx                = context.Background()
 		services           = make(map[string]service)
 		serviceName string = "verifier"
+		certs      = flag.String("cacerts", "/app/vc/internal/verifier/zk/certs.pem", "File containing issuer CA certs")
+		circuitDir         = flag.String("circuit_dir", "/app/vc/internal/verifier/zk/circuits", "Directory from which to load circuits")
 	)
+
+	flag.Parse()
+	zk.LoadCircuits(*circuitDir)
+
+	pem, err := os.ReadFile(*certs)
+	if err != nil {
+		panic("could not parse cacerts file")
+		os.Exit(1)
+	}
+	if err := zk.LoadIssuerRootCA(pem); err != nil {
+		panic("could not load issuer root CA")
+		os.Exit(1)
+	}
 
 	cfg, err := configuration.New(ctx, serviceName)
 	if err != nil {
