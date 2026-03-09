@@ -317,13 +317,101 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 	return reply, nil
 }
 
+// jwtKeyMaterial holds key material extracted from a JWT header for signature verification and trust evaluation.
+type jwtKeyMaterial struct {
+	keyType     trust.KeyType
+	keyMaterial any
+	publicKey   crypto.PublicKey
+	issuerID    string // may be updated (e.g., from cert CN fallback)
+}
+
+// extractJWTClaimsInfo extracts the issuer identifier and credential type from JWT claims.
+func extractJWTClaimsInfo(token *jwt.Token) (issuerID, credentialType string) {
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", ""
+	}
+	if iss, ok := claims["iss"].(string); ok {
+		issuerID = iss
+	}
+	if vct, ok := claims["vct"].(string); ok {
+		credentialType = vct
+	}
+	return issuerID, credentialType
+}
+
+// extractJWTKeyMaterial extracts key type, key material, and public key from the JWT header.
+// It supports x5c certificate chains, embedded JWKs, and DID-based key resolution.
+func (c *Client) extractJWTKeyMaterial(ctx context.Context, token *jwt.Token, issuerID, scope, credentialType string) (*jwtKeyMaterial, error) {
+	if x5cRaw, ok := token.Header["x5c"]; ok {
+		certChain, err := jose.ParseX5CHeader(x5cRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse x5c header: %w", err)
+		}
+		effectiveIssuerID := issuerID
+		if issuerID == "" {
+			effectiveIssuerID = certChain[0].Subject.CommonName
+		}
+		c.log.Debug("Verifying credential signature via x5c",
+			"scope", scope, "issuer_id", effectiveIssuerID,
+			"credential_type", credentialType, "cert_chain_length", len(certChain))
+		return &jwtKeyMaterial{
+			keyType: trust.KeyTypeX5C, keyMaterial: certChain,
+			publicKey: certChain[0].PublicKey, issuerID: effectiveIssuerID,
+		}, nil
+	}
+
+	if jwkRaw, ok := token.Header["jwk"]; ok {
+		jwkMap, ok := jwkRaw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("invalid jwk header format: expected map, got %T", jwkRaw)
+		}
+		publicKey, err := jose.ParseJWKToPublicKey(jwkMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse jwk header: %w", err)
+		}
+		c.log.Debug("Verifying credential signature via jwk",
+			"scope", scope, "issuer_id", issuerID, "credential_type", credentialType)
+		return &jwtKeyMaterial{
+			keyType: trust.KeyTypeJWK, keyMaterial: jwkMap,
+			publicKey: publicKey, issuerID: issuerID,
+		}, nil
+	}
+
+	if strings.HasPrefix(issuerID, "did:") {
+		resolver, ok := c.trustEvaluator.(trust.KeyResolver)
+		if !ok {
+			c.log.Warn("Issuer is DID but trust evaluator does not support key resolution",
+				"scope", scope, "issuer_id", issuerID)
+			return nil, fmt.Errorf("cannot resolve DID issuer key: trust evaluator does not support key resolution")
+		}
+		c.log.Debug("Resolving issuer key via DID",
+			"scope", scope, "issuer_id", issuerID, "credential_type", credentialType)
+		resolvedKey, err := resolver.ResolveKey(ctx, issuerID)
+		if err != nil {
+			c.log.Warn("Failed to resolve DID issuer key",
+				"scope", scope, "issuer_id", issuerID, "error", err)
+			return nil, fmt.Errorf("failed to resolve DID issuer key: %w", err)
+		}
+		c.log.Debug("Verifying credential signature via resolved DID key",
+			"scope", scope, "issuer_id", issuerID, "credential_type", credentialType)
+		return &jwtKeyMaterial{
+			keyType: trust.KeyTypeJWK, keyMaterial: resolvedKey,
+			publicKey: resolvedKey, issuerID: issuerID,
+		}, nil
+	}
+
+	c.log.Warn("Credential missing x5c or jwk header and issuer is not a DID - cannot evaluate issuer trust",
+		"scope", scope, "issuer_id", issuerID)
+	return nil, fmt.Errorf("credential missing x5c or jwk header and issuer is not a DID")
+}
+
 // evaluateIssuerTrust verifies the credential signature and evaluates the trust of the credential issuer.
 // For SD-JWT credentials with x5c header, it extracts the certificate chain, verifies the signature,
 // and evaluates trust against the AuthZEN PDP. For credentials with jwk header, it uses the embedded JWK.
 // If neither x5c nor jwk header is present but the issuer is a DID, it attempts to resolve
 // the key via go-trust's DID resolution. Signature verification happens before trust evaluation.
 func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
-	// Check that trust evaluator is configured
 	if c.trustEvaluator == nil {
 		c.log.Error(nil, "Trust evaluator not initialized - this should never happen")
 		return fmt.Errorf("trust evaluator not initialized")
@@ -347,122 +435,30 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		return fmt.Errorf("failed to parse JWT header: %w", err)
 	}
 
-	// Extract issuer identifier and credential type from claims
-	issuerID := ""
-	credentialType := ""
-	if claims, ok := token.Claims.(jwt.MapClaims); ok {
-		if iss, ok := claims["iss"].(string); ok {
-			issuerID = iss
-		}
-		if vct, ok := claims["vct"].(string); ok {
-			credentialType = vct
-		}
-	}
+	issuerID, credentialType := extractJWTClaimsInfo(token)
 
-	// Determine key type and extract key material from header
-	var keyType trust.KeyType
-	var keyMaterial any
-	var publicKey crypto.PublicKey
-
-	if x5cRaw, ok := token.Header["x5c"]; ok {
-		// x5c header - certificate chain
-		certChain, err := jose.ParseX5CHeader(x5cRaw)
-		if err != nil {
-			return fmt.Errorf("failed to parse x5c header: %w", err)
-		}
-		keyType = trust.KeyTypeX5C
-		keyMaterial = certChain
-		publicKey = certChain[0].PublicKey // Use leaf certificate's public key
-
-		// Fallback to leaf certificate CN for issuer ID
-		if issuerID == "" && len(certChain) > 0 {
-			issuerID = certChain[0].Subject.CommonName
-		}
-
-		c.log.Debug("Verifying credential signature via x5c",
-			"scope", scope,
-			"issuer_id", issuerID,
-			"credential_type", credentialType,
-			"cert_chain_length", len(certChain))
-	} else if jwkRaw, ok := token.Header["jwk"]; ok {
-		// jwk header - embedded JWK
-		jwkMap, ok := jwkRaw.(map[string]any)
-		if !ok {
-			return fmt.Errorf("invalid jwk header format: expected map, got %T", jwkRaw)
-		}
-		keyType = trust.KeyTypeJWK
-		keyMaterial = jwkMap
-
-		// Parse JWK to get public key for signature verification
-		publicKey, err = jose.ParseJWKToPublicKey(jwkMap)
-		if err != nil {
-			return fmt.Errorf("failed to parse jwk header: %w", err)
-		}
-
-		c.log.Debug("Verifying credential signature via jwk",
-			"scope", scope,
-			"issuer_id", issuerID,
-			"credential_type", credentialType)
-	} else if strings.HasPrefix(issuerID, "did:") {
-		// No x5c or jwk header, but issuer is a DID - try to resolve key via go-trust
-		resolver, ok := c.trustEvaluator.(trust.KeyResolver)
-		if !ok {
-			c.log.Warn("Issuer is DID but trust evaluator does not support key resolution",
-				"scope", scope,
-				"issuer_id", issuerID)
-			return fmt.Errorf("cannot resolve DID issuer key: trust evaluator does not support key resolution")
-		}
-
-		c.log.Debug("Resolving issuer key via DID",
-			"scope", scope,
-			"issuer_id", issuerID,
-			"credential_type", credentialType)
-
-		resolvedKey, err := resolver.ResolveKey(ctx, issuerID)
-		if err != nil {
-			c.log.Warn("Failed to resolve DID issuer key",
-				"scope", scope,
-				"issuer_id", issuerID,
-				"error", err)
-			return fmt.Errorf("failed to resolve DID issuer key: %w", err)
-		}
-
-		keyType = trust.KeyTypeJWK
-		keyMaterial = resolvedKey
-		publicKey = resolvedKey
-
-		c.log.Debug("Verifying credential signature via resolved DID key",
-			"scope", scope,
-			"issuer_id", issuerID,
-			"credential_type", credentialType)
-	} else {
-		// No x5c, jwk, or DID - credential lacks key material for trust evaluation
-		c.log.Warn("Credential missing x5c or jwk header and issuer is not a DID - cannot evaluate issuer trust",
-			"scope", scope,
-			"issuer_id", issuerID)
-		return fmt.Errorf("credential missing x5c or jwk header and issuer is not a DID")
+	keyInfo, err := c.extractJWTKeyMaterial(ctx, token, issuerID, scope, credentialType)
+	if err != nil {
+		return err
 	}
 
 	// CRITICAL: Verify the JWT signature using the extracted public key
 	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
-	if err := verifyJWTSignature(issuerJWT, publicKey, allowedAlgs); err != nil {
+	if err := verifyJWTSignature(issuerJWT, keyInfo.publicKey, allowedAlgs); err != nil {
 		c.log.Warn("JWT signature verification failed",
-			"scope", scope,
-			"issuer_id", issuerID,
-			"error", err)
+			"scope", scope, "issuer_id", keyInfo.issuerID, "error", err)
 		return fmt.Errorf("JWT signature verification failed: %w", err)
 	}
 
 	c.log.Debug("JWT signature verified successfully",
-		"scope", scope,
-		"issuer_id", issuerID)
+		"scope", scope, "issuer_id", keyInfo.issuerID)
 
 	// Evaluate trust via AuthZEN PDP
 	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID:      issuerID,
-			KeyType:        keyType,
-			Key:            keyMaterial,
+			SubjectID:      keyInfo.issuerID,
+			KeyType:        keyInfo.keyType,
+			Key:            keyInfo.keyMaterial,
 			Role:           trust.RoleCredentialIssuer,
 			CredentialType: credentialType,
 		},
@@ -473,19 +469,15 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 
 	if !decision.Trusted {
 		c.log.Warn("Issuer not trusted",
-			"scope", scope,
-			"issuer_id", issuerID,
-			"key_type", keyType,
-			"reason", decision.Reason,
+			"scope", scope, "issuer_id", keyInfo.issuerID,
+			"key_type", keyInfo.keyType, "reason", decision.Reason,
 			"trust_framework", decision.TrustFramework)
 		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
 	}
 
 	c.log.Info("Issuer trust verified",
-		"scope", scope,
-		"issuer_id", issuerID,
-		"key_type", keyType,
-		"trust_framework", decision.TrustFramework)
+		"scope", scope, "issuer_id", keyInfo.issuerID,
+		"key_type", keyInfo.keyType, "trust_framework", decision.TrustFramework)
 
 	return nil
 }
@@ -497,6 +489,30 @@ var defaultAllowedAlgorithms = []string{
 	"RS256", "RS384", "RS512", // RSA PKCS#1 v1.5
 	"PS256", "PS384", "PS512", // RSA-PSS
 	"EdDSA", // Ed25519
+}
+
+// validateSigningMethodForKey checks that the JWT signing method is compatible with the provided public key type.
+func validateSigningMethodForKey(token *jwt.Token, publicKey crypto.PublicKey) error {
+	alg := token.Method.Alg()
+	switch publicKey.(type) {
+	case *ecdsa.PublicKey:
+		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+			return fmt.Errorf("unexpected signing method %v for ECDSA key", alg)
+		}
+	case *rsa.PublicKey:
+		_, isRS := token.Method.(*jwt.SigningMethodRSA)
+		_, isPS := token.Method.(*jwt.SigningMethodRSAPSS)
+		if !isRS && !isPS {
+			return fmt.Errorf("unexpected signing method %v for RSA key", alg)
+		}
+	case ed25519.PublicKey:
+		if _, ok := token.Method.(*jwt.SigningMethodEd25519); !ok {
+			return fmt.Errorf("unexpected signing method %v for Ed25519 key", alg)
+		}
+	default:
+		return fmt.Errorf("unsupported public key type: %T", publicKey)
+	}
+	return nil
 }
 
 // verifyJWTSignature verifies the JWT signature using the provided public key.
@@ -529,24 +545,8 @@ func verifyJWTSignature(jwtString string, publicKey crypto.PublicKey, allowedAlg
 		}
 
 		// Validate the signing method matches the key type
-		switch publicKey.(type) {
-		case *ecdsa.PublicKey:
-			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
-				return nil, fmt.Errorf("unexpected signing method %v for ECDSA key", alg)
-			}
-		case *rsa.PublicKey:
-			// RSA can use RS* or PS* algorithms
-			_, isRS := token.Method.(*jwt.SigningMethodRSA)
-			_, isPS := token.Method.(*jwt.SigningMethodRSAPSS)
-			if !isRS && !isPS {
-				return nil, fmt.Errorf("unexpected signing method %v for RSA key", alg)
-			}
-		case ed25519.PublicKey:
-			if _, ok := token.Method.(*jwt.SigningMethodEd25519); !ok {
-				return nil, fmt.Errorf("unexpected signing method %v for Ed25519 key", alg)
-			}
-		default:
-			return nil, fmt.Errorf("unsupported public key type: %T", publicKey)
+		if err := validateSigningMethodForKey(token, publicKey); err != nil {
+			return nil, err
 		}
 		return publicKey, nil
 	})

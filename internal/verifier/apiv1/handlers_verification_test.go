@@ -17,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testScope = "test-scope"
+
 // TestGetKID tests the GetKID method on VerificationDirectPostRequest
 func TestGetKID(t *testing.T) {
 	tests := []struct {
@@ -239,7 +241,7 @@ func TestVerifyJWTSignature(t *testing.T) {
 }
 
 // TestVerifyJWTSignature_InvalidSignature tests that invalid signatures are rejected
-func TestVerifyJWTSignature_InvalidSignature(t *testing.T) {
+func TestVerifyJWTSignatureInvalidSignature(t *testing.T) {
 	// Generate two different keys
 	key1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -282,31 +284,31 @@ func (m *mockTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
 }
 
 // TestEvaluateIssuerTrust_NilEvaluator tests that nil trust evaluator returns error
-func TestEvaluateIssuerTrust_NilEvaluator(t *testing.T) {
+func TestEvaluateIssuerTrustNilEvaluator(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
 	// trustEvaluator is nil by default in test client
 
 	ctx := context.Background()
-	err := client.evaluateIssuerTrust(ctx, "dummy.jwt.token", "test-scope")
+	err := client.evaluateIssuerTrust(ctx, "dummy.jwt.token", testScope)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "trust evaluator not initialized")
 }
 
 // TestEvaluateIssuerTrust_EmptyJWT tests that empty JWT returns error
-func TestEvaluateIssuerTrust_EmptyJWT(t *testing.T) {
+func TestEvaluateIssuerTrustEmptyJWT(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
 	client.trustEvaluator = &mockTrustEvaluator{trustDecision: true}
 
 	ctx := context.Background()
-	err := client.evaluateIssuerTrust(ctx, "", "test-scope")
+	err := client.evaluateIssuerTrust(ctx, "", testScope)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty issuer JWT")
 }
 
 // TestEvaluateIssuerTrust_MissingKeyMaterial tests that missing key material returns error
-func TestEvaluateIssuerTrust_MissingKeyMaterial(t *testing.T) {
+func TestEvaluateIssuerTrustMissingKeyMaterial(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
 	client.trustEvaluator = &mockTrustEvaluator{trustDecision: true}
 
@@ -322,7 +324,7 @@ func TestEvaluateIssuerTrust_MissingKeyMaterial(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	err = client.evaluateIssuerTrust(ctx, signedJWT+"~disclosure1~disclosure2~", "test-scope")
+	err = client.evaluateIssuerTrust(ctx, signedJWT+"~disclosure1~disclosure2~", testScope)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing x5c or jwk header")
