@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,10 +12,13 @@ import (
 	"vc/pkg/cache"
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
+	"vc/pkg/trust"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
+	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 type VerificationRequestObjectRequest struct {
@@ -184,6 +188,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 		c.log.Debug("VP Token validated successfully", "scope", scope)
 
+		// Evaluate trust using AuthZEN PDP if configured
+		if err := c.evaluateIssuerTrust(ctx, responseParams.VPToken, scope); err != nil {
+			c.log.Error(err, "issuer trust evaluation failed", "scope", scope)
+			return nil, fmt.Errorf("issuer trust evaluation failed for scope %s: %w", scope, err)
+		}
+
 		// Parse SD-JWT credential
 		_, _, _, selectiveDisclosure, _, err := sdjwtvc.Token(responseParams.VPToken).Split()
 		if err != nil {
@@ -255,4 +265,129 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 	}
 
 	return reply, nil
+}
+
+// evaluateIssuerTrust evaluates the trust of the credential issuer using the configured TrustEvaluator.
+// For SD-JWT credentials with x5c header, it extracts the certificate chain and evaluates trust
+// against the AuthZEN PDP. If no x5c header is present or no TrustEvaluator is configured,
+// the function succeeds (allow-all mode).
+func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
+	// Split the SD-JWT to get the issuer JWT
+	parts := strings.Split(vpToken, "~")
+	if len(parts) < 1 {
+		return nil // No JWT to evaluate
+	}
+
+	issuerJWT := parts[0]
+
+	// Parse JWT header to check for x5c
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(issuerJWT, jwt.MapClaims{})
+	if err != nil {
+		return fmt.Errorf("failed to parse JWT header: %w", err)
+	}
+
+	// Check for x5c header
+	x5cRaw, ok := token.Header["x5c"]
+	if !ok {
+		// No x5c header - trust evaluation not applicable for this credential format
+		c.log.Debug("No x5c header in credential, skipping trust evaluation", "scope", scope)
+		return nil
+	}
+
+	// Parse x5c certificate chain
+	certChain, err := parseX5CHeader(x5cRaw)
+	if err != nil {
+		return fmt.Errorf("failed to parse x5c header: %w", err)
+	}
+
+	// Extract issuer identifier and credential type from claims
+	issuerID := ""
+	credentialType := ""
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		if iss, ok := claims["iss"].(string); ok {
+			issuerID = iss
+		}
+		if vct, ok := claims["vct"].(string); ok {
+			credentialType = vct
+		}
+	}
+
+	// Fallback to leaf certificate CN for issuer ID
+	if issuerID == "" && len(certChain) > 0 {
+		issuerID = certChain[0].Subject.CommonName
+	}
+
+	c.log.Debug("Evaluating issuer trust",
+		"scope", scope,
+		"issuer_id", issuerID,
+		"credential_type", credentialType,
+		"cert_chain_length", len(certChain))
+
+	// Evaluate trust via AuthZEN PDP
+	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			SubjectID:      issuerID,
+			KeyType:        trust.KeyTypeX5C,
+			Key:            certChain,
+			Role:           trust.RoleCredentialIssuer,
+			CredentialType: credentialType,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("trust evaluation error: %w", err)
+	}
+
+	if !decision.Trusted {
+		c.log.Warn("Issuer not trusted",
+			"scope", scope,
+			"issuer_id", issuerID,
+			"reason", decision.Reason,
+			"trust_framework", decision.TrustFramework)
+		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
+	}
+
+	c.log.Info("Issuer trust verified",
+		"scope", scope,
+		"issuer_id", issuerID,
+		"trust_framework", decision.TrustFramework)
+
+	return nil
+}
+
+// parseX5CHeader parses the x5c header into a certificate chain.
+// The x5c header is an array of base64-encoded DER certificates.
+func parseX5CHeader(x5cRaw any) ([]*x509.Certificate, error) {
+	x5cArray, ok := x5cRaw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("x5c header must be an array")
+	}
+
+	if len(x5cArray) == 0 {
+		return nil, fmt.Errorf("x5c header is empty")
+	}
+
+	certs := make([]*x509.Certificate, 0, len(x5cArray))
+	for i, certRaw := range x5cArray {
+		certB64, ok := certRaw.(string)
+		if !ok {
+			return nil, fmt.Errorf("x5c[%d] is not a string", i)
+		}
+
+		// Decode base64
+		certDER, err := base64.StdEncoding.DecodeString(certB64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode x5c[%d]: %w", i, err)
+		}
+
+		// Parse certificate
+		cert, err := x509.ParseCertificate(certDER)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse x5c[%d]: %w", i, err)
+		}
+
+		certs = append(certs, cert)
+	}
+
+	return certs, nil
 }

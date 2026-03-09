@@ -19,6 +19,7 @@ import (
 	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
 	"vc/pkg/trace"
+	"vc/pkg/trust"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -40,8 +41,9 @@ type Client struct {
 	pkiSignerChain []string
 
 	// Clients and services
-	openid4vp    *openid4vp.Client
-	trustService *openid4vp.TrustService
+	openid4vp      *openid4vp.Client
+	trustService   *openid4vp.TrustService
+	trustEvaluator trust.TrustEvaluator
 
 	// Cache
 	cacheService *cache.Service
@@ -96,6 +98,17 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	}
 
 	c.trustService = &openid4vp.TrustService{}
+
+	// Initialize trust evaluator from config
+	// If PDPURL is configured, uses AuthZEN PDP for trust decisions ("default deny" mode)
+	// If PDPURL is empty, uses AllowAllEvaluator ("allow all" mode)
+	c.trustEvaluator = trust.NewTrustEvaluatorFromConfig(cfg.Verifier.Trust.PDPURL)
+	c.log.Info("Trust evaluator initialized", "mode", func() string {
+		if cfg.Verifier.Trust.PDPURL != "" {
+			return "authzen"
+		}
+		return "allow-all"
+	}(), "pdp_url", cfg.Verifier.Trust.PDPURL)
 
 	c.log.Info("Started")
 
