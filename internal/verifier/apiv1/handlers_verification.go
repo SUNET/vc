@@ -2,6 +2,10 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
@@ -267,11 +272,11 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 	return reply, nil
 }
 
-// evaluateIssuerTrust evaluates the trust of the credential issuer using the configured TrustEvaluator.
-// For SD-JWT credentials with x5c header, it extracts the certificate chain and evaluates trust
-// against the AuthZEN PDP. For credentials with jwk header, it evaluates the embedded JWK.
+// evaluateIssuerTrust verifies the credential signature and evaluates the trust of the credential issuer.
+// For SD-JWT credentials with x5c header, it extracts the certificate chain, verifies the signature,
+// and evaluates trust against the AuthZEN PDP. For credentials with jwk header, it uses the embedded JWK.
 // If neither x5c nor jwk header is present but the issuer is a DID, it attempts to resolve
-// the key via go-trust's DID resolution. If key material cannot be obtained, evaluation fails.
+// the key via go-trust's DID resolution. Signature verification happens before trust evaluation.
 func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
 	// Split the SD-JWT to get the issuer JWT
 	parts := strings.Split(vpToken, "~")
@@ -303,6 +308,7 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 	// Determine key type and extract key material from header
 	var keyType trust.KeyType
 	var keyMaterial any
+	var publicKey crypto.PublicKey
 
 	if x5cRaw, ok := token.Header["x5c"]; ok {
 		// x5c header - certificate chain
@@ -312,13 +318,14 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		}
 		keyType = trust.KeyTypeX5C
 		keyMaterial = certChain
+		publicKey = certChain[0].PublicKey // Use leaf certificate's public key
 
 		// Fallback to leaf certificate CN for issuer ID
 		if issuerID == "" && len(certChain) > 0 {
 			issuerID = certChain[0].Subject.CommonName
 		}
 
-		c.log.Debug("Evaluating issuer trust via x5c",
+		c.log.Debug("Verifying credential signature via x5c",
 			"scope", scope,
 			"issuer_id", issuerID,
 			"credential_type", credentialType,
@@ -332,7 +339,13 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 		keyType = trust.KeyTypeJWK
 		keyMaterial = jwkMap
 
-		c.log.Debug("Evaluating issuer trust via jwk",
+		// Parse JWK to get public key for signature verification
+		publicKey, err = parseJWKToPublicKey(jwkMap)
+		if err != nil {
+			return fmt.Errorf("failed to parse jwk header: %w", err)
+		}
+
+		c.log.Debug("Verifying credential signature via jwk",
 			"scope", scope,
 			"issuer_id", issuerID,
 			"credential_type", credentialType)
@@ -362,8 +375,9 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 
 		keyType = trust.KeyTypeJWK
 		keyMaterial = resolvedKey
+		publicKey = resolvedKey
 
-		c.log.Debug("Evaluating issuer trust via resolved DID key",
+		c.log.Debug("Verifying credential signature via resolved DID key",
 			"scope", scope,
 			"issuer_id", issuerID,
 			"credential_type", credentialType)
@@ -374,6 +388,19 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 			"issuer_id", issuerID)
 		return fmt.Errorf("credential missing x5c or jwk header and issuer is not a DID")
 	}
+
+	// CRITICAL: Verify the JWT signature using the extracted public key
+	if err := verifyJWTSignature(issuerJWT, publicKey); err != nil {
+		c.log.Warn("JWT signature verification failed",
+			"scope", scope,
+			"issuer_id", issuerID,
+			"error", err)
+		return fmt.Errorf("JWT signature verification failed: %w", err)
+	}
+
+	c.log.Debug("JWT signature verified successfully",
+		"scope", scope,
+		"issuer_id", issuerID)
 
 	// Evaluate trust via AuthZEN PDP
 	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
@@ -443,4 +470,64 @@ func parseX5CHeader(x5cRaw any) ([]*x509.Certificate, error) {
 	}
 
 	return certs, nil
+}
+
+// parseJWKToPublicKey parses a JWK map to extract the public key.
+func parseJWKToPublicKey(jwkMap map[string]any) (crypto.PublicKey, error) {
+	// Serialize back to JSON for jwk.ParseKey
+	jwkBytes, err := json.Marshal(jwkMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize jwk: %w", err)
+	}
+
+	key, err := jwk.ParseKey(jwkBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse jwk: %w", err)
+	}
+
+	var rawKey any
+	if err := jwk.Export(key, &rawKey); err != nil {
+		return nil, fmt.Errorf("failed to export jwk: %w", err)
+	}
+
+	pubKey, ok := rawKey.(crypto.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("jwk does not contain a public key")
+	}
+
+	return pubKey, nil
+}
+
+// verifyJWTSignature verifies the JWT signature using the provided public key.
+func verifyJWTSignature(jwtString string, publicKey crypto.PublicKey) error {
+	// Parse and verify the JWT with the extracted public key
+	_, err := jwt.Parse(jwtString, func(token *jwt.Token) (any, error) {
+		// Validate the signing method matches the key type
+		switch publicKey.(type) {
+		case *ecdsa.PublicKey:
+			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method %v for ECDSA key", token.Method.Alg())
+			}
+		case *rsa.PublicKey:
+			// RSA can use RS* or PS* algorithms
+			_, isRS := token.Method.(*jwt.SigningMethodRSA)
+			_, isPS := token.Method.(*jwt.SigningMethodRSAPSS)
+			if !isRS && !isPS {
+				return nil, fmt.Errorf("unexpected signing method %v for RSA key", token.Method.Alg())
+			}
+		case ed25519.PublicKey:
+			if _, ok := token.Method.(*jwt.SigningMethodEd25519); !ok {
+				return nil, fmt.Errorf("unexpected signing method %v for Ed25519 key", token.Method.Alg())
+			}
+		default:
+			return nil, fmt.Errorf("unsupported public key type: %T", publicKey)
+		}
+		return publicKey, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	return nil
 }
