@@ -278,13 +278,18 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 // If neither x5c nor jwk header is present but the issuer is a DID, it attempts to resolve
 // the key via go-trust's DID resolution. Signature verification happens before trust evaluation.
 func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
-	// Split the SD-JWT to get the issuer JWT
-	parts := strings.Split(vpToken, "~")
-	if len(parts) < 1 {
-		return nil // No JWT to evaluate
+	// Check that trust evaluator is configured
+	if c.trustEvaluator == nil {
+		c.log.Error(nil, "Trust evaluator not initialized - this should never happen")
+		return fmt.Errorf("trust evaluator not initialized")
 	}
 
+	// Split the SD-JWT to get the issuer JWT
+	parts := strings.Split(vpToken, "~")
 	issuerJWT := parts[0]
+	if issuerJWT == "" {
+		return fmt.Errorf("empty issuer JWT in VP token")
+	}
 
 	// Parse JWT header to check for key material
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
@@ -390,7 +395,8 @@ func (c *Client) evaluateIssuerTrust(ctx context.Context, vpToken string, scope 
 	}
 
 	// CRITICAL: Verify the JWT signature using the extracted public key
-	if err := verifyJWTSignature(issuerJWT, publicKey); err != nil {
+	allowedAlgs := c.cfg.Verifier.Trust.AllowedSignatureAlgorithms
+	if err := verifyJWTSignature(issuerJWT, publicKey, allowedAlgs); err != nil {
 		c.log.Warn("JWT signature verification failed",
 			"scope", scope,
 			"issuer_id", issuerID,
@@ -498,26 +504,60 @@ func parseJWKToPublicKey(jwkMap map[string]any) (crypto.PublicKey, error) {
 	return pubKey, nil
 }
 
+// defaultAllowedAlgorithms is the secure default set of allowed JWT signature algorithms.
+// These are all considered cryptographically strong as of 2024.
+var defaultAllowedAlgorithms = []string{
+	"ES256", "ES384", "ES512", // ECDSA
+	"RS256", "RS384", "RS512", // RSA PKCS#1 v1.5
+	"PS256", "PS384", "PS512", // RSA-PSS
+	"EdDSA", // Ed25519
+}
+
 // verifyJWTSignature verifies the JWT signature using the provided public key.
-func verifyJWTSignature(jwtString string, publicKey crypto.PublicKey) error {
+// allowedAlgorithms restricts which algorithms are accepted. If empty, defaults to defaultAllowedAlgorithms.
+// The "none" algorithm is NEVER allowed regardless of configuration.
+func verifyJWTSignature(jwtString string, publicKey crypto.PublicKey, allowedAlgorithms []string) error {
+	// Use defaults if no algorithms specified
+	if len(allowedAlgorithms) == 0 {
+		allowedAlgorithms = defaultAllowedAlgorithms
+	}
+
+	// Build a set for O(1) lookup
+	allowedSet := make(map[string]bool, len(allowedAlgorithms))
+	for _, alg := range allowedAlgorithms {
+		allowedSet[alg] = true
+	}
+
+	// SECURITY: "none" algorithm is NEVER allowed, even if misconfigured
+	delete(allowedSet, "none")
+	delete(allowedSet, "None")
+	delete(allowedSet, "NONE")
+
 	// Parse and verify the JWT with the extracted public key
 	_, err := jwt.Parse(jwtString, func(token *jwt.Token) (any, error) {
+		alg := token.Method.Alg()
+
+		// Check algorithm whitelist
+		if !allowedSet[alg] {
+			return nil, fmt.Errorf("algorithm %q is not in the allowed list", alg)
+		}
+
 		// Validate the signing method matches the key type
 		switch publicKey.(type) {
 		case *ecdsa.PublicKey:
 			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
-				return nil, fmt.Errorf("unexpected signing method %v for ECDSA key", token.Method.Alg())
+				return nil, fmt.Errorf("unexpected signing method %v for ECDSA key", alg)
 			}
 		case *rsa.PublicKey:
 			// RSA can use RS* or PS* algorithms
 			_, isRS := token.Method.(*jwt.SigningMethodRSA)
 			_, isPS := token.Method.(*jwt.SigningMethodRSAPSS)
 			if !isRS && !isPS {
-				return nil, fmt.Errorf("unexpected signing method %v for RSA key", token.Method.Alg())
+				return nil, fmt.Errorf("unexpected signing method %v for RSA key", alg)
 			}
 		case ed25519.PublicKey:
 			if _, ok := token.Method.(*jwt.SigningMethodEd25519); !ok {
-				return nil, fmt.Errorf("unexpected signing method %v for Ed25519 key", token.Method.Alg())
+				return nil, fmt.Errorf("unexpected signing method %v for Ed25519 key", alg)
 			}
 		default:
 			return nil, fmt.Errorf("unsupported public key type: %T", publicKey)

@@ -490,6 +490,12 @@ type TrustConfig struct {
 	// TrustPolicies configures per-role trust evaluation policies.
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
+
+	// AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted.
+	// If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA.
+	// The "none" algorithm is NEVER allowed regardless of configuration.
+	// Examples: ["ES256", "ES384", "ES512", "EdDSA"]
+	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
