@@ -124,7 +124,6 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		assert.NoError(t, err)
 		client.privateKey = rsaKey
-		client.publicKey = &rsaKey.PublicKey
 		// Also update the signer to use RSA
 		signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
 		assert.NoError(t, err)

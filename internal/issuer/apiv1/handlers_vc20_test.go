@@ -177,7 +177,7 @@ func TestMakeVC20_RoundTrip(t *testing.T) {
 
 	// Create a VC20 handler for verification
 	handler, err := openid4vp.NewVC20Handler(
-		openid4vp.WithVC20StaticKey(client.publicKey),
+		openid4vp.WithVC20StaticKey(client.signer.PublicKey()),
 	)
 	require.NoError(t, err)
 

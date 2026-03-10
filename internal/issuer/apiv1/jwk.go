@@ -2,85 +2,43 @@ package apiv1
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/go-jose/go-jose/v4"
 )
 
+// createJWK builds the public JWK from the signer's key material and populates
+// the proto structure used by the gRPC JWKS endpoint.
+//
+// Key design decisions:
+//   - Uses go-jose (same library as pki.SignerConfig.GetJWK) for consistent JWK serialization
+//   - Only serializes the PUBLIC key — no private key material flows over gRPC
+//   - Kid is derived from the signer (same source as JWT header kid) to guarantee
+//     that verifiers can match JWKS keys to JWT headers
 func (c *Client) createJWK(ctx context.Context) error {
 	_, cancel := context.WithDeadline(ctx, time.Now().Add(2*time.Second))
 	defer cancel()
 
-	// Create JWK from private key (supports both ECDSA and RSA)
-	key, err := jwk.Import(c.privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to create JWK from private key: %w", err)
+	// Build JWK from the signer's public key.
+	// go-jose handles EC, RSA, and Ed25519 key types uniformly.
+	jwk := jose.JSONWebKey{
+		Key:       c.signer.PublicKey(),
+		KeyID:     c.signer.KeyID(),
+		Algorithm: c.signer.Algorithm(),
+		Use:       "sig",
 	}
 
-	// Use the same kid that the signer puts into JWT headers.
-	// This ensures the JWKS endpoint serves keys with matching kid values.
-	kid := c.signer.KeyID()
-
-	if err := key.Set("kid", kid); err != nil {
-		return fmt.Errorf("failed to set kid: %w", err)
-	}
-
-	keyID, ok := key.KeyID()
-	if !ok {
-		return fmt.Errorf("failed to get key ID")
-	}
-	c.kid = keyID
-
-	// Marshal JWK to JSON
-	c.jwkBytes, err = json.MarshalIndent(key, "", "  ")
+	// Marshal to JSON (public key only — no private key material)
+	jwkBytes, err := json.Marshal(jwk)
 	if err != nil {
 		return fmt.Errorf("failed to marshal JWK: %w", err)
 	}
 
-	// Unmarshal into proto structure
-	if err := json.Unmarshal(c.jwkBytes, c.jwkProto); err != nil {
+	// Populate proto for the gRPC JWKS endpoint
+	if err := json.Unmarshal(jwkBytes, c.jwkProto); err != nil {
 		return fmt.Errorf("failed to unmarshal JWK into proto: %w", err)
-	}
-
-	// Create JWT claim based on key type
-	switch c.privateKey.(type) {
-	case *ecdsa.PrivateKey:
-		// ECDSA keys have crv, x, y fields
-		c.jwkClaim["jwk"] = jwt.MapClaims{
-			"kid": c.jwkProto.Kid,
-			"kty": c.jwkProto.Kty,
-			"crv": c.jwkProto.Crv,
-			"x":   c.jwkProto.X,
-			"y":   c.jwkProto.Y,
-		}
-	case *rsa.PrivateKey:
-		// RSA keys have n, e fields (stored differently in proto)
-		// For RSA public keys, we only need kty, kid, and the public key components
-		jwkClaim := jwt.MapClaims{
-			"kid": c.jwkProto.Kid,
-			"kty": c.jwkProto.Kty,
-		}
-
-		// Parse the full JWK to get RSA-specific fields
-		var fullJWK map[string]any
-		if err := json.Unmarshal(c.jwkBytes, &fullJWK); err == nil {
-			// Add RSA-specific fields if present
-			if n, ok := fullJWK["n"].(string); ok {
-				jwkClaim["n"] = n
-			}
-			if e, ok := fullJWK["e"].(string); ok {
-				jwkClaim["e"] = e
-			}
-		}
-
-		c.jwkClaim["jwk"] = jwkClaim
-	default:
-		return fmt.Errorf("unsupported key type: %T", c.privateKey)
 	}
 
 	return nil

@@ -185,9 +185,12 @@ type SAMLConfig struct {
 	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty"`
 
 	// CertificatePath is the path to X.509 certificate for SAML signing/encryption
+	// TODO(pki): Migrate to pki.KeyConfig for consistency with other services and
+	// to enable HSM-backed SAML signing keys in the future.
 	CertificatePath string `yaml:"certificate_path" validate:"required_if=Enable true"`
 
 	// PrivateKeyPath is the path to private key for SAML signing/encryption
+	// TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.
 	PrivateKeyPath string `yaml:"private_key_path" validate:"required_if=Enable true"`
 
 	// ACSEndpoint is the Assertion Consumer Service URL where IdP sends SAML responses
@@ -367,6 +370,8 @@ type AuditLog struct {
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
 type MDocConfig struct {
 	// CertificateChainPath is the path to the PEM certificate chain
+	// TODO(pki): Consider folding into pki.KeyConfig.ChainPath to unify certificate
+	// chain loading with the standard key material configuration pattern.
 	CertificateChainPath string `yaml:"certificate_chain_path" validate:"required"`
 	// DefaultValidity is the default credential validity (default: 365 days)
 	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`

@@ -44,6 +44,9 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 	}
 
 	// Load X.509 key pair for signing/encryption
+	// TODO(pki): Migrate to pki.KeyConfig when SAML signing needs extend beyond
+	// TLS mutual auth (e.g., HSM-backed keys). Currently uses tls.LoadX509KeyPair
+	// directly which is sufficient for the TLS key pair use case.
 	keyPair, err := tls.LoadX509KeyPair(cfg.CertificatePath, cfg.PrivateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load SAML key pair: %w", err)
