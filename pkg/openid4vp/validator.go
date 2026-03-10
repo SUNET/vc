@@ -11,8 +11,9 @@ import (
 
 // VPTokenValidator validates VP Token according to Section 8.6
 // NOTE: This validator performs format and protocol validation only.
-// ACTUAL CRYPTOGRAPHIC SIGNATURE VERIFICATION must be done separately
-// using TrustEvaluator which verifies signatures and validates trust anchors.
+// Cryptographic signature verification must be done separately by the caller
+// (e.g. via jwt.Parse with a resolved key). TrustEvaluator handles trust/policy
+// evaluation — it does NOT perform signature verification itself.
 type VPTokenValidator struct {
 	// Nonce from the Authorization Request
 	Nonce string

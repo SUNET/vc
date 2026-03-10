@@ -116,10 +116,17 @@ func NewJWKSKeyResolver(config JWKSResolverConfig) *JWKSKeyResolver {
 	)
 	go cache.Start()
 
+	parseJWK := config.ParseJWKToPublicKey
+	if parseJWK == nil {
+		parseJWK = func(jwkData any) (crypto.PublicKey, error) {
+			return nil, fmt.Errorf("ParseJWKToPublicKey not configured")
+		}
+	}
+
 	return &JWKSKeyResolver{
 		httpClient: httpClient,
 		cache:      cache,
-		parseJWK:   config.ParseJWKToPublicKey,
+		parseJWK:   parseJWK,
 	}
 }
 
@@ -192,13 +199,13 @@ func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string)
 	}
 
 	// 3. Try .well-known/openid-configuration (OIDC Discovery) → jwks_uri
-	rawKeys, err = r.tryOAuthMetadata(ctx, baseURL+"/.well-known/openid-configuration", issuerURL)
+	rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(baseURL, "openid-configuration"), issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
 
 	// 4. Try .well-known/oauth-authorization-server (RFC 8414) → jwks_uri
-	rawKeys, err = r.tryOAuthMetadata(ctx, baseURL+"/.well-known/oauth-authorization-server", issuerURL)
+	rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(baseURL, "oauth-authorization-server"), issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
@@ -241,11 +248,11 @@ func (r *JWKSKeyResolver) tryCredentialIssuerMetadata(ctx context.Context, baseU
 
 	for _, asURL := range asURLs {
 		asBase := strings.TrimRight(asURL, "/")
-		rawKeys, err := r.tryOAuthMetadata(ctx, asBase+"/.well-known/oauth-authorization-server", asURL)
+		rawKeys, err := r.tryOAuthMetadata(ctx, buildWellKnownURL(asBase, "oauth-authorization-server"), asURL)
 		if err == nil {
 			return rawKeys, nil
 		}
-		rawKeys, err = r.tryOAuthMetadata(ctx, asBase+"/.well-known/openid-configuration", asURL)
+		rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(asBase, "openid-configuration"), asURL)
 		if err == nil {
 			return rawKeys, nil
 		}

@@ -293,10 +293,10 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 }
 
 // firstDocument returns the single document from the cache map.
-// Returns an error if the map is empty or any entry is nil.
+// Returns an error if the map is empty or any entry is nil/incomplete.
 func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocument, error) {
 	for key, doc := range docs {
-		if doc == nil || doc.DocumentData == nil {
+		if doc == nil || doc.Meta == nil || doc.DocumentData == nil {
 			return nil, fmt.Errorf("cached document for key %q is nil or has no data", key)
 		}
 		return doc, nil

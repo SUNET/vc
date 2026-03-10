@@ -381,7 +381,8 @@ func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(meta) //nolint:errcheck
-		case "/auth/.well-known/oauth-authorization-server":
+		case "/.well-known/oauth-authorization-server/auth":
+			// RFC 8615 §3: well-known suffix inserted between host and path
 			meta := map[string]any{
 				"issuer":   serverURL + "/auth",
 				"jwks_uri": serverURL + "/auth/jwks",
