@@ -12,13 +12,11 @@ import (
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
 
+	"encoding/hex"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
-	
-	"encoding/hex"
-	"vc/internal/verifier/zk"
-
+	"proofs/server/v2/zk"
 )
 
 type VerificationRequestObjectRequest struct {
@@ -246,7 +244,7 @@ type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
 }
 
-type VerifyRequest struct {
+type VerifyZKPRequest struct {
 	Transcript           string `json:"Transcript"`
 	ZKDeviceResponseCBOR string `json:"ZKDeviceResponseCBOR"`
 }
@@ -256,7 +254,7 @@ type ClaimElement struct {
 	ElementValue      string `json:"ElementValue"`
 }
 
-type VerifyResponse struct {
+type VerifyZKPResponse struct {
 	Status bool                      `json:"Status"`
 	Claims map[string][]ClaimElement `json:"Claims"`
 }
@@ -276,7 +274,7 @@ func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCall
 	return reply, nil
 }
 
-func (c *Client) Verify(ctx context.Context, req *VerifyRequest) (*VerifyResponse, error) {
+func (c *Client) VerifyZKP(ctx context.Context, req *VerifyZKPRequest) (*VerifyZKPResponse, error) {
 	c.log.Debug("Processing ZK Proof", "transcript_len", len(req.Transcript))
 	transcriptBytes, err := base64.StdEncoding.DecodeString(req.Transcript)
 	if err != nil {
@@ -311,7 +309,7 @@ func (c *Client) Verify(ctx context.Context, req *VerifyRequest) (*VerifyRespons
 	}
 
 	//TODO: support more vc types
-	reply := &VerifyResponse{
+	reply := &VerifyZKPResponse{
 		Status: ok,
 		Claims: map[string][]ClaimElement{
 			"org.iso.18013.5.1": apiClaims,
