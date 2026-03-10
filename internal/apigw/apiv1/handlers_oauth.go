@@ -288,6 +288,24 @@ func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
 	return &JWKSResponse{Keys: keys}, nil
 }
 
+// JWTVCIssuerMetadataResponse represents JWT VC Issuer Metadata per SD-JWT VC §5.3.
+type JWTVCIssuerMetadataResponse struct {
+	Issuer  string `json:"issuer"`
+	JWKSURI string `json:"jwks_uri"`
+}
+
+// JWTVCIssuerMetadata returns the JWT VC Issuer Metadata per draft-ietf-oauth-sd-jwt-vc §5.3.
+// This metadata is served at /.well-known/jwt-vc-issuer and allows verifiers to discover
+// the issuer's JWKS endpoint.
+func (c *Client) JWTVCIssuerMetadata(ctx context.Context) (*JWTVCIssuerMetadataResponse, error) {
+	c.log.Debug("jwt-vc-issuer metadata request")
+
+	return &JWTVCIssuerMetadataResponse{
+		Issuer:  c.cfg.APIGW.PublicURL,
+		JWKSURI: c.cfg.APIGW.PublicURL + "/jwks",
+	}, nil
+}
+
 type OauthAuthorizationConsentRequest struct {
 	//AuthMethod string `json:"-"`
 	SessionID string `json:"-"`

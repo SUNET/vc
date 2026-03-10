@@ -376,7 +376,7 @@ func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
 		switch r.URL.Path {
 		case "/.well-known/openid-credential-issuer":
 			meta := map[string]any{
-				"credential_issuer":    serverURL,
+				"credential_issuer":     serverURL,
 				"authorization_servers": []string{serverURL + "/auth"},
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -451,4 +451,32 @@ func TestJWKSKeyResolverInvalidateIssuer(t *testing.T) {
 	_, _, err = resolver.ResolveKeyByKID(ctx, server.URL, "key-1")
 	require.NoError(t, err)
 	assert.Equal(t, 2, callCount) // now 2, fetched again
+}
+
+func TestBuildWellKnownURL(t *testing.T) {
+	tests := []struct {
+		entity string
+		suffix string
+		want   string
+	}{
+		// Host-only
+		{"https://example.com", "jwt-vc-issuer", "https://example.com/.well-known/jwt-vc-issuer"},
+		// Trailing slash
+		{"https://example.com/", "jwt-vc-issuer", "https://example.com/.well-known/jwt-vc-issuer"},
+		// Path-based (RFC 8615 §3: insert between host and path)
+		{"https://example.com/tenant1", "jwt-vc-issuer", "https://example.com/.well-known/jwt-vc-issuer/tenant1"},
+		// Deep path
+		{"https://example.com/org/tenant/v1", "jwt-vc-issuer", "https://example.com/.well-known/jwt-vc-issuer/org/tenant/v1"},
+		// With port
+		{"https://example.com:8443/tenant", "jwt-vc-issuer", "https://example.com:8443/.well-known/jwt-vc-issuer/tenant"},
+		// HTTP (test servers)
+		{"http://127.0.0.1:12345", "jwt-vc-issuer", "http://127.0.0.1:12345/.well-known/jwt-vc-issuer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.entity, func(t *testing.T) {
+			got := buildWellKnownURL(tt.entity, tt.suffix)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

@@ -139,6 +139,20 @@ func (s *Service) endpointJWKS(ctx context.Context, c *gin.Context) (any, error)
 	return reply, nil
 }
 
+func (s *Service) endpointJWTVCIssuerMetadata(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointJWTVCIssuerMetadata")
+	defer span.End()
+
+	reply, err := s.apiv1.JWTVCIssuerMetadata(ctx)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	c.SetAccepted("application/json")
+	return reply, nil
+}
+
 func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointOAuthAuthorizationConsent", "c.Request.URL", c.Request.URL.String(), "headers", c.Request.Header)
 	_, span := s.tracer.Start(ctx, "httpserver:endpointAuthorizationConsent")

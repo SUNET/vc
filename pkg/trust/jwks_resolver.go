@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -52,9 +53,9 @@ type JWKSResolverConfig struct {
 //
 // Resolved JWKS are cached per issuer URL. Keys are matched by kid.
 type JWKSKeyResolver struct {
-	httpClient  *http.Client
-	cache       *ttlcache.Cache[string, *cachedJWKS]
-	parseJWK    func(jwkData any) (crypto.PublicKey, error)
+	httpClient *http.Client
+	cache      *ttlcache.Cache[string, *cachedJWKS]
+	parseJWK   func(jwkData any) (crypto.PublicKey, error)
 }
 
 // cachedJWKS holds the parsed JWKS keys for an issuer.
@@ -207,9 +208,12 @@ func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string)
 }
 
 // tryJWTVCIssuerMetadata tries the SD-JWT VC §5.3 primary discovery endpoint.
+// The well-known URL is constructed per RFC 8615 §3: the well-known string is inserted
+// between the host component and the path component of the issuer URL.
 func (r *JWKSKeyResolver) tryJWTVCIssuerMetadata(ctx context.Context, baseURL, issuerURL string) ([]json.RawMessage, error) {
+	metadataURL := buildWellKnownURL(baseURL, "jwt-vc-issuer")
 	var metadata jwtVCIssuerMetadata
-	if _, err := r.fetchJSON(ctx, baseURL+"/.well-known/jwt-vc-issuer", &metadata); err != nil {
+	if _, err := r.fetchJSON(ctx, metadataURL, &metadata); err != nil {
 		return nil, err
 	}
 
@@ -346,6 +350,30 @@ func (r *JWKSKeyResolver) fetchJSON(ctx context.Context, url string, target any)
 	}
 
 	return target, nil
+}
+
+// buildWellKnownURL constructs a well-known URL per RFC 8615 §3.
+// The well-known suffix is inserted between the host and path components of the entity URL.
+// For example, with suffix "jwt-vc-issuer":
+//
+//	https://example.com           → https://example.com/.well-known/jwt-vc-issuer
+//	https://example.com/tenant/1  → https://example.com/.well-known/jwt-vc-issuer/tenant/1
+func buildWellKnownURL(entity, suffix string) string {
+	entity = strings.TrimSuffix(entity, "/")
+
+	parsed, err := url.Parse(entity)
+	if err != nil || parsed.Host == "" {
+		// Best-effort fallback: just append
+		return entity + "/.well-known/" + suffix
+	}
+
+	path := strings.TrimPrefix(parsed.Path, "/")
+	base := parsed.Scheme + "://" + parsed.Host
+
+	if path == "" {
+		return base + "/.well-known/" + suffix
+	}
+	return base + "/.well-known/" + suffix + "/" + path
 }
 
 // Stop stops the cache's automatic expiration goroutine.

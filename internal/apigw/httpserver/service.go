@@ -39,7 +39,7 @@ type Service struct {
 	sessionsEncKey  string
 	sessionsAuthKey string
 	sessionsName    string
-	samlSPService     SAMLSPService
+	samlSPService   SAMLSPService
 	oidcrpService   OIDCRPService
 }
 
@@ -54,10 +54,10 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		server: &http.Server{
 			ReadHeaderTimeout: 3 * time.Second,
 		},
-		eventPublisher:  eventPublisher,
-		samlSPService:     samlSPService,
-		oidcrpService:   oidcrpService,
-		sessionsName:    "oauth_user_session",
+		eventPublisher: eventPublisher,
+		samlSPService:  samlSPService,
+		oidcrpService:  oidcrpService,
+		sessionsName:   "oauth_user_session",
 		sessionsOptions: sessions.Options{
 			Path:     "/",
 			Domain:   "",
@@ -149,6 +149,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer", http.StatusOK, s.endpointVCIMetadata)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/jwt-vc-issuer", http.StatusOK, s.endpointJWTVCIssuerMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "jwks", http.StatusOK, s.endpointJWKS)
 	rgOAuthSession := rgRoot.Group("")
 	rgOAuthSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
