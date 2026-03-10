@@ -84,12 +84,20 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, err
 	}
 
-	// Retrieve session to get credential type
+	// Retrieve session to get credential type.
+	// ProcessCallback already validated the session, but we need it for credential type etc.
 	session, err := service.GetSession(ctx, req.State)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
+
+	// Ensure session is cleaned up if any subsequent step fails
+	defer func() {
+		if err != nil {
+			service.DeleteSession(ctx, req.State)
+		}
+	}()
 
 	// Build transformer from config
 	transformer, err := service.BuildTransformer()
@@ -141,7 +149,8 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
 		}
 
-		// Clean up OIDC session
+		// Clean up OIDC session (clear err so defer doesn't double-delete)
+		err = nil
 		service.DeleteSession(ctx, req.State)
 
 		return &OIDCRPCallbackResponse{
@@ -174,7 +183,8 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
 	}
 
-	// Clean up session
+	// Clean up session (clear err so defer doesn't double-delete)
+	err = nil
 	service.DeleteSession(ctx, req.State)
 
 	c.log.Info("Credential issued successfully via OIDC RP",

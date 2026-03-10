@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"vc/internal/apigw/apiv1"
 	"vc/pkg/model"
@@ -210,6 +211,11 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 
 		scope, _ := session.Get("scope").(string)
+		if s.cfg.GetCredentialConstructor(scope) == nil {
+			err := fmt.Errorf("scope %q not configured for credential issuance", scope)
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
 
 		// Determine the IdP entity ID: use static IdP or default from config
 		idpEntityID := s.samlSPService.GetStaticIDPEntityID()
@@ -231,6 +237,11 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 
 		scope, _ := session.Get("scope").(string)
+		if s.cfg.GetCredentialConstructor(scope) == nil {
+			err := fmt.Errorf("scope %q not configured for credential issuance", scope)
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
 
 		authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID)
 		if err != nil {

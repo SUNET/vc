@@ -144,12 +144,18 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, err
 	}
 
-	// Retrieve session to get credential type
+	// Retrieve session to get credential type.
+	// Ensure session is cleaned up if any subsequent step fails.
 	session, err := s.samlSPService.GetSession(ctx, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			s.samlSPService.DeleteSession(ctx, relayState)
+		}
+	}()
 
 	// Build transformer from config
 	transformer, err := s.samlSPService.BuildTransformer()
@@ -169,6 +175,10 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// Take the first value from each attribute array
 	samlAttrs := make(map[string]any)
 	for key, values := range assertion.Attributes {
+		if len(values) > 1 {
+			s.log.Warn("SAML attribute has multiple values, using first",
+				"attribute", key, "count", len(values))
+		}
 		if len(values) > 0 {
 			samlAttrs[key] = values[0] // Use first value
 		}
@@ -209,8 +219,13 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
 		}
 
-		// Clean up SAML session
+		// Clean up SAML session (clear err so defer doesn't double-delete)
+		err = nil
 		s.samlSPService.DeleteSession(ctx, relayState)
+
+		// Clean up auth cookies before redirect
+		c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
+		c.SetCookie("saml_redirect_url", "", -1, "/authorization/consent", "", false, false)
 
 		// Redirect browser back to the consent page to continue the VCI flow
 		c.Redirect(http.StatusFound, "/authorization/consent/#/credentials")
@@ -229,10 +244,8 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// In a production scenario, the wallet would provide the JWK
 	jwk := session.JWK
 	if jwk == nil {
-		// For SAML flow without wallet involvement, we generate a JWK
-		// This is primarily for testing and backward compatibility
-		s.log.Info("No JWK provided in session, generating ephemeral key")
-		// TODO: Consider if we should require JWK from wallet instead
+		span.SetStatus(codes.Error, "JWK required for standalone SAML credential binding")
+		return nil, fmt.Errorf("wallet must provide a JWK for credential binding in standalone SAML mode")
 	}
 
 	// Create credential using the issuer gRPC API
@@ -249,7 +262,8 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
 	}
 
-	// Clean up SAML session
+	// Clean up SAML session (clear err so defer doesn't double-delete)
+	err = nil
 	s.samlSPService.DeleteSession(ctx, relayState)
 
 	s.log.Info("Credential issued successfully",

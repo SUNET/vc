@@ -117,8 +117,9 @@ func (s *Service) dynamicClientRegistration(ctx context.Context, registrationEnd
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
+	// Read response body with a size limit to prevent OOM from malicious endpoints
+	const maxResponseSize = 1 << 20 // 1 MB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read registration response: %w", err)
 	}

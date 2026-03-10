@@ -168,7 +168,7 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
 
-	s.log.Info("OIDC authorization URL generated",
+	s.log.Debug("OIDC authorization URL generated",
 		"credential_type", credentialType,
 		"state", session.State)
 
@@ -337,7 +337,7 @@ func (s *Service) createSession(ctx context.Context, credentialType string) (*Se
 func (s *Service) getSession(ctx context.Context, state string) (*Session, error) {
 	session, ok := s.sessionCache.Get(ctx, state)
 	if !ok || session == nil {
-		return nil, fmt.Errorf("session not found or expired for state: %s", state)
+		return nil, fmt.Errorf("session not found or expired")
 	}
 
 	return session, nil

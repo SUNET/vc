@@ -161,6 +161,14 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 		return nil, fmt.Errorf("failed to get IdP metadata: %w", err)
 	}
 
+	// Validate IdP metadata structure before accessing
+	if len(idpMetadata.IDPSSODescriptors) == 0 {
+		return nil, fmt.Errorf("no IdP SSO descriptors in metadata for %s", idpEntityID)
+	}
+	if len(idpMetadata.IDPSSODescriptors[0].SingleSignOnServices) == 0 {
+		return nil, fmt.Errorf("no SSO services in IdP metadata for %s", idpEntityID)
+	}
+
 	// Create authentication request
 	req, err := s.sp.MakeAuthenticationRequest(
 		idpMetadata.IDPSSODescriptors[0].SingleSignOnServices[0].Location,
@@ -272,6 +280,23 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 		}
 	}
 
+	// Validate assertion subject and conditions are present
+	if samlResp.Subject == nil || samlResp.Subject.NameID == nil {
+		return nil, fmt.Errorf("SAML assertion missing Subject or NameID")
+	}
+	if samlResp.Conditions == nil {
+		return nil, fmt.Errorf("SAML assertion missing Conditions")
+	}
+
+	// Validate assertion time conditions (SAML 2.0 §2.5.1)
+	now := time.Now()
+	if !samlResp.Conditions.NotBefore.IsZero() && now.Before(samlResp.Conditions.NotBefore) {
+		return nil, fmt.Errorf("SAML assertion not yet valid: now=%s, NotBefore=%s", now, samlResp.Conditions.NotBefore)
+	}
+	if !samlResp.Conditions.NotOnOrAfter.IsZero() && now.After(samlResp.Conditions.NotOnOrAfter) {
+		return nil, fmt.Errorf("SAML assertion expired: now=%s, NotOnOrAfter=%s", now, samlResp.Conditions.NotOnOrAfter)
+	}
+
 	return &Assertion{
 		NameID:     samlResp.Subject.NameID.Value,
 		Attributes: attributes,
@@ -295,7 +320,7 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) {
 func (s *Service) getSession(ctx context.Context, id string) (*Session, error) {
 	session, ok := s.sessionCache.Get(ctx, id)
 	if !ok || session == nil {
-		return nil, fmt.Errorf("session not found or expired: %s", id)
+		return nil, fmt.Errorf("session not found or expired")
 	}
 
 	return session, nil

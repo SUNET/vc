@@ -166,27 +166,12 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		c.log.Debug("userLookup - retrieved docs from cache", "session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		// TODO(masv): fix this monstrosity
-		authenticSource := ""
-		for key, doc := range docs {
-			c.log.Debug("userLookup - examining doc", "key", key, "authentic_source", doc.Meta.AuthenticSource, "doc_nil", doc == nil)
-			authenticSource = doc.Meta.AuthenticSource
-			break
+		doc, err := firstDocument(docs)
+		if err != nil {
+			c.log.Error(err, "no usable document in cache")
+			return nil, err
 		}
-		c.log.Debug("userLookup", "authenticSource", authenticSource, "docs", docs)
-
-		doc, ok := docs[authenticSource]
-		if !ok {
-			c.log.Error(nil, "no document found for authentic source", "authenticSource", authenticSource, "available_keys", func() []string {
-				keys := make([]string, 0, len(docs))
-				for k := range docs {
-					keys = append(keys, k)
-				}
-				return keys
-			}())
-			return nil, fmt.Errorf("no document found for authentic source %s", authenticSource)
-		}
-		c.log.Debug("userLookup", "doc", doc)
+		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource, "docs", docs)
 
 		jsonPaths, err := req.VCTM.ClaimJSONPath()
 		if err != nil {
@@ -240,18 +225,10 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		c.log.Debug("userLookup - retrieved SAML/OIDC docs from cache",
 			"session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		// Extract the first document (same approach as pid_auth)
-		authenticSource := ""
-		for key, doc := range docs {
-			c.log.Debug("userLookup - examining doc", "key", key,
-				"authentic_source", doc.Meta.AuthenticSource, "doc_nil", doc == nil)
-			authenticSource = doc.Meta.AuthenticSource
-			break
-		}
-
-		doc, ok := docs[authenticSource]
-		if !ok {
-			return nil, fmt.Errorf("no document found for authentic source %s", authenticSource)
+		doc, err := firstDocument(docs)
+		if err != nil {
+			c.log.Error(err, "no usable document in cache for SAML/OIDC session")
+			return nil, err
 		}
 
 		jsonPaths, err := req.VCTM.ClaimJSONPath()
@@ -313,6 +290,18 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	c.log.Debug("userlookup", "reply", reply)
 
 	return reply, nil
+}
+
+// firstDocument returns the single document from the cache map.
+// Returns an error if the map is empty or any entry is nil.
+func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocument, error) {
+	for key, doc := range docs {
+		if doc == nil || doc.DocumentData == nil {
+			return nil, fmt.Errorf("cached document for key %q is nil or has no data", key)
+		}
+		return doc, nil
+	}
+	return nil, fmt.Errorf("no documents in cache")
 }
 
 // findValueByName searches the document data for a claim value matching
