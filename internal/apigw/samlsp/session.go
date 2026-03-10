@@ -17,6 +17,5 @@ type Session struct {
 	ExpiresAt          time.Time
 
 	// VCI flow integration fields (set when initiated from OpenID4VCI consent)
-	VCISessionID  string // Links back to the VCI AuthorizationContext session
-	VCIRequestURI string // The VCI request_uri for resuming the flow
+	VCISessionID string // Links back to the VCI AuthorizationContext session
 }

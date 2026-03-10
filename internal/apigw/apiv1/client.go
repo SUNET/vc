@@ -81,7 +81,6 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand if needed)
 	c.oauth2Metadata = c.cfg.APIGW.OauthServer.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)
-	c.oauth2Metadata.JWKSURI = c.cfg.APIGW.PublicURL + "/jwks"
 
 	// Load PKI signing key and chain for metadata signing
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)

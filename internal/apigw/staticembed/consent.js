@@ -100,7 +100,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"basic" | "pid_auth" | null} */
+    /** @type {"basic" | "pid_auth" | "saml" | "oidc" | null} */
     authMethod: null,
 
     /** @type {number | null} */
@@ -125,6 +125,10 @@ Alpine.data("app", () => ({
 
         if (this.loggedIn) {
             this.handleIsLoggedIn();
+        } else if (this.authMethod === "saml") {
+            this.handleLoginSAML();
+        } else if (this.authMethod === "oidc") {
+            this.handleLoginOIDC();
         } else {
             this.loading = false;
         }
@@ -140,12 +144,9 @@ Alpine.data("app", () => ({
 
     setAuthMethod() {
         const authMethod = getCookie("auth_method");
+        const validMethods = ["basic", "pid_auth", "saml", "oidc"];
 
-        if (
-            !authMethod ||
-            authMethod !== "basic" &&
-            authMethod !== "pid_auth"
-        ) {
+        if (!authMethod || !validMethods.includes(authMethod)) {
             this.error = `Unknown auth method: '${authMethod}'`;
             return;
         }
@@ -221,6 +222,34 @@ Alpine.data("app", () => ({
             }
             this.loggedIn = false;
             this.loading = false;
+        }
+    },
+
+    handleLoginSAML() {
+        const rawRedirectUrl = getCookie("saml_redirect_url");
+        if (!rawRedirectUrl) {
+            this.error = "Missing 'saml_redirect_url' cookie";
+            return;
+        }
+        try {
+            const url = decodeURIComponent(rawRedirectUrl);
+            this.redirect(url);
+        } catch (err) {
+            this.error = `Invalid SAML redirect URL: ${err.message}`;
+        }
+    },
+
+    handleLoginOIDC() {
+        const rawRedirectUrl = getCookie("oidc_redirect_url");
+        if (!rawRedirectUrl) {
+            this.error = "Missing 'oidc_redirect_url' cookie";
+            return;
+        }
+        try {
+            const url = decodeURIComponent(rawRedirectUrl);
+            this.redirect(url);
+        } catch (err) {
+            this.error = `Invalid OIDC redirect URL: ${err.message}`;
         }
     },
 

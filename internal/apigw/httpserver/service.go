@@ -149,7 +149,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer", http.StatusOK, s.endpointVCIMetadata)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/jwt-vc-issuer", http.StatusOK, s.endpointJWTVCIssuerMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/jwt-vc-issuer", http.StatusOK, s.endpointSDJWTVCIssuerMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "jwks", http.StatusOK, s.endpointJWKS)
 	rgOAuthSession := rgRoot.Group("")
 	rgOAuthSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
@@ -160,11 +160,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/svg-template", http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "token", http.StatusOK, s.endpointOAuthToken)
 
-	// Register SAML endpoints if enabled (build tag dependent)
-	s.registerSAMLRoutes(ctx, rgRoot)
+	// SAML endpoints
+	rgSAML := rgRoot.Group("/saml")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodGet, "/metadata", http.StatusOK, s.endpointSAMLMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodPost, "/initiate", http.StatusOK, s.endpointSAMLInitiate)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodPost, "/acs", http.StatusOK, s.endpointSAMLACS)
 
-	// Register OIDC RP endpoints if enabled (build tag dependent)
-	s.registerOIDCRPRoutes(ctx, rgRoot)
+	// OIDC RP endpoints
+	rgOIDCRP := rgRoot.Group("/oidcrp")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCRP, http.MethodPost, "/initiate", http.StatusOK, s.endpointOIDCRPInitiate)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCRP, http.MethodGet, "/callback", http.StatusOK, s.endpointOIDCRPCallback)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
 

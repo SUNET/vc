@@ -244,13 +244,11 @@ func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServer
 }
 
 // JWKSResponse represents a JSON Web Key Set (RFC 7517 §5).
-type JWKSResponse struct {
-	Keys []map[string]any `json:"keys"`
-}
+type JWKSResponse = apiv1_issuer.Keys
 
 // JWKS returns the issuer's public signing keys as a JWK Set.
 // The keys are fetched from the issuer via gRPC and stripped of any private
-// key material ("d" parameter) before being served.
+// key material before being served.
 func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
 	c.log.Debug("JWKS request")
 
@@ -261,46 +259,32 @@ func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
 
 	jwks := reply.GetJwks()
 	if jwks == nil {
-		return &JWKSResponse{Keys: []map[string]any{}}, nil
+		return &apiv1_issuer.Keys{}, nil
 	}
 
-	keys := make([]map[string]any, 0, len(jwks.GetKeys()))
+	// Strip private key material — only public keys are served
 	for _, key := range jwks.GetKeys() {
-		jwkMap := map[string]any{
-			"kty": key.GetKty(),
-		}
-		if kid := key.GetKid(); kid != "" {
-			jwkMap["kid"] = kid
-		}
-		if crv := key.GetCrv(); crv != "" {
-			jwkMap["crv"] = crv
-		}
-		if x := key.GetX(); x != "" {
-			jwkMap["x"] = x
-		}
-		if y := key.GetY(); y != "" {
-			jwkMap["y"] = y
-		}
-		// Intentionally omit "d" (private key component)
-		keys = append(keys, jwkMap)
+		key.D = ""
+		key.KeyOps = nil
+		key.Ext = false
 	}
 
-	return &JWKSResponse{Keys: keys}, nil
+	return jwks, nil
 }
 
-// JWTVCIssuerMetadataResponse represents JWT VC Issuer Metadata per SD-JWT VC §5.3.
-type JWTVCIssuerMetadataResponse struct {
+// SDJWTVCIssuerMetadataResponse represents JWT VC Issuer Metadata per SD-JWT VC §5.3.
+type SDJWTVCIssuerMetadataResponse struct {
 	Issuer  string `json:"issuer"`
 	JWKSURI string `json:"jwks_uri"`
 }
 
-// JWTVCIssuerMetadata returns the JWT VC Issuer Metadata per draft-ietf-oauth-sd-jwt-vc §5.3.
+// SDJWTVCIssuerMetadata returns the JWT VC Issuer Metadata per draft-ietf-oauth-sd-jwt-vc §5.3.
 // This metadata is served at /.well-known/jwt-vc-issuer and allows verifiers to discover
 // the issuer's JWKS endpoint.
-func (c *Client) JWTVCIssuerMetadata(ctx context.Context) (*JWTVCIssuerMetadataResponse, error) {
-	c.log.Debug("jwt-vc-issuer metadata request")
+func (c *Client) SDJWTVCIssuerMetadata(ctx context.Context) (*SDJWTVCIssuerMetadataResponse, error) {
+	c.log.Debug("sd-jwt-vc issuer metadata request")
 
-	return &JWTVCIssuerMetadataResponse{
+	return &SDJWTVCIssuerMetadataResponse{
 		Issuer:  c.cfg.APIGW.PublicURL,
 		JWKSURI: c.cfg.APIGW.PublicURL + "/jwks",
 	}, nil

@@ -2,6 +2,7 @@ package samlsp
 
 import (
 	"fmt"
+	"vc/pkg/credential"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 )
@@ -56,7 +57,7 @@ func (m *AttributeMapper) MapAttributes(samlAttrs map[string][]string, samlType 
 		}
 
 		// Apply transformation
-		value = applyTransform(value, attrCfg.Transform)
+		value = credential.ApplyTransform(value, attrCfg.Transform)
 
 		claims[attrCfg.Claim] = value
 	}

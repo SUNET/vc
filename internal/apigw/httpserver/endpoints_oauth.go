@@ -139,11 +139,11 @@ func (s *Service) endpointJWKS(ctx context.Context, c *gin.Context) (any, error)
 	return reply, nil
 }
 
-func (s *Service) endpointJWTVCIssuerMetadata(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointJWTVCIssuerMetadata")
+func (s *Service) endpointSDJWTVCIssuerMetadata(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSDJWTVCIssuerMetadata")
 	defer span.End()
 
-	reply, err := s.apiv1.JWTVCIssuerMetadata(ctx)
+	reply, err := s.apiv1.SDJWTVCIssuerMetadata(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -169,7 +169,10 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	c.SetCookie("auth_method", authMethod, 900, "/authorization/consent", "", false, false)
+	// Set SameSite policy for consent cookies; Secure flag follows TLS configuration
+	c.SetSameSite(http.SameSiteLaxMode)
+	secureCookie := s.sessionsOptions.Secure
+	c.SetCookie("auth_method", authMethod, 900, "/authorization/consent", "", secureCookie, false)
 
 	sessionID, ok := session.Get("session_id").(string)
 	if !ok {
@@ -189,7 +192,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		c.SetCookie("pid_auth_redirect_url", reply.RedirectURL, 900, "/authorization/consent", "", false, false)
+		c.SetCookie("pid_auth_redirect_url", reply.RedirectURL, 900, "/authorization/consent", "", secureCookie, false)
 		session.Set("verifier_context_id", reply.VerifierContextID)
 		if err := session.Save(); err != nil {
 			return nil, err
@@ -207,18 +210,17 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 
 		scope, _ := session.Get("scope").(string)
-		requestURI, _ := session.Get("request_uri").(string)
 
 		// Determine the IdP entity ID: use static IdP or default from config
 		idpEntityID := s.samlSPService.GetStaticIDPEntityID()
 
-		authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID, requestURI)
+		authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID)
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 
-		c.SetCookie("saml_redirect_url", authReq.RedirectURL, 900, "/authorization/consent", "", false, false)
+		c.SetCookie("saml_redirect_url", authReq.RedirectURL, 900, "/authorization/consent", "", secureCookie, false)
 	}
 
 	if authMethod == model.AuthMethodOIDC {
@@ -229,15 +231,14 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 
 		scope, _ := session.Get("scope").(string)
-		requestURI, _ := session.Get("request_uri").(string)
 
-		authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID, requestURI)
+		authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID)
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 
-		c.SetCookie("oidc_redirect_url", authReq.AuthorizationURL, 900, "/authorization/consent", "", false, false)
+		c.SetCookie("oidc_redirect_url", authReq.AuthorizationURL, 900, "/authorization/consent", "", secureCookie, false)
 	}
 
 	c.HTML(http.StatusOK, "consent.html", nil)

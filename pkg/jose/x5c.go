@@ -5,10 +5,38 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
+
+// ExtractKIDFromCompactJWT extracts the "kid" field from the header of a compact-serialized JWT/JWE.
+func ExtractKIDFromCompactJWT(compactToken string) (string, error) {
+	header := strings.SplitN(compactToken, ".", 2)[0]
+	b, err := base64.RawURLEncoding.DecodeString(header)
+	if err != nil {
+		// Fall back to RawStdEncoding for compatibility
+		b, err = base64.RawStdEncoding.DecodeString(header)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode JWT header: %w", err)
+		}
+	}
+
+	var hdr struct {
+		KID string `json:"kid"`
+	}
+	if err := json.Unmarshal(b, &hdr); err != nil {
+		return "", fmt.Errorf("failed to parse JWT header: %w", err)
+	}
+
+	if hdr.KID == "" {
+		return "", errors.New("kid not found in JWT header")
+	}
+
+	return hdr.KID, nil
+}
 
 // ParseX5CHeader parses the x5c header into a certificate chain.
 // The x5c header is an array of base64-encoded DER certificates,

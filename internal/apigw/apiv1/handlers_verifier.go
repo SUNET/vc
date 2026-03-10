@@ -2,15 +2,14 @@ package apiv1
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 	"vc/internal/apigw/db"
 	"vc/pkg/cache"
+	"vc/pkg/jose"
 	"vc/pkg/model"
 	"vc/pkg/openid4vp"
 
@@ -146,28 +145,7 @@ type VerificationDirectPostRequest struct {
 }
 
 func (v *VerificationDirectPostRequest) GetKID() (string, error) {
-	header := strings.Split(v.Response, ".")[0]
-	b, err := base64.RawStdEncoding.DecodeString(header)
-	if err != nil {
-		return "", err
-	}
-
-	var headerMap map[string]any
-	if err := json.Unmarshal(b, &headerMap); err != nil {
-		return "", err
-	}
-
-	kid, ok := headerMap["kid"]
-	if !ok {
-		return "", errors.New("kid not found in JWT header")
-	}
-
-	kidStr, ok := kid.(string)
-	if !ok {
-		return "", errors.New("kid is not a string")
-	}
-
-	return kidStr, nil
+	return jose.ExtractKIDFromCompactJWT(v.Response)
 }
 
 type VerificationDirectPostResponse struct {
@@ -242,7 +220,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	validator := &openid4vp.VPTokenValidator{
 		Nonce:           authCtx.Nonce,
 		ClientID:        authCtx.ClientID,
-		VerifySignature: true,
+		ValidateFormat:  true,
 		CheckRevocation: false,
 		DCQLQuery:       authCtx.DCQLQuery,
 	}

@@ -336,8 +336,8 @@ func createTestDCQLForVP(t *testing.T) *openid4vp.DCQL {
 	}
 }
 
-// TestExtractClaimsFromVPToken tests the extractClaimsFromVPToken helper
-func TestExtractClaimsFromVPToken(t *testing.T) {
+// TestExtractAndMapClaimsEmpty tests the extractAndMapClaims helper with nil extractor
+func TestExtractAndMapClaimsEmpty(t *testing.T) {
 	ctx := t.Context()
 
 	tests := []struct {
@@ -371,7 +371,7 @@ func TestExtractClaimsFromVPToken(t *testing.T) {
 			client, _ := CreateTestClientWithMock(nil)
 
 			// Test with nil claims extractor (which is the default for test client)
-			claims, err := client.extractClaimsFromVPToken(ctx, tt.vpToken)
+			claims, err := client.extractAndMapClaims(ctx, tt.vpToken, "")
 
 			if tt.expectError {
 				assert.Error(t, err)

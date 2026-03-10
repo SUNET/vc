@@ -16,6 +16,5 @@ type Session struct {
 	ExpiresAt      time.Time `json:"expires_at" bson:"expires_at"`
 
 	// VCI flow integration fields (set when initiated from OpenID4VCI consent)
-	VCISessionID  string `json:"vci_session_id" bson:"vci_session_id"`   // Links back to the VCI AuthorizationContext session
-	VCIRequestURI string `json:"vci_request_uri" bson:"vci_request_uri"` // The VCI request_uri for resuming the flow
+	VCISessionID string `json:"vci_session_id" bson:"vci_session_id"` // Links back to the VCI AuthorizationContext session
 }

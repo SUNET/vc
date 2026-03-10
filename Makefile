@@ -33,9 +33,7 @@ _RELEASE_MODE           ?=
 RESERVED_TAGS           := latest testing demo dev
 
 # Build Tags for Optional Features
-# Only pkcs11 remains — it requires CGO for hardware security module support.
-# All other build tags (saml, oidcrp, vc20, didcomm) have been removed;
-# that code now compiles unconditionally.
+# PKCS#11 requires CGO for hardware security module support.
 PKCS11_TAG              := pkcs11
 
 # Service Build Configuration (service -> static/dynamic, tags)

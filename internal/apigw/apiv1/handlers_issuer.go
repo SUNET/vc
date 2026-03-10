@@ -142,16 +142,22 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 
 	default:
-		// Auth methods from config (e.g., pid_auth): retrieve from session cache
-		// These credentials require presenting another credential for authentication
+		// Auth methods from config (e.g., pid_auth, saml, oidc): retrieve from session cache
+		// These credentials are populated during the external authentication callback
 		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)
-		if !ok {
+		if !ok || len(docs) == 0 {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
 			return nil, errors.New("no documents found for session " + authContext.SessionID)
+		}
+		if len(docs) > 1 {
+			c.log.Info("multiple documents in cache for session, using first", "session_id", authContext.SessionID, "count", len(docs))
 		}
 		for _, doc := range docs {
 			document = doc
 			break
+		}
+		if document == nil || document.DocumentData == nil {
+			return nil, errors.New("cached document is empty for session " + authContext.SessionID)
 		}
 	}
 

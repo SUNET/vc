@@ -506,7 +506,11 @@ func testProviderDiscovery(t *testing.T, env *oidcTestEnvironment) {
 	transformer, err := env.oidcService.BuildTransformer()
 	require.NoError(t, err)
 	require.NotNil(t, transformer)
-	assert.NotEmpty(t, transformer.Mappings, "transformer should have credential mappings")
+
+	// Verify the transformer has mappings by attempting to get a known one
+	mapping, err := transformer.GetMapping("pid")
+	assert.NoError(t, err)
+	assert.NotNil(t, mapping, "transformer should have credential mapping for 'pid'")
 }
 
 // testOIDCInitiateAuth verifies auth initiation produces a valid authorization URL
@@ -718,7 +722,7 @@ func testMissingRequiredClaims(t *testing.T, env *oidcTestEnvironment) {
 
 	_, err = transformer.TransformClaims("pid", incompleteClaims)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing required claim")
+	assert.Contains(t, err.Error(), "missing required attribute")
 }
 
 // testInvalidAuthorizationCode tests that an invalid code returns an error

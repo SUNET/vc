@@ -24,6 +24,7 @@ func TestGenerateMetadata(t *testing.T) {
 				assert.Equal(t, "https://issuer.example.com/token", metadata.TokenEndpoint)
 				assert.Equal(t, "https://issuer.example.com/authorize", metadata.AuthorizationEndpoint)
 				assert.Equal(t, "https://issuer.example.com/op/par", metadata.PushedAuthorizationRequestEndpoint)
+				assert.Equal(t, "https://issuer.example.com/jwks", metadata.JWKSURI)
 				assert.True(t, metadata.RequiredPushedAuthorizationRequests)
 				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "none")
 				assert.Contains(t, metadata.ResponseTypesSupported, "code")

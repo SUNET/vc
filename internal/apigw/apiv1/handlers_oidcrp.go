@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
-	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
-	"vc/pkg/grpchelpers"
 	"vc/internal/apigw/oidcrp"
+	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
+	"vc/pkg/crypto"
+	"vc/pkg/grpchelpers"
 	"vc/pkg/model"
 	"vc/pkg/openid4vci"
 
@@ -34,11 +34,11 @@ type OIDCRPCallbackRequest struct {
 
 // OIDCRPCallbackResponse represents the credential issuance response
 type OIDCRPCallbackResponse struct {
-	Status          string                 `json:"status"`
-	CredentialType  string                 `json:"credential_type"`
-	Credential      string                 `json:"credential"`
+	Status          string         `json:"status"`
+	CredentialType  string         `json:"credential_type"`
+	Credential      string         `json:"credential"`
 	CredentialOffer map[string]any `json:"credential_offer"`
-	Message         string                 `json:"message"`
+	Message         string         `json:"message"`
 
 	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
 	// The httpserver should redirect the browser to this URL instead of returning JSON.
@@ -229,7 +229,10 @@ func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialTy
 	defer span.End()
 
 	// Generate a unique pre-authorized code
-	preAuthCode := fmt.Sprintf("oidcrp_%d", time.Now().UnixNano())
+	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
+	}
 
 	// Build credential offer parameters
 	params := openid4vci.CredentialOfferParameters{

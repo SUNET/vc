@@ -195,10 +195,10 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 }
 
 // InitiateAuthForVCI initiates a SAML authentication flow that is linked to
-// an OpenID4VCI credential issuance session. The VCI session ID and request URI
-// are stored in the SAML session so that the ACS handler can route the result
-// back into the VCI pipeline.
-func (s *Service) InitiateAuthForVCI(ctx context.Context, idpEntityID, credentialType, vciSessionID, vciRequestURI string) (*AuthRequest, error) {
+// an OpenID4VCI credential issuance session. The VCI session ID is stored in
+// the SAML session so that the ACS handler can route the result back into
+// the VCI pipeline.
+func (s *Service) InitiateAuthForVCI(ctx context.Context, idpEntityID, credentialType, vciSessionID string) (*AuthRequest, error) {
 	authReq, err := s.InitiateAuth(ctx, idpEntityID, credentialType)
 	if err != nil {
 		return nil, err
@@ -211,7 +211,6 @@ func (s *Service) InitiateAuthForVCI(ctx context.Context, idpEntityID, credentia
 	}
 
 	session.VCISessionID = vciSessionID
-	session.VCIRequestURI = vciRequestURI
 	s.sessionCache.Set(ctx, authReq.ID, session)
 
 	s.log.Info("SAML auth initiated for VCI flow",
@@ -287,6 +286,11 @@ func (s *Service) GetSession(ctx context.Context, sessionID string) (*Session, e
 	return s.getSession(ctx, sessionID)
 }
 
+// DeleteSession removes a session by ID
+func (s *Service) DeleteSession(ctx context.Context, sessionID string) {
+	s.deleteSession(ctx, sessionID)
+}
+
 // getSession retrieves a session by ID from the cache.
 func (s *Service) getSession(ctx context.Context, id string) (*Session, error) {
 	session, ok := s.sessionCache.Get(ctx, id)
@@ -342,29 +346,5 @@ func BuildTransformer(cfg *model.SAMLConfig) (*ClaimTransformer, error) {
 		return nil, fmt.Errorf("SAML not enabled")
 	}
 
-	// Convert config mappings to transformer format
-	mappings := make(map[string]*CredentialMapping, len(cfg.CredentialMappings))
-
-	for credentialType, credMapping := range cfg.CredentialMappings {
-		// Convert config attribute mappings to transformer format
-		attributes := make(map[string]*AttributeMapping)
-
-		for attrID, attrCfg := range credMapping.Attributes {
-			attributes[attrID] = &AttributeMapping{
-				Claim:     attrCfg.Claim,
-				Required:  attrCfg.Required,
-				Transform: attrCfg.Transform,
-				Default:   attrCfg.Default,
-			}
-		}
-
-		mappings[credentialType] = &CredentialMapping{
-			CredentialType:     credentialType,
-			CredentialConfigID: credMapping.CredentialConfigID,
-			Attributes:         attributes,
-			DefaultIdP:         credMapping.DefaultIdP,
-		}
-	}
-
-	return NewClaimTransformer(mappings), nil
+	return NewClaimTransformer(cfg.CredentialMappings), nil
 }

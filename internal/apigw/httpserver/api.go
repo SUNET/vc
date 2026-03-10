@@ -49,7 +49,7 @@ type Apiv1 interface {
 	OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error)
 	OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error)
 	JWKS(ctx context.Context) (*apiv1.JWKSResponse, error)
-	JWTVCIssuerMetadata(ctx context.Context) (*apiv1.JWTVCIssuerMetadataResponse, error)
+	SDJWTVCIssuerMetadata(ctx context.Context) (*apiv1.SDJWTVCIssuerMetadataResponse, error)
 
 	//Revoke(ctx context.Context, req *apiv1.RevokeRequest) (*apiv1.RevokeReply, error)
 

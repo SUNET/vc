@@ -103,7 +103,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	authCtx.PresentationSubmission = presentationSubmission
 
 	// Extract claims from VP token
-	claims, err := c.extractClaimsFromVPToken(ctx, vpToken)
+	claims, err := c.extractAndMapClaims(ctx, vpToken, "")
 	if err != nil {
 		c.log.Error(err, "Failed to extract claims from VP token")
 		authCtx.Status = "error"
@@ -133,26 +133,6 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	}
 
 	return nil
-}
-
-// extractClaimsFromVPToken extracts and maps claims from the VP token
-func (c *Client) extractClaimsFromVPToken(ctx context.Context, vpToken string) (map[string]any, error) {
-	ctx, span := c.tracer.Start(ctx, "apiv1:extract_claims")
-	defer span.End()
-
-	// If no claims extractor, return empty claims
-	if c.claimsExtractor == nil {
-		c.log.Debug("No claims extractor configured")
-		return make(map[string]any), nil
-	}
-
-	// Extract claims
-	claims, err := c.claimsExtractor.ExtractClaimsFromVPToken(ctx, vpToken)
-	if err != nil {
-		return nil, err
-	}
-
-	return claims, nil
 }
 
 // GetPollStatus returns the current status of a session for polling

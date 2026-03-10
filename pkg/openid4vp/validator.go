@@ -20,12 +20,10 @@ type VPTokenValidator struct {
 	// ClientID (or Origin for DC API)
 	ClientID string
 
-	// VerifySignature enables signature FORMAT validation (not cryptographic verification).
-	// This only validates that the JWT structure is parseable - it does NOT verify
-	// the actual cryptographic signature. Callers MUST use TrustEvaluator for
-	// real signature verification and trust anchor validation.
-	// Deprecated: Always use TrustEvaluator for actual signature verification.
-	VerifySignature bool
+	// ValidateFormat enables SD-JWT format validation (not cryptographic verification).
+	// This only validates that the JWT structure is parseable — it does NOT verify
+	// the actual cryptographic signature. Use TrustEvaluator for signature verification.
+	ValidateFormat bool
 
 	// CheckRevocation enables revocation status checks
 	CheckRevocation bool
@@ -68,9 +66,9 @@ func (v *VPTokenValidator) Validate(vpToken string) error {
 	}
 
 	// 6. Verify signature if requested
-	if v.VerifySignature {
-		if err := v.verifySignature(vpToken); err != nil {
-			return fmt.Errorf("signature verification failed: %w", err)
+	if v.ValidateFormat {
+		if err := v.validateFormat(vpToken); err != nil {
+			return fmt.Errorf("format validation failed: %w", err)
 		}
 	}
 
@@ -193,13 +191,9 @@ func parseKeyBindingJWT(kbJWT string) (map[string]any, error) {
 	return claims, nil
 }
 
-// verifySignature validates JWT FORMAT only - NOT CRYPTOGRAPHIC SIGNATURE.
-// This only checks that the VP token can be parsed as a valid SD-JWT structure.
-// IMPORTANT: Callers MUST use TrustEvaluator for actual cryptographic signature
-// verification and trust anchor validation. This method is INSUFFICIENT for security.
-func (v *VPTokenValidator) verifySignature(vpToken string) error {
-	// WARNING: This does NOT verify the cryptographic signature!
-	// It only validates the JWT format is parseable.
+// validateFormat validates the SD-JWT structure is parseable.
+// This does NOT perform cryptographic signature verification — use TrustEvaluator for that.
+func (v *VPTokenValidator) validateFormat(vpToken string) error {
 	token := sdjwtvc.Token(vpToken)
 	_, err := token.Parse()
 	if err != nil {
@@ -241,7 +235,7 @@ func ValidateVPToken(vpToken, nonce, clientID string) error {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		VerifySignature: true,
+		ValidateFormat:  true,
 		CheckRevocation: false,
 	}
 

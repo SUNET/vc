@@ -112,6 +112,14 @@
                     <button class="rounded-lg shadow-sm text-sm w-full px-4 py-2 mt-6 text-center text-white bg-primary hover:bg-primary-hover dark:text-white dark:hover:bg-primary-light-hover dark:bg-primary-light focus-visible:outline-2 focus-visible:outline-offset-2 cursor-pointer" @click="() => handleLoginPidAuth(true)" title="Proceed to Wallet immediately">Proceed now</button>
                 </div>
             </template>
+            <template x-if="!loading && !loggedIn && (authMethod === 'saml' || authMethod === 'oidc')">
+                <div class="space-y-4 md:space-y-6">
+                    <p class="text-center">Redirecting to your identity provider for authentication...</p>
+                    <div class="vc-loader">
+                        <span class="loader text-primary dark:text-primary-light"></span>
+                    </div>
+                </div>
+            </template>
             <template x-if="!loading && loggedIn">
                 <div class="space-y-4 md:space-y-6">
                     <p>Select the credential you wish to retrieve by clicking on it:</p>

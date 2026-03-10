@@ -13,6 +13,7 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		Issuer:                              cfg.IssuerURL,
 		AuthorizationEndpoint:               cfg.IssuerURL + "/authorize",
 		TokenEndpoint:                       cfg.TokenEndpoint,
+		JWKSURI:                             cfg.IssuerURL + "/jwks",
 		PushedAuthorizationRequestEndpoint:  cfg.IssuerURL + "/op/par",
 		RequiredPushedAuthorizationRequests: true,
 		TokenEndpointAuthMethodsSupported:   []string{"none"},
