@@ -84,6 +84,7 @@
         "OIDCOP",
         "OIDCRP",
         "OIDMDL",
+        "omitnil",
         "oneof",
         "openbadge",
         "openidvci",
@@ -107,6 +108,7 @@
         "protoc",
         "pubkey",
         "qrcode",
+        "QRURL",
         "Retag",
         "retags",
         "rpcclient",
@@ -154,6 +156,8 @@
         "VICAL",
         "vulncheck",
         "wrongverifier",
+        "wwwallet",
+        "zapr",
         "zoneinfo"
     ],
     "makefile.configureOnOpen": false
