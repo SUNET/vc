@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/helpers"
@@ -240,6 +241,51 @@ func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServer
 	}
 
 	return signedMetadata, nil
+}
+
+// JWKSResponse represents a JSON Web Key Set (RFC 7517 §5).
+type JWKSResponse struct {
+	Keys []map[string]any `json:"keys"`
+}
+
+// JWKS returns the issuer's public signing keys as a JWK Set.
+// The keys are fetched from the issuer via gRPC and stripped of any private
+// key material ("d" parameter) before being served.
+func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
+	c.log.Debug("JWKS request")
+
+	reply, err := c.issuerClient.JWKS(ctx, &apiv1_issuer.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWKS from issuer: %w", err)
+	}
+
+	jwks := reply.GetJwks()
+	if jwks == nil {
+		return &JWKSResponse{Keys: []map[string]any{}}, nil
+	}
+
+	keys := make([]map[string]any, 0, len(jwks.GetKeys()))
+	for _, key := range jwks.GetKeys() {
+		jwkMap := map[string]any{
+			"kty": key.GetKty(),
+		}
+		if kid := key.GetKid(); kid != "" {
+			jwkMap["kid"] = kid
+		}
+		if crv := key.GetCrv(); crv != "" {
+			jwkMap["crv"] = crv
+		}
+		if x := key.GetX(); x != "" {
+			jwkMap["x"] = x
+		}
+		if y := key.GetY(); y != "" {
+			jwkMap["y"] = y
+		}
+		// Intentionally omit "d" (private key component)
+		keys = append(keys, jwkMap)
+	}
+
+	return &JWKSResponse{Keys: keys}, nil
 }
 
 type OauthAuthorizationConsentRequest struct {
