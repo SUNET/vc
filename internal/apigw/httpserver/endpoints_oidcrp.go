@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"vc/internal/apigw/apiv1"
 
@@ -76,5 +77,17 @@ func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (a
 	}
 
 	// Delegate to apiv1 layer
-	return s.apiv1.OIDCRPCallback(ctx, req, s.oidcrpService)
+	reply, err := s.apiv1.OIDCRPCallback(ctx, req, s.oidcrpService)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	// VCI mode: redirect browser back to consent page
+	if reply != nil && reply.VCIRedirectURL != "" {
+		c.Redirect(http.StatusFound, reply.VCIRedirectURL)
+		return nil, nil
+	}
+
+	return reply, nil
 }

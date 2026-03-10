@@ -218,6 +218,66 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			}
 		}
 
+	case model.AuthMethodSAML, model.AuthMethodOIDC:
+		// For SAML/OIDC, documents are stored in the VCI session cache by the
+		// ACS/callback handlers, keyed by the authorization context's session ID.
+		// No verifier response_code lookup is needed — we use the session ID directly.
+		docs, ok := c.cacheService.Document.Get(ctx, authorizationContext.SessionID)
+		if !ok || len(docs) == 0 {
+			c.log.Error(nil, "no documents found in cache for SAML/OIDC session",
+				"session_id", authorizationContext.SessionID)
+			return nil, fmt.Errorf("no documents found for session %s", authorizationContext.SessionID)
+		}
+
+		c.log.Debug("userLookup - retrieved SAML/OIDC docs from cache",
+			"session_id", authorizationContext.SessionID, "num_docs", len(docs))
+
+		// Extract the first document (same approach as pid_auth)
+		authenticSource := ""
+		for key, doc := range docs {
+			c.log.Debug("userLookup - examining doc", "key", key,
+				"authentic_source", doc.Meta.AuthenticSource, "doc_nil", doc == nil)
+			authenticSource = doc.Meta.AuthenticSource
+			break
+		}
+
+		doc, ok := docs[authenticSource]
+		if !ok {
+			return nil, fmt.Errorf("no document found for authentic source %s", authenticSource)
+		}
+
+		jsonPaths, err := req.VCTM.ClaimJSONPath()
+		if err != nil {
+			c.log.Error(err, "failed to get JSON paths from VCTM claims")
+			return nil, err
+		}
+
+		claimValues, err := sdjwtvc.ExtractClaimsByJSONPath(doc.DocumentData, jsonPaths.Displayable)
+		if err != nil {
+			c.log.Error(err, "failed to extract claim values from document data",
+				"json_paths", jsonPaths.Displayable, "document_data", doc.DocumentData)
+			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
+		}
+
+		c.log.Debug("extracted claim values",
+			"extracted_count", len(claimValues),
+			"requested_count", len(jsonPaths.Displayable),
+			"claims", claimValues)
+
+		for _, claim := range req.VCTM.Claims {
+			value, ok := claimValues[claim.SVGID].(string)
+			if !ok {
+				continue
+			}
+
+			if claim.SVGID != "" {
+				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
+					Label: claim.Display[0].Label,
+					Value: value,
+				}
+			}
+		}
+
 	default:
 		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthMethod)
 	}

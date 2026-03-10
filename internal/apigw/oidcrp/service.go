@@ -178,6 +178,34 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 	}, nil
 }
 
+// InitiateAuthForVCI initiates an OIDC authentication flow that is linked to
+// an OpenID4VCI credential issuance session. The VCI session ID and request URI
+// are stored in the OIDC session so that the callback handler can route the result
+// back into the VCI pipeline.
+func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSessionID, vciRequestURI string) (*AuthRequest, error) {
+	authReq, err := s.InitiateAuth(ctx, credentialType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the OIDC session with VCI linkage
+	session, err := s.getSession(ctx, authReq.State)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update OIDC session with VCI context: %w", err)
+	}
+
+	session.VCISessionID = vciSessionID
+	session.VCIRequestURI = vciRequestURI
+	s.sessionCache.Set(ctx, session.ID, session)
+
+	s.log.Info("OIDC auth initiated for VCI flow",
+		"oidc_state", authReq.State,
+		"vci_session_id", vciSessionID,
+		"credential_type", credentialType)
+
+	return authReq, nil
+}
+
 // AuthResponse represents the result of OIDC authentication
 type AuthResponse struct {
 	IDToken      *oidc.IDToken

@@ -194,6 +194,34 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 	}, nil
 }
 
+// InitiateAuthForVCI initiates a SAML authentication flow that is linked to
+// an OpenID4VCI credential issuance session. The VCI session ID and request URI
+// are stored in the SAML session so that the ACS handler can route the result
+// back into the VCI pipeline.
+func (s *Service) InitiateAuthForVCI(ctx context.Context, idpEntityID, credentialType, vciSessionID, vciRequestURI string) (*AuthRequest, error) {
+	authReq, err := s.InitiateAuth(ctx, idpEntityID, credentialType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the SAML session with VCI linkage
+	session, err := s.getSession(ctx, authReq.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update SAML session with VCI context: %w", err)
+	}
+
+	session.VCISessionID = vciSessionID
+	session.VCIRequestURI = vciRequestURI
+	s.sessionCache.Set(ctx, authReq.ID, session)
+
+	s.log.Info("SAML auth initiated for VCI flow",
+		"saml_request_id", authReq.ID,
+		"vci_session_id", vciSessionID,
+		"credential_type", credentialType)
+
+	return authReq, nil
+}
+
 // Assertion represents a processed SAML assertion
 type Assertion struct {
 	NameID     string

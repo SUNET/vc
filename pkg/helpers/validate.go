@@ -35,8 +35,12 @@ func NewValidator() (*validator.Validate, error) {
 	err := validate.RegisterValidation("auth_method_exists", func(fl validator.FieldLevel) bool {
 		authMethod := fl.Field().String()
 
-		// "basic" is a special built-in auth method that doesn't require configuration
-		if authMethod == "basic" {
+		// Built-in auth methods that don't require configuration in common.auth_methods:
+		// - "basic": Simple username-based authentication
+		// - "saml": SAML SP authentication (requires saml config to be enabled)
+		// - "oidc": OIDC RP authentication (requires oidcrp config to be enabled)
+		switch authMethod {
+		case "basic", "saml", "oidc":
 			return true
 		}
 

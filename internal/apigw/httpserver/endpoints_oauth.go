@@ -199,6 +199,47 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		reply.VerifierContextID = ""
 	}
 
+	if authMethod == model.AuthMethodSAML {
+		if s.samlSPService == nil {
+			err := errors.New("SAML auth method requested but SAML is not enabled")
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+
+		scope, _ := session.Get("scope").(string)
+		requestURI, _ := session.Get("request_uri").(string)
+
+		// Determine the IdP entity ID: use static IdP or default from config
+		idpEntityID := s.samlSPService.GetStaticIDPEntityID()
+
+		authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID, requestURI)
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+
+		c.SetCookie("saml_redirect_url", authReq.RedirectURL, 900, "/authorization/consent", "", false, false)
+	}
+
+	if authMethod == model.AuthMethodOIDC {
+		if s.oidcrpService == nil {
+			err := errors.New("OIDC auth method requested but OIDC RP is not enabled")
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+
+		scope, _ := session.Get("scope").(string)
+		requestURI, _ := session.Get("request_uri").(string)
+
+		authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID, requestURI)
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+
+		c.SetCookie("oidc_redirect_url", authReq.AuthorizationURL, 900, "/authorization/consent", "", false, false)
+	}
+
 	c.HTML(http.StatusOK, "consent.html", nil)
 	return nil, nil
 }

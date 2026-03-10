@@ -18,6 +18,16 @@ import (
 	"vc/pkg/openid4vci"
 )
 
+// StoreVCIDocuments stores transformed credential documents in the VCI session cache.
+// This is used by external auth flows (SAML/OIDC) that are integrated into the
+// OpenID4VCI pipeline. The documents are stored keyed by the VCI session ID so they
+// can be retrieved during credential issuance (same as pid_auth flow).
+func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs map[string]*model.CompleteDocument) error {
+	c.cacheService.Document.Set(ctx, sessionID, docs)
+	c.log.Debug("VCI documents stored from external auth", "session_id", sessionID, "doc_count", len(docs))
+	return nil
+}
+
 // VCICredentialOffer implements OpenID4VCI credential offer endpoint
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-offer-endpoint
 func (c *Client) VCICredentialOffer(ctx context.Context, req *openid4vci.CredentialOfferParameters) (*openid4vci.CredentialOfferParameters, error) {

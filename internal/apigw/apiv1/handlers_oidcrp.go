@@ -9,6 +9,7 @@ import (
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
 	"vc/pkg/grpchelpers"
 	"vc/internal/apigw/oidcrp"
+	"vc/pkg/model"
 	"vc/pkg/openid4vci"
 
 	"go.opentelemetry.io/otel/codes"
@@ -38,6 +39,10 @@ type OIDCRPCallbackResponse struct {
 	Credential      string                 `json:"credential"`
 	CredentialOffer map[string]any `json:"credential_offer"`
 	Message         string                 `json:"message"`
+
+	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
+	// The httpserver should redirect the browser to this URL instead of returning JSON.
+	VCIRedirectURL string `json:"vci_redirect_url,omitempty"`
 }
 
 // OIDCRPInitiate initiates OIDC authentication flow
@@ -112,6 +117,42 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		"claims_count", len(claims),
 		"subject", authResp.IDToken.Subject)
 
+	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
+	// store the transformed claims as a document in the VCI session cache and signal
+	// the httpserver to redirect back to the consent page.
+	if session.VCISessionID != "" {
+		c.log.Info("OIDC callback: VCI mode detected, storing document in VCI cache",
+			"vci_session_id", session.VCISessionID,
+			"credential_type", session.CredentialType)
+
+		doc := &model.CompleteDocument{
+			Meta: &model.MetaData{
+				AuthenticSource: session.IssuerURL,
+			},
+			DocumentData:        claims,
+			DocumentDataVersion: "1.0.0",
+		}
+		docs := map[string]*model.CompleteDocument{
+			session.IssuerURL: doc,
+		}
+
+		if err := c.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
+			span.SetStatus(codes.Error, "VCI document storage failed")
+			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		}
+
+		// Clean up OIDC session
+		service.DeleteSession(ctx, req.State)
+
+		return &OIDCRPCallbackResponse{
+			Status:         "success",
+			CredentialType: session.CredentialType,
+			VCIRedirectURL: "/authorization/consent/#/credentials",
+			Message:        "OIDC authentication successful, continuing VCI flow",
+		}, nil
+	}
+
+	// Standalone mode: create credential directly via issuer gRPC
 	// Marshal claims to JSON for the credential
 	documentData, err := json.Marshal(claims)
 	if err != nil {
