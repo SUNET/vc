@@ -326,10 +326,14 @@ Alpine.data("app", () => ({
 
             this.redirectUrl = data.redirect_url;
 
-            const svg = await this.createCredentialSvgImageUri(
-                data.svg_template_claims,
-            );
-
+            let svg = null;
+            try {
+                svg = await this.createCredentialSvgImageUri(
+                    data.svg_template_claims,
+                );
+            } catch (_) {
+                // VCTM has no SVG template — display claims without card image
+            }
 
             this.credentials.push({
                 vct: "N/A",

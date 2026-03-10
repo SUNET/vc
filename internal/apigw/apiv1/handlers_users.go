@@ -205,15 +205,23 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		c.log.Debug("extracted claim values", "extracted_count", len(claimValues), "requested_count", len(jsonPaths.Displayable), "claims", claimValues)
 
 		for _, claim := range req.VCTM.Claims {
-			value, ok := claimValues[claim.SVGID].(string)
-			if !ok {
-				continue
-			}
-
 			if claim.SVGID != "" {
+				value, ok := claimValues[claim.SVGID].(string)
+				if !ok {
+					continue
+				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
 					Label: claim.Display[0].Label,
 					Value: value,
+				}
+			} else if len(claim.Display) > 0 {
+				// No svg_id — fall back to extracting claim value from document data by path
+				key := claim.JSONPath()
+				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+					svgTemplateClaims[key] = vcclient.SVGClaim{
+						Label: claim.Display[0].Label,
+						Value: value,
+					}
 				}
 			}
 		}
@@ -265,15 +273,23 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			"claims", claimValues)
 
 		for _, claim := range req.VCTM.Claims {
-			value, ok := claimValues[claim.SVGID].(string)
-			if !ok {
-				continue
-			}
-
 			if claim.SVGID != "" {
+				value, ok := claimValues[claim.SVGID].(string)
+				if !ok {
+					continue
+				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
 					Label: claim.Display[0].Label,
 					Value: value,
+				}
+			} else if len(claim.Display) > 0 {
+				// No svg_id — fall back to extracting claim value from document data by path
+				key := claim.JSONPath()
+				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+					svgTemplateClaims[key] = vcclient.SVGClaim{
+						Label: claim.Display[0].Label,
+						Value: value,
+					}
 				}
 			}
 		}
@@ -297,4 +313,54 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	c.log.Debug("userlookup", "reply", reply)
 
 	return reply, nil
+}
+
+// findValueByName searches the document data for a claim value matching
+// the VCTM claim path. It first tries an exact JSONPath-style lookup,
+// then falls back to searching recursively by the leaf key name.
+func findValueByName(data map[string]any, path []*string) string {
+	if len(path) == 0 {
+		return ""
+	}
+
+	// Walk the path through nested maps
+	var current any = data
+	for _, p := range path {
+		if p == nil {
+			break
+		}
+		m, ok := current.(map[string]any)
+		if !ok {
+			break
+		}
+		current, ok = m[*p]
+		if !ok {
+			// Exact path failed — try recursive search by leaf key name
+			leafKey := *path[len(path)-1]
+			return findValueRecursive(data, leafKey)
+		}
+	}
+
+	if s, ok := current.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", current)
+}
+
+// findValueRecursive searches a nested map for the first string value matching key.
+func findValueRecursive(data map[string]any, key string) string {
+	if v, ok := data[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+		return fmt.Sprintf("%v", v)
+	}
+	for _, v := range data {
+		if nested, ok := v.(map[string]any); ok {
+			if result := findValueRecursive(nested, key); result != "" {
+				return result
+			}
+		}
+	}
+	return ""
 }

@@ -110,6 +110,11 @@ type SVGTemplateRequest struct {
 }
 
 func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) (*vcclient.SVGTemplateReply, error) {
+	if len(req.VCTM.Display) == 0 || req.VCTM.Display[0].Rendering == nil ||
+		len(req.VCTM.Display[0].Rendering.SVGTemplates) == 0 {
+		return nil, fmt.Errorf("VCTM has no SVG templates")
+	}
+
 	svgTemplateURI := req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
 
 	if cached, ok := c.cacheService.SVGTemplate.Get(ctx, svgTemplateURI); ok {
