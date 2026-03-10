@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package protocol implements DIDComm v2.1 protocols.
 //
 // This package provides implementations of standard DIDComm protocols:

@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package crypto provides cryptographic primitives for DIDComm v2.1 messaging.
 //
 // This package implements the cryptographic algorithms required by the DIDComm

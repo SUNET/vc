@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 package didcomm_interop
 
 import (

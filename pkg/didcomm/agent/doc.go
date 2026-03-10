@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package agent provides a high-level DIDComm agent implementation.
 //
 // The Agent is the main entry point for DIDComm messaging. It coordinates:

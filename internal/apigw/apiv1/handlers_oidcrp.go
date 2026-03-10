@@ -1,5 +1,3 @@
-//go:build oidcrp
-
 package apiv1
 
 import (

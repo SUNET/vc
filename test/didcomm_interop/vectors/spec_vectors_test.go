@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 // Package vectors provides tests using official DIDComm v2.1 specification test vectors.
 package vectors
 

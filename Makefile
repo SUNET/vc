@@ -33,11 +33,10 @@ _RELEASE_MODE           ?=
 RESERVED_TAGS           := latest testing demo dev
 
 # Build Tags for Optional Features
-SAML_TAG                := saml
-OIDCRP_TAG              := oidcrp
+# Only pkcs11 remains — it requires CGO for hardware security module support.
+# All other build tags (saml, oidcrp, vc20, didcomm) have been removed;
+# that code now compiles unconditionally.
 PKCS11_TAG              := pkcs11
-VC20_TAG                := vc20
-ALL_TAGS                := $(SAML_TAG),$(OIDCRP_TAG)
 
 # Service Build Configuration (service -> static/dynamic, tags)
 # Format: service_name:cgo_mode:build_tags
@@ -48,7 +47,7 @@ BUILD_CONFIGS           := \
 	apigw:static: \
 	issuer:static: \
 	ui:static: \
-	vc20-test-server:static:$(VC20_TAG)
+	vc20-test-server:static:
 
 # ==============================================================================
 # Phony Targets Declaration
@@ -56,14 +55,15 @@ BUILD_CONFIGS           := \
 
 .PHONY: help pki pki-clean test test-env \
 	build build-% \
-	docker-build docker-build-% docker-push docker-push-% docker-push-apigw-saml docker-push-apigw-oidcrp docker-push-apigw-all docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
+	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
 	check-protoc diagram install-tools clean-apt-cache vscode \
 	gosec staticcheck vulncheck \
-	test-saml test-oidcrp test-vc20 test-pkcs11 test-all-tags \
+	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
 	test-wallet-stack-vci test-wallet-stack-vp test-wallet-stack-e2e test-wallet-stack-security \
+	test-didcomm test-didcomm-interop test-didcomm-all \
 	test-workflows test-workflows-run \
 	w3c-test create-w3c-test-suite run-w3c-test \
 	oidc-conformance-setup oidc-conformance-stop oidc-conformance-clean \
@@ -91,9 +91,6 @@ help: ## Show this help message
 	$(info Services: $(SERVICES))
 	$(info )
 	$(info Optional Build Features:)
-	$(info   make build-apigw-saml     - Build apigw with SAML support)
-	$(info   make build-apigw-oidcrp   - Build apigw with OIDC RP support)
-	$(info   make build-apigw-all      - Build apigw with all features)
 	$(info   make build-issuer-hsm     - Build issuer with PKCS#11 HSM support)
 	$(info )
 	$(info OpenID Conformance Suite:)
@@ -190,38 +187,22 @@ test-env: ## Set up test environment
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
 
 # Test targets with build tags
-test-saml: ## Test with SAML build tag
-	$(info Testing with SAML build tag)
-	go test -tags $(SAML_TAG) -v ./pkg/saml/... ./internal/apigw/...
-
-test-oidcrp: ## Test with OIDC RP build tag
-	$(info Testing with OIDC RP build tag)
-	go test -tags $(OIDCRP_TAG) -v ./pkg/oidcrp/... ./internal/apigw/...
-
-test-vc20: ## Test with VC 2.0 build tag
-	$(info Testing with VC 2.0 build tag)
-	go test -tags $(VC20_TAG) -v ./pkg/vc20/... ./pkg/authzen/... ./pkg/keyresolver/...
-
 test-pkcs11: ## Test with PKCS#11 build tag
 	$(info Testing with PKCS#11 build tag)
 	go test -tags $(PKCS11_TAG) -v ./pkg/signing/...
 
-test-all-tags: ## Test with all build tags
-	$(info Testing with all build tags)
-	go test -tags "$(SAML_TAG),$(OIDCRP_TAG),$(VC20_TAG),$(PKCS11_TAG)" -v ./...
-
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
 	$(info Testing DIDComm v2.1 implementation)
-	go test -tags "didcomm,$(VC20_TAG)" -v ./pkg/didcomm/...
+	go test -v ./pkg/didcomm/...
 
 test-didcomm-interop: ## Run DIDComm interoperability tests
 	$(info Running DIDComm interoperability tests)
-	go test -tags "didcomm,$(VC20_TAG),didcomm_interop" -v ./test/didcomm_interop/...
+	go test -v ./test/didcomm_interop/...
 
 test-didcomm-all: ## Run all DIDComm tests including interop
 	$(info Running all DIDComm tests including interop)
-	go test -tags "didcomm,$(VC20_TAG),didcomm_interop" -v ./pkg/didcomm/... ./test/didcomm_interop/...
+	go test -v ./pkg/didcomm/... ./test/didcomm_interop/...
 
 # Wallet Test targets
 test-wallet: test-wallet-vci test-wallet-vp test-wallet-e2e ## Run all wallet mock tests
@@ -240,23 +221,23 @@ test-wallet-e2e: ## Run wallet end-to-end mock tests (VCI then VP)
 
 test-wallet-stack: ## Run all wallet stack tests (requires: docker compose up)
 	$(info Testing wallet against live stack — requires: docker compose up)
-	go test -v -tags stack -count=1 -timeout 180s ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s ./internal/wallet/integration/...
 
 test-wallet-stack-vci: ## Run wallet stack VCI tests (happy path + negative)
 	$(info Testing wallet stack VCI flows)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VCI' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_VCI' ./internal/wallet/integration/...
 
 test-wallet-stack-vp: ## Run wallet stack VP tests
 	$(info Testing wallet stack VP flows)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VP' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_VP' ./internal/wallet/integration/...
 
 test-wallet-stack-e2e: ## Run wallet stack end-to-end test (VCI then VP)
 	$(info Testing wallet stack E2E flow)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_E2E' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_E2E' ./internal/wallet/integration/...
 
 test-wallet-stack-security: ## Run wallet stack security/negative tests (DPoP, PKCE, replay)
 	$(info Testing wallet stack security — DPoP, PKCE, replay)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VCI_(PAR_|Token_|Credential_)' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_VCI_(PAR_|Token_|Credential_)' ./internal/wallet/integration/...
 
 # ==============================================================================
 # Code Quality & Security
@@ -264,7 +245,7 @@ test-wallet-stack-security: ## Run wallet stack security/negative tests (DPoP, P
 
 gosec: ## Run gosec security scanner
 	$(info Running gosec)
-	gosec -color -tests -tags $(VC20_TAG) -exclude-dir=internal/gen ./...
+	gosec -color -tests -exclude-dir=internal/gen ./...
 
 staticcheck: ## Run staticcheck linter
 	$(info Running staticcheck)
@@ -272,7 +253,7 @@ staticcheck: ## Run staticcheck linter
 
 vulncheck: ## Run vulnerability checker
 	$(info Running vulncheck)
-	govulncheck -scan package -tags $(VC20_TAG) ./...
+	govulncheck -scan package ./...
 
 # ==============================================================================
 # Docker Compose Operations
@@ -310,7 +291,7 @@ $(foreach service,$(SERVICES),$(eval $(call BUILD_TEMPLATE,$(service))))
 build-vc20-test-server: ## Build VC 2.0 test server
 	$(info Building vc20-test-server)
 	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(VC20_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_vc20-test-server \
+		$(BUILD_FLAGS) -o ./bin/$(NAME)_vc20-test-server \
 		$(LDFLAGS) ./cmd/vc20-test-server/
 
 build-wallet: ## Build wallet test tool
@@ -334,24 +315,6 @@ build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags $(PKCS11_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_issuer-hsm \
 		$(LDFLAGS_DYNAMIC) ./cmd/issuer/
-
-build-apigw-saml: ## Build apigw with SAML support
-	$(info Building apigw with SAML support)
-	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(SAML_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_apigw-saml \
-		$(LDFLAGS) ./cmd/apigw/
-
-build-apigw-oidcrp: ## Build apigw with OIDC RP support
-	$(info Building apigw with OIDC RP support)
-	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(OIDCRP_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_apigw-oidcrp \
-		$(LDFLAGS) ./cmd/apigw/
-
-build-apigw-all: ## Build apigw with all optional features
-	$(info Building apigw with all optional features - SAML and OIDC RP)
-	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags "$(ALL_TAGS)" $(BUILD_FLAGS) -o ./bin/$(NAME)_apigw-all \
-		$(LDFLAGS) ./cmd/apigw/
 
 # ==============================================================================
 # Docker Build Targets
@@ -386,28 +349,7 @@ endef
 
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
-# Docker builds with optional features
-docker-build-apigw-saml: _check-reserved-tag ## Build apigw Docker image with SAML support
-	$(info Docker building apigw with SAML support, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS=$(SAML_TAG) \
-		--tag $(call docker-tag,apigw-saml,$(VERSION)) \
-		--file dockerfiles/worker .
-
-docker-build-apigw-oidcrp: _check-reserved-tag ## Build apigw Docker image with OIDC RP support
-	$(info Docker building apigw with OIDC RP support, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS=$(OIDCRP_TAG) \
-		--tag $(call docker-tag,apigw-oidcrp,$(VERSION)) \
-		--file dockerfiles/worker .
-
-docker-build-apigw-all: _check-reserved-tag ## Build apigw Docker image with all features
-	$(info Docker building apigw with all features - SAML and OIDC RP, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS="$(ALL_TAGS)" \
-		--tag $(call docker-tag,apigw-full,$(VERSION)) \
-		--file dockerfiles/worker .
-
+# Docker build with PKCS#11 feature
 docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
@@ -435,19 +377,7 @@ endef
 
 $(foreach service,$(SERVICES),$(eval $(call DOCKER_PUSH_TEMPLATE,$(service))))
 
-# Push targets for optional feature builds
-docker-push-apigw-saml: _check-reserved-tag ## Push apigw Docker image with SAML support
-	$(info Pushing docker image apigw-saml)
-	docker push $(call docker-tag,apigw-saml,$(VERSION))
-
-docker-push-apigw-oidcrp: _check-reserved-tag ## Push apigw Docker image with OIDC RP support
-	$(info Pushing docker image apigw-oidcrp)
-	docker push $(call docker-tag,apigw-oidcrp,$(VERSION))
-
-docker-push-apigw-all: _check-reserved-tag ## Push apigw Docker image with all features
-	$(info Pushing docker image apigw-full)
-	docker push $(call docker-tag,apigw-full,$(VERSION))
-
+# Push target for PKCS#11 feature build
 docker-push-issuer-hsm: _check-reserved-tag ## Push issuer Docker image with PKCS#11 HSM support
 	$(info Pushing docker image issuer-hsm)
 	docker push $(call docker-tag,issuer-hsm,$(VERSION))

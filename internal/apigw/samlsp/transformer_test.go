@@ -1,5 +1,3 @@
-//go:build saml
-
 package samlsp
 
 import (

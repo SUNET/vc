@@ -1,5 +1,3 @@
-//go:build vc20
-
 package openid4vp
 
 import (

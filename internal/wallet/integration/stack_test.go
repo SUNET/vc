@@ -1,5 +1,3 @@
-//go:build stack
-
 // Package integration contains integration tests that run against the real
 // docker-compose stack (apigw, verifier, mockas, issuer, registry, mongo).
 //
