@@ -221,6 +221,10 @@ verifier:
       - vct: "urn:credential:eduid:1"
         scopes:
           - "eduid"
+  zk:
+      ca_certs_path: "/app/vc/internal/verifier/zk/certs.pem"
+      circuits_path: "/app/vc/internal/verifier/zk/circuits/"
+      lib_path: "/usr/local/lib"
 
 registry:
   api_server:

@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"os"
 	"os/signal"
+	"proofs/server/v2/zk"
 	"sync"
 	"syscall"
 	"time"
@@ -17,9 +18,6 @@ import (
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/trace"
-
-	"flag"
-	"vc/internal/verifier/zk"
 )
 
 func init() {
@@ -37,26 +35,26 @@ func main() {
 		ctx                = context.Background()
 		services           = make(map[string]service)
 		serviceName string = "verifier"
-		certs      = flag.String("cacerts", "/app/vc/internal/verifier/zk/certs.pem", "File containing issuer CA certs")
-		circuitDir         = flag.String("circuit_dir", "/app/vc/internal/verifier/zk/circuits", "Directory from which to load circuits")
 	)
 
-	flag.Parse()
-	zk.LoadCircuits(*circuitDir)
+	cfg, err := configuration.New(ctx, serviceName)
 
-	pem, err := os.ReadFile(*certs)
+	if err != nil {
+		panic(err)
+	}
+	if cfg.Verifier == nil {
+		panic("Verifier section is missing from config")
+	}
+	certs := cfg.Verifier.ZK.CACertsPath
+	circuitsDir := cfg.Verifier.ZK.CircuitsPath
+	zk.LoadCircuits(circuitsDir)
+
+	pem, err := os.ReadFile(certs)
 	if err != nil {
 		panic("could not parse cacerts file")
-		os.Exit(1)
 	}
 	if err := zk.LoadIssuerRootCA(pem); err != nil {
 		panic("could not load issuer root CA")
-		os.Exit(1)
-	}
-
-	cfg, err := configuration.New(ctx, serviceName)
-	if err != nil {
-		panic(err)
 	}
 
 	if cfg.Verifier == nil {
