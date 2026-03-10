@@ -168,13 +168,19 @@ func TestJWKSKeyResolverJWKSURI(t *testing.T) {
 func TestJWKSKeyResolverIssuerMismatch(t *testing.T) {
 	testKey := generateTestKey(t)
 
+	// All metadata endpoints return a wrong issuer — the entire chain should fail
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		metadata := map[string]any{
-			"issuer": "https://wrong-issuer.example.com",
-			"jwks":   json.RawMessage(newTestJWKS("key-1")),
+		switch r.URL.Path {
+		case "/.well-known/jwt-vc-issuer":
+			metadata := map[string]any{
+				"issuer": "https://wrong-issuer.example.com",
+				"jwks":   json.RawMessage(newTestJWKS("key-1")),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(metadata) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -186,20 +192,26 @@ func TestJWKSKeyResolverIssuerMismatch(t *testing.T) {
 
 	_, _, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "key-1")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "does not match")
+	assert.Contains(t, err.Error(), "failed to discover JWKS")
 }
 
-func TestJWKSKeyResolverNoJWKS(t *testing.T) {
+func TestJWKSKeyResolverNoJWKSAnywhere(t *testing.T) {
 	testKey := generateTestKey(t)
 
+	// jwt-vc-issuer returns metadata with no jwks/jwks_uri, other endpoints 404
 	var serverURL string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		metadata := map[string]any{
-			"issuer": serverURL,
-			// no jwks and no jwks_uri
+		switch r.URL.Path {
+		case "/.well-known/jwt-vc-issuer":
+			metadata := map[string]any{
+				"issuer": serverURL,
+				// no jwks and no jwks_uri
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(metadata) //nolint:errcheck
 	}))
 	serverURL = server.URL
 	defer server.Close()
@@ -212,7 +224,7 @@ func TestJWKSKeyResolverNoJWKS(t *testing.T) {
 
 	_, _, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "key-1")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "neither jwks nor jwks_uri")
+	assert.Contains(t, err.Error(), "failed to discover JWKS")
 }
 
 func TestJWKSKeyResolverServerError(t *testing.T) {
@@ -231,7 +243,171 @@ func TestJWKSKeyResolverServerError(t *testing.T) {
 
 	_, _, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "key-1")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "500")
+	assert.Contains(t, err.Error(), "failed to discover JWKS")
+}
+
+func TestJWKSKeyResolverFallbackOAuthAS(t *testing.T) {
+	// Simulates the vc project issuer: no jwt-vc-issuer endpoint,
+	// but has openid-credential-issuer → authorization_servers → oauth-authorization-server → jwks_uri
+	testKey := generateTestKey(t)
+	jwksData := newTestJWKS("oauth-key-1")
+
+	var serverURL string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-credential-issuer":
+			meta := map[string]any{
+				"credential_issuer": serverURL,
+				// no authorization_servers → defaults to issuer itself
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+		case "/.well-known/oauth-authorization-server":
+			meta := map[string]any{
+				"issuer":   serverURL,
+				"jwks_uri": serverURL + "/jwks",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+		case "/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(jwksData) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	defer server.Close()
+
+	resolver := NewJWKSKeyResolver(JWKSResolverConfig{
+		HTTPClient:          server.Client(),
+		ParseJWKToPublicKey: mockParseJWK(testKey),
+	})
+	defer resolver.Stop()
+
+	pubKey, jwkMap, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "oauth-key-1")
+	require.NoError(t, err)
+	assert.Equal(t, testKey, pubKey)
+	assert.Equal(t, "oauth-key-1", jwkMap["kid"])
+}
+
+func TestJWKSKeyResolverFallbackOIDCDiscovery(t *testing.T) {
+	// No jwt-vc-issuer, no openid-credential-issuer; falls back to OIDC Discovery
+	testKey := generateTestKey(t)
+	jwksData := newTestJWKS("oidc-key-1")
+
+	var serverURL string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			meta := map[string]any{
+				"issuer":   serverURL,
+				"jwks_uri": serverURL + "/jwks",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+		case "/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(jwksData) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	defer server.Close()
+
+	resolver := NewJWKSKeyResolver(JWKSResolverConfig{
+		HTTPClient:          server.Client(),
+		ParseJWKToPublicKey: mockParseJWK(testKey),
+	})
+	defer resolver.Stop()
+
+	pubKey, jwkMap, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "oidc-key-1")
+	require.NoError(t, err)
+	assert.Equal(t, testKey, pubKey)
+	assert.Equal(t, "oidc-key-1", jwkMap["kid"])
+}
+
+func TestJWKSKeyResolverFallbackRFC8414(t *testing.T) {
+	// No jwt-vc-issuer, no openid-credential-issuer, no openid-configuration;
+	// falls back to .well-known/oauth-authorization-server (RFC 8414)
+	testKey := generateTestKey(t)
+	jwksData := newTestJWKS("rfc8414-key-1")
+
+	var serverURL string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			meta := map[string]any{
+				"issuer":   serverURL,
+				"jwks_uri": serverURL + "/jwks",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+		case "/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(jwksData) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	defer server.Close()
+
+	resolver := NewJWKSKeyResolver(JWKSResolverConfig{
+		HTTPClient:          server.Client(),
+		ParseJWKToPublicKey: mockParseJWK(testKey),
+	})
+	defer resolver.Stop()
+
+	pubKey, jwkMap, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "rfc8414-key-1")
+	require.NoError(t, err)
+	assert.Equal(t, testKey, pubKey)
+	assert.Equal(t, "rfc8414-key-1", jwkMap["kid"])
+}
+
+func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
+	// openid-credential-issuer specifies a separate authorization_servers URL
+	testKey := generateTestKey(t)
+	jwksData := newTestJWKS("as-key-1")
+
+	var serverURL string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-credential-issuer":
+			meta := map[string]any{
+				"credential_issuer":    serverURL,
+				"authorization_servers": []string{serverURL + "/auth"},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+		case "/auth/.well-known/oauth-authorization-server":
+			meta := map[string]any{
+				"issuer":   serverURL + "/auth",
+				"jwks_uri": serverURL + "/auth/jwks",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+		case "/auth/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(jwksData) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	defer server.Close()
+
+	resolver := NewJWKSKeyResolver(JWKSResolverConfig{
+		HTTPClient:          server.Client(),
+		ParseJWKToPublicKey: mockParseJWK(testKey),
+	})
+	defer resolver.Stop()
+
+	pubKey, jwkMap, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "as-key-1")
+	require.NoError(t, err)
+	assert.Equal(t, testKey, pubKey)
+	assert.Equal(t, "as-key-1", jwkMap["kid"])
 }
 
 func TestJWKSKeyResolverInvalidateIssuer(t *testing.T) {

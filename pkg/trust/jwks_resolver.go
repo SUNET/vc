@@ -1,5 +1,5 @@
 // Package trust — JWKSKeyResolver implements SD-JWT VC spec §5.3 key resolution
-// via JWT VC Issuer Metadata (.well-known/jwt-vc-issuer).
+// with a multi-endpoint discovery chain for maximum interoperability.
 package trust
 
 import (
@@ -42,14 +42,15 @@ type JWKSResolverConfig struct {
 	ParseJWKToPublicKey func(jwkData any) (crypto.PublicKey, error)
 }
 
-// JWKSKeyResolver resolves issuer public keys via JWT VC Issuer Metadata (SD-JWT VC §5.3).
+// JWKSKeyResolver resolves issuer public keys using a multi-endpoint discovery chain
+// per SD-JWT VC §5.3 with fallbacks for maximum interoperability:
 //
-// Resolution flow:
-//  1. Fetch {issuer}/.well-known/jwt-vc-issuer → JWT VC Issuer Metadata
-//  2. Validate metadata.issuer matches the expected issuer
-//  3. Obtain JWKS from inline jwks field or follow jwks_uri
-//  4. Cache the resolved JWKS per issuer URL
-//  5. Match by kid to return the correct key
+//  1. .well-known/jwt-vc-issuer → inline jwks or jwks_uri (SD-JWT VC §5.3 primary)
+//  2. .well-known/openid-credential-issuer → authorization_servers → AS metadata → jwks_uri
+//  3. .well-known/openid-configuration → jwks_uri (OIDC Discovery)
+//  4. .well-known/oauth-authorization-server → jwks_uri (RFC 8414)
+//
+// Resolved JWKS are cached per issuer URL. Keys are matched by kid.
 type JWKSKeyResolver struct {
 	httpClient  *http.Client
 	cache       *ttlcache.Cache[string, *cachedJWKS]
@@ -75,6 +76,18 @@ type jwtVCIssuerMetadata struct {
 	JWKS    *struct {
 		Keys []json.RawMessage `json:"keys"`
 	} `json:"jwks,omitempty"`
+}
+
+// oidcDiscoveryMetadata represents fields we need from OIDC or OAuth AS metadata.
+type oidcDiscoveryMetadata struct {
+	Issuer  string `json:"issuer"`
+	JWKSURI string `json:"jwks_uri,omitempty"`
+}
+
+// credentialIssuerMetadata represents fields we need from OID4VCI metadata.
+type credentialIssuerMetadata struct {
+	CredentialIssuer     string   `json:"credential_issuer"`
+	AuthorizationServers []string `json:"authorization_servers,omitempty"`
 }
 
 // NewJWKSKeyResolver creates a new resolver for SD-JWT VC issuer key resolution.
@@ -156,35 +169,120 @@ func (r *JWKSKeyResolver) getOrFetchJWKS(ctx context.Context, issuerURL string) 
 	return jwks, nil
 }
 
-// fetchIssuerJWKS fetches the JWT VC Issuer Metadata and resolves the JWKS.
+// fetchIssuerJWKS discovers and fetches the issuer's JWKS using the SD-JWT VC §5.3
+// discovery chain with fallbacks:
+//  1. .well-known/jwt-vc-issuer (SD-JWT VC primary)
+//  2. .well-known/openid-credential-issuer → authorization_servers → OAuth AS metadata → jwks_uri
+//  3. .well-known/openid-configuration → jwks_uri (OIDC Discovery)
+//  4. .well-known/oauth-authorization-server → jwks_uri (RFC 8414)
 func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string) (*cachedJWKS, error) {
-	// Fetch JWT VC Issuer Metadata per SD-JWT VC §5.3
-	metadataURL := strings.TrimRight(issuerURL, "/") + "/.well-known/jwt-vc-issuer"
+	baseURL := strings.TrimRight(issuerURL, "/")
+
+	// 1. Try .well-known/jwt-vc-issuer (SD-JWT VC §5.3 primary)
+	rawKeys, err := r.tryJWTVCIssuerMetadata(ctx, baseURL, issuerURL)
+	if err == nil {
+		return r.parseRawKeys(rawKeys)
+	}
+
+	// 2. Try .well-known/openid-credential-issuer → chase AS metadata → jwks_uri
+	rawKeys, err = r.tryCredentialIssuerMetadata(ctx, baseURL)
+	if err == nil {
+		return r.parseRawKeys(rawKeys)
+	}
+
+	// 3. Try .well-known/openid-configuration (OIDC Discovery) → jwks_uri
+	rawKeys, err = r.tryOAuthMetadata(ctx, baseURL+"/.well-known/openid-configuration", issuerURL)
+	if err == nil {
+		return r.parseRawKeys(rawKeys)
+	}
+
+	// 4. Try .well-known/oauth-authorization-server (RFC 8414) → jwks_uri
+	rawKeys, err = r.tryOAuthMetadata(ctx, baseURL+"/.well-known/oauth-authorization-server", issuerURL)
+	if err == nil {
+		return r.parseRawKeys(rawKeys)
+	}
+
+	return nil, fmt.Errorf("failed to discover JWKS for issuer %s: no metadata endpoint returned usable keys "+
+		"(tried .well-known/jwt-vc-issuer, openid-credential-issuer, openid-configuration, oauth-authorization-server)", issuerURL)
+}
+
+// tryJWTVCIssuerMetadata tries the SD-JWT VC §5.3 primary discovery endpoint.
+func (r *JWKSKeyResolver) tryJWTVCIssuerMetadata(ctx context.Context, baseURL, issuerURL string) ([]json.RawMessage, error) {
 	var metadata jwtVCIssuerMetadata
-	if _, err := r.fetchJSON(ctx, metadataURL, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to fetch JWT VC Issuer Metadata from %s: %w", metadataURL, err)
+	if _, err := r.fetchJSON(ctx, baseURL+"/.well-known/jwt-vc-issuer", &metadata); err != nil {
+		return nil, err
 	}
 
-	// Validate issuer match (security requirement per §5.3)
 	if metadata.Issuer != issuerURL {
-		return nil, fmt.Errorf("metadata issuer %q does not match expected issuer %q", metadata.Issuer, issuerURL)
+		return nil, fmt.Errorf("metadata issuer %q does not match expected %q", metadata.Issuer, issuerURL)
 	}
 
-	// Get raw JWKS keys: inline or via jwks_uri
-	var rawKeys []json.RawMessage
-	if metadata.JWKS != nil && len(metadata.JWKS.Keys) > 0 {
-		rawKeys = metadata.JWKS.Keys
-	} else if metadata.JWKSURI != "" {
-		var fetchErr error
-		rawKeys, fetchErr = r.fetchJWKSKeys(ctx, metadata.JWKSURI)
-		if fetchErr != nil {
-			return nil, fmt.Errorf("failed to fetch JWKS from %s: %w", metadata.JWKSURI, fetchErr)
+	return r.extractJWKSFromMetadata(ctx, metadata.JWKS, metadata.JWKSURI)
+}
+
+// tryCredentialIssuerMetadata tries OID4VCI credential issuer metadata, then chases
+// authorization_servers to find an OAuth AS with a jwks_uri.
+func (r *JWKSKeyResolver) tryCredentialIssuerMetadata(ctx context.Context, baseURL string) ([]json.RawMessage, error) {
+	var ciMeta credentialIssuerMetadata
+	if _, err := r.fetchJSON(ctx, baseURL+"/.well-known/openid-credential-issuer", &ciMeta); err != nil {
+		return nil, err
+	}
+
+	// Chase each authorization server's metadata for a jwks_uri
+	asURLs := ciMeta.AuthorizationServers
+	if len(asURLs) == 0 {
+		// Default: the issuer itself is the authorization server
+		asURLs = []string{baseURL}
+	}
+
+	for _, asURL := range asURLs {
+		asBase := strings.TrimRight(asURL, "/")
+		rawKeys, err := r.tryOAuthMetadata(ctx, asBase+"/.well-known/oauth-authorization-server", asURL)
+		if err == nil {
+			return rawKeys, nil
 		}
-	} else {
-		return nil, fmt.Errorf("issuer metadata contains neither jwks nor jwks_uri")
+		rawKeys, err = r.tryOAuthMetadata(ctx, asBase+"/.well-known/openid-configuration", asURL)
+		if err == nil {
+			return rawKeys, nil
+		}
 	}
 
-	// Parse all keys
+	return nil, fmt.Errorf("no authorization server metadata with jwks_uri found")
+}
+
+// tryOAuthMetadata tries an OAuth/OIDC metadata endpoint and follows jwks_uri if present.
+func (r *JWKSKeyResolver) tryOAuthMetadata(ctx context.Context, metadataURL, expectedIssuer string) ([]json.RawMessage, error) {
+	var metadata oidcDiscoveryMetadata
+	if _, err := r.fetchJSON(ctx, metadataURL, &metadata); err != nil {
+		return nil, err
+	}
+
+	if metadata.Issuer != expectedIssuer {
+		return nil, fmt.Errorf("metadata issuer %q does not match expected %q", metadata.Issuer, expectedIssuer)
+	}
+
+	if metadata.JWKSURI == "" {
+		return nil, fmt.Errorf("metadata at %s has no jwks_uri", metadataURL)
+	}
+
+	return r.fetchJWKSKeys(ctx, metadata.JWKSURI)
+}
+
+// extractJWKSFromMetadata returns raw JWK keys from inline jwks or jwks_uri.
+func (r *JWKSKeyResolver) extractJWKSFromMetadata(ctx context.Context, jwks *struct {
+	Keys []json.RawMessage `json:"keys"`
+}, jwksURI string) ([]json.RawMessage, error) {
+	if jwks != nil && len(jwks.Keys) > 0 {
+		return jwks.Keys, nil
+	}
+	if jwksURI != "" {
+		return r.fetchJWKSKeys(ctx, jwksURI)
+	}
+	return nil, fmt.Errorf("metadata contains neither jwks nor jwks_uri")
+}
+
+// parseRawKeys parses raw JSON JWK entries into cached key entries.
+func (r *JWKSKeyResolver) parseRawKeys(rawKeys []json.RawMessage) (*cachedJWKS, error) {
 	entries := make([]jwkEntry, 0, len(rawKeys))
 	for _, raw := range rawKeys {
 		var jwkMap map[string]any
@@ -207,7 +305,7 @@ func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string)
 	}
 
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("issuer JWKS contains no usable keys")
+		return nil, fmt.Errorf("JWKS contains no usable keys")
 	}
 
 	return &cachedJWKS{keys: entries}, nil
