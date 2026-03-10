@@ -83,6 +83,17 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 		SignatureMethod:   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
 	}
 
+	// Load optional metadata signing certificate for signature verification
+	var metadataSigningCert *x509.Certificate
+	if cfg.MetadataSigningCertPath != "" {
+		metadataSigningCert, err = LoadMetadataSigningCert(cfg.MetadataSigningCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load metadata signing certificate: %w", err)
+		}
+		s.log.Info("metadata signature verification enabled",
+			"cert_path", cfg.MetadataSigningCertPath)
+	}
+
 	// Initialize MDQ client (either MDQ or static mode)
 	if cfg.StaticIDPMetadata != nil {
 		// Static IdP mode
@@ -96,6 +107,7 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 			metadataSource,
 			cfg.StaticIDPMetadata.EntityID,
 			isURL,
+			metadataSigningCert,
 			s.log,
 		)
 		if err != nil {
@@ -107,7 +119,7 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 			"idp_entity_id", cfg.StaticIDPMetadata.EntityID)
 	} else {
 		// MDQ mode
-		s.mdqClient = NewMDQClient(cfg.MDQServer, cfg.MetadataCacheTTL, s.log)
+		s.mdqClient = NewMDQClient(cfg.MDQServer, cfg.MetadataCacheTTL, metadataSigningCert, s.log)
 		s.log.Info("SAML service initialized with MDQ",
 			"entity_id", cfg.EntityID,
 			"mdq_server", cfg.MDQServer)

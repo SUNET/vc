@@ -2,6 +2,8 @@ package samlsp
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -12,8 +14,10 @@ import (
 	"time"
 	"vc/pkg/logger"
 
+	"github.com/beevik/etree"
 	"github.com/crewjam/saml"
 	"github.com/patrickmn/go-cache"
+	dsig "github.com/russellhaering/goxmldsig"
 )
 
 // MDQClient handles Metadata Query Protocol (MDQ) requests or static metadata
@@ -24,10 +28,11 @@ type MDQClient struct {
 	log            *logger.Log
 	staticMetadata *saml.EntityDescriptor // For single static IdP mode
 	staticEntityID string                 // EntityID of static IdP
+	signingCert    *x509.Certificate      // Optional: federation metadata signing cert
 }
 
 // NewMDQClient creates a new MDQ client
-func NewMDQClient(serverURL string, cacheTTL int, log *logger.Log) *MDQClient {
+func NewMDQClient(serverURL string, cacheTTL int, signingCert *x509.Certificate, log *logger.Log) *MDQClient {
 	if cacheTTL == 0 {
 		cacheTTL = 3600
 	}
@@ -37,8 +42,9 @@ func NewMDQClient(serverURL string, cacheTTL int, log *logger.Log) *MDQClient {
 	}
 
 	return &MDQClient{
-		serverURL: serverURL,
-		cache:     cache.New(time.Duration(cacheTTL)*time.Second, time.Duration(cacheTTL*2)*time.Second),
+		serverURL:   serverURL,
+		cache:       cache.New(time.Duration(cacheTTL)*time.Second, time.Duration(cacheTTL*2)*time.Second),
+		signingCert: signingCert,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -47,9 +53,10 @@ func NewMDQClient(serverURL string, cacheTTL int, log *logger.Log) *MDQClient {
 }
 
 // NewStaticMDQClient creates a new MDQ client with static IdP metadata
-func NewStaticMDQClient(metadataSource, entityID string, isURL bool, log *logger.Log) (*MDQClient, error) {
+func NewStaticMDQClient(metadataSource, entityID string, isURL bool, signingCert *x509.Certificate, log *logger.Log) (*MDQClient, error) {
 	client := &MDQClient{
 		staticEntityID: entityID,
+		signingCert:    signingCert,
 		log:            log.New("mdq"),
 		client: &http.Client{
 			Timeout: 10 * time.Second,
@@ -75,10 +82,9 @@ func NewStaticMDQClient(metadataSource, entityID string, isURL bool, log *logger
 		}
 	}
 
-	// Parse metadata XML
-	var metadata saml.EntityDescriptor
-	if err := xml.Unmarshal(metadataXML, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
+	metadata, err := client.parseAndVerifyMetadata(metadataXML)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate metadata structure
@@ -97,7 +103,7 @@ func NewStaticMDQClient(metadataSource, entityID string, isURL bool, log *logger
 			"metadata", metadata.EntityID)
 	}
 
-	client.staticMetadata = &metadata
+	client.staticMetadata = metadata
 
 	log.Info("static IdP metadata loaded",
 		"entity_id", entityID,
@@ -178,9 +184,9 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 		return nil, fmt.Errorf("failed to read MDQ response: %w", err)
 	}
 
-	var metadata saml.EntityDescriptor
-	if err := xml.Unmarshal(body, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
+	metadata, err := m.parseAndVerifyMetadata(body)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(metadata.IDPSSODescriptors) == 0 {
@@ -191,13 +197,13 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 		return nil, fmt.Errorf("IdP metadata does not contain SSO service endpoint")
 	}
 
-	m.cache.Set(entityID, &metadata, cache.DefaultExpiration)
+	m.cache.Set(entityID, metadata, cache.DefaultExpiration)
 
 	m.log.Info("IdP metadata fetched and cached",
 		"entity_id", entityID,
 		"sso_location", metadata.IDPSSODescriptors[0].SingleSignOnServices[0].Location)
 
-	return &metadata, nil
+	return metadata, nil
 }
 
 // ClearCache clears all cached metadata
@@ -219,4 +225,66 @@ func (m *MDQClient) GetStaticEntityID() string {
 // IsStaticMode returns true if client is configured for static IdP mode
 func (m *MDQClient) IsStaticMode() bool {
 	return m.staticMetadata != nil
+}
+
+// parseAndVerifyMetadata parses metadata XML and, when a signing certificate is
+// configured, validates the enveloped XML signature. Returns the parsed descriptor.
+func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte) (*saml.EntityDescriptor, error) {
+	if m.signingCert != nil {
+		if err := m.verifyMetadataSignature(metadataXML); err != nil {
+			return nil, fmt.Errorf("metadata signature verification failed: %w", err)
+		}
+		m.log.Debug("metadata signature verified successfully")
+	}
+
+	var metadata saml.EntityDescriptor
+	if err := xml.Unmarshal(metadataXML, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
+	}
+
+	return &metadata, nil
+}
+
+// verifyMetadataSignature validates the XML signature on a metadata document
+// using the configured federation signing certificate.
+func (m *MDQClient) verifyMetadataSignature(metadataXML []byte) error {
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(metadataXML); err != nil {
+		return fmt.Errorf("failed to parse metadata XML for signature verification: %w", err)
+	}
+
+	certStore := dsig.MemoryX509CertificateStore{
+		Roots: []*x509.Certificate{m.signingCert},
+	}
+
+	validationCtx := dsig.NewDefaultValidationContext(&certStore)
+	validationCtx.IdAttribute = "ID"
+
+	_, err := validationCtx.Validate(doc.Root())
+	if err != nil {
+		return fmt.Errorf("invalid metadata signature: %w", err)
+	}
+
+	return nil
+}
+
+// LoadMetadataSigningCert loads an X.509 certificate from a PEM file for
+// metadata signature verification.
+func LoadMetadataSigningCert(certPath string) (*x509.Certificate, error) {
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata signing certificate: %w", err)
+	}
+
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block from %s", certPath)
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse metadata signing certificate: %w", err)
+	}
+
+	return cert, nil
 }

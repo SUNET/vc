@@ -206,6 +206,11 @@ type SAMLConfig struct {
 	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
 	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
 
+	// MetadataSigningCertPath is the path to the X.509 certificate used to verify
+	// metadata signatures. When set, all fetched metadata (MDQ and static) must
+	// carry a valid XML signature from this certificate.
+	MetadataSigningCertPath string `yaml:"metadata_signing_cert_path,omitempty"`
+
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
 }

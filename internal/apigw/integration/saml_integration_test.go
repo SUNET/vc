@@ -781,3 +781,201 @@ func generateTestCertificates(t *testing.T) (certPath, keyPath string, cleanup f
 
 	return certPath, keyPath, cleanup
 }
+
+// TestSAMLIntegration_MetadataSignatureValidation tests that signed metadata
+// is accepted when the signing cert matches and rejected when it doesn't.
+func TestSAMLIntegration_MetadataSignatureValidation(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	certPath, keyPath, cleanupCerts := generateTestCertificates(t)
+	defer cleanupCerts()
+
+	// Generate federation signing keypair
+	fedKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	fedCertTemplate := x509.Certificate{
+		SerialNumber: big.NewInt(100),
+		Subject:      pkix.Name{CommonName: "test-federation"},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	fedCertDER, err := x509.CreateCertificate(rand.Reader, &fedCertTemplate, &fedCertTemplate, &fedKey.PublicKey, fedKey)
+	require.NoError(t, err)
+	fedCert, err := x509.ParseCertificate(fedCertDER)
+	require.NoError(t, err)
+
+	// Write federation cert to temp file
+	tmpDir := t.TempDir()
+	fedCertPath := filepath.Join(tmpDir, "fed-signing.pem")
+	fedCertFile, err := os.Create(fedCertPath)
+	require.NoError(t, err)
+	err = pem.Encode(fedCertFile, &pem.Block{Type: "CERTIFICATE", Bytes: fedCertDER})
+	require.NoError(t, err)
+	fedCertFile.Close()
+
+	// Generate IdP signing keypair (for the IdP's own signing cert in metadata)
+	idpKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	idpCertTemplate := x509.Certificate{
+		SerialNumber: big.NewInt(200),
+		Subject:      pkix.Name{CommonName: "test-idp"},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	idpCertDER, err := x509.CreateCertificate(rand.Reader, &idpCertTemplate, &idpCertTemplate, &idpKey.PublicKey, idpKey)
+	require.NoError(t, err)
+	idpCertB64 := base64.StdEncoding.EncodeToString(idpCertDER)
+
+	idpEntityID := "https://test-idp.example.com/idp"
+
+	// Build unsigned metadata XML
+	metadataXML := fmt.Sprintf(`<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" ID="md1" entityID="%s">
+  <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>%s</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </KeyDescriptor>
+    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://test-idp.example.com/sso"/>
+  </IDPSSODescriptor>
+</EntityDescriptor>`, idpEntityID, idpCertB64)
+
+	// Sign the metadata with federation key
+	signedMetadata := signMetadataXML(t, metadataXML, fedKey, fedCert)
+
+	t.Run("AcceptValidSignature", func(t *testing.T) {
+		// Create MDQ server serving signed metadata
+		mdqServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/"+idpEntityID {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/samlmetadata+xml")
+			w.Write(signedMetadata)
+		}))
+		defer mdqServer.Close()
+
+		config := createTestSAMLConfig(mdqServer.URL, "https://idp.example.com/sso", idpEntityID, certPath, keyPath)
+		config.MetadataSigningCertPath = fedCertPath
+
+		sessionCache := pkgcache.NewMemoryCache[*samlsp.Session](3600 * time.Second)
+		defer sessionCache.Stop()
+
+		svc, err := samlsp.New(ctx, config, sessionCache, log)
+		require.NoError(t, err)
+
+		_, err = svc.InitiateAuth(ctx, idpEntityID, "pid")
+		require.NoError(t, err, "should accept validly signed metadata")
+		t.Log("Correctly accepted validly signed metadata")
+	})
+
+	t.Run("RejectInvalidSignature", func(t *testing.T) {
+		// Create a different signing key (attacker)
+		attackerKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		attackerCertTemplate := x509.Certificate{
+			SerialNumber: big.NewInt(999),
+			Subject:      pkix.Name{CommonName: "attacker"},
+			NotBefore:    time.Now().Add(-1 * time.Hour),
+			NotAfter:     time.Now().Add(24 * time.Hour),
+			KeyUsage:     x509.KeyUsageDigitalSignature,
+		}
+		attackerCertDER, err := x509.CreateCertificate(rand.Reader, &attackerCertTemplate, &attackerCertTemplate, &attackerKey.PublicKey, attackerKey)
+		require.NoError(t, err)
+		attackerCert, err := x509.ParseCertificate(attackerCertDER)
+		require.NoError(t, err)
+
+		// Sign metadata with attacker key
+		attackerSignedMetadata := signMetadataXML(t, metadataXML, attackerKey, attackerCert)
+
+		mdqServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/"+idpEntityID {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/samlmetadata+xml")
+			w.Write(attackerSignedMetadata)
+		}))
+		defer mdqServer.Close()
+
+		config := createTestSAMLConfig(mdqServer.URL, "https://idp.example.com/sso", idpEntityID, certPath, keyPath)
+		config.MetadataSigningCertPath = fedCertPath
+
+		sessionCache := pkgcache.NewMemoryCache[*samlsp.Session](3600 * time.Second)
+		defer sessionCache.Stop()
+
+		svc, err := samlsp.New(ctx, config, sessionCache, log)
+		require.NoError(t, err)
+
+		_, err = svc.InitiateAuth(ctx, idpEntityID, "pid")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "signature verification failed")
+		t.Logf("Correctly rejected metadata signed by untrusted key: %v", err)
+	})
+
+	t.Run("RejectUnsignedWhenCertConfigured", func(t *testing.T) {
+		// Serve unsigned metadata when signing cert is configured
+		mdqServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/"+idpEntityID {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/samlmetadata+xml")
+			w.Write([]byte(metadataXML))
+		}))
+		defer mdqServer.Close()
+
+		config := createTestSAMLConfig(mdqServer.URL, "https://idp.example.com/sso", idpEntityID, certPath, keyPath)
+		config.MetadataSigningCertPath = fedCertPath
+
+		sessionCache := pkgcache.NewMemoryCache[*samlsp.Session](3600 * time.Second)
+		defer sessionCache.Stop()
+
+		svc, err := samlsp.New(ctx, config, sessionCache, log)
+		require.NoError(t, err)
+
+		_, err = svc.InitiateAuth(ctx, idpEntityID, "pid")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "signature verification failed")
+		t.Logf("Correctly rejected unsigned metadata: %v", err)
+	})
+}
+
+// signMetadataXML signs an XML metadata document with the given key/cert
+// and returns the signed XML bytes.
+func signMetadataXML(t *testing.T, metadataXML string, key *rsa.PrivateKey, cert *x509.Certificate) []byte {
+	t.Helper()
+
+	doc := etree.NewDocument()
+	err := doc.ReadFromString(metadataXML)
+	require.NoError(t, err)
+
+	keyPair := tls.Certificate{
+		Certificate: [][]byte{cert.Raw},
+		PrivateKey:  key,
+		Leaf:        cert,
+	}
+	keyStore := dsig.TLSCertKeyStore(keyPair)
+	signingCtx := dsig.NewDefaultSigningContext(keyStore)
+	signingCtx.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
+	err = signingCtx.SetSignatureMethod(dsig.RSASHA256SignatureMethod)
+	require.NoError(t, err)
+
+	signedEl, err := signingCtx.SignEnveloped(doc.Root())
+	require.NoError(t, err)
+
+	signedDoc := etree.NewDocument()
+	signedDoc.SetRoot(signedEl)
+	signedBytes, err := signedDoc.WriteToBytes()
+	require.NoError(t, err)
+
+	return signedBytes
+}
