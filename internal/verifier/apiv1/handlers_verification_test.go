@@ -337,5 +337,5 @@ func TestEvaluateIssuerTrustMissingKeyMaterial(t *testing.T) {
 	err = client.evaluateIssuerTrust(ctx, signedJWT+"~disclosure1~disclosure2~", testScope)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing x5c or jwk header")
+	assert.Contains(t, err.Error(), "missing x5c, jwk, or kid header")
 }

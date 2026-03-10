@@ -7,12 +7,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 	"vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
 	"vc/pkg/configuration"
+	"vc/pkg/jose"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
@@ -44,6 +46,7 @@ type Client struct {
 	openid4vp      *openid4vp.Client
 	trustService   *openid4vp.TrustService
 	trustEvaluator trust.TrustEvaluator
+	jwksResolver   *trust.JWKSKeyResolver
 
 	// Cache
 	cacheService *cache.Service
@@ -72,6 +75,10 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		openid4vp:    openid4vpClient,
 		tracer:       tracer,
 		cacheService: cacheService,
+		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
+			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
+		}),
 	}
 
 	// Load PKI signing key and chain for request object signing and OIDC

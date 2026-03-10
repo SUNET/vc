@@ -12,6 +12,7 @@ import (
 	"vc/pkg/openid4vp"
 	"vc/pkg/sdjwtvc"
 	"vc/pkg/trace"
+	"vc/pkg/trust"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
@@ -150,6 +151,7 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 			RequestObject:          cache.NewTestMemoryCache[*openid4vp.RequestObject](5 * time.Minute),
 			Credential:             cache.NewTestMemoryCache[[]sdjwtvc.CredentialCache](5 * time.Minute),
 		},
+		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
 	}
 
 	return client, mockDB

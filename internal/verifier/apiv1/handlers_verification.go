@@ -401,9 +401,33 @@ func (c *Client) extractJWTKeyMaterial(ctx context.Context, token *jwt.Token, is
 		}, nil
 	}
 
-	c.log.Warn("Credential missing x5c or jwk header and issuer is not a DID - cannot evaluate issuer trust",
+	// Fallback: resolve key via issuer JWKS (SD-JWT VC spec §5.3)
+	// When the issuer is an HTTPS URL and the JWT has a kid header,
+	// fetch the issuer's JWT VC Issuer Metadata to obtain the JWKS.
+	if kidRaw, ok := token.Header["kid"]; ok {
+		kid, ok := kidRaw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid kid header: expected string, got %T", kidRaw)
+		}
+		if issuerID == "" {
+			return nil, fmt.Errorf("cannot resolve JWKS: issuer ID is empty")
+		}
+		c.log.Debug("Resolving issuer key via JWKS metadata",
+			"scope", scope, "issuer_id", issuerID, "kid", kid,
+			"credential_type", credentialType)
+		publicKey, jwkMap, err := c.jwksResolver.ResolveKeyByKID(ctx, issuerID, kid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve issuer key from JWKS: %w", err)
+		}
+		return &jwtKeyMaterial{
+			keyType: trust.KeyTypeJWK, keyMaterial: jwkMap,
+			publicKey: publicKey, issuerID: issuerID,
+		}, nil
+	}
+
+	c.log.Warn("Credential missing key material in header and issuer is not resolvable",
 		"scope", scope, "issuer_id", issuerID)
-	return nil, fmt.Errorf("credential missing x5c or jwk header and issuer is not a DID")
+	return nil, fmt.Errorf("credential missing x5c, jwk, or kid header and issuer is not a DID")
 }
 
 // evaluateIssuerTrust verifies the credential signature and evaluates the trust of the credential issuer.
