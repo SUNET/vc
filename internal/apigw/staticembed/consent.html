@@ -63,7 +63,7 @@
     <link rel="icon" href="/static/favicon.png" type="image/png">
 </head>
 <body class="content-fade-in-appear-done content-fade-in-enter-done">
-<section class="flex-grow flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 min-h-dvh flex flex-col" x-data="app">
+<section class="flex-grow flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 min-h-dvh flex flex-col" x-data="app" data-auth-method="{{.AuthMethod}}" data-redirect-url="{{.RedirectURL}}">
     <div class="w-full flex flex-col items-center gap-7 px-6 py-8 text-black dark:text-white max-w-lg p-8">
         <a href="https://www.sunet.se" target="_blank" rel="noopener noreferrer">
             <img src="/static/logo.png" alt="Sunet" style="height: 48px;">

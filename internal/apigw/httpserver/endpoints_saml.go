@@ -223,10 +223,6 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		err = nil
 		s.samlSPService.DeleteSession(ctx, relayState)
 
-		// Clean up auth cookies before redirect
-		c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
-		c.SetCookie("saml_redirect_url", "", -1, "/authorization/consent", "", false, false)
-
 		// Redirect browser back to the consent page to continue the VCI flow
 		c.Redirect(http.StatusFound, "/authorization/consent/#/credentials")
 		return nil, nil

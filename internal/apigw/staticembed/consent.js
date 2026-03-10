@@ -40,20 +40,6 @@ const UserDataSchema = v.required(v.object({
 }));
 
 /**
- * @param {string} name 
- * @returns {string | null}
- */
-function getCookie(name) {
-    return document.cookie
-        .split(";")
-        .find((cookie) =>
-            cookie.trim().startsWith(`${name}=`),
-        )
-        ?.split("=")
-        .pop() || null;
-}
-
-/**
  * @param {string} key 
  * @returns {string}
  */
@@ -143,7 +129,7 @@ Alpine.data("app", () => ({
     },
 
     setAuthMethod() {
-        const authMethod = getCookie("auth_method");
+        const authMethod = this.$el.dataset.authMethod || null;
         const validMethods = ["basic", "pid_auth", "saml", "oidc"];
 
         if (!authMethod || !validMethods.includes(authMethod)) {
@@ -226,9 +212,9 @@ Alpine.data("app", () => ({
     },
 
     handleLoginSAML() {
-        const rawRedirectUrl = getCookie("saml_redirect_url");
+        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
         if (!rawRedirectUrl) {
-            this.error = "Missing 'saml_redirect_url' cookie";
+            this.error = "Missing SAML redirect URL";
             return;
         }
         try {
@@ -240,9 +226,9 @@ Alpine.data("app", () => ({
     },
 
     handleLoginOIDC() {
-        const rawRedirectUrl = getCookie("oidc_redirect_url");
+        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
         if (!rawRedirectUrl) {
-            this.error = "Missing 'oidc_redirect_url' cookie";
+            this.error = "Missing OIDC redirect URL";
             return;
         }
         try {
@@ -257,9 +243,9 @@ Alpine.data("app", () => ({
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
     handleLoginPidAuth(immediate = false) {
-        const rawRedirectUrl = getCookie("pid_auth_redirect_url");
+        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
         if (!rawRedirectUrl) {
-            this.error = "Missing 'pid_auth_redirect_url' cookie";
+            this.error = "Missing PID auth redirect URL";
             return;
         }
 

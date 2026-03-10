@@ -207,12 +207,6 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 		return nil, err
 	}
 
-	// Delete all cookies, not just session.
-	c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
-	c.SetCookie("pid_auth_redirect_url", "", -1, "/authorization/consent", "", false, false)
-	c.SetCookie("oidc_redirect_url", "", -1, "/authorization/consent", "", false, false)
-	c.SetCookie("saml_redirect_url", "", -1, "/authorization/consent", "", false, false)
-
 	client, ok := s.cfg.APIGW.OauthServer.Clients[clientId]
 	if !ok {
 		err := errors.New("invalid client_id")

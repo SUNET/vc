@@ -96,9 +96,6 @@ func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (a
 
 	// VCI mode: redirect browser back to consent page
 	if reply != nil && reply.VCIRedirectURL != "" {
-		// Clean up auth cookies before redirect
-		c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
-		c.SetCookie("oidc_redirect_url", "", -1, "/authorization/consent", "", false, false)
 		c.Redirect(http.StatusFound, reply.VCIRedirectURL)
 		return nil, nil
 	}

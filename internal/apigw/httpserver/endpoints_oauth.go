@@ -170,10 +170,10 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	// Set SameSite policy for consent cookies; Secure flag follows TLS configuration
-	c.SetSameSite(http.SameSiteLaxMode)
-	secureCookie := s.sessionsOptions.Secure
-	c.SetCookie("auth_method", authMethod, 900, "/authorization/consent", "", secureCookie, false)
+	// Collect template data for the consent page instead of setting cookies.
+	// This avoids non-HttpOnly cookies (S3330) since JavaScript reads auth state
+	// from data attributes embedded in the rendered HTML.
+	var redirectURL string
 
 	sessionID, ok := session.Get("session_id").(string)
 	if !ok {
@@ -193,7 +193,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		c.SetCookie("pid_auth_redirect_url", reply.RedirectURL, 900, "/authorization/consent", "", secureCookie, false)
+		redirectURL = reply.RedirectURL
 		session.Set("verifier_context_id", reply.VerifierContextID)
 		if err := session.Save(); err != nil {
 			return nil, err
@@ -226,7 +226,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		c.SetCookie("saml_redirect_url", authReq.RedirectURL, 900, "/authorization/consent", "", secureCookie, false)
+		redirectURL = authReq.RedirectURL
 	}
 
 	if authMethod == model.AuthMethodOIDC {
@@ -249,10 +249,13 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		c.SetCookie("oidc_redirect_url", authReq.AuthorizationURL, 900, "/authorization/consent", "", secureCookie, false)
+		redirectURL = authReq.AuthorizationURL
 	}
 
-	c.HTML(http.StatusOK, "consent.html", nil)
+	c.HTML(http.StatusOK, "consent.html", gin.H{
+		"AuthMethod":  authMethod,
+		"RedirectURL": redirectURL,
+	})
 	return nil, nil
 }
 func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context, c *gin.Context) (any, error) {
