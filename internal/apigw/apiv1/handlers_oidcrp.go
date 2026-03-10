@@ -84,6 +84,27 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, err
 	}
 
+	// Fetch UserInfo claims and merge with ID token claims (OIDC Core §5.3.2).
+	// Many providers return only minimal claims in the ID token; the richer
+	// identity attributes are available only via the UserInfo endpoint.
+	if authResp.AccessToken != "" {
+		userInfoClaims, userInfoErr := service.GetUserInfo(ctx, authResp.AccessToken)
+		if userInfoErr != nil {
+			c.log.Warn("failed to fetch UserInfo, proceeding with ID token claims only", "error", userInfoErr)
+		} else {
+			// Verify sub consistency (OIDC Core §5.3.2: MUST be the same)
+			if uiSub, ok := userInfoClaims["sub"].(string); ok {
+				if idSub, ok := authResp.Claims["sub"].(string); ok && uiSub != idSub {
+					return nil, fmt.Errorf("UserInfo sub %q does not match ID token sub %q", uiSub, idSub)
+				}
+			}
+			// Merge: UserInfo claims take precedence per OIDC Core §5.3.2
+			for k, v := range userInfoClaims {
+				authResp.Claims[k] = v
+			}
+		}
+	}
+
 	// Retrieve session to get credential type.
 	// ProcessCallback already validated the session, but we need it for credential type etc.
 	session, err := service.GetSession(ctx, req.State)
