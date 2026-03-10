@@ -394,22 +394,7 @@ ZK_DST := internal/verifier/zk
 ZK_LIB_DST := internal/verifier/zk/lib
 DOCKER_TAG_VERIFIER		:= docker.sunet.se/dc4eu/verifier:$(VERSION)
 
-# Fetch ZK libraries
-zk:
-	$(info Fetching Longfellow ZK)
-	mkdir -p build
-	if [ -d build/longfellow-zk ]; then \
-		cd build/longfellow-zk && git pull; \
-	else \
-		git clone https://github.com/google/longfellow-zk.git build/longfellow-zk; \
-	fi
-	rm -rf $(ZK_DST)
-	cp -r $(ZK_SRC) $(ZK_DST)
-	cp -r $(ZK_LIB_SRC) $(ZK_LIB_DST)
-	cp -r $(ZK_CERT_SRC) $(ZK_DST)
-
-
-docker-build-verifier: zk
+docker-build-verifier:
 	$(info Building Docker image 'verifier')
 	docker build -f dockerfiles/verifier.Dockerfile -t verifier .
 	docker tag verifier ${DOCKER_TAG_VERIFIER}

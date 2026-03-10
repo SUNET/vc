@@ -1196,5 +1196,7 @@ gotest.tools/v3/internal/assert
 gotest.tools/v3/internal/difflib
 gotest.tools/v3/internal/format
 gotest.tools/v3/internal/source
-# nhooyr.io/websocket v1.8.17
-## explicit; go 1.19
+# proofs/server/v2 v2.0.0 => /tmp/longfellow-zk/reference/verifier-service/server
+## explicit; go 1.24
+proofs/server/v2/zk
+# proofs/server/v2 => /tmp/longfellow-zk/reference/verifier-service/server

@@ -64,6 +64,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	gorm.io/gorm v1.31.1
 	gotest.tools/v3 v3.5.2
+	proofs/server/v2 v2.0.0
 )
 
 require (
@@ -215,3 +216,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	nhooyr.io/websocket v1.8.17 // indirect
 )
+
+replace proofs/server/v2 => /tmp/longfellow-zk/reference/verifier-service/server

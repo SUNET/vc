@@ -468,6 +468,15 @@ type Verifier struct {
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// ZKConfig is the longfellow-zk configuration
+	ZK ZKConfig `yaml:"zk" validate:"required"`
+}
+
+type ZKConfig struct {
+	// Note the envconfig tags - this is how the loader finds them!
+	CACertsPath  string `yaml:"ca_certs_path" envconfig:"VERIFIER_ZK_CA_CERTS" validate:"required"`
+	CircuitsPath string `yaml:"circuits_path" envconfig:"VERIFIER_ZK_CIRCUITS" validate:"required"`
+	LibPath      string `yaml:"lib_path" envconfig:"VERIFIER_ZK_LIB" validate:"required"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
