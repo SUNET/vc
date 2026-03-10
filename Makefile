@@ -396,6 +396,8 @@ DOCKER_TAG_VERIFIER		:= docker.sunet.se/dc4eu/verifier:$(VERSION)
 
 docker-build-verifier:
 	$(info Building Docker image 'verifier')
+	go mod tidy
+	go mod vendor
 	docker build -f dockerfiles/verifier.Dockerfile -t verifier .
 	docker tag verifier ${DOCKER_TAG_VERIFIER}
 
