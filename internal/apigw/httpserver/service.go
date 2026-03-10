@@ -39,7 +39,7 @@ type Service struct {
 	sessionsEncKey  string
 	sessionsAuthKey string
 	sessionsName    string
-	samlSPService     SAMLSPService
+	samlSPService   SAMLSPService
 	oidcrpService   OIDCRPService
 }
 
@@ -54,10 +54,10 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		server: &http.Server{
 			ReadHeaderTimeout: 3 * time.Second,
 		},
-		eventPublisher:  eventPublisher,
-		samlSPService:     samlSPService,
-		oidcrpService:   oidcrpService,
-		sessionsName:    "oauth_user_session",
+		eventPublisher: eventPublisher,
+		samlSPService:  samlSPService,
+		oidcrpService:  oidcrpService,
+		sessionsName:   "oauth_user_session",
 		sessionsOptions: sessions.Options{
 			Path:     "/",
 			Domain:   "",
@@ -134,7 +134,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRestricted.Use(s.httpHelpers.Middleware.BasicAuth(ctx, s.cfg.APIGW.APIServer.APIAuth.BasicAuth.Users))
+	rgRestricted.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
