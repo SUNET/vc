@@ -22,11 +22,9 @@ func (c *Client) createJWK(ctx context.Context) error {
 		return fmt.Errorf("failed to create JWK from private key: %w", err)
 	}
 
-	// Set key ID from config or use default
-	kid := "default_signing_key_id"
-	if c.cfg.Issuer.JWTAttribute.Kid != "" {
-		kid = c.cfg.Issuer.JWTAttribute.Kid
-	}
+	// Use the same kid that the signer puts into JWT headers.
+	// This ensures the JWKS endpoint serves keys with matching kid values.
+	kid := c.signer.KeyID()
 
 	if err := key.Set("kid", kid); err != nil {
 		return fmt.Errorf("failed to set kid: %w", err)

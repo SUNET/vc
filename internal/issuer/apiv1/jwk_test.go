@@ -9,45 +9,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Sometimes this test does not behave deterministically
 func TestCreateJWK(t *testing.T) {
-	tts := []struct {
-		name    string
-		keyType string // "ecdsa" or "rsa"
-		want    jwt.MapClaims
-	}{
-		{
-			name:    "ECDSA key",
-			keyType: "ecdsa",
-			want: jwt.MapClaims{
-				"jwk": jwt.MapClaims{
-					"crv": "P-256",
-					"kid": "default_signing_key_id",
-					"kty": "EC",
-					// Note: "d" (private key) is intentionally excluded for security
-					"x": "kVao_jC0orUqlfq6lIEMgxE7mkTKQvrx28Gs7c50jeo",
-					"y": "47JXwoQzMH8_0rC72HAZPWWqsSHZPHniugPjuE03BEM",
-				},
-			},
+	ctx := t.Context()
+	client := mockNewClient(ctx, t, "ecdsa", logger.NewSimple("testing_apiv1"))
+
+	err := client.createJWK(ctx)
+	assert.NoError(t, err)
+
+	// The JWK kid must match the signer's KeyID (what goes into JWT headers)
+	expectedKid := client.signer.KeyID()
+	assert.NotEmpty(t, expectedKid)
+
+	want := jwt.MapClaims{
+		"jwk": jwt.MapClaims{
+			"crv": "P-256",
+			"kid": expectedKid,
+			"kty": "EC",
+			"x":   "kVao_jC0orUqlfq6lIEMgxE7mkTKQvrx28Gs7c50jeo",
+			"y":   "47JXwoQzMH8_0rC72HAZPWWqsSHZPHniugPjuE03BEM",
 		},
 	}
-
-	for _, tt := range tts {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := t.Context()
-			keyType := tt.keyType
-			if keyType == "" {
-				keyType = "ecdsa" // default for backward compatibility
-			}
-			client := mockNewClient(ctx, t, keyType, logger.NewSimple("testing_apiv1"))
-
-			err := client.createJWK(ctx)
-			assert.NoError(t, err)
-
-			if diff := cmp.Diff(tt.want, client.jwkClaim); diff != "" {
-				t.Errorf("diff: mismatch (-want +got):\n%s", diff)
-			}
-		})
+	if diff := cmp.Diff(want, client.jwkClaim); diff != "" {
+		t.Errorf("diff: mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -63,7 +46,8 @@ func TestCreateJWK_RSA(t *testing.T) {
 	assert.True(t, ok, "jwk should be a MapClaims")
 
 	assert.Equal(t, "RSA", jwk["kty"], "key type should be RSA")
-	assert.Equal(t, "default_signing_key_id", jwk["kid"])
+	// kid must match the signer's KeyID
+	assert.Equal(t, client.signer.KeyID(), jwk["kid"])
 	assert.NotEmpty(t, jwk["n"], "RSA modulus (n) should be present")
 	assert.NotEmpty(t, jwk["e"], "RSA exponent (e) should be present")
 
@@ -73,19 +57,22 @@ func TestCreateJWK_RSA(t *testing.T) {
 	assert.NotContains(t, jwk, "q", "private key component should not be included")
 }
 
-func TestCreateJWK_KidFromConfig(t *testing.T) {
+func TestCreateJWK_KidMatchesSigner(t *testing.T) {
 	ctx := t.Context()
 	client := mockNewClient(ctx, t, "ecdsa", logger.NewSimple("testing_apiv1"))
 
-	// Set custom kid in config
-	client.cfg.Issuer.JWTAttribute.Kid = "custom-key-id-123"
+	// Even when config has a different kid, the JWK uses the signer's kid
+	// to ensure JWT headers and JWKS endpoint are consistent.
+	client.cfg.Issuer.JWTAttribute.Kid = "config-value-ignored"
 
 	err := client.createJWK(ctx)
 	assert.NoError(t, err)
 
-	assert.Equal(t, "custom-key-id-123", client.kid)
+	// The JWK kid must match signer.KeyID(), not the config value
+	expectedKid := client.signer.KeyID()
+	assert.Equal(t, expectedKid, client.kid)
 
 	jwk, ok := client.jwkClaim["jwk"].(jwt.MapClaims)
 	assert.True(t, ok)
-	assert.Equal(t, "custom-key-id-123", jwk["kid"])
+	assert.Equal(t, expectedKid, jwk["kid"])
 }
