@@ -210,23 +210,28 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		scope, _ := session.Get("scope").(string)
-		if s.cfg.GetCredentialConstructor(scope) == nil {
-			err := fmt.Errorf("scope %q not configured for credential issuance", scope)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
+		// Skip re-initiating auth if the callback already stored documents.
+		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
+			scope, _ := session.Get("scope").(string)
+			if s.cfg.GetCredentialConstructor(scope) == nil {
+				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			// Determine the IdP entity ID: use static IdP or default from config
+			idpEntityID := s.samlSPService.GetStaticIDPEntityID()
+
+			authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID)
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			redirectURL = authReq.RedirectURL
+		} else {
+			s.log.Debug("SAML auth already completed, documents cached", "session_id", sessionID)
 		}
-
-		// Determine the IdP entity ID: use static IdP or default from config
-		idpEntityID := s.samlSPService.GetStaticIDPEntityID()
-
-		authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID)
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-
-		redirectURL = authReq.RedirectURL
 	}
 
 	if authMethod == model.AuthMethodOIDC {
@@ -236,20 +241,25 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		scope, _ := session.Get("scope").(string)
-		if s.cfg.GetCredentialConstructor(scope) == nil {
-			err := fmt.Errorf("scope %q not configured for credential issuance", scope)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
+		// Skip re-initiating auth if the callback already stored documents.
+		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
+			scope, _ := session.Get("scope").(string)
+			if s.cfg.GetCredentialConstructor(scope) == nil {
+				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
 
-		authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID)
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
+			authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID)
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
 
-		redirectURL = authReq.AuthorizationURL
+			redirectURL = authReq.AuthorizationURL
+		} else {
+			s.log.Debug("OIDC auth already completed, documents cached", "session_id", sessionID)
+		}
 	}
 
 	c.HTML(http.StatusOK, "consent.html", gin.H{

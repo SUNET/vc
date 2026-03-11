@@ -141,9 +141,22 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, err
 	}
 
+	// Log the mapping attributes and resulting document data for diagnostics.
+	// This helps identify mismatches between credential_mappings and the VCTM claims.
+	claimKeys := make([]string, 0, len(claims))
+	for k := range claims {
+		claimKeys = append(claimKeys, k)
+	}
+	mappingKeys := make([]string, 0, len(mapping.Attributes))
+	for k := range mapping.Attributes {
+		mappingKeys = append(mappingKeys, k)
+	}
+
 	c.log.Info("OIDC authentication successful",
 		"credential_type", session.CredentialType,
 		"claims_count", len(claims),
+		"claim_keys", claimKeys,
+		"mapping_attributes", mappingKeys,
 		"subject", authResp.IDToken.Subject)
 
 	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,

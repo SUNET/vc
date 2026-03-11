@@ -495,7 +495,7 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 		Enable: true,
 		Registration: &model.OIDCRPRegistrationConfig{
 			Preconfigured: &model.OIDCRPPreconfiguredConfig{
-				Enable:      true,
+				Enable:       true,
 				ClientID:     op.clientID,
 				ClientSecret: op.clientSecret,
 			},

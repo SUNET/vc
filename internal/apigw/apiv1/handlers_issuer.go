@@ -28,6 +28,13 @@ func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs m
 	return nil
 }
 
+// HasVCIDocuments checks whether documents have already been stored for the given VCI session.
+// Used by the consent endpoint to avoid re-initiating external auth when documents are already cached.
+func (c *Client) HasVCIDocuments(ctx context.Context, sessionID string) bool {
+	docs, ok := c.cacheService.Document.Get(ctx, sessionID)
+	return ok && len(docs) > 0
+}
+
 // VCICredentialOffer implements OpenID4VCI credential offer endpoint
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-offer-endpoint
 func (c *Client) VCICredentialOffer(ctx context.Context, req *openid4vci.CredentialOfferParameters) (*openid4vci.CredentialOfferParameters, error) {

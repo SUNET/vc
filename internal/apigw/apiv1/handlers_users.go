@@ -244,15 +244,35 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
 		}
 
-		c.log.Debug("extracted claim values",
-			"extracted_count", len(claimValues),
-			"requested_count", len(jsonPaths.Displayable),
-			"claims", claimValues)
+		if len(claimValues) == 0 && len(jsonPaths.Displayable) > 0 {
+			// Log diagnostic info when JSONPath extraction finds nothing.
+			// This typically means the credential_mappings don't produce the
+			// claim keys expected by the VCTM (check svg_id / path alignment).
+			docKeys := make([]string, 0, len(doc.DocumentData))
+			for k := range doc.DocumentData {
+				docKeys = append(docKeys, k)
+			}
+			c.log.Warn("no claims extracted: document data keys do not match VCTM JSONPaths",
+				"document_data_keys", docKeys,
+				"json_paths", jsonPaths.Displayable)
+		} else {
+			c.log.Debug("extracted claim values",
+				"extracted_count", len(claimValues),
+				"requested_count", len(jsonPaths.Displayable),
+				"claims", claimValues)
+		}
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
 				value, ok := claimValues[claim.SVGID].(string)
 				if !ok {
+					// JSONPath extraction missed this claim — try direct lookup as fallback
+					if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
+							Label: claim.Display[0].Label,
+							Value: value,
+						}
+					}
 					continue
 				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{

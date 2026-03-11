@@ -184,9 +184,14 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, err
 	}
 
+	claimKeys := make([]string, 0, len(claims))
+	for k := range claims {
+		claimKeys = append(claimKeys, k)
+	}
 	s.log.Info("SAML authentication successful",
 		"credential_type", session.CredentialType,
-		"claims_count", len(claims))
+		"claims_count", len(claims),
+		"claim_keys", claimKeys)
 
 	// VCI mode: if the SAML session was initiated from the OpenID4VCI consent flow,
 	// store the transformed claims as a document in the VCI session cache and redirect

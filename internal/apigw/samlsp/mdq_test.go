@@ -33,7 +33,7 @@ func TestMDQClient_GetIDPMetadata_Success(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client := NewMDQClient(server.URL, 3600, log)
+	client := NewMDQClient(server.URL, 3600, nil, log)
 
 	ctx := t.Context()
 	metadata, err := client.GetIDPMetadata(ctx, "https://idp.example.com/idp")
@@ -61,7 +61,7 @@ func TestMDQClient_GetIDPMetadata_Caching(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client := NewMDQClient(server.URL, 3600, log)
+	client := NewMDQClient(server.URL, 3600, nil, log)
 
 	ctx := t.Context()
 	entityID := "https://idp.example.com/idp"
@@ -96,8 +96,7 @@ func TestMDQClient_GetIDPMetadata_CacheExpiration(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	// Very short cache TTL (1 second)
-	client := NewMDQClient(server.URL, 1, log)
+	client := NewMDQClient(server.URL, 1, nil, log)
 
 	ctx := t.Context()
 	entityID := "https://idp.example.com/idp"
@@ -126,7 +125,7 @@ func TestMDQClient_GetIDPMetadata_HTTPError(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client := NewMDQClient(server.URL, 3600, log)
+	client := NewMDQClient(server.URL, 3600, nil, log)
 
 	ctx := t.Context()
 	_, err = client.GetIDPMetadata(ctx, "https://nonexistent.idp.com")
@@ -145,7 +144,7 @@ func TestMDQClient_GetIDPMetadata_InvalidXML(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client := NewMDQClient(server.URL, 3600, log)
+	client := NewMDQClient(server.URL, 3600, nil, log)
 
 	ctx := t.Context()
 	_, err = client.GetIDPMetadata(ctx, "https://idp.example.com/idp")
@@ -171,7 +170,7 @@ func TestMDQClient_GetIDPMetadata_NoIDPDescriptor(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client := NewMDQClient(server.URL, 3600, log)
+	client := NewMDQClient(server.URL, 3600, nil, log)
 
 	ctx := t.Context()
 	_, err = client.GetIDPMetadata(ctx, "https://sp.example.com")
@@ -195,7 +194,7 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client := NewMDQClient(server.URL, 3600, log)
+	client := NewMDQClient(server.URL, 3600, nil, log)
 
 	ctx := t.Context()
 	entityID := "https://idp.example.com/idp"
