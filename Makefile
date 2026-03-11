@@ -38,11 +38,12 @@ OIDCRP_TAG              := oidcrp
 PKCS11_TAG              := pkcs11
 VC20_TAG                := vc20
 ALL_TAGS                := $(SAML_TAG),$(OIDCRP_TAG)
+ZK_TAG                  := zk
 
 # Service Build Configuration (service -> static/dynamic, tags)
 # Format: service_name:cgo_mode:build_tags
 BUILD_CONFIGS           := \
-	verifier:static: \
+	verifier:dynamic:${ZK_TAG} \
 	registry:static: \
 	mockas:static: \
 	apigw:static: \
@@ -208,7 +209,7 @@ test-pkcs11: ## Test with PKCS#11 build tag
 
 test-all-tags: ## Test with all build tags
 	$(info Testing with all build tags)
-	go test -tags "$(SAML_TAG),$(OIDCRP_TAG),$(VC20_TAG),$(PKCS11_TAG)" -v ./...
+	go test -tags "$(SAML_TAG),$(OIDCRP_TAG),$(VC20_TAG),$(PKCS11_TAG), $(ZK_TAG)" -v ./...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
@@ -392,14 +393,15 @@ ZK_SRC := build/longfellow-zk/reference/verifier-service/server/zk
 ZK_CERT_SRC := build/longfellow-zk/reference/verifier-service/server/certs.pem
 ZK_DST := internal/verifier/zk
 ZK_LIB_DST := internal/verifier/zk/lib
-DOCKER_TAG_VERIFIER		:= docker.sunet.se/dc4eu/verifier:$(VERSION)
 
-docker-build-verifier:
-	$(info Building Docker image 'verifier')
+docker-build-verifier: _check-reserved-tag ## Build Docker image for verifier with ZK support
+	$(info Building Docker image 'verifier' with ZK support)
 	go mod tidy
 	go mod vendor
-	docker build -f dockerfiles/verifier.Dockerfile -t verifier .
-	docker tag verifier ${DOCKER_TAG_VERIFIER}
+	docker build --build-arg SERVICE_NAME=verifier \
+		--build-arg GO_BUILD_TAGS=$(ZK_TAG) \
+		--tag verifier \
+		--file dockerfiles/verifier.Dockerfile .
 
 docker-build-apigw-saml: _check-reserved-tag ## Build apigw Docker image with SAML support
 	$(info Docker building apigw with SAML support, tag: $(VERSION))

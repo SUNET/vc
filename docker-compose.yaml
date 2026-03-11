@@ -69,7 +69,7 @@ services:
   verifier:
     container_name: "vc_dev_verifier"
     hostname: "verifier.vc.docker"
-    image: docker.sunet.se/iam_vc/verifier:latest
+    image: verifier
     restart: always
     volumes:
       - ./config_minimal.yaml:/config.yaml:ro
