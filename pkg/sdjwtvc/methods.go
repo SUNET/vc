@@ -42,6 +42,15 @@ type TokenStatusListReference struct {
 	URI string
 }
 
+// maxVCTMSize is the maximum allowed size of a VCTM response body (1 MiB).
+const maxVCTMSize = 1 << 20
+
+// vctmHTTPClient is the HTTP client used for fetching VCTM documents.
+// It has a 30-second timeout to prevent hanging on slow/unresponsive servers.
+var vctmHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
+
 // fetchVCTM fetches and parses a VCTM document from the given URL.
 // It verifies the fetched document's SRI integrity hash matches the expected
 // value per SD-JWT VC draft-14 Section 6.
@@ -52,7 +61,7 @@ func (c *Client) fetchVCTM(ctx context.Context, vctURL string, expectedIntegrity
 		return nil, fmt.Errorf("failed to create request for VCT URL %s: %w", vctURL, err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := vctmHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch VCTM from %s: %w", vctURL, err)
 	}
@@ -62,9 +71,12 @@ func (c *Client) fetchVCTM(ctx context.Context, vctURL string, expectedIntegrity
 		return nil, fmt.Errorf("unexpected status %d fetching VCTM from %s", resp.StatusCode, vctURL)
 	}
 
-	rawBytes, err := io.ReadAll(resp.Body)
+	rawBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxVCTMSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read VCTM response from %s: %w", vctURL, err)
+	}
+	if int64(len(rawBytes)) > maxVCTMSize {
+		return nil, fmt.Errorf("VCTM response from %s exceeds maximum size of %d bytes", vctURL, maxVCTMSize)
 	}
 
 	var vctm VCTM

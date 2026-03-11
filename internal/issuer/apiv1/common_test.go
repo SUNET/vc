@@ -44,8 +44,33 @@ func (m *mockRegistryClient) SaveCredentialSubject(ctx context.Context, in *apiv
 }
 
 func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logger.Log) *Client {
+	return mockNewClientWithConstructors(ctx, t, keyType, log, nil)
+}
+
+// testConstructors builds a CredentialConstructor map for the standard test scopes (ehic, pid, diploma).
+// VCTURL and Integrity are set to the provided values so that MakeSDJWT scope validation passes.
+func testConstructors(vctURL, integrity string) map[string]*model.CredentialConstructor {
+	scopes := []string{"ehic", "pid", "diploma"}
+	m := make(map[string]*model.CredentialConstructor, len(scopes))
+	for _, s := range scopes {
+		c := &model.CredentialConstructor{
+			Format:     "dc+sd-jwt",
+			AuthMethod: "basic",
+		}
+		c.SetVCTURL(vctURL)
+		c.SetIntegrity(integrity)
+		m[s] = c
+	}
+	return m
+}
+
+func mockNewClientWithConstructors(ctx context.Context, t *testing.T, keyType string, log *logger.Log, constructors map[string]*model.CredentialConstructor) *Client {
+	common := &model.Common{}
+	if constructors != nil {
+		common.CredentialConstructor = constructors
+	}
 	cfg := &model.Cfg{
-		Common: &model.Common{},
+		Common: common,
 		Issuer: &model.Issuer{
 			APIServer:  model.APIServer{},
 			GRPCServer: model.GRPCServer{},

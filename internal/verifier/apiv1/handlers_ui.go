@@ -34,7 +34,11 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		info := &UICredentialInfo{
 			Attributes: constructor.GetAttributes(),
 		}
-		if vctm := constructor.GetVCTM(); vctm != nil {
+		// Prefer the resolved VCT URL (used in credentials/DCQL queries)
+		// over the VCTM's internal VCT field which may be empty or a legacy URN.
+		if v := constructor.GetVCTURL(); v != "" {
+			info.VCT = v
+		} else if vctm := constructor.GetVCTM(); vctm != nil {
 			info.VCT = vctm.VCT
 		}
 		reply.Credentials[scope] = info

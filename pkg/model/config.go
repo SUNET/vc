@@ -1073,6 +1073,20 @@ func (c *CredentialConstructor) GetIntegrity() string {
 	return c.Integrity
 }
 
+// SetVCTURL sets the published VCT URL under a write lock.
+func (c *CredentialConstructor) SetVCTURL(url string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.VCTURL = url
+}
+
+// SetIntegrity sets the SRI integrity hash under a write lock.
+func (c *CredentialConstructor) SetIntegrity(integrity string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Integrity = integrity
+}
+
 // IsLocalVCTM returns true when the VCTM is loaded from a local file
 // (i.e. apigw should publish it at /type-metadata/:scope).
 func (c *CredentialConstructor) IsLocalVCTM() bool {

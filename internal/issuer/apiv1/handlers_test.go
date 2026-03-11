@@ -147,7 +147,7 @@ func TestMakeSDJWT(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "integrity is required",
+			errMsg:  "integrity",
 		},
 		{
 			name: "missing scope",
@@ -214,7 +214,7 @@ func TestMakeSDJWT(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
 			log := logger.NewSimple("test")
-			client := mockNewClient(ctx, t, "ecdsa", log)
+			client := mockNewClientWithConstructors(ctx, t, "ecdsa", log, testConstructors(vctURL, integrity))
 
 			got, err := client.MakeSDJWT(ctx, tt.request)
 
@@ -281,7 +281,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 	vctURL, integrity := serveTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
-	client := mockNewClient(ctx, t, "rsa", log)
+	client := mockNewClientWithConstructors(ctx, t, "rsa", log, testConstructors(vctURL, integrity))
 
 	request := &CreateCredentialRequest{
 		Scope:        "ehic",
@@ -322,7 +322,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	vctURL, integrity := serveTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
-	client := mockNewClient(ctx, t, "ecdsa", log)
+	client := mockNewClientWithConstructors(ctx, t, "ecdsa", log, testConstructors(vctURL, integrity))
 
 	request := &CreateCredentialRequest{
 		Scope:        "ehic",
@@ -387,7 +387,7 @@ func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
 	vctURL, integrity := serveTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
-	client := mockNewClient(ctx, t, "ecdsa", log)
+	client := mockNewClientWithConstructors(ctx, t, "ecdsa", log, testConstructors(vctURL, integrity))
 
 	scopes := []string{"ehic", "pid", "diploma"}
 
@@ -472,7 +472,7 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
 			log := logger.NewSimple("test")
-			client := mockNewClient(ctx, t, "ecdsa", log)
+			client := mockNewClientWithConstructors(ctx, t, "ecdsa", log, testConstructors(vctURL, integrity))
 
 			req := &CreateCredentialRequest{
 				Scope:        tt.scope,

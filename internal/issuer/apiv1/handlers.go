@@ -17,8 +17,8 @@ type CreateCredentialRequest struct {
 	DocumentData []byte            `json:"document_data" validate:"required"`
 	Scope        string            `json:"scope" validate:"required"`
 	JWK          *apiv1_issuer.Jwk `json:"jwk" validate:"required"`
-	VCTUrl       string            `json:"vct_url"`
-	Integrity    string            `json:"integrity"`
+	VCTUrl       string            `json:"vct_url" validate:"required,url"`
+	Integrity    string            `json:"integrity" validate:"required"`
 }
 
 // CreateCredentialReply is the reply for Credential
@@ -41,9 +41,20 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, err
 	}
 
-	// Integrity is required per SD-JWT VC draft-14 Section 6
-	if req.Integrity == "" {
-		return nil, fmt.Errorf("integrity is required for scope: %s", req.Scope)
+	// Validate scope against configured credential constructors to prevent
+	// arbitrary VCT URL injection (SSRF) and unauthorized credential minting.
+	constructor := c.cfg.GetCredentialConstructor(req.Scope)
+	if constructor == nil {
+		return nil, fmt.Errorf("unknown scope: %s", req.Scope)
+	}
+
+	// Enforce that the caller-provided VCT URL and integrity match the
+	// configured values derived from the credential constructor.
+	if expected := constructor.GetVCTURL(); expected != "" && req.VCTUrl != expected {
+		return nil, fmt.Errorf("vct_url mismatch for scope %s: got %s, expected %s", req.Scope, req.VCTUrl, expected)
+	}
+	if expected := constructor.GetIntegrity(); expected != "" && req.Integrity != expected {
+		return nil, fmt.Errorf("integrity mismatch for scope %s", req.Scope)
 	}
 
 	// Build credential options with integrity provided by the caller (APIGW).
