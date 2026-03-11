@@ -51,8 +51,8 @@ func TestFetchVCTM(t *testing.T) {
 	tts := []struct {
 		name string
 		// setup returns the URL to fetch and the integrity to pass.
-		setup     func(t *testing.T) (url string, integrity string)
-		wantErr   bool
+		setup       func(t *testing.T) (url string, integrity string)
+		wantErr     bool
 		errContains string
 		// validate is called on success (wantErr == false).
 		validate func(t *testing.T, got *VCTM)
