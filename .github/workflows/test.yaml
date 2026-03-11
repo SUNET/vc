@@ -14,5 +14,10 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/*.sum"
 
+      - name: Sync dependencies
+        run: |
+          go mod tidy
+          go mod vendor
+
       - name: Run tests
         run: make test

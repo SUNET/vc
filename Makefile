@@ -387,12 +387,6 @@ endef
 
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
-# Docker builds with optional features
-ZK_LIB_SRC := build/longfellow-zk/lib
-ZK_SRC := build/longfellow-zk/reference/verifier-service/server/zk
-ZK_CERT_SRC := build/longfellow-zk/reference/verifier-service/server/certs.pem
-ZK_DST := internal/verifier/zk
-ZK_LIB_DST := internal/verifier/zk/lib
 
 docker-build-verifier: _check-reserved-tag ## Build Docker image for verifier with ZK support
 	$(info Building Docker image 'verifier' with ZK support)
