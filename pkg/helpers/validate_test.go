@@ -298,3 +298,62 @@ func TestHTTPURLValidator(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthScopesSelfReference(t *testing.T) {
+	validate, err := NewValidator()
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		common      model.Common
+		shouldError bool
+	}{
+		{
+			name: "self-reference in auth_scopes is rejected",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"eduid": {
+						AuthMethod: "openid4vp",
+						AuthScopes: []string{"pid", "eduid"},
+					},
+				},
+			},
+			shouldError: true,
+		},
+		{
+			name: "no self-reference passes",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"eduid": {
+						AuthMethod: "openid4vp",
+						AuthScopes: []string{"pid"},
+					},
+				},
+			},
+			shouldError: false,
+		},
+		{
+			name: "empty auth_scopes passes",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"pid": {
+						AuthMethod: "basic",
+					},
+				},
+			},
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validate.StructPartial(tt.common)
+			if tt.shouldError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "auth_scopes_self_reference")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}

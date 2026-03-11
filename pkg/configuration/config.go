@@ -89,17 +89,23 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			return nil, fmt.Errorf("common.credential_constructor is required for the %s service", serviceName)
 		}
 
-		// Load VCTM data and derive Attributes before validation so the
-		// vcts_exist validator can cross-reference auth_methods.vcts against
-		// actual VCT values.
+		// Load VCTM data and derive Attributes before validation.
 		for scope, constructor := range cfg.Common.CredentialConstructor {
-			if constructor == nil || constructor.VCTMFilePath == "" {
+			if constructor == nil {
 				continue
 			}
 			if err := constructor.LoadVCTMetadata(ctx, scope); err != nil {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
-			constructor.Attributes = constructor.VCTM.Attributes()
+		}
+
+		// Resolve URL-based VCTs from the APIGW public URL so that issued
+		// credentials reference a dereferenceable VCT and the served VCTM
+		// document is consistent.
+		if cfg.APIGW != nil && cfg.APIGW.PublicURL != "" {
+			if err := cfg.ResolveVCTUrls(cfg.APIGW.PublicURL); err != nil {
+				return nil, fmt.Errorf("failed to resolve VCT URLs: %w", err)
+			}
 		}
 	}
 

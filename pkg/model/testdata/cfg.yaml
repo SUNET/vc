@@ -4,25 +4,25 @@ credential_constructor:
     auth_method: basic
   ehic:
     vctm_file_path: "testdata/vctm_ehic.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   pda1:
     vctm_file_path: "testdata/vctm_pda1.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   elm:
     vctm_file_path: "testdata/vctm_elm.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   diploma:
     vctm_file_path: "testdata/vctm_diploma.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   micro_credential:
     vctm_file_path: "testdata/vctm_microcredential.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   openbadge_complete:
     vctm_file_path: "testdata/vctm_elm.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   openbadge_basic:
     vctm_file_path: "testdata/vctm_elm.json"
-    auth_method: pid_auth
+    auth_method: openid4vp
   openbadge_endorsements:
     vctm_file_path: "testdata/vctm_elm.json"
-    auth_method: pid_auth
+    auth_method: openid4vp

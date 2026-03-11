@@ -17,6 +17,8 @@ type CreateCredentialRequest struct {
 	DocumentData []byte            `json:"document_data" validate:"required"`
 	Scope        string            `json:"scope" validate:"required"`
 	JWK          *apiv1_issuer.Jwk `json:"jwk" validate:"required"`
+	VCTUrl       string            `json:"vct_url"`
+	Integrity    string            `json:"integrity"`
 }
 
 // CreateCredentialReply is the reply for Credential
@@ -39,26 +41,15 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, err
 	}
 
-	// Get credential constructor from config based on credential type
-	credentialConstructor := c.cfg.GetCredentialConstructor(req.Scope)
-	if credentialConstructor == nil {
-		return nil, fmt.Errorf("unsupported scope: %s", req.Scope)
+	// Integrity is required per SD-JWT VC draft-14 Section 6
+	if req.Integrity == "" {
+		return nil, fmt.Errorf("integrity is required for scope: %s", req.Scope)
 	}
 
-	// VCTM is already in sdjwtvc format
-	vctm := credentialConstructor.VCTM
-	if vctm == nil {
-		return nil, fmt.Errorf("VCTM not configured for scope: %s", req.Scope)
+	// Build credential options with integrity provided by the caller (APIGW).
+	opts := &sdjwtvc.CredentialOptions{
+		Integrity: req.Integrity,
 	}
-
-	// Validate document data against VCTM schema
-	if err := sdjwtvc.ValidateDocument(req.DocumentData, vctm); err != nil {
-		c.log.Error(err, "document validation failed", "scope", req.Scope)
-		return nil, fmt.Errorf("document validation failed: %w", err)
-	}
-
-	// Build credential options
-	opts := &sdjwtvc.CredentialOptions{}
 
 	// Call registry to allocate a status list entry for revocation support
 	if c.registryClient == nil {
@@ -73,13 +64,11 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
-	// Construct status URI based on registry endpoint and section
-	statusURI := fmt.Sprintf("%s/statuslists/%d", c.cfg.Registry.PublicURL, grpcReply.GetSection())
 	opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
 		Index: grpcReply.GetIndex(),
-		URI:   statusURI,
+		URI:   grpcReply.GetStatusListUri(),
 	}
-	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", statusURI)
+	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", grpcReply.GetStatusListUri())
 
 	// Build SD-JWT using sdjwtvc package with the signer interface
 	sdClient := sdjwtvc.New()
@@ -87,10 +76,9 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		ctx,
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
-		credentialConstructor.VCTM.VCT,
+		req.VCTUrl,
 		req.DocumentData,
 		req.JWK,
-		vctm,
 		opts,
 	)
 	if err != nil {
@@ -160,12 +148,6 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
 		return nil, err
-	}
-
-	// Get credential constructor from config based on scope
-	credentialConstructor := c.cfg.GetCredentialConstructor(req.Scope)
-	if credentialConstructor == nil {
-		return nil, fmt.Errorf("unsupported scope: %s", req.Scope)
 	}
 
 	// Check if mdoc issuer is initialized

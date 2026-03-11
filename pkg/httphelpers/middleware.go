@@ -47,7 +47,9 @@ func (m *middlewareHandler) RequestID(ctx context.Context) gin.HandlerFunc {
 	}
 }
 
-// Logger middleware to log the request details
+// Logger middleware to log the request details.
+// Successful (HTTP 200) requests to "/health" are always excluded from the
+// access log to reduce noise from monitoring probes.
 func (m *middlewareHandler) Logger(ctx context.Context) gin.HandlerFunc {
 	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:Logger")
 	defer span.End()
@@ -55,7 +57,13 @@ func (m *middlewareHandler) Logger(ctx context.Context) gin.HandlerFunc {
 	log := m.log.New("http")
 	return func(c *gin.Context) {
 		c.Next()
-		log.Info("request", "status", c.Writer.Status(), "url", c.Request.URL.String(), "method", c.Request.Method, "req_id", c.GetString("req_id"))
+
+		status := c.Writer.Status()
+		if c.Request.URL.Path == "/health" && status == 200 {
+			return
+		}
+
+		log.Info("request", "status", status, "url", c.Request.URL.String(), "method", c.Request.Method, "req_id", c.GetString("req_id"))
 	}
 }
 

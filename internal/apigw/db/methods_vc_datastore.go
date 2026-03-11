@@ -223,7 +223,7 @@ func (c *VCDatastoreColl) GetDocument(ctx context.Context, query *GetDocumentQue
 func (c *VCDatastoreColl) GetDocumentWithIdentity(ctx context.Context, query *GetDocumentQuery) (*model.CompleteDocument, error) {
 	filter := bson.M{
 		"meta.authentic_source":  bson.M{"$eq": query.Meta.AuthenticSource},
-		"meta.vct":               bson.M{"$eq": query.Meta.VCT},
+		"meta.scope":             bson.M{"$eq": query.Meta.Scope},
 		"identities.family_name": bson.M{"$eq": query.Identity.FamilyName},
 		"identities.given_name":  bson.M{"$eq": query.Identity.GivenName},
 		"identities.birth_date":  bson.M{"$eq": query.Identity.BirthDate},
@@ -245,10 +245,10 @@ func (c *VCDatastoreColl) GetDocumentWithIdentity(ctx context.Context, query *Ge
 	return doc, nil
 }
 
-// GetDocumentsWithIdentity returns matching document with identity and VCT if any, or error
+// GetDocumentsWithIdentity returns matching documents with identity and scope if any, or error
 func (c *VCDatastoreColl) GetDocumentsWithIdentity(ctx context.Context, query *GetDocumentQuery) (map[string]*model.CompleteDocument, error) {
 	filter := bson.M{
-		"meta.vct":               bson.M{"$eq": query.Meta.VCT},
+		"meta.scope":             bson.M{"$eq": query.Meta.Scope},
 		"identities.family_name": bson.M{"$eq": query.Identity.FamilyName},
 		"identities.given_name":  bson.M{"$eq": query.Identity.GivenName},
 		"identities.birth_date":  bson.M{"$eq": query.Identity.BirthDate},

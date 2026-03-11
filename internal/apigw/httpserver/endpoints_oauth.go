@@ -184,7 +184,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	if authMethod == model.AuthMethodPID {
+	if authMethod == model.AuthMethodOpenID4VP {
 		request := &apiv1.OauthAuthorizationConsentRequest{
 			SessionID: sessionID,
 		}
@@ -193,7 +193,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		redirectURL = reply.RedirectURL
+		c.SetCookie("openid4vp_redirect_url", reply.RedirectURL, 900, "/authorization/consent", "", false, false)
 		session.Set("verifier_context_id", reply.VerifierContextID)
 		if err := session.Save(); err != nil {
 			return nil, err

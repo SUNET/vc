@@ -24,7 +24,7 @@ apigw:
       basic_auth:
         users:
           admin: "secret-admin-pass"
-  oidcrp:
+  oidc_rp:
     registration:
       preconfigured:
         client_secret: "secret-client-secret"
@@ -34,7 +34,7 @@ registry:
   admin_gui:
     password: "secret-registry-pass"
 verifier:
-  oidc:
+  oidc_op:
     subject_salt: "secret-salt-value"
 ui:
   password: "secret-ui-pass"

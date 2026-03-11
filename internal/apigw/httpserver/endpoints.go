@@ -253,6 +253,28 @@ func (s *Service) endpointHealth(ctx context.Context, c *gin.Context) (any, erro
 	return reply, nil
 }
 
+// endpointTypeMetadata serves the raw VCTM JSON for locally-loaded credential types.
+// Only scopes backed by a local file (vctm_file_path) are published here;
+// scopes using an external vctm_url should be fetched from that URL directly.
+func (s *Service) endpointTypeMetadata(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointTypeMetadata")
+	defer span.End()
+
+	request := &apiv1.TypeMetadataRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	reply, err := s.apiv1.TypeMetadata(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return reply, nil
+}
+
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
 func (s *Service) endpointVCINonce(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointNonce")

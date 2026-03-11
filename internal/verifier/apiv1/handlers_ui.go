@@ -32,10 +32,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 
 	for scope, constructor := range c.cfg.Common.CredentialConstructor {
 		info := &UICredentialInfo{
-			Attributes: constructor.Attributes,
+			Attributes: constructor.GetAttributes(),
 		}
-		if constructor.VCTM != nil {
-			info.VCT = constructor.VCTM.VCT
+		if vctm := constructor.GetVCTM(); vctm != nil {
+			info.VCT = vctm.VCT
 		}
 		reply.Credentials[scope] = info
 	}

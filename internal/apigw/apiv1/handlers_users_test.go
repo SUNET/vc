@@ -207,7 +207,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	req := &vcclient.UserLookupRequest{
 		RequestURI:   "https://issuer.example.com/request/456",
 		ResponseCode: "response-code-xyz",
-		AuthMethod:   model.AuthMethodPID,
+		AuthMethod:   model.AuthMethodOpenID4VP,
 		VCTM: &sdjwtvc.VCTM{
 			Claims: []sdjwtvc.Claim{
 				{
@@ -290,7 +290,7 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 	req := &vcclient.UserLookupRequest{
 		RequestURI:   "https://issuer.example.com/request/789",
 		ResponseCode: "response-code-123",
-		AuthMethod:   model.AuthMethodPID,
+		AuthMethod:   model.AuthMethodOpenID4VP,
 		VCTM:         &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{}},
 	}
 

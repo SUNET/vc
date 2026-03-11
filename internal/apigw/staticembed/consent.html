@@ -98,13 +98,13 @@
                     </form>
                 </div>
             </template>
-            <template x-if="!loading && !loggedIn && authMethod === 'pid_auth' && !pidAuthRedirectCountUp">
+            <template x-if="!loading && !loggedIn && authMethod === 'openid4vp' && !pidAuthRedirectCountUp">
                 <div class="space-y-4 md:space-y-6">
                     <p class="text-center">Authenticate using your PID to continue. To begin, click the button below. You will be redirected to your wallet and prompted to present your PID.</p>
                     <button class="rounded-lg shadow-sm text-sm w-full px-4 py-2 mt-6 text-center text-white bg-primary hover:bg-primary-hover dark:text-white dark:hover:bg-primary-light-hover dark:bg-primary-light focus-visible:outline-2 focus-visible:outline-offset-2 cursor-pointer" @click="() => handleLoginPidAuth()">Start PID authentication</button>
                 </div>
             </template>
-            <template x-if="!loading && !loggedIn && authMethod === 'pid_auth' && pidAuthRedirectCountUp">
+            <template x-if="!loading && !loggedIn && authMethod === 'openid4vp' && pidAuthRedirectCountUp">
                 <div class="space-y-4 md:space-y-6">
                     <p class="text-center">Redirecting to Wallet in <span x-text="pidAuthRedirectMaxCount - pidAuthRedirectCountUp"></span>...</p>
                     <progress class="w-full rounded-lg bg-gray bg-opacity-15" :value="pidAuthRedirectCountUp" :max="pidAuthRedirectMaxCount" x-text="pidAuthRedirectCountUp">

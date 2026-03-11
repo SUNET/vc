@@ -153,7 +153,7 @@ func TestCredentialConstructor(t *testing.T) {
 			name: "Load PDA1 VCTM",
 			constructor: &CredentialConstructor{
 				VCTMFilePath: "./testdata/vctm_pda1.json",
-				AuthMethod:   "pid_auth",
+				AuthMethod:   "openid4vp",
 			},
 			scope:       "pda1",
 			expectedVCT: "urn:eudi:pda1:1",
@@ -162,7 +162,7 @@ func TestCredentialConstructor(t *testing.T) {
 			name: "Load EHIC VCTM",
 			constructor: &CredentialConstructor{
 				VCTMFilePath: "./testdata/vctm_ehic.json",
-				AuthMethod:   "pid_auth",
+				AuthMethod:   "openid4vp",
 			},
 			scope:       "ehic",
 			expectedVCT: "urn:eudi:ehic:1",
@@ -181,6 +181,13 @@ func TestCredentialConstructor(t *testing.T) {
 
 			// Verify VCT matches expected value
 			assert.Equal(t, tt.expectedVCT, tt.constructor.VCTM.VCT, "VCTM.VCT should match expected value")
+
+			// Verify integrity hash was computed
+			assert.NotEmpty(t, tt.constructor.Integrity, "Integrity hash should be computed")
+			assert.Contains(t, tt.constructor.Integrity, "sha256-", "Integrity should be SRI format")
+
+			// Verify raw bytes are kept for local files
+			assert.NotNil(t, tt.constructor.VCTMRaw, "VCTMRaw should be kept for local files")
 		})
 	}
 }
@@ -206,17 +213,17 @@ func TestGetCredentialConstructorAuthMethod(t *testing.T) {
 			want:           "basic",
 		},
 		{
-			name: "Found by scope key - pid_auth",
+			name: "Found by scope key - openid4vp",
 			cfg: &Cfg{
 				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
 					"ehic": {
 						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-						AuthMethod: "pid_auth",
+						AuthMethod: "openid4vp",
 					},
 				}},
 			},
 			credentialType: "ehic",
-			want:           "pid_auth",
+			want:           "openid4vp",
 		},
 		{
 			name: "Not found - returns default basic",
@@ -249,16 +256,16 @@ func TestGetCredentialConstructorAuthMethod(t *testing.T) {
 					},
 					"ehic": {
 						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-						AuthMethod: "pid_auth",
+						AuthMethod: "openid4vp",
 					},
 					"diploma": {
 						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
-						AuthMethod: "pid_auth",
+						AuthMethod: "openid4vp",
 					},
 				}},
 			},
 			credentialType: "ehic",
-			want:           "pid_auth",
+			want:           "openid4vp",
 		},
 	}
 
@@ -327,7 +334,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 					},
 					"ehic": {
 						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-						AuthMethod:   "pid_auth",
+						AuthMethod:   "openid4vp",
 						VCTMFilePath: "/path/to/vctm_ehic.json",
 					},
 				}},
@@ -335,7 +342,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 			scope: "ehic",
 			want: &CredentialConstructor{
 				VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-				AuthMethod:   "pid_auth",
+				AuthMethod:   "openid4vp",
 				VCTMFilePath: "/path/to/vctm_ehic.json",
 			},
 		},
@@ -364,14 +371,6 @@ func TestLoadFile(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Empty VCTMFilePath - error",
-			constructor: &CredentialConstructor{
-				VCTMFilePath: "",
-			},
-			wantErr:     true,
-			errContains: "vctm_file_path is empty",
-		},
-		{
 			name: "File does not exist - error",
 			constructor: &CredentialConstructor{
 				VCTMFilePath: "./testdata/nonexistent.json",
@@ -380,12 +379,19 @@ func TestLoadFile(t *testing.T) {
 			errContains: "failed to read VCTM file",
 		},
 		{
-			name: "Invalid JSON - error",
+			name: "Not JSON - error",
 			constructor: &CredentialConstructor{
-				VCTMFilePath: "./testdata/cfg.yaml", // YAML file, not JSON
+				VCTMFilePath: "./testdata/vctm_not_json.yaml",
 			},
 			wantErr:     true,
-			errContains: "invalid character",
+			errContains: "failed to unmarshal VCTM",
+		},
+		{
+			name: "Missing vct field - ok",
+			constructor: &CredentialConstructor{
+				VCTMFilePath: "./testdata/vctm_missing_vct.json",
+			},
+			wantErr: false,
 		},
 	}
 
@@ -402,9 +408,29 @@ func TestLoadFile(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, tt.constructor.VCTM)
+				assert.NotEmpty(t, tt.constructor.Integrity)
 			}
 		})
 	}
+}
+
+func TestCredentialConstructor_MissingVCTURL(t *testing.T) {
+	cfg := &Cfg{
+		Common: &Common{
+			CredentialConstructor: map[string]*CredentialConstructor{
+				"test_scope": {
+					// Neither VCTMFilePath nor VCTMUrl set,
+					// so VCTURL will remain empty after resolution.
+					Format:     "dc+sd-jwt",
+					AuthMethod: "basic",
+					VCTM:       &sdjwtvc.VCTM{},
+				},
+			},
+		},
+	}
+	err := cfg.ResolveVCTUrls("http://localhost:8080")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VCTURL is empty")
 }
 
 func TestIssuerMetadataLoadAndSign(t *testing.T) {

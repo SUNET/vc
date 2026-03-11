@@ -291,11 +291,18 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 
 	client := apiv1_issuer.NewIssuerServiceClient(conn)
 
+	credentialConstructor := s.cfg.GetCredentialConstructor(credentialType)
+	if credentialConstructor == nil {
+		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
+	}
+
 	// Call the issuer's MakeSDJWT method
 	reply, err := client.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
 		Scope:        credentialType,
 		DocumentData: documentData,
 		Jwk:          jwk,
+		VctUrl:       credentialConstructor.GetVCTURL(),
+		Integrity:    credentialConstructor.GetIntegrity(),
 	})
 	if err != nil {
 		s.log.Error(err, "failed to call MakeSDJWT")

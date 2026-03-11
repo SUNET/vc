@@ -1,0 +1,4 @@
+# This is a YAML file, not JSON.
+# Used by TestLoadFile to verify LoadVCTMetadata rejects non-JSON input.
+vct: "urn:test:yaml:1"
+name: "This is YAML, not valid VCTM JSON"

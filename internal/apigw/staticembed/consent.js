@@ -86,7 +86,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"basic" | "pid_auth" | "saml" | "oidc" | null} */
+    /** @type {"basic" | "saml" | "oidc" | "openid4vp" | null} */
     authMethod: null,
 
     /** @type {number | null} */
@@ -132,7 +132,13 @@ Alpine.data("app", () => ({
         const authMethod = this.$el.dataset.authMethod || null;
         const validMethods = ["basic", "pid_auth", "saml", "oidc"];
 
-        if (!authMethod || !validMethods.includes(authMethod)) {
+        if (
+            !authMethod ||
+            authMethod !== "basic" &&
+            authMethod !== "saml" &&
+            authMethod !== "oidc" &&
+            authMethod !== "openid4vp"
+        ) {
             this.error = `Unknown auth method: '${authMethod}'`;
             return;
         }
@@ -243,9 +249,9 @@ Alpine.data("app", () => ({
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
     handleLoginPidAuth(immediate = false) {
-        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
+        const rawRedirectUrl = getCookie("openid4vp_redirect_url");
         if (!rawRedirectUrl) {
-            this.error = "Missing PID auth redirect URL";
+            this.error = "Missing 'openid4vp_redirect_url' cookie";
             return;
         }
 
