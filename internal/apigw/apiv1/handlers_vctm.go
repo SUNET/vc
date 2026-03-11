@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 	"vc/pkg/openid4vci"
 	"vc/pkg/openid4vp"
@@ -123,28 +124,48 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 
 	c.log.Debug("SVG template not available in cache, fetching from origin")
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, svgTemplateURI, nil)
-	if err != nil {
-		return nil, err
-	}
+	var template string
 
-	response, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
+	if strings.HasPrefix(svgTemplateURI, "data:") {
+		// Handle data: URIs (e.g., data:image/svg+xml;base64,...)
+		commaIdx := strings.Index(svgTemplateURI, ",")
+		if commaIdx < 0 {
+			return nil, errors.New("invalid data URI: missing comma separator")
+		}
+		header := svgTemplateURI[5:commaIdx] // after "data:"
+		data := svgTemplateURI[commaIdx+1:]
 
-	if response.StatusCode != http.StatusOK {
-		err := errors.New("non ok response code from svg template origin")
-		return nil, err
-	}
+		if strings.HasSuffix(header, ";base64") {
+			// Data is already base64-encoded
+			template = data
+		} else {
+			// Plain text data URI — base64-encode it
+			template = base64.StdEncoding.EncodeToString([]byte(data))
+		}
+	} else {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, svgTemplateURI, nil)
+		if err != nil {
+			return nil, err
+		}
 
-	responseData, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
+		response, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		defer response.Body.Close()
 
-	template := base64.StdEncoding.EncodeToString([]byte(responseData))
+		if response.StatusCode != http.StatusOK {
+			err := errors.New("non ok response code from svg template origin")
+			return nil, err
+		}
+
+		responseData, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		template = base64.StdEncoding.EncodeToString([]byte(responseData))
+	}
 
 	reply := &vcclient.SVGTemplateReply{
 		Template: template,
