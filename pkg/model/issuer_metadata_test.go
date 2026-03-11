@@ -15,7 +15,8 @@ func TestIssuerMetadata_Generate_CustomFormat(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTURL:     "https://issuer.example.com/type-metadata/test_cred",
 			Format:     "dc+sd-jwt", // Custom format
 			AuthMethod: "basic",
 		},
@@ -30,7 +31,7 @@ func TestIssuerMetadata_Generate_CustomFormat(t *testing.T) {
 	credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
 	require.True(t, exists)
 	assert.Equal(t, "dc+sd-jwt", credConfig.Format)
-	assert.Equal(t, "urn:test:1", credConfig.VCT)
+	assert.Equal(t, "https://issuer.example.com/type-metadata/test_cred", credConfig.VCT)
 }
 
 func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
@@ -39,7 +40,7 @@ func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
 	// Test that display must come from VCTM, not from constructor
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "vc+sd-jwt",
 			AuthMethod: "basic",
 			// Display comes from VCTM, not from constructor
@@ -67,7 +68,7 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 		Description: "Test Description",
 		Display: []sdjwtvc.VCTMDisplay{
 			{
-				Locale:        "en-US",
+				Locale:      "en-US",
 				Name:        "VCTM Display Name",
 				Description: "VCTM Description",
 			},
@@ -103,7 +104,7 @@ func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -123,7 +124,7 @@ func TestIssuerMetadata_Generate_CustomSigningAlgorithms(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -145,7 +146,7 @@ func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -168,7 +169,7 @@ func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -192,7 +193,7 @@ func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -215,7 +216,7 @@ func TestIssuerMetadata_Generate_BatchCredentialIssuance(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -243,7 +244,7 @@ func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			AuthMethod: "basic",
 		},
 	}
@@ -263,7 +264,7 @@ func TestIssuerMetadata_Generate_NilConstructor(t *testing.T) {
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": nil, // Nil constructor should be skipped
 		"test_cred2": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:2"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:2"},
 			AuthMethod: "basic",
 		},
 	}
@@ -296,7 +297,7 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 
 	credentialConstructors := map[string]*CredentialConstructor{
 		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:test:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
 			Format:     "vc+sd-jwt",
 			AuthMethod: "basic",
 			// No custom crypto methods, etc. - testing defaults
@@ -324,40 +325,44 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
+	baseURL := "https://issuer.example.com"
 	credentialConstructors := map[string]*CredentialConstructor{
 		"pid": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+			VCTURL:     baseURL + "/type-metadata/pid",
 			AuthMethod: "basic",
 			Format:     "dc+sd-jwt",
 		},
 		"ehic": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-			AuthMethod: "pid_auth",
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
+			VCTURL:     baseURL + "/type-metadata/ehic",
+			AuthMethod: "openid4vp",
 			Format:     "vc+sd-jwt",
 		},
 		"diploma": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:     baseURL + "/type-metadata/diploma",
 			AuthMethod: "basic",
 			Format:     "vc+sd-jwt",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, baseURL, credentialConstructors)
 	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)
 
 	// Verify each credential
 	pidConfig := metadata.CredentialConfigurationsSupported["pid"]
 	assert.Equal(t, "dc+sd-jwt", pidConfig.Format)
-	assert.Equal(t, "urn:eudi:pid:1", pidConfig.VCT)
+	assert.Equal(t, baseURL+"/type-metadata/pid", pidConfig.VCT)
 	assert.Equal(t, "pid", pidConfig.Scope)
 
 	ehicConfig := metadata.CredentialConfigurationsSupported["ehic"]
 	assert.Equal(t, "vc+sd-jwt", ehicConfig.Format)
-	assert.Equal(t, "urn:eudi:ehic:1", ehicConfig.VCT)
+	assert.Equal(t, baseURL+"/type-metadata/ehic", ehicConfig.VCT)
 
 	diplomaConfig := metadata.CredentialConfigurationsSupported["diploma"]
 	assert.Equal(t, "vc+sd-jwt", diplomaConfig.Format) // default
-	assert.Equal(t, "urn:eudi:diploma:1", diplomaConfig.VCT)
+	assert.Equal(t, baseURL+"/type-metadata/diploma", diplomaConfig.VCT)
 }

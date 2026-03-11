@@ -45,19 +45,22 @@ func TestComprehensiveCoverage(t *testing.T) {
 			"y":   "test",
 		}
 
+		vctURL, integrity := serveVCTM(t, vctm)
+		signer := newTestSigner(privateKey, "key-123")
+
 		opts := &CredentialOptions{
 			DecoyDigests:   5,
 			ExpirationDays: 180,
+			Integrity:      integrity,
 		}
 
-		token, err := client.BuildCredential(
+		token, err := client.BuildCredentialWithSigner(
+			t.Context(),
 			"https://issuer.example.com",
-			"key-123",
-			privateKey,
-			"https://example.com/credentials/v1",
+			signer,
+			vctURL,
 			documentData,
 			holderJWK,
-			vctm,
 			opts,
 		)
 

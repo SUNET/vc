@@ -34,30 +34,19 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	// Get credential constructor to determine auth method
-	credentialConstructor := c.cfg.GetCredentialConstructor(authorizationContext.Scopes[0])
-	if credentialConstructor == nil {
-		c.log.Error(nil, "credential constructor not found for scope", "scope", authorizationContext.Scopes[0])
-		return "", errors.New("credential constructor not found for scope: " + authorizationContext.Scopes[0])
+	// Match a scope from the authorization context to a known credential constructor
+	scope, credentialConstructor, err := c.matchScope(authorizationContext.Scopes)
+	if err != nil {
+		c.log.Error(err, "no matching scope in authorization context")
+		return "", err
 	}
 
-	// Get auth method configuration (guaranteed to exist by config validation)
-	authMethod := c.cfg.Common.AuthMethods[credentialConstructor.AuthMethod]
+	// Get format from the first auth scope (all scopes share the same format)
+	format := c.cfg.GetFormatForScope(credentialConstructor.AuthScopes[0])
 
-	// Get format from credential constructor based on VCT
-	// All VCTs in the same auth method should have the same format (validated at config load)
-	format := ""
-	if len(authMethod.VCTs) > 0 {
-		format = c.cfg.GetFormatForVCT(authMethod.VCTs[0])
-	}
-	if format == "" {
-		// Fallback to the format of the credential being issued
-		format = credentialConstructor.Format
-	}
-
-	// Build DCQL claims from auth method configuration
-	claimQueries := make([]openid4vp.ClaimQuery, 0, len(authMethod.Claims))
-	for _, claim := range authMethod.Claims {
+	// Build DCQL claims from credential constructor configuration
+	claimQueries := make([]openid4vp.ClaimQuery, 0, len(credentialConstructor.AuthClaims))
+	for _, claim := range credentialConstructor.AuthClaims {
 		claimQueries = append(claimQueries, openid4vp.ClaimQuery{
 			Path: []string{claim},
 		})
@@ -66,11 +55,11 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	dcql := &openid4vp.DCQL{
 		Credentials: []openid4vp.CredentialQuery{
 			{
-				ID:       authorizationContext.Scopes[0],
+				ID:       scope,
 				Format:   format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
-					VCTValues: authMethod.VCTs,
+					VCTValues: c.cfg.VCTUrlsForScopes(credentialConstructor.AuthScopes),
 				},
 				RequireCryptographicHolderBinding: false,
 				Claims:                            claimQueries,
@@ -79,10 +68,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
 				Options: [][]string{
-					{authorizationContext.Scopes[0]},
+					{scope},
 				},
 				Required: false,
-				Purpose:  "fetch credential for " + authorizationContext.Scopes[0],
+				Purpose:  "fetch credential for " + scope,
 			},
 		},
 	}
@@ -217,11 +206,18 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
 
+	// Match a scope from the authorization context to a known credential constructor
+	scope, credentialConstructorCfg, err := c.matchScope(authCtx.Scopes)
+	if err != nil {
+		c.log.Error(err, "no matching scope in authorization context")
+		return nil, err
+	}
+
 	// Extract VP Token from the map using the scope as key
-	vpToken, ok := vpResponse.VPToken[authCtx.Scopes[0]]
+	vpToken, ok := vpResponse.VPToken[scope]
 	if !ok {
-		c.log.Error(nil, "VP Token not found for scope", "scope", authCtx.Scopes[0], "available_keys", vpResponse.VPToken)
-		return nil, fmt.Errorf("VP Token not found for scope: %s", authCtx.Scopes[0])
+		c.log.Error(nil, "VP Token not found for scope", "scope", scope, "available_keys", vpResponse.VPToken)
+		return nil, fmt.Errorf("VP Token not found for scope: %s", scope)
 	}
 
 	// Prepare response parameters
@@ -261,15 +257,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
-	// Get credential constructor configuration using GetCredentialConstructor
-	// This looks up by VCT (primary key) or CommonName (for backward compatibility)
-	credentialConstructorCfg := c.cfg.GetCredentialConstructor(authCtx.Scopes[0])
-	if credentialConstructorCfg == nil {
-		c.log.Error(nil, "credential constructor not found for scope", "scope", authCtx.Scopes[0])
-		return nil, errors.New("credential constructor not found for scope: " + authCtx.Scopes[0])
-	}
-
-	c.log.Debug("Found credential constructor", "scope", authCtx.Scopes, "vct", credentialConstructorCfg.VCTM.VCT)
+	c.log.Debug("Found credential constructor", "scope", scope, "vct", credentialConstructorCfg.GetVCTURL())
 
 	// Extract identity from validated credential
 	identity := &model.Identity{}
@@ -283,12 +271,11 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		identity.BirthDate = birthdate
 	}
 
-	// Retrieve documents matching the identity
-	// Use authorizationContext.VCT which should be set to the VCT value
-	c.log.Debug("Querying documents", "vct", credentialConstructorCfg.VCTM.VCT, "identity", identity)
+	// Retrieve documents matching the identity by scope
+	c.log.Debug("Querying documents", "scope", scope, "identity", identity)
 	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
 		Meta: &model.MetaData{
-			VCT: credentialConstructorCfg.VCTM.VCT,
+			Scope: scope,
 		},
 		Identity: identity,
 	})

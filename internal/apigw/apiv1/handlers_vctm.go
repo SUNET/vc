@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -95,13 +96,38 @@ func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequ
 		return nil, err
 	}
 
-	if err := credentialConstructor.LoadVCTMetadata(ctx, req.Scope); err != nil {
-		return nil, err
+	vctm := credentialConstructor.GetVCTM()
+	if vctm == nil {
+		return nil, fmt.Errorf("VCTM not loaded for scope: %s", req.Scope)
 	}
 
-	vctm := credentialConstructor.VCTM
-
 	return vctm, nil
+}
+
+// TypeMetadataRequest holds the request for serving locally-published VCTM.
+type TypeMetadataRequest struct {
+	Scope string `uri:"scope" validate:"required"`
+}
+
+// TypeMetadata returns the raw VCTM JSON for a locally-published scope.
+func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (json.RawMessage, error) {
+	constructor := c.cfg.GetCredentialConstructor(req.Scope)
+	if constructor == nil {
+		return nil, errors.New("unknown scope: " + req.Scope)
+	}
+
+	if !constructor.IsLocalVCTM() {
+		return nil, errors.New("VCTM for scope " + req.Scope + " is not published by this service")
+	}
+
+	raw := constructor.GetVCTMRaw()
+	if raw == nil {
+		return nil, errors.New("VCTM not loaded for scope: " + req.Scope)
+	}
+
+	reply := json.RawMessage(raw)
+
+	return reply, nil
 }
 
 // SVGTemplateRequest holds the request for fetching an SVG template.

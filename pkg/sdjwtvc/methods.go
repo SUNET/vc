@@ -9,10 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"io"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
-	"vc/pkg/jose"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/sha3"
@@ -26,6 +27,10 @@ type CredentialOptions struct {
 	ExpirationDays int
 	// TokenStatusList contains the Token Status List reference for credential revocation per draft-ietf-oauth-status-list
 	TokenStatusList *TokenStatusListReference
+	// Integrity is the pre-computed SRI hash of the VCTM document (e.g. "sha256-...").
+	// When non-empty it is set as the "vct#integrity" claim in the issued credential
+	// per SD-JWT VC draft-14 Section 6.
+	Integrity string
 }
 
 // TokenStatusListReference contains the status list reference to embed in a credential
@@ -37,88 +42,55 @@ type TokenStatusListReference struct {
 	URI string
 }
 
-// BuildCredential creates a complete SD-JWT credential with additional options
-func (c *Client) BuildCredential(issuer string, kid string, privateKey any, vct string, documentData []byte, holderJWK any, vctm *VCTM, opts *CredentialOptions) (string, error) {
-	// Set defaults
-	if opts == nil {
-		opts = &CredentialOptions{
-			DecoyDigests:   0,
-			ExpirationDays: 365,
-		}
-	}
-	if opts.ExpirationDays == 0 {
-		opts.ExpirationDays = 365
-	}
-	// Parse document data as generic map
-	body := map[string]any{}
-	if err := json.Unmarshal(documentData, &body); err != nil {
-		return "", fmt.Errorf("failed to unmarshal document data: %w", err)
-	}
-	fmt.Println("buildCredential", "body", body, "holderJWK", holderJWK)
-
-	// Add standard JWT claims
-	// Per SD-JWT VC draft-13 section 3.2.2.2:
-	// - iss: OPTIONAL (set when provided)
-	// - nbf, exp: OPTIONAL
-	// - vct: REQUIRED
-	body["nbf"] = int64(time.Now().Unix())
-	body["exp"] = time.Now().Add(time.Duration(opts.ExpirationDays) * 24 * time.Hour).Unix()
-	if issuer != "" {
-		body["iss"] = issuer
-	}
-	body["jti"] = uuid.NewString()
-	body["vct"] = vct
-
-	// Add confirmation claim with holder's public key
-	body["cnf"] = map[string]any{
-		"jwk": holderJWK,
-	}
-
-	// Determine signing algorithm from private key
-	signingMethod, algName := jose.GetSigningMethodFromKey(privateKey)
-
-	// Create JWT header
-	// Per SD-JWT VC draft-13 section 3.2.1: typ MUST be "dc+sd-jwt"
-	// (also accepts "vc+sd-jwt" during transition period)
-	header := map[string]any{
-		"typ": "dc+sd-jwt",
-		"kid": kid,
-		"alg": algName,
-	}
-
-	// Encode VCTM in header
-	vctmEncoded, err := vctm.Encode()
+// fetchVCTM fetches and parses a VCTM document from the given URL.
+// It verifies the fetched document's SRI integrity hash matches the expected
+// value per SD-JWT VC draft-14 Section 6.
+// Returns the parsed VCTM on success.
+func (c *Client) fetchVCTM(ctx context.Context, vctURL string, expectedIntegrity string) (*VCTM, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, vctURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to encode VCTM: %w", err)
+		return nil, fmt.Errorf("failed to create request for VCT URL %s: %w", vctURL, err)
 	}
-	header["vctm"] = vctmEncoded
-	fmt.Println("buildCredential", "header", header)
 
-	// Create selective disclosures using the provided VCTM
-	token, disclosures, err := c.MakeCredential(sha256.New(), body, vctm, opts.DecoyDigests)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to create selective disclosures: %w", err)
+		return nil, fmt.Errorf("failed to fetch VCTM from %s: %w", vctURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d fetching VCTM from %s", resp.StatusCode, vctURL)
 	}
 
-	fmt.Println("buildCredential", "token", token, "disclosures", disclosures)
-
-	// Sign the JWT
-	signedToken, err := Sign(header, token, signingMethod, privateKey)
+	rawBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign JWT: %w", err)
+		return nil, fmt.Errorf("failed to read VCTM response from %s: %w", vctURL, err)
 	}
 
-	fmt.Println("buildCredential", "signedToken", signedToken)
+	var vctm VCTM
+	if err := json.Unmarshal(rawBytes, &vctm); err != nil {
+		return nil, fmt.Errorf("failed to parse VCTM from %s: %w", vctURL, err)
+	}
 
-	// Combine signed JWT with disclosures
-	signedToken = Combine(signedToken, disclosures, "")
+	// Verify SRI integrity (required per SD-JWT VC draft-14 Section 6)
+	if expectedIntegrity == "" {
+		return nil, fmt.Errorf("integrity is required when fetching VCTM from %s", vctURL)
+	}
+	actualIntegrity, err := vctm.SRIIntegrity(rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute VCTM integrity: %w", err)
+	}
+	if actualIntegrity != expectedIntegrity {
+		return nil, fmt.Errorf("VCTM integrity mismatch: expected %s, got %s", expectedIntegrity, actualIntegrity)
+	}
 
-	return signedToken, nil
+	return &vctm, nil
 }
 
 // BuildCredentialWithSigner creates a complete SD-JWT credential using a Signer interface.
 // This allows signing with HSMs via PKCS#11 or other external signing services.
-func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, signer Signer, vct string, documentData []byte, holderJWK any, vctm *VCTM, opts *CredentialOptions) (string, error) {
+// The VCTM is fetched from the vct URL and verified against opts.Integrity.
+func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, signer Signer, vct string, documentData []byte, holderJWK any, opts *CredentialOptions) (string, error) {
 	// Set defaults
 	if opts == nil {
 		opts = &CredentialOptions{
@@ -148,6 +120,11 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 	}
 	body["jti"] = uuid.NewString()
 	body["vct"] = vct
+
+	// Add vct#integrity if provided (SD-JWT VC draft-14 Section 6)
+	if opts.Integrity != "" {
+		body["vct#integrity"] = opts.Integrity
+	}
 
 	// Add confirmation claim with holder's public key
 	body["cnf"] = map[string]any{
@@ -164,6 +141,17 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 		}
 	}
 
+	// Fetch and verify VCTM from the vct URL
+	vctm, err := c.fetchVCTM(ctx, vct, opts.Integrity)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch VCTM: %w", err)
+	}
+
+	// Validate document data against the fetched VCTM
+	if err := ValidateDocument(documentData, vctm); err != nil {
+		return "", fmt.Errorf("document validation failed: %w", err)
+	}
+
 	// Create JWT header using signer's algorithm and key ID
 	header := map[string]any{
 		"typ": "dc+sd-jwt",
@@ -171,14 +159,7 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 		"alg": signer.Algorithm(),
 	}
 
-	// Encode VCTM in header
-	vctmEncoded, err := vctm.Encode()
-	if err != nil {
-		return "", fmt.Errorf("failed to encode VCTM: %w", err)
-	}
-	header["vctm"] = vctmEncoded
-
-	// Create selective disclosures using the provided VCTM
+	// Create selective disclosures using the fetched VCTM
 	token, disclosures, err := c.MakeCredential(sha256.New(), body, vctm, opts.DecoyDigests)
 	if err != nil {
 		return "", fmt.Errorf("failed to create selective disclosures: %w", err)

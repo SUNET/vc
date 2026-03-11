@@ -94,7 +94,7 @@ determined by `auth_method` in the credential configuration.
                                        │
                           ┌────────────┴────────────┐
                           │                         │
-                   auth_method: basic        auth_method: pid_auth
+                   auth_method: basic        auth_method: openid4vp
                           │                         │
                ┌──────────▼──────────┐   ┌──────────▼───────────────┐
                │  PATH 1: PID        │   │  PATH 2: OTHER           │

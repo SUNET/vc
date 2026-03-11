@@ -98,24 +98,18 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	if len(authContext.Scopes) == 0 {
-		c.log.Error(nil, "no scope found in auth context")
-		return nil, errors.New("no scope found in auth context")
+	// Match a scope from the authorization context to a known credential constructor
+	scope, credentialConstructor, err := c.matchScope(authContext.Scopes)
+	if err != nil {
+		c.log.Error(err, "no matching scope in auth context")
+		return nil, err
 	}
 
 	document := &model.CompleteDocument{}
 
-	// Retrieve document based on scope configuration from credential constructor
-	scope := authContext.Scopes[0]
-	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
-	if credentialConstructor == nil {
-		c.log.Error(nil, "unsupported scope", "scope", scope)
-		return nil, errors.New("unsupported scope: " + scope)
-	}
-
 	// Determine retrieval strategy based on auth method
 	// - "basic": Identity-based authentication → retrieve from datastore
-	// - Other methods defined in auth_methods (e.g., "pid_auth"): Session-based → retrieve from cache
+	// - Other methods (e.g., "openid4vp"): Session-based → retrieve from cache
 	authMethod := credentialConstructor.AuthMethod
 	switch authMethod {
 	case model.AuthMethodBasic:
@@ -123,7 +117,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
 			Meta: &model.MetaData{
 				AuthenticSource: authContext.AuthenticSource,
-				VCT:             credentialConstructor.VCTM.VCT,
+				Scope:           scope,
 			},
 			Identity: authContext.Identity,
 		})
@@ -132,7 +126,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 
 	default:
-		// Auth methods from config (e.g., pid_auth): retrieve from session cache
+		// Session-based auth methods (e.g., openid4vp): retrieve from session cache
 		// These credentials require presenting another credential for authentication
 		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)
 		if !ok {
@@ -178,14 +172,14 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	// Branch based on requested credential format
 	switch format {
 	case "mso_mdoc":
-		return c.issueMDoc(ctx, authContext.Scopes[0], documentData, jwk, document)
+		return c.issueMDoc(ctx, scope, documentData, jwk, document)
 
 	case "vc+sd-jwt", "dc+sd-jwt":
-		return c.issueSDJWT(ctx, authContext.Scopes[0], documentData, jwk, document)
+		return c.issueSDJWT(ctx, scope, documentData, jwk, document)
 
 	case "ldp_vc", "vc+ld+json":
 		// W3C VC 2.0 Data Integrity credential
-		return c.issueVC20(ctx, authContext.Scopes[0], documentData, document, req)
+		return c.issueVC20(ctx, scope, documentData, document, req)
 
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
@@ -195,10 +189,17 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 // issueSDJWT issues an SD-JWT credential
 func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (*openid4vci.CredentialResponse, error) {
+	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
+	if credentialConstructor == nil {
+		return nil, fmt.Errorf("unsupported scope: %s", scope)
+	}
+
 	reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
 		Scope:        scope,
 		DocumentData: documentData,
 		Jwk:          jwk,
+		VctUrl:       credentialConstructor.GetVCTURL(),
+		Integrity:    credentialConstructor.GetIntegrity(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")

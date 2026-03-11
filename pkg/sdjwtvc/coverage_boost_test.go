@@ -20,12 +20,6 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 		t.Fatalf("Failed to generate key: %v", err)
 	}
 
-	client := &Client{}
-
-	issuer := "https://issuer.example.com"
-	kid := "key-1"
-	vct := "https://credentials.example.com/identity_credential"
-
 	mockName := "name"
 	vctm := &VCTM{
 		Claims: []Claim{
@@ -42,12 +36,19 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 		"crv": "P-256",
 	}
 
+	vctURL, integrity := serveVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "key-1")
+
 	t.Run("nil_options_uses_defaults", func(t *testing.T) {
-		token, err := client.BuildCredential(
-			issuer, kid, privateKey, vct, documentData, holderJWK, vctm, nil,
+		client := &Client{}
+		token, err := client.BuildCredentialWithSigner(
+			t.Context(),
+			"https://issuer.example.com",
+			signer, vctURL, documentData, holderJWK,
+			&CredentialOptions{Integrity: integrity},
 		)
 		if err != nil {
-			t.Fatalf("BuildCredentialWithOptions failed: %v", err)
+			t.Fatalf("BuildCredentialWithSigner failed: %v", err)
 		}
 		if token == "" {
 			t.Error("Expected non-empty token")
@@ -55,15 +56,19 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 	})
 
 	t.Run("zero_expiration_days_uses_default", func(t *testing.T) {
-		opts := &CredentialOptions{
-			DecoyDigests:   0,
-			ExpirationDays: 0, // Should default to 365
-		}
-		token, err := client.BuildCredential(
-			issuer, kid, privateKey, vct, documentData, holderJWK, vctm, opts,
+		client := &Client{}
+		token, err := client.BuildCredentialWithSigner(
+			t.Context(),
+			"https://issuer.example.com",
+			signer, vctURL, documentData, holderJWK,
+			&CredentialOptions{
+				DecoyDigests:   0,
+				ExpirationDays: 0, // Should default to 365
+				Integrity:      integrity,
+			},
 		)
 		if err != nil {
-			t.Fatalf("BuildCredentialWithOptions failed: %v", err)
+			t.Fatalf("BuildCredentialWithSigner failed: %v", err)
 		}
 		if token == "" {
 			t.Error("Expected non-empty token")
@@ -71,15 +76,19 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 	})
 
 	t.Run("custom_expiration_days", func(t *testing.T) {
-		opts := &CredentialOptions{
-			DecoyDigests:   2,
-			ExpirationDays: 90,
-		}
-		token, err := client.BuildCredential(
-			issuer, kid, privateKey, vct, documentData, holderJWK, vctm, opts,
+		client := &Client{}
+		token, err := client.BuildCredentialWithSigner(
+			t.Context(),
+			"https://issuer.example.com",
+			signer, vctURL, documentData, holderJWK,
+			&CredentialOptions{
+				DecoyDigests:   2,
+				ExpirationDays: 90,
+				Integrity:      integrity,
+			},
 		)
 		if err != nil {
-			t.Fatalf("BuildCredentialWithOptions failed: %v", err)
+			t.Fatalf("BuildCredentialWithSigner failed: %v", err)
 		}
 		if token == "" {
 			t.Error("Expected non-empty token")
@@ -87,9 +96,13 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 	})
 
 	t.Run("invalid_json_data", func(t *testing.T) {
+		client := &Client{}
 		invalidData := []byte(`{invalid json}`)
-		_, err := client.BuildCredential(
-			issuer, kid, privateKey, vct, invalidData, holderJWK, vctm, nil,
+		_, err := client.BuildCredentialWithSigner(
+			t.Context(),
+			"https://issuer.example.com",
+			signer, vctURL, invalidData, holderJWK,
+			&CredentialOptions{Integrity: integrity},
 		)
 		if err == nil {
 			t.Error("Expected error for invalid JSON")
@@ -333,49 +346,6 @@ func TestSign(t *testing.T) {
 		_, err = Sign(header, payload, signingMethod, privateKey)
 		if err == nil {
 			t.Error("Expected error for non-serializable payload")
-		}
-	})
-}
-
-// TestVCTMEncode tests VCTM encoding edge cases
-func TestVCTMEncode(t *testing.T) {
-	t.Run("encode_complex_vctm", func(t *testing.T) {
-		name := "name"
-		age := "age"
-
-		vctm := &VCTM{
-			VCT:         "https://example.com/credential",
-			Name:        "Test Credential",
-			Description: "A test credential",
-			Display: []VCTMDisplay{
-				{
-					Locale: "en",
-					Name: "Test",
-				},
-			},
-			Claims: []Claim{
-				{
-					Path: []*string{&name},
-					SD:   "always",
-				},
-				{
-					Path: []*string{&age},
-					SD:   "never",
-				},
-			},
-		}
-
-		encoded, err := vctm.Encode()
-		if err != nil {
-			t.Fatalf("Encode failed: %v", err)
-		}
-		if len(encoded) == 0 {
-			t.Error("Expected non-empty encoded result")
-		}
-
-		// Verify it's valid base64
-		if len(encoded[0]) == 0 {
-			t.Error("Expected non-empty encoded string")
 		}
 	})
 }

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-09
+**Generated:** 2026-03-11
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -46,7 +46,6 @@ Shared configuration used across all services.
 | `credential_offer_qr`    | `object` | Credential offer QR code settings                                                                                                                                | -                        | -       | No       |
 | `secret_file_path`       | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. | `"/etc/vc/secrets.yaml"` | -       | No       |
 | `ha`                     | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                                         | -                        | `false` | No       |
-| `auth_methods`           | `object` | Authentication methods for credential issuance, required by apigw, issuer, and verifier                                                                          | -                        | -       | No       |
 | `credential_constructor` | `object` | OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier                                                                  | -                        | -       | No       |
 
 ### `log`
@@ -102,28 +101,19 @@ Shared configuration used across all services.
 | `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
 | `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
 
-### `auth_methods` entry
-
-> **Path:** `.common.auth_methods.<key>`
-
-This specifies what credentials the wallet must present for authentication
-The format of the credentials is determined by looking up the VCTs in the credential_constructor
-
-| Field    | Type       | Description                                                           | Example | Default | Required |
-| -------- | ---------- | --------------------------------------------------------------------- | ------- | ------- | -------- |
-| `vcts`   | `[]string` | List of acceptable Verifiable Credential Type URNs for authentication | -       | -       | Yes      |
-| `claims` | `[]string` | Identity claims to extract from the authentication credential         | -       | -       | Yes      |
-
 ### `credential_constructor` entry
 
 > **Path:** `.common.credential_constructor.<key>`
 
-| Field            | Type     | Description    | Example | Default | Required |
-| ---------------- | -------- | -------------- | ------- | ------- | -------- |
-| `vctm_file_path` | `string` | VCTM File Path | -       | -       | Yes      |
-| `format`         | `string` | Format         | -       | -       | Yes      |
-| `auth_method`    | `string` | Auth Method    | -       | -       | Yes      |
-| `attributes`     | `object` | Attributes     | -       | -       | Yes      |
+| Field            | Type       | Description                                                    | Example | Default | Required                        |
+| ---------------- | ---------- | -------------------------------------------------------------- | ------- | ------- | ------------------------------- |
+| `vctm_file_path` | `string`   | Path to a local VCTM JSON file.                                | -       | -       | Yes (if vctm_url not set)       |
+| `vctm_url`       | `string`   | URL where the VCTM is already published externally.            | -       | -       | Yes (if vctm_file_path not set) |
+| `format`         | `string`   | Format                                                         | -       | -       | Yes                             |
+| `auth_method`    | `string`   | Auth Method                                                    | -       | -       | Yes                             |
+| `auth_scopes`    | `[]string` | Credential_constructor keys whose VCTs are acceptable for      | -       | -       | No                              |
+| `auth_claims`    | `[]string` | Identity claims to extract from the authentication credential. | -       | -       | No                              |
+| `attributes`     | `object`   | Attributes                                                     | -       | -       | Yes                             |
 
 ## `apigw` (Top-level)
 

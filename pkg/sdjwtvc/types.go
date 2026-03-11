@@ -1,6 +1,7 @@
 package sdjwtvc
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -99,16 +100,23 @@ type VCTM struct {
 	ExtendsIntegrity string `json:"extends#integrity,omitempty"`
 }
 
-// Encode encodes the VCTM to base64
-func (v *VCTM) Encode() ([]string, error) {
-	jsonData, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
+// SRIIntegrity computes the Subresource Integrity (SRI) hash of the VCTM document
+// as defined in W3C SRI spec and SD-JWT VC draft-14 Section 6.
+// The rawBytes parameter should be the original VCTM document bytes (not re-marshalled)
+// to preserve exact byte-level integrity.
+// If rawBytes is nil, the VCTM is marshalled to JSON.
+// Returns a string like "sha256-<base64-hash>".
+func (v *VCTM) SRIIntegrity(rawBytes []byte) (string, error) {
+	if rawBytes == nil {
+		var err error
+		rawBytes, err = json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal VCTM for integrity hash: %w", err)
+		}
 	}
-
-	encoded := base64.URLEncoding.EncodeToString(jsonData)
-
-	return []string{encoded}, nil
+	h := sha256.Sum256(rawBytes)
+	encoded := base64.StdEncoding.EncodeToString(h[:])
+	return "sha256-" + encoded, nil
 }
 
 // Attributes parse vctm claims and return a map of labels and their paths for each locale

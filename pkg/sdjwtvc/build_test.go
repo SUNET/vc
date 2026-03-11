@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBuildCredential tests the complete credential building process
-func TestBuildCredential(t *testing.T) {
+// TestBuildCredentialWithSigner tests the complete credential building process
+func TestBuildCredentialWithSigner(t *testing.T) {
 	// Generate test ECDSA key
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -47,16 +47,18 @@ func TestBuildCredential(t *testing.T) {
 		"issuing_country": "SE"
 	}`)
 
+	vctURL, integrity := serveVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "issuer-key-1")
+
 	client := New()
-	token, err := client.BuildCredential(
+	token, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"issuer-key-1",
-		privateKey,
-		"TestCredential",
+		signer,
+		vctURL,
 		documentData,
 		holderJWK,
-		vctm,
-		nil, // Use default options
+		&CredentialOptions{Integrity: integrity},
 	)
 
 	require.NoError(t, err)
@@ -79,7 +81,6 @@ func TestBuildCredential(t *testing.T) {
 	assert.Equal(t, "dc+sd-jwt", header["typ"])
 	assert.Equal(t, "ES256", header["alg"])
 	assert.Equal(t, "issuer-key-1", header["kid"])
-	assert.NotEmpty(t, header["vctm"])
 
 	// Decode payload (part before first ~)
 	payloadParts := splitOnTilde(parts[1])
@@ -92,7 +93,7 @@ func TestBuildCredential(t *testing.T) {
 
 	// Verify JWT claims
 	assert.Equal(t, "https://issuer.example.com", payload["iss"])
-	assert.Equal(t, "TestCredential", payload["vct"])
+	assert.Equal(t, vctURL, payload["vct"])
 	assert.Equal(t, "sha-256", payload["_sd_alg"])
 	assert.NotEmpty(t, payload["jti"])
 	assert.NotEmpty(t, payload["nbf"])
@@ -114,7 +115,7 @@ func TestBuildCredential(t *testing.T) {
 	assert.Greater(t, len(parts), 2, "token should have disclosure parts")
 }
 
-func TestBuildCredential_AlgorithmSelection(t *testing.T) {
+func TestBuildCredentialWithSigner_AlgorithmSelection(t *testing.T) {
 	tests := []struct {
 		name        string
 		keyType     string // "ecdsa" or "rsa"
@@ -184,16 +185,18 @@ func TestBuildCredential_AlgorithmSelection(t *testing.T) {
 				Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 			}
 
+			vctURL, integrity := serveVCTM(t, vctm)
+			signer := newTestSigner(privateKey, "key-1")
+
 			client := New()
-			token, err := client.BuildCredential(
+			token, err := client.BuildCredentialWithSigner(
+				t.Context(),
 				"https://issuer.example.com",
-				"key-1",
-				privateKey,
-				"TestCredential",
+				signer,
+				vctURL,
 				[]byte(`{"test_claim": "value"}`),
 				map[string]any{"kty": jwkType},
-				vctm,
-				nil, // Use default options
+				&CredentialOptions{Integrity: integrity},
 			)
 
 			require.NoError(t, err)
@@ -212,7 +215,7 @@ func TestBuildCredential_AlgorithmSelection(t *testing.T) {
 	}
 }
 
-func TestBuildCredential_InvalidJSON(t *testing.T) {
+func TestBuildCredentialWithSigner_InvalidJSON(t *testing.T) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -222,101 +225,78 @@ func TestBuildCredential_InvalidJSON(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
+	vctURL, integrity := serveVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "key-1")
+
 	client := New()
-	_, err = client.BuildCredential(
+	_, err = client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		privateKey,
-		"TestCredential",
+		signer,
+		vctURL,
 		[]byte(`{invalid json`),
 		map[string]any{"kty": "EC"},
-		vctm,
-		nil, // Use default options
+		&CredentialOptions{Integrity: integrity},
 	)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to unmarshal document data")
 }
 
-func TestBuildCredential_VCTMEncoding(t *testing.T) {
-	tests := []struct {
-		name       string
-		keyType    string // "ecdsa" or "rsa"
-		curve      elliptic.Curve
-		rsaKeySize int
-	}{
-		{
-			name:    "ECDSA P-256",
-			keyType: "ecdsa",
-			curve:   elliptic.P256(),
-		},
-		{
-			name:    "ECDSA P-384",
-			keyType: "ecdsa",
-			curve:   elliptic.P384(),
-		},
-		{
-			name:       "RSA 2048",
-			keyType:    "rsa",
-			rsaKeySize: 2048,
-		},
-		{
-			name:       "RSA 4096",
-			keyType:    "rsa",
-			rsaKeySize: 4096,
-		},
+func TestBuildCredentialWithSigner_MissingIntegrity(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	testClaim := "test"
+	vctm := &VCTM{
+		VCT:    "TestCredential",
+		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var privateKey any
-			var err error
-			var jwkType string
+	vctURL, _ := serveVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "key-1")
 
-			// Generate appropriate key type
-			if tt.keyType == "ecdsa" {
-				privateKey, err = ecdsa.GenerateKey(tt.curve, rand.Reader)
-				jwkType = "EC"
-			} else {
-				privateKey, err = rsa.GenerateKey(rand.Reader, tt.rsaKeySize)
-				jwkType = "RSA"
-			}
-			require.NoError(t, err)
+	client := New()
+	_, err = client.BuildCredentialWithSigner(
+		t.Context(),
+		"https://issuer.example.com",
+		signer,
+		vctURL,
+		[]byte(`{"test":"value"}`),
+		map[string]any{"kty": "EC"},
+		&CredentialOptions{}, // no Integrity
+	)
 
-			testClaim := "test_claim"
-			vctm := &VCTM{
-				VCT:    "TestCredential",
-				Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
-			}
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "integrity is required")
+}
 
-			client := New()
-			token, err := client.BuildCredential(
-				"https://issuer.example.com",
-				"key-1",
-				privateKey,
-				"TestCredential",
-				[]byte(`{"test_claim": "value"}`),
-				map[string]any{"kty": jwkType},
-				vctm,
-				nil, // Use default options
-			)
+func TestBuildCredentialWithSigner_WrongIntegrity(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 
-			require.NoError(t, err)
-
-			// Extract header and verify VCTM encoding
-			parts := splitToken(token)
-			headerStr, err := Base64Decode(parts[0])
-			require.NoError(t, err)
-
-			var header map[string]any
-			err = json.Unmarshal([]byte(headerStr), &header)
-			require.NoError(t, err)
-
-			vctmEncoded, ok := header["vctm"]
-			assert.True(t, ok, "vctm should be present in header")
-			assert.NotEmpty(t, vctmEncoded, "vctm should not be empty")
-		})
+	testClaim := "test"
+	vctm := &VCTM{
+		VCT:    "TestCredential",
+		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
+
+	vctURL, _ := serveVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "key-1")
+
+	client := New()
+	_, err = client.BuildCredentialWithSigner(
+		t.Context(),
+		"https://issuer.example.com",
+		signer,
+		vctURL,
+		[]byte(`{"test":"value"}`),
+		map[string]any{"kty": "EC"},
+		&CredentialOptions{Integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+	)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "integrity mismatch")
 }
 
 func TestGetSigningMethodFromKey_UnknownKeyType(t *testing.T) {

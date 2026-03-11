@@ -151,7 +151,7 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 		}
 
 		request.Username = username
-	case model.AuthMethodPID:
+	case model.AuthMethodOpenID4VP:
 		responseCode, ok := session.Get("response_code").(string)
 		if !ok {
 			err := errors.New("response_code not found in session")
@@ -201,7 +201,7 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 
 	// Delete all cookies, not just session.
 	c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
-	c.SetCookie("pid_auth_redirect_url", "", -1, "/authorization/consent", "", false, false)
+	c.SetCookie("openid4vp_redirect_url", "", -1, "/authorization/consent", "", false, false)
 
 	client, ok := s.cfg.APIGW.OauthServer.Clients[clientId]
 	if !ok {

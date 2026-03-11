@@ -26,6 +26,8 @@ type MakeSDJWTRequest struct {
 	Scope         string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`
 	DocumentData  []byte                 `protobuf:"bytes,2,opt,name=documentData,proto3" json:"documentData,omitempty"`
 	Jwk           *Jwk                   `protobuf:"bytes,3,opt,name=jwk,proto3" json:"jwk,omitempty"`
+	VctUrl        string                 `protobuf:"bytes,4,opt,name=vct_url,json=vctUrl,proto3" json:"vct_url,omitempty"`
+	Integrity     string                 `protobuf:"bytes,5,opt,name=integrity,proto3" json:"integrity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -79,6 +81,20 @@ func (x *MakeSDJWTRequest) GetJwk() *Jwk {
 		return x.Jwk
 	}
 	return nil
+}
+
+func (x *MakeSDJWTRequest) GetVctUrl() string {
+	if x != nil {
+		return x.VctUrl
+	}
+	return ""
+}
+
+func (x *MakeSDJWTRequest) GetIntegrity() string {
+	if x != nil {
+		return x.Integrity
+	}
+	return ""
 }
 
 type MakeSDJWTReply struct {
@@ -745,11 +761,13 @@ var File_v1_issuer_proto protoreflect.FileDescriptor
 
 const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
-	"\x0fv1-issuer.proto\x12\tv1.issuer\"n\n" +
+	"\x0fv1-issuer.proto\x12\tv1.issuer\"\xa5\x01\n" +
 	"\x10MakeSDJWTRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\"\n" +
 	"\fdocumentData\x18\x02 \x01(\fR\fdocumentData\x12 \n" +
-	"\x03jwk\x18\x03 \x01(\v2\x0e.v1.issuer.jwkR\x03jwk\"\xbb\x01\n" +
+	"\x03jwk\x18\x03 \x01(\v2\x0e.v1.issuer.jwkR\x03jwk\x12\x17\n" +
+	"\avct_url\x18\x04 \x01(\tR\x06vctUrl\x12\x1c\n" +
+	"\tintegrity\x18\x05 \x01(\tR\tintegrity\"\xbb\x01\n" +
 	"\x0eMakeSDJWTReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +

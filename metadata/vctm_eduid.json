@@ -1,5 +1,4 @@
 {
-  "vct": "urn:credential:eduid:1",
   "name": "eduID Credential",
   "description": "A verifiable credential for educational identity, based on PID ARF 1.8. Provides identity attributes for students and staff within the education and research sector.",
   "display": [

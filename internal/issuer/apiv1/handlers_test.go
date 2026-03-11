@@ -1,8 +1,13 @@
 package apiv1
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"vc/internal/gen/issuer/apiv1_issuer"
@@ -51,7 +56,28 @@ var mockDiplomaData = []byte(`
 }
 `)
 
+// serveTestVCTM starts an httptest server serving the VCTM from testdata and
+// returns the server URL and the SRI integrity hash. The server is registered
+// for cleanup via t.Cleanup.
+func serveTestVCTM(t *testing.T) (vctURL string, integrity string) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/vctm_test.json")
+	if err != nil {
+		t.Fatalf("read testdata/vctm_test.json: %v", err)
+	}
+	h := sha256.Sum256(raw)
+	integrity = fmt.Sprintf("sha256-%s", base64.StdEncoding.EncodeToString(h[:]))
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(raw)
+	}))
+	t.Cleanup(ts.Close)
+	return ts.URL, integrity
+}
+
 func TestMakeSDJWT(t *testing.T) {
+	vctURL, integrity := serveTestVCTM(t)
+
 	tests := []struct {
 		name    string
 		request *CreateCredentialRequest
@@ -63,6 +89,8 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: mockEhic,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -77,6 +105,8 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "pid",
 				DocumentData: mockPidData,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -91,6 +121,8 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "diploma",
 				DocumentData: mockDiplomaData,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -101,10 +133,12 @@ func TestMakeSDJWT(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "unsupported scope",
+			name: "missing integrity",
 			request: &CreateCredentialRequest{
-				Scope:        "unsupported_scope",
+				Scope:        "ehic",
 				DocumentData: mockEhic,
+				VCTUrl:       vctURL,
+				Integrity:    "",
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -113,13 +147,15 @@ func TestMakeSDJWT(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "unsupported scope",
+			errMsg:  "integrity is required",
 		},
 		{
 			name: "missing scope",
 			request: &CreateCredentialRequest{
 				Scope:        "",
 				DocumentData: mockEhic,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -134,6 +170,8 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: nil,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -148,6 +186,8 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: mockEhic,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK:          nil,
 			},
 			wantErr: true,
@@ -157,6 +197,8 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: []byte(`{invalid json`),
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -236,6 +278,7 @@ func TestMakeSDJWT(t *testing.T) {
 }
 
 func TestMakeSDJWT_WithRSAKey(t *testing.T) {
+	vctURL, integrity := serveTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "rsa", log)
@@ -243,6 +286,8 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 	request := &CreateCredentialRequest{
 		Scope:        "ehic",
 		DocumentData: mockEhic,
+		VCTUrl:       vctURL,
+		Integrity:    integrity,
 		JWK: &apiv1_issuer.Jwk{
 			Kty: "EC",
 			Crv: "P-256",
@@ -274,6 +319,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 }
 
 func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
+	vctURL, integrity := serveTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
@@ -281,6 +327,8 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	request := &CreateCredentialRequest{
 		Scope:        "ehic",
 		DocumentData: mockEhic,
+		VCTUrl:       vctURL,
+		Integrity:    integrity,
 		JWK: &apiv1_issuer.Jwk{
 			Kty: "EC",
 			Crv: "P-256",
@@ -336,6 +384,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 }
 
 func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
+	vctURL, integrity := serveTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
@@ -357,6 +406,8 @@ func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
 			request := &CreateCredentialRequest{
 				Scope:        scope,
 				DocumentData: docData,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
@@ -374,6 +425,8 @@ func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
 }
 
 func TestMakeSDJWT_ValidationErrors(t *testing.T) {
+	vctURL, integrity := serveTestVCTM(t)
+
 	tests := []struct {
 		name         string
 		scope        string
@@ -424,6 +477,8 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 			req := &CreateCredentialRequest{
 				Scope:        tt.scope,
 				DocumentData: tt.documentData,
+				VCTUrl:       vctURL,
+				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
 					Crv: "P-256",
