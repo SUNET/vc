@@ -1,6 +1,3 @@
-//go:build didcomm && vc20
-// +build didcomm,vc20
-
 // Package issuecredential implements the DIDComm Issue Credential protocol 3.0.
 //
 // This protocol enables issuing verifiable credentials from an issuer to a holder

@@ -1,5 +1,3 @@
-//go:build saml
-
 package samlsp
 
 import (
@@ -44,6 +42,9 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 	}
 
 	// Load X.509 key pair for signing/encryption
+	// TODO(pki): Migrate to pki.KeyConfig when SAML signing needs extend beyond
+	// TLS mutual auth (e.g., HSM-backed keys). Currently uses tls.LoadX509KeyPair
+	// directly which is sufficient for the TLS key pair use case.
 	keyPair, err := tls.LoadX509KeyPair(cfg.CertificatePath, cfg.PrivateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load SAML key pair: %w", err)
@@ -82,6 +83,17 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 		SignatureMethod:   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
 	}
 
+	// Load optional metadata signing certificate for signature verification
+	var metadataSigningCert *x509.Certificate
+	if cfg.MetadataSigningCertPath != "" {
+		metadataSigningCert, err = LoadMetadataSigningCert(cfg.MetadataSigningCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load metadata signing certificate: %w", err)
+		}
+		s.log.Info("metadata signature verification enabled",
+			"cert_path", cfg.MetadataSigningCertPath)
+	}
+
 	// Initialize MDQ client (either MDQ or static mode)
 	if cfg.StaticIDPMetadata != nil {
 		// Static IdP mode
@@ -95,6 +107,7 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 			metadataSource,
 			cfg.StaticIDPMetadata.EntityID,
 			isURL,
+			metadataSigningCert,
 			s.log,
 		)
 		if err != nil {
@@ -106,7 +119,7 @@ func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache
 			"idp_entity_id", cfg.StaticIDPMetadata.EntityID)
 	} else {
 		// MDQ mode
-		s.mdqClient = NewMDQClient(cfg.MDQServer, cfg.MetadataCacheTTL, s.log)
+		s.mdqClient = NewMDQClient(cfg.MDQServer, cfg.MetadataCacheTTL, metadataSigningCert, s.log)
 		s.log.Info("SAML service initialized with MDQ",
 			"entity_id", cfg.EntityID,
 			"mdq_server", cfg.MDQServer)
@@ -160,6 +173,14 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 		return nil, fmt.Errorf("failed to get IdP metadata: %w", err)
 	}
 
+	// Validate IdP metadata structure before accessing
+	if len(idpMetadata.IDPSSODescriptors) == 0 {
+		return nil, fmt.Errorf("no IdP SSO descriptors in metadata for %s", idpEntityID)
+	}
+	if len(idpMetadata.IDPSSODescriptors[0].SingleSignOnServices) == 0 {
+		return nil, fmt.Errorf("no SSO services in IdP metadata for %s", idpEntityID)
+	}
+
 	// Create authentication request
 	req, err := s.sp.MakeAuthenticationRequest(
 		idpMetadata.IDPSSODescriptors[0].SingleSignOnServices[0].Location,
@@ -193,6 +214,33 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 	}, nil
 }
 
+// InitiateAuthForVCI initiates a SAML authentication flow that is linked to
+// an OpenID4VCI credential issuance session. The VCI session ID is stored in
+// the SAML session so that the ACS handler can route the result back into
+// the VCI pipeline.
+func (s *Service) InitiateAuthForVCI(ctx context.Context, idpEntityID, credentialType, vciSessionID string) (*AuthRequest, error) {
+	authReq, err := s.InitiateAuth(ctx, idpEntityID, credentialType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the SAML session with VCI linkage
+	session, err := s.getSession(ctx, authReq.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update SAML session with VCI context: %w", err)
+	}
+
+	session.VCISessionID = vciSessionID
+	s.sessionCache.Set(ctx, authReq.ID, session)
+
+	s.log.Info("SAML auth initiated for VCI flow",
+		"saml_request_id", authReq.ID,
+		"vci_session_id", vciSessionID,
+		"credential_type", credentialType)
+
+	return authReq, nil
+}
+
 // Assertion represents a processed SAML assertion
 type Assertion struct {
 	NameID     string
@@ -216,12 +264,14 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 		return nil, fmt.Errorf("failed to get IdP metadata: %w", err)
 	}
 
-	// Set IdP metadata on SP for validation
-	s.sp.IDPMetadata = idpMetadata
+	// Create a per-request copy of the SP to avoid race conditions on
+	// IDPMetadata when processing concurrent SAML responses from different IdPs.
+	sp := *s.sp
+	sp.IDPMetadata = idpMetadata
 
 	// Parse and validate SAML response
-	acsURL := s.sp.AcsURL
-	samlResp, err := s.sp.ParseResponse(&http.Request{
+	acsURL := sp.AcsURL
+	samlResp, err := sp.ParseResponse(&http.Request{
 		URL: &acsURL,
 		PostForm: url.Values{
 			"SAMLResponse": {samlResponseEncoded},
@@ -244,6 +294,16 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 		}
 	}
 
+	// Validate assertion subject and conditions are present.
+	// Time conditions (NotBefore/NotOnOrAfter) are already validated by
+	// crewjam/saml's validateAssertion(), so we don't duplicate that here.
+	if samlResp.Subject == nil || samlResp.Subject.NameID == nil {
+		return nil, fmt.Errorf("SAML assertion missing Subject or NameID")
+	}
+	if samlResp.Conditions == nil {
+		return nil, fmt.Errorf("SAML assertion missing Conditions")
+	}
+
 	return &Assertion{
 		NameID:     samlResp.Subject.NameID.Value,
 		Attributes: attributes,
@@ -258,11 +318,16 @@ func (s *Service) GetSession(ctx context.Context, sessionID string) (*Session, e
 	return s.getSession(ctx, sessionID)
 }
 
+// DeleteSession removes a session by ID
+func (s *Service) DeleteSession(ctx context.Context, sessionID string) {
+	s.deleteSession(ctx, sessionID)
+}
+
 // getSession retrieves a session by ID from the cache.
 func (s *Service) getSession(ctx context.Context, id string) (*Session, error) {
 	session, ok := s.sessionCache.Get(ctx, id)
 	if !ok || session == nil {
-		return nil, fmt.Errorf("session not found or expired: %s", id)
+		return nil, fmt.Errorf("session not found or expired")
 	}
 
 	return session, nil
@@ -313,29 +378,5 @@ func BuildTransformer(cfg *model.SAMLConfig) (*ClaimTransformer, error) {
 		return nil, fmt.Errorf("SAML not enabled")
 	}
 
-	// Convert config mappings to transformer format
-	mappings := make(map[string]*CredentialMapping, len(cfg.CredentialMappings))
-
-	for credentialType, credMapping := range cfg.CredentialMappings {
-		// Convert config attribute mappings to transformer format
-		attributes := make(map[string]*AttributeMapping)
-
-		for attrID, attrCfg := range credMapping.Attributes {
-			attributes[attrID] = &AttributeMapping{
-				Claim:     attrCfg.Claim,
-				Required:  attrCfg.Required,
-				Transform: attrCfg.Transform,
-				Default:   attrCfg.Default,
-			}
-		}
-
-		mappings[credentialType] = &CredentialMapping{
-			CredentialType:     credentialType,
-			CredentialConfigID: credMapping.CredentialConfigID,
-			Attributes:         attributes,
-			DefaultIdP:         credMapping.DefaultIdP,
-		}
-	}
-
-	return NewClaimTransformer(mappings), nil
+	return NewClaimTransformer(cfg.CredentialMappings), nil
 }

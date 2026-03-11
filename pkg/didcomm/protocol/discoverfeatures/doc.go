@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package discoverfeatures implements the DIDComm Discover Features Protocol 2.0.
 //
 // Discover Features is used to query another agent about the protocols

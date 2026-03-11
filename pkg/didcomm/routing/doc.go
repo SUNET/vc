@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package routing implements DIDComm v2.1 message routing.
 //
 // The routing package provides support for DIDComm mediators and message

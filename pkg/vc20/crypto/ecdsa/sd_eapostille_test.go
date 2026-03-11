@@ -1,6 +1,3 @@
-//go:build vc20
-// +build vc20
-
 package ecdsa
 
 import (

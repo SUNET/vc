@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package message provides DIDComm v2.1 message types and operations.
 //
 // This package implements the core message structures defined in the

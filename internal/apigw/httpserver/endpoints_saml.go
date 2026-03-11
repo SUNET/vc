@@ -1,10 +1,7 @@
-//go:build saml
-
 package httpserver
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +9,7 @@ import (
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
 	"vc/pkg/crypto"
 	"vc/pkg/grpchelpers"
+	"vc/pkg/model"
 	"vc/pkg/openid4vci"
 
 	"github.com/gin-gonic/gin"
@@ -129,28 +127,28 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, fmt.Errorf("SAMLResponse parameter is required")
 	}
 
-	// Decode base64
-	samlResponseXML, err := base64.StdEncoding.DecodeString(samlResponseB64)
-	if err != nil {
-		span.SetStatus(codes.Error, "invalid base64")
-		return nil, fmt.Errorf("failed to decode SAMLResponse: %w", err)
-	}
-
 	relayState := c.PostForm("RelayState")
 
-	// Process the SAML assertion
-	assertion, err := s.samlSPService.ProcessAssertion(ctx, string(samlResponseXML), relayState)
+	// Pass the base64-encoded SAMLResponse directly to ProcessAssertion.
+	// The crewjam/saml library handles base64 decoding internally.
+	assertion, err := s.samlSPService.ProcessAssertion(ctx, samlResponseB64, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
-	// Retrieve session to get credential type
+	// Retrieve session to get credential type.
+	// Ensure session is cleaned up if any subsequent step fails.
 	session, err := s.samlSPService.GetSession(ctx, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			s.samlSPService.DeleteSession(ctx, relayState)
+		}
+	}()
 
 	// Build transformer from config
 	transformer, err := s.samlSPService.BuildTransformer()
@@ -170,6 +168,10 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// Take the first value from each attribute array
 	samlAttrs := make(map[string]any)
 	for key, values := range assertion.Attributes {
+		if len(values) > 1 {
+			s.log.Warn("SAML attribute has multiple values, using first",
+				"attribute", key, "count", len(values))
+		}
 		if len(values) > 0 {
 			samlAttrs[key] = values[0] // Use first value
 		}
@@ -182,10 +184,49 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, err
 	}
 
+	claimKeys := make([]string, 0, len(claims))
+	for k := range claims {
+		claimKeys = append(claimKeys, k)
+	}
 	s.log.Info("SAML authentication successful",
 		"credential_type", session.CredentialType,
-		"claims_count", len(claims))
+		"claims_count", len(claims),
+		"claim_keys", claimKeys)
 
+	// VCI mode: if the SAML session was initiated from the OpenID4VCI consent flow,
+	// store the transformed claims as a document in the VCI session cache and redirect
+	// back to the consent page, where the standard VCI pipeline will continue.
+	if session.VCISessionID != "" {
+		s.log.Info("SAML ACS: VCI mode detected, storing document in VCI cache",
+			"vci_session_id", session.VCISessionID,
+			"credential_type", session.CredentialType)
+
+		doc := &model.CompleteDocument{
+			Meta: &model.MetaData{
+				AuthenticSource: session.IDPEntityID,
+			},
+			DocumentData:        claims,
+			DocumentDataVersion: "1.0.0",
+		}
+		docs := map[string]*model.CompleteDocument{
+			session.IDPEntityID: doc,
+		}
+
+		if err := s.apiv1.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
+			span.SetStatus(codes.Error, "VCI document storage failed")
+			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		}
+
+		// Clean up SAML session (clear err so defer doesn't double-delete)
+		err = nil
+		s.samlSPService.DeleteSession(ctx, relayState)
+
+		// Redirect browser back to the consent page to continue the VCI flow
+		c.Redirect(http.StatusFound, "/authorization/consent/#/credentials")
+		return nil, nil
+	}
+
+	// Standalone mode: create credential directly via issuer gRPC
 	// Marshal claims to JSON for the credential
 	documentData, err := json.Marshal(claims)
 	if err != nil {
@@ -197,33 +238,35 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// In a production scenario, the wallet would provide the JWK
 	jwk := session.JWK
 	if jwk == nil {
-		// For SAML flow without wallet involvement, we generate a JWK
-		// This is primarily for testing and backward compatibility
-		s.log.Info("No JWK provided in session, generating ephemeral key")
-		// TODO: Consider if we should require JWK from wallet instead
+		span.SetStatus(codes.Error, "JWK required for standalone SAML credential binding")
+		return nil, fmt.Errorf("wallet must provide a JWK for credential binding in standalone SAML mode")
 	}
 
 	// Create credential using the issuer gRPC API
-	credential, err := s.createCredentialViaSAML(ctx, mapping.CredentialType, documentData, jwk)
+	credential, err := s.createCredentialViaSAML(ctx, session.CredentialType, documentData, jwk)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential creation failed")
 		return nil, fmt.Errorf("failed to create credential: %w", err)
 	}
 
 	// Generate credential offer for wallet
-	credentialOffer, err := s.generateCredentialOffer(ctx, mapping.CredentialType, mapping.CredentialConfigID)
+	credentialOffer, err := s.generateCredentialOffer(ctx, session.CredentialType, mapping.CredentialConfigID)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
 	}
 
+	// Clean up SAML session (clear err so defer doesn't double-delete)
+	err = nil
+	s.samlSPService.DeleteSession(ctx, relayState)
+
 	s.log.Info("Credential issued successfully",
-		"credential_type", mapping.CredentialType,
+		"credential_type", session.CredentialType,
 		"offer_id", credentialOffer["id"])
 
 	response := map[string]any{
 		"status":           "success",
-		"credential_type":  mapping.CredentialType,
+		"credential_type":  session.CredentialType,
 		"credential":       credential,
 		"credential_offer": credentialOffer,
 		"message":          "SAML authentication and credential issuance successful",

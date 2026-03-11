@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 // Package harness provides shared test infrastructure for DIDComm interoperability testing.
 package harness
 

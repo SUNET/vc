@@ -7,18 +7,21 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 	"vc/internal/verifier/cache"
 	"vc/internal/verifier/db"
 	"vc/internal/verifier/notify"
 	"vc/pkg/configuration"
+	"vc/pkg/jose"
 	"vc/pkg/logger"
 	"vc/pkg/model"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
 	"vc/pkg/pki"
 	"vc/pkg/trace"
+	"vc/pkg/trust"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -40,8 +43,10 @@ type Client struct {
 	pkiSignerChain []string
 
 	// Clients and services
-	openid4vp    *openid4vp.Client
-	trustService *openid4vp.TrustService
+	openid4vp      *openid4vp.Client
+	trustService   *openid4vp.TrustService
+	trustEvaluator trust.TrustEvaluator
+	jwksResolver   *trust.JWKSKeyResolver
 
 	// Cache
 	cacheService *cache.Service
@@ -70,6 +75,10 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		openid4vp:    openid4vpClient,
 		tracer:       tracer,
 		cacheService: cacheService,
+		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
+			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
+		}),
 	}
 
 	// Load PKI signing key and chain for request object signing and OIDC
@@ -96,6 +105,17 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	}
 
 	c.trustService = &openid4vp.TrustService{}
+
+	// Initialize trust evaluator from config
+	// If PDPURL is configured, uses AuthZEN PDP for trust decisions ("default deny" mode)
+	// If PDPURL is empty/nil, uses AllowAllEvaluator ("allow all" mode)
+	pdpURL := cfg.Verifier.Trust.PDPURL
+	c.trustEvaluator = trust.NewTrustEvaluatorFromConfig(pdpURL)
+	if pdpURL == "" {
+		c.log.Warn("Trust evaluation is DISABLED - no pdp_url configured. All credential issuers will be trusted.")
+	} else {
+		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
+	}
 
 	c.log.Info("Started")
 

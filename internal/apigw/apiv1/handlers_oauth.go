@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
 	"vc/pkg/helpers"
@@ -240,6 +241,53 @@ func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServer
 	}
 
 	return signedMetadata, nil
+}
+
+// JWKSResponse represents a JSON Web Key Set (RFC 7517 §5).
+type JWKSResponse = apiv1_issuer.Keys
+
+// JWKS returns the issuer's public signing keys as a JWK Set.
+// The keys are fetched from the issuer via gRPC and stripped of any private
+// key material before being served.
+func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
+	c.log.Debug("JWKS request")
+
+	reply, err := c.issuerClient.JWKS(ctx, &apiv1_issuer.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWKS from issuer: %w", err)
+	}
+
+	jwks := reply.GetJwks()
+	if jwks == nil {
+		return &apiv1_issuer.Keys{}, nil
+	}
+
+	// Strip private key material — only public keys are served
+	for _, key := range jwks.GetKeys() {
+		key.D = ""
+		key.KeyOps = nil
+		key.Ext = false
+	}
+
+	return jwks, nil
+}
+
+// SDJWTVCIssuerMetadataResponse represents JWT VC Issuer Metadata per SD-JWT VC §5.3.
+type SDJWTVCIssuerMetadataResponse struct {
+	Issuer  string `json:"issuer"`
+	JWKSURI string `json:"jwks_uri"`
+}
+
+// SDJWTVCIssuerMetadata returns the JWT VC Issuer Metadata per draft-ietf-oauth-sd-jwt-vc §5.3.
+// This metadata is served at /.well-known/jwt-vc-issuer and allows verifiers to discover
+// the issuer's JWKS endpoint.
+func (c *Client) SDJWTVCIssuerMetadata(ctx context.Context) (*SDJWTVCIssuerMetadataResponse, error) {
+	c.log.Debug("sd-jwt-vc issuer metadata request")
+
+	return &SDJWTVCIssuerMetadataResponse{
+		Issuer:  c.cfg.APIGW.PublicURL,
+		JWKSURI: c.cfg.APIGW.PublicURL + "/jwks",
+	}, nil
 }
 
 type OauthAuthorizationConsentRequest struct {

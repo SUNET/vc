@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"vc/pkg/jose"
 	"vc/pkg/trust"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -123,7 +124,7 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 	if preToken != nil {
 		// Check for x5c header
 		if x5cRaw, ok := preToken.Header["x5c"]; ok && opts.TrustEvaluator != nil {
-			chain, err := parseX5CHeader(x5cRaw)
+			chain, err := jose.ParseX5CHeader(x5cRaw)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Errorf("failed to parse x5c header: %w", err))
 				return result, err
@@ -604,45 +605,4 @@ func decodeVCTM(vctmEncoded any) (*VCTM, error) {
 		// Just skip VCTM if it's in an unexpected format
 		return nil, nil
 	}
-}
-
-// parseX5CHeader parses the x5c header into a certificate chain.
-// The x5c header is an array of base64-encoded DER certificates,
-// with the leaf certificate first.
-func parseX5CHeader(x5cRaw any) ([]*x509.Certificate, error) {
-	x5cArray, ok := x5cRaw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("x5c header must be an array")
-	}
-
-	if len(x5cArray) == 0 {
-		return nil, fmt.Errorf("x5c header is empty")
-	}
-
-	certs := make([]*x509.Certificate, 0, len(x5cArray))
-	for i, certRaw := range x5cArray {
-		certB64, ok := certRaw.(string)
-		if !ok {
-			return nil, fmt.Errorf("x5c[%d] is not a string", i)
-		}
-
-		// x5c uses standard base64 encoding (not URL-safe)
-		certDER, err := base64.StdEncoding.DecodeString(certB64)
-		if err != nil {
-			// Try URL-safe base64 as fallback
-			certDER, err = base64.RawURLEncoding.DecodeString(certB64)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode x5c[%d]: %w", i, err)
-			}
-		}
-
-		cert, err := x509.ParseCertificate(certDER)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse x5c[%d]: %w", i, err)
-		}
-
-		certs = append(certs, cert)
-	}
-
-	return certs, nil
 }

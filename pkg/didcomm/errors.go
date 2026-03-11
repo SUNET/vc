@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 package didcomm
 
 import "errors"

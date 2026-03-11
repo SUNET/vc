@@ -1,6 +1,3 @@
-//go:build didcomm && vc20
-// +build didcomm,vc20
-
 // Package crypto provides HSM and external signer support for DIDComm operations.
 package crypto
 

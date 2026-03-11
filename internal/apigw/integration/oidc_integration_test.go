@@ -1,5 +1,3 @@
-//go:build oidcrp
-
 package integration
 
 import (
@@ -129,6 +127,97 @@ func TestOIDCIntegration_ClaimTransformations(t *testing.T) {
 
 	t.Run("StringTransformations", func(t *testing.T) {
 		testStringTransformations(t, env)
+	})
+}
+
+// TestOIDCIntegration_UserInfo tests UserInfo endpoint fetch and claim merging
+func TestOIDCIntegration_UserInfo(t *testing.T) {
+	env := setupOIDCTestEnvironment(t)
+	defer env.cleanup()
+
+	t.Run("FetchAndMergeClaims", func(t *testing.T) {
+		ctx := t.Context()
+
+		// Initiate auth, get session, process callback to obtain an access token
+		authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+		require.NoError(t, err)
+
+		session, err := env.oidcService.GetSession(ctx, authReq.State)
+		require.NoError(t, err)
+
+		code := "valid-auth-code|" + session.Nonce
+		authResp, err := env.oidcService.ProcessCallback(ctx, code, authReq.State)
+		require.NoError(t, err)
+		require.NotEmpty(t, authResp.AccessToken)
+
+		// Fetch UserInfo using the access token
+		userInfoClaims, err := env.oidcService.GetUserInfo(ctx, authResp.AccessToken)
+		require.NoError(t, err)
+
+		// Verify UserInfo contains expected claims
+		assert.Equal(t, "user-123", userInfoClaims["sub"])
+		assert.Equal(t, "John", userInfoClaims["given_name"])
+		assert.Equal(t, "Doe", userInfoClaims["family_name"])
+		assert.Equal(t, "john.doe@example.com", userInfoClaims["email"])
+		assert.Equal(t, "1990-01-01", userInfoClaims["birthdate"])
+
+		// Verify sub matches between ID token and UserInfo
+		assert.Equal(t, authResp.Claims["sub"], userInfoClaims["sub"],
+			"sub in UserInfo must match sub in ID token (OIDC Core §5.3.2)")
+
+		// Verify merge: UserInfo claims take precedence
+		for k, v := range userInfoClaims {
+			authResp.Claims[k] = v
+		}
+		assert.Equal(t, "john.doe@example.com", authResp.Claims["email"])
+	})
+
+	t.Run("SubMismatchDetected", func(t *testing.T) {
+		// Override the mock to return a different sub in UserInfo
+		origHandler := env.mockOP.server.Config.Handler
+		mux := http.NewServeMux()
+		mux.HandleFunc("/.well-known/openid-configuration", env.mockOP.handleDiscovery)
+		mux.HandleFunc("/jwks", env.mockOP.handleJWKS)
+		mux.HandleFunc("/token", env.mockOP.handleToken)
+		mux.HandleFunc("/authorize", env.mockOP.handleAuthorize)
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"sub":        "different-user-456",
+				"given_name": "Jane",
+			})
+		})
+		env.mockOP.server.Config.Handler = mux
+		defer func() { env.mockOP.server.Config.Handler = origHandler }()
+
+		ctx := t.Context()
+
+		authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+		require.NoError(t, err)
+
+		session, err := env.oidcService.GetSession(ctx, authReq.State)
+		require.NoError(t, err)
+
+		code := "valid-auth-code|" + session.Nonce
+		authResp, err := env.oidcService.ProcessCallback(ctx, code, authReq.State)
+		require.NoError(t, err)
+
+		// Fetch UserInfo — sub will differ
+		userInfoClaims, err := env.oidcService.GetUserInfo(ctx, authResp.AccessToken)
+		require.NoError(t, err)
+
+		// Reproduce the handler's sub check
+		uiSub, _ := userInfoClaims["sub"].(string)
+		idSub, _ := authResp.Claims["sub"].(string)
+		assert.NotEqual(t, uiSub, idSub, "subs should differ in this test")
+	})
+
+	t.Run("InvalidAccessTokenFallback", func(t *testing.T) {
+		ctx := t.Context()
+
+		// Calling GetUserInfo with an invalid token should return an error
+		_, err := env.oidcService.GetUserInfo(ctx, "")
+		assert.Error(t, err, "empty access token should fail")
 	})
 }
 
@@ -406,7 +495,7 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 		Enable: true,
 		Registration: &model.OIDCRPRegistrationConfig{
 			Preconfigured: &model.OIDCRPPreconfiguredConfig{
-				Enable:      true,
+				Enable:       true,
 				ClientID:     op.clientID,
 				ClientSecret: op.clientSecret,
 			},
@@ -508,7 +597,11 @@ func testProviderDiscovery(t *testing.T, env *oidcTestEnvironment) {
 	transformer, err := env.oidcService.BuildTransformer()
 	require.NoError(t, err)
 	require.NotNil(t, transformer)
-	assert.NotEmpty(t, transformer.Mappings, "transformer should have credential mappings")
+
+	// Verify the transformer has mappings by attempting to get a known one
+	mapping, err := transformer.GetMapping("pid")
+	assert.NoError(t, err)
+	assert.NotNil(t, mapping, "transformer should have credential mapping for 'pid'")
 }
 
 // testOIDCInitiateAuth verifies auth initiation produces a valid authorization URL
@@ -720,7 +813,7 @@ func testMissingRequiredClaims(t *testing.T, env *oidcTestEnvironment) {
 
 	_, err = transformer.TransformClaims("pid", incompleteClaims)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing required claim")
+	assert.Contains(t, err.Error(), "missing required attribute")
 }
 
 // testInvalidAuthorizationCode tests that an invalid code returns an error

@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package trustping implements the DIDComm Trust Ping Protocol 2.0.
 //
 // Trust Ping is used to test connectivity and verify that an agent is

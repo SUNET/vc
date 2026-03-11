@@ -1,10 +1,9 @@
-//go:build oidcrp
-
 package httpserver
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"vc/internal/apigw/apiv1"
 
@@ -72,11 +71,34 @@ func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (a
 		State: c.Query("state"),
 	}
 
+	// Check for IdP error responses (RFC 6749 §4.1.2.1)
+	if idpError := c.Query("error"); idpError != "" {
+		idpDesc := c.Query("error_description")
+		s.log.Error(nil, "OIDC IdP returned error",
+			"error", idpError,
+			"error_description", idpDesc,
+			"state", req.State)
+		span.SetStatus(codes.Error, "IdP error: "+idpError)
+		return nil, fmt.Errorf("identity provider error: %s - %s", idpError, idpDesc)
+	}
+
 	if req.Code == "" || req.State == "" {
 		span.SetStatus(codes.Error, "missing code or state parameter")
 		return nil, fmt.Errorf("missing required parameters: code and state")
 	}
 
 	// Delegate to apiv1 layer
-	return s.apiv1.OIDCRPCallback(ctx, req, s.oidcrpService)
+	reply, err := s.apiv1.OIDCRPCallback(ctx, req, s.oidcrpService)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	// VCI mode: redirect browser back to consent page
+	if reply != nil && reply.VCIRedirectURL != "" {
+		c.Redirect(http.StatusFound, reply.VCIRedirectURL)
+		return nil, nil
+	}
+
+	return reply, nil
 }

@@ -1,5 +1,3 @@
-//go:build oidcrp
-
 package oidcrp
 
 import (
@@ -170,7 +168,7 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
 
-	s.log.Info("OIDC authorization URL generated",
+	s.log.Debug("OIDC authorization URL generated",
 		"credential_type", credentialType,
 		"state", session.State)
 
@@ -178,6 +176,33 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 		AuthorizationURL: authURL,
 		State:            session.State,
 	}, nil
+}
+
+// InitiateAuthForVCI initiates an OIDC authentication flow that is linked to
+// an OpenID4VCI credential issuance session. The VCI session ID is stored in
+// the OIDC session so that the callback handler can route the result back into
+// the VCI pipeline.
+func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSessionID string) (*AuthRequest, error) {
+	authReq, err := s.InitiateAuth(ctx, credentialType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the OIDC session with VCI linkage
+	session, err := s.getSession(ctx, authReq.State)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update OIDC session with VCI context: %w", err)
+	}
+
+	session.VCISessionID = vciSessionID
+	s.sessionCache.Set(ctx, session.ID, session)
+
+	s.log.Info("OIDC auth initiated for VCI flow",
+		"oidc_state", authReq.State,
+		"vci_session_id", vciSessionID,
+		"credential_type", credentialType)
+
+	return authReq, nil
 }
 
 // AuthResponse represents the result of OIDC authentication
@@ -266,9 +291,7 @@ func (s *Service) BuildTransformer() (*ClaimTransformer, error) {
 		return nil, fmt.Errorf("no credential mappings configured")
 	}
 
-	return &ClaimTransformer{
-		Mappings: s.cfg.CredentialMappings,
-	}, nil
+	return NewClaimTransformer(s.cfg.CredentialMappings), nil
 }
 
 // createSession creates a new session with generated state, nonce, and PKCE code_verifier.
@@ -314,7 +337,7 @@ func (s *Service) createSession(ctx context.Context, credentialType string) (*Se
 func (s *Service) getSession(ctx context.Context, state string) (*Session, error) {
 	session, ok := s.sessionCache.Get(ctx, state)
 	if !ok || session == nil {
-		return nil, fmt.Errorf("session not found or expired for state: %s", state)
+		return nil, fmt.Errorf("session not found or expired")
 	}
 
 	return session, nil

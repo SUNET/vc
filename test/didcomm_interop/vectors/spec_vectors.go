@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 // Package vectors provides test vectors for DIDComm interoperability testing.
 // This file contains official test vectors from the DIDComm v2.1 specification.
 // See: https://identity.foundation/didcomm-messaging/spec/v2.1/

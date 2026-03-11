@@ -1,19 +1,19 @@
-//go:build saml
-
 package samlsp
 
 import (
 	"testing"
 
+	"vc/pkg/credential"
+	"vc/pkg/model"
+
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewClaimTransformer(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType:     "pid",
 			CredentialConfigID: "urn:eudi:pid:1",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "given_name", Required: true},
 			},
 		},
@@ -21,14 +21,12 @@ func TestNewClaimTransformer(t *testing.T) {
 
 	transformer := NewClaimTransformer(mappings)
 	assert.NotNil(t, transformer)
-	assert.Len(t, transformer.mappings, 1)
 }
 
 func TestGetMapping(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes:     map[string]*AttributeMapping{},
+			Attributes: map[string]model.AttributeConfig{},
 		},
 	}
 
@@ -38,7 +36,6 @@ func TestGetMapping(t *testing.T) {
 	mapping, err := transformer.GetMapping("pid")
 	assert.NoError(t, err)
 	assert.NotNil(t, mapping)
-	assert.Equal(t, "pid", mapping.CredentialType)
 
 	// Test non-existent mapping
 	_, err = transformer.GetMapping("unknown")
@@ -47,10 +44,9 @@ func TestGetMapping(t *testing.T) {
 }
 
 func TestTransformClaims_SimpleMapping(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "given_name", Required: true},
 				"urn:oid:2.5.4.4":  {Claim: "family_name", Required: true},
 			},
@@ -72,10 +68,9 @@ func TestTransformClaims_SimpleMapping(t *testing.T) {
 }
 
 func TestTransformClaims_NestedMapping(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "identity.given_name", Required: true},
 				"urn:oid:2.5.4.4":  {Claim: "identity.family_name", Required: true},
 				"urn:oid:2.5.4.10": {Claim: "identity.organization", Required: false},
@@ -107,10 +102,9 @@ func TestTransformClaims_NestedMapping(t *testing.T) {
 }
 
 func TestTransformClaims_RequiredAttributeMissing(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "given_name", Required: true},
 				"urn:oid:2.5.4.4":  {Claim: "family_name", Required: true},
 			},
@@ -130,10 +124,9 @@ func TestTransformClaims_RequiredAttributeMissing(t *testing.T) {
 }
 
 func TestTransformClaims_OptionalAttributeMissing(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "given_name", Required: true},
 				"urn:oid:2.5.4.10": {Claim: "organization", Required: false},
 			},
@@ -155,10 +148,9 @@ func TestTransformClaims_OptionalAttributeMissing(t *testing.T) {
 }
 
 func TestTransformClaims_DefaultValue(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "given_name", Required: true},
 				"urn:oid:2.5.4.10": {Claim: "country", Required: false, Default: "SE"},
 			},
@@ -180,36 +172,35 @@ func TestTransformClaims_DefaultValue(t *testing.T) {
 }
 
 func TestApplyTransform_Lowercase(t *testing.T) {
-	result := applyTransform("JOHN.DOE@EXAMPLE.COM", "lowercase")
+	result := credential.ApplyTransform("JOHN.DOE@EXAMPLE.COM", "lowercase")
 	assert.Equal(t, "john.doe@example.com", result)
 }
 
 func TestApplyTransform_Uppercase(t *testing.T) {
-	result := applyTransform("john doe", "uppercase")
+	result := credential.ApplyTransform("john doe", "uppercase")
 	assert.Equal(t, "JOHN DOE", result)
 }
 
 func TestApplyTransform_Trim(t *testing.T) {
-	result := applyTransform("  John Doe  ", "trim")
+	result := credential.ApplyTransform("  John Doe  ", "trim")
 	assert.Equal(t, "John Doe", result)
 }
 
 func TestApplyTransform_NonString(t *testing.T) {
 	// Should return original value for non-strings
-	result := applyTransform(123, "lowercase")
+	result := credential.ApplyTransform(123, "lowercase")
 	assert.Equal(t, 123, result)
 }
 
 func TestApplyTransform_UnknownTransform(t *testing.T) {
-	result := applyTransform("test", "unknown")
+	result := credential.ApplyTransform("test", "unknown")
 	assert.Equal(t, "test", result)
 }
 
 func TestTransformClaims_WithTransformations(t *testing.T) {
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType: "pid",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:0.9.2342.19200300.100.1.3": {
 					Claim:     "email",
 					Required:  true,
@@ -239,14 +230,14 @@ func TestTransformClaims_WithTransformations(t *testing.T) {
 
 func TestSetNestedValue_Simple(t *testing.T) {
 	doc := make(map[string]any)
-	err := setNestedValue(doc, "name", "John")
+	err := credential.SetNestedValue(doc, "name", "John")
 	assert.NoError(t, err)
 	assert.Equal(t, "John", doc["name"])
 }
 
 func TestSetNestedValue_Nested(t *testing.T) {
 	doc := make(map[string]any)
-	err := setNestedValue(doc, "person.name", "John")
+	err := credential.SetNestedValue(doc, "person.name", "John")
 	assert.NoError(t, err)
 
 	person, exists := doc["person"]
@@ -259,7 +250,7 @@ func TestSetNestedValue_Nested(t *testing.T) {
 
 func TestSetNestedValue_DeepNesting(t *testing.T) {
 	doc := make(map[string]any)
-	err := setNestedValue(doc, "a.b.c.d", "value")
+	err := credential.SetNestedValue(doc, "a.b.c.d", "value")
 	assert.NoError(t, err)
 
 	// Navigate down the structure
@@ -272,13 +263,13 @@ func TestSetNestedValue_DeepNesting(t *testing.T) {
 func TestSetNestedValue_MultipleValues(t *testing.T) {
 	doc := make(map[string]any)
 
-	err := setNestedValue(doc, "identity.given_name", "John")
+	err := credential.SetNestedValue(doc, "identity.given_name", "John")
 	assert.NoError(t, err)
 
-	err = setNestedValue(doc, "identity.family_name", "Doe")
+	err = credential.SetNestedValue(doc, "identity.family_name", "Doe")
 	assert.NoError(t, err)
 
-	err = setNestedValue(doc, "identity.email", "john@example.com")
+	err = credential.SetNestedValue(doc, "identity.email", "john@example.com")
 	assert.NoError(t, err)
 
 	identity, _ := doc["identity"].(map[string]any)
@@ -289,7 +280,7 @@ func TestSetNestedValue_MultipleValues(t *testing.T) {
 
 func TestSetNestedValue_EmptyPath(t *testing.T) {
 	doc := make(map[string]any)
-	err := setNestedValue(doc, "", "value")
+	err := credential.SetNestedValue(doc, "", "value")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty path")
 }
@@ -301,7 +292,7 @@ func TestSetNestedValue_PathConflict(t *testing.T) {
 	doc["person"] = "John"
 
 	// Try to set a nested value under it - should fail
-	err := setNestedValue(doc, "person.name", "Doe")
+	err := credential.SetNestedValue(doc, "person.name", "Doe")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "path conflict")
 }
@@ -311,7 +302,7 @@ func TestGetNestedValue_Simple(t *testing.T) {
 		"name": "John",
 	}
 
-	value, exists := getNestedValue(doc, "name")
+	value, exists := credential.GetNestedValue(doc, "name")
 	assert.True(t, exists)
 	assert.Equal(t, "John", value)
 }
@@ -323,7 +314,7 @@ func TestGetNestedValue_Nested(t *testing.T) {
 		},
 	}
 
-	value, exists := getNestedValue(doc, "person.name")
+	value, exists := credential.GetNestedValue(doc, "person.name")
 	assert.True(t, exists)
 	assert.Equal(t, "John", value)
 }
@@ -333,24 +324,23 @@ func TestGetNestedValue_NotFound(t *testing.T) {
 		"name": "John",
 	}
 
-	_, exists := getNestedValue(doc, "age")
+	_, exists := credential.GetNestedValue(doc, "age")
 	assert.False(t, exists)
 }
 
 func TestGetNestedValue_EmptyPath(t *testing.T) {
 	doc := map[string]any{}
 
-	_, exists := getNestedValue(doc, "")
+	_, exists := credential.GetNestedValue(doc, "")
 	assert.False(t, exists)
 }
 
 func TestTransformClaims_ComplexRealWorld(t *testing.T) {
 	// Simulate a real-world PID credential with nested identity structure
-	mappings := map[string]*CredentialMapping{
+	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialType:     "pid",
 			CredentialConfigID: "urn:eudi:pid:1",
-			Attributes: map[string]*AttributeMapping{
+			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42":                  {Claim: "identity.given_name", Required: true},
 				"urn:oid:2.5.4.4":                   {Claim: "identity.family_name", Required: true},
 				"urn:oid:0.9.2342.19200300.100.1.3": {Claim: "identity.email_address", Required: false, Transform: "lowercase"},

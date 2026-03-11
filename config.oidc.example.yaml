@@ -1,0 +1,91 @@
+# OIDC Configuration Example for VC Issuer
+# This file demonstrates how to configure OpenID Connect authentication for
+# credential issuance via the standard OID4VCI pipeline.
+#
+# To issue credentials using OIDC authentication, set auth_method: oidc on
+# the credential_constructor entry and ensure the credential_mappings key
+# under apigw.oidcrp matches the credential_constructor key.
+
+common:
+  credential_constructor:
+    # Example: issue PID credentials after OIDC authentication
+    pid:
+      vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
+      auth_method: oidc          # <-- triggers OIDC redirect during OID4VCI flow
+      format: "dc+sd-jwt"
+
+  mongo:
+    uri: "mongodb://mongo:27017/vc"
+
+apigw:
+  public_url: "https://issuer.example.org"
+
+  api_server:
+    addr: :8080
+
+  oidcrp:
+    enable: true
+
+    # OIDC Provider issuer URL (for discovery via .well-known/openid-configuration)
+    issuer_url: "https://accounts.google.com"
+
+    # Callback URL where the OP sends the authorization response
+    redirect_uri: "https://issuer.example.org/oidcrp/callback"
+
+    # Client registration – choose preconfigured or dynamic (not both)
+    registration:
+      preconfigured:
+        enable: true
+        client_id: "${OIDC_CLIENT_ID}"
+        client_secret: "${OIDC_CLIENT_SECRET}"
+
+    # Scopes to request (openid is mandatory)
+    scopes:
+      - openid
+      - profile
+      - email
+
+    # Session duration in seconds (default: 300)
+    session_duration: 300
+
+    # Credential mappings – map OIDC claims to credential claims.
+    # The map key MUST match a credential_constructor key above.
+    credential_mappings:
+      pid:
+        credential_config_id: "urn:eudi:pid:arf-1.8:1"
+        attributes:
+          given_name:
+            claim: "given_name"
+            required: true
+          family_name:
+            claim: "family_name"
+            required: true
+          email:
+            claim: "email"
+            required: false
+          sub:
+            claim: "subject_id"
+            required: true
+            transform: "lowercase"
+
+issuer:
+  api_server:
+    addr: :8090
+
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+
+# Common OIDC Providers Reference:
+# ------------------------------------------
+# Google:          https://accounts.google.com
+# Microsoft:       https://login.microsoftonline.com/{tenant}/v2.0
+# Keycloak:        https://keycloak.example.org/realms/{realm}
+# Auth0:           https://{domain}.auth0.com/
+# Okta:            https://{org}.okta.com
+#
+# Dynamic Client Registration (RFC 7591):
+#   registration:
+#     dynamic:
+#       enable: true
+#       initial_access_token: "your-registration-token"

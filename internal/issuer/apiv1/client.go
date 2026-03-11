@@ -17,7 +17,6 @@ import (
 	"vc/pkg/pki"
 	"vc/pkg/trace"
 
-	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc"
 )
 
@@ -32,12 +31,8 @@ type Client struct {
 	tracer         *trace.Tracer
 	auditLog       *auditlog.Service
 	signer         pki.Signer
-	privateKey     any // Can be *ecdsa.PrivateKey or *rsa.PrivateKey (legacy, kept for JWK creation)
-	publicKey      any // Can be *ecdsa.PublicKey or *rsa.PublicKey
-	jwkClaim       jwt.MapClaims
-	jwkBytes       []byte
+	privateKey     any // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
 	jwkProto       *apiv1_issuer.Jwk
-	kid            string
 	registryConn   *grpc.ClientConn
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
@@ -51,7 +46,6 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		tracer:   tracer,
 		auditLog: auditLog,
 		jwkProto: &apiv1_issuer.Jwk{},
-		jwkClaim: jwt.MapClaims{},
 	}
 
 	if err := c.initSigner(ctx); err != nil {
@@ -86,9 +80,8 @@ func (c *Client) initSigner(ctx context.Context) error {
 	// Create signer from key material
 	c.signer = pki.NewKeyMaterialSigner(km)
 
-	// Store private key for mDL issuer and JWK generation
+	// Store private key for mDL issuer and VC 2.0 Data Integrity signing
 	c.privateKey = km.PrivateKey
-	c.publicKey = c.signer.PublicKey()
 
 	c.log.Info("Initialized signing key", "algorithm", c.signer.Algorithm(), "keyID", c.signer.KeyID())
 

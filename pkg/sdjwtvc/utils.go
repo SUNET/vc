@@ -167,7 +167,7 @@ func Base64Decode(s string) (string, error) {
 // ExtractClaimsByJSONPath extracts specific claim values from document data using JSONPath queries.
 // Takes a map of label->JSONPath expressions and returns a map of label->extracted values.
 // Example: {"given-name": "$.name.given"} extracts the value at path $.name.given and maps it to "given-name".
-// Returns an error if any path fails to extract.
+// Paths that do not match any value in the document data are silently skipped.
 func ExtractClaimsByJSONPath(documentData map[string]any, jsonPathMap map[string]string) (map[string]any, error) {
 	v := any(nil)
 
@@ -185,7 +185,8 @@ func ExtractClaimsByJSONPath(documentData map[string]any, jsonPathMap map[string
 	for key, path := range jsonPathMap {
 		result, err := jsonpath.Get(path, v)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get path %s: %w", path, err)
+			// Path not found in document data — skip it.
+			continue
 		}
 
 		reply[key] = result

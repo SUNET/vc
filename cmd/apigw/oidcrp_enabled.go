@@ -1,5 +1,3 @@
-//go:build oidcrp
-
 package main
 
 import (
