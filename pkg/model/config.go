@@ -1078,12 +1078,11 @@ func (c *CredentialConstructor) IsLocalVCTM() bool {
 }
 
 // ResolveVCTUrls computes the URL-based VCT for each credential constructor
-// and stores it in VCTURL.  VCTM.VCT is left unchanged (it keeps
-// the original URN from the VCTM file).
+// and stores it in VCTURL.  VCTM.VCT, VCTMRaw, and Integrity are left
+// unchanged — the served VCTM document preserves the original VCT
+// identifier from the VCTM file (e.g. a URN).
 // For local VCTMs the URL is built from apigwPublicURL + /type-metadata/{scope}.
 // For external VCTMs the VCTMUrl is used.
-// VCTMRaw and Integrity are re-computed with the URL-based VCT so the
-// served document and SRI hash stay consistent.
 func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	if cfg.Common == nil {
 		return nil
@@ -1105,28 +1104,8 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 			vctURL = constructor.VCTMUrl
 		}
 
-		// Build a patched copy of the VCTM with the URL-based VCT for
-		// serialization, but leave the in-memory VCTM.VCT untouched.
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
-
-		vctmCopy := *constructor.VCTM
-		vctmCopy.VCT = vctURL
-
-		// Re-serialize and re-hash so served document and integrity match.
-		rawBytes, err := json.Marshal(&vctmCopy)
-		if err != nil {
-			constructor.mu.Unlock()
-			return fmt.Errorf("failed to re-serialize VCTM for scope %s: %w", scope, err)
-		}
-		if constructor.IsLocalVCTM() {
-			constructor.VCTMRaw = rawBytes
-		}
-		constructor.Integrity, err = vctmCopy.SRIIntegrity(rawBytes)
-		if err != nil {
-			constructor.mu.Unlock()
-			return fmt.Errorf("failed to re-compute integrity for scope %s: %w", scope, err)
-		}
 		constructor.mu.Unlock()
 	}
 
