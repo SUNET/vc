@@ -105,6 +105,9 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	serverHTTP.ReadTimeout = 5 * time.Second
 	serverHTTP.WriteTimeout = 30 * time.Second
 	serverHTTP.IdleTimeout = 90 * time.Second
+	// ReadHeaderTimeout limits the time to read request headers.
+	// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
+	// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
 	serverHTTP.ReadHeaderTimeout = 2 * time.Second
 
 	// Middlewares
