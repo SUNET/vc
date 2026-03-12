@@ -7,8 +7,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -363,8 +361,8 @@ func (s *testSigner) Algorithm() string { return s.algo }
 func (s *testSigner) KeyID() string     { return s.kid }
 func (s *testSigner) PublicKey() any    { return s.pubKey }
 
-// serveVCTM starts an httptest server that serves the given VCTM as JSON.
-func serveVCTM(t *testing.T, vctm *sdjwtvc.VCTM) (vctURL string, integrity string) {
+// marshalVCTM marshals a VCTM to JSON bytes and computes the SRI integrity hash.
+func marshalVCTM(t *testing.T, vctm *sdjwtvc.VCTM) (raw []byte, integrity string) {
 	t.Helper()
 	raw, err := json.Marshal(vctm)
 	if err != nil {
@@ -374,11 +372,7 @@ func serveVCTM(t *testing.T, vctm *sdjwtvc.VCTM) (vctURL string, integrity strin
 	if err != nil {
 		t.Fatalf("Failed to compute integrity: %v", err)
 	}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(raw)
-	}))
-	t.Cleanup(ts.Close)
-	return ts.URL, integrity
+	return raw, integrity
 }
 
 // createTestSDJWT creates a minimal test SD-JWT for testing
@@ -402,14 +396,14 @@ func createTestSDJWT(t *testing.T) string {
 		Name: "Test Credential",
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "key-1")
 
 	token, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		vctmRaw,
 		documentData,
 		nil, // no holder binding
 		&sdjwtvc.CredentialOptions{Integrity: integrity},
@@ -449,14 +443,14 @@ func TestSDJWTHandler_VerifyAndExtract_Valid(t *testing.T) {
 		Name: "Test Credential",
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "key-1")
 
 	token, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		vctmRaw,
 		documentData,
 		nil, // no holder binding
 		&sdjwtvc.CredentialOptions{Integrity: integrity},

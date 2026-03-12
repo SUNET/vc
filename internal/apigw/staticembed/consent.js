@@ -90,16 +90,17 @@ Alpine.data("app", () => ({
     authMethod: null,
 
     /** @type {number | null} */
-    pidAuthRedirectCountUp: null,
+    openid4vpRedirectCountUp: null,
 
     /** @type {number} */
-    pidAuthRedirectMaxCount: 7,
+    openid4vpRedirectMaxCount: 7,
 
     /** @type {string | null} */
     error: null,
 
     init() {
         this.setAuthMethod();
+        this.setRedirectUrl();
 
         this.hashState();
 
@@ -130,7 +131,7 @@ Alpine.data("app", () => ({
 
     setAuthMethod() {
         const authMethod = this.$el.dataset.authMethod || null;
-        const validMethods = ["basic", "pid_auth", "saml", "oidc"];
+        const validMethods = ["basic", "openid4vp", "saml", "oidc"];
 
         if (
             !authMethod ||
@@ -144,6 +145,17 @@ Alpine.data("app", () => ({
         }
 
         this.authMethod = authMethod;
+    },
+
+    setRedirectUrl() {
+        const raw = this.$el.dataset.redirectUrl || null;
+        if (raw) {
+            try {
+                this.redirectUrl = decodeURIComponent(raw);
+            } catch (err) {
+                this.error = `Invalid redirect URL: ${err.message}`;
+            }
+        }
     },
 
     hashState() {
@@ -218,79 +230,53 @@ Alpine.data("app", () => ({
     },
 
     handleLoginSAML() {
-        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
-        if (!rawRedirectUrl) {
+        if (!this.redirectUrl) {
             this.error = "Missing SAML redirect URL";
             return;
         }
-        try {
-            const url = decodeURIComponent(rawRedirectUrl);
-            this.redirect(url);
-        } catch (err) {
-            this.error = `Invalid SAML redirect URL: ${err.message}`;
-        }
+        this.redirect(this.redirectUrl);
     },
 
     handleLoginOIDC() {
-        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
-        if (!rawRedirectUrl) {
+        if (!this.redirectUrl) {
             this.error = "Missing OIDC redirect URL";
             return;
         }
-        try {
-            const url = decodeURIComponent(rawRedirectUrl);
-            this.redirect(url);
-        } catch (err) {
-            this.error = `Invalid OIDC redirect URL: ${err.message}`;
-        }
+        this.redirect(this.redirectUrl);
     },
 
     /**
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
-    handleLoginPidAuth(immediate = false) {
-        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
-        if (!rawRedirectUrl) {
+    handleLoginOpenID4VP(immediate = false) {
+        if (!this.redirectUrl) {
             this.error = "Missing OpenID4VP redirect URL";
             return;
         }
 
-        try {
-            const url = decodeURIComponent(rawRedirectUrl);
+        if (immediate) {
+            this.redirect(this.redirectUrl);
+            return;
+        }
 
-            if (immediate) {
-                this.redirect(url);
+        this.openid4vpRedirectCountUp = 1;
+
+        const increment = setInterval(() => {
+            // We can stop the interval by setting
+            // this.openid4vpRedirectCountUp to 'null'
+            if (!this.openid4vpRedirectCountUp) {
+                clearInterval(increment);
                 return;
             }
 
-            this.pidAuthRedirectCountUp = 1;
+            ++this.openid4vpRedirectCountUp;
 
-            const increment = setInterval(() => {
-                // We can stop the interval by setting
-                // this.pidAuthRedirectCountUp to 'null'
-                if (!this.pidAuthRedirectCountUp) {
-                    clearInterval(increment);
-                    return;
-                }
-
-                ++this.pidAuthRedirectCountUp;
-
-                if (this.pidAuthRedirectCountUp >= this.pidAuthRedirectMaxCount) {
-                    clearInterval(increment);
-                    this.redirect(url);
-                    return;
-                }
-            }, 1000);
-
-        } catch (err) {
-            if (err instanceof URIError) {
-                this.error = `Invalid redirect_uri provided: ${err.message}`;
-            } else {
-                this.error = err.message;
+            if (this.openid4vpRedirectCountUp >= this.openid4vpRedirectMaxCount) {
+                clearInterval(increment);
+                this.redirect(this.redirectUrl);
+                return;
             }
-
-            this.pidAuthRedirectCountUp = null;
-        }
+        }, 1000);
     },
 
     async handleIsNotLoggedIn() {

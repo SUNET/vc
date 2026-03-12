@@ -75,6 +75,8 @@ type AuthorizationResponse struct {
 
 	ClientID string `json:"-"`
 
+	WalletClientID string `json:"-"`
+
 	SessionID string `json:"-"`
 }
 

@@ -38,13 +38,13 @@ func TestToken_Parse_WithRealCredential(t *testing.T) {
 	}`)
 
 	// Build credential
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "issuer-key-1")
 	token, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		vctmRaw,
 		documentData,
 		holderJWK,
 		&CredentialOptions{Integrity: integrity},
@@ -74,9 +74,9 @@ func TestToken_Parse_WithRealCredential(t *testing.T) {
 		t.Errorf("Expected iss = https://issuer.example.com, got %v", parsed.Claims["iss"])
 	}
 
-	// Verify VCT (now the URL from the test server)
-	if vct, ok := parsed.Claims["vct"].(string); !ok || vct != vctURL {
-		t.Errorf("Expected vct = %s, got %v", vctURL, parsed.Claims["vct"])
+	// Verify VCT (derived from VCTM)
+	if vct, ok := parsed.Claims["vct"].(string); !ok || vct != "https://example.com/credentials/test" {
+		t.Errorf("Expected vct = https://example.com/credentials/test, got %v", parsed.Claims["vct"])
 	}
 
 	// Verify disclosed claims are present

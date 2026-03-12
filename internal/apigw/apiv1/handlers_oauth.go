@@ -48,6 +48,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		CodeChallengeMethod:  req.CodeChallengeMethod,
 		State:                req.State,
 		ClientID:             fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
+		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
 		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
 	}
@@ -104,10 +105,11 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	}
 
 	response := &openid4vci.AuthorizationResponse{
-		RedirectURL: redirectURL,
-		Scope:       authorizationContext.Scopes[0],
-		SessionID:   authorizationContext.SessionID,
-		ClientID:    authorizationContext.ClientID,
+		RedirectURL:    redirectURL,
+		Scope:          authorizationContext.Scopes[0],
+		SessionID:      authorizationContext.SessionID,
+		ClientID:       authorizationContext.ClientID,
+		WalletClientID: authorizationContext.WalletClientID,
 	}
 
 	c.log.Debug("Authorize", "authorization", authorizationContext)

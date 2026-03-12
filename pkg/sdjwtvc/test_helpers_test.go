@@ -69,3 +69,15 @@ func serveVCTM(t *testing.T, vctm *VCTM) (vctURL string, integrity string) {
 	t.Cleanup(ts.Close)
 	return ts.URL, integrity
 }
+
+// marshalVCTM marshals a VCTM to JSON bytes and computes the SRI integrity hash.
+// Unlike serveVCTM, this does not start an HTTP server — the raw bytes are
+// intended for the inline VCTM parameter of BuildCredentialWithSigner.
+func marshalVCTM(t *testing.T, vctm *VCTM) (raw []byte, integrity string) {
+	t.Helper()
+	raw, err := json.Marshal(vctm)
+	require.NoError(t, err)
+	integrity, err = vctm.SRIIntegrity(raw)
+	require.NoError(t, err)
+	return raw, integrity
+}

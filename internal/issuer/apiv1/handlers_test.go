@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -56,10 +54,10 @@ var mockDiplomaData = []byte(`
 }
 `)
 
-// serveTestVCTM starts an httptest server serving the VCTM from testdata and
-// returns the server URL and the SRI integrity hash. The server is registered
-// for cleanup via t.Cleanup.
-func serveTestVCTM(t *testing.T) (vctURL string, integrity string) {
+// loadTestVCTM reads the VCTM from testdata and returns the raw bytes and its
+// SRI integrity hash. This avoids spinning up an HTTP server — the VCTM is
+// supplied inline via CreateCredentialRequest.VCTM.
+func loadTestVCTM(t *testing.T) (vctmRaw []byte, integrity string) {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/vctm_test.json")
 	if err != nil {
@@ -67,16 +65,11 @@ func serveTestVCTM(t *testing.T) (vctURL string, integrity string) {
 	}
 	h := sha256.Sum256(raw)
 	integrity = fmt.Sprintf("sha256-%s", base64.StdEncoding.EncodeToString(h[:]))
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(raw)
-	}))
-	t.Cleanup(ts.Close)
-	return ts.URL, integrity
+	return raw, integrity
 }
 
 func TestMakeSDJWT(t *testing.T) {
-	vctURL, integrity := serveTestVCTM(t)
+	vctmRaw, integrity := loadTestVCTM(t)
 
 	tests := []struct {
 		name    string
@@ -89,7 +82,7 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: mockEhic,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -105,7 +98,7 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "pid",
 				DocumentData: mockPidData,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -121,7 +114,7 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "diploma",
 				DocumentData: mockDiplomaData,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -137,7 +130,7 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: mockEhic,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    "",
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -147,14 +140,13 @@ func TestMakeSDJWT(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "integrity is required",
 		},
 		{
 			name: "missing scope",
 			request: &CreateCredentialRequest{
 				Scope:        "",
 				DocumentData: mockEhic,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -170,7 +162,7 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: nil,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -186,9 +178,25 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: mockEhic,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK:          nil,
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing VCTM",
+			request: &CreateCredentialRequest{
+				Scope:        "ehic",
+				DocumentData: mockEhic,
+				VCTM:         nil,
+				Integrity:    integrity,
+				JWK: &apiv1_issuer.Jwk{
+					Kty: "EC",
+					Crv: "P-256",
+					X:   "f83OJ3D2xF4c3hXhN3k1j5x5mX5Z5x5Z5x5Z5x5Z5x5Z",
+					Y:   "x_FEzRu9mX5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5",
+				},
 			},
 			wantErr: true,
 		},
@@ -197,7 +205,23 @@ func TestMakeSDJWT(t *testing.T) {
 			request: &CreateCredentialRequest{
 				Scope:        "ehic",
 				DocumentData: []byte(`{invalid json`),
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
+				Integrity:    integrity,
+				JWK: &apiv1_issuer.Jwk{
+					Kty: "EC",
+					Crv: "P-256",
+					X:   "f83OJ3D2xF4c3hXhN3k1j5x5mX5Z5x5Z5x5Z5x5Z5x5Z",
+					Y:   "x_FEzRu9mX5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid VCTM bytes",
+			request: &CreateCredentialRequest{
+				Scope:        "ehic",
+				DocumentData: mockEhic,
+				VCTM:         []byte(`{not valid json`),
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -278,7 +302,7 @@ func TestMakeSDJWT(t *testing.T) {
 }
 
 func TestMakeSDJWT_WithRSAKey(t *testing.T) {
-	vctURL, integrity := serveTestVCTM(t)
+	vctmRaw, integrity := loadTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "rsa", log)
@@ -286,7 +310,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 	request := &CreateCredentialRequest{
 		Scope:        "ehic",
 		DocumentData: mockEhic,
-		VCTUrl:       vctURL,
+		VCTM:         vctmRaw,
 		Integrity:    integrity,
 		JWK: &apiv1_issuer.Jwk{
 			Kty: "EC",
@@ -319,7 +343,7 @@ func TestMakeSDJWT_WithRSAKey(t *testing.T) {
 }
 
 func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
-	vctURL, integrity := serveTestVCTM(t)
+	vctmRaw, integrity := loadTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
@@ -327,7 +351,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 	request := &CreateCredentialRequest{
 		Scope:        "ehic",
 		DocumentData: mockEhic,
-		VCTUrl:       vctURL,
+		VCTM:         vctmRaw,
 		Integrity:    integrity,
 		JWK: &apiv1_issuer.Jwk{
 			Kty: "EC",
@@ -384,7 +408,7 @@ func TestMakeSDJWT_VerifySelectiveDisclosure(t *testing.T) {
 }
 
 func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
-	vctURL, integrity := serveTestVCTM(t)
+	vctmRaw, integrity := loadTestVCTM(t)
 	ctx := t.Context()
 	log := logger.NewSimple("test")
 	client := mockNewClient(ctx, t, "ecdsa", log)
@@ -406,7 +430,7 @@ func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
 			request := &CreateCredentialRequest{
 				Scope:        scope,
 				DocumentData: docData,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -425,7 +449,7 @@ func TestMakeSDJWT_MultipleCredentialTypes(t *testing.T) {
 }
 
 func TestMakeSDJWT_ValidationErrors(t *testing.T) {
-	vctURL, integrity := serveTestVCTM(t)
+	vctmRaw, integrity := loadTestVCTM(t)
 
 	tests := []struct {
 		name         string
@@ -477,7 +501,7 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 			req := &CreateCredentialRequest{
 				Scope:        tt.scope,
 				DocumentData: tt.documentData,
-				VCTUrl:       vctURL,
+				VCTM:         vctmRaw,
 				Integrity:    integrity,
 				JWK: &apiv1_issuer.Jwk{
 					Kty: "EC",
@@ -492,6 +516,83 @@ func TestMakeSDJWT_ValidationErrors(t *testing.T) {
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
+				assert.Nil(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, got)
+				assert.NotEmpty(t, got.Data)
+			}
+		})
+	}
+}
+
+func TestMakeSDJWT_InlineVCTMValidation(t *testing.T) {
+	vctmRaw, integrity := loadTestVCTM(t)
+
+	defaultJWK := &apiv1_issuer.Jwk{
+		Kty: "EC",
+		Crv: "P-256",
+		X:   "f83OJ3D2xF4c3hXhN3k1j5x5mX5Z5x5Z5x5Z5x5Z5x5Z",
+		Y:   "x_FEzRu9mX5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5x5Z5",
+	}
+
+	tests := []struct {
+		name        string
+		vctm        []byte
+		integrity   string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:      "valid VCTM and integrity succeeds",
+			vctm:      vctmRaw,
+			integrity: integrity,
+			wantErr:   false,
+		},
+		{
+			name:        "nil VCTM is rejected by validation",
+			vctm:        nil,
+			integrity:   integrity,
+			wantErr:     true,
+			errContains: "VCTM",
+		},
+		{
+			name:        "invalid JSON VCTM is rejected",
+			vctm:        []byte(`{not json`),
+			integrity:   integrity,
+			wantErr:     true,
+			errContains: "failed to parse inline VCTM",
+		},
+		{
+			name:        "VCTM with empty vct field is rejected",
+			vctm:        []byte(`{"vct":"","claims":[]}`),
+			integrity:   integrity,
+			wantErr:     true,
+			errContains: "empty vct field",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			log := logger.NewSimple("test")
+			client := mockNewClient(ctx, t, "ecdsa", log)
+
+			req := &CreateCredentialRequest{
+				Scope:        "ehic",
+				DocumentData: mockEhic,
+				VCTM:         tt.vctm,
+				Integrity:    tt.integrity,
+				JWK:          defaultJWK,
+			}
+
+			got, err := client.MakeSDJWT(ctx, req)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
 				assert.Nil(t, got)
 			} else {
 				require.NoError(t, err)

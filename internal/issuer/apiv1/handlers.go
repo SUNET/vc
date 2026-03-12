@@ -17,8 +17,8 @@ type CreateCredentialRequest struct {
 	DocumentData []byte            `json:"document_data" validate:"required"`
 	Scope        string            `json:"scope" validate:"required"`
 	JWK          *apiv1_issuer.Jwk `json:"jwk" validate:"required"`
-	VCTUrl       string            `json:"vct_url"`
-	Integrity    string            `json:"integrity"`
+	Integrity    string            `json:"integrity" validate:"required"`
+	VCTM         []byte            `json:"vctm" validate:"required"`
 }
 
 // CreateCredentialReply is the reply for Credential
@@ -41,12 +41,11 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, err
 	}
 
-	// Integrity is required per SD-JWT VC draft-14 Section 6
-	if req.Integrity == "" {
-		return nil, fmt.Errorf("integrity is required for scope: %s", req.Scope)
-	}
-
-	// Build credential options with integrity provided by the caller (APIGW).
+	// Build credential options. The VCTM bytes and integrity hash come from
+	// the caller (APIGW) which already loaded and verified them from config.
+	// By accepting the VCTM inline the issuer never fetches arbitrary URLs,
+	// eliminating SSRF risk while staying decoupled from credential-constructor
+	// configuration.
 	opts := &sdjwtvc.CredentialOptions{
 		Integrity: req.Integrity,
 	}
@@ -70,13 +69,15 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	}
 	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", grpcReply.GetStatusListUri())
 
-	// Build SD-JWT using sdjwtvc package with the signer interface
+	// Build SD-JWT using sdjwtvc package with the signer interface.
+	// The VCTM bytes come from the caller (APIGW); BuildCredentialWithSigner
+	// derives the vct claim from the VCTM's VCT field.
 	sdClient := sdjwtvc.New()
 	token, err := sdClient.BuildCredentialWithSigner(
 		ctx,
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
-		req.VCTUrl,
+		req.VCTM,
 		req.DocumentData,
 		req.JWK,
 		opts,

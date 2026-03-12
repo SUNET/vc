@@ -191,11 +191,11 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 
 	session := sessions.Default(c)
 
-	clientId, ok := session.Get("client_id").(string)
+	walletClientID, ok := session.Get("wallet_client_id").(string)
 	if !ok {
-		err := errors.New("client_id not found in session")
+		err := errors.New("wallet_client_id not found in session")
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "endpointUserCancel: client_id not found in session")
+		s.log.Error(err, "endpointUserCancel: wallet_client_id not found in session")
 		return nil, err
 	}
 
@@ -211,11 +211,11 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 	c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
 	c.SetCookie("openid4vp_redirect_url", "", -1, "/authorization/consent", "", false, false)
 
-	client, ok := s.cfg.APIGW.OauthServer.Clients[clientId]
+	client, ok := s.cfg.APIGW.OauthServer.Clients[walletClientID]
 	if !ok {
-		err := errors.New("invalid client_id")
+		err := errors.New("invalid wallet_client_id")
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "endpointUserCancel: invalid client_id")
+		s.log.Error(err, "endpointUserCancel: invalid wallet_client_id", "wallet_client_id", walletClientID)
 		return nil, err
 	}
 

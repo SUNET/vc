@@ -47,7 +47,7 @@ func TestBuildCredentialWithSigner(t *testing.T) {
 		"issuing_country": "SE"
 	}`)
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "issuer-key-1")
 
 	client := New()
@@ -55,7 +55,7 @@ func TestBuildCredentialWithSigner(t *testing.T) {
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		vctmRaw,
 		documentData,
 		holderJWK,
 		&CredentialOptions{Integrity: integrity},
@@ -93,7 +93,7 @@ func TestBuildCredentialWithSigner(t *testing.T) {
 
 	// Verify JWT claims
 	assert.Equal(t, "https://issuer.example.com", payload["iss"])
-	assert.Equal(t, vctURL, payload["vct"])
+	assert.Equal(t, "TestCredential", payload["vct"])
 	assert.Equal(t, "sha-256", payload["_sd_alg"])
 	assert.NotEmpty(t, payload["jti"])
 	assert.NotEmpty(t, payload["nbf"])
@@ -185,7 +185,7 @@ func TestBuildCredentialWithSigner_AlgorithmSelection(t *testing.T) {
 				Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 			}
 
-			vctURL, integrity := serveVCTM(t, vctm)
+			vctmRaw, integrity := marshalVCTM(t, vctm)
 			signer := newTestSigner(privateKey, "key-1")
 
 			client := New()
@@ -193,7 +193,7 @@ func TestBuildCredentialWithSigner_AlgorithmSelection(t *testing.T) {
 				t.Context(),
 				"https://issuer.example.com",
 				signer,
-				vctURL,
+				vctmRaw,
 				[]byte(`{"test_claim": "value"}`),
 				map[string]any{"kty": jwkType},
 				&CredentialOptions{Integrity: integrity},
@@ -225,7 +225,7 @@ func TestBuildCredentialWithSigner_InvalidJSON(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "key-1")
 
 	client := New()
@@ -233,7 +233,7 @@ func TestBuildCredentialWithSigner_InvalidJSON(t *testing.T) {
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		vctmRaw,
 		[]byte(`{invalid json`),
 		map[string]any{"kty": "EC"},
 		&CredentialOptions{Integrity: integrity},
@@ -243,17 +243,10 @@ func TestBuildCredentialWithSigner_InvalidJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to unmarshal document data")
 }
 
-func TestBuildCredentialWithSigner_MissingIntegrity(t *testing.T) {
+func TestBuildCredentialWithSigner_InvalidVCTM(t *testing.T) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	testClaim := "test"
-	vctm := &VCTM{
-		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
-	}
-
-	vctURL, _ := serveVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "key-1")
 
 	client := New()
@@ -261,42 +254,38 @@ func TestBuildCredentialWithSigner_MissingIntegrity(t *testing.T) {
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		[]byte(`{not json`),
 		[]byte(`{"test":"value"}`),
 		map[string]any{"kty": "EC"},
-		&CredentialOptions{}, // no Integrity
+		&CredentialOptions{},
 	)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "integrity is required")
+	assert.Contains(t, err.Error(), "failed to parse VCTM")
 }
 
-func TestBuildCredentialWithSigner_WrongIntegrity(t *testing.T) {
+func TestBuildCredentialWithSigner_EmptyVCT(t *testing.T) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	testClaim := "test"
-	vctm := &VCTM{
-		VCT:    "TestCredential",
-		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
-	}
-
-	vctURL, _ := serveVCTM(t, vctm)
 	signer := newTestSigner(privateKey, "key-1")
+
+	// VCTM with empty VCT field
+	vctmRaw, _ := marshalVCTM(t, &VCTM{VCT: ""})
 
 	client := New()
 	_, err = client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
 		signer,
-		vctURL,
+		vctmRaw,
 		[]byte(`{"test":"value"}`),
 		map[string]any{"kty": "EC"},
-		&CredentialOptions{Integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+		&CredentialOptions{},
 	)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "integrity mismatch")
+	assert.Contains(t, err.Error(), "empty vct field")
 }
 
 func TestGetSigningMethodFromKey_UnknownKeyType(t *testing.T) {

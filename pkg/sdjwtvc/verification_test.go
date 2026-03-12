@@ -34,7 +34,7 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	documentData := []byte(`{"test_claim": "test_value"}`)
@@ -43,7 +43,7 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL, documentData, holderJWK,
+		signer, vctmRaw, documentData, holderJWK,
 		&CredentialOptions{Integrity: integrity},
 	)
 	require.NoError(t, err)
@@ -57,7 +57,7 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 	assert.Equal(t, "ES256", result.Header["alg"])
 
 	assert.Equal(t, "https://issuer.example.com", result.Claims["iss"])
-	assert.Equal(t, vctURL, result.Claims["vct"])
+	assert.Equal(t, "TestCredential", result.Claims["vct"])
 
 	assert.Greater(t, len(result.Disclosures), 0)
 	assert.NotNil(t, result.DisclosedClaims["test_claim"])
@@ -73,14 +73,14 @@ func TestParseAndVerify_InvalidSignature(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL,
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
 		&CredentialOptions{Integrity: integrity},
@@ -106,14 +106,14 @@ func TestParseAndVerify_ExpiredCredential(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL,
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
 		&CredentialOptions{
@@ -141,14 +141,14 @@ func TestParseAndVerify_SkipTimeValidation(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL,
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
 		&CredentialOptions{
@@ -185,14 +185,14 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL,
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		holderJWK,
 		&CredentialOptions{Integrity: integrity},
@@ -228,14 +228,14 @@ func TestParseAndVerify_KeyBindingRequired(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL,
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
 		&CredentialOptions{Integrity: integrity},
@@ -270,14 +270,14 @@ func TestParseAndVerify_InvalidNonce(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
 	sdJWT, err := client.BuildCredentialWithSigner(
 		t.Context(),
 		"https://issuer.example.com",
-		signer, vctURL,
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		holderJWK,
 		&CredentialOptions{Integrity: integrity},

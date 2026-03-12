@@ -42,6 +42,7 @@ type AuthorizationContext struct {
 
 	// Client and authorization fields
 	ClientID            string   `json:"client_id" bson:"client_id" validate:"omitempty,max=128,printascii"`
+	WalletClientID      string   `json:"wallet_client_id,omitempty" bson:"wallet_client_id,omitempty" validate:"omitempty,max=128,printascii"`
 	Scopes              []string `json:"scopes,omitempty" bson:"scopes,omitempty"`
 	State               string   `json:"state,omitempty" bson:"state,omitempty" validate:"omitempty,max=500,printascii"`
 	Nonce               string   `json:"nonce,omitempty" bson:"nonce,omitempty" validate:"omitempty,max=128,printascii"`

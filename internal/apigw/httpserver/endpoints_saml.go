@@ -301,8 +301,8 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 		Scope:        credentialType,
 		DocumentData: documentData,
 		Jwk:          jwk,
-		VctUrl:       credentialConstructor.GetVCTURL(),
 		Integrity:    credentialConstructor.GetIntegrity(),
+		Vctm:         credentialConstructor.GetVCTMRaw(),
 	})
 	if err != nil {
 		s.log.Error(err, "failed to call MakeSDJWT")

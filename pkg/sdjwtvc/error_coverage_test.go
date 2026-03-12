@@ -296,7 +296,7 @@ func TestBuildCredentialWithSigner_SignError(t *testing.T) {
 		},
 	}
 
-	vctURL, integrity := serveVCTM(t, vctm)
+	vctmRaw, integrity := marshalVCTM(t, vctm)
 
 	documentData := []byte(`{"name":"test"}`)
 	holderJWK := map[string]any{"kty": "EC"}
@@ -305,7 +305,7 @@ func TestBuildCredentialWithSigner_SignError(t *testing.T) {
 		t.Context(),
 		"issuer",
 		&failingSigner{},
-		vctURL,
+		vctmRaw,
 		documentData,
 		holderJWK,
 		&CredentialOptions{Integrity: integrity},

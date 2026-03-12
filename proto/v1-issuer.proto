@@ -18,8 +18,9 @@ message MakeSDJWTRequest {
     string scope = 1;
     bytes documentData = 2;
     jwk jwk =3;
-    string vct_url = 4;
+    reserved 4;                  // was: string vct_url (removed – issuer must not fetch arbitrary URLs)
     string integrity = 5;
+    bytes vctm = 6;              // Raw VCTM JSON bytes (provided by APIGW, avoids issuer fetching URL)
 }
 
 message MakeSDJWTReply {

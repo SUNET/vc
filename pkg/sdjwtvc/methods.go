@@ -42,6 +42,21 @@ type TokenStatusListReference struct {
 	URI string
 }
 
+// parseVCTM parses raw VCTM JSON bytes supplied by a trusted caller (e.g. APIGW)
+// and performs a basic sanity check (non-empty vct field). Integrity is NOT
+// re-verified here because the caller already verified it at load time and the
+// gRPC transport is internal/mTLS-protected.
+func (c *Client) parseVCTM(rawBytes []byte) (*VCTM, error) {
+	var vctm VCTM
+	if err := json.Unmarshal(rawBytes, &vctm); err != nil {
+		return nil, fmt.Errorf("failed to parse inline VCTM: %w", err)
+	}
+	if vctm.VCT == "" {
+		return nil, fmt.Errorf("inline VCTM has empty vct field")
+	}
+	return &vctm, nil
+}
+
 // fetchVCTM fetches and parses a VCTM document from the given URL.
 // It verifies the fetched document's SRI integrity hash matches the expected
 // value per SD-JWT VC draft-14 Section 6.
@@ -89,8 +104,9 @@ func (c *Client) fetchVCTM(ctx context.Context, vctURL string, expectedIntegrity
 
 // BuildCredentialWithSigner creates a complete SD-JWT credential using a Signer interface.
 // This allows signing with HSMs via PKCS#11 or other external signing services.
-// The VCTM is fetched from the vct URL and verified against opts.Integrity.
-func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, signer Signer, vct string, documentData []byte, holderJWK any, opts *CredentialOptions) (string, error) {
+// The caller provides the raw VCTM bytes directly, eliminating SSRF risk.
+// The vct claim is derived from the VCTM's VCT field.
+func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, signer Signer, vctmRaw []byte, documentData []byte, holderJWK any, opts *CredentialOptions) (string, error) {
 	// Set defaults
 	if opts == nil {
 		opts = &CredentialOptions{
@@ -119,7 +135,13 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 		body["iss"] = issuer
 	}
 	body["jti"] = uuid.NewString()
-	body["vct"] = vct
+
+	// Parse the VCTM and derive the vct claim from it (authoritative source).
+	vctm, err := c.parseVCTM(vctmRaw)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse VCTM: %w", err)
+	}
+	body["vct"] = vctm.VCT
 
 	// Add vct#integrity if provided (SD-JWT VC draft-14 Section 6)
 	if opts.Integrity != "" {
@@ -139,12 +161,6 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 				"uri": opts.TokenStatusList.URI,
 			},
 		}
-	}
-
-	// Fetch and verify VCTM from the vct URL
-	vctm, err := c.fetchVCTM(ctx, vct, opts.Integrity)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch VCTM: %w", err)
 	}
 
 	// Validate document data against the fetched VCTM
