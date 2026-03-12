@@ -15,6 +15,7 @@ import (
 	"vc/internal/verifier/db"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
+	"vc/pkg/helpers"
 	"vc/pkg/jose"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
@@ -161,7 +162,12 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 	// Construct OpenID4VP authorization request URL with query parameters
 	// Use x509_san_dns: prefix so wallets know how to verify the client identity
-	oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"))
+	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	if err != nil {
+		c.log.Error(err, "Failed to extract host from PublicURL")
+		return nil, ErrServerError
+	}
+	oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", host)
 	q := url.Values{}
 	q.Set("client_id", oidc4vpClientID)
 	q.Set("request_uri", requestObjectPath)
@@ -815,14 +821,24 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 			return nil, fmt.Errorf("failed to construct request object path: %w", err)
 		}
 
+		host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		}
+
 		q := url.Values{}
-		q.Set("client_id", fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")))
+		q.Set("client_id", fmt.Sprintf("x509_san_dns:%s", host))
 		q.Set("request_uri", requestObjectPath)
 		qrData = walletBaseURL + "?" + q.Encode()
 	} else {
 		// Standard flow: generate QR for openid4vp:// URI (native wallet)
+		host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		}
+
 		requestObject := &openid4vp.RequestObject{
-			ClientID: fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")),
+			ClientID: fmt.Sprintf("x509_san_dns:%s", host),
 		}
 		qrData, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
 		if err != nil {

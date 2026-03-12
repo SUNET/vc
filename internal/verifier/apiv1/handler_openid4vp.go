@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 	"vc/pkg/crypto"
+	"vc/pkg/helpers"
 	"vc/pkg/openid4vp"
 )
 
@@ -34,7 +34,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		return "", err
 	}
 	// Build x509_san_dns client_id: strip scheme to get the DNS name (+ optional port)
-	clientID := fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"))
+	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract host from PublicURL: %w", err)
+	}
+	clientID := fmt.Sprintf("x509_san_dns:%s", host)
 
 	requestObject := &openid4vp.RequestObject{
 		ISS:          c.cfg.Verifier.OIDCOP.Issuer,

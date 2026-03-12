@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
 	"vc/pkg/cache"
@@ -37,6 +36,11 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	c.log.Debug("PAR", "state", req.State)
 
+	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+	}
+
 	azt := cache.AuthorizationContext{
 		SessionID:            uuid.NewString(),
 		Code:                 uuid.NewString(),
@@ -47,7 +51,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		CodeChallenge:        req.CodeChallenge,
 		CodeChallengeMethod:  req.CodeChallengeMethod,
 		State:                req.State,
-		ClientID:             fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
+		ClientID:             fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
 		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
@@ -82,9 +86,14 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error) {
 	c.log.Debug("Authorize", "req", req)
+	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+	}
+
 	query := &cache.AuthorizationContext{
 		RequestURI: req.RequestURI,
-		ClientID:   fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.APIGW.PublicURL, "https://")),
+		ClientID:   fmt.Sprintf("x509_san_dns:%s", host),
 	}
 	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, query)
 	c.log.Debug("Get authorization", "query", query, "authorization", authorizationContext)

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 	"vc/pkg/cache"
+	"vc/pkg/helpers"
 	"vc/pkg/openid4vp"
 
 	"github.com/google/uuid"
@@ -77,6 +77,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		scopes = append(scopes, credential.ID)
 	}
 
+	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+	}
+
 	authorizationContext := &cache.AuthorizationContext{
 		SessionID:           sessionID,
 		Scopes:              scopes,
@@ -85,7 +90,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		WalletURI:           "",
 		Forfeited:           false,
 		State:               state,
-		ClientID:            fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")),
+		ClientID:            fmt.Sprintf("x509_san_dns:%s", host),
 		ExpiresAt:           0,
 		CodeChallenge:       "",
 		CodeChallengeMethod: "",
@@ -111,7 +116,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	requestObject := &openid4vp.RequestObject{
 		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
-		ISS:          strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"),
+		ISS:          host,
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post.jwt",
