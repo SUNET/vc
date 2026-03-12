@@ -48,13 +48,13 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("unknown scope: %s", req.Scope)
 	}
 
-	// Enforce that the caller-provided VCT URL and integrity match the
-	// configured values derived from the credential constructor.
+	// Enforce that the caller-provided VCT URL matches the configured value
+	// to prevent arbitrary URL injection (SSRF). Integrity is verified when
+	// the VCTM is actually fetched in BuildCredentialWithSigner/fetchVCTM,
+	// so we don't compare cached integrity hashes here (they can diverge
+	// when apigw and issuer refresh their caches independently).
 	if expected := constructor.GetVCTURL(); expected != "" && req.VCTUrl != expected {
 		return nil, fmt.Errorf("vct_url mismatch for scope %s: got %s, expected %s", req.Scope, req.VCTUrl, expected)
-	}
-	if expected := constructor.GetIntegrity(); expected != "" && req.Integrity != expected {
-		return nil, fmt.Errorf("integrity mismatch for scope %s", req.Scope)
 	}
 
 	// Build credential options with integrity provided by the caller (APIGW).
