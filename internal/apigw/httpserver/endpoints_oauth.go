@@ -193,14 +193,14 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		c.SetCookie("openid4vp_redirect_url", reply.RedirectURL, 900, "/authorization/consent", "", false, false)
 		session.Set("verifier_context_id", reply.VerifierContextID)
 		if err := session.Save(); err != nil {
 			return nil, err
 		}
 
-		// in order to avoid the verifier context ID being sent to the client
-		reply.VerifierContextID = ""
+		// Pass the wallet redirect URL via the template data attribute
+		// (cookies are no longer used for this purpose).
+		redirectURL = reply.RedirectURL
 	}
 
 	if authMethod == model.AuthMethodSAML {
