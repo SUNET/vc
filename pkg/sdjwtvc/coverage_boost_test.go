@@ -22,6 +22,7 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 
 	mockName := "name"
 	vctm := &VCTM{
+		VCT:    "https://example.com/credential/test",
 		Claims: []Claim{
 			{
 				Path: []*string{&mockName},
