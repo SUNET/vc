@@ -554,7 +554,7 @@ func TestMakeSDJWT_InlineVCTMValidation(t *testing.T) {
 			vctm:        nil,
 			integrity:   integrity,
 			wantErr:     true,
-			errContains: "VCTM",
+			errContains: "vctm",
 		},
 		{
 			name:        "invalid JSON VCTM is rejected",
