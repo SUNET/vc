@@ -52,6 +52,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		gin:    gin.New(),
 		tracer: tracer,
 		server: &http.Server{
+			// ReadHeaderTimeout limits the time to read request headers.
+			// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
+			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
 			ReadHeaderTimeout: 3 * time.Second,
 		},
 		eventPublisher: eventPublisher,
