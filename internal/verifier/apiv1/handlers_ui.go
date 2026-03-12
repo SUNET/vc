@@ -34,7 +34,9 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		info := &UICredentialInfo{
 			Attributes: constructor.GetAttributes(),
 		}
-		if vctm := constructor.GetVCTM(); vctm != nil {
+		if v := constructor.GetVCTURL(); v != "" {
+			info.VCT = v
+		} else if vctm := constructor.GetVCTM(); vctm != nil {
 			info.VCT = vctm.VCT
 		}
 		reply.Credentials[scope] = info
