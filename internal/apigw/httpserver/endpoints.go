@@ -272,7 +272,11 @@ func (s *Service) endpointTypeMetadata(ctx context.Context, c *gin.Context) (any
 		return nil, err
 	}
 
-	return reply, nil
+	// Write raw JSON directly; the generic Content renderer would corrupt
+	// json.RawMessage ([]byte) when content-negotiation picks text/html,
+	// because fmt "%v" renders bytes as decimal numbers.
+	c.Data(http.StatusOK, "application/json; charset=utf-8", reply)
+	return nil, nil
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint
