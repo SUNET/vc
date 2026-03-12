@@ -953,11 +953,11 @@ type CredentialConstructor struct {
 	Format     string        `yaml:"format" json:"format" validate:"required"`
 	AuthMethod string        `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic saml oidc openid4vp"`
 	// AuthScopes lists credential_constructor keys whose VCTs are acceptable for
-	// wallet authentication. Only relevant when AuthMethod is "openid4vp".
+	// wallet authentication. Required when AuthMethod is "openid4vp".
 	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
 	// AuthClaims lists identity claims to extract from the authentication credential.
-	// Only relevant when AuthMethod is "openid4vp".
-	AuthClaims []string                       `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
+	// Required when AuthMethod is "openid4vp".
+	AuthClaims []string `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving

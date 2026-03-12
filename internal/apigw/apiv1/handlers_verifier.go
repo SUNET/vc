@@ -40,7 +40,9 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	// Get format from the first auth scope (all scopes share the same format)
+	// Get format from the first auth scope (all scopes share the same format).
+	// AuthScopes is guaranteed non-empty here because startup validation
+	// requires auth_scopes when auth_method is "openid4vp".
 	format := c.cfg.GetFormatForScope(credentialConstructor.AuthScopes[0])
 
 	// Build DCQL claims from credential constructor configuration

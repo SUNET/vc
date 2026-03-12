@@ -202,15 +202,25 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.OIDCRPConfig{})
 
-	// Register struct-level validation for Common: auth_scopes must not reference self
+	// Register struct-level validation for Common: credential constructor constraints
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		common := sl.Current().Interface().(model.Common)
 		for scope, cc := range common.CredentialConstructor {
 			if cc == nil {
 				continue
 			}
+			// auth_scopes must not reference self
 			if slices.Contains(cc.AuthScopes, scope) {
 				sl.ReportError(cc.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
+			}
+			// openid4vp requires non-empty auth_scopes and auth_claims
+			if cc.AuthMethod == "openid4vp" {
+				if len(cc.AuthScopes) == 0 {
+					sl.ReportError(cc.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
+				}
+				if len(cc.AuthClaims) == 0 {
+					sl.ReportError(cc.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_openid4vp", scope)
+				}
 			}
 		}
 	}, model.Common{})
