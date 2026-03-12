@@ -131,11 +131,11 @@ type CreateMDocRequest struct {
 
 // CreateMDocReply is the reply for mDL credential creation
 type CreateMDocReply struct {
-	MDoc               []byte `json:"mdoc"`
-	StatusListSection  int64  `json:"status_list_section"`
-	StatusListIndex    int64  `json:"status_list_index"`
-	ValidFrom          string `json:"valid_from"`
-	ValidUntil         string `json:"valid_until"`
+	MDoc              []byte `json:"mdoc"`
+	StatusListSection int64  `json:"status_list_section"`
+	StatusListIndex   int64  `json:"status_list_index"`
+	ValidFrom         string `json:"valid_from"`
+	ValidUntil        string `json:"valid_until"`
 }
 
 // MakeMDoc creates an mDL credential per ISO 18013-5

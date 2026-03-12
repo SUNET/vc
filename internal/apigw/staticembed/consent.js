@@ -249,9 +249,9 @@ Alpine.data("app", () => ({
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
     handleLoginPidAuth(immediate = false) {
-        const rawRedirectUrl = getCookie("openid4vp_redirect_url");
+        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
         if (!rawRedirectUrl) {
-            this.error = "Missing 'openid4vp_redirect_url' cookie";
+            this.error = "Missing OpenID4VP redirect URL";
             return;
         }
 
@@ -353,6 +353,7 @@ Alpine.data("app", () => ({
     handleCredentialSelection(event) {
         if (!this.redirectUrl) {
             this.error = "'redirect_url' is null";
+            return;
         }
         this.redirect(this.redirectUrl);
     },
@@ -376,7 +377,6 @@ Alpine.data("app", () => ({
         }
 
         const data = await response.json();
-        console.info(JSON.stringify(data, null, 2));
         return data;
     },
 
