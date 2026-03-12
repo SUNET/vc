@@ -455,25 +455,34 @@ type DiscoveryMetadata struct {
 
 // GetDiscoveryMetadata returns OpenID Provider configuration
 func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
-	authorizationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/authorize")
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct authorization endpoint URL: %w", err)
+	base := c.cfg.Verifier.PublicURL
+	join := func(path string) (string, error) {
+		u, err := url.JoinPath(base, path)
+		if err != nil {
+			return "", fmt.Errorf("failed to construct %s URL: %w", path, err)
+		}
+		return u, nil
 	}
-	tokenEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/token")
+
+	authorizationEndpoint, err := join("/authorize")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct token endpoint URL: %w", err)
+		return nil, err
 	}
-	userInfoEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/userinfo")
+	tokenEndpoint, err := join("/token")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct userinfo endpoint URL: %w", err)
+		return nil, err
 	}
-	jwksURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/jwks")
+	userInfoEndpoint, err := join("/userinfo")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct jwks URI: %w", err)
+		return nil, err
 	}
-	registrationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/register")
+	jwksURI, err := join("/jwks")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct registration endpoint URL: %w", err)
+		return nil, err
+	}
+	registrationEndpoint, err := join("/register")
+	if err != nil {
+		return nil, err
 	}
 
 	metadata := &DiscoveryMetadata{

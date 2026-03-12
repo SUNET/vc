@@ -187,9 +187,12 @@ type SAMLConfig struct {
 	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty"`
 
 	// CertificatePath is the path to X.509 certificate for SAML signing/encryption
+	// TODO(pki): Migrate to pki.KeyConfig for consistency with other services and
+	// to enable HSM-backed SAML signing keys in the future.
 	CertificatePath string `yaml:"certificate_path" validate:"required_if=Enable true"`
 
 	// PrivateKeyPath is the path to private key for SAML signing/encryption
+	// TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.
 	PrivateKeyPath string `yaml:"private_key_path" validate:"required_if=Enable true"`
 
 	// ACSEndpoint is the Assertion Consumer Service URL where IdP sends SAML responses
@@ -204,6 +207,11 @@ type SAMLConfig struct {
 	// Key: credential type identifier (e.g., "pid", "diploma")
 	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
 	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
+
+	// MetadataSigningCertPath is the path to the X.509 certificate used to verify
+	// metadata signatures. When set, all fetched metadata (MDQ and static) must
+	// carry a valid XML signature from this certificate.
+	MetadataSigningCertPath string `yaml:"metadata_signing_cert_path,omitempty"`
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
@@ -369,6 +377,8 @@ type AuditLog struct {
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
 type MDocConfig struct {
 	// CertificateChainPath is the path to the PEM certificate chain
+	// TODO(pki): Consider folding into pki.KeyConfig.ChainPath to unify certificate
+	// chain loading with the standard key material configuration pattern.
 	CertificateChainPath string `yaml:"certificate_chain_path" validate:"required"`
 	// DefaultValidity is the default credential validity (default: 365 days)
 	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
@@ -492,6 +502,12 @@ type TrustConfig struct {
 	// TrustPolicies configures per-role trust evaluation policies.
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
+
+	// AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted.
+	// If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA.
+	// The "none" algorithm is NEVER allowed regardless of configuration.
+	// Examples: ["ES256", "ES384", "ES512", "EdDSA"]
+	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.

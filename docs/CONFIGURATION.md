@@ -115,6 +115,22 @@ Shared configuration used across all services.
 | `auth_claims`    | `[]string` | Identity claims to extract from the authentication credential. | -       | -       | No                              |
 | `attributes`     | `object`   | Attributes                                                     | -       | -       | Yes                             |
 
+#### `auth_method` values
+
+The `auth_method` field selects how the user is authenticated before the credential is issued.
+
+| Value      | Description                                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `basic`    | Internal lookup – the user's identity is obtained from the issuer's own datastore (e.g. pre-provisioned data).                             |
+| `pid_auth` | Wallet-based authentication – the user proves identity by presenting a Verifiable Credential (PID) to the verifier via OpenID4VP.          |
+| `saml`     | SAML 2.0 authentication – the user is redirected to a SAML IdP; identity claims are extracted from the SAML assertion. Requires `apigw.saml` to be configured. |
+| `oidc`     | OpenID Connect authentication – the user is redirected to an OIDC Provider; identity claims are extracted from the ID token. Requires `apigw.oidcrp` to be configured. |
+
+For `saml` and `oidc`, the claim transformation is driven by the `credential_mappings` under
+`apigw.saml` or `apigw.oidcrp` respectively. A mapping entry whose key matches the
+`credential_constructor` scope is used to determine which IdP attributes or OIDC claims
+become credential claims.
+
 ## `apigw` (Top-level)
 
 Configuration for the API Gateway service that handles credential issuance requests.

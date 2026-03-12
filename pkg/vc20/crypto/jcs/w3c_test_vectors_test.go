@@ -1,6 +1,3 @@
-//go:build vc20
-// +build vc20
-
 // Package jcs tests using official W3C test vectors from the
 // Data Integrity EdDSA Cryptosuites v1.0 specification.
 // Reference: https://www.w3.org/TR/vc-di-eddsa/#representation-eddsa-jcs-2022

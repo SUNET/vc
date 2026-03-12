@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package oob implements the DIDComm Out-of-Band Protocol 2.0.
 //
 // Out-of-Band is used to share out-of-band invitations that can

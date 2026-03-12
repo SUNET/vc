@@ -119,14 +119,20 @@ func (m *middlewareHandler) BasicAuth(ctx context.Context, users map[string]stri
 
 	return func(c *gin.Context) {
 		user, pass, ok := c.Request.BasicAuth()
-		if ok {
-			password, ok := users[user]
-			if !ok || pass != password {
-				c.AbortWithStatus(401)
-				return
-			}
+		if !ok {
+			c.Header("WWW-Authenticate", `Basic realm="restricted"`)
+			c.AbortWithStatus(401)
+			return
 		}
 
+		password, found := users[user]
+		if !found || pass != password {
+			c.Header("WWW-Authenticate", `Basic realm="restricted"`)
+			c.AbortWithStatus(401)
+			return
+		}
+
+		c.Set("user", user)
 		c.Next()
 		m.log.Info("basic_auth", "user", user, "req_id", c.GetString("req_id"))
 	}

@@ -63,7 +63,7 @@
     <link rel="icon" href="/static/favicon.png" type="image/png">
 </head>
 <body class="content-fade-in-appear-done content-fade-in-enter-done">
-<section class="flex-grow flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 min-h-dvh flex flex-col" x-data="app">
+<section class="flex-grow flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 min-h-dvh flex flex-col" x-data="app" data-auth-method="{{.AuthMethod}}" data-redirect-url="{{.RedirectURL}}">
     <div class="w-full flex flex-col items-center gap-7 px-6 py-8 text-black dark:text-white max-w-lg p-8">
         <a href="https://www.sunet.se" target="_blank" rel="noopener noreferrer">
             <img src="/static/logo.png" alt="Sunet" style="height: 48px;">
@@ -112,6 +112,14 @@
                     <button class="rounded-lg shadow-sm text-sm w-full px-4 py-2 mt-6 text-center text-white bg-primary hover:bg-primary-hover dark:text-white dark:hover:bg-primary-light-hover dark:bg-primary-light focus-visible:outline-2 focus-visible:outline-offset-2 cursor-pointer" @click="() => handleLoginPidAuth(true)" title="Proceed to Wallet immediately">Proceed now</button>
                 </div>
             </template>
+            <template x-if="!loading && !loggedIn && (authMethod === 'saml' || authMethod === 'oidc')">
+                <div class="space-y-4 md:space-y-6">
+                    <p class="text-center">Redirecting to your identity provider for authentication...</p>
+                    <div class="vc-loader">
+                        <span class="loader text-primary dark:text-primary-light"></span>
+                    </div>
+                </div>
+            </template>
             <template x-if="!loading && loggedIn">
                 <div class="space-y-4 md:space-y-6">
                     <p>Select the credential you wish to retrieve by clicking on it:</p>
@@ -126,7 +134,7 @@
                                     </div>
                                     <label :for="`credential:${index}`" class="vc-radio-label radio block cursor-pointer" :class="{ 'outline-3 outline-double outline-primary-light bg-primary-light bg-opacity-10': checked }">
                                         <div class="block">
-                                            <img class="vc-credential-card mb-2" width="829" height="504" :src="credential.svg" alt="">
+                                            <img x-show="credential.svg" class="vc-credential-card mb-2" width="829" height="504" :src="credential.svg" alt="">
                                             <table class="table-auto w-full">
                                                 <tbody>
                                                     <template x-for="[svg_id, claim] of Object.entries(credential.claims)">

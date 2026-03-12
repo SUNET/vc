@@ -1,6 +1,3 @@
-//go:build vc20
-// +build vc20
-
 package apiv1
 
 import (
@@ -191,10 +188,9 @@ func (c *Client) buildVC20CredentialJSON(
 
 // signVC20Credential signs a credential using the specified cryptosuite
 func (c *Client) signVC20Credential(ctx context.Context, cred *credential.RDFCredential, cryptosuite string, mandatoryPointers []string) (*credential.RDFCredential, error) {
-	// Get the verification method from config
 	verificationMethod := c.cfg.Issuer.JWTAttribute.Issuer + "#key-1"
-	if c.kid != "" {
-		verificationMethod = c.cfg.Issuer.JWTAttribute.Issuer + "#" + c.kid
+	if kid := c.signer.KeyID(); kid != "" {
+		verificationMethod = c.cfg.Issuer.JWTAttribute.Issuer + "#" + kid
 	}
 
 	switch cryptosuite {

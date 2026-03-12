@@ -15,7 +15,6 @@ import (
 
 // Verifier verifies mDL documents according to ISO/IEC 18013-5:2021.
 type Verifier struct {
-	trustList           *IACATrustList
 	trustEvaluator      trust.TrustEvaluator
 	skipRevocationCheck bool
 	clock               func() time.Time
@@ -23,13 +22,10 @@ type Verifier struct {
 
 // VerifierConfig contains configuration options for the Verifier.
 type VerifierConfig struct {
-	// TrustList is the list of trusted IACA certificates (local trust anchors).
-	// Either TrustList or TrustEvaluator must be provided.
-	TrustList *IACATrustList
-
-	// TrustEvaluator is an optional trust evaluator for validating certificate chains
-	// using an external trust framework (e.g., go-trust). When both TrustList and
-	// TrustEvaluator are provided, TrustEvaluator takes precedence for trust decisions.
+	// TrustEvaluator is required for validating certificate chains using an external
+	// trust framework (e.g., go-trust with mdociaca, ETSI TSL, or OpenID Federation).
+	// This replaces the deprecated local TrustList approach - all trust decisions
+	// should go through TrustEvaluator for consistent policy enforcement.
 	TrustEvaluator trust.TrustEvaluator
 
 	// SkipRevocationCheck skips CRL/OCSP revocation checking if true.
@@ -74,9 +70,11 @@ type DocumentVerificationResult struct {
 }
 
 // NewVerifier creates a new Verifier with the given configuration.
+// TrustEvaluator is required - use go-trust with appropriate registries
+// (mdociaca for dynamic IACA, ETSI TSL, OpenID Federation, etc.).
 func NewVerifier(config VerifierConfig) (*Verifier, error) {
-	if config.TrustList == nil && config.TrustEvaluator == nil {
-		return nil, errors.New("either TrustList or TrustEvaluator is required")
+	if config.TrustEvaluator == nil {
+		return nil, errors.New("TrustEvaluator is required")
 	}
 
 	clock := config.Clock
@@ -85,7 +83,6 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 	}
 
 	return &Verifier{
-		trustList:           config.TrustList,
 		trustEvaluator:      config.TrustEvaluator,
 		skipRevocationCheck: config.SkipRevocationCheck,
 		clock:               clock,
@@ -234,8 +231,9 @@ func (v *Verifier) verifyCertificateChain(chain []*x509.Certificate) error {
 	return v.verifyCertificateChainWithContext(context.Background(), chain, "")
 }
 
-// verifyCertificateChainWithContext verifies the DS certificate chain against trusted IACAs
-// with a provided context for external trust evaluation.
+// verifyCertificateChainWithContext verifies the DS certificate chain via TrustEvaluator.
+// This delegates all trust decisions to go-trust which can use mdociaca, ETSI TSL,
+// OpenID Federation, or other registries for dynamic trust anchor resolution.
 func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain []*x509.Certificate, docType string) error {
 	if len(chain) == 0 {
 		return errors.New("empty certificate chain")
@@ -252,71 +250,27 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 		return fmt.Errorf("certificate expired: valid until %s", dsCert.NotAfter)
 	}
 
-	// If TrustEvaluator is configured, use it for trust decisions
-	if v.trustEvaluator != nil {
-		// Extract issuer identifier from the DS certificate
-		// For mDOC, this is typically the issuing_country or issuing_authority
-		issuerID := extractMDocIssuerID(dsCert)
+	// Extract issuer identifier from the DS certificate
+	// For mDOC, this is typically the issuing_country or issuing_authority
+	issuerID := extractMDocIssuerID(dsCert)
 
-		decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
-			EvaluationRequest: trustapi.EvaluationRequest{
-				SubjectID: issuerID,
-				KeyType:   trust.KeyTypeX5C,
-				Key:       chain,
-				Role:      trust.RoleCredentialIssuer,
-				DocType:   docType,
-			},
-		})
+	// Delegate trust decision to TrustEvaluator (go-trust)
+	decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			SubjectID: issuerID,
+			KeyType:   trust.KeyTypeX5C,
+			Key:       chain,
+			Role:      trust.RoleCredentialIssuer,
+			DocType:   docType,
+		},
+	})
 
-		if err != nil {
-			return fmt.Errorf("trust evaluation failed: %w", err)
-		}
-
-		if !decision.Trusted {
-			return fmt.Errorf("issuer not trusted: %s", decision.Reason)
-		}
-
-		// Trust evaluator approved the chain
-		return nil
+	if err != nil {
+		return fmt.Errorf("trust evaluation failed: %w", err)
 	}
 
-	// Fall back to local trust list verification
-	if v.trustList == nil {
-		return errors.New("no trust configuration available")
-	}
-
-	// Find a trusted IACA that issued this certificate
-	var issuerCert *x509.Certificate
-
-	if len(chain) > 1 {
-		// Chain includes intermediate/root certificates
-		issuerCert = chain[len(chain)-1]
-	}
-
-	// Verify against trust list
-	if issuerCert != nil {
-		// Check if the chain is trusted
-		if err := v.trustList.IsTrusted(chain); err != nil {
-			return fmt.Errorf("certificate chain not trusted: %w", err)
-		}
-	} else {
-		// Try to find the issuer in the trust list
-		trusted := false
-		for _, iaca := range v.trustList.GetTrustedIssuers() {
-			if err := dsCert.CheckSignatureFrom(iaca); err == nil {
-				trusted = true
-				issuerCert = iaca
-				break
-			}
-		}
-		if !trusted {
-			return errors.New("no trusted IACA found for certificate")
-		}
-	}
-
-	// Verify the signature on the DS certificate
-	if err := dsCert.CheckSignatureFrom(issuerCert); err != nil {
-		return fmt.Errorf("certificate signature verification failed: %w", err)
+	if !decision.Trusted {
+		return fmt.Errorf("issuer not trusted: %s", decision.Reason)
 	}
 
 	// TODO: Check revocation status if not skipped

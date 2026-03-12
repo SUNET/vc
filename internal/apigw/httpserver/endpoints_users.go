@@ -161,6 +161,14 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 		}
 		request.ResponseCode = responseCode
 
+	case model.AuthMethodSAML, model.AuthMethodOIDC:
+		// For SAML/OIDC auth methods, documents are already stored in the VCI
+		// session cache by the ACS/callback handlers. No additional session data
+		// is needed — the apiv1 UserLookup will retrieve them using the session ID
+		// from the authorization context (same as pid_auth's default cache path).
+		s.log.Debug("endpointUserLookup: SAML/OIDC auth method, documents in VCI cache",
+			"auth_method", authMethod)
+
 	default:
 		err := errors.New("unsupported auth method for user lookup")
 		span.SetStatus(codes.Error, err.Error())

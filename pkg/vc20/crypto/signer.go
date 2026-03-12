@@ -1,6 +1,3 @@
-//go:build vc20
-// +build vc20
-
 // Package crypto provides cryptographic interfaces and utilities for VC 2.0 Data Integrity proofs.
 package crypto
 

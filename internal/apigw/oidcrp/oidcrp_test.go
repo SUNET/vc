@@ -1,5 +1,3 @@
-//go:build oidcrp
-
 package oidcrp
 
 import (
@@ -109,7 +107,7 @@ func TestClaimTransformer(t *testing.T) {
 		},
 	}
 
-	transformer := &ClaimTransformer{Mappings: mappings}
+	transformer := NewClaimTransformer(mappings)
 
 	// Test claims
 	inputClaims := map[string]any{
@@ -164,7 +162,7 @@ func TestClaimTransformerMissingRequired(t *testing.T) {
 		},
 	}
 
-	transformer := &ClaimTransformer{Mappings: mappings}
+	transformer := NewClaimTransformer(mappings)
 
 	// Missing required claim
 	inputClaims := map[string]any{}
@@ -200,7 +198,7 @@ func TestClaimTransformerTransformations(t *testing.T) {
 		},
 	}
 
-	transformer := &ClaimTransformer{Mappings: mappings}
+	transformer := NewClaimTransformer(mappings)
 
 	inputClaims := map[string]any{
 		"lowercase_field": "HELLO WORLD",
@@ -251,7 +249,7 @@ func BenchmarkClaimTransform(b *testing.B) {
 		},
 	}
 
-	transformer := &ClaimTransformer{Mappings: mappings}
+	transformer := NewClaimTransformer(mappings)
 
 	claims := map[string]any{
 		"given_name":  "John",

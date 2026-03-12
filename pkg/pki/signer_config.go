@@ -101,6 +101,8 @@ func (sc *SignerConfig) SignJWT(claims jwt.Claims) (string, error) {
 }
 
 // GetJWK returns the public key as a JSON Web Key (JWK).
+// The kid is derived using the same logic as KeyMaterialSigner.KeyID()
+// to ensure consistency between JWT headers and JWKS endpoints.
 func (sc *SignerConfig) GetJWK() (*jose.JSONWebKey, error) {
 	if err := sc.initialize(); err != nil {
 		return nil, fmt.Errorf("failed to initialize key material: %w", err)
@@ -111,24 +113,20 @@ func (sc *SignerConfig) GetJWK() (*jose.JSONWebKey, error) {
 		return nil, fmt.Errorf("private key does not implement crypto.Signer")
 	}
 
+	// Use the same kid derivation as KeyMaterialSigner to ensure
+	// JWT header kid and JWKS kid are always consistent.
+	kid := determineKeyID(sc.keyMaterial)
+
 	jwk := &jose.JSONWebKey{
 		Key:       signer.Public(),
+		KeyID:     kid,
 		Algorithm: sc.keyMaterial.SigningMethod.Alg(),
 		Use:       "sig",
 	}
 
-	// Add key ID if certificate is available
-	if sc.keyMaterial.Cert != nil {
-		jwk.KeyID = getCertificateKeyID(sc.keyMaterial.Cert)
-	}
-
 	// Add certificate chain if available
-	if len(sc.keyMaterial.Chain) > 0 {
-		// Convert base64 strings back to certificates if needed
-		// For now, if cert is available, create chain from it
-		if sc.keyMaterial.Cert != nil {
-			jwk.Certificates = []*x509.Certificate{sc.keyMaterial.Cert}
-		}
+	if sc.keyMaterial.Cert != nil {
+		jwk.Certificates = []*x509.Certificate{sc.keyMaterial.Cert}
 	}
 
 	return jwk, nil

@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 package didcomm_interop
 
 // Package didcomm_interop contains tests derived from the Affinidi TDK examples.

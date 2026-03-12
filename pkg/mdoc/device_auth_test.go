@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,7 +10,34 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"vc/pkg/trust"
+
+	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
+
+// deviceAuthMockTrustEvaluator is a mock TrustEvaluator for testing device auth
+type deviceAuthMockTrustEvaluator struct {
+	trusted  bool
+	iacaCert *x509.Certificate
+}
+
+func (m *deviceAuthMockTrustEvaluator) Evaluate(ctx context.Context, req *trust.EvaluationRequest) (*trustapi.TrustDecision, error) {
+	return &trustapi.TrustDecision{
+		Trusted:        m.trusted,
+		Reason:         "test decision",
+		TrustFramework: "test-mock",
+	}, nil
+}
+
+func (m *deviceAuthMockTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
+	return kt == trust.KeyTypeX5C
+}
+
+// createTestTrustEvaluatorFromIACA creates a mock TrustEvaluator that trusts credentials from the given IACA
+func createTestTrustEvaluatorFromIACA(iacaCert *x509.Certificate) trust.TrustEvaluator {
+	return &deviceAuthMockTrustEvaluator{trusted: true, iacaCert: iacaCert}
+}
 
 // createTestIACACert creates a test IACA root certificate for device auth tests
 func createTestIACACert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
@@ -617,11 +645,10 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 	}
 
 	// Create verifier with trust list
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 	if err != nil {
@@ -640,11 +667,10 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 func TestVerifier_VerifyDeviceAuth_NoDeviceAuth(t *testing.T) {
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 
@@ -713,11 +739,10 @@ func TestVerifier_VerifyDeviceAuth_WrongKey(t *testing.T) {
 
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 
@@ -766,11 +791,10 @@ func TestVerifier_VerifyDeviceAuth_MACRequiresSessionKey(t *testing.T) {
 
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 
@@ -814,11 +838,10 @@ func TestVerifier_VerifyDeviceAuthWithSessionKey(t *testing.T) {
 
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 
@@ -858,11 +881,10 @@ func TestVerifier_VerifyDeviceAuthWithSessionKey_WrongKey(t *testing.T) {
 
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 
@@ -884,11 +906,10 @@ func TestVerifier_VerifyDeviceAuthWithSessionKey_NoMAC(t *testing.T) {
 
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 
@@ -932,11 +953,10 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 
 	// Create verifier
 	iacaCert, _ := createTestIACACert(t)
-	trustList := NewIACATrustList()
-	trustList.AddTrustedIACA(iacaCert)
+	trustEvaluator := createTestTrustEvaluatorFromIACA(iacaCert)
 
 	verifier, _ := NewVerifier(VerifierConfig{
-		TrustList:           trustList,
+		TrustEvaluator:      trustEvaluator,
 		SkipRevocationCheck: true,
 	})
 

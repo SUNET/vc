@@ -1,6 +1,3 @@
-//go:build didcomm && vc20
-// +build didcomm,vc20
-
 // Package presentproof implements the DIDComm present-proof protocol 3.0.
 // This protocol enables requesting and presenting verifiable credentials
 // and presentations between DIDComm agents.

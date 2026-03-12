@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package didcomm implements DIDComm Messaging v2.1 specification.
 //
 // DIDComm Messaging is a secure, private communication methodology built atop

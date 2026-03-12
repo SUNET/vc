@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package transport implements DIDComm v2.1 message transports.
 //
 // This package provides implementations for sending and receiving

@@ -40,20 +40,6 @@ const UserDataSchema = v.required(v.object({
 }));
 
 /**
- * @param {string} name 
- * @returns {string | null}
- */
-function getCookie(name) {
-    return document.cookie
-        .split(";")
-        .find((cookie) =>
-            cookie.trim().startsWith(`${name}=`),
-        )
-        ?.split("=")
-        .pop() || null;
-}
-
-/**
  * @param {string} key 
  * @returns {string}
  */
@@ -125,6 +111,10 @@ Alpine.data("app", () => ({
 
         if (this.loggedIn) {
             this.handleIsLoggedIn();
+        } else if (this.authMethod === "saml") {
+            this.handleLoginSAML();
+        } else if (this.authMethod === "oidc") {
+            this.handleLoginOIDC();
         } else {
             this.loading = false;
         }
@@ -139,7 +129,8 @@ Alpine.data("app", () => ({
     },
 
     setAuthMethod() {
-        const authMethod = getCookie("auth_method");
+        const authMethod = this.$el.dataset.authMethod || null;
+        const validMethods = ["basic", "pid_auth", "saml", "oidc"];
 
         if (
             !authMethod ||
@@ -226,6 +217,34 @@ Alpine.data("app", () => ({
         }
     },
 
+    handleLoginSAML() {
+        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
+        if (!rawRedirectUrl) {
+            this.error = "Missing SAML redirect URL";
+            return;
+        }
+        try {
+            const url = decodeURIComponent(rawRedirectUrl);
+            this.redirect(url);
+        } catch (err) {
+            this.error = `Invalid SAML redirect URL: ${err.message}`;
+        }
+    },
+
+    handleLoginOIDC() {
+        const rawRedirectUrl = this.$el.dataset.redirectUrl || null;
+        if (!rawRedirectUrl) {
+            this.error = "Missing OIDC redirect URL";
+            return;
+        }
+        try {
+            const url = decodeURIComponent(rawRedirectUrl);
+            this.redirect(url);
+        } catch (err) {
+            this.error = `Invalid OIDC redirect URL: ${err.message}`;
+        }
+    },
+
     /**
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
@@ -299,10 +318,14 @@ Alpine.data("app", () => ({
 
             this.redirectUrl = data.redirect_url;
 
-            const svg = await this.createCredentialSvgImageUri(
-                data.svg_template_claims,
-            );
-
+            let svg = null;
+            try {
+                svg = await this.createCredentialSvgImageUri(
+                    data.svg_template_claims,
+                );
+            } catch (_) {
+                // VCTM has no SVG template — display claims without card image
+            }
 
             this.credentials.push({
                 vct: "N/A",
