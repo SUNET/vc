@@ -67,7 +67,12 @@ func (c *Client) fetchVCTM(ctx context.Context, vctURL string, expectedIntegrity
 		return nil, fmt.Errorf("failed to create request for VCT URL %s: %w", vctURL, err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch VCTM from %s: %w", vctURL, err)
 	}
@@ -77,9 +82,14 @@ func (c *Client) fetchVCTM(ctx context.Context, vctURL string, expectedIntegrity
 		return nil, fmt.Errorf("unexpected status %d fetching VCTM from %s", resp.StatusCode, vctURL)
 	}
 
-	rawBytes, err := io.ReadAll(resp.Body)
+	// Read at most maxVCTMSize+1 bytes so we can detect oversized responses.
+	limitedReader := io.LimitReader(resp.Body, maxVCTMSize+1)
+	rawBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read VCTM response from %s: %w", vctURL, err)
+	}
+	if int64(len(rawBytes)) > maxVCTMSize {
+		return nil, fmt.Errorf("VCTM response from %s exceeds maximum allowed size of %d bytes", vctURL, maxVCTMSize)
 	}
 
 	var vctm VCTM

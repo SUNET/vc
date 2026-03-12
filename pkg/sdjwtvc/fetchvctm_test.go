@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -130,6 +131,20 @@ func TestFetchVCTM(t *testing.T) {
 			},
 			wantErr:     true,
 			errContains: "VCTM integrity mismatch",
+		},
+		{
+			name: "response_exceeds_max_size",
+			setup: func(t *testing.T) (string, string) {
+				// Serve a body larger than maxVCTMSize (1 MiB).
+				oversized := strings.Repeat("X", maxVCTMSize+1)
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Write([]byte(oversized))
+				}))
+				t.Cleanup(ts.Close)
+				return ts.URL, "sha256-xxx"
+			},
+			wantErr:     true,
+			errContains: "exceeds maximum allowed size",
 		},
 	}
 
