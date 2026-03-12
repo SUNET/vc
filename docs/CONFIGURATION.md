@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-11
+**Generated:** 2026-03-12
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -114,22 +114,6 @@ Shared configuration used across all services.
 | `auth_scopes`    | `[]string` | Credential_constructor keys whose VCTs are acceptable for      | -       | -       | No                              |
 | `auth_claims`    | `[]string` | Identity claims to extract from the authentication credential. | -       | -       | No                              |
 | `attributes`     | `object`   | Attributes                                                     | -       | -       | Yes                             |
-
-#### `auth_method` values
-
-The `auth_method` field selects how the user is authenticated before the credential is issued.
-
-| Value      | Description                                                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `basic`    | Internal lookup – the user's identity is obtained from the issuer's own datastore (e.g. pre-provisioned data).                             |
-| `pid_auth` | Wallet-based authentication – the user proves identity by presenting a Verifiable Credential (PID) to the verifier via OpenID4VP.          |
-| `saml`     | SAML 2.0 authentication – the user is redirected to a SAML IdP; identity claims are extracted from the SAML assertion. Requires `apigw.saml` to be configured. |
-| `oidc`     | OpenID Connect authentication – the user is redirected to an OIDC Provider; identity claims are extracted from the ID token. Requires `apigw.oidcrp` to be configured. |
-
-For `saml` and `oidc`, the claim transformation is driven by the `credential_mappings` under
-`apigw.saml` or `apigw.oidcrp` respectively. A mapping entry whose key matches the
-`credential_constructor` scope is used to determine which IdP attributes or OIDC claims
-become credential claims.
 
 ## `apigw` (Top-level)
 
@@ -352,19 +336,20 @@ Supports both file-based and HSM-based keys with explicit control.
 
 > **Path:** `.apigw.saml`
 
-| Field                 | Type     | Description                                                                           | Example                                             | Default | Required         |
-| --------------------- | -------- | ------------------------------------------------------------------------------------- | --------------------------------------------------- | ------- | ---------------- |
-| `enable`              | `bool`   | SAML support (default: false)                                                         | -                                                   | `false` | No               |
-| `entity_id`           | `string` | SAML SP entity identifier (typically the metadata URL)                                | `"https://issuer.sunet.se/saml/metadata"`           | -       | Yes (if enabled) |
-| `metadata_url`        | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)            | -                                                   | -       | No               |
-| `mdq_server`          | `string` | Base URL for MDQ (Metadata Query Protocol) server                                     | `"https://md.sunet.se/entities/" (must end with /)` | -       | No               |
-| `static_idp_metadata` | `object` | A single static IdP as alternative to MDQ                                             | -                                                   | -       | No               |
-| `certificate_path`    | `string` | Path to X.509 certificate for SAML signing/encryption                                 | -                                                   | -       | Yes (if enabled) |
-| `private_key_path`    | `string` | Path to private key for SAML signing/encryption                                       | -                                                   | -       | Yes (if enabled) |
-| `acs_endpoint`        | `string` | Assertion Consumer Service URL where IdP sends SAML responses                         | `"https://issuer.sunet.se/saml/acs"`                | -       | Yes (if enabled) |
-| `session_duration`    | `int`    | Maximum time in seconds an in-flight SAML authentication flow                         | -                                                   | `300`   | No               |
-| `credential_mappings` | `object` | How to map external attributes to credential claims                                   | -                                                   | -       | Yes (if enabled) |
-| `metadata_cache_ttl`  | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ | -                                                   | -       | No               |
+| Field                        | Type     | Description                                                                           | Example                                             | Default | Required         |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------- | --------------------------------------------------- | ------- | ---------------- |
+| `enable`                     | `bool`   | SAML support (default: false)                                                         | -                                                   | `false` | No               |
+| `entity_id`                  | `string` | SAML SP entity identifier (typically the metadata URL)                                | `"https://issuer.sunet.se/saml/metadata"`           | -       | Yes (if enabled) |
+| `metadata_url`               | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)            | -                                                   | -       | No               |
+| `mdq_server`                 | `string` | Base URL for MDQ (Metadata Query Protocol) server                                     | `"https://md.sunet.se/entities/" (must end with /)` | -       | No               |
+| `static_idp_metadata`        | `object` | A single static IdP as alternative to MDQ                                             | -                                                   | -       | No               |
+| `certificate_path`           | `string` | Path to X.509 certificate for SAML signing/encryption                                 | -                                                   | -       | Yes (if enabled) |
+| `private_key_path`           | `string` | Path to private key for SAML signing/encryption                                       | -                                                   | -       | Yes (if enabled) |
+| `acs_endpoint`               | `string` | Assertion Consumer Service URL where IdP sends SAML responses                         | `"https://issuer.sunet.se/saml/acs"`                | -       | Yes (if enabled) |
+| `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow                         | -                                                   | `300`   | No               |
+| `credential_mappings`        | `object` | How to map external attributes to credential claims                                   | -                                                   | -       | Yes (if enabled) |
+| `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify                                          | -                                                   | -       | No               |
+| `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ | -                                                   | -       | No               |
 
 ### `static_idp_metadata`
 
@@ -722,11 +707,12 @@ Trust evaluation operates in one of two modes:
 - When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
 - When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
 
-| Field               | Type       | Description                                                                  | Example                        | Default                  | Required |
-| ------------------- | ---------- | ---------------------------------------------------------------------------- | ------------------------------ | ------------------------ | -------- |
-| `pdp_url`           | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation. | `"https://trust.sunet.se/pdp"` | -                        | No       |
-| `local_did_methods` | `[]string` | Which DID methods can be resolved locally without go-trust.                  | -                              | `["did:key", "did:jwk"]` | No       |
-| `trust_policies`    | `object`   | Per-role trust evaluation policies.                                          | -                              | -                        | No       |
+| Field                          | Type       | Description                                                                       | Example                        | Default                  | Required |
+| ------------------------------ | ---------- | --------------------------------------------------------------------------------- | ------------------------------ | ------------------------ | -------- |
+| `pdp_url`                      | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation.      | `"https://trust.sunet.se/pdp"` | -                        | No       |
+| `local_did_methods`            | `[]string` | Which DID methods can be resolved locally without go-trust.                       | -                              | `["did:key", "did:jwk"]` | No       |
+| `trust_policies`               | `object`   | Per-role trust evaluation policies.                                               | -                              | -                        | No       |
+| `allowed_signature_algorithms` | `[]string` | AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted. | -                              | -                        | No       |
 
 ### `trust_policies` entry
 
