@@ -14,10 +14,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Clone and Link Dependency
+        run: |
+          git clone https://github.com/google/longfellow-zk.git /tmp/longfellow-zk
+          go mod edit -replace proofs/server/v2=/tmp/longfellow-zk
+          
       - name: Sync dependencies
         run: |
-          sed -i '/replace .* => \/tmp/d' go.mod || true          
-          go mod tidy          
+          go mod tidy
           go mod vendor
 
       - name: Run tests
