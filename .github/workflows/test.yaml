@@ -17,6 +17,8 @@ jobs:
       - name: Clone Missing Dependency
         run: |
           git clone https://github.com/google/longfellow-zk.git /tmp/longfellow-zk
+          cd /tmp/longfellow-zk
+          git checkout 66fab34ac83bdb669be35ca380e16191468e96d4
 
       - name: Sync dependencies
         run: |

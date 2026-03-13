@@ -6,9 +6,12 @@ RUN apt update -y && apt install -y \
     libbenchmark-dev zlib1g-dev build-essential git
 
 # 1. Clone the external dependency
-RUN git clone https://github.com/google/longfellow-zk.git /tmp/longfellow-zk
+RUN git clone https://github.com/google/longfellow-zk.git /tmp/longfellow-zk && \
+    cd /tmp/longfellow-zk && \
+    git checkout 66fab34ac83bdb669be35ca380e16191468e96d4
 
 WORKDIR /tmp/longfellow-zk
+
 RUN CXX=clang++ cmake -D CMAKE_BUILD_TYPE=Release -S lib -B build \
     --install-prefix /usr/local/zk-install && \
     cd build && make -j$(nproc) install
