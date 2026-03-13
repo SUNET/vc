@@ -938,6 +938,23 @@ func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 	return urls
 }
 
+// VCTIdentifiersForScopes resolves a list of scope keys to the original VCT
+// identifiers from the VCTM (e.g. URNs). Scopes without a loaded VCTM are
+// silently skipped.
+func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
+	ids := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		constructor := c.GetCredentialConstructor(scope)
+		if constructor == nil {
+			continue
+		}
+		if vctm := constructor.GetVCTM(); vctm != nil && vctm.VCT != "" {
+			ids = append(ids, vctm.VCT)
+		}
+	}
+	return ids
+}
+
 type CredentialConstructor struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
