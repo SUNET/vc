@@ -8,37 +8,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install System Dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install -y clang cmake libssl-dev libzstd-dev zlib1g-dev build-essential git
-
-      - name: Clone and Build ZK Libraries
-        run: |
-          git clone https://github.com/google/longfellow-zk.git /tmp/longfellow-zk
-          
-          cd /tmp/longfellow-zk
-          CXX=clang++ cmake -D CMAKE_BUILD_TYPE=Release -S lib -B build --install-prefix /usr/local/zk-install
-          cd build
-          sudo make -j$(nproc) install
-          sudo ldconfig
-
       - name: Install Go
         uses: actions/setup-go@v4
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Sync dependencies
-        env:
-          CGO_CFLAGS: "-I/usr/local/zk-install/include"
-          CGO_LDFLAGS: "-L/usr/local/zk-install/lib -lmdoc_static -lcrypto -lzstd -lstdc++"
-        run: |
-          go mod tidy
-          go mod vendor
+          cache-dependency-path: "**/*.sum"
 
       - name: Run tests
-        env:
-          CGO_CFLAGS: "-I/usr/local/zk-install/include"
-          CGO_LDFLAGS: "-L/usr/local/zk-install/lib -lmdoc_static -lcrypto -lzstd -lstdc++"
         run: make test
