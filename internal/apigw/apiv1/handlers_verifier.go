@@ -60,7 +60,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 				Format:   format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
-					VCTValues: c.cfg.VCTUrlsForScopes(credentialConstructor.AuthScopes),
+					VCTValues: c.cfg.VCTIdentifiersForScopes(credentialConstructor.AuthScopes),
 				},
 				RequireCryptographicHolderBinding: false,
 				Claims:                            claimQueries,
