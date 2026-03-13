@@ -7,7 +7,7 @@ import (
     "encoding/hex"
     "fmt"
 
-    "proofs/server/v2/zk" // The CGO-heavy library
+    "proofs/server/v2/zk"
 )
 
 func (c *Client) VerifyZKP(ctx context.Context, req *VerifyZKPRequest) (*VerifyZKPResponse, error) {

@@ -15,6 +15,5 @@ func TestVerifyZKP_Disabled(t *testing.T) {
 
     assert.Nil(t, resp)
     assert.Error(t, err)
-    // Verify it matches your specific requirement
     assert.Contains(t, err.Error(), "no item in credential cache matching id test-id")
 }

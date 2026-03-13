@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"os"
 	"os/signal"
-	"proofs/server/v2/zk"
 	"sync"
 	"syscall"
 	"time"
@@ -45,17 +44,9 @@ func main() {
 	if cfg.Verifier == nil {
 		panic("Verifier section is missing from config")
 	}
-	certs := cfg.Verifier.ZK.CACertsPath
-	circuitsDir := cfg.Verifier.ZK.CircuitsPath
-	zk.LoadCircuits(circuitsDir)
-
-	pem, err := os.ReadFile(certs)
-	if err != nil {
-		panic("could not parse cacerts file")
-	}
-	if err := zk.LoadIssuerRootCA(pem); err != nil {
-		panic("could not load issuer root CA")
-	}
+	if err := setupZK(cfg); err != nil {
+        panic(err)
+    }
 
 	if cfg.Verifier == nil {
 		panic("verifier configuration is required but not found in config file")
