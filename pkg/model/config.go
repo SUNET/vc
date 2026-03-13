@@ -469,7 +469,7 @@ type Verifier struct {
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
 	// ZKConfig is the longfellow-zk configuration
-	ZK ZKConfig `yaml:"zk" validate:"required"`
+	ZK ZKConfig `yaml:"zk"`
 }
 
 type ZKConfig struct {
