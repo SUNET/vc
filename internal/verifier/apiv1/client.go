@@ -308,13 +308,17 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			continue
 		}
 
-		c.log.Info("Matched scope to credential", "scope", scope, "vct", credInfo.GetVCTURL(), "format", credInfo.Format)
+		vctID := ""
+		if vctm := credInfo.GetVCTM(); vctm != nil {
+			vctID = vctm.VCT
+		}
+		c.log.Info("Matched scope to credential", "scope", scope, "vct", vctID, "format", credInfo.Format)
 
 		cred := openid4vp.CredentialQuery{
 			ID:     scope,
 			Format: credInfo.Format,
 			Meta: openid4vp.MetaQuery{
-				VCTValues: []string{credInfo.GetVCTURL()},
+				VCTValues: []string{vctID},
 			},
 			Claims: make([]openid4vp.ClaimQuery, 0),
 		}
