@@ -957,7 +957,7 @@ type CredentialConstructor struct {
 	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
 	// AuthClaims lists identity claims to extract from the authentication credential.
 	// Required when AuthMethod is "openid4vp".
-	AuthClaims []string `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
+	AuthClaims []string                       `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving
@@ -1176,21 +1176,22 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 				// Map rendering information from VCTM to OpenID4VCI format
 				if vctmDisplay.Rendering != nil {
-					if vctmDisplay.Rendering.Simple.BackgroundColor != "" {
-						display.BackgroundColor = vctmDisplay.Rendering.Simple.BackgroundColor
+					simple := vctmDisplay.Rendering.Simple
+					if simple.BackgroundColor != "" {
+						display.BackgroundColor = simple.BackgroundColor
 					}
-					if vctmDisplay.Rendering.Simple.TextColor != "" {
-						display.TextColor = vctmDisplay.Rendering.Simple.TextColor
+					if simple.TextColor != "" {
+						display.TextColor = simple.TextColor
 					}
-					if vctmDisplay.Rendering.Simple.Logo.URI != "" {
+					if simple.Logo.URI != "" {
 						display.Logo = openid4vci.MetadataLogo{
-							URI:     vctmDisplay.Rendering.Simple.Logo.URI,
-							AltText: vctmDisplay.Rendering.Simple.Logo.AltText,
+							URI:     simple.Logo.URI,
+							AltText: simple.Logo.AltText,
 						}
 					}
-					if vctmDisplay.Rendering.Simple.BackgroundImage != nil && vctmDisplay.Rendering.Simple.BackgroundImage.URI != "" {
+					if simple.BackgroundImage != nil && simple.BackgroundImage.URI != "" {
 						display.BackgroundImage = openid4vci.MetadataBackgroundImage{
-							URI: vctmDisplay.Rendering.Simple.BackgroundImage.URI,
+							URI: simple.BackgroundImage.URI,
 						}
 					}
 				}
