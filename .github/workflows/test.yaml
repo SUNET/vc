@@ -17,6 +17,7 @@ jobs:
       - name: Sync dependencies
         run: |
           sed -i '/replace .* => \/tmp/d' go.mod || true          
+          go mod tidy          
           go mod vendor
 
       - name: Run tests
