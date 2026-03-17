@@ -43,7 +43,8 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	// Get format from the first auth scope (all scopes share the same format).
 	// AuthScopes is guaranteed non-empty here because startup validation
 	// requires auth_scopes when auth_method is "openid4vp".
-	format := c.cfg.GetFormatForScope(credentialConstructor.AuthScopes[0])
+	authScope := credentialConstructor.AuthScopes[0]
+	format := c.cfg.GetFormatForScope(authScope)
 
 	// Build DCQL claims from credential constructor configuration
 	claimQueries := make([]openid4vp.ClaimQuery, 0, len(credentialConstructor.AuthClaims))
@@ -53,10 +54,14 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		})
 	}
 
+	// Use the first auth scope as the credential query ID, not the issuing scope.
+	// The credential query ID tells the wallet what type of credential we're
+	// requesting for authentication. Using the issuing scope (e.g. "ehic")
+	// would mislead wallets into selecting the wrong credential.
 	dcql := &openid4vp.DCQL{
 		Credentials: []openid4vp.CredentialQuery{
 			{
-				ID:       scope,
+				ID:       authScope,
 				Format:   format,
 				Multiple: false,
 				Meta: openid4vp.MetaQuery{
@@ -69,10 +74,10 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
 				Options: [][]string{
-					{scope},
+					{authScope},
 				},
 				Required: false,
-				Purpose:  "fetch credential for " + scope,
+				Purpose:  "authenticate for " + scope,
 			},
 		},
 	}
@@ -193,11 +198,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
-	// Extract VP Token from the map using the scope as key
-	vpToken, ok := vpResponse.VPToken[scope]
+	// Extract the credential query ID from the persisted DCQL query.
+	// The VP Token map is keyed by credential query ID (the auth scope),
+	// not by the issuing scope.
+	var credQueryID string
+	if authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) > 0 {
+		credQueryID = authCtx.DCQLQuery.Credentials[0].ID
+	}
+	if credQueryID == "" {
+		c.log.Error(nil, "DCQL credential query ID is empty", "scope", scope)
+		return nil, errors.New("DCQL credential query ID is empty")
+	}
+
+	// Extract VP Token from the map using the credential query ID
+	vpToken, ok := vpResponse.VPToken[credQueryID]
 	if !ok {
-		c.log.Error(nil, "VP Token not found for scope", "scope", scope, "available_keys", vpResponse.VPToken)
-		return nil, fmt.Errorf("VP Token not found for scope: %s", scope)
+		c.log.Error(nil, "VP Token not found for credential query", "query_id", credQueryID, "available_keys", vpResponse.VPToken)
+		return nil, fmt.Errorf("VP Token not found for credential query: %s", credQueryID)
 	}
 
 	// Prepare response parameters

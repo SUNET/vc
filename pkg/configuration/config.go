@@ -20,9 +20,10 @@ type envVars struct {
 }
 
 // servicesRequiringVCTM lists services that need credential_constructor and VCTM files.
+// The issuer does NOT need credential_constructor — it receives VCTM bytes
+// inline over gRPC from the apigw at credential-issuance time.
 var servicesRequiringVCTM = map[string]bool{
 	"apigw":    true,
-	"issuer":   true,
 	"verifier": true,
 }
 
