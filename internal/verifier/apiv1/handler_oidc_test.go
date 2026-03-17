@@ -940,10 +940,10 @@ func TestGenerateIDToken(t *testing.T) {
 	ctx := t.Context()
 
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDC.Issuer = "https://issuer.example.com"
-	client.cfg.Verifier.OIDC.IDTokenDuration = 3600
-	client.cfg.Verifier.OIDC.SubjectType = "public"
-	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDCOP.Issuer = "https://issuer.example.com"
+	client.cfg.Verifier.OIDCOP.IDTokenDuration = 3600
+	client.cfg.Verifier.OIDCOP.SubjectType = "public"
+	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
@@ -1230,7 +1230,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-			client.cfg.Verifier.OIDC.SessionDuration = 900
+			client.cfg.Verifier.OIDCOP.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
 			client.cfg.Verifier.DigitalCredentials.UseJAR = true
@@ -1263,6 +1263,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				assert.NotEmpty(t, resp.DeepLinkURL)
 				assert.NotEmpty(t, resp.PollURL)
 				assert.Contains(t, resp.QRCodeData, "openid4vp://")
+				assert.Contains(t, resp.DeepLinkURL, "openid4vp://")
 				assert.Contains(t, resp.QRCodeImageURL, "/qr/")
 				assert.Contains(t, resp.PollURL, "/poll/")
 
@@ -1301,7 +1302,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDC.SessionDuration = 900
+	client.cfg.Verifier.OIDCOP.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enable = false
 	// Clear CSS title to test default fallback
@@ -1335,19 +1336,131 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	assert.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Verify default DC API configuration is applied
-	assert.Equal(t, []string{"vc+sd-jwt"}, resp.PreferredFormats)
-	assert.False(t, resp.UseJAR)
-	assert.Equal(t, "direct_post", resp.ResponseMode)
+	// Verify DC API configuration from struct defaults is applied
+	assert.Equal(t, resp.PreferredFormats, client.cfg.Verifier.DigitalCredentials.PreferredFormats)
+	assert.Equal(t, resp.UseJAR, client.cfg.Verifier.DigitalCredentials.UseJAR)
+	assert.Equal(t, resp.ResponseMode, client.cfg.Verifier.DigitalCredentials.ResponseMode)
 
 	// Verify default title/subtitle are applied
 	assert.Equal(t, "Credential Verification", resp.Title)
 	assert.Equal(t, "Please present your digital credential to continue", resp.Subtitle)
 }
+
+// TestAuthorize_WalletLinks tests that supported_wallets config generates wallet links
+func TestAuthorize_WalletLinks(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.SupportedWallets = map[string]string{
+		"SUNET Wallet":  "https://wallet.sunet.se/cb",
+		"Test Wallet":   "https://test-wallet.example.com/authorize",
+	}
+
+	// Add presentation template
+	template := createSimplePresentationTemplate(t, []string{"openid", "profile"})
+	client.AddPresentationTemplateForTesting(template)
+
+	// Setup client
+	dbClient := &db.Client{
+		ClientID:      "wallet-links-client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		ResponseTypes: []string{"code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}
+	mockDB.Clients.Create(ctx, dbClient)
+
+	req := &AuthorizeRequest{
+		ResponseType: "code",
+		ClientID:     "wallet-links-client",
+		RedirectURI:  "https://example.com/callback",
+		Scope:        "openid profile",
+		State:        "test-state",
+		Nonce:        "test-nonce",
+	}
+
+	resp, err := client.Authorize(ctx, req)
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// QR code should still be openid4vp://
+	assert.Contains(t, resp.QRCodeData, "openid4vp://")
+
+	// Should have wallet links
+	assert.Len(t, resp.WalletLinks, 2)
+
+	// Each wallet link should contain the authorization params and a QR code URL
+	for _, link := range resp.WalletLinks {
+		assert.NotEmpty(t, link.Name)
+		assert.Contains(t, link.URL, "client_id=")
+		assert.Contains(t, link.URL, "request_uri=")
+
+		// Wallet links should use HTTPS
+		assert.Contains(t, link.URL, "https://")
+		assert.NotContains(t, link.URL, "openid4vp://")
+
+		// Each wallet link should have a QR code image URL for cross-device flow
+		assert.NotEmpty(t, link.QRCodeImageURL)
+		assert.Contains(t, link.QRCodeImageURL, "/qr/")
+		assert.Contains(t, link.QRCodeImageURL, "wallet=")
+	}
+
+	// Check specific wallet URLs
+	walletNames := make(map[string]string)
+	for _, link := range resp.WalletLinks {
+		walletNames[link.Name] = link.URL
+	}
+	assert.Contains(t, walletNames["SUNET Wallet"], "https://wallet.sunet.se/cb?")
+	assert.Contains(t, walletNames["Test Wallet"], "https://test-wallet.example.com/authorize?")
+}
+
+// TestAuthorize_NoWalletLinks tests that no wallet links when supported_wallets is empty
+func TestAuthorize_NoWalletLinks(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	// No supported wallets configured
+	client.cfg.Verifier.SupportedWallets = nil
+
+	template := createSimplePresentationTemplate(t, []string{"openid", "profile"})
+	client.AddPresentationTemplateForTesting(template)
+
+	dbClient := &db.Client{
+		ClientID:      "no-wallets-client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		ResponseTypes: []string{"code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}
+	mockDB.Clients.Create(ctx, dbClient)
+
+	req := &AuthorizeRequest{
+		ResponseType: "code",
+		ClientID:     "no-wallets-client",
+		RedirectURI:  "https://example.com/callback",
+		Scope:        "openid profile",
+		State:        "test-state",
+		Nonce:        "test-nonce",
+	}
+
+	resp, err := client.Authorize(ctx, req)
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.WalletLinks)
+}
+
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
 	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.SupportedWallets = map[string]string{
+		"SUNET Wallet": "https://wallet.sunet.se/cb",
+		"Test Wallet":  "https://test-wallet.example.com/authorize",
+	}
 
 	// Create a test session
 	authCtx := &cache.AuthorizationContext{
@@ -1384,6 +1497,27 @@ func TestGetQRCode(t *testing.T) {
 				SessionID: "nonexistent-session",
 			},
 			wantErr: ErrSessionNotFound,
+		},
+		{
+			name: "valid web wallet QR code",
+			req: &GetQRCodeRequest{
+				SessionID:  "test-session-123",
+				WalletName: "SUNET Wallet",
+			},
+			wantErr: nil,
+			checkResp: func(t *testing.T, resp *GetQRCodeResponse) {
+				assert.NotNil(t, resp)
+				assert.NotEmpty(t, resp.ImageData)
+				assert.True(t, len(resp.ImageData) > 0)
+			},
+		},
+		{
+			name: "unknown wallet name returns error",
+			req: &GetQRCodeRequest{
+				SessionID:  "test-session-123",
+				WalletName: "Unknown Wallet",
+			},
+			wantErr: ErrInvalidRequest,
 		},
 	}
 
@@ -2129,6 +2263,7 @@ func TestContainsOIDC(t *testing.T) {
 		})
 	}
 }
+
 // TestGetDiscoveryMetadata tests the OIDC discovery metadata endpoint
 func TestGetDiscoveryMetadata(t *testing.T) {
 	ctx := t.Context()
@@ -2136,7 +2271,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2211,7 +2346,7 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2265,7 +2400,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
 					PublicURL: tt.externalURL,
-					OIDC: &model.OIDCConfig{
+					OIDCOP: &model.OIDCOPConfig{
 						Issuer:      tt.externalURL,
 						SubjectType: "public",
 						SubjectSalt: "test-salt",
@@ -2296,7 +2431,7 @@ func TestGetJWKS(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2382,7 +2517,7 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2410,7 +2545,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDC: &model.OIDCConfig{
+			OIDCOP: &model.OIDCOPConfig{
 				Issuer:      "https://verifier.example.com",
 				SubjectType: "public",
 				SubjectSalt: "test-salt",
@@ -2424,5 +2559,152 @@ func BenchmarkGetJWKS(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ctx := b.Context()
 		_, _ = client.GetJWKS(ctx)
+	}
+}
+
+func TestNormalizeRedirectURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      string
+		expected string
+	}{
+		{
+			name:     "plain URI unchanged",
+			uri:      "https://example.com/callback",
+			expected: "https://example.com/callback",
+		},
+		{
+			name:     "percent-encoded space decoded",
+			uri:      "https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+			expected: "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+		},
+		{
+			name:     "literal space unchanged",
+			uri:      "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected: "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+		},
+		{
+			name:     "plus sign preserved (not decoded to space)",
+			uri:      "https://example.com/path+name/callback",
+			expected: "https://example.com/path+name/callback",
+		},
+		{
+			name:     "multiple encoded segments",
+			uri:      "https://sso.example.org/realms/My%20Test%20Realm/broker/my%20idp/endpoint",
+			expected: "https://sso.example.org/realms/My Test Realm/broker/my idp/endpoint",
+		},
+		{
+			name:     "encoded slash preserved via PathUnescape",
+			uri:      "https://example.com/a%2Fb/callback",
+			expected: "https://example.com/a/b/callback",
+		},
+		{
+			name:     "empty string",
+			uri:      "",
+			expected: "",
+		},
+		{
+			name:     "query parameters with encoding",
+			uri:      "https://example.com/callback?foo=bar%20baz",
+			expected: "https://example.com/callback?foo=bar baz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeRedirectURI(tt.uri)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestMatchRedirectURI(t *testing.T) {
+	cfg := &model.Cfg{
+		Verifier: &model.Verifier{
+			PublicURL: "https://verifier.example.com",
+			OIDCOP: &model.OIDCOPConfig{
+				Issuer: "https://verifier.example.com",
+			},
+		},
+	}
+	client, _ := CreateTestClientWithMock(cfg)
+
+	tests := []struct {
+		name       string
+		registered []string
+		reqURI     string
+		expected   bool
+	}{
+		{
+			name:       "exact match",
+			registered: []string{"https://example.com/callback"},
+			reqURI:     "https://example.com/callback",
+			expected:   true,
+		},
+		{
+			name:       "percent-encoded registered vs decoded request",
+			registered: []string{"https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "decoded registered vs percent-encoded request",
+			registered: []string{"https://sso.example.org/realms/Test Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "both percent-encoded",
+			registered: []string{"https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "both decoded (literal space)",
+			registered: []string{"https://sso.example.org/realms/Test Realm/broker/oidc/endpoint"},
+			reqURI:     "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected:   true,
+		},
+		{
+			name:       "no match",
+			registered: []string{"https://example.com/callback"},
+			reqURI:     "https://example.com/other",
+			expected:   false,
+		},
+		{
+			name:       "empty registered list",
+			registered: []string{},
+			reqURI:     "https://example.com/callback",
+			expected:   false,
+		},
+		{
+			name: "match among multiple registered URIs",
+			registered: []string{
+				"https://example.com/callback1",
+				"https://sso.example.org/realms/Test%20Realm/broker/oidc/endpoint",
+				"https://example.com/callback3",
+			},
+			reqURI:   "https://sso.example.org/realms/Test Realm/broker/oidc/endpoint",
+			expected: true,
+		},
+		{
+			name:       "plus sign is not treated as space",
+			registered: []string{"https://example.com/path+name/callback"},
+			reqURI:     "https://example.com/path name/callback",
+			expected:   false,
+		},
+		{
+			name:       "keycloak realistic URL",
+			registered: []string{"https://sso.common.siros.org/realms/Test Realm/broker/test2/endpoint"},
+			reqURI:     "https://sso.common.siros.org/realms/Test%20Realm/broker/test2/endpoint",
+			expected:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.matchRedirectURI(tt.registered, tt.reqURI)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }

@@ -3,7 +3,7 @@ services:
   apigw:
     container_name: "vc_dev_apigw"
     hostname: "apigw.vc.docker"
-    image: docker.sunet.se/iam_vc/apigw:latest
+    image: docker.sunet.se/iam_vc/apigw:local
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
@@ -23,7 +23,7 @@ services:
   ui:
     container_name: "vc_dev_ui"
     hostname: "ui.vc.docker"
-    image: docker.sunet.se/iam_vc/ui:latest
+    image: docker.sunet.se/iam_vc/ui:local
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
@@ -50,7 +50,7 @@ services:
   issuer:
     container_name: "vc_dev_issuer"
     hostname: "issuer.vc.docker"
-    image: docker.sunet.se/iam_vc/issuer:latest
+    image: docker.sunet.se/iam_vc/issuer:local
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
@@ -69,7 +69,7 @@ services:
   verifier:
     container_name: "vc_dev_verifier"
     hostname: "verifier.vc.docker"
-    image: docker.sunet.se/iam_vc/verifier:latest
+    image: docker.sunet.se/iam_vc/verifier:local
     restart: always
     volumes:
       - ./config_minimal.yaml:/config.yaml:ro
@@ -89,7 +89,7 @@ services:
   registry:
     container_name: "vc_dev_registry"
     hostname: "registry.vc.docker"
-    image: docker.sunet.se/iam_vc/registry:latest
+    image: docker.sunet.se/iam_vc/registry:local
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
@@ -106,7 +106,7 @@ services:
   mockas:
     container_name: "vc_dev_mockas"
     hostname: "mockas.vc.docker"
-    image: docker.sunet.se/iam_vc/mockas:latest
+    image: docker.sunet.se/iam_vc/mockas:local
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro

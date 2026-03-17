@@ -13,8 +13,8 @@ import (
 
 func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDC.SubjectType = "public"
-	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDCOP.SubjectType = "public"
+	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
 
 	walletID := "wallet-123"
 	clientID1 := "client-1"
@@ -31,8 +31,8 @@ func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDC.SubjectType = "pairwise"
-	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDCOP.SubjectType = "pairwise"
+	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
 
 	walletID := "wallet-123"
 	clientID1 := "client-1"
@@ -53,8 +53,8 @@ func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_DifferentWallets(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDC.SubjectType = "pairwise"
-	client.cfg.Verifier.OIDC.SubjectSalt = "test-salt"
+	client.cfg.Verifier.OIDCOP.SubjectType = "pairwise"
+	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
 
 	walletID1 := "wallet-1"
 	walletID2 := "wallet-2"
@@ -177,7 +177,7 @@ func TestPKCE_S256(t *testing.T) {
 	assert.Equal(t, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", challenge)
 }
 
-func TestClient_buildLegacyDCQLQuery(t *testing.T) {
+func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 	tests := []struct {
 		name                  string
 		scopes                []string
@@ -190,6 +190,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
 					},
@@ -203,11 +204,13 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma", "ehic"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
 					},
 				},
 				"ehic": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:ehic",
 					},
@@ -221,6 +224,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"openid", "diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
 					},
@@ -254,7 +258,7 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 			scopes: []string{"diploma"},
 			credentialConstructor: map[string]*model.CredentialConstructor{
 				"diploma": {
-
+					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
 						VCT:  "urn:credential:diploma",
 						Name: "Diploma Credential",
@@ -283,11 +287,13 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
-				CredentialConstructor: tt.credentialConstructor,
+				Common: &model.Common{
+					CredentialConstructor: tt.credentialConstructor,
+				},
 			}
 			client, _ := CreateTestClientWithMock(cfg)
 
-			dcql, err := client.buildLegacyDCQLQuery(tt.scopes)
+			dcql, err := client.buildDCQLQueryFromConfig(tt.scopes)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -297,9 +303,9 @@ func TestClient_buildLegacyDCQLQuery(t *testing.T) {
 				require.NotNil(t, dcql)
 				assert.Equal(t, tt.expectedCredCount, len(dcql.Credentials))
 
-				// Verify credential format is vc+sd-jwt
+				// Verify credential format matches config
 				for _, cred := range dcql.Credentials {
-					assert.Equal(t, "vc+sd-jwt", cred.Format)
+					assert.Equal(t, "dc+sd-jwt", cred.Format)
 				}
 			}
 		})
@@ -343,7 +349,9 @@ func TestClient_createDCQLQuery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
-				CredentialConstructor: tt.credentialConstructor,
+				Common: &model.Common{
+					CredentialConstructor: tt.credentialConstructor,
+				},
 			}
 			client, _ := CreateTestClientWithMock(cfg)
 

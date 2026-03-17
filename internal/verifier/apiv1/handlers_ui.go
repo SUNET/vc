@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 	"vc/pkg/cache"
-	"vc/pkg/model"
+	"vc/pkg/helpers"
 	"vc/pkg/openid4vp"
 
 	"github.com/google/uuid"
@@ -31,12 +30,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		SupportedWallets: c.cfg.Verifier.SupportedWallets,
 	}
 
-	for scope, constructor := range c.cfg.CredentialConstructor {
+	for scope, constructor := range c.cfg.Common.CredentialConstructor {
 		info := &UICredentialInfo{
-			Attributes: constructor.Attributes,
+			Attributes: constructor.GetAttributes(),
 		}
-		if constructor.VCTM != nil {
-			info.VCT = constructor.VCTM.VCT
+		if v := constructor.GetVCTURL(); v != "" {
+			info.VCT = v
+		} else if vctm := constructor.GetVCTM(); vctm != nil {
+			info.VCT = vctm.VCT
 		}
 		reply.Credentials[scope] = info
 	}
@@ -76,22 +77,26 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		scopes = append(scopes, credential.ID)
 	}
 
+	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+	}
+
 	authorizationContext := &cache.AuthorizationContext{
-		SessionID:                sessionID,
-		Scopes:                   scopes,
-		Code:                     "",
-		RequestURI:               "",
-		WalletURI:                "",
-		Forfeited:                false,
-		State:                    state,
-		ClientID:                 fmt.Sprintf("x509_san_dns:%s", strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://")),
-		ExpiresAt:                0,
-		CodeChallenge:            "",
-		CodeChallengeMethod:      "",
-		Consent:                  false,
-		AuthenticSource:          "",
-		Identity:                 &model.Identity{},
-		Token:                    &cache.Token{},
+		SessionID:           sessionID,
+		Scopes:              scopes,
+		Code:                "",
+		RequestURI:          "",
+		WalletURI:           "",
+		Forfeited:           false,
+		State:               state,
+		ClientID:            fmt.Sprintf("x509_san_dns:%s", host),
+		ExpiresAt:           0,
+		CodeChallenge:       "",
+		CodeChallengeMethod: "",
+		Consent:             false,
+		AuthenticSource:     "",
+		// Identity and Token are nil until wallet presents credentials
 		Nonce:                    nonce,
 		EphemeralEncryptionKeyID: uuid.NewString(),
 		VerifierResponseCode:     "",
@@ -111,7 +116,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	requestObject := &openid4vp.RequestObject{
 		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
-		ISS:          strings.TrimLeft(c.cfg.Verifier.PublicURL, "https://"),
+		ISS:          host,
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post.jwt",

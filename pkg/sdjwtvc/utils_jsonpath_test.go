@@ -59,10 +59,10 @@ func TestExtractClaimsByJSONPath(t *testing.T) {
 		}
 
 		result, err := ExtractClaimsByJSONPath(documentData, jsonPathMap)
-		// Should return error when path doesn't exist
-		assert.Error(t, err)
-		assert.Nil(t, result)
-		assert.Contains(t, err.Error(), "failed to get path")
+		// Missing paths are silently skipped — only matched paths are returned
+		require.NoError(t, err)
+		assert.Equal(t, "John", result["existing"])
+		assert.NotContains(t, result, "nonexistent")
 	})
 
 	t.Run("empty_document", func(t *testing.T) {
@@ -73,9 +73,9 @@ func TestExtractClaimsByJSONPath(t *testing.T) {
 		}
 
 		result, err := ExtractClaimsByJSONPath(documentData, jsonPathMap)
-		// Should return error when path doesn't exist in empty document
-		assert.Error(t, err)
-		assert.Nil(t, result)
+		// No paths match in empty document — returns empty result, no error
+		require.NoError(t, err)
+		assert.Empty(t, result)
 	})
 
 	t.Run("empty_json_path_map", func(t *testing.T) {

@@ -40,20 +40,6 @@ const UserDataSchema = v.required(v.object({
 }));
 
 /**
- * @param {string} name 
- * @returns {string | null}
- */
-function getCookie(name) {
-    return document.cookie
-        .split(";")
-        .find((cookie) =>
-            cookie.trim().startsWith(`${name}=`),
-        )
-        ?.split("=")
-        .pop() || null;
-}
-
-/**
  * @param {string} key 
  * @returns {string}
  */
@@ -100,20 +86,21 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"basic" | "pid_auth" | null} */
+    /** @type {"basic" | "saml" | "oidc" | "openid4vp" | null} */
     authMethod: null,
 
     /** @type {number | null} */
-    pidAuthRedirectCountUp: null,
+    openid4vpRedirectCountUp: null,
 
     /** @type {number} */
-    pidAuthRedirectMaxCount: 7,
+    openid4vpRedirectMaxCount: 7,
 
     /** @type {string | null} */
     error: null,
 
     init() {
         this.setAuthMethod();
+        this.setRedirectUrl();
 
         this.hashState();
 
@@ -125,6 +112,10 @@ Alpine.data("app", () => ({
 
         if (this.loggedIn) {
             this.handleIsLoggedIn();
+        } else if (this.authMethod === "saml") {
+            this.handleLoginSAML();
+        } else if (this.authMethod === "oidc") {
+            this.handleLoginOIDC();
         } else {
             this.loading = false;
         }
@@ -139,18 +130,32 @@ Alpine.data("app", () => ({
     },
 
     setAuthMethod() {
-        const authMethod = getCookie("auth_method");
+        const authMethod = this.$el.dataset.authMethod || null;
+        const validMethods = ["basic", "openid4vp", "saml", "oidc"];
 
         if (
             !authMethod ||
             authMethod !== "basic" &&
-            authMethod !== "pid_auth"
+            authMethod !== "saml" &&
+            authMethod !== "oidc" &&
+            authMethod !== "openid4vp"
         ) {
             this.error = `Unknown auth method: '${authMethod}'`;
             return;
         }
 
         this.authMethod = authMethod;
+    },
+
+    setRedirectUrl() {
+        const raw = this.$el.dataset.redirectUrl || null;
+        if (raw) {
+            try {
+                this.redirectUrl = decodeURIComponent(raw);
+            } catch (err) {
+                this.error = `Invalid redirect URL: ${err.message}`;
+            }
+        }
     },
 
     hashState() {
@@ -224,52 +229,54 @@ Alpine.data("app", () => ({
         }
     },
 
+    handleLoginSAML() {
+        if (!this.redirectUrl) {
+            this.error = "Missing SAML redirect URL";
+            return;
+        }
+        this.redirect(this.redirectUrl);
+    },
+
+    handleLoginOIDC() {
+        if (!this.redirectUrl) {
+            this.error = "Missing OIDC redirect URL";
+            return;
+        }
+        this.redirect(this.redirectUrl);
+    },
+
     /**
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
-    handleLoginPidAuth(immediate = false) {
-        const rawRedirectUrl = getCookie("pid_auth_redirect_url");
-        if (!rawRedirectUrl) {
-            this.error = "Missing 'pid_auth_redirect_url' cookie";
+    handleLoginOpenID4VP(immediate = false) {
+        if (!this.redirectUrl) {
+            this.error = "Missing OpenID4VP redirect URL";
             return;
         }
 
-        try {
-            const url = decodeURIComponent(rawRedirectUrl);
+        if (immediate) {
+            this.redirect(this.redirectUrl);
+            return;
+        }
 
-            if (immediate) {
-                this.redirect(url);
+        this.openid4vpRedirectCountUp = 1;
+
+        const increment = setInterval(() => {
+            // We can stop the interval by setting
+            // this.openid4vpRedirectCountUp to 'null'
+            if (!this.openid4vpRedirectCountUp) {
+                clearInterval(increment);
                 return;
             }
 
-            this.pidAuthRedirectCountUp = 1;
+            ++this.openid4vpRedirectCountUp;
 
-            const increment = setInterval(() => {
-                // We can stop the interval by setting
-                // this.pidAuthRedirectCountUp to 'null'
-                if (!this.pidAuthRedirectCountUp) {
-                    clearInterval(increment);
-                    return;
-                }
-
-                ++this.pidAuthRedirectCountUp;
-
-                if (this.pidAuthRedirectCountUp >= this.pidAuthRedirectMaxCount) {
-                    clearInterval(increment);
-                    this.redirect(url);
-                    return;
-                }
-            }, 1000);
-
-        } catch (err) {
-            if (err instanceof URIError) {
-                this.error = `Invalid redirect_uri provided: ${err.message}`;
-            } else {
-                this.error = err.message;
+            if (this.openid4vpRedirectCountUp >= this.openid4vpRedirectMaxCount) {
+                clearInterval(increment);
+                this.redirect(this.redirectUrl);
+                return;
             }
-
-            this.pidAuthRedirectCountUp = null;
-        }
+        }, 1000);
     },
 
     async handleIsNotLoggedIn() {
@@ -297,10 +304,14 @@ Alpine.data("app", () => ({
 
             this.redirectUrl = data.redirect_url;
 
-            const svg = await this.createCredentialSvgImageUri(
-                data.svg_template_claims,
-            );
-
+            let svg = null;
+            try {
+                svg = await this.createCredentialSvgImageUri(
+                    data.svg_template_claims,
+                );
+            } catch (_) {
+                // VCTM has no SVG template — display claims without card image
+            }
 
             this.credentials.push({
                 vct: "N/A",
@@ -328,6 +339,7 @@ Alpine.data("app", () => ({
     handleCredentialSelection(event) {
         if (!this.redirectUrl) {
             this.error = "'redirect_url' is null";
+            return;
         }
         this.redirect(this.redirectUrl);
     },
@@ -351,7 +363,6 @@ Alpine.data("app", () => ({
         }
 
         const data = await response.json();
-        console.info(JSON.stringify(data, null, 2));
         return data;
     },
 

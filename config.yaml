@@ -14,62 +14,73 @@ common:
       recovery_level: 2
       size: 256
 
-auth_methods:
-  pid_auth:
-    vcts:
-      - "urn:eudi:pid:arf-1.5:1"
-      - "urn:eudi:pid:arf-1.8:1"
-      - "urn:credential:eduid:1"
-    claims:
-      - "given_name"
-      - "birthdate"
-      - "family_name"
-
-credential_constructor:
-  pid_1_5:
-    vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
-    auth_method: basic
-    format: "dc+sd-jwt"
-  pid_1_8:
-    vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
-    auth_method: basic
-    format: "dc+sd-jwt"
-  ehic:
-    vctm_file_path: "/metadata/vctm_ehic.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  pda1:
-    vctm_file_path: "/metadata/vctm_pda1.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  elm:
-    vctm_file_path: "/metadata/vctm_elm.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  diploma:
-    vctm_file_path: "/metadata/vctm_diploma.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  micro_credential:
-    vctm_file_path: "/metadata/vctm_microcredential.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  eduid:
-    vctm_file_path: "/metadata/vctm_eduid.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  openbadge_complete:
-    vctm_file_path: "/metadata/vctm_elm.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  openbadge_basic:
-    vctm_file_path: "/metadata/vctm_elm.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
-  openbadge_endorsements:
-    vctm_file_path: "/metadata/vctm_elm.json"
-    auth_method: pid_auth
-    format: "dc+sd-jwt"
+  credential_constructor:
+    pid:
+      vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
+      auth_method: basic
+      format: "dc+sd-jwt"
+    pid_1_5:
+      vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
+      auth_method: basic
+      format: "dc+sd-jwt"
+    pid_1_8:
+      vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
+      auth_method: basic
+      format: "dc+sd-jwt"
+    ehic:
+      vctm_file_path: "/metadata/vctm_ehic.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    pda1:
+      vctm_file_path: "/metadata/vctm_pda1.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    elm:
+      vctm_file_path: "/metadata/vctm_elm.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    diploma:
+      vctm_file_path: "/metadata/vctm_diploma.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    micro_credential:
+      vctm_file_path: "/metadata/vctm_microcredential.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    eduid:
+      vctm_file_path: "/metadata/vctm_eduid.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    openbadge_complete:
+      vctm_file_path: "/metadata/vctm_elm.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    openbadge_basic:
+      vctm_file_path: "/metadata/vctm_elm.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
+    openbadge_endorsements:
+      vctm_file_path: "/metadata/vctm_elm.json"
+      auth_method: openid4vp
+      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+      auth_claims: ["given_name", "birthdate", "family_name"]
+      format: "dc+sd-jwt"
 
 kafka:
   enable: false
@@ -116,6 +127,10 @@ issuer:
 verifier:
   api_server:
     addr: :8080
+    cors:
+      allowed_origins:
+        - "https://dev.wallet.sunet.se"
+        - "https://sunetwallet-dev.app.siros.org"
   #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
   public_url: "http://verifier.vc.docker:8080"
   # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
@@ -383,7 +398,7 @@ apigw:
   #   preconfigured: pre-registered client_id and client_secret
   #   dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
   #
-  oidcrp:
+  oidc_rp:
     enable: false
     # --- Option A: Pre-registered credentials ---
     registration:

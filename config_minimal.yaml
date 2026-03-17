@@ -10,16 +10,17 @@
 
 common:
   production: false            # default: true — set false for local development
+  ha: true
   mongo:
     uri: mongodb://mongo:27017
 
-# credential_constructor is required by apigw, issuer, and verifier.
-# At least one entry is needed. "pid_1_5" is a minimal example.
-credential_constructor:
-  pid_1_5:
-    vctm_file_path: "metadata/vctm_pid_arf_1_5.json"
-    auth_method: basic
-    format: "dc+sd-jwt"
+  # credential_constructor is required by apigw, issuer, and verifier.
+  # At least one entry is needed. "pid_1_5" is a minimal example.
+  credential_constructor:
+    pid_1_5:
+      vctm_file_path: "metadata/vctm_pid_arf_1_5.json"
+      auth_method: basic
+      format: "dc+sd-jwt"
 
 issuer:
   api_server:

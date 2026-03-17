@@ -81,42 +81,7 @@ func TestDiscloserHash_ErrorHandling(t *testing.T) {
 	})
 }
 
-// TestBuildCredentialWithOptions_VCTMEncodeError tests VCTM encoding errors
-func TestBuildCredentialWithOptions_VCTMEncodeError(t *testing.T) {
-	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	client := &Client{}
 
-	// Create a VCTM that might have encoding issues
-	name := "name"
-	vctm := &VCTM{
-		VCT:  "test",
-		Name: "test",
-		Claims: []Claim{
-			{
-				Path: []*string{&name},
-				SD:   "always",
-			},
-		},
-	}
-
-	documentData := []byte(`{"name":"test"}`)
-	holderJWK := map[string]any{"kty": "EC"}
-
-	_, err := client.BuildCredential(
-		"issuer",
-		"kid",
-		privateKey,
-		"vct",
-		documentData,
-		holderJWK,
-		vctm,
-		nil,
-	)
-
-	// This might or might not error depending on how Encode handles the bad data
-	// Just execute it to increase coverage
-	_ = err
-}
 
 // TestSign_JSONMarshalError tests signing with unmarshalable header
 func TestSign_JSONMarshalError(t *testing.T) {
@@ -317,9 +282,8 @@ func TestIsSHA_Functions_Coverage(t *testing.T) {
 	})
 }
 
-// TestBuildCredentialWithOptions_SignError tests signing errors
-func TestBuildCredentialWithOptions_SignError(t *testing.T) {
-	// Use an invalid key type to trigger signing error
+// TestBuildCredentialWithSigner_SignError tests signing errors
+func TestBuildCredentialWithSigner_SignError(t *testing.T) {
 	client := &Client{}
 
 	name := "name"
@@ -332,26 +296,24 @@ func TestBuildCredentialWithOptions_SignError(t *testing.T) {
 		},
 	}
 
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+
 	documentData := []byte(`{"name":"test"}`)
 	holderJWK := map[string]any{"kty": "EC"}
 
-	// Pass a non-key type that will fail signing
-	invalidKey := "not-a-key"
-
-	_, err := client.BuildCredential(
+	_, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"issuer",
-		"kid",
-		invalidKey,
-		"vct",
+		&failingSigner{},
+		vctmRaw,
 		documentData,
 		holderJWK,
-		vctm,
-		nil,
+		&CredentialOptions{Integrity: integrity},
 	)
 
 	// Should error during signing
 	if err == nil {
-		t.Error("Expected error when signing with invalid key")
+		t.Error("Expected error when signing with failing signer")
 	}
 }
 

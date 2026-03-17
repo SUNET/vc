@@ -10,6 +10,10 @@ import (
 )
 
 // VPTokenValidator validates VP Token according to Section 8.6
+// NOTE: This validator performs format and protocol validation only.
+// Cryptographic signature verification must be done separately by the caller
+// (e.g. via jwt.Parse with a resolved key). TrustEvaluator handles trust/policy
+// evaluation — it does NOT perform signature verification itself.
 type VPTokenValidator struct {
 	// Nonce from the Authorization Request
 	Nonce string
@@ -17,8 +21,10 @@ type VPTokenValidator struct {
 	// ClientID (or Origin for DC API)
 	ClientID string
 
-	// VerifySignature enables signature verification
-	VerifySignature bool
+	// ValidateFormat enables SD-JWT format validation (not cryptographic verification).
+	// This only validates that the JWT structure is parseable — it does NOT verify
+	// the actual cryptographic signature. Use TrustEvaluator for signature verification.
+	ValidateFormat bool
 
 	// CheckRevocation enables revocation status checks
 	CheckRevocation bool
@@ -61,9 +67,9 @@ func (v *VPTokenValidator) Validate(vpToken string) error {
 	}
 
 	// 6. Verify signature if requested
-	if v.VerifySignature {
-		if err := v.verifySignature(vpToken); err != nil {
-			return fmt.Errorf("signature verification failed: %w", err)
+	if v.ValidateFormat {
+		if err := v.validateFormat(vpToken); err != nil {
+			return fmt.Errorf("format validation failed: %w", err)
 		}
 	}
 
@@ -186,14 +192,13 @@ func parseKeyBindingJWT(kbJWT string) (map[string]any, error) {
 	return claims, nil
 }
 
-// verifySignature verifies the cryptographic signature
-func (v *VPTokenValidator) verifySignature(vpToken string) error {
-	// For now, we validate format - full signature verification
-	// would require the issuer's public key
+// validateFormat validates the SD-JWT structure is parseable.
+// This does NOT perform cryptographic signature verification — use TrustEvaluator for that.
+func (v *VPTokenValidator) validateFormat(vpToken string) error {
 	token := sdjwtvc.Token(vpToken)
 	_, err := token.Parse()
 	if err != nil {
-		return fmt.Errorf("signature verification failed: %w", err)
+		return fmt.Errorf("JWT format validation failed: %w", err)
 	}
 
 	return nil
@@ -231,7 +236,7 @@ func ValidateVPToken(vpToken, nonce, clientID string) error {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		VerifySignature: true,
+		ValidateFormat:  true,
 		CheckRevocation: false,
 	}
 

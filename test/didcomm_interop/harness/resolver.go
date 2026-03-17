@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 package harness
 
 import (

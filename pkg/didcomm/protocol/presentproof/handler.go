@@ -1,6 +1,3 @@
-//go:build didcomm && vc20
-// +build didcomm,vc20
-
 package presentproof
 
 import (

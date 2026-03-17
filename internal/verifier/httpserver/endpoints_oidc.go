@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"vc/internal/verifier/apiv1"
@@ -67,7 +68,13 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 
 		// Return error to redirect_uri if possible
 		if request.RedirectURI != "" && request.State != "" {
-			errorURL := request.RedirectURI + "?error=server_error&state=" + request.State
+			// Use the actual OAuth error code if available
+			errorCode := "server_error"
+			var oauthErr *apiv1.OAuthError
+			if errors.As(err, &oauthErr) {
+				errorCode = oauthErr.ErrorCode
+			}
+			errorURL := request.RedirectURI + "?error=" + errorCode + "&state=" + request.State
 			c.Redirect(http.StatusFound, errorURL)
 			return nil, nil
 		}
@@ -82,6 +89,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		"QRCodeData":       response.QRCodeData,
 		"DeepLinkURL":      response.DeepLinkURL,
 		"PollURL":          response.PollURL,
+		"WalletLinks":      response.WalletLinks,
 		"PreferredFormats": response.PreferredFormats,
 		"UseJAR":           response.UseJAR,
 		"ResponseMode":     response.ResponseMode,

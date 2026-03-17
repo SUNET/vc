@@ -1,5 +1,3 @@
-//go:build vc20
-
 // Package keyresolver provides pluggable key resolution for verifiable credentials
 package keyresolver
 

@@ -74,7 +74,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
 	// Unsigned metadata will be signed on-demand in the handler for freshness
-	c.issuerMetadata, err = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.PublicURL, cfg.CredentialConstructor)
+	c.issuerMetadata, err = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.PublicURL, cfg.Common.CredentialConstructor)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate issuer metadata: %w", err)
 	}
@@ -187,8 +187,8 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 
 	credentialTypes := map[string]CredentialOfferTypeData{}
 
-	for scope, credential := range c.cfg.CredentialConstructor {
-		vctm := credential.VCTM
+	for scope, credential := range c.cfg.Common.CredentialConstructor {
+		vctm := credential.GetVCTM()
 		if vctm == nil {
 			c.log.Warn("credential constructor has nil VCTM; failing CreateCredentialOfferLookupMetadata", "scope", scope)
 			return fmt.Errorf("credential constructor for scope %q has no VCTM configured", scope)

@@ -12,6 +12,8 @@ func (s *Service) MakeSDJWT(ctx context.Context, in *apiv1_issuer.MakeSDJWTReque
 		Scope:        in.Scope,
 		DocumentData: in.DocumentData,
 		JWK:          in.Jwk,
+		Integrity:    in.Integrity,
+		VCTM:         in.Vctm,
 	})
 	if err != nil {
 		return nil, err

@@ -1,5 +1,3 @@
-//go:build saml
-
 package samlsp
 
 import (
@@ -32,7 +30,7 @@ func TestNewStaticMDQClient_FromFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create static MDQ client from file
-	client, err := NewStaticMDQClient(metadataPath, "https://static-idp.example.com/idp", false, log)
+	client, err := NewStaticMDQClient(metadataPath, "https://static-idp.example.com/idp", false, nil, log)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
@@ -64,7 +62,7 @@ func TestNewStaticMDQClient_FromURL(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create static MDQ client from URL
-	client, err := NewStaticMDQClient(server.URL+"/metadata", "https://static-idp.example.com/idp", true, log)
+	client, err := NewStaticMDQClient(server.URL+"/metadata", "https://static-idp.example.com/idp", true, nil, log)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
@@ -91,7 +89,7 @@ func TestStaticMDQClient_GetIDPMetadata_IgnoresEntityID(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	client, err := NewStaticMDQClient(metadataPath, "https://static-idp.example.com/idp", false, log)
+	client, err := NewStaticMDQClient(metadataPath, "https://static-idp.example.com/idp", false, nil, log)
 	require.NoError(t, err)
 
 	ctx := t.Context()
@@ -115,7 +113,7 @@ func TestNewStaticMDQClient_FileNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to create client with non-existent file
-	_, err = NewStaticMDQClient("/nonexistent/metadata.xml", "https://idp.example.com", false, log)
+	_, err = NewStaticMDQClient("/nonexistent/metadata.xml", "https://idp.example.com", false, nil, log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read metadata file")
 }
@@ -129,7 +127,7 @@ func TestNewStaticMDQClient_InvalidXML(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	_, err = NewStaticMDQClient(metadataPath, "https://idp.example.com", false, log)
+	_, err = NewStaticMDQClient(metadataPath, "https://idp.example.com", false, nil, log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse IdP metadata XML")
 }
@@ -149,7 +147,7 @@ func TestNewStaticMDQClient_NoIDPDescriptor(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	_, err = NewStaticMDQClient(metadataPath, "https://sp.example.com", false, log)
+	_, err = NewStaticMDQClient(metadataPath, "https://sp.example.com", false, nil, log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not contain IdP SSO descriptor")
 }
@@ -159,7 +157,7 @@ func TestNewStaticMDQClient_URLFetchError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to fetch from invalid URL
-	_, err = NewStaticMDQClient("http://nonexistent.invalid/metadata", "https://idp.example.com", true, log)
+	_, err = NewStaticMDQClient("http://nonexistent.invalid/metadata", "https://idp.example.com", true, nil, log)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to fetch metadata from URL")
 }
@@ -175,7 +173,7 @@ func TestNewStaticMDQClient_EntityIDMismatch(t *testing.T) {
 
 	// Create client with different entityID than in metadata
 	// Should succeed but log warning (not tested here, but functionality works)
-	client, err := NewStaticMDQClient(metadataPath, "https://different-idp.example.com", false, log)
+	client, err := NewStaticMDQClient(metadataPath, "https://different-idp.example.com", false, nil, log)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 

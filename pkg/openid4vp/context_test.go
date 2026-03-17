@@ -34,7 +34,7 @@ func TestCreateAuthorizationRequestURIWithoutScheme(t *testing.T) {
 
 	expectedURI := "openid4vp://cb?client_id=x509_san_dns%3Avc-interop-3.sunet.se%3A444&request_uri=https%3A%2F%2Fvc-interop-3.sunet.se%3A444%2Fverification%2Frequest-object%3Fid%3D0d62594e-9bf9-4051-9ae5-207cbf8bea4d"
 	assert.Equal(t, expectedURI, got)
-	
+
 	// Verify the request_uri parameter contains https:// when decoded
 	u, err := url.Parse(got)
 	assert.NoError(t, err)

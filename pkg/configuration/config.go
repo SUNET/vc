@@ -20,9 +20,10 @@ type envVars struct {
 }
 
 // servicesRequiringVCTM lists services that need credential_constructor and VCTM files.
+// The issuer does NOT need credential_constructor — it receives VCTM bytes
+// inline over gRPC from the apigw at credential-issuance time.
 var servicesRequiringVCTM = map[string]bool{
 	"apigw":    true,
-	"issuer":   true,
 	"verifier": true,
 }
 
@@ -85,21 +86,27 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	// and the requirement check. Other services (ui, mockas, registry) share
 	// the same config file but do not use credential constructors at all.
 	if servicesRequiringVCTM[serviceName] {
-		if len(cfg.CredentialConstructor) == 0 {
-			return nil, fmt.Errorf("credential_constructor is required for the %s service", serviceName)
+		if cfg.Common == nil || len(cfg.Common.CredentialConstructor) == 0 {
+			return nil, fmt.Errorf("common.credential_constructor is required for the %s service", serviceName)
 		}
 
-		// Load VCTM data and derive Attributes before validation so the
-		// vcts_exist validator can cross-reference auth_methods.vcts against
-		// actual VCT values.
-		for scope, constructor := range cfg.CredentialConstructor {
-			if constructor == nil || constructor.VCTMFilePath == "" {
+		// Load VCTM data and derive Attributes before validation.
+		for scope, constructor := range cfg.Common.CredentialConstructor {
+			if constructor == nil {
 				continue
 			}
 			if err := constructor.LoadVCTMetadata(ctx, scope); err != nil {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
-			constructor.Attributes = constructor.VCTM.Attributes()
+		}
+
+		// Resolve URL-based VCTs from the APIGW public URL so that issued
+		// credentials reference a dereferenceable VCT and the served VCTM
+		// document is consistent.
+		if cfg.APIGW != nil && cfg.APIGW.PublicURL != "" {
+			if err := cfg.ResolveVCTUrls(cfg.APIGW.PublicURL); err != nil {
+				return nil, fmt.Errorf("failed to resolve VCT URLs: %w", err)
+			}
 		}
 	}
 

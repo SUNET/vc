@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vci"
@@ -96,6 +99,11 @@ type Common struct {
 	// HA enables high-availability mode. When true, caches use MongoDB (Common.Mongo.URI)
 	// instead of in-memory storage so state is shared across instances.
 	HA bool `yaml:"ha" default:"false"`
+
+	// CredentialConstructor maps OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier
+	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
+	// The constructor contains the VCT URN and other configuration for issuing that credential type
+	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
 }
 
 // CredentialOfferQRConfig holds credential offer QR code settings
@@ -179,9 +187,12 @@ type SAMLConfig struct {
 	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty"`
 
 	// CertificatePath is the path to X.509 certificate for SAML signing/encryption
+	// TODO(pki): Migrate to pki.KeyConfig for consistency with other services and
+	// to enable HSM-backed SAML signing keys in the future.
 	CertificatePath string `yaml:"certificate_path" validate:"required_if=Enable true"`
 
 	// PrivateKeyPath is the path to private key for SAML signing/encryption
+	// TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.
 	PrivateKeyPath string `yaml:"private_key_path" validate:"required_if=Enable true"`
 
 	// ACSEndpoint is the Assertion Consumer Service URL where IdP sends SAML responses
@@ -196,6 +207,11 @@ type SAMLConfig struct {
 	// Key: credential type identifier (e.g., "pid", "diploma")
 	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
 	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
+
+	// MetadataSigningCertPath is the path to the X.509 certificate used to verify
+	// metadata signatures. When set, all fetched metadata (MDQ and static) must
+	// carry a valid XML signature from this certificate.
+	MetadataSigningCertPath string `yaml:"metadata_signing_cert_path,omitempty"`
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
@@ -361,6 +377,8 @@ type AuditLog struct {
 // MDocConfig holds mDL (ISO 18013-5) issuer configuration
 type MDocConfig struct {
 	// CertificateChainPath is the path to the PEM certificate chain
+	// TODO(pki): Consider folding into pki.KeyConfig.ChainPath to unify certificate
+	// chain loading with the standard key material configuration pattern.
 	CertificateChainPath string `yaml:"certificate_chain_path" validate:"required"`
 	// DefaultValidity is the default credential validity (default: 365 days)
 	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
@@ -450,8 +468,8 @@ type Verifier struct {
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
-	// OIDC holds the OIDC Provider configuration
-	OIDC *OIDCConfig `yaml:"oidc,omitempty" validate:"omitempty"`
+	// OIDCOP holds the OIDC Provider configuration
+	OIDCOP *OIDCOPConfig `yaml:"oidc_op,omitempty" validate:"omitempty"`
 	// OpenID4VP holds the OpenID4VP configuration
 	OpenID4VP *OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
 	// DigitalCredentials holds the W3C Digital Credentials API configuration
@@ -484,6 +502,12 @@ type TrustConfig struct {
 	// TrustPolicies configures per-role trust evaluation policies.
 	// The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.
 	TrustPolicies map[string]TrustPolicyConfig `yaml:"trust_policies,omitempty"`
+
+	// AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted.
+	// If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA.
+	// The "none" algorithm is NEVER allowed regardless of configuration.
+	// Examples: ["ES256", "ES384", "ES512", "EdDSA"]
+	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -538,7 +562,7 @@ type StaticOIDCClient struct {
 // This configures how the verifier issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 // The signing key is shared from the parent Verifier.KeyConfig.
-type OIDCConfig struct {
+type OIDCOPConfig struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
@@ -788,13 +812,10 @@ type APIGW struct {
 	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
 	// Example: "https://issuer.sunet.se"
 	PublicURL string `yaml:"public_url" validate:"required,httpurl"`
-	// RegistryPublicURL is the public URL of the registry service for constructing status list URIs
-	// Example: "https://registry.sunet.se"
-	RegistryPublicURL string `yaml:"registry_public_url" validate:"required,httpurl"`
 	// SAML holds the SAML Service Provider configuration
 	SAML SAMLConfig `yaml:"saml,omitempty" validate:"omitempty"`
 	// OIDCRP holds the OIDC Relying Party configuration
-	OIDCRP OIDCRPConfig `yaml:"oidcrp,omitempty" validate:"omitempty"`
+	OIDCRP OIDCRPConfig `yaml:"oidc_rp,omitempty" validate:"omitempty"`
 	// IssuerClient is the gRPC client config for issuer
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry
@@ -858,23 +879,21 @@ type UI struct {
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
-	Common      *Common                `yaml:"common"`
-	AuthMethods map[string]*AuthMethod `yaml:"auth_methods" json:"auth_methods" validate:"omitempty,vcts_exist,dive"`
-	APIGW       *APIGW                 `yaml:"apigw" validate:"omitempty"`
-	Issuer      *Issuer                `yaml:"issuer" validate:"omitempty"`
-	Verifier    *Verifier              `yaml:"verifier" validate:"omitempty"`
-	Registry    *Registry              `yaml:"registry" validate:"omitempty"`
-	MockAS      *MockAS                `yaml:"mock_as" validate:"omitempty"`
-	UI          *UI                    `yaml:"ui" validate:"omitempty"`
-	// CredentialConstructor maps OAuth2 scope values to their constructor configuration
-	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
-	// The constructor contains the VCT URN and other configuration for issuing that credential type
-	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
+	Common   *Common   `yaml:"common"`
+	APIGW    *APIGW    `yaml:"apigw" validate:"omitempty"`
+	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
+	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
+	Registry *Registry `yaml:"registry" validate:"omitempty"`
+	MockAS   *MockAS   `yaml:"mock_as" validate:"omitempty"`
+	UI       *UI       `yaml:"ui" validate:"omitempty"`
 }
 
 // GetCredentialConstructorAuthMethod returns the auth method for the given credential type or "basic" if not found
 func (c *Cfg) GetCredentialConstructorAuthMethod(credentialType string) string {
-	if constructor, ok := c.CredentialConstructor[credentialType]; ok {
+	if c.Common == nil {
+		return "basic"
+	}
+	if constructor, ok := c.Common.CredentialConstructor[credentialType]; ok {
 		return constructor.AuthMethod
 	}
 	return "basic"
@@ -882,61 +901,239 @@ func (c *Cfg) GetCredentialConstructorAuthMethod(credentialType string) string {
 
 // GetCredentialConstructor returns the credential constructor for a given scope
 func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
+	if c.Common == nil {
+		return nil
+	}
 	// Direct lookup by scope (map key)
-	if constructor, ok := c.CredentialConstructor[scope]; ok {
+	if constructor, ok := c.Common.CredentialConstructor[scope]; ok {
 		return constructor
 	}
 
 	return nil
 }
 
-// GetFormatForVCT returns the format for a given VCT by looking it up in credential constructors
-// Returns empty string if not found
-func (c *Cfg) GetFormatForVCT(vct string) string {
-	for _, constructor := range c.CredentialConstructor {
-		if constructor != nil && constructor.VCTM.VCT == vct {
-			return constructor.Format
+// GetFormatForScope returns the credential format for the given scope key.
+// Returns empty string if the scope is not found in credential_constructor.
+func (c *Cfg) GetFormatForScope(scope string) string {
+	constructor := c.GetCredentialConstructor(scope)
+	if constructor == nil {
+		return ""
+	}
+	return constructor.Format
+}
+
+// VCTUrlsForScopes resolves a list of scope keys to their resolved VCT URLs.
+// Scopes without a loaded VCTM are silently skipped.
+func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
+	urls := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		constructor := c.GetCredentialConstructor(scope)
+		if constructor == nil {
+			continue
+		}
+		if v := constructor.GetVCTURL(); v != "" {
+			urls = append(urls, v)
 		}
 	}
-	return ""
+	return urls
+}
+
+// VCTIdentifiersForScopes resolves a list of scope keys to the original VCT
+// identifiers from the VCTM (e.g. URNs). Scopes without a loaded VCTM are
+// silently skipped.
+func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
+	ids := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		constructor := c.GetCredentialConstructor(scope)
+		if constructor == nil {
+			continue
+		}
+		if vctm := constructor.GetVCTM(); vctm != nil && vctm.VCT != "" {
+			ids = append(ids, vctm.VCT)
+		}
+	}
+	return ids
 }
 
 type CredentialConstructor struct {
-	VCTMFilePath string                         `yaml:"vctm_file_path" json:"-" validate:"required"`
-	VCTM         *sdjwtvc.VCTM                  `yaml:"-" json:"-"`
-	Format       string                         `yaml:"format" json:"format" validate:"required"`
-	AuthMethod   string                         `yaml:"auth_method" json:"auth_method" validate:"required,auth_method_exists"`
-	Attributes   map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
-}
+	// VCTMFilePath is the path to a local VCTM JSON file.
+	// When set, apigw will publish the VCTM at /type-metadata/:scope.
+	// Mutually exclusive with VCTMUrl (one of the two is required).
+	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without=VCTMUrl"`
+	// VCTMUrl is the URL where the VCTM is already published externally.
+	// When set, the VCTM is fetched from this URL at startup for internal use
+	// but NOT re-published by apigw.
+	// Mutually exclusive with VCTMFilePath (one of the two is required).
+	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without=VCTMFilePath,omitempty,url"`
 
-// AuthMethod defines the authentication method configuration for credential issuance
-// This specifies what credentials the wallet must present for authentication
-// The format of the credentials is determined by looking up the VCTs in the credential_constructor
-type AuthMethod struct {
-	// VCTs is the list of acceptable Verifiable Credential Type URNs for authentication
-	VCTs []string `yaml:"vcts" json:"vcts" validate:"required,min=1"`
-	// Claims are the identity claims to extract from the authentication credential
-	Claims []string `yaml:"claims" json:"claims" validate:"required,min=1"`
+	VCTM       *sdjwtvc.VCTM `yaml:"-" json:"-"`
+	Format     string        `yaml:"format" json:"format" validate:"required"`
+	AuthMethod string        `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic saml oidc openid4vp"`
+	// AuthScopes lists credential_constructor keys whose VCTs are acceptable for
+	// wallet authentication. Required when AuthMethod is "openid4vp".
+	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
+	// AuthClaims lists identity claims to extract from the authentication credential.
+	// Required when AuthMethod is "openid4vp".
+	AuthClaims []string                       `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
+	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
+
+	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving
+	// via /type-metadata/:scope. Only populated for local VCTMs (VCTMFilePath).
+	VCTMRaw []byte `yaml:"-" json:"-"`
+
+	// Integrity is the SRI hash of the VCTM document (e.g. "sha256-...").
+	// Computed once in LoadVCTMetadata and used for vct#integrity in issued credentials.
+	Integrity string `yaml:"-" json:"-"`
+
+	// VCTURL is the published URL where the VCTM is served.
+	// Set by ResolveVCTUrls for both local and external VCTMs.
+	VCTURL string `yaml:"-" json:"-"`
+
+	// mu guards VCTM, VCTMRaw, Integrity, and Attributes during background refresh.
+	mu sync.RWMutex `yaml:"-" json:"-"`
 }
 
 // The scope parameter is used only for error messages.
 func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope string) error {
-	if c.VCTMFilePath == "" {
-		return fmt.Errorf("vctm_file_path is empty for scope: %s", scope)
+	var (
+		rawBytes []byte
+		err      error
+	)
+
+	switch {
+	case c.VCTMFilePath != "":
+		data, err := os.ReadFile(c.VCTMFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to read VCTM file %s for scope %s: %w", c.VCTMFilePath, scope, err)
+		}
+		rawBytes = data
+
+	case c.VCTMUrl != "":
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.VCTMUrl, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request for VCTM URL %s for scope %s: %w", c.VCTMUrl, scope, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch VCTM from %s for scope %s: %w", c.VCTMUrl, scope, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("VCTM URL %s returned status %d for scope %s", c.VCTMUrl, resp.StatusCode, scope)
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read VCTM response from %s for scope %s: %w", c.VCTMUrl, scope, err)
+		}
+		rawBytes = data
 	}
 
-	fileByte, err := os.ReadFile(c.VCTMFilePath)
+	var vctm sdjwtvc.VCTM
+	if err := json.Unmarshal(rawBytes, &vctm); err != nil {
+		return fmt.Errorf("failed to unmarshal VCTM for scope %s: %w", scope, err)
+	}
+
+	// Swap cached data under write lock so concurrent readers see a
+	// consistent snapshot.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.VCTM = &vctm
+	c.Integrity, err = vctm.SRIIntegrity(rawBytes)
 	if err != nil {
-		return fmt.Errorf("failed to read VCTM file %s for scope %s: %w", c.VCTMFilePath, scope, err)
+		return fmt.Errorf("failed to compute VCTM integrity for scope %s: %w", scope, err)
+	}
+	c.Attributes = vctm.Attributes()
+
+	// Only keep raw bytes for locally-served VCTMs.
+	if c.IsLocalVCTM() {
+		c.VCTMRaw = rawBytes
 	}
 
-	if err := json.Unmarshal(fileByte, &c.VCTM); err != nil {
-		return fmt.Errorf("failed to unmarshal VCTM file %s for scope %s: %w", c.VCTMFilePath, scope, err)
+	return nil
+}
+
+// GetVCTM returns the cached VCTM under a read lock so it is safe to call
+// concurrently with the background refresh loop.
+func (c *CredentialConstructor) GetVCTM() *sdjwtvc.VCTM {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.VCTM
+}
+
+// GetVCTURL returns the published URL where the VCTM is served.
+func (c *CredentialConstructor) GetVCTURL() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.VCTURL
+}
+
+// GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
+func (c *CredentialConstructor) GetVCTMRaw() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.VCTMRaw
+}
+
+// GetAttributes returns the derived attributes under a read lock.
+func (c *CredentialConstructor) GetAttributes() map[string]map[string][]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Attributes
+}
+
+// GetIntegrity returns the SRI integrity hash of the VCTM under a read lock.
+func (c *CredentialConstructor) GetIntegrity() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Integrity
+}
+
+// IsLocalVCTM returns true when the VCTM is loaded from a local file
+// (i.e. apigw should publish it at /type-metadata/:scope).
+func (c *CredentialConstructor) IsLocalVCTM() bool {
+	return c.VCTMFilePath != ""
+}
+
+// ResolveVCTUrls computes the URL-based VCT for each credential constructor
+// and stores it in VCTURL.  VCTM.VCT, VCTMRaw, and Integrity are left
+// unchanged — the served VCTM document preserves the original VCT
+// identifier from the VCTM file (e.g. a URN).
+// For local VCTMs the URL is built from apigwPublicURL + /type-metadata/{scope}.
+// For external VCTMs the VCTMUrl is used.
+func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	for scope, constructor := range cfg.Common.CredentialConstructor {
+		if constructor == nil || constructor.GetVCTM() == nil {
+			continue
+		}
+
+		var vctURL string
+		switch {
+		case constructor.IsLocalVCTM():
+			u, err := url.JoinPath(apigwPublicURL, "/type-metadata/", scope)
+			if err != nil {
+				return fmt.Errorf("failed to build VCT URL for scope %s: %w", scope, err)
+			}
+			vctURL = u
+		case constructor.VCTMUrl != "":
+			vctURL = constructor.VCTMUrl
+		}
+
+		constructor.mu.Lock()
+		constructor.VCTURL = vctURL
+		constructor.mu.Unlock()
 	}
 
-	// Validate that VCTM has a VCT
-	if c.VCTM.VCT == "" {
-		return fmt.Errorf("VCTM file %s for scope %s is missing required 'vct' field", c.VCTMFilePath, scope)
+	// Validate that every constructor got a non-empty VCTURL.
+	for scope, constructor := range cfg.Common.CredentialConstructor {
+		if constructor == nil || constructor.GetVCTM() == nil {
+			continue
+		}
+		if constructor.GetVCTURL() == "" {
+			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path or vctm_url)", scope)
+		}
 	}
 
 	return nil
@@ -951,7 +1148,8 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		if constructor == nil {
 			continue
 		}
-		if constructor.VCTM == nil {
+		vctm := constructor.GetVCTM()
+		if vctm == nil {
 			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
@@ -961,31 +1159,32 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		}
 
 		// Set format-specific parameters per OID4VCI 1.0 Appendix A
+		resolvedVCT := constructor.GetVCTURL()
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
-			credConfig.VCT = constructor.VCTM.VCT
+			credConfig.VCT = resolvedVCT
 		case "mso_mdoc":
 			// Appendix A.2: doctype is format-specific for mso_mdoc
-			credConfig.Doctype = constructor.VCTM.VCT // VCT serves as doctype for mdoc
+			credConfig.Doctype = resolvedVCT // VCT serves as doctype for mdoc
 		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
 			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
 				Type: []string{"VerifiableCredential"},
 			}
-			credConfig.VCT = constructor.VCTM.VCT
+			credConfig.VCT = resolvedVCT
 		default:
 			// For unknown formats, include VCT if available
-			credConfig.VCT = constructor.VCTM.VCT
+			credConfig.VCT = resolvedVCT
 		}
 
 		// Build credential_metadata object (OID4VCI 1.0 Section 12.2.4)
 		credMetadata := &openid4vci.CredentialMetadata{}
 
 		// Use VCTM display information
-		if len(constructor.VCTM.Display) > 0 {
-			credMetadata.Display = make([]openid4vci.CredentialMetadataDisplay, len(constructor.VCTM.Display))
-			for i, vctmDisplay := range constructor.VCTM.Display {
+		if len(vctm.Display) > 0 {
+			credMetadata.Display = make([]openid4vci.CredentialMetadataDisplay, len(vctm.Display))
+			for i, vctmDisplay := range vctm.Display {
 				display := openid4vci.CredentialMetadataDisplay{
 					Name:        vctmDisplay.Name,
 					Locale:      vctmDisplay.Locale,
@@ -994,21 +1193,22 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 				// Map rendering information from VCTM to OpenID4VCI format
 				if vctmDisplay.Rendering != nil {
-					if vctmDisplay.Rendering.Simple.BackgroundColor != "" {
-						display.BackgroundColor = vctmDisplay.Rendering.Simple.BackgroundColor
+					simple := vctmDisplay.Rendering.Simple
+					if simple.BackgroundColor != "" {
+						display.BackgroundColor = simple.BackgroundColor
 					}
-					if vctmDisplay.Rendering.Simple.TextColor != "" {
-						display.TextColor = vctmDisplay.Rendering.Simple.TextColor
+					if simple.TextColor != "" {
+						display.TextColor = simple.TextColor
 					}
-					if vctmDisplay.Rendering.Simple.Logo.URI != "" {
+					if simple.Logo.URI != "" {
 						display.Logo = openid4vci.MetadataLogo{
-							URI:     vctmDisplay.Rendering.Simple.Logo.URI,
-							AltText: vctmDisplay.Rendering.Simple.Logo.AltText,
+							URI:     simple.Logo.URI,
+							AltText: simple.Logo.AltText,
 						}
 					}
-					if vctmDisplay.Rendering.Simple.BackgroundImage != nil && vctmDisplay.Rendering.Simple.BackgroundImage.URI != "" {
+					if simple.BackgroundImage != nil && simple.BackgroundImage.URI != "" {
 						display.BackgroundImage = openid4vci.MetadataBackgroundImage{
-							URI: vctmDisplay.Rendering.Simple.BackgroundImage.URI,
+							URI: simple.BackgroundImage.URI,
 						}
 					}
 				}

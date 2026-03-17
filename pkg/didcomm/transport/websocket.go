@@ -1,6 +1,3 @@
-//go:build didcomm && vc20
-// +build didcomm,vc20
-
 // Package transport provides WebSocket transport for DIDComm v2 messaging.
 //
 // # Coexistence with Wallet Frontend WebSocket

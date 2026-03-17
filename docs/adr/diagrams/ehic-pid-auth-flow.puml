@@ -6,7 +6,7 @@ title Two-Stage PID Authentication Flow for EHIC
 user -> wallet: select EHIC credential
 wallet -> oauth: /op/par (scope=ehic)
 wallet -> oauth: /authorize
-oauth -> oauth: detects auth_method=pid_auth
+oauth -> oauth: detects auth_method=openid4vp
 oauth -> oauth: /authorization/consent
 oauth -> wallet: redirect with verification request_uri
 wallet -> verifier: /verification/request-object

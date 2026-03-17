@@ -68,7 +68,9 @@ func TestUIMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
-				CredentialConstructor: tt.credentials,
+				Common: &model.Common{
+					CredentialConstructor: tt.credentials,
+				},
 				Verifier: &model.Verifier{
 					SupportedWallets: tt.supportedWallets,
 				},

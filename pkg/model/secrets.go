@@ -25,7 +25,7 @@ type MongoSecrets struct {
 // APIGWSecrets holds API gateway secrets
 type APIGWSecrets struct {
 	APIServer APIServerSecrets `yaml:"api_server,omitempty"`
-	OIDCRP    OIDCRPSecrets    `yaml:"oidcrp,omitempty"`
+	OIDCRP    OIDCRPSecrets    `yaml:"oidc_rp,omitempty"`
 }
 
 // APIServerSecrets holds API server secrets (basic auth passwords)
@@ -76,11 +76,11 @@ type AdminGUISecrets struct {
 
 // VerifierSecrets holds verifier secrets
 type VerifierSecrets struct {
-	OIDC OIDCSecrets `yaml:"oidc,omitempty"`
+	OIDCOP OIDCOPSecrets `yaml:"oidc_op,omitempty"`
 }
 
-// OIDCSecrets holds OIDC configuration secrets
-type OIDCSecrets struct {
+// OIDCOPSecrets holds OIDC OP configuration secrets
+type OIDCOPSecrets struct {
 	SubjectSalt string `yaml:"subject_salt"`
 }
 
@@ -110,8 +110,8 @@ func (cfg *Cfg) ClearSecrets() {
 		cfg.Registry.AdminGUI.Password = ""
 	}
 
-	if cfg.Verifier != nil && cfg.Verifier.OIDC != nil {
-		cfg.Verifier.OIDC.SubjectSalt = ""
+	if cfg.Verifier != nil && cfg.Verifier.OIDCOP != nil {
+		cfg.Verifier.OIDCOP.SubjectSalt = ""
 	}
 
 	if cfg.UI != nil {
@@ -175,11 +175,11 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.Verifier == nil {
 			cfg.Verifier = &Verifier{}
 		}
-		if secrets.Verifier.OIDC.SubjectSalt != "" {
-			if cfg.Verifier.OIDC == nil {
-				cfg.Verifier.OIDC = &OIDCConfig{}
+		if secrets.Verifier.OIDCOP.SubjectSalt != "" {
+			if cfg.Verifier.OIDCOP == nil {
+				cfg.Verifier.OIDCOP = &OIDCOPConfig{}
 			}
-			cfg.Verifier.OIDC.SubjectSalt = secrets.Verifier.OIDC.SubjectSalt
+			cfg.Verifier.OIDCOP.SubjectSalt = secrets.Verifier.OIDCOP.SubjectSalt
 		}
 	}
 

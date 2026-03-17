@@ -3,7 +3,7 @@
 # ==============================================================================
 
 NAME                    := vc
-VERSION                 ?= latest
+VERSION                 ?= local
 NEWTAG                  ?= $(VERSION)
 CURRENT_BRANCH          := $(shell git rev-parse --abbrev-ref HEAD)
 W3C_TEST_PORT           ?= 8888
@@ -28,12 +28,13 @@ DOCKER_REGISTRY         := docker.sunet.se/iam_vc
 DOCKER_BUILD_FLAGS      := 
 GO_BUILD_TAGS           ?=
 
+# Release Guard Configuration
+_RELEASE_MODE           ?=
+RESERVED_TAGS           := latest testing demo dev
+
 # Build Tags for Optional Features
-SAML_TAG                := saml
-OIDCRP_TAG              := oidcrp
+# PKCS#11 requires CGO for hardware security module support.
 PKCS11_TAG              := pkcs11
-VC20_TAG                := vc20
-ALL_TAGS                := $(SAML_TAG),$(OIDCRP_TAG)
 
 # Service Build Configuration (service -> static/dynamic, tags)
 # Format: service_name:cgo_mode:build_tags
@@ -44,7 +45,7 @@ BUILD_CONFIGS           := \
 	apigw:static: \
 	issuer:static: \
 	ui:static: \
-	vc20-test-server:static:$(VC20_TAG)
+	vc20-test-server:static:
 
 # ==============================================================================
 # Phony Targets Declaration
@@ -52,20 +53,22 @@ BUILD_CONFIGS           := \
 
 .PHONY: help pki pki-clean test test-env \
 	build build-% \
-	docker-build docker-build-% docker-push docker-push-% docker-push-apigw-saml docker-push-apigw-oidcrp docker-push-apigw-all docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
+	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
 	check-protoc diagram install-tools clean-apt-cache vscode \
 	gosec staticcheck vulncheck \
-	test-saml test-oidcrp test-vc20 test-pkcs11 test-all-tags \
+	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
 	test-wallet-stack-vci test-wallet-stack-vp test-wallet-stack-e2e test-wallet-stack-security \
+	test-didcomm test-didcomm-interop test-didcomm-all \
 	test-workflows test-workflows-run \
 	w3c-test create-w3c-test-suite run-w3c-test \
 	oidc-conformance-setup oidc-conformance-stop oidc-conformance-clean \
 	oidc-conformance-test oidc-conformance-test-vci oidc-conformance-test-vp oidc-conformance-test-oidc \
 	oidc-conformance-status \
-	release check_current_branch ci_build
+	_check-reserved-tag \
+	release release-prod release-demo check_current_branch
 
 # ==============================================================================
 # Help Target
@@ -86,9 +89,6 @@ help: ## Show this help message
 	$(info Services: $(SERVICES))
 	$(info )
 	$(info Optional Build Features:)
-	$(info   make build-apigw-saml     - Build apigw with SAML support)
-	$(info   make build-apigw-oidcrp   - Build apigw with OIDC RP support)
-	$(info   make build-apigw-all      - Build apigw with all features)
 	$(info   make build-issuer-hsm     - Build issuer with PKCS#11 HSM support)
 	$(info )
 	$(info OpenID Conformance Suite:)
@@ -131,6 +131,27 @@ $(DOCKER_REGISTRY)/$1:$2
 endef
 
 # ==============================================================================
+# Reserved Tag Guard
+# ==============================================================================
+# Prevents reserved Docker tags from being used outside of release targets.
+# Reserved: semver (vX.Y.Z), latest, testing, demo, dev.
+# Only 'make release', 'make release-prod', and 'make release-demo' may use them.
+
+_check-reserved-tag:
+ifneq ($(_RELEASE_MODE),1)
+	@for val in "$(VERSION)" "$(NEWTAG)"; do \
+		if echo "$$val" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+			echo "Error: '$$val' is a reserved semver tag. Use 'make release', 'make release-prod', or 'make release-demo' instead."; exit 1; \
+		fi; \
+		for reserved in $(RESERVED_TAGS); do \
+			if [ "$$val" = "$$reserved" ]; then \
+				echo "Error: '$$val' is a reserved tag. Use 'make release', 'make release-prod', or 'make release-demo' instead."; exit 1; \
+			fi; \
+		done; \
+	done
+endif
+
+# ==============================================================================
 # PKI Management
 # ==============================================================================
 
@@ -164,38 +185,22 @@ test-env: ## Set up test environment
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
 
 # Test targets with build tags
-test-saml: ## Test with SAML build tag
-	$(info Testing with SAML build tag)
-	go test -tags $(SAML_TAG) -v ./pkg/saml/... ./internal/apigw/...
-
-test-oidcrp: ## Test with OIDC RP build tag
-	$(info Testing with OIDC RP build tag)
-	go test -tags $(OIDCRP_TAG) -v ./pkg/oidcrp/... ./internal/apigw/...
-
-test-vc20: ## Test with VC 2.0 build tag
-	$(info Testing with VC 2.0 build tag)
-	go test -tags $(VC20_TAG) -v ./pkg/vc20/... ./pkg/authzen/... ./pkg/keyresolver/...
-
 test-pkcs11: ## Test with PKCS#11 build tag
 	$(info Testing with PKCS#11 build tag)
 	go test -tags $(PKCS11_TAG) -v ./pkg/signing/...
 
-test-all-tags: ## Test with all build tags
-	$(info Testing with all build tags)
-	go test -tags "$(SAML_TAG),$(OIDCRP_TAG),$(VC20_TAG),$(PKCS11_TAG)" -v ./...
-
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
 	$(info Testing DIDComm v2.1 implementation)
-	go test -tags "didcomm,$(VC20_TAG)" -v ./pkg/didcomm/...
+	go test -v ./pkg/didcomm/...
 
 test-didcomm-interop: ## Run DIDComm interoperability tests
 	$(info Running DIDComm interoperability tests)
-	go test -tags "didcomm,$(VC20_TAG),didcomm_interop" -v ./test/didcomm_interop/...
+	go test -v ./test/didcomm_interop/...
 
 test-didcomm-all: ## Run all DIDComm tests including interop
 	$(info Running all DIDComm tests including interop)
-	go test -tags "didcomm,$(VC20_TAG),didcomm_interop" -v ./pkg/didcomm/... ./test/didcomm_interop/...
+	go test -v ./pkg/didcomm/... ./test/didcomm_interop/...
 
 # Wallet Test targets
 test-wallet: test-wallet-vci test-wallet-vp test-wallet-e2e ## Run all wallet mock tests
@@ -214,23 +219,23 @@ test-wallet-e2e: ## Run wallet end-to-end mock tests (VCI then VP)
 
 test-wallet-stack: ## Run all wallet stack tests (requires: docker compose up)
 	$(info Testing wallet against live stack — requires: docker compose up)
-	go test -v -tags stack -count=1 -timeout 180s ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s ./internal/wallet/integration/...
 
 test-wallet-stack-vci: ## Run wallet stack VCI tests (happy path + negative)
 	$(info Testing wallet stack VCI flows)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VCI' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_VCI' ./internal/wallet/integration/...
 
 test-wallet-stack-vp: ## Run wallet stack VP tests
 	$(info Testing wallet stack VP flows)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VP' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_VP' ./internal/wallet/integration/...
 
 test-wallet-stack-e2e: ## Run wallet stack end-to-end test (VCI then VP)
 	$(info Testing wallet stack E2E flow)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_E2E' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_E2E' ./internal/wallet/integration/...
 
 test-wallet-stack-security: ## Run wallet stack security/negative tests (DPoP, PKCE, replay)
 	$(info Testing wallet stack security — DPoP, PKCE, replay)
-	go test -v -tags stack -count=1 -timeout 180s -run 'TestStack_VCI_(PAR_|Token_|Credential_)' ./internal/wallet/integration/...
+	go test -v -count=1 -timeout 180s -run 'TestStack_VCI_(PAR_|Token_|Credential_)' ./internal/wallet/integration/...
 
 # ==============================================================================
 # Code Quality & Security
@@ -238,7 +243,7 @@ test-wallet-stack-security: ## Run wallet stack security/negative tests (DPoP, P
 
 gosec: ## Run gosec security scanner
 	$(info Running gosec)
-	gosec -color -tests -tags $(VC20_TAG) -exclude-dir=internal/gen ./...
+	gosec -color -tests -exclude-dir=internal/gen ./...
 
 staticcheck: ## Run staticcheck linter
 	$(info Running staticcheck)
@@ -246,7 +251,7 @@ staticcheck: ## Run staticcheck linter
 
 vulncheck: ## Run vulnerability checker
 	$(info Running vulncheck)
-	govulncheck -scan package -tags $(VC20_TAG) ./...
+	govulncheck -scan package ./...
 
 # ==============================================================================
 # Docker Compose Operations
@@ -284,7 +289,7 @@ $(foreach service,$(SERVICES),$(eval $(call BUILD_TEMPLATE,$(service))))
 build-vc20-test-server: ## Build VC 2.0 test server
 	$(info Building vc20-test-server)
 	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(VC20_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_vc20-test-server \
+		$(BUILD_FLAGS) -o ./bin/$(NAME)_vc20-test-server \
 		$(LDFLAGS) ./cmd/vc20-test-server/
 
 build-wallet: ## Build wallet test tool
@@ -293,7 +298,7 @@ build-wallet: ## Build wallet test tool
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
 
-docker-build-wallet: ## Build Docker image for wallet test tool
+docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test tool
 	$(info Docker Building wallet with tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=wallet \
 		--tag $(call docker-tag,wallet,$(VERSION)) \
@@ -309,24 +314,6 @@ build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
 		-tags $(PKCS11_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_issuer-hsm \
 		$(LDFLAGS_DYNAMIC) ./cmd/issuer/
 
-build-apigw-saml: ## Build apigw with SAML support
-	$(info Building apigw with SAML support)
-	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(SAML_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_apigw-saml \
-		$(LDFLAGS) ./cmd/apigw/
-
-build-apigw-oidcrp: ## Build apigw with OIDC RP support
-	$(info Building apigw with OIDC RP support)
-	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(OIDCRP_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_apigw-oidcrp \
-		$(LDFLAGS) ./cmd/apigw/
-
-build-apigw-all: ## Build apigw with all optional features
-	$(info Building apigw with all optional features - SAML and OIDC RP)
-	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags "$(ALL_TAGS)" $(BUILD_FLAGS) -o ./bin/$(NAME)_apigw-all \
-		$(LDFLAGS) ./cmd/apigw/
-
 # ==============================================================================
 # Docker Build Targets
 # ==============================================================================
@@ -335,7 +322,7 @@ docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
 # Generate docker-build targets for web workers
 define DOCKER_BUILD_WEB_TEMPLATE
-docker-build-$(1): ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
@@ -348,7 +335,7 @@ $(foreach service,$(WEB_SERVICES),$(eval $(call DOCKER_BUILD_WEB_TEMPLATE,$(serv
 
 # Generate docker-build targets for workers
 define DOCKER_BUILD_WORKER_TEMPLATE
-docker-build-$(1): ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
@@ -360,36 +347,15 @@ endef
 
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
-# Docker builds with optional features
-docker-build-apigw-saml: ## Build apigw Docker image with SAML support
-	$(info Docker building apigw with SAML support, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS=$(SAML_TAG) \
-		--tag $(call docker-tag,apigw-saml,$(VERSION)) \
-		--file dockerfiles/worker .
-
-docker-build-apigw-oidcrp: ## Build apigw Docker image with OIDC RP support
-	$(info Docker building apigw with OIDC RP support, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS=$(OIDCRP_TAG) \
-		--tag $(call docker-tag,apigw-oidcrp,$(VERSION)) \
-		--file dockerfiles/worker .
-
-docker-build-apigw-all: ## Build apigw Docker image with all features
-	$(info Docker building apigw with all features - SAML and OIDC RP, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=apigw --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS="$(ALL_TAGS)" \
-		--tag $(call docker-tag,apigw-full,$(VERSION)) \
-		--file dockerfiles/worker .
-
-docker-build-issuer-hsm: ## Build issuer Docker image with PKCS#11 HSM support
+# Docker build with PKCS#11 feature
+docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS=$(PKCS11_TAG) \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
 		--file dockerfiles/worker .
 
-docker-build-gobuild: ## Build gobuild Docker image
+docker-build-gobuild: _check-reserved-tag ## Build gobuild Docker image
 	$(info Docker Building gobuild with tag: $(VERSION))
 	docker build --tag $(call docker-tag,gobuild,$(VERSION)) --file dockerfiles/gobuild .
 
@@ -401,7 +367,7 @@ docker-push: $(addprefix docker-push-,$(SERVICES)) ## Push all Docker images
 
 # Generate docker-push targets dynamically
 define DOCKER_PUSH_TEMPLATE
-docker-push-$(1): ## Push Docker image for $(1)
+docker-push-$(1): _check-reserved-tag ## Push Docker image for $(1)
 	$$(info Pushing docker image $(1))
 	docker push $$(call docker-tag,$(1),$$(VERSION))
 
@@ -409,24 +375,12 @@ endef
 
 $(foreach service,$(SERVICES),$(eval $(call DOCKER_PUSH_TEMPLATE,$(service))))
 
-# Push targets for optional feature builds
-docker-push-apigw-saml: ## Push apigw Docker image with SAML support
-	$(info Pushing docker image apigw-saml)
-	docker push $(call docker-tag,apigw-saml,$(VERSION))
-
-docker-push-apigw-oidcrp: ## Push apigw Docker image with OIDC RP support
-	$(info Pushing docker image apigw-oidcrp)
-	docker push $(call docker-tag,apigw-oidcrp,$(VERSION))
-
-docker-push-apigw-all: ## Push apigw Docker image with all features
-	$(info Pushing docker image apigw-full)
-	docker push $(call docker-tag,apigw-full,$(VERSION))
-
-docker-push-issuer-hsm: ## Push issuer Docker image with PKCS#11 HSM support
+# Push target for PKCS#11 feature build
+docker-push-issuer-hsm: _check-reserved-tag ## Push issuer Docker image with PKCS#11 HSM support
 	$(info Pushing docker image issuer-hsm)
 	docker push $(call docker-tag,issuer-hsm,$(VERSION))
 
-docker-push-gobuild: ## Push gobuild Docker image
+docker-push-gobuild: _check-reserved-tag ## Push gobuild Docker image
 	$(info Pushing docker image gobuild)
 	docker push $(call docker-tag,gobuild,$(VERSION))
 
@@ -438,7 +392,7 @@ docker-tag: $(addprefix docker-tag-,$(SERVICES)) ## Tag all Docker images
 
 # Generate docker-tag targets dynamically
 define DOCKER_TAG_TEMPLATE
-docker-tag-$(1): ## Tag Docker image for $(1)
+docker-tag-$(1): _check-reserved-tag ## Tag Docker image for $(1)
 	$$(info Tagging docker image $(1))
 	docker tag $$(call docker-tag,$(1),$$(VERSION)) $$(call docker-tag,$(1),$$(NEWTAG))
 
@@ -450,11 +404,11 @@ $(foreach service,$(SERVICES),$(eval $(call DOCKER_TAG_TEMPLATE,$(service))))
 # Docker Utilities
 # ==============================================================================
 
-docker-pull: ## Pull all Docker images
+docker-pull: _check-reserved-tag ## Pull all Docker images
 	$(info Pulling docker images)
 	$(foreach service,$(SERVICES),docker pull $(call docker-tag,$(service),$(VERSION));)
 
-docker-archive: ## Create Docker archive
+docker-archive: _check-reserved-tag ## Create Docker archive
 	docker save --output docker_archives/vc_$(VERSION).tar \
 		$(call docker-tag,verifier,$(VERSION)) \
 		$(call docker-tag,registry,$(VERSION))
@@ -687,30 +641,123 @@ test-workflows-run: ## Run all GitHub Actions workflows locally
 # Release Management
 # ==============================================================================
 
-VERSION_FILE            := VERSION
-RELEASE_VERSION         := $(shell cat $(VERSION_FILE) 2>/dev/null | tr -d '[:space:]')
+BUMP                    ?= patch
+FORCE                   ?=
 
 check_current_branch: ## Verify current branch is main
 	$(info Current branch: $(CURRENT_BRANCH))
 ifeq ($(CURRENT_BRANCH),main)
 	$(info On main branch)
 else
-	$(error Not on main branch)
+ifneq ($(FORCE),true)
+	$(error Not on main branch — use FORCE=true to override)
+else
+	$(warning Not on main branch — continuing because FORCE=true)
+endif
 endif
 
-get_release-tag: ## Show current release version from VERSION file
-	@echo "$(RELEASE_VERSION)"
+get_release-tag: ## Show current release version from latest git tag
+	@git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1 || echo "v0.0.0"
 
-release: check_current_branch ## Create and push a git tag from VERSION file
-	$(info Release version: v$(RELEASE_VERSION))
-	git tag -a v$(RELEASE_VERSION) -m "Release v$(RELEASE_VERSION)"
-	git push origin v$(RELEASE_VERSION)
-	$(info Release v$(RELEASE_VERSION) tagged — Jenkins will build and push Docker images)
+#### Release target
+# Creates a vX.Y.Z tag by bumping the latest existing tag.
+# Usage:
+#   make release                       # defaults to patch bump
+#   make release BUMP=minor            # minor bump
+#   make release BUMP=major            # major bump
+#   make release FORCE=true            # release from any branch
+#   make release BUMP=minor FORCE=true # combine options
+release: check_current_branch ## Create and push a git tag (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing version tags found, starting at v0.0.0"; \
+		LATEST="v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="v$${MAJOR}.$${MINOR}.$${PATCH}"; \
+	echo ""; \
+	echo "Bumping $$LATEST -> $$NEW_TAG ($(BUMP))"; \
+	echo ""; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> Release $$NEW_TAG created and pushed"; \
+	echo ""; \
+	echo "Building and pushing Docker images for $$NEW_TAG..."; \
+	echo ""; \
+	$(MAKE) docker-build VERSION=$$NEW_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=$$NEW_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-tag VERSION=$$NEW_TAG NEWTAG=dev _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=dev _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Docker images built and pushed for $$NEW_TAG (:dev)"; \
+	echo ""
 
-ci_build: ## CI build: vanilla + HSM Docker images (used by Jenkins)
-	$(info CI Build: VERSION=$(VERSION))
-	make docker-build VERSION=$(VERSION)
-	make docker-push VERSION=$(VERSION)
-	make docker-build VERSION=$(VERSION)-hsm GO_BUILD_TAGS=pkcs11
-	make docker-push VERSION=$(VERSION)-hsm
-	$(info CI Build complete)
+#### Prod promotion
+# Promotes a version to prod by locally pulling :vX.Y.Z images
+# and re-tagging/pushing as :latest. No rebuild.
+# Usage:
+#   make release-prod              # promotes latest vX.Y.Z tag to prod
+#   make release-prod TAG=v1.2.3   # promotes v1.2.3 to prod
+release-prod: ## Promote a release tag to prod
+	@set -e; \
+	if [ -n "$(TAG)" ]; then \
+		SRC_TAG=$$(echo "$(TAG)" | sed 's#^refs/tags/##'); \
+	else \
+		SRC_TAG=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+		if [ -z "$$SRC_TAG" ]; then \
+			echo "Error: no version tags found. Run 'make release' first."; exit 1; \
+		fi; \
+	fi; \
+	echo "$$SRC_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || \
+		{ echo "Error: TAG must match vX.Y.Z (got: $$SRC_TAG)"; exit 1; }; \
+	echo ""; \
+	echo "Promoting $$SRC_TAG -> prod"; \
+	echo ""; \
+	$(MAKE) docker-pull VERSION=$$SRC_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-tag VERSION=$$SRC_TAG NEWTAG=latest _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=latest _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Prod promotion complete for $$SRC_TAG (:latest)"; \
+	echo ""
+
+#### Demo promotion
+# Promotes a version to demo by pulling :vX.Y.Z images
+# and re-tagging/pushing as :demo. No rebuild.
+# Usage:
+#   make release-demo              # promotes latest vX.Y.Z tag to demo
+#   make release-demo TAG=v1.2.3   # promotes v1.2.3 to demo
+release-demo: ## Promote a release tag to demo
+	@set -e; \
+	if [ -n "$(TAG)" ]; then \
+		SRC_TAG=$$(echo "$(TAG)" | sed 's#^refs/tags/##'); \
+	else \
+		SRC_TAG=$$(git tag -l "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+		if [ -z "$$SRC_TAG" ]; then \
+			echo "Error: no version tags found. Run 'make release' first."; exit 1; \
+		fi; \
+	fi; \
+	echo "$$SRC_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || \
+		{ echo "Error: TAG must match vX.Y.Z (got: $$SRC_TAG)"; exit 1; }; \
+	echo ""; \
+	echo "Promoting $$SRC_TAG -> demo"; \
+	echo ""; \
+	$(MAKE) docker-pull VERSION=$$SRC_TAG _RELEASE_MODE=1 && \
+	$(MAKE) docker-tag VERSION=$$SRC_TAG NEWTAG=demo _RELEASE_MODE=1 && \
+	$(MAKE) docker-push VERSION=demo _RELEASE_MODE=1; \
+	echo ""; \
+	echo "==> Demo promotion complete for $$SRC_TAG (:demo)"; \
+	echo ""

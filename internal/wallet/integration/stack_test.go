@@ -1,4 +1,4 @@
-//go:build stack
+//go:build integration
 
 // Package integration contains integration tests that run against the real
 // docker-compose stack (apigw, verifier, mockas, issuer, registry, mongo).
@@ -10,7 +10,7 @@
 //
 // Run:
 //
-//	go test -v -tags stack ./internal/wallet/integration/ -run TestStack
+//	go test -v -tags integration ./internal/wallet/integration/ -run TestStack
 package integration
 
 import (

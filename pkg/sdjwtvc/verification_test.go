@@ -15,14 +15,12 @@ import (
 )
 
 func TestParseAndVerify_ValidCredential(t *testing.T) {
-	// Create a test credential
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
 	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	// Create holder JWK
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
@@ -30,49 +28,42 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
 	}
 
-	// Create VCTM
 	testClaim := "test_claim"
 	vctm := &VCTM{
 		VCT:    "TestCredential",
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
+
 	documentData := []byte(`{"test_claim": "test_value"}`)
 
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
-		documentData,
-		holderJWK,
-		vctm,
-		nil,
+		signer, vctmRaw, documentData, holderJWK,
+		&CredentialOptions{Integrity: integrity},
 	)
 	require.NoError(t, err)
 
-	// Verify the credential
 	result, err := client.ParseAndVerify(sdJWT, &issuerPrivateKey.PublicKey, nil)
 	require.NoError(t, err)
 	assert.True(t, result.Valid)
 	assert.Empty(t, result.Errors)
 
-	// Verify header
 	assert.Equal(t, "dc+sd-jwt", result.Header["typ"])
 	assert.Equal(t, "ES256", result.Header["alg"])
 
-	// Verify claims
 	assert.Equal(t, "https://issuer.example.com", result.Claims["iss"])
 	assert.Equal(t, "TestCredential", result.Claims["vct"])
 
-	// Verify disclosures were parsed
 	assert.Greater(t, len(result.Disclosures), 0)
 	assert.NotNil(t, result.DisclosedClaims["test_claim"])
 }
 
 func TestParseAndVerify_InvalidSignature(t *testing.T) {
-	// Create a credential with one key
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -82,20 +73,20 @@ func TestParseAndVerify_InvalidSignature(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
+
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
-		vctm,
-		nil,
+		&CredentialOptions{Integrity: integrity},
 	)
 	require.NoError(t, err)
 
-	// Try to verify with a different public key
 	wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -106,7 +97,6 @@ func TestParseAndVerify_InvalidSignature(t *testing.T) {
 }
 
 func TestParseAndVerify_ExpiredCredential(t *testing.T) {
-	// Create a credential with custom expiration
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -116,25 +106,23 @@ func TestParseAndVerify_ExpiredCredential(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	// Build with very short expiration
-	opts := &CredentialOptions{
-		ExpirationDays: -1, // Already expired
-	}
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
-		vctm,
-		opts,
+		&CredentialOptions{
+			ExpirationDays: -1,
+			Integrity:      integrity,
+		},
 	)
 	require.NoError(t, err)
 
-	// Verify should fail due to expiration
 	result, err := client.ParseAndVerify(sdJWT, &issuerPrivateKey.PublicKey, &VerificationOptions{
 		ValidateTime: true,
 	})
@@ -144,7 +132,6 @@ func TestParseAndVerify_ExpiredCredential(t *testing.T) {
 }
 
 func TestParseAndVerify_SkipTimeValidation(t *testing.T) {
-	// Create an expired credential
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -154,24 +141,23 @@ func TestParseAndVerify_SkipTimeValidation(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
-	opts := &CredentialOptions{
-		ExpirationDays: -1, // Already expired
-	}
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
 
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
-		vctm,
-		opts,
+		&CredentialOptions{
+			ExpirationDays: -1,
+			Integrity:      integrity,
+		},
 	)
 	require.NoError(t, err)
 
-	// Verify with time validation disabled
 	result, err := client.ParseAndVerify(sdJWT, &issuerPrivateKey.PublicKey, &VerificationOptions{
 		ValidateTime: false,
 	})
@@ -180,14 +166,12 @@ func TestParseAndVerify_SkipTimeValidation(t *testing.T) {
 }
 
 func TestParseAndVerify_WithKeyBinding(t *testing.T) {
-	// Create credentials with key binding
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
 	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	// Create holder JWK
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
@@ -201,29 +185,27 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
+
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		holderJWK,
-		vctm,
-		nil,
+		&CredentialOptions{Integrity: integrity},
 	)
 	require.NoError(t, err)
 
-	// Create Key Binding JWT
 	nonce := "test-nonce-12345"
 	audience := "https://verifier.example.com"
 	kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, "sha-256")
 	require.NoError(t, err)
 
-	// Combine SD-JWT with KB-JWT
 	combined := sdJWT + kbJWT
 
-	// Verify with KB-JWT
 	result, err := client.ParseAndVerify(combined, &issuerPrivateKey.PublicKey, &VerificationOptions{
 		ExpectedNonce:    nonce,
 		ExpectedAudience: audience,
@@ -237,7 +219,6 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 }
 
 func TestParseAndVerify_KeyBindingRequired(t *testing.T) {
-	// Create credential without key binding
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -247,20 +228,20 @@ func TestParseAndVerify_KeyBindingRequired(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
+
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		map[string]any{"kty": "EC"},
-		vctm,
-		nil,
+		&CredentialOptions{Integrity: integrity},
 	)
 	require.NoError(t, err)
 
-	// Verify with RequireKeyBinding=true should fail
 	result, err := client.ParseAndVerify(sdJWT, &issuerPrivateKey.PublicKey, &VerificationOptions{
 		RequireKeyBinding: true,
 	})
@@ -270,7 +251,6 @@ func TestParseAndVerify_KeyBindingRequired(t *testing.T) {
 }
 
 func TestParseAndVerify_InvalidNonce(t *testing.T) {
-	// Create credential with key binding
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -290,26 +270,25 @@ func TestParseAndVerify_InvalidNonce(t *testing.T) {
 		Claims: []Claim{{Path: []*string{&testClaim}, SD: "always"}},
 	}
 
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(issuerPrivateKey, "key-1")
+
 	client := New()
-	sdJWT, err := client.BuildCredential(
+	sdJWT, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		issuerPrivateKey,
-		"TestCredential",
+		signer, vctmRaw,
 		[]byte(`{"test_claim": "value"}`),
 		holderJWK,
-		vctm,
-		nil,
+		&CredentialOptions{Integrity: integrity},
 	)
 	require.NoError(t, err)
 
-	// Create KB-JWT with one nonce
 	kbJWT, err := CreateKeyBindingJWT(sdJWT, "nonce-1", "https://verifier.example.com", holderPrivateKey, "sha-256")
 	require.NoError(t, err)
 
 	combined := sdJWT + kbJWT
 
-	// Try to verify with different expected nonce
 	result, err := client.ParseAndVerify(combined, &issuerPrivateKey.PublicKey, &VerificationOptions{
 		ExpectedNonce:    "nonce-2",
 		ExpectedAudience: "https://verifier.example.com",

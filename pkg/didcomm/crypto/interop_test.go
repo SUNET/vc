@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package crypto provides interoperability tests against sicpa-dlab/didcomm-rust test vectors.
 // These tests verify that our implementation can decrypt messages created by the Rust library
 // and that messages we encrypt can be decrypted using the same keys.

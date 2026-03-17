@@ -1,16 +1,38 @@
 package openid4vp
 
 import (
+	"context"
 	"encoding/base64"
 	"testing"
 
 	"vc/pkg/mdoc"
+	"vc/pkg/trust"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
+// mockTrustEvaluator is a test implementation of TrustEvaluator
+type mockTrustEvaluator struct {
+	trusted bool
+}
+
+func (m *mockTrustEvaluator) Evaluate(ctx context.Context, req *trust.EvaluationRequest) (*trustapi.TrustDecision, error) {
+	return &trustapi.TrustDecision{
+		Trusted:        m.trusted,
+		Reason:         "test decision",
+		TrustFramework: "test-mock",
+	}, nil
+}
+
+func (m *mockTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
+	return kt == trust.KeyTypeX5C
+}
+
 func TestNewMDocHandler(t *testing.T) {
-	h, err := NewMDocHandler()
+	// Create with mock trust evaluator (now required)
+	te := &mockTrustEvaluator{trusted: true}
+	h, err := NewMDocHandler(WithMDocTrustEvaluator(te))
 	if err != nil {
 		t.Fatalf("NewMDocHandler() error = %v", err)
 	}
@@ -22,15 +44,15 @@ func TestNewMDocHandler(t *testing.T) {
 	}
 }
 
-func TestNewMDocHandler_WithTrustList(t *testing.T) {
-	trustList := mdoc.NewIACATrustList()
+func TestNewMDocHandlerWithTrustEvaluator(t *testing.T) {
+	te := &mockTrustEvaluator{trusted: true}
 
-	h, err := NewMDocHandler(WithMDocTrustList(trustList))
+	h, err := NewMDocHandler(WithMDocTrustEvaluator(te))
 	if err != nil {
 		t.Fatalf("NewMDocHandler() error = %v", err)
 	}
-	if h.trustList != trustList {
-		t.Error("trust list was not set correctly")
+	if h.trustEvaluator != te {
+		t.Error("trust evaluator was not set correctly")
 	}
 }
 

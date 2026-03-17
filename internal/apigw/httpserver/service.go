@@ -39,7 +39,7 @@ type Service struct {
 	sessionsEncKey  string
 	sessionsAuthKey string
 	sessionsName    string
-	samlSPService     SAMLSPService
+	samlSPService   SAMLSPService
 	oidcrpService   OIDCRPService
 }
 
@@ -52,12 +52,15 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		gin:    gin.New(),
 		tracer: tracer,
 		server: &http.Server{
+			// ReadHeaderTimeout limits the time to read request headers.
+			// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
+			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
 			ReadHeaderTimeout: 3 * time.Second,
 		},
-		eventPublisher:  eventPublisher,
-		samlSPService:     samlSPService,
-		oidcrpService:   oidcrpService,
-		sessionsName:    "oauth_user_session",
+		eventPublisher: eventPublisher,
+		samlSPService:  samlSPService,
+		oidcrpService:  oidcrpService,
+		sessionsName:   "oauth_user_session",
 		sessionsOptions: sessions.Options{
 			Path:     "/",
 			Domain:   "",
@@ -134,7 +137,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRestricted.Use(s.httpHelpers.Middleware.BasicAuth(ctx, s.cfg.APIGW.APIServer.APIAuth.BasicAuth.Users))
+	rgRestricted.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -149,6 +152,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer", http.StatusOK, s.endpointVCIMetadata)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/jwt-vc-issuer", http.StatusOK, s.endpointSDJWTVCIssuerMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "jwks", http.StatusOK, s.endpointJWKS)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "type-metadata/:scope", http.StatusOK, s.endpointTypeMetadata)
 	rgOAuthSession := rgRoot.Group("")
 	rgOAuthSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "op/par", http.StatusCreated, s.endpointOAuthPar)
@@ -158,11 +164,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/svg-template", http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "token", http.StatusOK, s.endpointOAuthToken)
 
-	// Register SAML endpoints if enabled (build tag dependent)
-	s.registerSAMLRoutes(ctx, rgRoot)
+	// SAML endpoints
+	rgSAML := rgRoot.Group("/saml")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodGet, "/metadata", http.StatusOK, s.endpointSAMLMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodPost, "/initiate", http.StatusOK, s.endpointSAMLInitiate)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodPost, "/acs", http.StatusOK, s.endpointSAMLACS)
 
-	// Register OIDC RP endpoints if enabled (build tag dependent)
-	s.registerOIDCRPRoutes(ctx, rgRoot)
+	// OIDC RP endpoints
+	rgOIDCRP := rgRoot.Group("/oidcrp")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCRP, http.MethodPost, "/initiate", http.StatusOK, s.endpointOIDCRPInitiate)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCRP, http.MethodGet, "/callback", http.StatusOK, s.endpointOIDCRPCallback)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
 

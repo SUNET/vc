@@ -68,8 +68,9 @@ func (x *TokenStatusListAddStatusRequest) GetStatus() uint32 {
 
 type TokenStatusListAddStatusReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Section       int64                  `protobuf:"varint,1,opt,name=Section,proto3" json:"Section,omitempty"` // Section where the status was added
-	Index         int64                  `protobuf:"varint,2,opt,name=Index,proto3" json:"Index,omitempty"`     // Index within the section
+	Section       int64                  `protobuf:"varint,1,opt,name=Section,proto3" json:"Section,omitempty"`            // Section where the status was added
+	Index         int64                  `protobuf:"varint,2,opt,name=Index,proto3" json:"Index,omitempty"`                // Index within the section
+	StatusListUri string                 `protobuf:"bytes,3,opt,name=StatusListUri,proto3" json:"StatusListUri,omitempty"` // Full URI to the status list (e.g. "https://registry.sunet.se/statuslists/0")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -116,6 +117,13 @@ func (x *TokenStatusListAddStatusReply) GetIndex() int64 {
 		return x.Index
 	}
 	return 0
+}
+
+func (x *TokenStatusListAddStatusReply) GetStatusListUri() string {
+	if x != nil {
+		return x.StatusListUri
+	}
+	return ""
 }
 
 type TokenStatusListUpdateStatusRequest struct {
@@ -333,10 +341,11 @@ const file_v1_registry_proto_rawDesc = "" +
 	"\n" +
 	"\x11v1-registry.proto\x12\vv1.registry\"9\n" +
 	"\x1fTokenStatusListAddStatusRequest\x12\x16\n" +
-	"\x06Status\x18\x01 \x01(\rR\x06Status\"O\n" +
+	"\x06Status\x18\x01 \x01(\rR\x06Status\"u\n" +
 	"\x1dTokenStatusListAddStatusReply\x12\x18\n" +
 	"\aSection\x18\x01 \x01(\x03R\aSection\x12\x14\n" +
-	"\x05Index\x18\x02 \x01(\x03R\x05Index\"l\n" +
+	"\x05Index\x18\x02 \x01(\x03R\x05Index\x12$\n" +
+	"\rStatusListUri\x18\x03 \x01(\tR\rStatusListUri\"l\n" +
 	"\"TokenStatusListUpdateStatusRequest\x12\x18\n" +
 	"\aSection\x18\x01 \x01(\x03R\aSection\x12\x14\n" +
 	"\x05Index\x18\x02 \x01(\x03R\x05Index\x12\x16\n" +

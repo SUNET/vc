@@ -2,6 +2,8 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 
 	"vc/internal/gen/registry/apiv1_registry"
 	"vc/internal/registry/apiv1"
@@ -14,9 +16,19 @@ func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_regis
 		return nil, err
 	}
 
+	baseURL, err := url.Parse(s.cfg.Registry.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid registry public URL: %w", err)
+	}
+	baseURL.Path, err = url.JoinPath(baseURL.Path, "statuslists", fmt.Sprintf("%d", section))
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct status list URI: %w", err)
+	}
+
 	reply := &apiv1_registry.TokenStatusListAddStatusReply{
-		Section: section,
-		Index:   index,
+		Section:       section,
+		Index:         index,
+		StatusListUri: baseURL.String(),
 	}
 
 	return reply, nil

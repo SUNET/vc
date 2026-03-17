@@ -1,16 +1,15 @@
-//go:build oidcrp
-
 package apiv1
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
-	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
-	"vc/pkg/grpchelpers"
 	"vc/internal/apigw/oidcrp"
+	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
+	"vc/pkg/crypto"
+	"vc/pkg/grpchelpers"
+	"vc/pkg/model"
 	"vc/pkg/openid4vci"
 
 	"go.opentelemetry.io/otel/codes"
@@ -35,11 +34,15 @@ type OIDCRPCallbackRequest struct {
 
 // OIDCRPCallbackResponse represents the credential issuance response
 type OIDCRPCallbackResponse struct {
-	Status          string                 `json:"status"`
-	CredentialType  string                 `json:"credential_type"`
-	Credential      string                 `json:"credential"`
+	Status          string         `json:"status"`
+	CredentialType  string         `json:"credential_type"`
+	Credential      string         `json:"credential"`
 	CredentialOffer map[string]any `json:"credential_offer"`
-	Message         string                 `json:"message"`
+	Message         string         `json:"message"`
+
+	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
+	// The httpserver should redirect the browser to this URL instead of returning JSON.
+	VCIRedirectURL string `json:"vci_redirect_url,omitempty"`
 }
 
 // OIDCRPInitiate initiates OIDC authentication flow
@@ -81,12 +84,41 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, err
 	}
 
-	// Retrieve session to get credential type
+	// Fetch UserInfo claims and merge with ID token claims (OIDC Core §5.3.2).
+	// Many providers return only minimal claims in the ID token; the richer
+	// identity attributes are available only via the UserInfo endpoint.
+	if authResp.AccessToken != "" {
+		userInfoClaims, userInfoErr := service.GetUserInfo(ctx, authResp.AccessToken)
+		if userInfoErr != nil {
+			c.log.Warn("failed to fetch UserInfo, proceeding with ID token claims only", "error", userInfoErr)
+		} else {
+			// Verify sub consistency (OIDC Core §5.3.2: MUST be the same)
+			if uiSub, ok := userInfoClaims["sub"].(string); ok {
+				if idSub, ok := authResp.Claims["sub"].(string); ok && uiSub != idSub {
+					return nil, fmt.Errorf("UserInfo sub %q does not match ID token sub %q", uiSub, idSub)
+				}
+			}
+			// Merge: UserInfo claims take precedence per OIDC Core §5.3.2
+			for k, v := range userInfoClaims {
+				authResp.Claims[k] = v
+			}
+		}
+	}
+
+	// Retrieve session to get credential type.
+	// ProcessCallback already validated the session, but we need it for credential type etc.
 	session, err := service.GetSession(ctx, req.State)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
+
+	// Ensure session is cleaned up if any subsequent step fails
+	defer func() {
+		if err != nil {
+			service.DeleteSession(ctx, req.State)
+		}
+	}()
 
 	// Build transformer from config
 	transformer, err := service.BuildTransformer()
@@ -109,11 +141,61 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, err
 	}
 
+	// Log the mapping attributes and resulting document data for diagnostics.
+	// This helps identify mismatches between credential_mappings and the VCTM claims.
+	claimKeys := make([]string, 0, len(claims))
+	for k := range claims {
+		claimKeys = append(claimKeys, k)
+	}
+	mappingKeys := make([]string, 0, len(mapping.Attributes))
+	for k := range mapping.Attributes {
+		mappingKeys = append(mappingKeys, k)
+	}
+
 	c.log.Info("OIDC authentication successful",
 		"credential_type", session.CredentialType,
 		"claims_count", len(claims),
+		"claim_keys", claimKeys,
+		"mapping_attributes", mappingKeys,
 		"subject", authResp.IDToken.Subject)
 
+	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
+	// store the transformed claims as a document in the VCI session cache and signal
+	// the httpserver to redirect back to the consent page.
+	if session.VCISessionID != "" {
+		c.log.Info("OIDC callback: VCI mode detected, storing document in VCI cache",
+			"vci_session_id", session.VCISessionID,
+			"credential_type", session.CredentialType)
+
+		doc := &model.CompleteDocument{
+			Meta: &model.MetaData{
+				AuthenticSource: session.IssuerURL,
+			},
+			DocumentData:        claims,
+			DocumentDataVersion: "1.0.0",
+		}
+		docs := map[string]*model.CompleteDocument{
+			session.IssuerURL: doc,
+		}
+
+		if err := c.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
+			span.SetStatus(codes.Error, "VCI document storage failed")
+			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		}
+
+		// Clean up OIDC session (clear err so defer doesn't double-delete)
+		err = nil
+		service.DeleteSession(ctx, req.State)
+
+		return &OIDCRPCallbackResponse{
+			Status:         "success",
+			CredentialType: session.CredentialType,
+			VCIRedirectURL: "/authorization/consent/#/credentials",
+			Message:        "OIDC authentication successful, continuing VCI flow",
+		}, nil
+	}
+
+	// Standalone mode: create credential directly via issuer gRPC
 	// Marshal claims to JSON for the credential
 	documentData, err := json.Marshal(claims)
 	if err != nil {
@@ -135,7 +217,8 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
 	}
 
-	// Clean up session
+	// Clean up session (clear err so defer doesn't double-delete)
+	err = nil
 	service.DeleteSession(ctx, req.State)
 
 	c.log.Info("Credential issued successfully via OIDC RP",
@@ -166,11 +249,18 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 
 	client := apiv1_issuer.NewIssuerServiceClient(conn)
 
+	credentialConstructor := c.cfg.GetCredentialConstructor(credentialType)
+	if credentialConstructor == nil {
+		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
+	}
+
 	// Call the issuer's MakeSDJWT method
 	reply, err := client.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
 		Scope:        credentialType,
 		DocumentData: documentData,
 		Jwk:          jwk,
+		Integrity:    credentialConstructor.GetIntegrity(),
+		Vctm:         credentialConstructor.GetVCTMRaw(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")
@@ -190,7 +280,10 @@ func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialTy
 	defer span.End()
 
 	// Generate a unique pre-authorized code
-	preAuthCode := fmt.Sprintf("oidcrp_%d", time.Now().UnixNano())
+	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
+	}
 
 	// Build credential offer parameters
 	params := openid4vci.CredentialOfferParameters{

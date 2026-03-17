@@ -1029,16 +1029,14 @@ func renderDocument(sections []*DocSection) string {
 
 func sectionLabel(yamlKey string) string {
 	labels := map[string]string{
-		"common":                 "Common",
-		"auth_methods":           "Authentication Methods",
-		"credential_constructor": "Credential Constructor",
-		"apigw":                  "API Gateway (APIGW)",
-		"issuer":                 "Issuer",
-		"verifier":               "Verifier",
-		"registry":               "Registry",
-		"mock_as":                "Mock AS",
-		"ui":                     "UI",
-		"secrets_file":           "Secrets File Reference",
+		"common":   "Common",
+		"apigw":    "API Gateway (APIGW)",
+		"issuer":   "Issuer",
+		"verifier": "Verifier",
+		"registry": "Registry",
+		"mock_as":  "Mock AS",
+		"ui":       "UI",
+		"secrets_file": "Secrets File Reference",
 	}
 	if l, ok := labels[yamlKey]; ok {
 		return l

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"fmt"
+	"net/url"
 	"testing"
 	"vc/internal/gen/registry/apiv1_registry"
 	"vc/internal/issuer/auditlog"
@@ -24,9 +26,12 @@ type mockRegistryClient struct {
 
 func (m *mockRegistryClient) TokenStatusListAddStatus(ctx context.Context, in *apiv1_registry.TokenStatusListAddStatusRequest, opts ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
 	m.index++
+	u, _ := url.Parse("https://test-registry.sunet.se")
+	u.Path, _ = url.JoinPath(u.Path, "statuslists", fmt.Sprintf("%d", m.section))
 	return &apiv1_registry.TokenStatusListAddStatusReply{
-		Section: m.section,
-		Index:   m.index,
+		Section:       m.section,
+		Index:         m.index,
+		StatusListUri: u.String(),
 	}, nil
 }
 
@@ -40,45 +45,7 @@ func (m *mockRegistryClient) SaveCredentialSubject(ctx context.Context, in *apiv
 
 func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logger.Log) *Client {
 	cfg := &model.Cfg{
-		CredentialConstructor: map[string]*model.CredentialConstructor{
-			// OAuth2 scope based keys
-			"diploma": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"pid": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"ehic": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"pda1": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"micro_credential": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"elm": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"openbadge_complete": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"openbadge_basic": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-			"openbadge_endorsements": {
-				VCTMFilePath: "testdata/vctm_test.json",
-				AuthMethod:   "basic",
-			},
-		},
+		Common: &model.Common{},
 		Issuer: &model.Issuer{
 			APIServer:  model.APIServer{},
 			GRPCServer: model.GRPCServer{},
@@ -94,9 +61,6 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 				Kid:                      "",
 			},
 		},
-		Registry: &model.Registry{
-			PublicURL: "https://test-registry.sunet.se",
-		},
 	}
 
 	tracer, err := trace.NewForTesting(ctx, "test", log.New("trace"))
@@ -104,12 +68,6 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 
 	audit, err := auditlog.New(ctx, cfg, log.New("audit"))
 	assert.NoError(t, err)
-
-	// Load VCTM files for all credential constructors
-	for scope, constructor := range cfg.CredentialConstructor {
-		err := constructor.LoadVCTMetadata(ctx, scope)
-		assert.NoError(t, err)
-	}
 
 	client, err := New(ctx, audit, cfg, tracer, log.New("apiv1"))
 	assert.NoError(t, err)
@@ -122,7 +80,6 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		assert.NoError(t, err)
 		client.privateKey = rsaKey
-		client.publicKey = &rsaKey.PublicKey
 		// Also update the signer to use RSA
 		signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
 		assert.NoError(t, err)

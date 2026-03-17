@@ -15,6 +15,7 @@ import (
 	"vc/internal/verifier/db"
 	"vc/pkg/cache"
 	"vc/pkg/crypto"
+	"vc/pkg/helpers"
 	"vc/pkg/jose"
 	"vc/pkg/oauth2"
 	"vc/pkg/openid4vp"
@@ -28,40 +29,48 @@ import (
 type AuthorizeRequest struct {
 	ResponseType        string `form:"response_type" binding:"required" validate:"required,max=128,printascii"`
 	ClientID            string `form:"client_id" binding:"required" validate:"required,max=128,printascii"`
-	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=128,printascii"`
-	Scope               string `form:"scope" binding:"required" validate:"required,max=128,printascii"`
+	RedirectURI         string `form:"redirect_uri" binding:"required" validate:"required,max=2048,printascii"`
+	Scope               string `form:"scope" binding:"required" validate:"required,max=1024,printascii"`
 	State               string `form:"state" validate:"omitempty,max=500,printascii"`
-	Nonce               string `form:"nonce" validate:"omitempty,max=128,printascii"`
+	Nonce               string `form:"nonce" validate:"omitempty,max=256,printascii"`
 	CodeChallenge       string `form:"code_challenge" validate:"omitempty,max=128,printascii"`
 	CodeChallengeMethod string `form:"code_challenge_method" validate:"omitempty,max=128,printascii"`
 	ResponseMode        string `form:"response_mode" validate:"omitempty,max=128,printascii"`
 	Display             string `form:"display" validate:"omitempty,max=128,printascii"`
 	Prompt              string `form:"prompt" validate:"omitempty,max=128,printascii"`
 	MaxAge              int    `form:"max_age"`
-	UILocales           string `form:"ui_locales" validate:"omitempty,max=128,printascii"`
-	IDTokenHint         string `form:"id_token_hint" validate:"omitempty,max=128,printascii"`
-	LoginHint           string `form:"login_hint" validate:"omitempty,max=128,printascii"`
-	ACRValues           string `form:"acr_values" validate:"omitempty,max=128,printascii"`
+	UILocales           string `form:"ui_locales" validate:"omitempty,max=256,printascii"`
+	IDTokenHint         string `form:"id_token_hint" validate:"omitempty,max=8192,printascii"`
+	LoginHint           string `form:"login_hint" validate:"omitempty,max=256,printascii"`
+	ACRValues           string `form:"acr_values" validate:"omitempty,max=512,printascii"`
+}
+
+// WalletLink represents a clickable link to a known web wallet
+type WalletLink struct {
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	QRCodeImageURL string `json:"qr_code_image_url"` // QR code image URL for cross-device flow
 }
 
 // AuthorizeResponse represents the response to an authorization request
 type AuthorizeResponse struct {
-	SessionID        string   `json:"session_id"`
-	QRCodeData       string   `json:"qr_code_data"`
-	QRCodeImageURL   string   `json:"qr_code_image_url"`
-	DeepLinkURL      string   `json:"deep_link_url"`
-	PollURL          string   `json:"poll_url"`
-	PreferredFormats []string `json:"preferred_formats"`
-	UseJAR           bool     `json:"use_jar"`
-	ResponseMode     string   `json:"response_mode"`
-	Title            string   `json:"title"`
-	Subtitle         string   `json:"subtitle"`
-	PrimaryColor     string   `json:"primary_color"`
-	SecondaryColor   string   `json:"secondary_color"`
-	Theme            string   `json:"theme"`
-	CustomCSS        string   `json:"custom_css"`
-	CSSFile          string   `json:"css_file"`
-	LogoURL          string   `json:"logo_url"`
+	SessionID        string       `json:"session_id"`
+	QRCodeData       string       `json:"qr_code_data"`
+	QRCodeImageURL   string       `json:"qr_code_image_url"`
+	DeepLinkURL      string       `json:"deep_link_url"`
+	PollURL          string       `json:"poll_url"`
+	WalletLinks      []WalletLink `json:"wallet_links,omitempty"`
+	PreferredFormats []string     `json:"preferred_formats"`
+	UseJAR           bool         `json:"use_jar"`
+	ResponseMode     string       `json:"response_mode"`
+	Title            string       `json:"title"`
+	Subtitle         string       `json:"subtitle"`
+	PrimaryColor     string       `json:"primary_color"`
+	SecondaryColor   string       `json:"secondary_color"`
+	Theme            string       `json:"theme"`
+	CustomCSS        string       `json:"custom_css"`
+	CSSFile          string       `json:"css_file"`
+	LogoURL          string       `json:"logo_url"`
 }
 
 // Authorize handles the OIDC authorization request
@@ -81,14 +90,14 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate redirect URI
-	if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
-		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI)
+	if !c.matchRedirectURI(client.RedirectURIs, req.RedirectURI) {
+		c.log.Info("Invalid redirect URI", "redirect_uri", req.RedirectURI, "allowed_redirect_uris", client.RedirectURIs, "client_id", req.ClientID)
 		return nil, ErrInvalidRequest
 	}
 
 	// Validate response type
 	if !c.containsOIDC(client.ResponseTypes, req.ResponseType) {
-		c.log.Info("Unsupported response type", "response_type", req.ResponseType)
+		c.log.Info("Unsupported response type", "response_type", req.ResponseType, "allowed_response_types", client.ResponseTypes, "client_id", req.ClientID)
 		return nil, ErrInvalidRequest
 	}
 
@@ -124,7 +133,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second).Unix(),
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -152,10 +161,17 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Construct OpenID4VP authorization request URL with query parameters
+	// Use x509_san_dns: prefix so wallets know how to verify the client identity
+	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	if err != nil {
+		c.log.Error(err, "Failed to extract host from PublicURL")
+		return nil, ErrServerError
+	}
+	oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", host)
 	q := url.Values{}
-	q.Set("client_id", c.cfg.Verifier.PublicURL)
+	q.Set("client_id", oidc4vpClientID)
 	q.Set("request_uri", requestObjectPath)
-	authzReqURL := "openid4vp://?" + q.Encode()
+	authzReqURL := "openid4vp://cb?" + q.Encode()
 
 	qrCodeImageURL, err := url.JoinPath("/qr", sessionID)
 	if err != nil {
@@ -178,17 +194,30 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		PollURL:        pollURL,
 	}
 
-	// Add Digital Credentials API configuration
-	if c.cfg.Verifier.DigitalCredentials.Enable {
-		response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
-		response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
-		response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
-	} else {
-		// Defaults
-		response.PreferredFormats = []string{"vc+sd-jwt"}
-		response.UseJAR = false
-		response.ResponseMode = "direct_post"
+	// Build wallet links from supported_wallets config
+	// Each wallet URL gets the same client_id + request_uri params appended
+	for name, walletBaseURL := range c.cfg.Verifier.SupportedWallets {
+		walletLink := walletBaseURL + "?" + q.Encode()
+
+		// Build QR code image URL for cross-device flow
+		walletQRURL, err := url.JoinPath("/qr", sessionID)
+		if err != nil {
+			c.log.Error(err, "Failed to construct wallet QR code URL")
+			return nil, ErrServerError
+		}
+		walletQRURL += "?wallet=" + url.QueryEscape(name)
+
+		response.WalletLinks = append(response.WalletLinks, WalletLink{
+			Name:           name,
+			URL:            walletLink,
+			QRCodeImageURL: walletQRURL,
+		})
 	}
+
+	// Add Digital Credentials API configuration
+	response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
+	response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
+	response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 
 	// Add CSS customization configuration
 	cssConfig := c.cfg.Verifier.AuthorizationPageCSS
@@ -222,12 +251,12 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 // TokenRequest represents an OIDC token request
 type TokenRequest struct {
 	GrantType    string `form:"grant_type" binding:"required" validate:"required,max=128,printascii"`
-	Code         string `form:"code" validate:"omitempty,max=128,printascii"`
-	RedirectURI  string `form:"redirect_uri" validate:"omitempty,max=128,printascii"`
+	Code         string `form:"code" validate:"omitempty,max=256,printascii"`
+	RedirectURI  string `form:"redirect_uri" validate:"omitempty,max=2048,printascii"`
 	ClientID     string `form:"client_id" validate:"omitempty,max=128,printascii"`
-	ClientSecret string `form:"client_secret" validate:"omitempty,max=128,printascii"`
+	ClientSecret string `form:"client_secret" validate:"omitempty,max=256,printascii"`
 	CodeVerifier string `form:"code_verifier" validate:"omitempty,max=128,printascii"`
-	RefreshToken string `form:"refresh_token" validate:"omitempty,max=128,printascii"`
+	RefreshToken string `form:"refresh_token" validate:"omitempty,max=256,printascii"`
 }
 
 // TokenResponse represents an OIDC token response
@@ -297,7 +326,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 
 	// Verify redirect URI matches
-	if authCtx.RedirectURI != req.RedirectURI {
+	if normalizeRedirectURI(authCtx.RedirectURI) != normalizeRedirectURI(req.RedirectURI) {
 		c.log.Info("Redirect URI mismatch")
 		return nil, ErrInvalidGrant
 	}
@@ -338,10 +367,10 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Update session with tokens
 	authCtx.AccessToken = accessToken
-	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.AccessTokenDuration) * time.Second).Unix()
+	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.AccessTokenDuration) * time.Second).Unix()
 	authCtx.IDToken = idToken
 	authCtx.RefreshToken = refreshToken
-	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.RefreshTokenDuration) * time.Second).Unix()
+	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
@@ -352,7 +381,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.Verifier.OIDC.AccessTokenDuration,
+		ExpiresIn:    c.cfg.Verifier.OIDCOP.AccessTokenDuration,
 		RefreshToken: refreshToken,
 		IDToken:      idToken,
 		Scope:        strings.Join(authCtx.Scopes, " "),
@@ -373,10 +402,10 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
-	idTokenTTL := time.Duration(c.cfg.Verifier.OIDC.IDTokenDuration) * time.Second
+	idTokenTTL := time.Duration(c.cfg.Verifier.OIDCOP.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.Verifier.OIDC.Issuer,
+		"iss":   c.cfg.Verifier.OIDCOP.Issuer,
 		"sub":   sub,
 		"aud":   client.ClientID,
 		"exp":   now.Add(idTokenTTL).Unix(),
@@ -432,29 +461,38 @@ type DiscoveryMetadata struct {
 
 // GetDiscoveryMetadata returns OpenID Provider configuration
 func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, error) {
-	authorizationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/authorize")
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct authorization endpoint URL: %w", err)
+	base := c.cfg.Verifier.PublicURL
+	join := func(path string) (string, error) {
+		u, err := url.JoinPath(base, path)
+		if err != nil {
+			return "", fmt.Errorf("failed to construct %s URL: %w", path, err)
+		}
+		return u, nil
 	}
-	tokenEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/token")
+
+	authorizationEndpoint, err := join("/authorize")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct token endpoint URL: %w", err)
+		return nil, err
 	}
-	userInfoEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/userinfo")
+	tokenEndpoint, err := join("/token")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct userinfo endpoint URL: %w", err)
+		return nil, err
 	}
-	jwksURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/jwks")
+	userInfoEndpoint, err := join("/userinfo")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct jwks URI: %w", err)
+		return nil, err
 	}
-	registrationEndpoint, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/register")
+	jwksURI, err := join("/jwks")
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct registration endpoint URL: %w", err)
+		return nil, err
+	}
+	registrationEndpoint, err := join("/register")
+	if err != nil {
+		return nil, err
 	}
 
 	metadata := &DiscoveryMetadata{
-		Issuer:                           c.cfg.Verifier.OIDC.Issuer,
+		Issuer:                           c.cfg.Verifier.OIDCOP.Issuer,
 		AuthorizationEndpoint:            authorizationEndpoint,
 		TokenEndpoint:                    tokenEndpoint,
 		UserInfoEndpoint:                 userInfoEndpoint,
@@ -546,10 +584,10 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 
 // DirectPostRequest represents a direct_post callback from a wallet
 type DirectPostRequest struct {
-	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=128,printascii"`
-	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty,max=128,printascii"`                               // For standard direct_post
-	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty,max=128,printascii"` // For standard direct_post
-	Response               string `json:"response" form:"response" validate:"omitempty,max=128,printascii"`                               // For DC API encrypted JWT response
+	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=256,printascii"`
+	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty"`                               // For standard direct_post (JWT, can be very large)
+	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty"` // For standard direct_post (JSON, can be large)
+	Response               string `json:"response" form:"response" validate:"omitempty"`                               // For DC API encrypted JWT response (can be very large)
 }
 
 // DirectPostResponse contains the response to a direct_post request
@@ -649,7 +687,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Error(err, "Failed to generate authorization code")
 		return nil, ErrServerError
 	}
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDC.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second)
 
 	session.Code = code
 	session.CodeExpiresAt = codeExpiry.Unix()
@@ -748,7 +786,8 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 
 // GetQRCodeRequest represents a request for a QR code image
 type GetQRCodeRequest struct {
-	SessionID string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+	SessionID  string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
+	WalletName string `json:"-" form:"wallet" validate:"omitempty,max=128,printascii"` // Optional: generate QR for a specific web wallet
 }
 
 // GetQRCodeResponse contains the QR code image data
@@ -767,17 +806,48 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 		return nil, ErrSessionNotFound
 	}
 
-	// Generate authorization request URI
-	requestObject := &openid4vp.RequestObject{
-		ClientID: c.cfg.Verifier.OIDC.Issuer,
-	}
-	authReqURI, err := requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+	var qrData string
+
+	if req.WalletName != "" {
+		// Cross-device web wallet flow: generate QR for a specific web wallet URL
+		walletBaseURL, ok := c.cfg.Verifier.SupportedWallets[req.WalletName]
+		if !ok {
+			return nil, ErrInvalidRequest
+		}
+
+		// Build the web wallet URL with the same authorization params
+		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", req.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to construct request object path: %w", err)
+		}
+
+		host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		}
+
+		q := url.Values{}
+		q.Set("client_id", fmt.Sprintf("x509_san_dns:%s", host))
+		q.Set("request_uri", requestObjectPath)
+		qrData = walletBaseURL + "?" + q.Encode()
+	} else {
+		// Standard flow: generate QR for openid4vp:// URI (native wallet)
+		host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		}
+
+		requestObject := &openid4vp.RequestObject{
+			ClientID: fmt.Sprintf("x509_san_dns:%s", host),
+		}
+		qrData, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+		}
 	}
 
 	// Generate QR code
-	qr, err := qrcode.New(authReqURI, qrcode.Medium)
+	qr, err := qrcode.New(qrData, qrcode.Medium)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate QR code: %w", err)
 	}
@@ -801,8 +871,8 @@ type PollSessionRequest struct {
 
 // PollSessionResponse contains the session status
 type PollSessionResponse struct {
-	Status      string
-	RedirectURI string
+	Status      string `json:"status"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 // PollSession returns the current status of a session
@@ -881,4 +951,28 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 	maps.Copy(response, session.VerifiedClaims)
 
 	return response, nil
+}
+
+// normalizeRedirectURI normalizes a redirect URI for comparison.
+// Decodes percent-encoding so that e.g. "Test%20Realm" and "Test Realm"
+// compare as equal. Uses PathUnescape (not QueryUnescape) so that "+" is
+// left intact — it is a valid path character.
+func normalizeRedirectURI(uri string) string {
+	decoded, err := url.PathUnescape(uri)
+	if err != nil {
+		return uri
+	}
+	return decoded
+}
+
+// matchRedirectURI checks whether reqURI matches any of the registered URIs
+// using normalized comparison per RFC 3986 Section 6.
+func (c *Client) matchRedirectURI(registered []string, reqURI string) bool {
+	normReq := normalizeRedirectURI(reqURI)
+	for _, r := range registered {
+		if normalizeRedirectURI(r) == normReq {
+			return true
+		}
+	}
+	return false
 }

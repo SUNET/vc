@@ -14,4 +14,7 @@ type Session struct {
 	IssuerURL      string    `json:"issuer_url" bson:"issuer_url"`           // OIDC Provider issuer URL
 	CreatedAt      time.Time `json:"created_at" bson:"created_at"`
 	ExpiresAt      time.Time `json:"expires_at" bson:"expires_at"`
+
+	// VCI flow integration fields (set when initiated from OpenID4VCI consent)
+	VCISessionID string `json:"vci_session_id" bson:"vci_session_id"` // Links back to the VCI AuthorizationContext session
 }

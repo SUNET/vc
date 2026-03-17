@@ -1,6 +1,8 @@
 package model
 
 const (
-	AuthMethodPID   = "pid_auth"
-	AuthMethodBasic = "basic"
+	AuthMethodBasic     = "basic"
+	AuthMethodSAML      = "saml"
+	AuthMethodOIDC      = "oidc"
+	AuthMethodOpenID4VP = "openid4vp"
 )

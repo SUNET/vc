@@ -1,5 +1,3 @@
-//go:build didcomm_interop
-
 // Package vectors provides test vector loading and validation for DIDComm interoperability tests.
 package vectors
 

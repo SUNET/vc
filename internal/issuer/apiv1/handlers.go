@@ -17,6 +17,8 @@ type CreateCredentialRequest struct {
 	DocumentData []byte            `json:"document_data" validate:"required"`
 	Scope        string            `json:"scope" validate:"required"`
 	JWK          *apiv1_issuer.Jwk `json:"jwk" validate:"required"`
+	Integrity    string            `json:"integrity" validate:"required"`
+	VCTM         []byte            `json:"vctm" validate:"required"`
 }
 
 // CreateCredentialReply is the reply for Credential
@@ -39,26 +41,14 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, err
 	}
 
-	// Get credential constructor from config based on credential type
-	credentialConstructor := c.cfg.GetCredentialConstructor(req.Scope)
-	if credentialConstructor == nil {
-		return nil, fmt.Errorf("unsupported scope: %s", req.Scope)
+	// Build credential options. The VCTM bytes and integrity hash come from
+	// the caller (APIGW) which already loaded and verified them from config.
+	// By accepting the VCTM inline the issuer never fetches arbitrary URLs,
+	// eliminating SSRF risk while staying decoupled from credential-constructor
+	// configuration.
+	opts := &sdjwtvc.CredentialOptions{
+		Integrity: req.Integrity,
 	}
-
-	// VCTM is already in sdjwtvc format
-	vctm := credentialConstructor.VCTM
-	if vctm == nil {
-		return nil, fmt.Errorf("VCTM not configured for scope: %s", req.Scope)
-	}
-
-	// Validate document data against VCTM schema
-	if err := sdjwtvc.ValidateDocument(req.DocumentData, vctm); err != nil {
-		c.log.Error(err, "document validation failed", "scope", req.Scope)
-		return nil, fmt.Errorf("document validation failed: %w", err)
-	}
-
-	// Build credential options
-	opts := &sdjwtvc.CredentialOptions{}
 
 	// Call registry to allocate a status list entry for revocation support
 	if c.registryClient == nil {
@@ -73,24 +63,23 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
-	// Construct status URI based on registry endpoint and section
-	statusURI := fmt.Sprintf("%s/statuslists/%d", c.cfg.Registry.PublicURL, grpcReply.GetSection())
 	opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
 		Index: grpcReply.GetIndex(),
-		URI:   statusURI,
+		URI:   grpcReply.GetStatusListUri(),
 	}
-	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", statusURI)
+	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", grpcReply.GetStatusListUri())
 
-	// Build SD-JWT using sdjwtvc package with the signer interface
+	// Build SD-JWT using sdjwtvc package with the signer interface.
+	// The VCTM bytes come from the caller (APIGW); BuildCredentialWithSigner
+	// derives the vct claim from the VCTM's VCT field.
 	sdClient := sdjwtvc.New()
 	token, err := sdClient.BuildCredentialWithSigner(
 		ctx,
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
-		credentialConstructor.VCTM.VCT,
+		req.VCTM,
 		req.DocumentData,
 		req.JWK,
-		vctm,
 		opts,
 	)
 	if err != nil {
@@ -143,11 +132,11 @@ type CreateMDocRequest struct {
 
 // CreateMDocReply is the reply for mDL credential creation
 type CreateMDocReply struct {
-	MDoc               []byte `json:"mdoc"`
-	StatusListSection  int64  `json:"status_list_section"`
-	StatusListIndex    int64  `json:"status_list_index"`
-	ValidFrom          string `json:"valid_from"`
-	ValidUntil         string `json:"valid_until"`
+	MDoc              []byte `json:"mdoc"`
+	StatusListSection int64  `json:"status_list_section"`
+	StatusListIndex   int64  `json:"status_list_index"`
+	ValidFrom         string `json:"valid_from"`
+	ValidUntil        string `json:"valid_until"`
 }
 
 // MakeMDoc creates an mDL credential per ISO 18013-5
@@ -160,12 +149,6 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
 		return nil, err
-	}
-
-	// Get credential constructor from config based on scope
-	credentialConstructor := c.cfg.GetCredentialConstructor(req.Scope)
-	if credentialConstructor == nil {
-		return nil, fmt.Errorf("unsupported scope: %s", req.Scope)
 	}
 
 	// Check if mdoc issuer is initialized

@@ -1,5 +1,4 @@
 {
-  "vct": "urn:eudi:ehic:1",
   "name": "DC4EU EHIC SD-JWT VCTM",
   "extends#integrity": "sha256-h0D1xX0uZ5r3O8b8h3T6lKXJ7Q1Q6f1Y5jv3F4y7gXU=",
   "description": "DC4EU European Health Insurance Card (EHIC) SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 09), using a single language tag (en-US).",

@@ -2,101 +2,214 @@
 
 ## Overview
 
-This project uses **semantic versioning** (`MAJOR.MINOR.PATCH`) with **release candidate (RC) builds on every PR**. The current target version is tracked in the `VERSION` file at the repository root.
+Releases are managed entirely through **git tags** and **Make targets**. The version is always derived from the latest `vX.Y.Z` git tag using [semantic versioning](https://semver.org/).
 
 ## Release Cycle
 
+```text
+feature branch ──▶ make release (v0.4.1) ──▶ :v0.4.1 + :dev
+                                                   │
+                                          test in staging...
+                                                   │
+                                    ┌──────────────┼──────────────┐
+                                    │              │              │
+                           make release-demo       │     make release-prod
+                                    │              │              │
+                                    ▼              │              ▼
+                                 :demo             │          :latest
+                                                   │
+                                          next make release...
 ```
-feature branch ──PR──▶ RC build (0.4.0-rc.42.a1b2c3d4) ──merge──▶ Release (v0.4.0)
-                                                                         │
-                                                          version-bump workflow
-                                                                         │
-                                                                         ▼
-                                                               VERSION = 0.5.0
-                                                                         │
-next feature branch ──PR──▶ RC build (0.5.0-rc.55.e5f6g7h8) ──merge──▶ Release (v0.5.0)
+
+## Commands
+
+| Command                | What it does                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `make release`         | Bump version, create git tag, build & push Docker images as `:vX.Y.Z` and `:dev` |
+| `make release-demo`    | Promote a release to demo by re-tagging as `:demo`                                |
+| `make release-prod`    | Promote a release to production by re-tagging as `:latest`                        |
+| `make get_release-tag` | Show the current latest version tag                                               |
+
+## Docker Tag Lifecycle
+
+```text
+make release        →  :vX.Y.Z  +  :dev
+make release-demo   →  :demo
+make release-prod   →  :latest
 ```
 
-### 1. Development (feature branches)
+- **`:vX.Y.Z`** — Immutable, versioned tag created on every release.
+- **`:dev`** — Mutable, always points to the most recent release. Intended for development/staging environments.
+- **`:demo`** — Mutable, only updated when explicitly promoted with `make release-demo`. Intended for demo environments.
+- **`:latest`** — Mutable, only updated when explicitly promoted with `make release-prod`. Intended for production/end-user environments.
 
-- Create a branch from `main` and open a PR.
-- Every push triggers **Jenkins** (`.jenkins.yaml`), which:
-  - Reads `VERSION` (e.g., `0.4.0`)
-  - Builds and pushes Docker images tagged `0.4.0-rc.{PR#}.{short-sha}` to `docker.sunet.se`
-- **GitHub Actions** (`pr-rc-build.yaml`) runs the Go build and posts a comment on the PR with the expected RC image tags.
-- These RC images can be deployed to staging/test environments for validation.
+## Creating a Release
 
-### 2. Release (merge to main)
-
-- When a PR is merged:
-  - **Jenkins** builds Docker images tagged with the version (e.g., `0.4.0`) **and** `latest`, and pushes them to `docker.sunet.se`.
-  - **GitHub Actions** (`build.yaml`) creates a GitHub Release with tag `v0.4.0` and auto-generated release notes.
-  - If the tag already exists (e.g., multiple merges at the same version), it skips release creation.
-
-### 3. Version Bump (prepare next cycle)
-
-After a release, bump the version for the next development cycle:
-
-- Go to **Actions → version-bump → Run workflow**
-- Select bump type: `patch`, `minor`, or `major`
-- This creates a PR that updates `VERSION` and `CHANGELOG.md`
-- Merge it to start the next RC cycle
-
-## Versioning Scheme
-
-| Context | Tag format | Example |
-|---------|-----------|---------|
-| PR / RC build | `{VERSION}-rc.{PR#}.{SHA}` | `0.4.0-rc.42.a1b2c3d4` |
-| Release | `v{VERSION}` | `v0.4.0` |
-| Docker latest | `latest` | always points to last release |
-
-## CI Systems
-
-| System | Responsibility |
-|--------|---------------|
-| **Jenkins** (`.jenkins.yaml`) | Docker build + push to `docker.sunet.se` (has registry credentials) |
-| **GitHub Actions** | Go build validation, tests, GitHub Release creation, PR comments |
-
-## Workflows
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `.jenkins.yaml` | Push (all branches) | Docker build + push (RC on branches, release on main) |
-| `test.yaml` | Push & PR | Run `make test` |
-| `pr-rc-build.yaml` | PR open/sync | Go build validation, comment RC image tags on PR |
-| `build.yaml` | PR merged to main | Go build validation, create GitHub Release |
-| `version-bump.yaml` | Manual dispatch | Bump VERSION, update CHANGELOG, open PR |
-
-## Docker Image Tags
-
-Every service (`apigw`, `verifier`, `registry`, `mockas`, `issuer`, `ui`) is tagged consistently:
+### Basic usage (patch bump)
 
 ```bash
-# RC (from PR #42, commit a1b2c3d4):
-docker.sunet.se/iam_vc/verifier:0.4.0-rc.42.a1b2c3d4
-
-# Release:
-docker.sunet.se/iam_vc/verifier:0.4.0
-docker.sunet.se/iam_vc/verifier:latest
-```
-
-## Makefile Targets
-
-```bash
-make get_release-tag    # Print current version from VERSION file
-make release            # Full release from main (tag + build + push + latest)
-make release-rc         # Build RC images (used by CI, needs PR_NUMBER env var)
-```
-
-## Quick Reference
-
-```bash
-# Check current target version
-cat VERSION
-
-# Build RC locally (simulating PR #99)
-PR_NUMBER=99 make release-rc
-
-# Manual release from main branch
 make release
 ```
+
+This will:
+
+1. Verify you are on the `main` branch
+2. Find the latest `vX.Y.Z` tag (e.g., `v0.4.0`)
+3. Bump the patch version (e.g., `v0.4.0` → `v0.4.1`)
+4. Create and push an annotated git tag
+5. Build all Docker images tagged as `:v0.4.1`
+6. Tag and push images as `:dev`
+
+### Minor or major bump
+
+```bash
+make release BUMP=minor    # v0.4.0 → v0.5.0
+make release BUMP=major    # v0.4.0 → v1.0.0
+```
+
+### Releasing from a non-main branch
+
+By default, `make release` requires you to be on the `main` branch. If you need to release from another branch (e.g., during active development), use `FORCE=true`:
+
+```bash
+make release FORCE=true
+make release BUMP=minor FORCE=true
+```
+
+`FORCE=true` also skips the dirty working tree check.
+
+## Promoting to Demo
+
+Promote a release to the demo environment by re-tagging as `:demo`:
+
+### Promote the most recent release to demo
+
+```bash
+make release-demo
+```
+
+This will:
+
+1. Find the latest `vX.Y.Z` tag
+2. Pull the Docker images for that version
+3. Re-tag them as `:demo`
+4. Push `:demo`
+
+### Promote a specific version to demo
+
+```bash
+make release-demo TAG=v0.4.0
+```
+
+This lets you point the demo environment at any previous release.
+
+## Promoting to Production
+
+Once a release has been tested and is ready for production, promote it to `:latest`:
+
+### Promote the most recent release
+
+```bash
+make release-prod
+```
+
+This will:
+
+1. Find the latest `vX.Y.Z` tag
+2. Pull the Docker images for that version
+3. Re-tag them as `:latest`
+4. Push `:latest`
+
+### Promote a specific version
+
+```bash
+make release-prod TAG=v0.4.0
+```
+
+This is useful for rolling back — you can promote any previous version to `:latest`.
+
+## Checking the Current Version
+
+```bash
+make get_release-tag
+```
+
+Prints the latest `vX.Y.Z` git tag (e.g., `v0.4.1`).
+
+## Examples
+
+### Full release workflow
+
+```bash
+# Create a patch release
+make release
+
+# Test the :dev images in staging...
+
+# Promote to demo
+make release-demo
+
+# Promote to production
+make release-prod
+```
+
+### Hotfix from a feature branch
+
+```bash
+# Force release from current branch
+make release FORCE=true
+
+# Promote immediately
+make release-prod
+```
+
+### Rollback production
+
+```bash
+# Promote an older version to :latest
+make release-prod TAG=v0.3.0
+```
+
+## Safety Checks
+
+| Check                      | Behaviour                                    | Override     |
+| -------------------------- | -------------------------------------------- | ------------ |
+| Must be on `main` branch   | Errors if not on `main`                      | `FORCE=true` |
+| Working tree must be clean | Errors if uncommitted changes                | `FORCE=true` |
+| `BUMP` must be valid       | Errors if not `major`, `minor`, or `patch`   | —            |
+| `TAG` must match `vX.Y.Z`  | Errors on invalid format                     | —            |
+| Reserved tag guard         | Blocks reserved tags on direct docker targets | —            |
+
+### Reserved Tag Guard
+
+The Docker tags `vX.Y.Z`, `latest`, `testing`, `demo`, and `dev` are **reserved** and cannot be used as `VERSION` or `NEWTAG` when running docker targets directly (e.g., `make docker-build`, `make docker-push`, `make docker-tag`).
+
+Only `make release`, `make release-prod`, and `make release-demo` are allowed to produce these tags.
+
+```bash
+# These are BLOCKED:
+make VERSION=dev docker-build           # ✗ 'dev' is reserved
+make VERSION=v1.2.3 docker-build        # ✗ semver is reserved
+make VERSION=latest docker-push         # ✗ 'latest' is reserved
+make VERSION=foo NEWTAG=demo docker-tag # ✗ 'demo' is reserved
+
+# These are ALLOWED:
+make docker-build                       # ✓ uses default VERSION=local
+make docker-build VERSION=myfeature     # ✓ non-reserved tag
+make release                            # ✓ creates vX.Y.Z and :dev
+make release-prod                       # ✓ creates :latest
+make release-demo                       # ✓ creates :demo
+```
+
+## Docker Registry
+
+All images are pushed to `docker.sunet.se/iam_vc/`. Services:
+
+| Service  | Image                              |
+| -------- | ---------------------------------- |
+| apigw    | `docker.sunet.se/iam_vc/apigw`    |
+| verifier | `docker.sunet.se/iam_vc/verifier` |
+| registry | `docker.sunet.se/iam_vc/registry` |
+| mockas   | `docker.sunet.se/iam_vc/mockas`   |
+| issuer   | `docker.sunet.se/iam_vc/issuer`   |
+| ui       | `docker.sunet.se/iam_vc/ui`       |

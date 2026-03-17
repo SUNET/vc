@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"vc/internal/apigw/apiv1"
 	"vc/pkg/model"
@@ -65,6 +66,7 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 	session.Set("request_uri", request.RequestURI)
 	session.Set("session_id", reply.SessionID)
 	session.Set("client_id", reply.ClientID)
+	session.Set("wallet_client_id", reply.WalletClientID)
 	if err := session.Save(); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "session save error")
@@ -125,6 +127,34 @@ func (s *Service) endpointOAuthMetadata(ctx context.Context, c *gin.Context) (an
 	return reply, nil
 }
 
+func (s *Service) endpointJWKS(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointJWKS")
+	defer span.End()
+
+	reply, err := s.apiv1.JWKS(ctx)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	c.SetAccepted("application/json")
+	return reply, nil
+}
+
+func (s *Service) endpointSDJWTVCIssuerMetadata(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSDJWTVCIssuerMetadata")
+	defer span.End()
+
+	reply, err := s.apiv1.SDJWTVCIssuerMetadata(ctx)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	c.SetAccepted("application/json")
+	return reply, nil
+}
+
 func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointOAuthAuthorizationConsent", "c.Request.URL", c.Request.URL.String(), "headers", c.Request.Header)
 	_, span := s.tracer.Start(ctx, "httpserver:endpointAuthorizationConsent")
@@ -141,7 +171,10 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	c.SetCookie("auth_method", authMethod, 900, "/authorization/consent", "", false, false)
+	// Collect template data for the consent page instead of setting cookies.
+	// This avoids non-HttpOnly cookies (S3330) since JavaScript reads auth state
+	// from data attributes embedded in the rendered HTML.
+	var redirectURL string
 
 	sessionID, ok := session.Get("session_id").(string)
 	if !ok {
@@ -152,7 +185,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	if authMethod == model.AuthMethodPID {
+	if authMethod == model.AuthMethodOpenID4VP {
 		request := &apiv1.OauthAuthorizationConsentRequest{
 			SessionID: sessionID,
 		}
@@ -161,17 +194,79 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
-		c.SetCookie("pid_auth_redirect_url", reply.RedirectURL, 900, "/authorization/consent", "", false, false)
 		session.Set("verifier_context_id", reply.VerifierContextID)
 		if err := session.Save(); err != nil {
 			return nil, err
 		}
 
-		// in order to avoid the verifier context ID being sent to the client
-		reply.VerifierContextID = ""
+		// Pass the wallet redirect URL via the template data attribute
+		// (cookies are no longer used for this purpose).
+		redirectURL = reply.RedirectURL
 	}
 
-	c.HTML(http.StatusOK, "consent.html", nil)
+	if authMethod == model.AuthMethodSAML {
+		if s.samlSPService == nil {
+			err := errors.New("SAML auth method requested but SAML is not enabled")
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+
+		// Skip re-initiating auth if the callback already stored documents.
+		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
+			scope, _ := session.Get("scope").(string)
+			if s.cfg.GetCredentialConstructor(scope) == nil {
+				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			// Determine the IdP entity ID: use static IdP or default from config
+			idpEntityID := s.samlSPService.GetStaticIDPEntityID()
+
+			authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID)
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			redirectURL = authReq.RedirectURL
+		} else {
+			s.log.Debug("SAML auth already completed, documents cached", "session_id", sessionID)
+		}
+	}
+
+	if authMethod == model.AuthMethodOIDC {
+		if s.oidcrpService == nil {
+			err := errors.New("OIDC auth method requested but OIDC RP is not enabled")
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+
+		// Skip re-initiating auth if the callback already stored documents.
+		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
+			scope, _ := session.Get("scope").(string)
+			if s.cfg.GetCredentialConstructor(scope) == nil {
+				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID)
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			redirectURL = authReq.AuthorizationURL
+		} else {
+			s.log.Debug("OIDC auth already completed, documents cached", "session_id", sessionID)
+		}
+	}
+
+	c.HTML(http.StatusOK, "consent.html", gin.H{
+		"AuthMethod":  authMethod,
+		"RedirectURL": redirectURL,
+	})
 	return nil, nil
 }
 func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context, c *gin.Context) (any, error) {

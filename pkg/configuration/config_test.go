@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"vc/pkg/model"
 
+	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +24,7 @@ apigw:
       basic_auth:
         users:
           admin: "secret-admin-pass"
-  oidcrp:
+  oidc_rp:
     registration:
       preconfigured:
         client_secret: "secret-client-secret"
@@ -32,7 +34,7 @@ registry:
   admin_gui:
     password: "secret-registry-pass"
 verifier:
-  oidc:
+  oidc_op:
     subject_salt: "secret-salt-value"
 ui:
   password: "secret-ui-pass"
@@ -62,7 +64,7 @@ ui:
 
 	// Verify Verifier secrets
 	require.NotNil(t, secrets.Verifier)
-	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDC.SubjectSalt)
+	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDCOP.SubjectSalt)
 
 	// Verify UI secrets
 	require.NotNil(t, secrets.UI)
@@ -116,4 +118,22 @@ ui:
 	require.NotNil(t, secrets.UI)
 	assert.Equal(t, "only-ui-password", secrets.UI.Password)
 	assert.Nil(t, secrets.Common)
+}
+
+func TestDigitalCredentialsDefaults(t *testing.T) {
+	cfg := &model.Cfg{
+		Verifier: &model.Verifier{},
+	}
+	require.NoError(t, defaults.Set(cfg))
+
+	dc := cfg.Verifier.DigitalCredentials
+
+	assert.Equal(t, []string{"vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"}, dc.PreferredFormats,
+		"PreferredFormats should have default values from struct tag")
+	assert.Equal(t, "dc_api.jwt", dc.ResponseMode,
+		"ResponseMode should default to dc_api.jwt")
+	assert.False(t, dc.Enable,
+		"Enable should default to false")
+	assert.False(t, dc.UseJAR,
+		"UseJAR should default to false")
 }

@@ -1,5 +1,3 @@
-//go:build didcomm && vc20
-
 // Package crypto provides cryptographic operations for DIDComm v2.1.
 //
 // This package implements:

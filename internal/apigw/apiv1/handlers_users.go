@@ -151,7 +151,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			},
 		}
 
-	case model.AuthMethodPID:
+	case model.AuthMethodOpenID4VP:
 		authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
 		if err != nil {
 			c.log.Error(err, "failed to get authorization context")
@@ -166,27 +166,12 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		c.log.Debug("userLookup - retrieved docs from cache", "session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		// TODO(masv): fix this monstrosity
-		authenticSource := ""
-		for key, doc := range docs {
-			c.log.Debug("userLookup - examining doc", "key", key, "authentic_source", doc.Meta.AuthenticSource, "doc_nil", doc == nil)
-			authenticSource = doc.Meta.AuthenticSource
-			break
+		doc, err := firstDocument(docs)
+		if err != nil {
+			c.log.Error(err, "no usable document in cache")
+			return nil, err
 		}
-		c.log.Debug("userLookup", "authenticSource", authenticSource, "docs", docs)
-
-		doc, ok := docs[authenticSource]
-		if !ok {
-			c.log.Error(nil, "no document found for authentic source", "authenticSource", authenticSource, "available_keys", func() []string {
-				keys := make([]string, 0, len(docs))
-				for k := range docs {
-					keys = append(keys, k)
-				}
-				return keys
-			}())
-			return nil, fmt.Errorf("no document found for authentic source %s", authenticSource)
-		}
-		c.log.Debug("userLookup", "doc", doc)
+		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource, "docs", docs)
 
 		jsonPaths, err := req.VCTM.ClaimJSONPath()
 		if err != nil {
@@ -205,15 +190,103 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		c.log.Debug("extracted claim values", "extracted_count", len(claimValues), "requested_count", len(jsonPaths.Displayable), "claims", claimValues)
 
 		for _, claim := range req.VCTM.Claims {
-			value, ok := claimValues[claim.SVGID].(string)
-			if !ok {
-				continue
-			}
-
 			if claim.SVGID != "" {
+				value, ok := claimValues[claim.SVGID].(string)
+				if !ok {
+					continue
+				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
 					Label: claim.Display[0].Label,
 					Value: value,
+				}
+			} else if len(claim.Display) > 0 {
+				// No svg_id — fall back to extracting claim value from document data by path
+				key := claim.JSONPath()
+				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+					svgTemplateClaims[key] = vcclient.SVGClaim{
+						Label: claim.Display[0].Label,
+						Value: value,
+					}
+				}
+			}
+		}
+
+	case model.AuthMethodSAML, model.AuthMethodOIDC:
+		// For SAML/OIDC, documents are stored in the VCI session cache by the
+		// ACS/callback handlers, keyed by the authorization context's session ID.
+		// No verifier response_code lookup is needed — we use the session ID directly.
+		docs, ok := c.cacheService.Document.Get(ctx, authorizationContext.SessionID)
+		if !ok || len(docs) == 0 {
+			c.log.Error(nil, "no documents found in cache for SAML/OIDC session",
+				"session_id", authorizationContext.SessionID)
+			return nil, fmt.Errorf("no documents found for session %s", authorizationContext.SessionID)
+		}
+
+		c.log.Debug("userLookup - retrieved SAML/OIDC docs from cache",
+			"session_id", authorizationContext.SessionID, "num_docs", len(docs))
+
+		doc, err := firstDocument(docs)
+		if err != nil {
+			c.log.Error(err, "no usable document in cache for SAML/OIDC session")
+			return nil, err
+		}
+
+		jsonPaths, err := req.VCTM.ClaimJSONPath()
+		if err != nil {
+			c.log.Error(err, "failed to get JSON paths from VCTM claims")
+			return nil, err
+		}
+
+		claimValues, err := sdjwtvc.ExtractClaimsByJSONPath(doc.DocumentData, jsonPaths.Displayable)
+		if err != nil {
+			c.log.Error(err, "failed to extract claim values from document data",
+				"json_paths", jsonPaths.Displayable, "document_data", doc.DocumentData)
+			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
+		}
+
+		if len(claimValues) == 0 && len(jsonPaths.Displayable) > 0 {
+			// Log diagnostic info when JSONPath extraction finds nothing.
+			// This typically means the credential_mappings don't produce the
+			// claim keys expected by the VCTM (check svg_id / path alignment).
+			docKeys := make([]string, 0, len(doc.DocumentData))
+			for k := range doc.DocumentData {
+				docKeys = append(docKeys, k)
+			}
+			c.log.Warn("no claims extracted: document data keys do not match VCTM JSONPaths",
+				"document_data_keys", docKeys,
+				"json_paths", jsonPaths.Displayable)
+		} else {
+			c.log.Debug("extracted claim values",
+				"extracted_count", len(claimValues),
+				"requested_count", len(jsonPaths.Displayable),
+				"claims", claimValues)
+		}
+
+		for _, claim := range req.VCTM.Claims {
+			if claim.SVGID != "" {
+				value, ok := claimValues[claim.SVGID].(string)
+				if !ok {
+					// JSONPath extraction missed this claim — try direct lookup as fallback
+					if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
+							Label: claim.Display[0].Label,
+							Value: value,
+						}
+					}
+					continue
+				}
+				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
+					Label: claim.Display[0].Label,
+					Value: value,
+				}
+			} else if len(claim.Display) > 0 {
+				// No svg_id — fall back to extracting claim value from document data by path
+				key := claim.JSONPath()
+				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+					svgTemplateClaims[key] = vcclient.SVGClaim{
+						Label: claim.Display[0].Label,
+						Value: value,
+					}
 				}
 			}
 		}
@@ -237,4 +310,66 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	c.log.Debug("userlookup", "reply", reply)
 
 	return reply, nil
+}
+
+// firstDocument returns the single document from the cache map.
+// Returns an error if the map is empty or any entry is nil/incomplete.
+func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocument, error) {
+	for key, doc := range docs {
+		if doc == nil || doc.Meta == nil || doc.DocumentData == nil {
+			return nil, fmt.Errorf("cached document for key %q is nil or has no data", key)
+		}
+		return doc, nil
+	}
+	return nil, fmt.Errorf("no documents in cache")
+}
+
+// findValueByName searches the document data for a claim value matching
+// the VCTM claim path. It first tries an exact JSONPath-style lookup,
+// then falls back to searching recursively by the leaf key name.
+func findValueByName(data map[string]any, path []*string) string {
+	if len(path) == 0 {
+		return ""
+	}
+
+	// Walk the path through nested maps
+	var current any = data
+	for _, p := range path {
+		if p == nil {
+			break
+		}
+		m, ok := current.(map[string]any)
+		if !ok {
+			break
+		}
+		current, ok = m[*p]
+		if !ok {
+			// Exact path failed — try recursive search by leaf key name
+			leafKey := *path[len(path)-1]
+			return findValueRecursive(data, leafKey)
+		}
+	}
+
+	if s, ok := current.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", current)
+}
+
+// findValueRecursive searches a nested map for the first string value matching key.
+func findValueRecursive(data map[string]any, key string) string {
+	if v, ok := data[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+		return fmt.Sprintf("%v", v)
+	}
+	for _, v := range data {
+		if nested, ok := v.(map[string]any); ok {
+			if result := findValueRecursive(nested, key); result != "" {
+				return result
+			}
+		}
+	}
+	return ""
 }

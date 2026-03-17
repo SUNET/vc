@@ -151,7 +151,7 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 		}
 
 		request.Username = username
-	case model.AuthMethodPID:
+	case model.AuthMethodOpenID4VP:
 		responseCode, ok := session.Get("response_code").(string)
 		if !ok {
 			err := errors.New("response_code not found in session")
@@ -160,6 +160,14 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 			return nil, err
 		}
 		request.ResponseCode = responseCode
+
+	case model.AuthMethodSAML, model.AuthMethodOIDC:
+		// For SAML/OIDC auth methods, documents are already stored in the VCI
+		// session cache by the ACS/callback handlers. No additional session data
+		// is needed — the apiv1 UserLookup will retrieve them using the session ID
+		// from the authorization context (same as pid_auth's default cache path).
+		s.log.Debug("endpointUserLookup: SAML/OIDC auth method, documents in VCI cache",
+			"auth_method", authMethod)
 
 	default:
 		err := errors.New("unsupported auth method for user lookup")
@@ -183,11 +191,11 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 
 	session := sessions.Default(c)
 
-	clientId, ok := session.Get("client_id").(string)
+	walletClientID, ok := session.Get("wallet_client_id").(string)
 	if !ok {
-		err := errors.New("client_id not found in session")
+		err := errors.New("wallet_client_id not found in session")
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "endpointUserCancel: client_id not found in session")
+		s.log.Error(err, "endpointUserCancel: wallet_client_id not found in session")
 		return nil, err
 	}
 
@@ -201,13 +209,13 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 
 	// Delete all cookies, not just session.
 	c.SetCookie("auth_method", "", -1, "/authorization/consent", "", false, false)
-	c.SetCookie("pid_auth_redirect_url", "", -1, "/authorization/consent", "", false, false)
+	c.SetCookie("openid4vp_redirect_url", "", -1, "/authorization/consent", "", false, false)
 
-	client, ok := s.cfg.APIGW.OauthServer.Clients[clientId]
+	client, ok := s.cfg.APIGW.OauthServer.Clients[walletClientID]
 	if !ok {
-		err := errors.New("invalid client_id")
+		err := errors.New("invalid wallet_client_id")
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "endpointUserCancel: invalid client_id")
+		s.log.Error(err, "endpointUserCancel: invalid wallet_client_id", "wallet_client_id", walletClientID)
 		return nil, err
 	}
 

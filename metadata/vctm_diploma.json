@@ -1,5 +1,4 @@
 {
-  "vct": "urn:eudi:diploma:1",
   "name": "Diploma Credential",
   "description": "European Learning Model Diploma Credential.",
   "extends#integrity": "sha256-h0D1xX0uZ5r3O8b8h3T6lKXJ7Q1Q6f1Y5jv3F4y7gXU=",

@@ -6,9 +6,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
+	"vc/pkg/jose"
 	"vc/pkg/sdjwtvc"
 )
 
@@ -336,6 +340,41 @@ func TestSDJWTHandler_WithKeyResolver(t *testing.T) {
 	}
 }
 
+// testSigner implements sdjwtvc.Signer for unit tests.
+type testSigner struct {
+	key    any
+	algo   string
+	kid    string
+	pubKey any
+	method jwt.SigningMethod
+}
+
+func newTestSigner(key *ecdsa.PrivateKey, kid string) *testSigner {
+	method, algo := jose.GetSigningMethodFromKey(key)
+	return &testSigner{key: key, algo: algo, kid: kid, pubKey: &key.PublicKey, method: method}
+}
+
+func (s *testSigner) Sign(_ context.Context, data []byte) ([]byte, error) {
+	return s.method.Sign(string(data), s.key)
+}
+func (s *testSigner) Algorithm() string { return s.algo }
+func (s *testSigner) KeyID() string     { return s.kid }
+func (s *testSigner) PublicKey() any    { return s.pubKey }
+
+// marshalVCTM marshals a VCTM to JSON bytes and computes the SRI integrity hash.
+func marshalVCTM(t *testing.T, vctm *sdjwtvc.VCTM) (raw []byte, integrity string) {
+	t.Helper()
+	raw, err := json.Marshal(vctm)
+	if err != nil {
+		t.Fatalf("Failed to marshal VCTM: %v", err)
+	}
+	integrity, err = vctm.SRIIntegrity(raw)
+	if err != nil {
+		t.Fatalf("Failed to compute integrity: %v", err)
+	}
+	return raw, integrity
+}
+
 // createTestSDJWT creates a minimal test SD-JWT for testing
 func createTestSDJWT(t *testing.T) string {
 	t.Helper()
@@ -357,15 +396,17 @@ func createTestSDJWT(t *testing.T) string {
 		Name: "Test Credential",
 	}
 
-	token, err := client.BuildCredential(
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "key-1")
+
+	token, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		privateKey,
-		"TestCredential",
+		signer,
+		vctmRaw,
 		documentData,
 		nil, // no holder binding
-		vctm,
-		nil,
+		&sdjwtvc.CredentialOptions{Integrity: integrity},
 	)
 	if err != nil {
 		t.Fatalf("Failed to build SD-JWT: %v", err)
@@ -402,15 +443,17 @@ func TestSDJWTHandler_VerifyAndExtract_Valid(t *testing.T) {
 		Name: "Test Credential",
 	}
 
-	token, err := client.BuildCredential(
+	vctmRaw, integrity := marshalVCTM(t, vctm)
+	signer := newTestSigner(privateKey, "key-1")
+
+	token, err := client.BuildCredentialWithSigner(
+		t.Context(),
 		"https://issuer.example.com",
-		"key-1",
-		privateKey,
-		"TestCredential",
+		signer,
+		vctmRaw,
 		documentData,
 		nil, // no holder binding
-		vctm,
-		nil,
+		&sdjwtvc.CredentialOptions{Integrity: integrity},
 	)
 	if err != nil {
 		t.Fatalf("Failed to build SD-JWT: %v", err)

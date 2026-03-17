@@ -120,57 +120,6 @@ func TestCreateRequestObject(t *testing.T) {
 	}
 }
 
-// TestBuildVPFormats tests the buildVPFormats helper
-func TestBuildVPFormats(t *testing.T) {
-	tests := []struct {
-		name             string
-		preferredFormats []string
-		expectedFormats  []string
-	}{
-		{
-			name:             "default formats (empty)",
-			preferredFormats: nil,
-			expectedFormats:  []string{"vc+sd-jwt"},
-		},
-		{
-			name:             "single SD-JWT format",
-			preferredFormats: []string{"vc+sd-jwt"},
-			expectedFormats:  []string{"vc+sd-jwt"},
-		},
-		{
-			name:             "multiple formats",
-			preferredFormats: []string{"vc+sd-jwt", "mso_mdoc"},
-			expectedFormats:  []string{"vc+sd-jwt", "mso_mdoc"},
-		},
-		{
-			name:             "DC SD-JWT format",
-			preferredFormats: []string{"dc+sd-jwt"},
-			expectedFormats:  []string{"dc+sd-jwt"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
-			client.cfg.Verifier.DigitalCredentials.PreferredFormats = tt.preferredFormats
-
-			vpFormats := client.buildVPFormats()
-
-			assert.NotNil(t, vpFormats)
-			for _, format := range tt.expectedFormats {
-				switch format {
-				case "dc+sd-jwt", "vc+sd-jwt":
-					assert.NotNil(t, vpFormats.SDJWT, "SDJWT format should be present")
-					assert.NotEmpty(t, vpFormats.SDJWT.SDJWTAlgValues, "SD-JWT alg values should not be empty")
-				case "mso_mdoc":
-					assert.NotNil(t, vpFormats.MsoMdoc, "MsoMdoc format should be present")
-					assert.NotEmpty(t, vpFormats.MsoMdoc.IssuerAuthAlgValues, "IssuerAuth alg values should not be empty")
-				}
-			}
-		})
-	}
-}
-
 // TestGetRequestObject tests the GetRequestObject handler
 func TestGetRequestObject(t *testing.T) {
 	ctx := t.Context()
@@ -387,8 +336,8 @@ func createTestDCQLForVP(t *testing.T) *openid4vp.DCQL {
 	}
 }
 
-// TestExtractClaimsFromVPToken tests the extractClaimsFromVPToken helper
-func TestExtractClaimsFromVPToken(t *testing.T) {
+// TestExtractAndMapClaimsEmpty tests the extractAndMapClaims helper with nil extractor
+func TestExtractAndMapClaimsEmpty(t *testing.T) {
 	ctx := t.Context()
 
 	tests := []struct {
@@ -422,7 +371,7 @@ func TestExtractClaimsFromVPToken(t *testing.T) {
 			client, _ := CreateTestClientWithMock(nil)
 
 			// Test with nil claims extractor (which is the default for test client)
-			claims, err := client.extractClaimsFromVPToken(ctx, tt.vpToken)
+			claims, err := client.extractAndMapClaims(ctx, tt.vpToken, "")
 
 			if tt.expectError {
 				assert.Error(t, err)

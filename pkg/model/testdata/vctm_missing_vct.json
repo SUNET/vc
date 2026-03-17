@@ -1,0 +1,5 @@
+{
+  "name": "VCTM without a vct field",
+  "description": "Used by TestLoadFile to verify LoadVCTMetadata rejects a VCTM missing the required 'vct' field.",
+  "claims": []
+}

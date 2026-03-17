@@ -1,5 +1,22 @@
 # SAML Configuration Example for VC Issuer
 # This file demonstrates how to configure SAML authentication for credential issuance
+#
+# To issue credentials via the OID4VCI pipeline using SAML authentication,
+# set auth_method: saml on the credential_constructor entry and ensure the
+# credential_mappings key matches the credential_constructor key.
+
+common:
+  credential_constructor:
+    # Example: issue PID credentials after SAML authentication
+    pid:
+      vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
+      auth_method: saml          # <-- triggers SAML IdP redirect during OID4VCI flow
+      format: "dc+sd-jwt"
+    # Example: issue diplomas after SAML authentication
+    diploma:
+      vctm_file_path: "/metadata/vctm_diploma.json"
+      auth_method: saml
+      format: "dc+sd-jwt"
 
 issuer:
   identifier: "SUNET_v1"

@@ -18,8 +18,9 @@ message TokenStatusListAddStatusRequest {
 }
 
 message TokenStatusListAddStatusReply {
-    int64 Section = 1; // Section where the status was added
-    int64 Index = 2;   // Index within the section
+    int64 Section = 1;          // Section where the status was added
+    int64 Index = 2;            // Index within the section
+    string StatusListUri = 3;   // Full URI to the status list (e.g. "https://registry.sunet.se/statuslists/0")
 }
 
 message TokenStatusListUpdateStatusRequest {

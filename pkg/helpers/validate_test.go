@@ -20,6 +20,14 @@ func TestValidationIdentity(t *testing.T) {
 				Title: "validation_error",
 				Err: []map[string]any{
 					{
+						"field":           "authentic_source_person_id",
+						"namespace":       "authentic_source_person_id",
+						"type":            "string",
+						"validation":      "required",
+						"validationParam": "",
+						"value":           "",
+					},
+					{
 						"field":           "schema",
 						"namespace":       "schema",
 						"type":            "ptr",
@@ -57,6 +65,7 @@ func TestValidationIdentity(t *testing.T) {
 		{
 			name: "ok",
 			have: &model.Identity{
+				AuthenticSourcePersonID: "person-123",
 				Schema: &model.IdentitySchema{
 					Name:    "SE",
 					Version: "1.0.0",
@@ -70,6 +79,7 @@ func TestValidationIdentity(t *testing.T) {
 		{
 			name: "wrong datetime format",
 			have: &model.Identity{
+				AuthenticSourcePersonID: "person-123",
 				Schema: &model.IdentitySchema{
 					Name: "SE",
 				},
@@ -161,6 +171,7 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 			Have: myStruct{
 				ID: []model.Identity{
 					{
+						AuthenticSourcePersonID: "person-123",
 						Schema: &model.IdentitySchema{
 							Name: "SE",
 						},
@@ -177,6 +188,7 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 			Have: myStruct{
 				ID: []model.Identity{
 					{
+						AuthenticSourcePersonID: "person-123",
 						Schema: &model.IdentitySchema{
 							Name: "SE",
 						},
@@ -282,6 +294,111 @@ func TestHTTPURLValidator(t *testing.T) {
 				assert.Error(t, err, "Expected validation error for URL: %s", tt.url)
 			} else {
 				assert.NoError(t, err, "Expected no validation error for URL: %s", tt.url)
+			}
+		})
+	}
+}
+
+func TestAuthScopesSelfReference(t *testing.T) {
+	validate, err := NewValidator()
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name          string
+		common        model.Common
+		shouldError   bool
+		errorContains string
+	}{
+		{
+			name: "self-reference in auth_scopes is rejected",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"eduid": {
+						AuthMethod: "openid4vp",
+						AuthScopes: []string{"pid", "eduid"},
+						AuthClaims: []string{"given_name"},
+					},
+				},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_self_reference",
+		},
+		{
+			name: "no self-reference passes",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"eduid": {
+						AuthMethod: "openid4vp",
+						AuthScopes: []string{"pid"},
+						AuthClaims: []string{"given_name"},
+					},
+				},
+			},
+			shouldError:   false,
+			errorContains: "",
+		},
+		{
+			name: "empty auth_scopes passes for basic auth",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"pid": {
+						AuthMethod: "basic",
+					},
+				},
+			},
+			shouldError:   false,
+			errorContains: "",
+		},
+		{
+			name: "openid4vp without auth_scopes is rejected",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma": {
+						AuthMethod: "openid4vp",
+						AuthClaims: []string{"given_name"},
+					},
+				},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_required_for_openid4vp",
+		},
+		{
+			name: "openid4vp without auth_claims is rejected",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma": {
+						AuthMethod: "openid4vp",
+						AuthScopes: []string{"pid"},
+					},
+				},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_required_for_openid4vp",
+		},
+		{
+			name: "openid4vp with both auth_scopes and auth_claims passes",
+			common: model.Common{
+				CredentialConstructor: map[string]*model.CredentialConstructor{
+					"diploma": {
+						AuthMethod: "openid4vp",
+						AuthScopes: []string{"pid"},
+						AuthClaims: []string{"given_name", "family_name"},
+					},
+				},
+			},
+			shouldError:   false,
+			errorContains: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validate.StructPartial(tt.common)
+			if tt.shouldError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorContains)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
