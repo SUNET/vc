@@ -39,7 +39,7 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.7.0
-	github.com/russellhaering/goxmldsig v1.5.0
+	github.com/russellhaering/goxmldsig v1.6.0
 	github.com/sirosfoundation/go-spocp v0.0.0-20251211124650-f50063144ac8
 	github.com/sirosfoundation/go-trust v0.0.0-20260110233605-ed2e7e9dd77c
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
