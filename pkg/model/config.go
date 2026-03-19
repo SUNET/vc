@@ -1203,13 +1203,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 						display.TextColor = simple.TextColor
 					}
 					if simple.Logo.URI != "" {
-						display.Logo = openid4vci.MetadataLogo{
+						display.Logo = &openid4vci.MetadataLogo{
 							URI:     simple.Logo.URI,
 							AltText: simple.Logo.AltText,
 						}
 					}
 					if simple.BackgroundImage != nil && simple.BackgroundImage.URI != "" {
-						display.BackgroundImage = openid4vci.MetadataBackgroundImage{
+						display.BackgroundImage = &openid4vci.MetadataBackgroundImage{
 							URI: simple.BackgroundImage.URI,
 						}
 					}

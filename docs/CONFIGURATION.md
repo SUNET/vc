@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-12
+**Generated:** 2026-03-19
 
 Complete reference for all configuration parameters in the VC system.
 

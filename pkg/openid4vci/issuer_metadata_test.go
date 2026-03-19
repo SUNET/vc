@@ -42,7 +42,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "Person Identification Data",
 						BackgroundColor: "#1b263b",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#FFFFFF",
@@ -68,7 +68,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "Person Identification Data",
 						BackgroundColor: "#4CC3DD",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#000000",
@@ -92,11 +92,11 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					{
 						Name:   "Bachelor Diploma - SD-JWT VC",
 						Locale: "en-US",
-						Logo: MetadataLogo{
+						Logo: &MetadataLogo{
 							URI: "http://vc_dev_apigw:8080/images/diploma-logo.png",
 						},
 						BackgroundColor: "#b1d3ff",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#ffffff",
@@ -122,7 +122,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "European Health Insurance Card",
 						BackgroundColor: "#1b263b",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#FFFFFF",
@@ -148,7 +148,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "Power of Representation",
 						BackgroundColor: "#c3b25d",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#363531",
@@ -273,12 +273,12 @@ func TestMarshal(t *testing.T) {
 			{
 				Name:   "European Health Insurance Card",
 				Locale: "en-US",
-				Logo:   MetadataLogo{},
+				Logo:   nil,
 			},
 			{
 				Name:   "Carte européenne d'assurance maladie",
 				Locale: "fr-FR",
-				Logo:   MetadataLogo{},
+				Logo:   nil,
 			},
 		},
 		CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
@@ -296,13 +296,13 @@ func TestMarshal(t *testing.T) {
 						{
 							Name:   "European Health Insurance Card Credential",
 							Locale: "en-US",
-							Logo: MetadataLogo{
+							Logo: &MetadataLogo{
 								URI:     "https://example.edu/public/logo.png",
 								AltText: "a square logo of a EHIC card",
 							},
 							Description:     "",
 							BackgroundColor: "#12107c",
-							BackgroundImage: MetadataBackgroundImage{
+							BackgroundImage: &MetadataBackgroundImage{
 								URI: "https://example.edu/public/background.png",
 							},
 							TextColor: "#FFFFFF",
