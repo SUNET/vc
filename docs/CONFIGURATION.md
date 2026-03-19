@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-12
+**Generated:** 2026-03-19
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -60,9 +60,13 @@ Shared configuration used across all services.
 
 > **Path:** `.common.mongo`
 
-| Field | Type     | Description            | Example                                    | Default | Required |
-| ----- | -------- | ---------------------- | ------------------------------------------ | ------- | -------- |
-| `uri` | `string` | MongoDB connection URI | `"mongodb://user:password@mongo:27017/vc"` | -       | Yes      |
+| Field            | Type     | Description                                                     | Example                                    | Default | Required |
+| ---------------- | -------- | --------------------------------------------------------------- | ------------------------------------------ | ------- | -------- |
+| `uri`            | `string` | MongoDB connection URI                                          | `"mongodb://user:password@mongo:27017/vc"` | -       | Yes      |
+| `tls`            | `bool`   | TLS for the MongoDB connection.                                 | -                                          | `false` | No       |
+| `ca_file_path`   | `string` | Path to a PEM-encoded CA certificate used to verify             | -                                          | -       | No       |
+| `cert_file_path` | `string` | Path to a PEM-encoded client certificate for mutual TLS (mTLS). | -                                          | -       | No       |
+| `key_file_path`  | `string` | Path to a PEM-encoded client private key for mutual TLS (mTLS). | -                                          | -       | No       |
 
 ### `tracing`
 

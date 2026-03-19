@@ -8,7 +8,6 @@ import (
 	"vc/pkg/trace"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var databaseName = "vc_registry"
@@ -66,7 +65,11 @@ func (s *Service) connectMongo(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	client, err := mongo.Connect(options.Client().ApplyURI(s.cfg.Common.Mongo.URI))
+	opts, err := s.cfg.Common.Mongo.MongoClientOptions()
+	if err != nil {
+		return err
+	}
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return err
 	}

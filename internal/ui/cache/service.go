@@ -10,7 +10,6 @@ import (
 	"vc/pkg/model"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Service holds session keys for the UI service.
@@ -39,9 +38,12 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 		connCtx, cancel := context.WithTimeout(ctx, connTimeout)
 		defer cancel()
 
+		opts, err := cfg.Common.Mongo.MongoClientOptions()
+		if err != nil {
+			return nil, fmt.Errorf("cache: mongo options: %w", err)
+		}
 		client, err := mongo.Connect(
-			options.Client().
-				ApplyURI(cfg.Common.Mongo.URI).
+			opts.
 				SetConnectTimeout(connTimeout).
 				SetTimeout(connTimeout),
 		)

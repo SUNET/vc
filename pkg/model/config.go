@@ -65,6 +65,18 @@ type Mongo struct {
 	// URI is the MongoDB connection URI
 	// Example: "mongodb://user:password@mongo:27017/vc"
 	URI string `yaml:"uri" validate:"required"`
+	// TLS enables TLS for the MongoDB connection.
+	// Can also be enabled via the connection URI parameter "tls=true".
+	TLS bool `yaml:"tls" default:"false"`
+	// CAFilePath is the path to a PEM-encoded CA certificate used to verify
+	// the MongoDB server's certificate. When empty, the system root CAs are used.
+	CAFilePath string `yaml:"ca_file_path" validate:"omitempty"`
+	// CertFilePath is the path to a PEM-encoded client certificate for mutual TLS (mTLS).
+	// Must be set together with KeyFilePath.
+	CertFilePath string `yaml:"cert_file_path" validate:"required_with=KeyFilePath"`
+	// KeyFilePath is the path to a PEM-encoded client private key for mutual TLS (mTLS).
+	// Must be set together with CertFilePath.
+	KeyFilePath string `yaml:"key_file_path" validate:"required_with=CertFilePath"`
 }
 
 // Kafka holds the Kafka message broker configuration
