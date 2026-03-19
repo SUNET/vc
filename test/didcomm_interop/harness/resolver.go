@@ -330,8 +330,8 @@ func (r *MockResolver) AddKey(keyID string, key jwk.Key) {
 // ExtractDIDFromKeyID extracts the DID from a key ID (DID URL).
 func ExtractDIDFromKeyID(keyID string) string {
 	// Key ID format: did:method:specific#fragment
-	if idx := strings.Index(keyID, "#"); idx != -1 {
-		return keyID[:idx]
+	if before, _, ok := strings.Cut(keyID, "#"); ok {
+		return before
 	}
 	return keyID
 }

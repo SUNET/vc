@@ -135,20 +135,20 @@ func (m *mockMediatorServer) handleMessage(w http.ResponseWriter, r *http.Reques
 }
 
 // DIDDocument returns a mock DID document for the mediator.
-func (m *mockMediatorServer) DIDDocument() map[string]interface{} {
+func (m *mockMediatorServer) DIDDocument() map[string]any {
 	pubKey, _ := m.routingKeyJWK.PublicKey()
 	pubKeyBytes, _ := json.Marshal(pubKey)
-	pubKeyMap := make(map[string]interface{})
+	pubKeyMap := make(map[string]any)
 	json.Unmarshal(pubKeyBytes, &pubKeyMap)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"@context": []string{
 			"https://www.w3.org/ns/did/v1",
 			"https://w3id.org/security/suites/jws-2020/v1",
 		},
 		"id":         m.did,
 		"controller": m.did,
-		"verificationMethod": []map[string]interface{}{
+		"verificationMethod": []map[string]any{
 			{
 				"id":           m.did + testRoutingKeySfx,
 				"type":         "JsonWebKey2020",
@@ -157,7 +157,7 @@ func (m *mockMediatorServer) DIDDocument() map[string]interface{} {
 			},
 		},
 		"keyAgreement": []string{m.did + testRoutingKeySfx},
-		"service": []map[string]interface{}{
+		"service": []map[string]any{
 			{
 				"id":              m.did + "#didcomm-1",
 				"type":            "DIDCommMessaging",

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -1068,9 +1069,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	// Construct Proof Config
 	// Copy from original proof but replace proofValue
 	newProofConfig := make(map[string]any)
-	for k, v := range proofMap {
-		newProofConfig[k] = v
-	}
+	maps.Copy(newProofConfig, proofMap)
 	newProofConfig["proofValue"] = proofValue
 
 	// Get context from original credential

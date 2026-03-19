@@ -160,7 +160,7 @@ func base64Encode(data []byte) string {
 func (s *testSuite) initializeConfiguration() {
 	s.cfg = &model.Cfg{
 		Common: &model.Common{
-			Production: model.BoolPtr(false),
+			Production: new(false),
 			Log: model.Log{
 				FolderPath: "",
 			},
@@ -673,7 +673,7 @@ func TestCreateNewSectionIfNeeded_CreatesNewSection(t *testing.T) {
 
 	// Add statuses to consume decoys (each AddStatus converts one decoy to a real status)
 	// We need to consume more than 500 decoys to get below 1000 threshold
-	for i := 0; i < 501; i++ {
+	for range 501 {
 		_, _, err := service.AddStatus(suite.ctx, tokenstatuslist.StatusValid)
 		require.NoError(t, err)
 	}
@@ -742,7 +742,7 @@ func TestCreateNewSectionIfNeeded_MultipleSections(t *testing.T) {
 	defer service.Close(suite.ctx)
 
 	// Consume 10 decoys to trigger first section change
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, _, err := service.AddStatus(suite.ctx, tokenstatuslist.StatusValid)
 		require.NoError(t, err)
 	}
@@ -753,7 +753,7 @@ func TestCreateNewSectionIfNeeded_MultipleSections(t *testing.T) {
 	assert.Equal(t, int64(1), section)
 
 	// Continue adding to consume decoys in section 1
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, _, err := service.AddStatus(suite.ctx, tokenstatuslist.StatusValid)
 		require.NoError(t, err)
 	}

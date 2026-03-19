@@ -33,7 +33,7 @@ type GrantAuthorizationCode struct {
 // GrantPreAuthorizedCode authorization code grant
 type GrantPreAuthorizedCode struct {
 	PreAuthorizedCode   string `json:"pre-authorized_code" bson:"pre-authorized_code" validate:"required"`
-	TXCode              TXCode `json:"tx_code,omitempty" bson:"tx_code,omitempty"`
+	TXCode              TXCode `json:"tx_code" bson:"tx_code,omitempty"`
 	AuthorizationServer string `json:"authorization_server,omitempty" bson:"authorization_server,omitempty"`
 }
 

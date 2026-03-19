@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/multiformats/go-multibase"
@@ -315,9 +316,7 @@ func TestW3CContextSupersetAllowed(t *testing.T) {
 
 	// Create a modified credential where document @context has extra entries
 	modifiedCredential := make(map[string]any)
-	for k, v := range w3cSignedCredential {
-		modifiedCredential[k] = v
-	}
+	maps.Copy(modifiedCredential, w3cSignedCredential)
 	// Add an extra context entry that wasn't there when signed
 	modifiedCredential[keyContext] = []any{
 		w3cCredentialsContextV2,
@@ -342,9 +341,7 @@ func TestW3CContextOrderMismatch(t *testing.T) {
 
 	// Create a modified credential with @context in wrong order
 	modifiedCredential := make(map[string]any)
-	for k, v := range w3cSignedCredential {
-		modifiedCredential[k] = v
-	}
+	maps.Copy(modifiedCredential, w3cSignedCredential)
 	// Reverse the context order
 	modifiedCredential[keyContext] = []any{
 		w3cCredentialsExamplesV2,

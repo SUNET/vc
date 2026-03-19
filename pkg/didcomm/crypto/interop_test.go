@@ -279,7 +279,7 @@ func TestInteropDecryptAnoncryptP256XC20P(t *testing.T) {
 	}
 
 	// Verify it's valid JSON
-	var jweMsg map[string]interface{}
+	var jweMsg map[string]any
 	if err := json.Unmarshal(encrypted, &jweMsg); err != nil {
 		t.Fatalf("Encrypted message is not valid JSON: %v", err)
 	}
@@ -293,13 +293,13 @@ func TestInteropDecryptAnoncryptP256XC20P(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to decode protected header: %v", err)
 	}
-	var header map[string]interface{}
+	var header map[string]any
 	if err := json.Unmarshal(protectedBytes, &header); err != nil {
 		t.Fatalf("Failed to parse protected header: %v", err)
 	}
 
 	// Check EPK curve
-	epk, ok := header["epk"].(map[string]interface{})
+	epk, ok := header["epk"].(map[string]any)
 	if !ok {
 		t.Fatal("Missing EPK in protected header")
 	}
@@ -348,7 +348,7 @@ func TestInteropEncryptDecryptRoundtripXC20P(t *testing.T) {
 	}
 
 	// Verify it's valid JSON
-	var jwe map[string]interface{}
+	var jwe map[string]any
 	if err := json.Unmarshal(encrypted, &jwe); err != nil {
 		t.Fatalf("Encrypted message is not valid JSON: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestInteropEncryptDecryptRoundtripXC20P(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to decode protected header: %v", err)
 	}
-	var header map[string]interface{}
+	var header map[string]any
 	if err := json.Unmarshal(protectedBytes, &header); err != nil {
 		t.Fatalf("Failed to parse protected header: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestInteropECDH1PURoundtrip(t *testing.T) {
 	}
 
 	// Verify it's valid JSON
-	var jwe map[string]interface{}
+	var jwe map[string]any
 	if err := json.Unmarshal(encrypted, &jwe); err != nil {
 		t.Fatalf("Encrypted message is not valid JSON: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestInteropECDH1PURoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to decode protected header: %v", err)
 	}
-	var header map[string]interface{}
+	var header map[string]any
 	if err := json.Unmarshal(protectedBytes, &header); err != nil {
 		t.Fatalf("Failed to parse protected header: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestInteropXC20PFormat(t *testing.T) {
 	}
 
 	// Parse and verify JWE structure
-	var jwe map[string]interface{}
+	var jwe map[string]any
 	if err := json.Unmarshal(encrypted, &jwe); err != nil {
 		t.Fatalf("Not valid JSON: %v", err)
 	}
@@ -801,18 +801,18 @@ func TestInteropForwardProtocolEncryption(t *testing.T) {
 	}
 
 	// Step 2: Create a forward message and encrypt for mediator
-	forwardMessage := map[string]interface{}{
+	forwardMessage := map[string]any{
 		"id":   "forward-1",
 		"type": "https://didcomm.org/routing/2.0/forward",
 		"to":   []string{"did:example:mediator"},
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"next": "did:example:bob",
 		},
-		"attachments": []map[string]interface{}{
+		"attachments": []map[string]any{
 			{
 				"id":         "inner-message",
 				"media_type": "application/didcomm-encrypted+json",
-				"data": map[string]interface{}{
+				"data": map[string]any{
 					"json": json.RawMessage(encryptedForBob),
 				},
 			},
@@ -837,7 +837,7 @@ func TestInteropForwardProtocolEncryption(t *testing.T) {
 	}
 
 	// Parse the forward message
-	var parsedForward map[string]interface{}
+	var parsedForward map[string]any
 	if err := json.Unmarshal(decryptedForward, &parsedForward); err != nil {
 		t.Fatalf("Failed to parse forward message: %v", err)
 	}
@@ -847,7 +847,7 @@ func TestInteropForwardProtocolEncryption(t *testing.T) {
 		t.Errorf("Unexpected forward type: %v", parsedForward["type"])
 	}
 
-	body, ok := parsedForward["body"].(map[string]interface{})
+	body, ok := parsedForward["body"].(map[string]any)
 	if !ok {
 		t.Fatal("Forward body is not a map")
 	}
@@ -856,12 +856,12 @@ func TestInteropForwardProtocolEncryption(t *testing.T) {
 	}
 
 	// Extract the inner encrypted message
-	attachments, ok := parsedForward["attachments"].([]interface{})
+	attachments, ok := parsedForward["attachments"].([]any)
 	if !ok || len(attachments) == 0 {
 		t.Fatal("No attachments in forward message")
 	}
-	attachment := attachments[0].(map[string]interface{})
-	data := attachment["data"].(map[string]interface{})
+	attachment := attachments[0].(map[string]any)
+	data := attachment["data"].(map[string]any)
 	innerEncrypted, _ := json.Marshal(data["json"])
 
 	// Step 4: Bob decrypts the inner message
@@ -871,7 +871,7 @@ func TestInteropForwardProtocolEncryption(t *testing.T) {
 	}
 
 	// Verify the original message was recovered
-	var finalMessage map[string]interface{}
+	var finalMessage map[string]any
 	if err := json.Unmarshal(decryptedMessage, &finalMessage); err != nil {
 		t.Fatalf("Failed to parse final message: %v", err)
 	}
@@ -880,7 +880,7 @@ func TestInteropForwardProtocolEncryption(t *testing.T) {
 		t.Errorf("Message ID mismatch: %v", finalMessage["id"])
 	}
 
-	finalBody := finalMessage["body"].(map[string]interface{})
+	finalBody := finalMessage["body"].(map[string]any)
 	if finalBody["message"] != "Hello Bob through the mediator!" {
 		t.Errorf("Message body mismatch: %v", finalBody["message"])
 	}

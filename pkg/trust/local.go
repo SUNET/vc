@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -204,20 +205,12 @@ func certificateMatchesSubject(cert *x509.Certificate, subjectID string) bool {
 	}
 
 	// Check SAN DNS names
-	for _, dns := range cert.DNSNames {
-		if dns == subjectID {
-			return true
-		}
+	if slices.Contains(cert.DNSNames, subjectID) {
+		return true
 	}
 
 	// Check SAN email addresses
-	for _, email := range cert.EmailAddresses {
-		if email == subjectID {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(cert.EmailAddresses, subjectID)
 }
 
 // GetTrustedRoots returns all trusted root certificates.

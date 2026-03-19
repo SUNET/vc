@@ -6,11 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	sha30 "crypto/sha3"
 	"crypto/sha512"
+	"hash"
 	"testing"
 	"vc/pkg/jose"
-
-	"golang.org/x/crypto/sha3"
 )
 
 // TestComprehensiveCoverage targets remaining uncovered branches
@@ -92,8 +92,14 @@ func TestComprehensiveCoverage(t *testing.T) {
 			{"SHA-256", func() any { return sha256.New() }, "sha-256"},
 			{"SHA-384", func() any { return sha512.New384() }, "sha-384"},
 			{"SHA-512", func() any { return sha512.New() }, "sha-512"},
-			{"SHA3-256", func() any { return sha3.New256() }, "sha3-256"},
-			{"SHA3-512", func() any { return sha3.New512() }, "sha3-512"},
+			{"SHA3-256", func() any {
+				return hash.
+					Hash(sha30.New256())
+			}, "sha3-256"},
+			{"SHA3-512", func() any {
+				return hash.
+					Hash(sha30.New512())
+			}, "sha3-512"},
 			{"SHA-224", func() any { return sha256.New224() }, "sha-224"},
 		}
 
@@ -269,8 +275,10 @@ func TestComprehensiveCoverage(t *testing.T) {
 		hashers := []any{
 			sha256.New(),
 			sha512.New(),
-			sha3.New256(),
-			sha3.New512(),
+			hash.
+				Hash(sha30.New256()),
+			hash.
+				Hash(sha30.New512()),
 		}
 
 		for _, h := range hashers {
@@ -281,7 +289,7 @@ func TestComprehensiveCoverage(t *testing.T) {
 				Size() int
 				BlockSize() int
 			}); ok {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					digest, err := generateDecoyDigest(hasher)
 					if err != nil {
 						t.Fatalf("generateDecoyDigest failed: %v", err)
@@ -296,7 +304,7 @@ func TestComprehensiveCoverage(t *testing.T) {
 
 	t.Run("generateSalt_multiple_calls", func(t *testing.T) {
 		salts := make(map[string]bool)
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			salt, err := generateSalt()
 			if err != nil {
 				t.Fatalf("generateSalt failed: %v", err)

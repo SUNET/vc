@@ -68,7 +68,7 @@ func (s *Secp256k1Signer) Sign(payload []byte) ([]byte, error) {
 // SignJWS creates a complete JWS with ES256K algorithm.
 func (s *Secp256k1Signer) SignJWS(payload []byte, typ string) ([]byte, error) {
 	// Build protected header manually since jwx doesn't support ES256K
-	header := map[string]interface{}{
+	header := map[string]any{
 		"alg": "ES256K",
 		"typ": typ,
 	}
@@ -164,7 +164,7 @@ func (v *Secp256k1Verifier) VerifyJWS(compactJWS []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to decode header: %w", err)
 	}
 
-	var header map[string]interface{}
+	var header map[string]any
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
 		return nil, fmt.Errorf("failed to parse header: %w", err)
 	}
@@ -284,7 +284,7 @@ func exportSecp256k1PublicKey(pubKey *secp256k1.PublicKey, keyID string) (jwk.Ke
 	yPadded := padTo32(yBytes[:])
 
 	// Build JWK manually
-	jwkMap := map[string]interface{}{
+	jwkMap := map[string]any{
 		"kty": "EC",
 		"crv": CurveSecp256k1,
 		"x":   base64.RawURLEncoding.EncodeToString(xPadded),
@@ -371,7 +371,7 @@ func importSecp256k1PrivateKey(privKey *secp256k1.PrivateKey, keyID string) (jwk
 	y := pubKey.Y().Bytes()
 
 	// Build JWK manually
-	jwkMap := map[string]interface{}{
+	jwkMap := map[string]any{
 		"kty": "EC",
 		"crv": CurveSecp256k1,
 		"x":   base64.RawURLEncoding.EncodeToString(padTo32(x[:])),

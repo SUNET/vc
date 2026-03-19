@@ -17,8 +17,10 @@ import (
 )
 
 // int64Ptr is a helper to create a pointer to an int64
+//
+//go:fix inline
 func int64Ptr(v int64) *int64 {
-	return &v
+	return new(v)
 }
 
 // mockTokenStatusListIssuer is a mock implementation of the TokenStatusListIssuer interface for testing
@@ -597,7 +599,7 @@ func TestTokenStatusLists_TimeParameter_ValidTimestamps(t *testing.T) {
 		t.Run("timestamp_"+strconv.FormatInt(ts, 10), func(t *testing.T) {
 			req := &TokenStatusListsRequest{
 				ID:   1,
-				Time: int64Ptr(ts),
+				Time: new(ts),
 			}
 
 			resp, err := client.TokenStatusLists(ctx, req)
@@ -621,7 +623,7 @@ func TestTokenStatusLists_ConcurrentAccess(t *testing.T) {
 
 	// Run concurrent requests
 	done := make(chan bool)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		go func(i int) {
 			var req *TokenStatusListsRequest
 			if i%2 == 0 {
@@ -638,7 +640,7 @@ func TestTokenStatusLists_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		<-done
 	}
 }
@@ -650,7 +652,7 @@ func TestTokenStatusListAggregation_ConcurrentAccess(t *testing.T) {
 	mock.SetSections([]int64{1, 2, 3, 4, 5})
 
 	done := make(chan bool)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		go func() {
 			resp, err := client.TokenStatusListAggregation(ctx)
 			assert.NoError(t, err)
@@ -660,7 +662,7 @@ func TestTokenStatusListAggregation_ConcurrentAccess(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		<-done
 	}
 }

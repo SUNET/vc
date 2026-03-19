@@ -23,7 +23,7 @@ func TestFile_SendToDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -61,7 +61,7 @@ func TestFile_FileSyncEveryWrite(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:          true,
+				Enable:           true,
 				Destinations:     []string{logFile},
 				FileSyncInterval: 0, // 0 = fsync every write
 			},
@@ -100,7 +100,7 @@ func TestFile_DeferredSync(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:          true,
+				Enable:           true,
 				Destinations:     []string{logFile},
 				FileSyncInterval: 100 * time.Millisecond,
 			},
@@ -136,8 +136,6 @@ func TestFile_DeferredSync(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	service.Close(t.Context())
 }
-
-
 
 func TestFile_DestinationParsing(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -201,7 +199,7 @@ func TestFile_WriteToFile_NilFile(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -238,7 +236,7 @@ func TestFile_MultipleWrites(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -251,7 +249,7 @@ func TestFile_MultipleWrites(t *testing.T) {
 	dest := service.destinations[0]
 
 	// Write multiple times
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		jsonBytes := []byte(`{"iteration":` + string(rune(i+'0')) + `}`)
 		err = service.writeToFile(dest, jsonBytes)
 		assert.NoError(t, err)
@@ -278,7 +276,7 @@ func TestFile_MessageDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -318,7 +316,7 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -329,7 +327,7 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send multiple audit logs concurrently
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		service.AddAuditLog(ctx, "concurrent_test", map[string]any{
 			"iteration": i,
 		})

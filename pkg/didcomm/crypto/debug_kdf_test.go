@@ -75,19 +75,19 @@ func TestDebugECDH1PUKeyDerivation(t *testing.T) {
 	alicePub, _ := aliceKey.PublicKey()
 
 	// Extract ECDH keys
-	var bobPrivRaw interface{}
+	var bobPrivRaw any
 	if err := jwk.Export(bobKey, &bobPrivRaw); err != nil {
 		t.Fatalf("Failed to export Bob's key: %v", err)
 	}
 	bobPriv := bobPrivRaw.(*ecdh.PrivateKey)
 
-	var alicePubRaw interface{}
+	var alicePubRaw any
 	if err := jwk.Export(alicePub, &alicePubRaw); err != nil {
 		t.Fatalf("Failed to export Alice's public key: %v", err)
 	}
 	alicePubEC := alicePubRaw.(*ecdh.PublicKey)
 
-	var epkRaw interface{}
+	var epkRaw any
 	if err := jwk.Export(epk, &epkRaw); err != nil {
 		t.Fatalf("Failed to export EPK: %v", err)
 	}

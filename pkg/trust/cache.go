@@ -203,7 +203,7 @@ func computeKeyFingerprint(key any, keyType KeyType) string {
 
 	default:
 		// For other key types, try to get a string representation
-		h.Write([]byte(fmt.Sprintf("%v", key)))
+		h.Write(fmt.Appendf(nil, "%v", key))
 	}
 
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil)[:16]) // Use first 16 bytes

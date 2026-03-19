@@ -1135,7 +1135,7 @@ func unwrapKeyAES(wrappedKey, wrappingKey []byte) ([]byte, error) {
 
 	// Verify integrity check value
 	defaultIV := []byte{0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if a[i] != defaultIV[i] {
 			return nil, fmt.Errorf("key unwrap integrity check failed")
 		}

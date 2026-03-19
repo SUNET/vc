@@ -23,7 +23,7 @@ func TestAddAuditLog_GeneratesID(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -66,7 +66,7 @@ func TestAddAuditLog_ComplexMessage(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -113,7 +113,7 @@ func TestProcessAuditLog_ContextCancellation(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -124,7 +124,7 @@ func TestProcessAuditLog_ContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add some audit logs
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		service.AddAuditLog(ctx, "test_event", map[string]int{"iteration": i})
 	}
 
@@ -187,7 +187,7 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -198,7 +198,7 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add multiple audit logs rapidly
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		service.AddAuditLog(ctx, "rapid_event", map[string]any{
 			"sequence": i,
 			"data":     "test data",
@@ -230,7 +230,7 @@ func TestAddAuditLog_NilMessage(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},

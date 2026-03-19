@@ -3,6 +3,7 @@ package httpserver
 import (
 	"fmt"
 	"html"
+	"strings"
 	"vc/internal/registry/apiv1"
 )
 
@@ -150,7 +151,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 			searchDateOfBirth = searchParams.DateOfBirth
 		}
 
-		var rows string
+		var rows strings.Builder
 		for _, person := range result.Results {
 			statusClass := fmt.Sprintf("status-%d", person.Status)
 			if person.Status > 2 {
@@ -158,7 +159,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 			}
 			statusLabel := getStatusLabel(person.Status)
 
-			rows += fmt.Sprintf(`
+			rows.WriteString(fmt.Sprintf(`
 				<tr>
 					<td>%s</td>
 					<td>%s</td>
@@ -186,7 +187,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 				statusClass, person.Status, statusLabel,
 				person.Section, person.Index,
 				html.EscapeString(searchFirstName), html.EscapeString(searchLastName), html.EscapeString(searchDateOfBirth),
-				selected(person.Status == 0), selected(person.Status == 1), selected(person.Status == 2))
+				selected(person.Status == 0), selected(person.Status == 1), selected(person.Status == 2)))
 		}
 
 		resultHTML = fmt.Sprintf(`
@@ -206,7 +207,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 					%s
 				</tbody>
 			</table>
-		</div>`, len(result.Results), rows)
+		</div>`, len(result.Results), rows.String())
 	} else if result != nil {
 		resultHTML = `<div class="card"><p>No results found.</p></div>`
 	}

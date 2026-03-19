@@ -285,7 +285,7 @@ func generateECDHKey(curve string) (jwk.Key, error) {
 
 // extractECDHPrivateKey extracts the raw ECDH private key from a JWK.
 func extractECDHPrivateKey(key jwk.Key) (*ecdh.PrivateKey, error) {
-	var raw interface{}
+	var raw any
 	if err := jwk.Export(key, &raw); err != nil {
 		return nil, fmt.Errorf("failed to get raw key: %w", err)
 	}
@@ -313,7 +313,7 @@ func extractECDHPrivateKey(key jwk.Key) (*ecdh.PrivateKey, error) {
 
 // extractECDHPublicKey extracts the raw ECDH public key from a JWK.
 func extractECDHPublicKey(key jwk.Key) (*ecdh.PublicKey, error) {
-	var raw interface{}
+	var raw any
 	if err := jwk.Export(key, &raw); err != nil {
 		return nil, fmt.Errorf("failed to get raw key: %w", err)
 	}

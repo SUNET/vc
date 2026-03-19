@@ -264,13 +264,13 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 						Name: "Diploma Credential",
 						Claims: []sdjwtvc.Claim{
 							{
-								Path: []*string{ptrString("given_name")},
+								Path: []*string{new("given_name")},
 								Display: []sdjwtvc.ClaimDisplay{
 									{Locale: "en", Label: "Given Name"},
 								},
 							},
 							{
-								Path: []*string{ptrString("family_name")},
+								Path: []*string{new("family_name")},
 								Display: []sdjwtvc.ClaimDisplay{
 									{Locale: "en", Label: "Family Name"},
 								},
@@ -313,8 +313,10 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 }
 
 // Helper function to create a pointer to a string
+//
+//go:fix inline
 func ptrString(s string) *string {
-	return &s
+	return new(s)
 }
 
 func TestClient_createDCQLQuery(t *testing.T) {

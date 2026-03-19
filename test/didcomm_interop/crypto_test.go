@@ -106,9 +106,9 @@ func TestCryptoSigningRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	testCases := []struct {
-		name       string
-		signerKey  *harness.KeyPair
-		verifyKey  *harness.KeyPair
+		name      string
+		signerKey *harness.KeyPair
+		verifyKey *harness.KeyPair
 	}{
 		{
 			name:      "Ed25519",
@@ -264,7 +264,7 @@ func TestEncryptionVectors(t *testing.T) {
 			// 3. Known outputs can be decrypted (if keys are provided)
 
 			// Parse the expected plaintext
-			var msg map[string]interface{}
+			var msg map[string]any
 			if err := json.Unmarshal(vec.Plaintext, &msg); err != nil {
 				t.Fatalf("failed to parse plaintext: %v", err)
 			}
@@ -283,7 +283,7 @@ func TestSigningVectors(t *testing.T) {
 			t.Logf("Testing: %s", vec.Description)
 
 			// Parse the expected plaintext
-			var msg map[string]interface{}
+			var msg map[string]any
 			if err := json.Unmarshal(vec.Plaintext, &msg); err != nil {
 				t.Fatalf("failed to parse plaintext: %v", err)
 			}
@@ -360,7 +360,7 @@ func TestPackerRoundTrip(t *testing.T) {
 		message.WithType("https://didcomm.org/test/1.0/message"),
 		message.WithFrom(harness.AliceDID),
 		message.WithTo(harness.BobDID),
-		message.WithBody(map[string]interface{}{
+		message.WithBody(map[string]any{
 			"content": "Hello from the packer test!",
 		}),
 	)
@@ -454,7 +454,7 @@ func TestHighLevelPack(t *testing.T) {
 		message.WithType("https://didcomm.org/test/1.0/message"),
 		message.WithFrom(harness.AliceDID),
 		message.WithTo(harness.BobDID),
-		message.WithBody(map[string]interface{}{
+		message.WithBody(map[string]any{
 			"greeting": "Hello!",
 		}),
 	)

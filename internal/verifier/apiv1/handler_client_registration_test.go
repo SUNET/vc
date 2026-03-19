@@ -18,7 +18,7 @@ import (
 func TestGenerateClientID(t *testing.T) {
 	// Generate multiple client IDs and verify they're unique and correct format
 	ids := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id, err := generateClientID()
 		require.NoError(t, err)
 		assert.Len(t, id, 32, "client ID should be 32 hex characters (16 bytes)")
@@ -36,7 +36,7 @@ func TestGenerateClientID(t *testing.T) {
 func TestGenerateClientSecret(t *testing.T) {
 	// Generate multiple client secrets and verify they're unique
 	secrets := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		secret, err := generateClientSecret()
 		require.NoError(t, err)
 		assert.NotEmpty(t, secret)
@@ -72,7 +72,7 @@ func TestHashClientSecret(t *testing.T) {
 func TestGenerateRegistrationAccessToken(t *testing.T) {
 	// Generate multiple tokens and verify they're unique
 	tokens := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		token, err := generateRegistrationAccessToken()
 		require.NoError(t, err)
 		assert.NotEmpty(t, token)

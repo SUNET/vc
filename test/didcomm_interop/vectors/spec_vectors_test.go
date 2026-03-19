@@ -48,11 +48,11 @@ func TestSpecEncryptionVectorsDecryption(t *testing.T) {
 			}
 
 			// Verify plaintext matches
-			var decrypted map[string]interface{}
+			var decrypted map[string]any
 			err = json.Unmarshal(plaintext, &decrypted)
 			require.NoError(t, err, "Decrypted plaintext should be valid JSON")
 
-			var expected map[string]interface{}
+			var expected map[string]any
 			err = json.Unmarshal([]byte(vec.Plaintext), &expected)
 			require.NoError(t, err)
 
@@ -98,11 +98,11 @@ func TestSpecSignedVectorsVerification(t *testing.T) {
 			}
 
 			// Verify payload matches
-			var decrypted map[string]interface{}
+			var decrypted map[string]any
 			err = json.Unmarshal(payload, &decrypted)
 			require.NoError(t, err, "Signed payload should be valid JSON")
 
-			var expected map[string]interface{}
+			var expected map[string]any
 			err = json.Unmarshal([]byte(vec.Plaintext), &expected)
 			require.NoError(t, err)
 
@@ -170,31 +170,31 @@ func TestSpecKeyMaterialParsing(t *testing.T) {
 func TestSpecDIDDocumentsParsing(t *testing.T) {
 	t.Run("Alice DID Document", func(t *testing.T) {
 		doc := AliceDIDDocument()
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		err := json.Unmarshal([]byte(doc), &parsed)
 		require.NoError(t, err, "Should parse Alice DID document")
 		assert.Equal(t, "did:example:alice", parsed["id"])
 
 		// Check verificationMethod
-		vm, ok := parsed["verificationMethod"].([]interface{})
+		vm, ok := parsed["verificationMethod"].([]any)
 		require.True(t, ok, "Should have verificationMethod")
 		assert.Len(t, vm, 3, "Alice should have 3 verification methods")
 
 		// Check keyAgreement
-		ka, ok := parsed["keyAgreement"].([]interface{})
+		ka, ok := parsed["keyAgreement"].([]any)
 		require.True(t, ok, "Should have keyAgreement")
 		assert.Len(t, ka, 3, "Alice should have 3 key agreement keys")
 	})
 
 	t.Run("Bob DID Document", func(t *testing.T) {
 		doc := BobDIDDocument()
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		err := json.Unmarshal([]byte(doc), &parsed)
 		require.NoError(t, err, "Should parse Bob DID document")
 		assert.Equal(t, "did:example:bob", parsed["id"])
 
 		// Check keyAgreement
-		ka, ok := parsed["keyAgreement"].([]interface{})
+		ka, ok := parsed["keyAgreement"].([]any)
 		require.True(t, ok, "Should have keyAgreement")
 		assert.Len(t, ka, 9, "Bob should have 9 key agreement keys")
 	})
@@ -217,7 +217,7 @@ func TestProtectedHeaderDecoding(t *testing.T) {
 			headerBytes, err := base64.RawURLEncoding.DecodeString(jweMsg.Protected)
 			require.NoError(t, err, "Should decode protected header")
 
-			var header map[string]interface{}
+			var header map[string]any
 			err = json.Unmarshal(headerBytes, &header)
 			require.NoError(t, err, "Should parse protected header as JSON")
 
@@ -277,12 +277,12 @@ func TestSignedMessagePayloadDecoding(t *testing.T) {
 			payloadBytes, err := base64.RawURLEncoding.DecodeString(jwsMsg.Payload)
 			require.NoError(t, err, "Should decode payload")
 
-			var payload map[string]interface{}
+			var payload map[string]any
 			err = json.Unmarshal(payloadBytes, &payload)
 			require.NoError(t, err, "Should parse payload as JSON")
 
 			// Verify expected fields match plaintext
-			var expected map[string]interface{}
+			var expected map[string]any
 			err = json.Unmarshal([]byte(vec.Plaintext), &expected)
 			require.NoError(t, err)
 
@@ -298,7 +298,7 @@ func TestSignedMessagePayloadDecoding(t *testing.T) {
 			protectedBytes, err := base64.RawURLEncoding.DecodeString(jwsMsg.Signatures[0].Protected)
 			require.NoError(t, err, "Should decode protected header")
 
-			var protectedHeader map[string]interface{}
+			var protectedHeader map[string]any
 			err = json.Unmarshal(protectedBytes, &protectedHeader)
 			require.NoError(t, err, "Should parse protected header")
 

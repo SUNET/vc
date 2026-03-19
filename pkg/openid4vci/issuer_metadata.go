@@ -115,7 +115,7 @@ type MetadataDisplay struct {
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 
 	// Logo: OPTIONAL. Object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:
-	Logo MetadataLogo `json:"logo,omitempty" yaml:"logo,omitempty"`
+	Logo MetadataLogo `json:"logo" yaml:"logo,omitempty"`
 }
 
 // MetadataLogo object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:
@@ -223,7 +223,7 @@ type CredentialMetadataDisplay struct {
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 
 	// Logo: OPTIONAL. Object with information about the logo of the Credential
-	Logo MetadataLogo `json:"logo,omitempty" yaml:"logo,omitempty"`
+	Logo MetadataLogo `json:"logo" yaml:"logo,omitempty"`
 
 	// Description: OPTIONAL. String value of a description of the Credential.
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -232,7 +232,7 @@ type CredentialMetadataDisplay struct {
 	BackgroundColor string `json:"background_color,omitempty" yaml:"background_color,omitempty"`
 
 	// BackgroundImage: OPTIONAL. Object with information about the background image of the Credential. At least the following parameter MUST be included:
-	BackgroundImage MetadataBackgroundImage `json:"background_image,omitempty" yaml:"background_image,omitempty"`
+	BackgroundImage MetadataBackgroundImage `json:"background_image" yaml:"background_image,omitempty"`
 
 	// TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].
 	TextColor string `json:"text_color,omitempty" yaml:"text_color,omitempty"`

@@ -56,7 +56,7 @@ func TestRoutingForwardMessage(t *testing.T) {
 		}
 
 		// Compare as JSON (key order may vary)
-		var original, extracted map[string]interface{}
+		var original, extracted map[string]any
 		json.Unmarshal(innerMessage, &original)
 		json.Unmarshal(wrapped, &extracted)
 
@@ -277,7 +277,7 @@ func TestRoutingUnwrapForward(t *testing.T) {
 		}
 
 		// Verify inner message content
-		var innerParsed map[string]interface{}
+		var innerParsed map[string]any
 		if err := json.Unmarshal(inner, &innerParsed); err != nil {
 			t.Fatalf("failed to parse inner: %v", err)
 		}

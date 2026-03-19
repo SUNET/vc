@@ -368,7 +368,7 @@ func base64URLDecode(s string) ([]byte, error) {
 
 	for i := 0; i < len(s); i += 4 {
 		var val uint
-		for j := 0; j < 4; j++ {
+		for j := range 4 {
 			c := s[i+j]
 			if c == '=' {
 				// Handle padding
@@ -486,7 +486,7 @@ func hmacSHA256(key, data []byte) []byte {
 	// ipad and opad
 	ipad := make([]byte, blockSize)
 	opad := make([]byte, blockSize)
-	for i := 0; i < blockSize; i++ {
+	for i := range blockSize {
 		ipad[i] = key[i] ^ 0x36
 		opad[i] = key[i] ^ 0x5c
 	}

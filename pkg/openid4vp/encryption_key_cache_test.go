@@ -176,7 +176,7 @@ func TestEphemeralEncryptionKeyCache_ConcurrentAccess(t *testing.T) {
 	done := make(chan bool)
 
 	// Writer goroutines
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(id int) {
 			kid := "concurrent-key-" + string(rune('0'+id))
 			key := createTestKey(t, kid)
@@ -186,7 +186,7 @@ func TestEphemeralEncryptionKeyCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all writes
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 
@@ -194,7 +194,7 @@ func TestEphemeralEncryptionKeyCache_ConcurrentAccess(t *testing.T) {
 	assert.Equal(t, 10, cache.Len())
 
 	// Reader goroutines
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(id int) {
 			kid := "concurrent-key-" + string(rune('0'+id))
 			retrieved, found := cache.Get(kid)
@@ -205,7 +205,7 @@ func TestEphemeralEncryptionKeyCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all reads
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

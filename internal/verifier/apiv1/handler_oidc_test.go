@@ -1354,8 +1354,8 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.OIDCOP.SessionDuration = 900
 	client.cfg.Verifier.SupportedWallets = map[string]string{
-		"SUNET Wallet":  "https://wallet.sunet.se/cb",
-		"Test Wallet":   "https://test-wallet.example.com/authorize",
+		"SUNET Wallet": "https://wallet.sunet.se/cb",
+		"Test Wallet":  "https://test-wallet.example.com/authorize",
 	}
 
 	// Add presentation template
@@ -1767,7 +1767,7 @@ func TestGetUserInfo(t *testing.T) {
 func TestGenerateNonce(t *testing.T) {
 	// Generate multiple nonces and verify they're unique
 	nonces := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		nonce, err := crypto.GenerateSecureToken(32, 0)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, nonce)

@@ -667,7 +667,7 @@ func TestJWTAuth_SetsContextValues(t *testing.T) {
 	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	var capturedSubject string
-	var capturedClaims interface{}
+	var capturedClaims any
 
 	r := gin.New()
 	r.POST("/api/v1/test", handler, func(c *gin.Context) {

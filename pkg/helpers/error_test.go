@@ -73,7 +73,7 @@ func TestNewErrorFromError(t *testing.T) {
 			name: "json.UnmarshalTypeError",
 			have: &json.UnmarshalTypeError{
 				Value:  "bool",
-				Type:   reflect.TypeOf(true),
+				Type:   reflect.TypeFor[bool](),
 				Offset: 0,
 				Struct: "",
 				Field:  "1",

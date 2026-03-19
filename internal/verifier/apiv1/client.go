@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"vc/internal/verifier/cache"
@@ -173,12 +174,7 @@ func (c *Client) generateSubjectIdentifier(walletID string, clientID string) str
 
 // containsOIDC checks if a slice contains a specific string value (for OIDC validations)
 func (c *Client) containsOIDC(slice []string, value string) bool {
-	for _, v := range slice {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, value)
 }
 
 // verifyPlaintextSecret performs constant-time comparison of plaintext secrets

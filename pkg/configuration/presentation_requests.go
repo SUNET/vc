@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"vc/pkg/openid4vp"
 
 	"gopkg.in/yaml.v2"
@@ -272,10 +273,8 @@ func (c *PresentationRequestConfig) GetTemplateByScope(scope string) (*Presentat
 		if !template.Enabled {
 			continue
 		}
-		for _, templateScope := range template.OIDCScopes {
-			if templateScope == scope {
-				return template, nil
-			}
+		if slices.Contains(template.OIDCScopes, scope) {
+			return template, nil
 		}
 	}
 	return nil, fmt.Errorf("no template found for scope: %s", scope)

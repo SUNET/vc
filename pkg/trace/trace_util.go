@@ -78,5 +78,5 @@ func fallbackAttr(key string, val any) attribute.KeyValue {
 }
 
 func isPointer(val any) bool {
-	return reflect.TypeOf(val).Kind() == reflect.Ptr
+	return reflect.TypeOf(val).Kind() == reflect.Pointer
 }

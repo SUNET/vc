@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 	"vc/pkg/sdjwtvc"
@@ -179,9 +180,7 @@ func (ce *ClaimsExtractor) ApplyClaimTransforms(claims map[string]any, transform
 	transformedClaims := make(map[string]any)
 
 	// Copy all claims first
-	for key, value := range claims {
-		transformedClaims[key] = value
-	}
+	maps.Copy(transformedClaims, claims)
 
 	// Apply transforms
 	for claimName, transformDef := range transformDefs {
@@ -305,13 +304,7 @@ func isInternalClaim(key string) bool {
 		"status", // Status - internal
 	}
 
-	for _, internal := range internalClaims {
-		if key == internal {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(internalClaims, key)
 }
 
 // ExtractAndMapClaims is a convenience function that combines extraction, mapping, and transformation

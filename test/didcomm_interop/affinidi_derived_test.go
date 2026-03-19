@@ -115,7 +115,7 @@ func TestAliceBobCompleteFlow(t *testing.T) {
 	// Create a plaintext DIDComm message (like Affinidi's Message::build)
 	now := time.Now().Unix()
 	messageID := "msg-" + time.Now().Format("20060102-150405")
-	plainMessage := map[string]interface{}{
+	plainMessage := map[string]any{
 		"id":           messageID,
 		"typ":          "application/didcomm-plain+json",
 		"type":         "https://example.com/protocols/chatty-alice/1.0/hello",
@@ -123,7 +123,7 @@ func TestAliceBobCompleteFlow(t *testing.T) {
 		"to":           []string{"did:example:bob"},
 		"created_time": now,
 		"expires_time": now + 300, // 5 minutes
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"message": "Hello Bob!",
 		},
 	}
@@ -156,12 +156,12 @@ func TestAliceBobCompleteFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the message content
-	var receivedMessage map[string]interface{}
+	var receivedMessage map[string]any
 	err = json.Unmarshal(decryptedPlaintext, &receivedMessage)
 	require.NoError(t, err)
 	assert.Equal(t, messageID, receivedMessage["id"])
 	assert.Equal(t, "did:example:alice", receivedMessage["from"])
-	body, ok := receivedMessage["body"].(map[string]interface{})
+	body, ok := receivedMessage["body"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Hello Bob!", body["message"])
 
@@ -180,12 +180,12 @@ func TestForwardMessageWrapping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the inner message for Bob
-	innerMessage := map[string]interface{}{
+	innerMessage := map[string]any{
 		"id":   "inner-msg-123",
 		"type": "https://example.com/protocols/test/1.0/message",
 		"from": "did:example:alice",
 		"to":   []string{"did:example:bob"},
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"content": "Secret message for Bob",
 		},
 	}
@@ -201,18 +201,18 @@ func TestForwardMessageWrapping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the forward message (DIDComm routing protocol 2.0)
-	forwardMessage := map[string]interface{}{
+	forwardMessage := map[string]any{
 		"id":   "forward-msg-456",
 		"type": "https://didcomm.org/routing/2.0/forward",
 		"to":   []string{"did:example:mediator"},
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"next": "did:example:bob",
 		},
-		"attachments": []map[string]interface{}{
+		"attachments": []map[string]any{
 			{
 				"id":         "attachment-1",
 				"media_type": "application/didcomm-encrypted+json",
-				"data": map[string]interface{}{
+				"data": map[string]any{
 					"base64": base64.RawURLEncoding.EncodeToString(innerEncrypted),
 				},
 			},
@@ -224,23 +224,23 @@ func TestForwardMessageWrapping(t *testing.T) {
 	t.Logf("Forward message:\n%s", string(forwardPlaintext))
 
 	// Parse the forward message and extract the attachment
-	var parsedForward map[string]interface{}
+	var parsedForward map[string]any
 	err = json.Unmarshal(forwardPlaintext, &parsedForward)
 	require.NoError(t, err)
 
 	// Verify forward message structure
 	assert.Equal(t, "https://didcomm.org/routing/2.0/forward", parsedForward["type"])
-	body, ok := parsedForward["body"].(map[string]interface{})
+	body, ok := parsedForward["body"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "did:example:bob", body["next"])
 
 	// Extract and process the attachment
-	attachments, ok := parsedForward["attachments"].([]interface{})
+	attachments, ok := parsedForward["attachments"].([]any)
 	require.True(t, ok)
 	require.Len(t, attachments, 1)
 
-	attachment := attachments[0].(map[string]interface{})
-	data := attachment["data"].(map[string]interface{})
+	attachment := attachments[0].(map[string]any)
+	data := attachment["data"].(map[string]any)
 	base64Data := data["base64"].(string)
 
 	// Decode the base64 attachment
@@ -252,11 +252,11 @@ func TestForwardMessageWrapping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the inner message content
-	var receivedInner map[string]interface{}
+	var receivedInner map[string]any
 	err = json.Unmarshal(decrypted, &receivedInner)
 	require.NoError(t, err)
 	assert.Equal(t, "inner-msg-123", receivedInner["id"])
-	innerBody := receivedInner["body"].(map[string]interface{})
+	innerBody := receivedInner["body"].(map[string]any)
 	assert.Equal(t, "Secret message for Bob", innerBody["content"])
 
 	t.Log("Forward message wrapping and extraction successful!")
@@ -306,7 +306,7 @@ func TestMessageTimestampValidation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			msg := map[string]interface{}{
+			msg := map[string]any{
 				"id":           "test-msg",
 				"type":         "test",
 				"created_time": tc.createdTime,
@@ -323,7 +323,7 @@ func TestMessageTimestampValidation(t *testing.T) {
 }
 
 // validateMessageTimestamps validates DIDComm message timestamps.
-func validateMessageTimestamps(msg map[string]interface{}) bool {
+func validateMessageTimestamps(msg map[string]any) bool {
 	now := time.Now().Unix()
 	createdTime, ok := msg["created_time"].(int64)
 	if !ok {
@@ -366,25 +366,25 @@ func validateMessageTimestamps(msg map[string]interface{}) bool {
 // (alternative to base64 encoding as shown in read_raw_didcomm.rs).
 func TestJSONAttachmentExtraction(t *testing.T) {
 	// Create a forward message with JSON attachment (no base64)
-	innerMessage := map[string]interface{}{
+	innerMessage := map[string]any{
 		"id":   "json-inner-msg",
 		"type": "test",
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"data": "This is JSON-embedded data",
 		},
 	}
 
-	forwardMessage := map[string]interface{}{
+	forwardMessage := map[string]any{
 		"id":   "forward-with-json",
 		"type": "https://didcomm.org/routing/2.0/forward",
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"next": "did:example:recipient",
 		},
-		"attachments": []map[string]interface{}{
+		"attachments": []map[string]any{
 			{
 				"id":         "json-attachment",
 				"media_type": "application/json",
-				"data": map[string]interface{}{
+				"data": map[string]any{
 					"json": innerMessage, // Directly embedded JSON
 				},
 			},
@@ -395,19 +395,19 @@ func TestJSONAttachmentExtraction(t *testing.T) {
 	require.NoError(t, err)
 
 	// Parse and extract
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err = json.Unmarshal(forwardBytes, &parsed)
 	require.NoError(t, err)
 
-	attachments := parsed["attachments"].([]interface{})
-	attachment := attachments[0].(map[string]interface{})
-	data := attachment["data"].(map[string]interface{})
+	attachments := parsed["attachments"].([]any)
+	attachment := attachments[0].(map[string]any)
+	data := attachment["data"].(map[string]any)
 
 	// Extract JSON directly
-	jsonData, ok := data["json"].(map[string]interface{})
+	jsonData, ok := data["json"].(map[string]any)
 	require.True(t, ok, "Should have json field in attachment data")
 	assert.Equal(t, "json-inner-msg", jsonData["id"])
-	body := jsonData["body"].(map[string]interface{})
+	body := jsonData["body"].(map[string]any)
 	assert.Equal(t, "This is JSON-embedded data", body["data"])
 
 	t.Log("JSON attachment extraction successful!")
@@ -419,13 +419,13 @@ func TestTrustPingMessageStructure(t *testing.T) {
 	now := time.Now().Unix()
 
 	// Create a trust-ping message
-	pingMessage := map[string]interface{}{
+	pingMessage := map[string]any{
 		"id":           "ping-" + time.Now().Format("20060102-150405"),
 		"type":         "https://didcomm.org/trust-ping/2.0/ping",
 		"from":         "did:example:alice",
 		"to":           []string{"did:example:mediator"},
 		"created_time": now,
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"response_requested": true,
 		},
 	}
@@ -435,23 +435,23 @@ func TestTrustPingMessageStructure(t *testing.T) {
 	t.Logf("Trust-ping message:\n%s", string(pingBytes))
 
 	// Verify structure
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err = json.Unmarshal(pingBytes, &parsed)
 	require.NoError(t, err)
 
 	assert.Equal(t, "https://didcomm.org/trust-ping/2.0/ping", parsed["type"])
-	body := parsed["body"].(map[string]interface{})
+	body := parsed["body"].(map[string]any)
 	assert.True(t, body["response_requested"].(bool))
 
 	// Create expected pong response
-	pongMessage := map[string]interface{}{
+	pongMessage := map[string]any{
 		"id":           "pong-" + time.Now().Format("20060102-150405"),
 		"type":         "https://didcomm.org/trust-ping/2.0/ping-response",
 		"from":         "did:example:mediator",
 		"to":           []string{"did:example:alice"},
 		"thid":         parsed["id"], // Thread ID references the ping
 		"created_time": now,
-		"body":         map[string]interface{}{},
+		"body":         map[string]any{},
 	}
 
 	pongBytes, err := json.Marshal(pongMessage)
@@ -459,7 +459,7 @@ func TestTrustPingMessageStructure(t *testing.T) {
 	t.Logf("Trust-pong response:\n%s", string(pongBytes))
 
 	// Verify pong references ping via thid
-	var parsedPong map[string]interface{}
+	var parsedPong map[string]any
 	err = json.Unmarshal(pongBytes, &parsedPong)
 	require.NoError(t, err)
 	assert.Equal(t, parsed["id"], parsedPong["thid"], "Pong should reference ping via thid")
@@ -518,11 +518,11 @@ func TestDifferentCurveKeyAgreement(t *testing.T) {
 // TestOutOfBandInvitation tests OOB invitation structure from oob_invite.rs.
 func TestOutOfBandInvitation(t *testing.T) {
 	// Create an OOB invitation
-	invitation := map[string]interface{}{
+	invitation := map[string]any{
 		"type": "https://didcomm.org/out-of-band/2.0/invitation",
 		"id":   "oob-invite-" + time.Now().Format("20060102-150405"),
 		"from": "did:example:alice",
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"goal_code": "connect",
 			"goal":      "Establish a connection",
 			"accept":    []string{"didcomm/v2"},
@@ -547,7 +547,7 @@ func TestOutOfBandInvitation(t *testing.T) {
 	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
 	require.NoError(t, err)
 
-	var parsedInvite map[string]interface{}
+	var parsedInvite map[string]any
 	err = json.Unmarshal(decoded, &parsedInvite)
 	require.NoError(t, err)
 
@@ -558,10 +558,10 @@ func TestOutOfBandInvitation(t *testing.T) {
 // TestMessageHashComputation tests computing SHA256 hash of messages
 // as shown in read_raw_didcomm.rs for message tracking.
 func TestMessageHashComputation(t *testing.T) {
-	message := map[string]interface{}{
+	message := map[string]any{
 		"id":   "hash-test-msg",
 		"type": "test",
-		"body": map[string]interface{}{
+		"body": map[string]any{
 			"content": "Message for hashing",
 		},
 	}

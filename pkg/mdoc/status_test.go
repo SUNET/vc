@@ -233,7 +233,7 @@ func TestNewStatusManager(t *testing.T) {
 func TestStatusManager_AllocateIndex(t *testing.T) {
 	sm := NewStatusManager("https://example.com/status", 10)
 
-	for i := int64(0); i < 10; i++ {
+	for i := range int64(10) {
 		idx, err := sm.AllocateIndex()
 		if err != nil {
 			t.Fatalf("AllocateIndex() error = %v", err)

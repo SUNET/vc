@@ -463,8 +463,8 @@ func (l *LocalResolver) resolveDidPeerEd25519(didPeer string) (ed25519.PublicKey
 	}
 
 	// Handle did:peer:0 (equivalent to did:key)
-	if strings.HasPrefix(didPeer, didPeer0Prefix) {
-		multikey := strings.TrimPrefix(didPeer, didPeer0Prefix)
+	if after, ok := strings.CutPrefix(didPeer, didPeer0Prefix); ok {
+		multikey := after
 		return l.decodeMultikey(multikey)
 	}
 
@@ -503,8 +503,8 @@ func (l *LocalResolver) resolveDidPeerECDSA(didPeer string) (*ecdsa.PublicKey, e
 	}
 
 	// Handle did:peer:0 (equivalent to did:key)
-	if strings.HasPrefix(didPeer, didPeer0Prefix) {
-		multikey := strings.TrimPrefix(didPeer, didPeer0Prefix)
+	if after, ok := strings.CutPrefix(didPeer, didPeer0Prefix); ok {
+		multikey := after
 		return decodeMultikeyECDSA(multikey)
 	}
 
@@ -688,8 +688,8 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 	}
 
 	// Handle did:peer:0 and did:key - convert Ed25519 to X25519
-	if strings.HasPrefix(baseDID, didPeer0Prefix) {
-		multikey := strings.TrimPrefix(baseDID, didPeer0Prefix)
+	if after, ok := strings.CutPrefix(baseDID, didPeer0Prefix); ok {
+		multikey := after
 		edKey, err := l.decodeMultikey(multikey)
 		if err == nil {
 			return ed25519ToX25519(edKey)
@@ -698,8 +698,8 @@ func (l *LocalResolver) ResolveX25519(did string) (*ecdh.PublicKey, error) {
 		return decodeMultikeyX25519(multikey)
 	}
 
-	if strings.HasPrefix(baseDID, "did:key:") {
-		multikey := strings.TrimPrefix(baseDID, "did:key:")
+	if after, ok := strings.CutPrefix(baseDID, "did:key:"); ok {
+		multikey := after
 		edKey, err := l.decodeMultikey(multikey)
 		if err == nil {
 			return ed25519ToX25519(edKey)
@@ -747,9 +747,9 @@ func parseDidPeer2Service(didPeer string) (*DIDCommService, error) {
 	}
 
 	// Split by "." (each element starts with ".")
-	parts := strings.Split(content, ".")
+	parts := strings.SplitSeq(content, ".")
 
-	for _, part := range parts {
+	for part := range parts {
 		if len(part) == 0 {
 			continue
 		}

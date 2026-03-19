@@ -189,7 +189,7 @@ func TestTrustCache_Clear(t *testing.T) {
 	cache := NewTrustCache(TrustCacheConfig{})
 	defer cache.Stop()
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		req := testReq("did:web:example.com", KeyTypeJWK, Role("role-"+string(rune('a'+i))))
 		cache.Set(req, &TrustDecision{Trusted: true})
 	}

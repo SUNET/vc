@@ -219,7 +219,7 @@ type VCTMDisplay struct {
 type Rendering struct {
 	// Simple contains basic rendering properties per section 8.1.1 (OPTIONAL)
 	// Used for applications that don't support SVG rendering
-	Simple SimpleRendering `json:"simple,omitempty"`
+	Simple SimpleRendering `json:"simple"`
 
 	// SVGTemplates contains SVG-based rendering per section 8.1.2 (OPTIONAL)
 	// Array of SVG templates with different properties (landscape/portrait, light/dark, etc.)
@@ -230,7 +230,7 @@ type Rendering struct {
 // Intended for applications that don't support SVG rendering
 type SimpleRendering struct {
 	// Logo contains logo information (OPTIONAL per section 8.1.1.1)
-	Logo Logo `json:"logo,omitempty"`
+	Logo Logo `json:"logo"`
 
 	// BackgroundImage contains background image information (OPTIONAL per section 8.1.1.2)
 	BackgroundImage *Logo `json:"background_image,omitempty"`
@@ -264,7 +264,7 @@ type SVGTemplates struct {
 	URLIntegrity string `json:"uri#integrity,omitempty"`
 
 	// Properties specifies template properties per section 8.1.2.1 (OPTIONAL for single template, REQUIRED for multiple)
-	Properties SVGTemplateProperties `json:"properties,omitempty"`
+	Properties SVGTemplateProperties `json:"properties"`
 }
 
 // SVGTemplateProperties specifies SVG template characteristics per section 8.1.2.1

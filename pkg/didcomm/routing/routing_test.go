@@ -67,7 +67,7 @@ func TestForwardToMessage(t *testing.T) {
 		t.Errorf("type mismatch: got %s, want %s", msg.Type, ForwardMessageType)
 	}
 
-	body, ok := msg.Body.(map[string]interface{})
+	body, ok := msg.Body.(map[string]any)
 	if !ok {
 		t.Fatal("body is not a map")
 	}
@@ -144,7 +144,7 @@ func TestParseForwardMissingNext(t *testing.T) {
 	msg := message.New(
 		message.WithID("test-1"),
 		message.WithType(ForwardMessageType),
-		message.WithBody(map[string]interface{}{}),
+		message.WithBody(map[string]any{}),
 	)
 
 	_, err := ParseForward(msg)
@@ -161,7 +161,7 @@ type mockEncrypter struct {
 
 func (m *mockEncrypter) Encrypt(ctx context.Context, plaintext []byte, recipientDIDs []string) ([]byte, error) {
 	// Just wrap in a simple JSON envelope for testing
-	envelope := map[string]interface{}{
+	envelope := map[string]any{
 		"encrypted_for": recipientDIDs,
 		"ciphertext":    string(plaintext),
 	}
@@ -179,7 +179,7 @@ func (m *mockDecrypter) Decrypt(ctx context.Context, encrypted []byte) ([]byte, 
 		return m.decryptResult, nil
 	}
 	// Parse the mock envelope
-	var envelope map[string]interface{}
+	var envelope map[string]any
 	if err := json.Unmarshal(encrypted, &envelope); err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func TestUnwrapForward(t *testing.T) {
 	}
 
 	// Compare as JSON objects rather than raw bytes (key order may vary)
-	var innerParsed, expectedParsed map[string]interface{}
+	var innerParsed, expectedParsed map[string]any
 	if err := json.Unmarshal(inner, &innerParsed); err != nil {
 		t.Fatalf("failed to parse inner message: %v", err)
 	}

@@ -2,10 +2,10 @@ package sdjwtvc
 
 import (
 	"crypto/sha256"
+	sha30 "crypto/sha3"
 	"crypto/sha512"
+	"hash"
 	"testing"
-
-	"golang.org/x/crypto/sha3"
 )
 
 // TestHashAlgorithmComparison tests all hash comparison functions thoroughly
@@ -25,14 +25,14 @@ func TestHashAlgorithmComparison(t *testing.T) {
 	})
 
 	t.Run("isSHA256_false_with_SHA3_256", func(t *testing.T) {
-		h := sha3.New256()
+		h := hash.Hash(sha30.New256())
 		if isSHA256(h) {
 			t.Error("Expected isSHA256 to return false for SHA3-256 hash")
 		}
 	})
 
 	t.Run("isSHA3_256_true", func(t *testing.T) {
-		h := sha3.New256()
+		h := hash.Hash(sha30.New256())
 		if !isSHA3_256(h) {
 			t.Error("Expected isSHA3_256 to return true for SHA3-256 hash")
 		}
@@ -67,14 +67,14 @@ func TestHashAlgorithmComparison(t *testing.T) {
 	})
 
 	t.Run("isSHA512_false_with_SHA3_512", func(t *testing.T) {
-		h := sha3.New512()
+		h := hash.Hash(sha30.New512())
 		if isSHA512(h) {
 			t.Error("Expected isSHA512 to return false for SHA3-512 hash")
 		}
 	})
 
 	t.Run("isSHA3_512_true", func(t *testing.T) {
-		h := sha3.New512()
+		h := hash.Hash(sha30.New512())
 		if !isSHA3_512(h) {
 			t.Error("Expected isSHA3_512 to return true for SHA3-512 hash")
 		}
@@ -109,7 +109,7 @@ func TestGetHashAlgorithmName_AllCases(t *testing.T) {
 	})
 
 	t.Run("SHA3_256_explicit", func(t *testing.T) {
-		h := sha3.New256()
+		h := hash.Hash(sha30.New256())
 		name, err := getHashAlgorithmName(h)
 		if err != nil {
 			t.Fatalf("getHashAlgorithmName failed: %v", err)
@@ -142,7 +142,7 @@ func TestGetHashAlgorithmName_AllCases(t *testing.T) {
 	})
 
 	t.Run("SHA3_512_explicit", func(t *testing.T) {
-		h := sha3.New512()
+		h := hash.Hash(sha30.New512())
 		name, err := getHashAlgorithmName(h)
 		if err != nil {
 			t.Fatalf("getHashAlgorithmName failed: %v", err)
@@ -227,13 +227,15 @@ func TestMakeCredential_AllBranches(t *testing.T) {
 		}
 
 		data256 := map[string]any{"name": "test"}
-		_, _, err := client.MakeCredential(sha3.New256(), data256, vctm, 1)
+		_, _, err := client.MakeCredential(hash.
+			Hash(sha30.New256()), data256, vctm, 1)
 		if err != nil {
 			t.Fatalf("MakeCredential with SHA3-256 failed: %v", err)
 		}
 
 		data512 := map[string]any{"name": "test"}
-		_, _, err = client.MakeCredential(sha3.New512(), data512, vctm, 1)
+		_, _, err = client.MakeCredential(hash.
+			Hash(sha30.New512()), data512, vctm, 1)
 		if err != nil {
 			t.Fatalf("MakeCredential with SHA3-512 failed: %v", err)
 		}

@@ -22,7 +22,7 @@ func TestGenerateSecureToken_DefaultSize(t *testing.T) {
 	const wantChars = 43
 	const wantBytes = 32
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		token, err := GenerateSecureToken(0, 0)
 		require.NoError(t, err)
 		assert.Len(t, token, wantChars, "default token must be exactly %d chars", wantChars)
@@ -236,7 +236,7 @@ func TestGenerateSecureToken_Uniqueness(t *testing.T) {
 	const iterations = 1000
 	tokens := make(map[string]struct{}, iterations)
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		token, err := GenerateSecureToken(32, 0)
 		require.NoError(t, err)
 		_, dup := tokens[token]

@@ -115,10 +115,7 @@ func CertFingerprint(cert *x509.Certificate) string {
 func FormatFingerprint(fp string) string {
 	var parts []string
 	for i := 0; i < len(fp); i += 2 {
-		end := i + 2
-		if end > len(fp) {
-			end = len(fp)
-		}
+		end := min(i+2, len(fp))
 		parts = append(parts, fp[i:end])
 	}
 	return "SHA256:" + strings.Join(parts, ":")
@@ -257,13 +254,13 @@ func parseDNString(dn string) []dnAttribute {
 		rdnParts := splitUnescaped(component, '+')
 		for _, part := range rdnParts {
 			part = strings.TrimSpace(part)
-			eqIdx := strings.IndexByte(part, '=')
-			if eqIdx < 0 {
+			before, after, ok := strings.Cut(part, "=")
+			if !ok {
 				continue // Malformed RDN, skip
 			}
 
-			attrType := strings.TrimSpace(part[:eqIdx])
-			attrValue := strings.TrimSpace(part[eqIdx+1:])
+			attrType := strings.TrimSpace(before)
+			attrValue := strings.TrimSpace(after)
 
 			attrs = append(attrs, dnAttribute{
 				Type:  normalizeAttrType(attrType),

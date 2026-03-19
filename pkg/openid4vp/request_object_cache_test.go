@@ -107,7 +107,7 @@ func TestRequestObjectCache_MultipleRequestObjects(t *testing.T) {
 	defer cache.Stop()
 
 	// Add multiple request objects
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		requestURI := "urn:ietf:params:oauth:request_uri:test-" + string(rune('0'+i))
 		requestObject := &RequestObject{
 			ResponseType: "vp_token",
@@ -120,7 +120,7 @@ func TestRequestObjectCache_MultipleRequestObjects(t *testing.T) {
 	assert.Equal(t, 5, cache.Len())
 
 	// Verify all are retrievable
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		requestURI := "urn:ietf:params:oauth:request_uri:test-" + string(rune('0'+i))
 		retrieved, found := cache.Get(requestURI)
 		assert.True(t, found)
@@ -170,7 +170,7 @@ func TestRequestObjectCache_ConcurrentAccess(t *testing.T) {
 	numGoroutines := 10
 
 	// Concurrent writes
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -188,7 +188,7 @@ func TestRequestObjectCache_ConcurrentAccess(t *testing.T) {
 	assert.Equal(t, numGoroutines, cache.Len())
 
 	// Concurrent reads
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()

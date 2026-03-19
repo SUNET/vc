@@ -20,13 +20,6 @@ var (
 	ErrNoDocuments = errors.New("no documents in result")
 )
 
-// DB is the interface for the database
-type DB interface {
-	//connect(ctx context.Context) error
-	//Save(ctx context.Context, doc *model.Document) error
-	//Get(ctx context.Context, transactionID string) (*model.Document, error)
-}
-
 // Service is the database service
 type Service struct {
 	MongoClient *mongo.Client
@@ -35,10 +28,10 @@ type Service struct {
 	tracer      *trace.Tracer
 	probeStore  *apiv1_status.StatusProbeStore
 
-	VCDatastoreColl       *VCDatastoreColl
-	VCConsentColl         *VCConsentColl
-	VCUsersColl           *VCUsersColl
-	VCCredentialOfferColl *VCCredentialOfferColl
+	VCDatastoreColl           *VCDatastoreColl
+	VCConsentColl             *VCConsentColl
+	VCUsersColl               *VCUsersColl
+	VCCredentialOfferColl     *VCCredentialOfferColl
 	VCDynamicRegistrationColl *VCDynamicRegistrationColl
 }
 

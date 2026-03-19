@@ -229,10 +229,8 @@ func (t *ReaderTrustList) IsTrusted(chain []*x509.Certificate) error {
 	readerCert := chain[0]
 
 	// Check if directly trusted
-	for _, trusted := range t.trustedCerts {
-		if readerCert.Equal(trusted) {
-			return nil
-		}
+	if slices.ContainsFunc(t.trustedCerts, readerCert.Equal) {
+		return nil
 	}
 
 	// Check if signed by trusted CA

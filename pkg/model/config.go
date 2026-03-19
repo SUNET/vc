@@ -28,8 +28,10 @@ func BoolVal(b *bool, fallback bool) bool {
 
 // BoolPtr returns a pointer to the given bool value.
 // Useful for initializing *bool fields in struct literals.
+//
+//go:fix inline
 func BoolPtr(v bool) *bool {
-	return &v
+	return new(v)
 }
 
 // APIServer holds the HTTP API server configuration

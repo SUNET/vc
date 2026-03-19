@@ -164,7 +164,7 @@ func TestGenerateDecoyDigest(t *testing.T) {
 
 	t.Run("generates_unique_digests", func(t *testing.T) {
 		digests := make(map[string]bool)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			digest, err := generateDecoyDigest(hashMethod)
 			if err != nil {
 				t.Fatalf("generateDecoyDigest failed: %v", err)
@@ -181,7 +181,7 @@ func TestGenerateDecoyDigest(t *testing.T) {
 	})
 
 	t.Run("generates_valid_base64url", func(t *testing.T) {
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			digest, err := generateDecoyDigest(hashMethod)
 			if err != nil {
 				t.Fatalf("generateDecoyDigest failed: %v", err)

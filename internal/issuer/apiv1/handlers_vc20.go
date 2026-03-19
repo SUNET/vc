@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"vc/internal/gen/registry/apiv1_registry"
@@ -159,13 +160,7 @@ func (c *Client) buildVC20CredentialJSON(
 	validUntil *time.Time,
 ) ([]byte, error) {
 	// Ensure VerifiableCredential is in types
-	hasVC := false
-	for _, t := range types {
-		if t == "VerifiableCredential" {
-			hasVC = true
-			break
-		}
-	}
+	hasVC := slices.Contains(types, "VerifiableCredential")
 	if !hasVC {
 		types = append([]string{"VerifiableCredential"}, types...)
 	}

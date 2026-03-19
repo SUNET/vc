@@ -43,7 +43,7 @@ func (s *kafkaMessageProducer) MockNext(mockNextRequest *vcclient.MockNextReques
 	}
 
 	//TODO(mk): make header code below generic and move to kafka client
-	paramType := reflect.TypeOf(mockNextRequest).Elem().Name()
+	paramType := reflect.TypeFor[vcclient.MockNextRequest]().Name()
 	typeHeader := []byte(paramType)
 	headers := []sarama.RecordHeader{
 		{Key: []byte(kafka.TypeOfStructInMessageValue), Value: typeHeader},

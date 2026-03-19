@@ -73,7 +73,7 @@ func TestMessageSerialization(t *testing.T) {
 			message: message.New(
 				message.WithID("test-4"),
 				message.WithType("https://example.org/test/1.0"),
-				message.WithBody(map[string]interface{}{
+				message.WithBody(map[string]any{
 					"content": "Hello, World!",
 					"count":   42,
 				}),
@@ -87,8 +87,8 @@ func TestMessageSerialization(t *testing.T) {
 					message.WithType("https://example.org/test/1.0"),
 					message.WithFrom("did:example:alice"),
 					message.WithTo("did:example:bob"),
-					message.WithBody(map[string]interface{}{
-						"nested": map[string]interface{}{
+					message.WithBody(map[string]any{
+						"nested": map[string]any{
 							"field": "value",
 						},
 					}),
@@ -304,12 +304,12 @@ func TestMessageAttachments(t *testing.T) {
 			t.Fatalf("failed to marshal JSON attachment: %v", err)
 		}
 
-		var content map[string]interface{}
+		var content map[string]any
 		if err := json.Unmarshal(jsonData, &content); err != nil {
 			t.Fatalf("failed to unmarshal JSON attachment: %v", err)
 		}
 
-		nested, ok := content["nested"].(map[string]interface{})
+		nested, ok := content["nested"].(map[string]any)
 		if !ok {
 			t.Fatal("expected nested object")
 		}
@@ -377,18 +377,18 @@ func TestMessageBodyGetSet(t *testing.T) {
 		)
 
 		// Set body
-		body := map[string]interface{}{
+		body := map[string]any{
 			"string_field": "hello",
 			"number_field": 42,
 			"bool_field":   true,
-			"nested": map[string]interface{}{
+			"nested": map[string]any{
 				"inner": "value",
 			},
 		}
 		m.SetBody(body)
 
 		// Get body
-		var retrieved map[string]interface{}
+		var retrieved map[string]any
 		if err := m.GetBody(&retrieved); err != nil {
 			t.Fatalf("failed to get body: %v", err)
 		}
