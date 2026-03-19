@@ -17,11 +17,11 @@ type HealthResponse struct {
 type ReadinessResponse struct {
 	Status        string                   `json:"status"`
 	Timestamp     time.Time                `json:"timestamp"`
-	TSLCount      int                      `json:"tsl_count"`
-	LastProcessed string                   `json:"last_processed,omitempty"`
+	RegistryCount int                      `json:"registry_count"`
+	HealthyCount  int                      `json:"healthy_count"`
 	Ready         bool                     `json:"ready"`
 	Message       string                   `json:"message,omitempty"`
-	TSLs          []map[string]interface{} `json:"tsls,omitempty"` // Only included with ?verbose=true
+	Registries    []map[string]interface{} `json:"registries,omitempty"` // Only included with ?verbose=true
 }
 
 // RegisterHealthEndpoints registers health check endpoints on the given Gin router.
@@ -38,12 +38,12 @@ type ReadinessResponse struct {
 // that the process is alive and can handle requests.
 //
 // The /readyz endpoint checks whether the service has:
-//   - Successfully loaded at least one TSL
-//   - Refreshed registries at least once
+//   - At least one registry configured
+//   - At least one registry reporting healthy
 //
 // If these conditions are not met, it returns 503 Service Unavailable.
 //
-// Use ?verbose=true on /readyz to include detailed TSL summaries in the response.
+// Use ?verbose=true on /readyz to include detailed registry information in the response.
 func RegisterHealthEndpoints(r *gin.Engine, serverCtx *ServerContext) {
 	r.GET("/healthz", HealthHandler(serverCtx))
 	r.GET("/readyz", ReadinessHandler(serverCtx))
@@ -74,13 +74,13 @@ func HealthHandler(serverCtx *ServerContext) gin.HandlerFunc {
 
 // ReadinessHandler godoc
 // @Summary Readiness check
-// @Description Returns ready status if registries have been refreshed and are loaded
+// @Description Returns ready status if at least one healthy registry is configured
 // @Description
 // @Description Query Parameters:
-// @Description - verbose=true: Include detailed TSL information in the response
+// @Description - verbose=true: Include detailed registry information in the response
 // @Tags Health
 // @Produce json
-// @Param verbose query bool false "Include detailed TSL information"
+// @Param verbose query bool false "Include detailed registry information"
 // @Success 200 {object} ReadinessResponse "Service is ready"
 // @Failure 503 {object} ReadinessResponse "Service is not ready"
 // @Router /readyz [get]
@@ -88,43 +88,39 @@ func ReadinessHandler(serverCtx *ServerContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		serverCtx.RLock()
 		registryCount := 0
-		lastProcessed := ""
-		hasProcessed := !serverCtx.LastProcessed.IsZero()
+		healthyCount := 0
 		verbose := c.Query("verbose") == "true"
 
-		if serverCtx.RegistryManager != nil {
-			registryCount = len(serverCtx.RegistryManager.ListRegistries())
-		}
-
-		if hasProcessed {
-			lastProcessed = serverCtx.LastProcessed.Format(time.RFC3339)
-		}
-
-		// Collect detailed registry information if verbose mode requested
+		// Collect registry information
 		var registryInfos []map[string]interface{}
-		if verbose && serverCtx.RegistryManager != nil {
+		if serverCtx.RegistryManager != nil {
 			for _, info := range serverCtx.RegistryManager.ListRegistries() {
-				registryInfos = append(registryInfos, map[string]interface{}{
-					"name":            info.Name,
-					"resource_types":  info.ResourceTypes,
-					"resolution_only": info.ResolutionOnly,
-					"healthy":         info.Healthy,
-				})
+				registryCount++
+				if info.Healthy {
+					healthyCount++
+				}
+				if verbose {
+					registryInfos = append(registryInfos, map[string]interface{}{
+						"name":            info.Name,
+						"type":            info.Type,
+						"resource_types":  info.ResourceTypes,
+						"resolution_only": info.ResolutionOnly,
+						"healthy":         info.Healthy,
+					})
+				}
 			}
 		}
 		serverCtx.RUnlock()
 
-		// Service is ready if:
-		// 1. Registries have been refreshed at least once
-		// 2. At least one registry is available (optional but recommended)
-		isReady := hasProcessed && registryCount > 0
+		// Service is ready if at least one registry is configured and healthy
+		isReady := healthyCount > 0
 
 		response := ReadinessResponse{
 			Timestamp:     time.Now(),
-			TSLCount:      registryCount, // Using TSLCount field for backward compat
-			LastProcessed: lastProcessed,
+			RegistryCount: registryCount,
+			HealthyCount:  healthyCount,
 			Ready:         isReady,
-			TSLs:          registryInfos, // Using TSLs field for backward compat
+			Registries:    registryInfos,
 		}
 
 		if isReady {
@@ -136,15 +132,15 @@ func ReadinessHandler(serverCtx *ServerContext) gin.HandlerFunc {
 				logging.F("endpoint", c.Request.URL.Path),
 				logging.F("verbose", verbose),
 				logging.F("registry_count", registryCount),
-				logging.F("last_processed", lastProcessed))
+				logging.F("healthy_count", healthyCount))
 
 			c.JSON(200, response)
 		} else {
 			response.Status = "not_ready"
-			if !hasProcessed {
-				response.Message = "Registries have not been refreshed yet"
-			} else if registryCount == 0 {
+			if registryCount == 0 {
 				response.Message = "No registries configured"
+			} else {
+				response.Message = "No healthy registries available"
 			}
 
 			serverCtx.Logger.Warn("Readiness check failed",
@@ -153,7 +149,7 @@ func ReadinessHandler(serverCtx *ServerContext) gin.HandlerFunc {
 				logging.F("verbose", verbose),
 				logging.F("reason", response.Message),
 				logging.F("registry_count", registryCount),
-				logging.F("has_processed", hasProcessed))
+				logging.F("healthy_count", healthyCount))
 
 			c.JSON(503, response)
 		}

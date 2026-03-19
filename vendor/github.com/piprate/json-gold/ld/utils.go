@@ -53,8 +53,8 @@ func DeepCompare(v1 interface{}, v2 interface{}, listOrderMatters bool) bool {
 		if len(m1) != len(m2) {
 			return false
 		}
-		for _, key := range GetKeys(m1) {
-			if val2, present := m2[key]; !present || !DeepCompare(m1[key], val2, listOrderMatters) {
+		for key, val1 := range m1 {
+			if val2, present := m2[key]; !present || !DeepCompare(val1, val2, listOrderMatters) {
 				return false
 			}
 		}
@@ -112,6 +112,8 @@ func normalizeValue(v interface{}) string {
 	}
 	if isFloat {
 		return fmt.Sprintf("%f", floatVal)
+	} else if str, isString := v.(string); isString {
+		return str
 	} else {
 		return fmt.Sprintf("%s", v)
 	}
@@ -128,6 +130,10 @@ func deepContains(values []interface{}, value interface{}) bool {
 
 // MergeValue adds a value to a subject. If the value is an array, all values in the array will be added.
 func MergeValue(obj map[string]interface{}, key string, value interface{}) {
+	mergeValue(obj, key, value, false)
+}
+
+func mergeValue(obj map[string]interface{}, key string, value interface{}, assumeNoDuplicates bool) {
 	if obj == nil {
 		return
 	}
@@ -138,7 +144,7 @@ func MergeValue(obj map[string]interface{}, key string, value interface{}) {
 	}
 	valueMap, isMap := value.(map[string]interface{})
 	_, valueContainsList := valueMap["@list"]
-	if key == "@list" || (isMap && valueContainsList) || !deepContains(values, value) {
+	if key == "@list" || (isMap && valueContainsList) || assumeNoDuplicates || !deepContains(values, value) {
 		values = append(values, value)
 	}
 	obj[key] = values

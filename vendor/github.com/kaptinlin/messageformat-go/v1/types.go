@@ -202,81 +202,30 @@ const (
 	PluralKeyModeRelaxed
 )
 
-// Helper functions for creating pointers to option values
-// These functions are needed for number skeleton configurations (UnitConfig, PrecisionConfig, etc.)
-// NOTE: MessageFormatOptions now uses zero-value semantics and does NOT need these helpers
-
-// StringPtr creates a pointer to a string value
-func StringPtr(s string) *string {
-	return &s
-}
-
-// BoolPtr creates a pointer to a bool value
-func BoolPtr(b bool) *bool {
-	return &b
-}
-
-// IntPtr creates a pointer to an int value
-func IntPtr(i int) *int {
-	return &i
-}
-
-// Float64Ptr creates a pointer to a float64 value
-func Float64Ptr(f float64) *float64 {
-	return &f
-}
-
-// ReturnTypePtr creates a pointer to a ReturnType value
-func ReturnTypePtr(rt ReturnType) *ReturnType {
-	return &rt
-}
-
-// SignDisplayPtr creates a pointer to a SignDisplay value
-func SignDisplayPtr(sd SignDisplay) *SignDisplay {
-	return &sd
-}
-
-// GroupDisplayPtr creates a pointer to a GroupDisplay value
-func GroupDisplayPtr(gd GroupDisplay) *GroupDisplay {
-	return &gd
-}
-
-// DecimalDisplayPtr creates a pointer to a DecimalDisplay value
-func DecimalDisplayPtr(dd DecimalDisplay) *DecimalDisplay {
-	return &dd
-}
-
-// UnitStylePtr creates a pointer to a UnitStyle value
-func UnitStylePtr(us UnitStyle) *UnitStyle {
-	return &us
-}
-
-// NotationStylePtr creates a pointer to a NotationStyle value
-func NotationStylePtr(ns NotationStyle) *NotationStyle {
-	return &ns
-}
-
-// RoundingModePtr creates a pointer to a RoundingMode value
-func RoundingModePtr(rm RoundingMode) *RoundingMode {
-	return &rm
-}
-
-// UnitWidthPtr creates a pointer to a UnitWidth value
-func UnitWidthPtr(uw UnitWidth) *UnitWidth {
-	return &uw
-}
-
-// PrecisionStylePtr creates a pointer to a PrecisionStyle value
-func PrecisionStylePtr(ps PrecisionStyle) *PrecisionStyle {
-	return &ps
-}
-
-// TrailingZeroDisplayPtr creates a pointer to a TrailingZeroDisplay value
-func TrailingZeroDisplayPtr(tzd TrailingZeroDisplay) *TrailingZeroDisplay {
-	return &tzd
-}
-
-// RoundingPriorityPtr creates a pointer to a RoundingPriority value
-func RoundingPriorityPtr(rp RoundingPriority) *RoundingPriority {
-	return &rp
+// Ptr returns a pointer to the given value.
+//
+// This is a generic helper function for creating pointers to any type.
+// It's particularly useful when you need to pass pointer values to optional
+// struct fields or function parameters.
+//
+// Examples:
+//
+//	// With type constants
+//	signDisplay := Ptr(SignAuto)
+//	groupDisplay := Ptr(GroupOff)
+//
+//	// With literal values
+//	name := Ptr("John")
+//	age := Ptr(25)
+//	enabled := Ptr(true)
+//
+//	// In struct initialization
+//	config := Config{
+//	    ReturnType: Ptr(ReturnTypeValues),
+//	    Strict:     Ptr(true),
+//	}
+//
+//go:fix inline
+func Ptr[T any](v T) *T {
+	return &v
 }

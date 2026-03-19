@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
+	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
 
 // FileFormat represents the format of a ruleset file
@@ -121,10 +122,8 @@ func loadText(r io.Reader, opts LoadOptions) ([]sexp.Element, error) {
 		var err error
 
 		if opts.Format == FormatAdvanced {
-			// Convert advanced form to canonical, then parse
-			canonical := advancedToCanonical(line)
-			parser := sexp.NewParser(canonical)
-			elem, err = parser.Parse()
+			// Parse advanced form directly into sexp.Element (handles star-forms)
+			elem, err = parseAdvanced(line)
 		} else {
 			// Parse canonical form directly
 			parser := sexp.NewParser(line)
@@ -350,102 +349,202 @@ func isBinaryFile(filename string) bool {
 		strings.HasSuffix(filename, ".bin")
 }
 
-// advancedToCanonical converts advanced form to canonical form
-// This is a simple implementation - for production use, you might want
-// a more sophisticated parser
-func advancedToCanonical(advanced string) string {
-	// Remove outer parentheses if present
-	advanced = strings.TrimSpace(advanced)
-	if strings.HasPrefix(advanced, "(") && strings.HasSuffix(advanced, ")") {
-		advanced = advanced[1 : len(advanced)-1]
+// parseAdvanced parses a human-readable advanced-form S-expression string
+// directly into a sexp.Element tree, without going through canonical form.
+// This replaces the old advancedToCanonical + sexp.NewParser two-step approach
+// which was incomplete for deeply nested expressions.
+//
+// The advanced format is:
+//
+//	atom            → any whitespace-delimited token without parens
+//	list            → "(" atom element* ")"
+//	star-wildcard   → "(*)"
+//	star-range      → "(* range <type> <op> <val> [<op> <val>])"
+//	star-prefix     → "(* prefix <value>)"
+//	star-suffix     → "(* suffix <value>)"
+//	star-set        → "(* set <element>...)"
+func parseAdvanced(s string) (sexp.Element, error) {
+	s = strings.TrimSpace(s)
+	tokens := advTokenize(s)
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("empty expression")
 	}
-
-	// Split into tokens
-	tokens := tokenize(advanced)
-
-	// Convert to canonical
-	return tokensToCanonical(tokens)
+	elem, rest, err := advParseElement(tokens)
+	if err != nil {
+		return nil, err
+	}
+	if len(rest) > 0 {
+		return nil, fmt.Errorf("unexpected trailing tokens: %v", rest)
+	}
+	return elem, nil
 }
 
-func tokenize(s string) []string {
+// advTokenize splits an advanced-form string into a flat list of string tokens.
+// Sub-expressions in parens are kept as single opaque tokens (with parens).
+// Quoted strings are kept as single tokens (including the quote characters).
+func advTokenize(s string) []string {
 	var tokens []string
 	var current strings.Builder
 	depth := 0
 	inQuote := false
 
-	for i, ch := range s {
-		switch ch {
-		case '(':
-			if !inQuote {
-				if current.Len() > 0 {
-					tokens = append(tokens, current.String())
-					current.Reset()
-				}
-				depth++
-				current.WriteRune(ch)
-			} else {
-				current.WriteRune(ch)
-			}
-		case ')':
-			if !inQuote {
-				current.WriteRune(ch)
-				depth--
-				if depth == 0 {
-					tokens = append(tokens, current.String())
-					current.Reset()
-				}
-			} else {
-				current.WriteRune(ch)
-			}
-		case '"':
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+		switch {
+		case ch == '"':
 			inQuote = !inQuote
 			current.WriteRune(ch)
-		case ' ', '\t', '\n', '\r':
-			if !inQuote && depth == 0 {
+		case inQuote:
+			current.WriteRune(ch)
+		case ch == '(':
+			if depth > 0 {
+				current.WriteRune(ch)
+			} else {
 				if current.Len() > 0 {
 					tokens = append(tokens, current.String())
 					current.Reset()
 				}
-			} else {
 				current.WriteRune(ch)
+			}
+			depth++
+		case ch == ')':
+			current.WriteRune(ch)
+			depth--
+			if depth == 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		case ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r':
+			if depth > 0 {
+				current.WriteRune(ch)
+			} else if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
 			}
 		default:
 			current.WriteRune(ch)
 		}
-
-		// Handle last character
-		if i == len(s)-1 && current.Len() > 0 {
-			tokens = append(tokens, current.String())
-		}
 	}
-
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
 	return tokens
 }
 
-func tokensToCanonical(tokens []string) string {
+// advParseElement parses the first element from tokens and returns it along
+// with the remaining unconsumed tokens.
+func advParseElement(tokens []string) (sexp.Element, []string, error) {
 	if len(tokens) == 0 {
+		return nil, nil, fmt.Errorf("unexpected end of tokens")
+	}
+	tok := tokens[0]
+	if !strings.HasPrefix(tok, "(") {
+		// Plain atom
+		return sexp.NewAtom(tok), tokens[1:], nil
+	}
+	// It's a list — strip the outer parens and tokenize its contents
+	inner := strings.TrimSpace(tok[1 : len(tok)-1])
+	innerTokens := advTokenize(inner)
+	if len(innerTokens) == 0 {
+		return nil, nil, fmt.Errorf("empty list")
+	}
+	tag := innerTokens[0]
+	if tag == "*" {
+		// Star form
+		elem, err := advParseStarForm(innerTokens[1:])
+		if err != nil {
+			return nil, nil, err
+		}
+		return elem, tokens[1:], nil
+	}
+	// Regular list: tag + elements
+	var elems []sexp.Element
+	rest := innerTokens[1:]
+	for len(rest) > 0 {
+		var elem sexp.Element
+		var err error
+		elem, rest, err = advParseElement(rest)
+		if err != nil {
+			return nil, nil, err
+		}
+		elems = append(elems, elem)
+	}
+	return sexp.NewList(tag, elems...), tokens[1:], nil
+}
+
+// advParseStarForm constructs the appropriate starform type from the tokens
+// that follow the "*" tag inside a star-form list.
+func advParseStarForm(args []string) (sexp.Element, error) {
+	if len(args) == 0 {
+		return &starform.Wildcard{}, nil
+	}
+	switch args[0] {
+	case "range":
+		return advParseRange(args[1:])
+	case "prefix":
+		if len(args) != 2 {
+			return nil, fmt.Errorf("prefix star-form expects 1 argument, got %d", len(args)-1)
+		}
+		return &starform.Prefix{Value: args[1]}, nil
+	case "suffix":
+		if len(args) != 2 {
+			return nil, fmt.Errorf("suffix star-form expects 1 argument, got %d", len(args)-1)
+		}
+		return &starform.Suffix{Value: args[1]}, nil
+	case "set":
+		var elems []sexp.Element
+		rest := args[1:]
+		for len(rest) > 0 {
+			elem, remaining, err := advParseElement(rest)
+			if err != nil {
+				return nil, err
+			}
+			elems = append(elems, elem)
+			rest = remaining
+		}
+		return &starform.Set{Elements: elems}, nil
+	default:
+		return nil, fmt.Errorf("unknown star-form type: %q", args[0])
+	}
+}
+
+// advParseRange parses the contents of a range star-form: <type> (<op> <val>)...
+func advParseRange(args []string) (sexp.Element, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("range star-form requires a type argument")
+	}
+	r := &starform.Range{RangeType: starform.RangeType(args[0])}
+	i := 1
+	for i+1 < len(args) {
+		op := starform.RangeOp(args[i])
+		val := args[i+1]
+		bound := &starform.RangeBound{Op: op, Value: val}
+		switch op {
+		case starform.OpGE, starform.OpGT:
+			r.LowerBound = bound
+		case starform.OpLE, starform.OpLT:
+			r.UpperBound = bound
+		default:
+			return nil, fmt.Errorf("unknown range operator: %q", op)
+		}
+		i += 2
+	}
+	return r, nil
+}
+
+// advancedToCanonical converts advanced form to canonical form.
+// Kept for backward compatibility with saveAdvanced; new loading code uses
+// parseAdvanced directly.
+func advancedToCanonical(advanced string) string {
+	elem, err := parseAdvanced(advanced)
+	if err != nil {
 		return ""
 	}
+	return elem.String()
+}
 
-	// Single token
-	if len(tokens) == 1 {
-		token := tokens[0]
-		if strings.HasPrefix(token, "(") {
-			return tokensToCanonical(tokenize(token[1 : len(token)-1]))
-		}
-		return fmt.Sprintf("%d:%s", len(token), token)
-	}
-
-	// Multiple tokens form a list
-	var buf strings.Builder
-	buf.WriteString("(")
-	for _, token := range tokens {
-		if strings.HasPrefix(token, "(") {
-			buf.WriteString(tokensToCanonical(tokenize(token[1 : len(token)-1])))
-		} else {
-			buf.WriteString(fmt.Sprintf("%d:%s", len(token), token))
-		}
-	}
-	buf.WriteString(")")
-	return buf.String()
+// tokenize splits a string into tokens (kept for tests that reference it).
+func tokenize(s string) []string {
+	return advTokenize(s)
 }

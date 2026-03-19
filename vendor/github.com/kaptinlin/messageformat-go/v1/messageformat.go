@@ -141,16 +141,24 @@ package v1
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 )
 
+// Performance optimization constants
+const (
+	// estimatedValueCapacity is the estimated capacity for variable values in string building
+	// Based on typical variable value lengths in message formatting
+	estimatedValueCapacity = 20
+)
+
 // MessageFunction represents a compiled message function
-type MessageFunction func(param interface{}) (interface{}, error)
+type MessageFunction func(param any) (any, error)
 
 // CustomFormatter represents a custom formatting function
-type CustomFormatter func(value interface{}, locale string, arg *string) interface{}
+type CustomFormatter func(value any, locale string, arg *string) any
 
 // CustomFormatterConfig represents configuration for a custom formatter
 // TypeScript original code:
@@ -158,9 +166,9 @@ type CustomFormatter func(value interface{}, locale string, arg *string) interfa
 //	{ formatter: CustomFormatter; arg?: 'string' | 'raw' | 'options'; id?: string; module?: string | ((locale: string) => string) }
 type CustomFormatterConfig struct {
 	Formatter CustomFormatter
-	Arg       string      // "string" | "raw" | "options" (empty string for default)
-	ID        string      // Identifier (empty string for default)
-	Module    interface{} // string or func(locale string) string
+	Arg       string // "string" | "raw" | "options" (empty string for default)
+	ID        string // Identifier (empty string for default)
+	Module    any    // string or func(locale string) string
 }
 
 // MessageFormatOptions represents options for the MessageFormat constructor
@@ -181,7 +189,7 @@ type MessageFormatOptions struct {
 
 	// Map of custom formatting functions to include
 	// Default: nil (zero value)
-	CustomFormatters map[string]interface{} `json:"customFormatters,omitempty"`
+	CustomFormatters map[string]any `json:"customFormatters,omitempty"`
 
 	// Used to identify and map keys to locale identifiers
 	// Return empty string for null/undefined (following TypeScript pattern)
@@ -210,7 +218,7 @@ type MessageFormatOptionsWithDefaults struct {
 	BiDiSupport         bool                    `json:"biDiSupport"`
 	Currency            string                  `json:"currency"`
 	TimeZone            string                  `json:"timeZone"`
-	CustomFormatters    map[string]interface{}  `json:"customFormatters"`
+	CustomFormatters    map[string]any          `json:"customFormatters"`
 	LocaleCodeFromKey   func(key string) string `json:"-"`
 	RequireAllArguments bool                    `json:"requireAllArguments"`
 	ReturnType          ReturnType              `json:"returnType"`
@@ -261,7 +269,7 @@ func Escape(str string, octothorpe bool) string {
 // has built-in plural category support.
 // TypeScript original code:
 // static supportedLocalesOf(locales: string | string[]) { return la.filter(hasPlural); }
-func SupportedLocalesOf(locales interface{}) ([]string, error) {
+func SupportedLocalesOf(locales any) ([]string, error) {
 	var localeArray []string
 
 	switch l := locales.(type) {
@@ -269,7 +277,7 @@ func SupportedLocalesOf(locales interface{}) ([]string, error) {
 		localeArray = []string{l}
 	case []string:
 		localeArray = l
-	case []interface{}:
+	case []any:
 		// Handle generic slice conversion
 		localeArray = make([]string, 0, len(l))
 		for _, item := range l {
@@ -302,20 +310,19 @@ func hasPlural(locale string) bool {
 	}
 
 	if len(locale) >= 2 {
-		// Extract language part (before hyphen or underscore)
-		lang := strings.Split(strings.Split(locale, "-")[0], "_")[0]
+		// Extract language part (before hyphen or underscore) using strings.Cut (Go 1.20+)
+		lang, _, _ := strings.Cut(locale, "-")
+		lang, _, _ = strings.Cut(lang, "_")
 
-		for _, supported := range supportedLocales {
-			if lang == supported {
-				return true
-			}
+		if slices.Contains(supportedLocales, lang) {
+			return true
 		}
 	}
 	return false
 }
 
 // getPlural gets the plural object for a locale using proper CLDR rules
-func getPlural(locale interface{}) *PluralObject {
+func getPlural(locale any) *PluralObject {
 	switch l := locale.(type) {
 	case string:
 		pluralObj, err := GetPlural(l)
@@ -324,7 +331,6 @@ func getPlural(locale interface{}) *PluralObject {
 		}
 		// If locale is unsupported, fallback to default locale
 		if !hasPlural(l) {
-			// Use default locale for unsupported locales
 			fallbackObj, fallbackErr := GetPlural(DefaultLocale)
 			if fallbackErr == nil {
 				return &fallbackObj
@@ -339,7 +345,7 @@ func getPlural(locale interface{}) *PluralObject {
 			Locale:    l,
 			Cardinals: []PluralCategory{PluralOne, PluralOther},
 			Ordinals:  []PluralCategory{PluralOne, PluralOther},
-			Func: func(value interface{}, ord ...bool) (PluralCategory, error) {
+			Func: func(value any, ord ...bool) (PluralCategory, error) {
 				// Simple English-like rules as fallback
 				num, err := toNumber(value)
 				if err != nil {
@@ -361,8 +367,9 @@ func getPlural(locale interface{}) *PluralObject {
 			Ordinals:  []PluralCategory{PluralOther},
 			Func:      l,
 		}
+	default:
+		return nil
 	}
-	return nil
 }
 
 // getAllPlurals gets all available plurals (simplified implementation)
@@ -382,7 +389,7 @@ func getAllPlurals(defaultLocale string) []PluralObject {
 // If locale is nil, it will fall back to DefaultLocale.
 // TypeScript original code:
 // constructor(locale: string | PluralFunction | Array<string | PluralFunction> | null, options?: MessageFormatOptions<ReturnType>)
-func New(locale interface{}, options *MessageFormatOptions) (*MessageFormat, error) {
+func New(locale any, options *MessageFormatOptions) (*MessageFormat, error) {
 	mf := &MessageFormat{}
 
 	// Apply options with zero-value semantics and defaults
@@ -424,17 +431,13 @@ func New(locale interface{}, options *MessageFormatOptions) (*MessageFormat, err
 
 	// Handle locale parameter
 	// Check for PluralFunction first - need to check the function signature
-	if fn, ok := locale.(func(interface{}, ...bool) (PluralCategory, error)); ok {
-		// Convert to PluralFunction type
+	if fn, ok := locale.(func(any, ...bool) (PluralCategory, error)); ok {
 		pf := PluralFunction(fn)
-		pl := getPlural(pf)
-		if pl != nil {
+		if pl := getPlural(pf); pl != nil {
 			mf.plurals = []PluralObject{*pl}
 		}
 	} else if pf, ok := locale.(PluralFunction); ok {
-		// Already a PluralFunction type
-		pl := getPlural(pf)
-		if pl != nil {
+		if pl := getPlural(pf); pl != nil {
 			mf.plurals = []PluralObject{*pl}
 		}
 	} else {
@@ -442,23 +445,18 @@ func New(locale interface{}, options *MessageFormatOptions) (*MessageFormat, err
 		case string:
 			if l == "*" {
 				mf.plurals = getAllPlurals(DefaultLocale)
-			} else {
-				pl := getPlural(l)
-				if pl != nil {
-					mf.plurals = []PluralObject{*pl}
-				}
+			} else if pl := getPlural(l); pl != nil {
+				mf.plurals = []PluralObject{*pl}
 			}
-		case []interface{}:
+		case []any:
 			for _, item := range l {
-				pl := getPlural(item)
-				if pl != nil {
+				if pl := getPlural(item); pl != nil {
 					mf.plurals = append(mf.plurals, *pl)
 				}
 			}
 		case []string:
 			for _, item := range l {
-				pl := getPlural(item)
-				if pl != nil {
+				if pl := getPlural(item); pl != nil {
 					mf.plurals = append(mf.plurals, *pl)
 				}
 			}
@@ -467,8 +465,7 @@ func New(locale interface{}, options *MessageFormatOptions) (*MessageFormat, err
 		default:
 			// Try as single locale string
 			if str, ok := l.(string); ok {
-				pl := getPlural(str)
-				if pl != nil {
+				if pl := getPlural(str); pl != nil {
 					mf.plurals = []PluralObject{*pl}
 				}
 			}
@@ -477,8 +474,7 @@ func New(locale interface{}, options *MessageFormatOptions) (*MessageFormat, err
 
 	// Ensure at least one plural object
 	if len(mf.plurals) == 0 {
-		pl := getPlural(DefaultLocale)
-		if pl != nil {
+		if pl := getPlural(DefaultLocale); pl != nil {
 			mf.plurals = []PluralObject{*pl}
 		}
 	}
@@ -530,7 +526,7 @@ func (mf *MessageFormat) Compile(message string) (MessageFunction, error) {
 	}
 
 	// Return compiled message function (standard path)
-	return func(param interface{}) (interface{}, error) {
+	return func(param any) (any, error) {
 		result, err := mf.executeTokens(tokens, param, pluralObj)
 		if err != nil {
 			return nil, fmt.Errorf("execution error: %w", err)
@@ -655,13 +651,13 @@ func (mf *MessageFormat) createSimpleInterpolationFastPath(tokens []Token) Messa
 	}
 
 	// Return optimized function
-	return func(param interface{}) (interface{}, error) {
+	return func(param any) (any, error) {
 		// Fast parameter conversion
-		var paramMap map[string]interface{}
+		var paramMap map[string]any
 		var needsCleanup bool
 
 		switch p := param.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			paramMap = p
 		case map[string]string:
 			paramMap = getPooledParamMap()
@@ -670,7 +666,7 @@ func (mf *MessageFormat) createSimpleInterpolationFastPath(tokens []Token) Messa
 				paramMap[k] = v
 			}
 		case nil:
-			paramMap = make(map[string]interface{})
+			paramMap = make(map[string]any)
 		default:
 			return nil, WrapInvalidParamType(fmt.Sprintf("%T", param))
 		}
@@ -681,7 +677,7 @@ func (mf *MessageFormat) createSimpleInterpolationFastPath(tokens []Token) Messa
 
 		// Handle ReturnType values - TypeScript compatibility
 		if mf.options.ReturnType == ReturnTypeValues {
-			var result []interface{}
+			var result []any
 			for _, info := range pattern {
 				if info.isContent {
 					result = append(result, info.content)
@@ -703,7 +699,7 @@ func (mf *MessageFormat) createSimpleInterpolationFastPath(tokens []Token) Messa
 			if info.isContent {
 				capacity += len(info.content)
 			} else {
-				capacity += 20 // Estimate for variable values
+				capacity += estimatedValueCapacity
 			}
 		}
 
@@ -776,13 +772,13 @@ func (mf *MessageFormat) createBasicPluralFastPath(tokens []Token) MessageFuncti
 	}
 
 	// Return optimized function
-	return func(param interface{}) (interface{}, error) {
+	return func(param any) (any, error) {
 		// Fast parameter conversion
-		var paramMap map[string]interface{}
+		var paramMap map[string]any
 		var needsCleanup bool
 
 		switch p := param.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			paramMap = p
 		case map[string]string:
 			paramMap = getPooledParamMap()
@@ -890,7 +886,7 @@ func (mf *MessageFormat) createBasicPluralFastPath(tokens []Token) MessageFuncti
 
 		// Handle ReturnType values - TypeScript compatibility
 		if mf.options.ReturnType == ReturnTypeValues {
-			var result []interface{}
+			var result []any
 			for _, info := range selectedPattern {
 				if info.isContent {
 					result = append(result, info.content)
@@ -918,9 +914,9 @@ func (mf *MessageFormat) createBasicPluralFastPath(tokens []Token) MessageFuncti
 // TypeScript original code:
 // token(token: Token, pluralToken: Select | null)
 type ExecutionContext struct {
-	PluralContext *Select                // Current plural/selectordinal context for octothorpe processing
-	Locale        string                 // Current locale for number formatting
-	ParamMap      map[string]interface{} // Parameter values
+	PluralContext *Select        // Current plural/selectordinal context for octothorpe processing
+	Locale        string         // Current locale for number formatting
+	ParamMap      map[string]any // Parameter values
 }
 
 // reset clears the context for reuse in pooling
@@ -934,22 +930,22 @@ func (ctx *ExecutionContext) reset() {
 var (
 	// contextPool pools ExecutionContext objects to reduce allocations
 	contextPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return &ExecutionContext{}
 		},
 	}
 
 	// builderPool pools strings.Builder objects for string concatenation
 	builderPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return &strings.Builder{}
 		},
 	}
 
 	// paramMapPool pools parameter maps to avoid repeated allocations
 	paramMapPool = sync.Pool{
-		New: func() interface{} {
-			return make(map[string]interface{}, 8) // Pre-allocate for 8 params
+		New: func() any {
+			return make(map[string]any, 8) // Pre-allocate for 8 params
 		},
 	}
 )
@@ -977,21 +973,21 @@ func putPooledBuilder(builder *strings.Builder) {
 }
 
 // getPooledParamMap gets a pooled parameter map
-func getPooledParamMap() map[string]interface{} {
-	return paramMapPool.Get().(map[string]interface{})
+func getPooledParamMap() map[string]any {
+	return paramMapPool.Get().(map[string]any)
 }
 
 // putPooledParamMap returns a parameter map to the pool after clearing it
-func putPooledParamMap(paramMap map[string]interface{}) {
+func putPooledParamMap(paramMap map[string]any) {
 	// Clear the map for reuse (Go 1.21+ built-in)
 	clear(paramMap)
 	paramMapPool.Put(paramMap)
 }
 
 // convertParameters efficiently converts parameters to map[string]interface{} with minimal allocations
-func convertParameters(param interface{}) (map[string]interface{}, bool) {
+func convertParameters(param any) (map[string]any, bool) {
 	switch p := param.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		// Perfect case - no conversion needed
 		return p, false // false = not pooled, don't return to pool
 
@@ -1016,18 +1012,18 @@ func convertParameters(param interface{}) (map[string]interface{}, bool) {
 }
 
 // executeTokens executes parsed tokens with given parameters
-func (mf *MessageFormat) executeTokens(tokens []Token, param interface{}, plural *PluralObject) (interface{}, error) {
+func (mf *MessageFormat) executeTokens(tokens []Token, param any, plural *PluralObject) (any, error) {
 	return mf.executeTokensWithContext(tokens, param, plural, nil)
 }
 
 // executeTokensWithContext executes parsed tokens with execution context
-func (mf *MessageFormat) executeTokensWithContext(tokens []Token, param interface{}, plural *PluralObject, context *ExecutionContext) (interface{}, error) {
+func (mf *MessageFormat) executeTokensWithContext(tokens []Token, param any, plural *PluralObject, context *ExecutionContext) (any, error) {
 	// TypeScript original code:
 	// if (this.options.returnType === 'values') return values array
 	// else return concatenated string
 
 	if mf.options.ReturnType == ReturnTypeValues {
-		var result []interface{}
+		var result []any
 
 		// Convert parameters efficiently using pooling
 		paramMap, isPooled := convertParameters(param)
@@ -1108,7 +1104,7 @@ func (mf *MessageFormat) executeTokensWithContext(tokens []Token, param interfac
 					return nil, err
 				}
 
-				if nestedArray, ok := caseResult.([]interface{}); ok {
+				if nestedArray, ok := caseResult.([]any); ok {
 					result = append(result, nestedArray...)
 				} else {
 					result = append(result, caseResult)
@@ -1272,7 +1268,7 @@ func (mf *MessageFormat) executeTokensWithContext(tokens []Token, param interfac
 }
 
 // formatValue formats a value using the specified formatter
-func (mf *MessageFormat) formatValue(value interface{}, key string, param []Token, _ map[string]interface{}, _ *PluralObject) (string, error) {
+func (mf *MessageFormat) formatValue(value any, key string, param []Token, _ map[string]any, _ *PluralObject) (string, error) {
 	switch strings.ToLower(key) {
 	case "number":
 		return fmt.Sprintf("%v", value), nil
@@ -1303,7 +1299,7 @@ func (mf *MessageFormat) formatValue(value interface{}, key string, param []Toke
 				}
 				result := f.Formatter(value, mf.plurals[0].Locale, argStr)
 				return fmt.Sprintf("%v", result), nil
-			case func(interface{}, string, *string) interface{}:
+			case func(any, string, *string) any:
 				// Handle function type directly
 				var argStr *string
 				if len(param) > 0 {
@@ -1321,7 +1317,7 @@ func (mf *MessageFormat) formatValue(value interface{}, key string, param []Toke
 }
 
 // selectCase selects the appropriate case from a select statement
-func (mf *MessageFormat) selectCase(sel *Select, paramMap map[string]interface{}, plural *PluralObject) (*SelectCase, error) {
+func (mf *MessageFormat) selectCase(sel *Select, paramMap map[string]any, plural *PluralObject) (*SelectCase, error) {
 	value, exists := paramMap[sel.Arg]
 	if !exists {
 		// Find "other" case
@@ -1406,7 +1402,7 @@ func (mf *MessageFormat) selectCase(sel *Select, paramMap map[string]interface{}
 //	export function number(lc: string, value: number, offset: number) {
 //	  return _nf(lc).format(value - offset);
 //	}
-func (mf *MessageFormat) numberFormatter(locale string, value interface{}, offset int) (string, error) {
+func (mf *MessageFormat) numberFormatter(locale string, value any, offset int) (string, error) {
 	// Convert value to number
 	var num float64
 	switch v := value.(type) {
@@ -1425,7 +1421,7 @@ func (mf *MessageFormat) numberFormatter(locale string, value interface{}, offse
 		}
 		num = parsed
 	default:
-		return "", WrapUnsupportedType(fmt.Sprintf("%T", value))
+		return "", WrapInvalidType(fmt.Sprintf("%T", value))
 	}
 
 	// Apply offset
@@ -1435,10 +1431,7 @@ func (mf *MessageFormat) numberFormatter(locale string, value interface{}, offse
 	// Note: v1 is maintenance-only. For full locale support, use v2 (MessageFormat 2.0)
 	_ = locale // locale parameter reserved for future enhancement if needed
 	if result == float64(int64(result)) {
-		// Integer formatting
 		return fmt.Sprintf("%.0f", result), nil
-	} else {
-		// Decimal formatting
-		return fmt.Sprintf("%g", result), nil
 	}
+	return fmt.Sprintf("%g", result), nil
 }

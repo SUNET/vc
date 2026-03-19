@@ -2,14 +2,13 @@ package api
 
 import (
 	"sync"
-	"time"
 
 	"github.com/sirosfoundation/g119612/pkg/logging"
 	"github.com/sirosfoundation/go-trust/pkg/registry"
 )
 
 // ServerContext holds the shared state for the API server, including the registry manager.
-// It provides thread-safe access to trust registries and tracks when data was last processed.
+// It provides thread-safe access to trust registries.
 // This struct is used by API handlers to access the current state of trust registries
 // for making trust decisions.
 //
@@ -18,7 +17,6 @@ import (
 type ServerContext struct {
 	mu              sync.RWMutex              // Mutex for thread-safe access
 	RegistryManager *registry.RegistryManager // Multi-registry manager
-	LastProcessed   time.Time                 // Timestamp when data was last processed
 	Logger          logging.Logger            // Logger for API operations (never nil)
 	RateLimiter     *RateLimiter              // Rate limiter for API endpoints (optional)
 	Metrics         *Metrics                  // Prometheus metrics (optional)
@@ -65,7 +63,6 @@ func (s *ServerContext) WithLogger(logger logging.Logger) *ServerContext {
 
 	return &ServerContext{
 		RegistryManager: s.RegistryManager,
-		LastProcessed:   s.LastProcessed,
 		Logger:          logger,
 		RateLimiter:     s.RateLimiter,
 		Metrics:         s.Metrics,

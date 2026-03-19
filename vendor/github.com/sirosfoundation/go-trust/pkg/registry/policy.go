@@ -24,15 +24,18 @@ type Policy struct {
 
 	// ETSI contains ETSI TSL-specific constraints
 	ETSI *ETSIPolicyConstraints `json:"etsi,omitempty" yaml:"etsi,omitempty"`
+
+	// DID contains DID method-specific constraints (did:web, did:webvh)
+	DID *DIDPolicyConstraints `json:"did,omitempty" yaml:"did,omitempty"`
+
+	// MDOCIACA contains mDOC IACA-specific constraints
+	MDOCIACA *MDOCIACAPolicyConstraints `json:"mdociaca,omitempty" yaml:"mdociaca,omitempty"`
 }
 
 // PolicyConstraints contains registry-agnostic trust constraints.
 type PolicyConstraints struct {
-	// RequireKeyBinding requires that a key be provided and validated.
-	// If false, resolution-only requests are allowed.
-	RequireKeyBinding bool `json:"require_key_binding,omitempty" yaml:"require_key_binding,omitempty"`
-
-	// AllowedKeyTypes restricts accepted key types (e.g., ["x5c", "jwk"])
+	// AllowedKeyTypes restricts accepted resource types (e.g., ["jwk", "x5c"]).
+	// If non-empty, requests with a resource.type not in this list are rejected.
 	AllowedKeyTypes []string `json:"allowed_key_types,omitempty" yaml:"allowed_key_types,omitempty"`
 }
 
@@ -58,6 +61,38 @@ type ETSIPolicyConstraints struct {
 
 	// Countries filters by country codes (e.g., ["DE", "FR"])
 	Countries []string `json:"countries,omitempty" yaml:"countries,omitempty"`
+}
+
+// DIDPolicyConstraints contains DID method-specific constraints.
+// These apply to both did:web and did:webvh registries.
+type DIDPolicyConstraints struct {
+	// AllowedDomains restricts DIDs to specific domains.
+	// Supports wildcards: "*.example.com" matches "sub.example.com"
+	// If empty, all domains are allowed.
+	AllowedDomains []string `json:"allowed_domains,omitempty" yaml:"allowed_domains,omitempty"`
+
+	// RequiredVerificationMethods requires specific verification method types.
+	// E.g., ["Ed25519VerificationKey2020", "JsonWebKey2020"]
+	RequiredVerificationMethods []string `json:"required_verification_methods,omitempty" yaml:"required_verification_methods,omitempty"`
+
+	// RequiredServices requires specific service types in the DID document.
+	// E.g., ["LinkedDomains", "CredentialRegistry"]
+	RequiredServices []string `json:"required_services,omitempty" yaml:"required_services,omitempty"`
+
+	// RequireVerifiableHistory (did:webvh only) requires valid verifiable history.
+	// When true, DIDs without valid cryptographic history are rejected.
+	RequireVerifiableHistory bool `json:"require_verifiable_history,omitempty" yaml:"require_verifiable_history,omitempty"`
+}
+
+// MDOCIACAPolicyConstraints contains mDOC IACA-specific constraints.
+type MDOCIACAPolicyConstraints struct {
+	// IssuerAllowlist restricts to specific credential issuers.
+	// If empty, all issuers with valid IACAs are trusted.
+	IssuerAllowlist []string `json:"issuer_allowlist,omitempty" yaml:"issuer_allowlist,omitempty"`
+
+	// RequireIACAEndpoint requires the issuer to publish mdoc_iacas_uri.
+	// When true, issuers without IACA endpoints are rejected.
+	RequireIACAEndpoint bool `json:"require_iaca_endpoint,omitempty" yaml:"require_iaca_endpoint,omitempty"`
 }
 
 // PolicyManager manages trust policies and routes requests based on action.name.
@@ -159,4 +194,43 @@ func (pc *PolicyContext) GetETSIServiceTypes() []string {
 		return nil
 	}
 	return pc.Policy.ETSI.ServiceTypes
+}
+
+// HasDIDConstraints returns true if the policy has DID-specific constraints.
+func (pc *PolicyContext) HasDIDConstraints() bool {
+	return pc.Policy != nil && pc.Policy.DID != nil
+}
+
+// GetDIDAllowedDomains returns allowed domains from the policy, or nil.
+func (pc *PolicyContext) GetDIDAllowedDomains() []string {
+	if pc.Policy == nil || pc.Policy.DID == nil {
+		return nil
+	}
+	return pc.Policy.DID.AllowedDomains
+}
+
+// GetDIDRequiredServices returns required services from the policy, or nil.
+func (pc *PolicyContext) GetDIDRequiredServices() []string {
+	if pc.Policy == nil || pc.Policy.DID == nil {
+		return nil
+	}
+	return pc.Policy.DID.RequiredServices
+}
+
+// RequiresVerifiableHistory returns true if verifiable history is required.
+func (pc *PolicyContext) RequiresVerifiableHistory() bool {
+	return pc.Policy != nil && pc.Policy.DID != nil && pc.Policy.DID.RequireVerifiableHistory
+}
+
+// HasMDOCIACAConstraints returns true if the policy has mDOC IACA-specific constraints.
+func (pc *PolicyContext) HasMDOCIACAConstraints() bool {
+	return pc.Policy != nil && pc.Policy.MDOCIACA != nil
+}
+
+// GetMDOCIACAIssuerAllowlist returns issuer allowlist from the policy, or nil.
+func (pc *PolicyContext) GetMDOCIACAIssuerAllowlist() []string {
+	if pc.Policy == nil || pc.Policy.MDOCIACA == nil {
+		return nil
+	}
+	return pc.Policy.MDOCIACA.IssuerAllowlist
 }

@@ -13,12 +13,12 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry // Private registry for this metrics instance
 
-	// Pipeline metrics
-	PipelineExecutionDuration prometheus.Histogram
-	PipelineExecutionTotal    prometheus.Counter
-	PipelineExecutionErrors   prometheus.Counter
-	TSLCount                  prometheus.Gauge
-	TSLProcessingDuration     prometheus.Histogram
+	// Registry refresh metrics
+	RefreshExecutionDuration prometheus.Histogram
+	RefreshExecutionTotal    prometheus.Counter
+	RefreshExecutionErrors   prometheus.Counter
+	TSLCount                 prometheus.Gauge
+	TSLProcessingDuration    prometheus.Histogram
 
 	// API request metrics
 	APIRequestsTotal    *prometheus.CounterVec
@@ -40,19 +40,19 @@ func NewMetrics() *Metrics {
 	m := &Metrics{
 		registry: registry,
 
-		// Pipeline metrics
-		PipelineExecutionDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "go_trust_pipeline_execution_duration_seconds",
-			Help:    "Duration of pipeline execution in seconds",
+		// Registry refresh metrics
+		RefreshExecutionDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "go_trust_refresh_execution_duration_seconds",
+			Help:    "Duration of registry refresh execution in seconds",
 			Buckets: prometheus.DefBuckets,
 		}),
-		PipelineExecutionTotal: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "go_trust_pipeline_execution_total",
-			Help: "Total number of pipeline executions",
+		RefreshExecutionTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "go_trust_refresh_execution_total",
+			Help: "Total number of registry refresh executions",
 		}),
-		PipelineExecutionErrors: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "go_trust_pipeline_execution_errors_total",
-			Help: "Total number of pipeline execution errors",
+		RefreshExecutionErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "go_trust_refresh_execution_errors_total",
+			Help: "Total number of registry refresh execution errors",
 		}),
 		TSLCount: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "go_trust_tsl_count",
@@ -111,9 +111,9 @@ func NewMetrics() *Metrics {
 
 	// Register all metrics with the private registry
 	registry.MustRegister(
-		m.PipelineExecutionDuration,
-		m.PipelineExecutionTotal,
-		m.PipelineExecutionErrors,
+		m.RefreshExecutionDuration,
+		m.RefreshExecutionTotal,
+		m.RefreshExecutionErrors,
 		m.TSLCount,
 		m.TSLProcessingDuration,
 		m.APIRequestsTotal,
@@ -156,27 +156,14 @@ func (m *Metrics) MetricsMiddleware() gin.HandlerFunc {
 	}
 }
 
-// RecordPipelineExecution records metrics for a pipeline execution
-// DEPRECATED: Use RecordRefreshExecution instead
-func (m *Metrics) RecordPipelineExecution(duration time.Duration, tslCount int, err error) {
-	m.PipelineExecutionDuration.Observe(duration.Seconds())
-	m.PipelineExecutionTotal.Inc()
-	m.TSLCount.Set(float64(tslCount))
-
-	if err != nil {
-		m.PipelineExecutionErrors.Inc()
-		m.ErrorsTotal.WithLabelValues("pipeline_execution", "pipeline").Inc()
-	}
-}
-
 // RecordRefreshExecution records metrics for a registry refresh execution
 func (m *Metrics) RecordRefreshExecution(duration time.Duration, registryCount int, err error) {
-	m.PipelineExecutionDuration.Observe(duration.Seconds())
-	m.PipelineExecutionTotal.Inc()
+	m.RefreshExecutionDuration.Observe(duration.Seconds())
+	m.RefreshExecutionTotal.Inc()
 	m.TSLCount.Set(float64(registryCount))
 
 	if err != nil {
-		m.PipelineExecutionErrors.Inc()
+		m.RefreshExecutionErrors.Inc()
 		m.ErrorsTotal.WithLabelValues("refresh_execution", "registry").Inc()
 	}
 }
@@ -211,7 +198,7 @@ func RegisterMetricsEndpoint(r *gin.Engine, metrics *Metrics) {
 	// @Description Exposes Prometheus metrics for monitoring and alerting
 	// @Description
 	// @Description Metrics include:
-	// @Description - Pipeline execution duration and counts
+	// @Description - Registry refresh execution duration and counts
 	// @Description - TSL processing metrics
 	// @Description - API request rates and latency
 	// @Description - Certificate validation metrics

@@ -16,6 +16,7 @@ type UnmarshalError struct {
 	Err    error
 }
 
+// Error returns a string representation of the unmarshal error.
 func (e *UnmarshalError) Error() string {
 	if e.Field != "" {
 		return fmt.Sprintf("unmarshal error at field '%s': %s", e.Field, e.Reason)
@@ -23,6 +24,7 @@ func (e *UnmarshalError) Error() string {
 	return fmt.Sprintf("unmarshal error: %s", e.Reason)
 }
 
+// Unwrap returns the underlying error.
 func (e *UnmarshalError) Unwrap() error {
 	return e.Err
 }
@@ -82,7 +84,7 @@ func (s *Schema) validateDestination(dst any) error {
 	}
 
 	dstVal := reflect.ValueOf(dst)
-	if dstVal.Kind() != reflect.Ptr {
+	if dstVal.Kind() != reflect.Pointer {
 		return &UnmarshalError{Type: "destination", Reason: ErrNotPointer.Error()}
 	}
 
@@ -112,12 +114,12 @@ func (s *Schema) unmarshalObject(dst, intermediate any) error {
 // unmarshalNonObject handles non-object type unmarshaling without validation
 func (s *Schema) unmarshalNonObject(dst, intermediate any) error {
 	// No validation for non-object types, use JSON marshaling directly
-	jsonData, err := s.GetCompiler().jsonEncoder(intermediate)
+	jsonData, err := s.Compiler().jsonEncoder(intermediate)
 	if err != nil {
 		return &UnmarshalError{Type: "marshal", Reason: "failed to encode intermediate data", Err: err}
 	}
 
-	if err := s.GetCompiler().jsonDecoder(jsonData, dst); err != nil {
+	if err := s.Compiler().jsonDecoder(jsonData, dst); err != nil {
 		return &UnmarshalError{Type: "unmarshal", Reason: "failed to decode to destination", Err: err}
 	}
 
@@ -141,7 +143,7 @@ func (s *Schema) convertSource(src any) (any, bool, error) {
 // convertBytesSource handles []byte input with JSON parsing
 func (s *Schema) convertBytesSource(data []byte) (any, bool, error) {
 	var parsed any
-	err := s.GetCompiler().jsonDecoder(data, &parsed)
+	err := s.Compiler().jsonDecoder(data, &parsed)
 	if err == nil {
 		// Successfully parsed as JSON, check if it's an object
 		if objData, ok := parsed.(map[string]any); ok {
@@ -167,13 +169,13 @@ func (s *Schema) convertGenericSource(src any) (any, bool, error) {
 	}
 
 	// For other types, use JSON round-trip to convert
-	data, err := s.GetCompiler().jsonEncoder(src)
+	data, err := s.Compiler().jsonEncoder(src)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrSourceEncode, err)
 	}
 
 	var parsed any
-	if err := s.GetCompiler().jsonDecoder(data, &parsed); err != nil {
+	if err := s.Compiler().jsonDecoder(data, &parsed); err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrIntermediateJSONDecode, err)
 	}
 
@@ -273,14 +275,14 @@ func (s *Schema) evaluateDefaultValue(defaultValue any) (any, error) {
 	}
 
 	// Get the effective compiler (current schema -> parent schema -> defaultCompiler)
-	compiler := s.GetCompiler()
+	compiler := s.Compiler()
 	if compiler == nil {
 		// No compiler available, use literal value as fallback
 		return defaultStr, nil
 	}
 
 	// Look up and execute function
-	fn, exists := compiler.getDefaultFunc(call.Name)
+	fn, exists := compiler.defaultFunc(call.Name)
 	if !exists {
 		// Function not registered, use literal value as fallback
 		return defaultStr, nil
@@ -312,13 +314,13 @@ func (s *Schema) applyArrayDefaults(arrayData []any, itemSchema *Schema, propNam
 func (s *Schema) unmarshalToDestination(dst any, data map[string]any) error {
 	dstVal := reflect.ValueOf(dst).Elem()
 
-	//nolint:exhaustive // Only handling Map, Struct, and Ptr kinds - other types use default fallback
+	//nolint:exhaustive,nolintlint // Only handling Map, Struct, and Ptr kinds - other types use default fallback
 	switch dstVal.Kind() {
 	case reflect.Map:
 		return s.unmarshalToMap(dstVal, data)
 	case reflect.Struct:
 		return s.unmarshalToStruct(dstVal, data)
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if dstVal.IsNil() {
 			dstVal.Set(reflect.New(dstVal.Type().Elem()))
 		}
@@ -331,11 +333,11 @@ func (s *Schema) unmarshalToDestination(dst any, data map[string]any) error {
 
 // unmarshalViaJSON uses JSON round-trip for unsupported types
 func (s *Schema) unmarshalViaJSON(dst any, data map[string]any) error {
-	jsonData, err := s.GetCompiler().jsonEncoder(data)
+	jsonData, err := s.Compiler().jsonEncoder(data)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDataEncode, err)
 	}
-	return s.GetCompiler().jsonDecoder(jsonData, dst)
+	return s.Compiler().jsonDecoder(jsonData, dst)
 }
 
 // unmarshalToMap converts data to a map destination
@@ -393,7 +395,7 @@ func (s *Schema) setFieldValue(fieldVal reflect.Value, value any) error {
 	fieldType := fieldVal.Type()
 
 	// Handle pointer fields
-	if fieldType.Kind() == reflect.Ptr {
+	if fieldType.Kind() == reflect.Pointer {
 		return s.setPointerValue(fieldVal, valueVal, fieldType)
 	}
 
@@ -410,7 +412,7 @@ func (s *Schema) setFieldValue(fieldVal reflect.Value, value any) error {
 	}
 
 	// Special handling for time.Time
-	if fieldType == reflect.TypeOf(time.Time{}) {
+	if fieldType == reflect.TypeFor[time.Time]() {
 		return s.setTimeValue(fieldVal, value)
 	}
 
@@ -429,7 +431,7 @@ func (s *Schema) setFieldValue(fieldVal reflect.Value, value any) error {
 
 // setNilValue handles nil value assignment
 func (s *Schema) setNilValue(fieldVal reflect.Value) error {
-	if fieldVal.Kind() == reflect.Ptr {
+	if fieldVal.Kind() == reflect.Pointer {
 		fieldVal.Set(reflect.Zero(fieldVal.Type()))
 	}
 	return nil
@@ -467,11 +469,11 @@ func (s *Schema) setSliceValue(fieldVal reflect.Value, value any) error {
 			// Set the value for the element
 			if err := s.setFieldValue(elemVal, item); err != nil {
 				// If direct conversion fails, try JSON round-trip
-				jsonData, encErr := s.GetCompiler().jsonEncoder(item)
+				jsonData, encErr := s.Compiler().jsonEncoder(item)
 				if encErr != nil {
 					return fmt.Errorf("%w: %w", ErrNestedValueEncode, encErr)
 				}
-				if decErr := s.GetCompiler().jsonDecoder(jsonData, elemVal.Addr().Interface()); decErr != nil {
+				if decErr := s.Compiler().jsonDecoder(jsonData, elemVal.Addr().Interface()); decErr != nil {
 					return fmt.Errorf("%w: %w", ErrTypeConversion, decErr)
 				}
 			}
@@ -489,11 +491,11 @@ func (s *Schema) setSliceValue(fieldVal reflect.Value, value any) error {
 
 // setComplexValue handles nested structs and maps
 func (s *Schema) setComplexValue(fieldVal reflect.Value, value any) error {
-	jsonData, err := s.GetCompiler().jsonEncoder(value)
+	jsonData, err := s.Compiler().jsonEncoder(value)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrNestedValueEncode, err)
 	}
-	return s.GetCompiler().jsonDecoder(jsonData, fieldVal.Addr().Interface())
+	return s.Compiler().jsonDecoder(jsonData, fieldVal.Addr().Interface())
 }
 
 // setTimeValue handles time.Time field assignment from various string formats
@@ -505,12 +507,12 @@ func (s *Schema) setTimeValue(fieldVal reflect.Value, value any) error {
 		fieldVal.Set(reflect.ValueOf(v))
 		return nil
 	default:
-		return fmt.Errorf("%w: %T", ErrTimeTypeConversion, value)
+		return fmt.Errorf("%w: %T", ErrTimeConversion, value)
 	}
 }
 
 // parseTimeString parses time string in various formats
-func (s *Schema) parseTimeString(fieldVal reflect.Value, timeStr string) error {
+func (s *Schema) parseTimeString(fieldVal reflect.Value, raw string) error {
 	// Try multiple time formats
 	formats := []string{
 		time.RFC3339,
@@ -521,12 +523,12 @@ func (s *Schema) parseTimeString(fieldVal reflect.Value, timeStr string) error {
 	}
 
 	for _, format := range formats {
-		if t, err := time.Parse(format, timeStr); err == nil {
+		if t, err := time.Parse(format, raw); err == nil {
 			fieldVal.Set(reflect.ValueOf(t))
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: %s", ErrTimeParseFailure, timeStr)
+	return fmt.Errorf("%w: %s", ErrTimeParsing, raw)
 }
 
 // deepCopyMap creates a deep copy of a map[string]any

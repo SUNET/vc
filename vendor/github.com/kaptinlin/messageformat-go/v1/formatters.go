@@ -35,7 +35,7 @@ import (
 //	  };
 //	  return nf(lc, opt[type] || {}).format(value);
 //	}
-func NumberFmt(value interface{}, lc string, arg string, defaultCurrency string) (string, error) {
+func NumberFmt(value any, lc string, arg string, defaultCurrency string) (string, error) {
 	numValue, err := toFloat64(value)
 	if err != nil {
 		return "", WrapInvalidNumberValue(value)
@@ -62,7 +62,6 @@ func NumberFmt(value interface{}, lc string, arg string, defaultCurrency string)
 	case "currency":
 		return NumberCurrency(numValue, lc, currency), nil
 	default:
-		// Default number formatting
 		tag, _ := language.Parse(lc)
 		printer := message.NewPrinter(tag)
 		return printer.Sprintf("%.10g", numValue), nil
@@ -85,7 +84,7 @@ func NumberFmt(value interface{}, lc string, arg string, defaultCurrency string)
 //	  minimumFractionDigits: 2,
 //	  maximumFractionDigits: 2
 //	}).format(value);
-func NumberCurrency(value interface{}, lc string, currencyCode string) string {
+func NumberCurrency(value any, lc string, currencyCode string) string {
 	numValue, err := toFloat64(value)
 	if err != nil {
 		return fmt.Sprintf("%v", value)
@@ -119,7 +118,7 @@ func NumberCurrency(value interface{}, lc string, currencyCode string) string {
 // export const numberInteger = (value: number, lc: string | string[]) =>
 //
 //	nf(lc, { maximumFractionDigits: 0 }).format(value);
-func NumberInteger(value interface{}, lc string) string {
+func NumberInteger(value any, lc string) string {
 	numValue, err := toFloat64(value)
 	if err != nil {
 		return fmt.Sprintf("%v", value)
@@ -140,7 +139,7 @@ func NumberInteger(value interface{}, lc string) string {
 // export const numberPercent = (value: number, lc: string | string[]) =>
 //
 //	nf(lc, { style: 'percent' }).format(value);
-func NumberPercent(value interface{}, lc string) string {
+func NumberPercent(value any, lc string) string {
 	numValue, err := toFloat64(value)
 	if err != nil {
 		return fmt.Sprintf("%v", value)
@@ -182,7 +181,7 @@ func NumberPercent(value interface{}, lc string) string {
 //	  }
 //	  return new Date(value).toLocaleDateString(lc, o);
 //	}
-func DateFormatter(value interface{}, lc string, size string) (string, error) {
+func DateFormatter(value any, lc string, size string) (string, error) {
 	var t time.Time
 
 	switch v := value.(type) {
@@ -220,7 +219,7 @@ func DateFormatter(value interface{}, lc string, size string) (string, error) {
 	case time.Time:
 		t = v
 	default:
-		return "", WrapUnsupportedType(fmt.Sprintf("%T", value))
+		return "", WrapInvalidType(fmt.Sprintf("%T", value))
 	}
 
 	// Format based on size parameter - matching TypeScript behavior
@@ -238,7 +237,7 @@ func DateFormatter(value interface{}, lc string, size string) (string, error) {
 
 // TimeFormatter formats time values
 // TypeScript original code: Similar to date formatter but for time
-func TimeFormatter(value interface{}, lc string, size string) (string, error) {
+func TimeFormatter(value any, lc string, size string) (string, error) {
 	var t time.Time
 
 	switch v := value.(type) {
@@ -274,7 +273,7 @@ func TimeFormatter(value interface{}, lc string, size string) (string, error) {
 	case time.Time:
 		t = v
 	default:
-		return "", WrapUnsupportedType(fmt.Sprintf("%T", value))
+		return "", WrapInvalidType(fmt.Sprintf("%T", value))
 	}
 
 	// Format based on size parameter
@@ -291,10 +290,10 @@ func TimeFormatter(value interface{}, lc string, size string) (string, error) {
 }
 
 // GetFormatter returns a formatter function by name
-func GetFormatter(name string) func(interface{}, string, string) (string, error) {
+func GetFormatter(name string) func(any, string, string) (string, error) {
 	switch name {
 	case "number":
-		return func(value interface{}, lc string, arg string) (string, error) {
+		return func(value any, lc string, arg string) (string, error) {
 			return NumberFmt(value, lc, arg, "USD")
 		}
 	case "date":

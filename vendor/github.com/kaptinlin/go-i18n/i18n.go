@@ -2,168 +2,38 @@ package i18n
 
 import (
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/go-json-experiment/json"
 	mf "github.com/kaptinlin/messageformat-go/v1"
 	"golang.org/x/text/language"
 )
 
-// Unmarshaler unmarshals the translation files, can be `json.Unmarshal` or `yaml.Unmarshal`.
+// Unmarshaler unmarshals translation files. Common implementations include
+// json.Unmarshal, yaml.Unmarshal, and toml.Unmarshal.
 type Unmarshaler func(data []byte, v any) error
 
-// I18n is the main internationalization core.
+// Option configures an [I18n] bundle. See [WithDefaultLocale],
+// [WithLocales], [WithFallback], and [WithUnmarshaler] for available options.
+type Option func(*I18n)
+
+// I18n is the main internationalization bundle that manages translations,
+// locales, and fallback chains.
 type I18n struct {
 	defaultLocale             string
 	defaultLanguage           language.Tag
 	languages                 []language.Tag
 	unmarshaler               Unmarshaler
-	languageMatcher           language.Matcher // matcher is a language.Matcher configured for all supported languages.
+	languageMatcher           language.Matcher
 	fallbacks                 map[string][]string
 	parsedTranslations        map[string]map[string]*parsedTranslation
 	runtimeParsedTranslations map[string]*parsedTranslation
 	mfOptions                 *mf.MessageFormatOptions
 }
 
-// WithUnmarshaler replaces the default translation file unmarshaler.
-func WithUnmarshaler(u Unmarshaler) func(*I18n) {
-	return func(bundle *I18n) {
-		bundle.unmarshaler = u
-	}
-}
-
-// WithFallback changes fallback settings.
-func WithFallback(f map[string][]string) func(*I18n) {
-	return func(bundle *I18n) {
-		bundle.fallbacks = f
-	}
-}
-
-func WithDefaultLocale(locale string) func(*I18n) {
-	return func(bundle *I18n) {
-		bundle.defaultLanguage = language.Make(locale)
-		bundle.defaultLocale = bundle.defaultLanguage.String()
-	}
-}
-
-func WithLocales(languages ...string) func(*I18n) {
-	return func(bundle *I18n) {
-		var tags []language.Tag
-		for _, lang := range languages {
-			tag, err := language.Parse(lang)
-			if err == nil && tag != language.Und {
-				tags = append(tags, tag)
-			}
-		}
-		bundle.languages = tags
-	}
-}
-
-// WithMessageFormatOptions sets MessageFormat options
-func WithMessageFormatOptions(opts *mf.MessageFormatOptions) func(*I18n) {
-	return func(bundle *I18n) {
-		bundle.mfOptions = opts
-	}
-}
-
-// WithCustomFormatters sets custom formatters for MessageFormat
-func WithCustomFormatters(formatters map[string]interface{}) func(*I18n) {
-	return func(bundle *I18n) {
-		if bundle.mfOptions == nil {
-			bundle.mfOptions = &mf.MessageFormatOptions{}
-		}
-		bundle.mfOptions.CustomFormatters = formatters
-	}
-}
-
-// WithStrictMode sets strict parsing mode
-func WithStrictMode(strict bool) func(*I18n) {
-	return func(bundle *I18n) {
-		if bundle.mfOptions == nil {
-			bundle.mfOptions = &mf.MessageFormatOptions{}
-		}
-		bundle.mfOptions.Strict = strict
-	}
-}
-
-// NewBundle creates a new internationalization bundle.
-func NewBundle(options ...func(*I18n)) *I18n {
-	// Pre-allocate with reasonable default capacities
-	bundle := &I18n{
-		languages:                 make([]language.Tag, 0, max(len(options), 4)), // Estimate 4 languages
-		unmarshaler:               func(data []byte, v any) error { return json.Unmarshal(data, v) },
-		fallbacks:                 make(map[string][]string, max(len(options), 4)),
-		runtimeParsedTranslations: make(map[string]*parsedTranslation, 100), // Estimate 100 translations
-		parsedTranslations:        make(map[string]map[string]*parsedTranslation, max(len(options), 4)),
-	}
-	for _, o := range options {
-		o(bundle)
-	}
-	if bundle.defaultLanguage == language.Und {
-		bundle.defaultLanguage = bundle.languages[0]
-		bundle.defaultLocale = bundle.defaultLanguage.String()
-	}
-	if len(bundle.languages) > 0 && bundle.languages[0] != bundle.defaultLanguage {
-		for i, t := range bundle.languages {
-			if t == bundle.defaultLanguage {
-				bundle.languages = append(bundle.languages[:i], bundle.languages[i+1:]...)
-				break
-			}
-		}
-		bundle.languages = append([]language.Tag{bundle.defaultLanguage}, bundle.languages...)
-	} else if len(bundle.languages) == 0 {
-		bundle.languages = append(bundle.languages, bundle.defaultLanguage)
-	}
-	bundle.languageMatcher = language.NewMatcher(bundle.languages)
-	return bundle
-}
-
-func (bundle *I18n) SupportedLanguages() []language.Tag {
-	return bundle.languages
-}
-
-func (bundle *I18n) getExactSupportedLocale(locale string) string {
-	_, i, confidence := bundle.languageMatcher.Match(language.Make(locale))
-
-	if confidence == language.Exact {
-		return bundle.languages[i].String()
-	}
-
-	return ""
-}
-
-// IsLanguageSupported indicates whether a language can be translated.
-// The check is done by the bundle's matcher and therefore languages that are not returned by
-// SupportedLanguages can be supported.
-func (bundle *I18n) IsLanguageSupported(lang language.Tag) bool {
-	_, _, confidence := bundle.languageMatcher.Match(lang)
-	return confidence > language.No
-}
-
-// NewLocalizer reads a locale from the internationalization core.
-func (bundle *I18n) NewLocalizer(locales ...string) *Localizer {
-	selectedLocale := bundle.defaultLocale
-	for _, locale := range locales {
-		locale = bundle.getExactSupportedLocale(locale)
-		if locale != "" {
-			if _, ok := bundle.parsedTranslations[locale]; ok {
-				selectedLocale = locale
-				break
-			}
-		}
-	}
-
-	return &Localizer{
-		bundle: bundle,
-		locale: selectedLocale,
-	}
-}
-
-var contextRegExp = regexp.MustCompile("<(.*?)>$")
-
-// parsedTranslation
+// parsedTranslation holds a pre-compiled translation with its locale, name,
+// original text, and an optional compiled MessageFormat function.
 type parsedTranslation struct {
 	locale string
 	name   string
@@ -171,14 +41,175 @@ type parsedTranslation struct {
 	format mf.MessageFunction
 }
 
-// trimContext
-func trimContext(v string) string {
-	return contextRegExp.ReplaceAllString(v, "")
+// WithUnmarshaler sets a custom unmarshaler for translation files.
+// The default is JSON. Common alternatives include YAML, TOML, and INI.
+func WithUnmarshaler(u Unmarshaler) Option {
+	return func(i *I18n) {
+		i.unmarshaler = u
+	}
 }
 
-// parseTranslation
-func (bundle *I18n) parseTranslation(locale, name, text string) (*parsedTranslation, error) {
-	parsedTrans := &parsedTranslation{
+// WithFallback configures locale fallback chains. Each key is a locale, and
+// its value is an ordered list of fallback locales to try when a translation
+// is missing. The default locale is used as the final fallback.
+func WithFallback(f map[string][]string) Option {
+	return func(i *I18n) {
+		i.fallbacks = f
+	}
+}
+
+// WithDefaultLocale sets the default locale. This locale is used when no
+// translation is found in the requested locale or its fallback chain.
+func WithDefaultLocale(locale string) Option {
+	return func(i *I18n) {
+		i.defaultLanguage = language.Make(locale)
+		i.defaultLocale = i.defaultLanguage.String()
+	}
+}
+
+// WithLocales sets the supported locales for the bundle.
+// Invalid locale strings are silently ignored.
+func WithLocales(locales ...string) Option {
+	return func(i *I18n) {
+		tags := make([]language.Tag, 0, len(locales))
+		for _, loc := range locales {
+			tag, err := language.Parse(loc)
+			if err == nil && tag != language.Und {
+				tags = append(tags, tag)
+			}
+		}
+		i.languages = tags
+	}
+}
+
+// WithMessageFormatOptions sets MessageFormat options for the bundle.
+func WithMessageFormatOptions(opts *mf.MessageFormatOptions) Option {
+	return func(i *I18n) {
+		i.mfOptions = opts
+	}
+}
+
+// WithCustomFormatters adds custom formatters for MessageFormat.
+// Creates a new options struct if none exists.
+func WithCustomFormatters(formatters map[string]any) Option {
+	return func(i *I18n) {
+		if i.mfOptions == nil {
+			i.mfOptions = &mf.MessageFormatOptions{}
+		}
+		i.mfOptions.CustomFormatters = formatters
+	}
+}
+
+// WithStrictMode enables strict parsing mode for MessageFormat.
+// Creates a new options struct if none exists.
+func WithStrictMode(strict bool) Option {
+	return func(i *I18n) {
+		if i.mfOptions == nil {
+			i.mfOptions = &mf.MessageFormatOptions{}
+		}
+		i.mfOptions.Strict = strict
+	}
+}
+
+// NewBundle creates a new internationalization bundle with the given options.
+// If no default locale is set, the first locale from [WithLocales] is used;
+// if no locales are configured, English is used as the default.
+func NewBundle(options ...Option) *I18n {
+	i := &I18n{
+		unmarshaler:               func(data []byte, v any) error { return json.Unmarshal(data, v) },
+		fallbacks:                 make(map[string][]string),
+		runtimeParsedTranslations: make(map[string]*parsedTranslation),
+		parsedTranslations:        make(map[string]map[string]*parsedTranslation),
+	}
+	for _, o := range options {
+		o(i)
+	}
+	if i.defaultLanguage == language.Und {
+		if len(i.languages) == 0 {
+			i.defaultLanguage = language.English
+		} else {
+			i.defaultLanguage = i.languages[0]
+		}
+		i.defaultLocale = i.defaultLanguage.String()
+	}
+	i.ensureDefaultLanguageFirst()
+	i.languageMatcher = language.NewMatcher(i.languages)
+	return i
+}
+
+// SupportedLanguages returns all language tags supported by this bundle.
+func (i *I18n) SupportedLanguages() []language.Tag {
+	return i.languages
+}
+
+// ensureDefaultLanguageFirst ensures the default language is the first element
+// in the languages slice, adding it if absent or moving it to the front.
+func (i *I18n) ensureDefaultLanguageFirst() {
+	if len(i.languages) == 0 {
+		i.languages = []language.Tag{i.defaultLanguage}
+		return
+	}
+	if i.languages[0] == i.defaultLanguage {
+		return
+	}
+	if idx := slices.Index(i.languages, i.defaultLanguage); idx > 0 {
+		i.languages = slices.Delete(i.languages, idx, idx+1)
+	}
+	i.languages = slices.Insert(i.languages, 0, i.defaultLanguage)
+}
+
+// matchExactLocale returns the string form of the supported locale that
+// exactly matches the given locale, or an empty string if none matches.
+func (i *I18n) matchExactLocale(locale string) string {
+	_, idx, conf := i.languageMatcher.Match(language.Make(locale))
+	if conf == language.Exact {
+		return i.languages[idx].String()
+	}
+	return ""
+}
+
+// IsLanguageSupported reports whether lang can be matched to a supported locale.
+// Languages not in SupportedLanguages may still match through the language matcher.
+func (i *I18n) IsLanguageSupported(lang language.Tag) bool {
+	_, _, conf := i.languageMatcher.Match(lang)
+	return conf > language.No
+}
+
+// NewLocalizer creates a Localizer for the first matching locale from
+// locales. If none match, the default locale is used.
+func (i *I18n) NewLocalizer(locales ...string) *Localizer {
+	for _, loc := range locales {
+		matched := i.matchExactLocale(loc)
+		if matched == "" {
+			continue
+		}
+		if _, ok := i.parsedTranslations[matched]; ok {
+			return &Localizer{
+				bundle: i,
+				locale: matched,
+			}
+		}
+	}
+	return &Localizer{
+		bundle: i,
+		locale: i.defaultLocale,
+	}
+}
+
+// trimContext removes the trailing context suffix (e.g., " <verb>") from a
+// translation key, returning the base key.
+func trimContext(v string) string {
+	if idx := strings.LastIndex(v, " <"); idx != -1 && strings.HasSuffix(v, ">") {
+		return v[:idx]
+	}
+	return v
+}
+
+// parseTranslation compiles a translation text into a parsedTranslation.
+// If MessageFormat compilation fails, it returns the translation with the raw
+// text as a graceful fallback.
+func (i *I18n) parseTranslation(locale, name, text string) (*parsedTranslation, error) {
+	pt := &parsedTranslation{
 		name:   name,
 		locale: locale,
 		text:   text,
@@ -186,79 +217,73 @@ func (bundle *I18n) parseTranslation(locale, name, text string) (*parsedTranslat
 
 	base, _ := language.MustParse(locale).Base()
 
-	// Create new MessageFormat instance
-	messageFormat, err := mf.New(base.String(), bundle.mfOptions)
+	formatter, err := mf.New(base.String(), i.mfOptions)
 	if err != nil {
-		return parsedTrans, nil //nolint:nilerr // Intentionally ignore error for graceful fallback
+		return pt, nil //nolint:nilerr // Graceful fallback on compilation error
 	}
 
-	compiled, err := messageFormat.Compile(text)
+	compiled, err := formatter.Compile(text)
 	if err != nil {
-		return parsedTrans, nil //nolint:nilerr // Intentionally ignore error for graceful fallback
+		return pt, nil //nolint:nilerr // Graceful fallback on compilation error
 	}
 
-	parsedTrans.format = compiled
-	return parsedTrans, nil
+	pt.format = compiled
+	return pt, nil
 }
 
-// nameInsensitive converts `zh_CN.music.json`, `zh_CN` and `zh-TW` to `zh-CN`.
+// nameInsensitive normalizes a file name or locale string to a lowercase,
+// hyphen-separated form. For example, "zh_CN.music.json" becomes "zh-cn".
 func nameInsensitive(v string) string {
 	v = filepath.Base(v)
-
-	// Use strings.Cut instead of Split for better performance (Go 1.18+)
 	if before, _, found := strings.Cut(v, "."); found {
 		v = before
 	}
-
-	// Use Builder to reduce memory allocations
-	var result strings.Builder
-	result.Grow(len(v)) // Pre-allocate capacity
-
-	for _, r := range v {
-		switch r {
-		case '_':
-			result.WriteByte('-')
-		default:
-			result.WriteRune(unicode.ToLower(r))
-		}
-	}
-
-	return result.String()
+	return strings.ToLower(strings.ReplaceAll(v, "_", "-"))
 }
 
-// formatFallbacks
-func (bundle *I18n) formatFallbacks() {
-	for _, grandTrans := range bundle.parsedTranslations[bundle.defaultLocale] {
-		for locale, trans := range bundle.parsedTranslations {
-			//
-			if locale == bundle.defaultLocale {
+// formatFallbacks populates missing translations for each locale by looking up
+// the best available fallback from the configured fallback chain.
+func (i *I18n) formatFallbacks() {
+	for _, defTrans := range i.parsedTranslations[i.defaultLocale] {
+		for locale, trans := range i.parsedTranslations {
+			if locale == i.defaultLocale {
 				continue
 			}
-			//
-			if _, ok := trans[grandTrans.name]; !ok {
-				if bestfit := bundle.lookupBestFallback(locale, grandTrans.name); bestfit != nil {
-					bundle.parsedTranslations[locale][grandTrans.name] = bestfit
-				}
+			if _, ok := trans[defTrans.name]; ok {
+				continue
+			}
+			if best := i.lookupBestFallback(locale, defTrans.name); best != nil {
+				i.parsedTranslations[locale][defTrans.name] = best
 			}
 		}
 	}
 }
 
-// lookupBestFallback
-func (bundle *I18n) lookupBestFallback(locale, name string) *parsedTranslation {
-	fallbacks, ok := bundle.fallbacks[locale]
+// lookupBestFallback finds the best fallback translation for a given locale and
+// translation name by traversing the fallback chain.
+func (i *I18n) lookupBestFallback(locale, name string) *parsedTranslation {
+	return i.lookupFallback(locale, name, make(map[string]struct{}))
+}
+
+// lookupFallback recursively searches the fallback chain for a translation.
+// The visited set prevents infinite recursion from circular fallback configs.
+func (i *I18n) lookupFallback(locale, name string, visited map[string]struct{}) *parsedTranslation {
+	if _, ok := visited[locale]; ok {
+		return nil
+	}
+	visited[locale] = struct{}{}
+
+	chain, ok := i.fallbacks[locale]
 	if !ok {
-		if v, ok := bundle.parsedTranslations[bundle.defaultLocale][name]; ok {
+		return i.parsedTranslations[i.defaultLocale][name]
+	}
+	for _, fb := range chain {
+		if v, ok := i.parsedTranslations[fb][name]; ok {
 			return v
 		}
-	}
-	for _, fallback := range fallbacks {
-		if v, ok := bundle.parsedTranslations[fallback][name]; ok {
-			return v
-		}
-		if j := bundle.lookupBestFallback(fallback, name); j != nil {
-			return j
+		if found := i.lookupFallback(fb, name, visited); found != nil {
+			return found
 		}
 	}
-	return nil
+	return i.parsedTranslations[i.defaultLocale][name]
 }

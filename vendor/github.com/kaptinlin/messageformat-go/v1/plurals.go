@@ -33,7 +33,7 @@ const (
 //	  ordinals?: PluralCategory[];
 //	  module?: string;
 //	}
-type PluralFunction func(value interface{}, ord ...bool) (PluralCategory, error)
+type PluralFunction func(value any, ord ...bool) (PluralCategory, error)
 
 // PluralObject represents plural rules and metadata for a specific locale
 // TypeScript original code:
@@ -54,12 +54,15 @@ type PluralObject struct {
 	ID          string
 	LC          string
 	Locale      string
-	GetCardinal func(value interface{}) (PluralCategory, error)
+	GetCardinal func(value any) (PluralCategory, error)
 	Func        PluralFunction
 	Cardinals   []PluralCategory
 	Ordinals    []PluralCategory
 	Module      string
 }
+
+// Pre-compiled regex for normalize function
+var normalizeRegex = regexp.MustCompile(`^([^-_]+)`)
 
 // normalize normalizes a locale string following TypeScript implementation
 // TypeScript original code:
@@ -79,14 +82,11 @@ func normalize(locale string) (string, error) {
 		return "", WrapInvalidLocale(locale)
 	}
 
-	// Special case for Portuguese as spoken in Portugal
 	if strings.HasPrefix(locale, "pt-PT") {
 		return "pt-PT", nil
 	}
 
-	// Extract primary subtag
-	re := regexp.MustCompile(`^([^-_]+)`)
-	if matches := re.FindStringSubmatch(locale); len(matches) > 1 {
+	if matches := normalizeRegex.FindStringSubmatch(locale); len(matches) > 1 {
 		return matches[1], nil
 	}
 
@@ -96,7 +96,7 @@ func normalize(locale string) (string, error) {
 // GetPlural returns the PluralObject for a given locale
 // TypeScript original code:
 // export function getPlural(locale: string | PluralFunction): PluralObject | null
-func GetPlural(locale interface{}) (PluralObject, error) {
+func GetPlural(locale any) (PluralObject, error) {
 	switch v := locale.(type) {
 	case string:
 		normalized, err := normalize(v)
@@ -138,7 +138,7 @@ func GetPlural(locale interface{}) (PluralObject, error) {
 		}, nil
 
 	default:
-		return PluralObject{}, ErrUnsupportedType
+		return PluralObject{}, ErrInvalidType
 	}
 }
 
@@ -171,7 +171,7 @@ func GetAllPlurals(defaultLocale string) ([]PluralObject, error) {
 	for _, locale := range commonLocales {
 		plural, err := GetPlural(locale)
 		if err != nil {
-			continue // Skip locales that can't be processed
+			continue
 		}
 		plurals = append(plurals, plural)
 	}
@@ -179,7 +179,6 @@ func GetAllPlurals(defaultLocale string) ([]PluralObject, error) {
 	// Ensure default locale is first
 	defaultPlural, err := GetPlural(defaultLocale)
 	if err == nil {
-		// Remove default from list if present and prepend
 		var filtered []PluralObject
 		for _, p := range plurals {
 			if p.Locale != defaultLocale {
@@ -196,20 +195,17 @@ func GetAllPlurals(defaultLocale string) ([]PluralObject, error) {
 func getPluralRules(locale string) (PluralFunction, []PluralCategory, []PluralCategory, bool) {
 	tag, err := language.Parse(locale)
 	if err != nil {
-		// Fallback to English for invalid locales
 		tag = language.English
 	}
 
-	// Create wrapper function that uses golang.org/x/text/feature/plural
-	pluralFunc := func(value interface{}, ord ...bool) (PluralCategory, error) {
+	pluralFunc := func(value any, ord ...bool) (PluralCategory, error) {
 		num, err := toNumber(value)
 		if err != nil {
 			return PluralOther, err
 		}
 
-		// Handle edge cases for negative numbers and zero
 		if num < 0 {
-			num = -num // Use absolute value for plural calculations
+			num = -num
 		}
 
 		isOrdinal := len(ord) > 0 && ord[0]
@@ -218,12 +214,19 @@ func getPluralRules(locale string) (PluralFunction, []PluralCategory, []PluralCa
 			rule = plural.Ordinal
 		}
 
-		// Use CLDR plural rules from golang.org/x/text with proper error handling
-		// Parameters: i (integer), v (visible fraction digits), w (w/o trailing zeros), f (fraction), t (fraction w/o trailing zeros)
 		defer func() {
 			if r := recover(); r != nil {
-				// In case of panic, fall back to basic English-like rules
-				// Empty body is intentional - we just want to recover gracefully
+				// Recover from potential panics in golang.org/x/text/feature/plural.MatchPlural.
+				// This can happen with:
+				// 1. Malformed locale tags that pass language.Parse but fail in plural rules
+				// 2. Edge cases in CLDR data processing
+				// 3. Unexpected number formats
+				//
+				// Fallback behavior: The function will return PluralOther (line 232),
+				// which matches the basic English-like plural rules.
+				//
+				// Note: If this occurs frequently, investigate the root cause rather than
+				// relying on panic recovery. Consider adding validation before calling MatchPlural.
 				_ = r
 			}
 		}()
@@ -232,13 +235,9 @@ func getPluralRules(locale string) (PluralFunction, []PluralCategory, []PluralCa
 		return mapPluralResult(result), nil
 	}
 
-	// Get available categories for this language
 	cardinals := getAvailableCategories(tag, false)
 	ordinals := getAvailableCategories(tag, true)
-
-	// Check if this is actually a supported locale based on the original input
-	// rather than the parsed tag, because language.Parse might change unknown locales to "und"
-	isSupported := hasPlural(locale) // Use the original locale string
+	isSupported := hasPlural(locale)
 
 	return pluralFunc, cardinals, ordinals, isSupported
 }
@@ -265,8 +264,6 @@ func mapPluralResult(result plural.Form) PluralCategory {
 
 // getAvailableCategories returns available plural categories for a language tag
 func getAvailableCategories(tag language.Tag, ordinal bool) []PluralCategory {
-	// This is a simplified implementation - in a full version, we would
-	// query the CLDR data to get the exact categories available for each locale
 	rule := plural.Cardinal
 	if ordinal {
 		rule = plural.Ordinal
@@ -300,7 +297,7 @@ func getAvailableCategories(tag language.Tag, ordinal bool) []PluralCategory {
 }
 
 // toNumber converts various types to int64
-func toNumber(value interface{}) (int64, error) {
+func toNumber(value any) (int64, error) {
 	switch v := value.(type) {
 	case int:
 		return int64(v), nil
@@ -319,6 +316,6 @@ func toNumber(value interface{}) (int64, error) {
 		}
 		return int64(num), nil
 	default:
-		return 0, WrapUnsupportedType(fmt.Sprintf("%T", value))
+		return 0, WrapInvalidType(fmt.Sprintf("%T", value))
 	}
 }

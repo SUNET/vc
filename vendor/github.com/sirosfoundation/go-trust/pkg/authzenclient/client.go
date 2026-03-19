@@ -59,6 +59,11 @@ const (
 	// DefaultTimeout is the default HTTP request timeout.
 	DefaultTimeout = 30 * time.Second
 
+	// maxResponseBodyBytes is the maximum allowed HTTP response body size (10 MB).
+	// This is the default for the authzenclient package; server-side code uses
+	// registry.GetMaxResponseBodyBytes() which is configurable.
+	maxResponseBodyBytes = 10 * 1024 * 1024
+
 	// WellKnownPath is the discovery endpoint path.
 	WellKnownPath = "/.well-known/authzen-configuration"
 
@@ -149,15 +154,15 @@ func Discover(ctx context.Context, baseURL string, opts ...Option) (*Client, err
 	if err != nil {
 		return nil, fmt.Errorf("discovery request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // Body close error is not actionable
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 		return nil, fmt.Errorf("discovery returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var metadata authzen.PDPMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&metadata); err != nil {
 		return nil, fmt.Errorf("decoding discovery response: %w", err)
 	}
 
@@ -213,12 +218,15 @@ func (c *Client) doEvaluate(ctx context.Context, req *authzen.EvaluationRequest)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer httpResp.Body.Close() //nolint:errcheck // Body close error is not actionable
 
-	// Read response body
-	respBody, err := io.ReadAll(httpResp.Body)
+	// Read response body (limited to prevent unbounded memory use)
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseBodyBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+	if len(respBody) > maxResponseBodyBytes {
+		return nil, fmt.Errorf("response body exceeds maximum size of %d bytes", maxResponseBodyBytes)
 	}
 
 	// Handle error responses

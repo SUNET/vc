@@ -1,6 +1,6 @@
 package jsonschema
 
-// EvaluateFormat checks if the data conforms to the format specified in the schema.
+// evaluateFormat checks if the data conforms to the format specified in the schema.
 // According to the JSON Schema Draft 2020-12:
 //   - The "format" keyword defines the data format expected for a value.
 //   - The format must be a string that names a specific format which the value should conform to.
@@ -21,7 +21,7 @@ func evaluateFormat(schema *Schema, value any) *EvaluationError {
 	var customValidator func(any) bool
 
 	// Get the effective compiler (may be from parent or defaultCompiler)
-	compiler := schema.GetCompiler()
+	compiler := schema.Compiler()
 
 	// 1. Check compiler-specific custom formats first
 	if compiler != nil {
@@ -62,7 +62,9 @@ func evaluateFormat(schema *Schema, value any) *EvaluationError {
 	return nil // Default behavior: ignore unknown formats
 }
 
-// matchesType checks if a value type matches the required type
+// matchesType checks if a value type matches the required type.
+// It returns true if there's no type restriction or if the types match.
+// Special case: integer values are considered valid for number types.
 func matchesType(valueType, requiredType string) bool {
 	if requiredType == "" {
 		return true // No type restriction
