@@ -33,7 +33,17 @@ func (c *VCDatastoreColl) createIndex(ctx context.Context) error {
 		},
 		Options: options.Index().SetName("document_unique_within_namespace").SetUnique(true),
 	}
-	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexDocumentIDInAuthenticSourceUniq})
+	indexIdentityLookup := mongo.IndexModel{
+		Keys: bson.D{
+			bson.E{Key: "meta.scope", Value: 1},
+			bson.E{Key: "identities.family_name", Value: 1},
+			bson.E{Key: "identities.given_name", Value: 1},
+			bson.E{Key: "identities.birth_date", Value: 1},
+			bson.E{Key: "meta.authentic_source", Value: 1},
+		},
+		Options: options.Index().SetName("identity_lookup"),
+	}
+	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexDocumentIDInAuthenticSourceUniq, indexIdentityLookup})
 	if err != nil {
 		return err
 	}
