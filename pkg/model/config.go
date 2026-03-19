@@ -258,13 +258,18 @@ type OIDCRPConfig struct {
 	// (state, nonce, PKCE verifier) may remain active before it expires
 	SessionDuration int `yaml:"session_duration" validate:"required" default:"300"`
 
-	// Client metadata for dynamic registration or display purposes
-	ClientName string   `yaml:"client_name,omitempty"`
-	ClientURI  string   `yaml:"client_uri,omitempty"`
-	LogoURI    string   `yaml:"logo_uri,omitempty"`
-	Contacts   []string `yaml:"contacts,omitempty"`
-	TosURI     string   `yaml:"tos_uri,omitempty"`
-	PolicyURI  string   `yaml:"policy_uri,omitempty"`
+	// ClientName is a human-readable name for the OIDC client, shown during dynamic registration or consent
+	ClientName string `yaml:"client_name,omitempty"`
+	// ClientURI is a URL to the client's homepage, used for display during consent
+	ClientURI string `yaml:"client_uri,omitempty"`
+	// LogoURI is a URL to the client's logo image, shown during consent screens
+	LogoURI string `yaml:"logo_uri,omitempty"`
+	// Contacts is a list of email addresses for responsible parties of this client
+	Contacts []string `yaml:"contacts,omitempty"`
+	// TosURI is a URL to the client's Terms of Service document
+	TosURI string `yaml:"tos_uri,omitempty"`
+	// PolicyURI is a URL to the client's Privacy Policy document
+	PolicyURI string `yaml:"policy_uri,omitempty"`
 
 	// CredentialMappings defines how to map OIDC claims to credential claims
 	// Key: credential type identifier (e.g., "pid", "diploma")
@@ -534,7 +539,7 @@ type StaticOIDCClient struct {
 	// ClientID is the unique identifier for the client
 	ClientID string `yaml:"client_id" validate:"required"`
 	// ClientSecret is the client secret for authentication.
-	// Can be defined in the secrets file under verifier.oidc.static_clients
+	// Can be defined in the secrets file under verifier.oidc_op.static_clients
 	// as a map of client_id to client_secret.
 	// Required unless TokenEndpointAuthMethod is "none" (public client).
 	ClientSecret string `yaml:"client_secret" validate:"required_unless=TokenEndpointAuthMethod none"`
@@ -967,15 +972,18 @@ type CredentialConstructor struct {
 	// Mutually exclusive with VCTMFilePath (one of the two is required).
 	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without=VCTMFilePath,omitempty,url"`
 
-	VCTM       *sdjwtvc.VCTM `yaml:"-" json:"-"`
-	Format     string        `yaml:"format" json:"format" validate:"required"`
-	AuthMethod string        `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic saml oidc openid4vp"`
+	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
+	// Format is the credential format to issue, e.g. "vc+sd-jwt"
+	Format string `yaml:"format" json:"format" validate:"required"`
+	// AuthMethod is the authentication method used to verify the holder's identity. Supported values: basic, saml, oidc, openid4vp
+	AuthMethod string `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic saml oidc openid4vp"`
 	// AuthScopes lists credential_constructor keys whose VCTs are acceptable for
 	// wallet authentication. Required when AuthMethod is "openid4vp".
 	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
 	// AuthClaims lists identity claims to extract from the authentication credential.
 	// Required when AuthMethod is "openid4vp".
 	AuthClaims []string                       `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
+	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving

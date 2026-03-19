@@ -19,6 +19,7 @@ type CommonSecrets struct {
 
 // MongoSecrets holds the mongo connection URI (may contain credentials)
 type MongoSecrets struct {
+	// URI is the MongoDB connection string, which may include authentication credentials
 	URI string `yaml:"uri"`
 }
 
@@ -40,6 +41,7 @@ type APIAuthSecrets struct {
 
 // BasicAuthSecrets holds basic auth user/password pairs
 type BasicAuthSecrets struct {
+	// Users maps usernames to passwords for HTTP Basic Authentication
 	Users map[string]string `yaml:"users,omitempty"`
 }
 
@@ -56,11 +58,13 @@ type OIDCRPRegistrationSecrets struct {
 
 // OIDCRPPreconfiguredSecrets holds pre-registered client secrets
 type OIDCRPPreconfiguredSecrets struct {
+	// ClientSecret is the shared secret for the pre-configured OIDC RP client
 	ClientSecret string `yaml:"client_secret"`
 }
 
 // OIDCRPDynamicSecrets holds dynamic registration secrets
 type OIDCRPDynamicSecrets struct {
+	// InitialAccessToken is the bearer token required by the OP for dynamic client registration
 	InitialAccessToken string `yaml:"initial_access_token"`
 }
 
@@ -71,6 +75,7 @@ type RegistrySecrets struct {
 
 // AdminGUISecrets holds admin GUI secrets
 type AdminGUISecrets struct {
+	// Password is the admin GUI login password
 	Password string `yaml:"password"`
 }
 
@@ -81,6 +86,7 @@ type VerifierSecrets struct {
 
 // OIDCOPSecrets holds OIDC OP configuration secrets
 type OIDCOPSecrets struct {
+	// SubjectSalt is a secret value used to derive pairwise subject identifiers for OIDC clients
 	SubjectSalt string `yaml:"subject_salt"`
 	// StaticClients maps client_id to client_secret for static OIDC clients.
 	// Only clients listed here will have their secrets applied; clients not
@@ -91,6 +97,7 @@ type OIDCOPSecrets struct {
 
 // UISecrets holds UI secrets
 type UISecrets struct {
+	// Password is the UI login password
 	Password string `yaml:"password"`
 }
 

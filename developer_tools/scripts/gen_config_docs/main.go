@@ -373,6 +373,7 @@ func fieldDescription(f *FieldDef) string {
 	if raw == "" {
 		return titleFromGoName(f.GoName)
 	}
+	var parts []string
 	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -385,10 +386,15 @@ func fieldDescription(f *FieldDef) string {
 		// Strip inline " example: ..." suffix from description
 		line = stripInlineExample(line)
 		if line != "" {
-			return cleanFieldDesc(line, f.GoName)
+			parts = append(parts, line)
 		}
 	}
-	return titleFromGoName(f.GoName)
+	if len(parts) == 0 {
+		return titleFromGoName(f.GoName)
+	}
+	// Clean the first line (strip "FieldName is the ..." prefix), keep the rest as-is
+	parts[0] = cleanFieldDesc(parts[0], f.GoName)
+	return strings.Join(parts, " ")
 }
 
 // isExampleLine returns true if the line is a standalone example line.
