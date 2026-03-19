@@ -18,34 +18,34 @@ This is a high-performance Go implementation of JSON Pointer (RFC 6901), ported 
 
 ```bash
 # Run all tests with race detection
-make test
+task test
 
 # Run tests with coverage report (generates coverage.html)
-make test-coverage
+task test-coverage
 
 # Run tests with verbose output
-make test-verbose
+task test-verbose
 
 # Run benchmarks
-make bench
+task bench
 
 # Run linters (golangci-lint + go mod tidy check)
-make lint
+task lint
 
 # Format code
-make fmt
+task fmt
 
 # Run go vet
-make vet
+task vet
 
 # Run full verification pipeline (deps, fmt, vet, lint, test)
-make verify
+task verify
 
 # Clean build artifacts and caches
-make clean
+task clean
 
 # Download and tidy dependencies
-make deps
+task deps
 ```
 
 ### Running Individual Tests
@@ -136,8 +136,8 @@ All public functions maintain 1:1 mapping with TypeScript API:
 - **`Unescape(component string) string`** - Unescape encoded characters (~0, ~1)
 
 #### Validation
-- **`Validate(pointer any) error`** - Validate JSON Pointer string or Path
-- **`ValidatePath(path any) error`** - Validate Path array structure
+- **`Validate(pointer string) error`** - Validate JSON Pointer string
+- **`ValidatePath(path Path) error`** - Validate Path array structure
 
 ### Core Operations
 
@@ -182,7 +182,7 @@ This layered approach ensures **optimal performance for common cases** while mai
 #### Operation Files
 - **get.go**: `Get` operation with zero-allocation optimization (fast paths for common types)
 - **find.go**: `Find` operation with context tracking (returns `Reference` with parent)
-- **findbypointer.go**: JSON Pointer string entry points (`GetByPointer`, `FindByPointer`)
+- **findbypointer.go**: JSON Pointer string entry point (`FindByPointer`)
 
 #### Utility Files
 - **util.go**: Parsing, formatting, and escape/unescape utilities
@@ -240,7 +240,6 @@ type internalToken struct {
 
 #### Helper Functions
 - `IsArrayReference(ref Reference) bool` - Check if reference points to array element
-- `IsArrayEnd[T](ref ArrayReference[T]) bool` - Check if reference is array end marker
 - `IsObjectReference(ref Reference) bool` - Check if reference points to object property
 
 ### Error Types
@@ -393,7 +392,7 @@ Before submitting changes, verify:
 2. **Add corresponding case** in `find.go` main switch statement
 3. **Add optimized path** in `tryArrayAccess` or `tryObjectAccess` if applicable
 4. **Add test cases** in appropriate test file with edge cases
-5. **Run benchmarks** to verify performance impact: `make bench`
+5. **Run benchmarks** to verify performance impact: `task bench`
 6. **Update documentation** if this is a new public-facing type
 
 #### Optimizing Performance
@@ -438,7 +437,7 @@ Only add new errors if absolutely necessary:
 #### Before Committing
 ```bash
 # Run full verification pipeline
-make verify
+task verify
 
 # This runs: deps, fmt, vet, lint, test
 ```
@@ -455,7 +454,7 @@ benchcmp bench-old.txt bench-new.txt
 #### Test Coverage
 ```bash
 # Generate coverage report
-make test-coverage
+task test-coverage
 
 # Open coverage.html in browser to review
 ```
@@ -543,11 +542,11 @@ func Parse(pointer string) Path {
 
 ## golangci-lint Configuration
 
-- **Version**: 2.4.0 (specified in `.golangci.version`)
+- **Version**: 2.9.0 (specified in `.golangci.version`)
 - **Timeout**: 10 minutes (for comprehensive linting)
 - **Configuration**: Managed via Makefile with automatic version checking
 - **Installation**: Automatic via `make install-golangci-lint`
-- **Usage**: Run `make lint` for full linting suite (golangci-lint + mod tidy check)
+- **Usage**: Run `task lint` for full linting suite (golangci-lint + mod tidy check)
 
 ## Additional Resources
 

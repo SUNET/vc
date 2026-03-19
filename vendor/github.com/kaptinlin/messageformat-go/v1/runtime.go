@@ -12,6 +12,13 @@ import (
 	"golang.org/x/text/message"
 )
 
+// Safe integer range constants (JavaScript Number.MAX_SAFE_INTEGER/MIN_SAFE_INTEGER)
+// Integers outside this range may lose precision in JavaScript environments
+const (
+	maxSafeInteger = 1e15
+	minSafeInteger = -1e15
+)
+
 // Number formatters cache with sync.Map for better performance
 // TypeScript original code:
 // const _nf: Record<string, Intl.NumberFormat> = {};
@@ -36,11 +43,9 @@ func Number(lc string, value float64, offset float64) string {
 
 	// Use locale-specific formatting
 	printer := message.NewPrinter(tag)
-	if result == math.Trunc(result) && result >= -1e15 && result <= 1e15 {
-		// Integer formatting
+	if result == math.Trunc(result) && result >= minSafeInteger && result <= maxSafeInteger {
 		return printer.Sprintf("%.0f", result)
 	}
-	// Decimal formatting
 	return printer.Sprintf("%.10g", result)
 }
 
@@ -58,7 +63,7 @@ func Number(lc string, value float64, offset float64) string {
 //	  if (isNaN(n)) throw new Error('`' + name + '` or its offset is not a number');
 //	  return _nf(lc).format(n);
 //	}
-func StrictNumber(lc string, value interface{}, offset float64, name string) (string, error) {
+func StrictNumber(lc string, value any, offset float64, name string) (string, error) {
 	numValue, err := toFloat64(value)
 	if err != nil {
 		return "", WrapMissingParameter("`" + name + "` or its offset is not a number")
@@ -88,11 +93,10 @@ func StrictNumber(lc string, value interface{}, offset float64, name string) (st
 //	  const key = lcfunc(value, isOrdinal);
 //	  return key in data ? data[key] : data.other;
 //	}
-func Plural(value interface{}, offset float64, lcfunc PluralFunction, data map[string]interface{}, isOrdinal ...bool) interface{} {
+func Plural(value any, offset float64, lcfunc PluralFunction, data map[string]any, isOrdinal ...bool) any {
 	// Convert value to number
 	numValue, err := toFloat64(value)
 	if err != nil {
-		// If we can't convert to number, return "other" case or empty string
 		if other, exists := data["other"]; exists {
 			return other
 		}
@@ -124,7 +128,6 @@ func Plural(value interface{}, offset float64, lcfunc PluralFunction, data map[s
 	// e.g., "1.0" should be treated as decimal even if it converts to 1.0
 	if valueStr, ok := value.(string); ok {
 		if strings.Contains(valueStr, ".") && valueStr != strings.TrimRight(strings.TrimRight(valueStr, "0"), ".") {
-			// This is a decimal representation like "1.0", use "other"
 			if other, exists := data["other"]; exists {
 				return other
 			}
@@ -138,7 +141,6 @@ func Plural(value interface{}, offset float64, lcfunc PluralFunction, data map[s
 	// Get plural category using the locale function
 	category, err := lcfunc(adjustedValue, ordinal)
 	if err != nil {
-		// If plural function fails, fall back to "other"
 		if other, exists := data["other"]; exists {
 			return other
 		}
@@ -150,7 +152,6 @@ func Plural(value interface{}, offset float64, lcfunc PluralFunction, data map[s
 		return categoryValue
 	}
 
-	// Final fallback to "other"
 	if other, exists := data["other"]; exists {
 		return other
 	}
@@ -164,18 +165,15 @@ func Plural(value interface{}, offset float64, lcfunc PluralFunction, data map[s
 //	export function select(value: string, data: { [key: string]: unknown }) {
 //	  return {}.hasOwnProperty.call(data, value) ? data[value] : data.other;
 //	}
-func SelectValue(value string, data map[string]interface{}) interface{} {
-	// Check if exact value exists in data
+func SelectValue(value string, data map[string]any) any {
 	if selectedValue, exists := data[value]; exists {
 		return selectedValue
 	}
 
-	// Fall back to "other" case
 	if other, exists := data["other"]; exists {
 		return other
 	}
 
-	// Final fallback - return empty string
 	return ""
 }
 
@@ -189,7 +187,7 @@ func SelectValue(value string, data map[string]interface{}) interface{} {
 //	    }
 //	  }
 //	}
-func ReqArgs(keys []string, data map[string]interface{}) error {
+func ReqArgs(keys []string, data map[string]any) error {
 	for _, key := range keys {
 		if data == nil {
 			return WrapMissingArgument(key)
@@ -204,7 +202,7 @@ func ReqArgs(keys []string, data map[string]interface{}) error {
 // Helper functions
 
 // toFloat64 converts various numeric types to float64
-func toFloat64(value interface{}) (float64, error) {
+func toFloat64(value any) (float64, error) {
 	switch v := value.(type) {
 	case float64:
 		return v, nil
@@ -233,17 +231,15 @@ func toFloat64(value interface{}) (float64, error) {
 	case string:
 		return strconv.ParseFloat(v, 64)
 	default:
-		return 0, WrapUnsupportedType(fmt.Sprintf("cannot convert %T to float64", value))
+		return 0, WrapInvalidType(fmt.Sprintf("cannot convert %T to float64", value))
 	}
 }
 
 // formatExactKey formats a number as an exact key (e.g., "=1", "=0")
 func formatExactKey(value float64) string {
-	// Check if it's an integer value
-	if value == math.Trunc(value) && value >= -1e15 && value <= 1e15 {
+	if value == math.Trunc(value) && value >= minSafeInteger && value <= maxSafeInteger {
 		return fmt.Sprintf("=%.0f", value)
 	}
-	// For non-integers, use a reasonable precision
 	return fmt.Sprintf("=%g", value)
 }
 
@@ -251,18 +247,16 @@ func formatExactKey(value float64) string {
 // TypeScript original code (from compiler.ts):
 // const rep = token.type === 'plural' ? token : pluralToken;
 // if (rep) res = res.replace(/(^|[^\\])#/g, `$1${this.numbr(rep.arg)}`);
-func ReplaceOctothorpe(content string, argValue interface{}, locale string, offset float64) string {
+func ReplaceOctothorpe(content string, argValue any, locale string, offset float64) string {
 	if content == "" {
 		return content
 	}
 
-	// Convert argument value to number
 	numValue, err := toFloat64(argValue)
 	if err != nil {
-		return content // Return unchanged if not a number
+		return content
 	}
 
-	// Format the number for replacement
 	formattedNumber := Number(locale, numValue, offset)
 
 	// Replace only the special __OCTOTHORPE__ placeholders, not literal # characters
@@ -271,10 +265,7 @@ func ReplaceOctothorpe(content string, argValue interface{}, locale string, offs
 }
 
 // ProcessPluralContent processes plural case content with octothorpe replacement
-func ProcessPluralContent(content interface{}, argValue interface{}, locale string, offset float64) string {
-	// Convert content to string
+func ProcessPluralContent(content any, argValue any, locale string, offset float64) string {
 	contentStr := fmt.Sprintf("%v", content)
-
-	// Replace octothorpe symbols with formatted numbers
 	return ReplaceOctothorpe(contentStr, argValue, locale, offset)
 }

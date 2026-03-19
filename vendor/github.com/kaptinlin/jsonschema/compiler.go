@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/go-json-experiment/json"
-
 	"github.com/goccy/go-yaml"
 )
 
-// FormatDef defines a custom format validation rule
+// FormatDef defines a custom format validation rule.
 type FormatDef struct {
 	// Type specifies which JSON Schema type this format applies to (optional)
 	// Supported values: "string", "number", "integer", "boolean", "array", "object"
@@ -36,6 +36,9 @@ type Compiler struct {
 	Loaders        map[string]func(url string) (io.ReadCloser, error) // Functions to load schemas from URLs.
 	DefaultBaseURI string                                             // Base URI used to resolve relative references.
 	AssertFormat   bool                                               // Flag to enforce format validation.
+	// PreserveExtra indicates whether to preserve unknown keywords in the schema.
+	// If false (default), unknown keywords are stripped during compilation.
+	PreserveExtra bool
 
 	// JSON encoder/decoder configuration
 	jsonEncoder func(v any) ([]byte, error)
@@ -49,7 +52,7 @@ type Compiler struct {
 	customFormatsRW sync.RWMutex          // Protects concurrent access to custom formats
 }
 
-// DefaultFunc represents a function that can generate dynamic default values
+// DefaultFunc represents a function that can generate dynamic default values.
 type DefaultFunc func(args ...any) (any, error)
 
 // NewCompiler creates a new Compiler instance and initializes it with default settings.
@@ -60,8 +63,6 @@ func NewCompiler() *Compiler {
 		Decoders:       make(map[string]func(string) ([]byte, error)),
 		MediaTypes:     make(map[string]func([]byte) (any, error)),
 		Loaders:        make(map[string]func(url string) (io.ReadCloser, error)),
-		DefaultBaseURI: "",
-		AssertFormat:   false,
 		defaultFuncs:   make(map[string]DefaultFunc),
 		customFormats:  make(map[string]*FormatDef),
 
@@ -73,13 +74,13 @@ func NewCompiler() *Compiler {
 	return compiler
 }
 
-// WithEncoderJSON configures custom JSON encoder implementation
+// WithEncoderJSON configures custom JSON encoder implementation.
 func (c *Compiler) WithEncoderJSON(encoder func(v any) ([]byte, error)) *Compiler {
 	c.jsonEncoder = encoder
 	return c
 }
 
-// WithDecoderJSON configures custom JSON decoder implementation
+// WithDecoderJSON configures custom JSON decoder implementation.
 func (c *Compiler) WithDecoderJSON(decoder func(data []byte, v any) error) *Compiler {
 	c.jsonDecoder = decoder
 	return c
@@ -147,23 +148,12 @@ func (c *Compiler) Compile(jsonSchema []byte, uris ...string) (*Schema, error) {
 	return schema, nil
 }
 
-// trackUnresolvedReferences tracks which schemas have unresolved references to which URIs
-// This method should be called with mutex locked
+// trackUnresolvedReferences tracks which schemas have unresolved references to which URIs.
+// This method should be called with mutex locked.
 func (c *Compiler) trackUnresolvedReferences(schema *Schema) {
-	unresolvedURIs := schema.GetUnresolvedReferenceURIs()
+	unresolvedURIs := schema.UnresolvedReferenceURIs()
 	for _, uri := range unresolvedURIs {
-		if c.unresolvedRefs[uri] == nil {
-			c.unresolvedRefs[uri] = make([]*Schema, 0)
-		}
-		// Check if schema is already in the list to avoid duplicates
-		found := false
-		for _, existing := range c.unresolvedRefs[uri] {
-			if existing == schema {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(c.unresolvedRefs[uri], schema) {
 			c.unresolvedRefs[uri] = append(c.unresolvedRefs[uri], schema)
 		}
 	}
@@ -178,7 +168,7 @@ func (c *Compiler) resolveSchemaURL(url string) (*Schema, error) {
 	c.mu.RUnlock()
 
 	if exists {
-		return schema, nil // Return cached schema if available
+		return schema, nil
 	}
 
 	loader, ok := c.Loaders[getURLScheme(url)]
@@ -188,17 +178,16 @@ func (c *Compiler) resolveSchemaURL(url string) (*Schema, error) {
 
 	body, err := loader(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading schema from %s: %w", url, err)
 	}
 	defer body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(body)
 	if err != nil {
-		return nil, ErrDataRead
+		return nil, fmt.Errorf("reading from %s: %w", url, err)
 	}
 
 	compiledSchema, err := c.Compile(data, id)
-
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +207,8 @@ func (c *Compiler) SetSchema(uri string, schema *Schema) *Compiler {
 	return c
 }
 
-// GetSchema retrieves a schema by reference. If the schema is not found in the cache and the ref is a URL, it tries to resolve it.
-func (c *Compiler) GetSchema(ref string) (*Schema, error) {
+// Schema retrieves a schema by reference. If the schema is not found in the cache and the ref is a URL, it tries to resolve it.
+func (c *Compiler) Schema(ref string) (*Schema, error) {
 	baseURI, anchor := splitRef(ref)
 
 	c.mu.RLock()
@@ -248,6 +237,12 @@ func (c *Compiler) SetAssertFormat(assert bool) *Compiler {
 	return c
 }
 
+// SetPreserveExtra sets whether to preserve unknown keywords in the schema.
+func (c *Compiler) SetPreserveExtra(preserve bool) *Compiler {
+	c.PreserveExtra = preserve
+	return c
+}
+
 // RegisterDecoder adds a new decoder function for a specific encoding.
 func (c *Compiler) RegisterDecoder(encodingName string, decoderFunc func(string) ([]byte, error)) *Compiler {
 	c.Decoders[encodingName] = decoderFunc
@@ -266,7 +261,7 @@ func (c *Compiler) RegisterLoader(scheme string, loaderFunc func(url string) (io
 	return c
 }
 
-// RegisterDefaultFunc registers a function for dynamic default value generation
+// RegisterDefaultFunc registers a function for dynamic default value generation.
 func (c *Compiler) RegisterDefaultFunc(name string, fn DefaultFunc) *Compiler {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -278,8 +273,8 @@ func (c *Compiler) RegisterDefaultFunc(name string, fn DefaultFunc) *Compiler {
 	return c
 }
 
-// getDefaultFunc retrieves a registered default function by name
-func (c *Compiler) getDefaultFunc(name string) (DefaultFunc, bool) {
+// defaultFunc retrieves a registered default function by name.
+func (c *Compiler) defaultFunc(name string) (DefaultFunc, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -299,7 +294,7 @@ func (c *Compiler) setupMediaTypes() {
 	c.MediaTypes["application/json"] = func(data []byte) (any, error) {
 		var temp any
 		if err := c.jsonDecoder(data, &temp); err != nil {
-			return nil, ErrJSONUnmarshal
+			return nil, fmt.Errorf("%w: %w", ErrJSONUnmarshal, err)
 		}
 		return temp, nil
 	}
@@ -307,7 +302,7 @@ func (c *Compiler) setupMediaTypes() {
 	c.MediaTypes["application/xml"] = func(data []byte) (any, error) {
 		var temp any
 		if err := xml.Unmarshal(data, &temp); err != nil {
-			return nil, ErrXMLUnmarshal
+			return nil, fmt.Errorf("%w: %w", ErrXMLUnmarshal, err)
 		}
 		return temp, nil
 	}
@@ -315,7 +310,7 @@ func (c *Compiler) setupMediaTypes() {
 	c.MediaTypes["application/yaml"] = func(data []byte) (any, error) {
 		var temp any
 		if err := yaml.Unmarshal(data, &temp); err != nil {
-			return nil, ErrYAMLUnmarshal
+			return nil, fmt.Errorf("%w: %w", ErrYAMLUnmarshal, err)
 		}
 		return temp, nil
 	}
@@ -324,7 +319,7 @@ func (c *Compiler) setupMediaTypes() {
 // setupLoaders configures default loaders for fetching schemas via HTTP/HTTPS.
 func (c *Compiler) setupLoaders() {
 	client := &http.Client{
-		Timeout: 10 * time.Second, // Set a reasonable timeout for network requests.
+		Timeout: 10 * time.Second,
 	}
 
 	defaultHTTPLoader := func(url string) (io.ReadCloser, error) {
@@ -339,10 +334,7 @@ func (c *Compiler) setupLoaders() {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			err = resp.Body.Close()
-			if err != nil {
-				return nil, err
-			}
+			_ = resp.Body.Close()
 			return nil, ErrInvalidStatusCode
 		}
 
@@ -363,7 +355,7 @@ func (c *Compiler) CompileBatch(schemas map[string][]byte) (map[string]*Schema, 
 	for id, schemaBytes := range schemas {
 		schema, err := newSchema(schemaBytes)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %w", ErrSchemaCompilation, id, err)
+			return nil, fmt.Errorf("compiling schema %s: %w", id, err)
 		}
 
 		if schema.ID == "" {
@@ -394,7 +386,7 @@ func (c *Compiler) CompileBatch(schemas map[string][]byte) (map[string]*Schema, 
 }
 
 // RegisterFormat registers a custom format.
-// The optional typeName parameter specifies which JSON Schema type the format applies to
+// The optional typeName parameter specifies which JSON Schema type the format applies to.
 // (e.g., "string", "number"). If omitted, the format applies to all types.
 func (c *Compiler) RegisterFormat(name string, validator func(any) bool, typeName ...string) *Compiler {
 	c.customFormatsRW.Lock()

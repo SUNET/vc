@@ -31,14 +31,13 @@ func StatusHandler(serverCtx *ServerContext) gin.HandlerFunc {
 		tslCount := getRegistryCount(serverCtx)
 
 		// Log the status request with structured logging
-		serverCtx.Logger.Warn("API status request (deprecated endpoint)",
+		serverCtx.Logger.Debug("API status request (deprecated endpoint)",
 			logging.F("remote_ip", c.ClientIP()),
 			logging.F("registry_count", tslCount),
 			logging.F("replacement", "GET /readyz"))
 
 		c.JSON(200, gin.H{
 			"registry_count": tslCount,
-			"last_processed": serverCtx.LastProcessed.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
 }
@@ -91,15 +90,24 @@ func AuthZENDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
 			return
 		}
 
-		// Log valid request
+		// Log valid request with full trace details
+		actionName := ""
+		if req.Action != nil {
+			actionName = req.Action.Name
+		}
 		serverCtx.Logger.Debug("Processing AuthZEN request",
 			logging.F("remote_ip", c.ClientIP()),
 			logging.F("subject_id", req.Subject.ID),
-			logging.F("resource_type", req.Resource.Type))
+			logging.F("subject_type", req.Subject.Type),
+			logging.F("resource_type", req.Resource.Type),
+			logging.F("resource_id", req.Resource.ID),
+			logging.F("action", actionName),
+			logging.F("has_key", len(req.Resource.Key) > 0),
+			logging.F("has_context", req.Context != nil))
 
 		start := time.Now()
 
-		// Use RegistryManager if available, fallback to legacy PipelineContext
+		// Use RegistryManager for trust evaluation
 		serverCtx.RLock()
 		registryMgr := serverCtx.RegistryManager
 		serverCtx.RUnlock()
@@ -107,13 +115,12 @@ func AuthZENDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
 		var resp *authzen.EvaluationResponse
 		var evalErr error
 
-		if registryMgr != nil {
-			// New architecture: use RegistryManager
-			resp, evalErr = registryMgr.Evaluate(c.Request.Context(), &req)
-		} else {
-			// Legacy architecture: use direct validation (backward compatibility)
-			resp, evalErr = legacyEvaluate(serverCtx, &req)
+		if registryMgr == nil {
+			c.JSON(500, gin.H{"error": "server not configured: no registry manager"})
+			return
 		}
+
+		resp, evalErr = registryMgr.Evaluate(c.Request.Context(), &req)
 
 		validationDuration := time.Since(start)
 
@@ -128,12 +135,12 @@ func AuthZENDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
 				serverCtx.Metrics.RecordError("evaluation_error", "authzen_decision")
 			}
 
-			c.JSON(500, buildResponse(false, evalErr.Error()))
+			c.JSON(500, buildResponse(false, "internal evaluation error"))
 			return
 		}
 
 		if resp.Decision {
-			serverCtx.Logger.Info("AuthZEN request approved",
+			serverCtx.Logger.Debug("AuthZEN request approved",
 				logging.F("remote_ip", c.ClientIP()),
 				logging.F("subject_id", req.Subject.ID),
 				logging.F("resource_type", req.Resource.Type),
@@ -144,7 +151,7 @@ func AuthZENDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
 				serverCtx.Metrics.RecordCertValidation(validationDuration, true)
 			}
 		} else {
-			serverCtx.Logger.Info("AuthZEN request denied",
+			serverCtx.Logger.Debug("AuthZEN request denied",
 				logging.F("remote_ip", c.ClientIP()),
 				logging.F("subject_id", req.Subject.ID),
 				logging.F("resource_type", req.Resource.Type),
@@ -156,21 +163,18 @@ func AuthZENDecisionHandler(serverCtx *ServerContext) gin.HandlerFunc {
 			}
 		}
 
+		// Debug trace: response details
+		if resp.Context != nil && resp.Context.Reason != nil {
+			if registry, ok := resp.Context.Reason["registry"]; ok {
+				serverCtx.Logger.Debug("AuthZEN response details",
+					logging.F("decision", resp.Decision),
+					logging.F("registry", registry),
+					logging.F("duration_ms", validationDuration.Milliseconds()))
+			}
+		}
+
 		c.JSON(200, resp)
 	}
-}
-
-// legacyEvaluate returns an error indicating legacy mode is no longer supported.
-// Use RegistryManager with TSLRegistry for trust evaluation.
-func legacyEvaluate(serverCtx *ServerContext, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
-	return &authzen.EvaluationResponse{
-		Decision: false,
-		Context: &authzen.EvaluationResponseContext{
-			Reason: map[string]interface{}{
-				"error": "legacy mode not supported; configure RegistryManager with TSLRegistry",
-			},
-		},
-	}, nil
 }
 
 // InfoHandler godoc
@@ -219,7 +223,7 @@ func InfoHandler(serverCtx *ServerContext) gin.HandlerFunc {
 		}
 
 		// Log info request with structured logging
-		serverCtx.Logger.Warn("API info request (deprecated endpoint)",
+		serverCtx.Logger.Debug("API info request (deprecated endpoint)",
 			logging.F("remote_ip", c.ClientIP()),
 			logging.F("registry_count", registryCount),
 			logging.F("replacement", "GET /tsls"))
@@ -250,7 +254,6 @@ func TSLsHandler(serverCtx *ServerContext) gin.HandlerFunc {
 
 		registryInfos := make([]map[string]interface{}, 0)
 		registryCount := 0
-		lastUpdated := serverCtx.LastProcessed.Format(time.RFC3339)
 
 		if serverCtx.RegistryManager != nil {
 			for _, info := range serverCtx.RegistryManager.ListRegistries() {
@@ -267,14 +270,13 @@ func TSLsHandler(serverCtx *ServerContext) gin.HandlerFunc {
 			registryCount = len(registryInfos)
 		}
 
-		serverCtx.Logger.Info("API /tsls request",
+		serverCtx.Logger.Debug("API /tsls request",
 			logging.F("remote_ip", c.ClientIP()),
 			logging.F("registry_count", registryCount))
 
 		c.JSON(200, gin.H{
-			"count":        registryCount,
-			"last_updated": lastUpdated,
-			"registries":   registryInfos,
+			"count":      registryCount,
+			"registries": registryInfos,
 		})
 	}
 }

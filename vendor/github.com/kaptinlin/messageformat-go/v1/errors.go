@@ -8,14 +8,14 @@ import (
 
 var (
 	// Common error types
-	ErrInvalidLocale      = errors.New("invalid language tag")
+	ErrInvalidLocale      = errors.New("invalid locale")
 	ErrInvalidNumberValue = errors.New("invalid number value")
-	ErrInvalidDateValue   = errors.New("cannot parse date")
-	ErrInvalidTimeValue   = errors.New("cannot parse time")
-	ErrUnsupportedType    = errors.New("unsupported type")
-	ErrInvalidNumberType  = errors.New("unsupported number type")
-	ErrInvalidDateType    = errors.New("unsupported date value type")
-	ErrInvalidTimeType    = errors.New("unsupported time value type")
+	ErrInvalidDateValue   = errors.New("invalid date value")
+	ErrInvalidTimeValue   = errors.New("invalid time value")
+	ErrInvalidType        = errors.New("invalid type")
+	ErrInvalidNumberType  = errors.New("invalid number type")
+	ErrInvalidDateType    = errors.New("invalid date type")
+	ErrInvalidTimeType    = errors.New("invalid time type")
 	ErrInvalidParamType   = errors.New("invalid parameter type")
 	ErrMissingParameter   = errors.New("missing parameter")
 	ErrMissingArgument    = errors.New("missing required argument")
@@ -31,20 +31,20 @@ func WrapInvalidLocale(locale string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidLocale, locale)
 }
 
-func WrapInvalidNumberValue(value interface{}) error {
+func WrapInvalidNumberValue(value any) error {
 	return fmt.Errorf("%w: %v", ErrInvalidNumberValue, value)
 }
 
-func WrapInvalidDateValue(value interface{}) error {
+func WrapInvalidDateValue(value any) error {
 	return fmt.Errorf("%w: %v", ErrInvalidDateValue, value)
 }
 
-func WrapInvalidTimeValue(value interface{}) error {
+func WrapInvalidTimeValue(value any) error {
 	return fmt.Errorf("%w: %v", ErrInvalidTimeValue, value)
 }
 
-func WrapUnsupportedType(valueType string) error {
-	return fmt.Errorf("%w: %s", ErrUnsupportedType, valueType)
+func WrapInvalidType(valueType string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidType, valueType)
 }
 
 func WrapInvalidParamType(paramType string) error {

@@ -1,12 +1,10 @@
 package api
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirosfoundation/g119612/pkg/logging"
@@ -14,7 +12,7 @@ import (
 )
 
 // parseX5C extracts and parses x5c certificates from a map[string]interface{}.
-// DEPRECATED: Use parseX5CFromArray or parseX5CFromJWK for AuthZEN Trust Registry Profile compliance.
+// Deprecated: Use parseX5CFromArray or parseX5CFromJWK for AuthZEN Trust Registry Profile compliance.
 func parseX5C(props map[string]interface{}) ([]*x509.Certificate, error) {
 	var certs []*x509.Certificate
 	if props == nil {
@@ -133,99 +131,6 @@ func buildResponse(decision bool, reason string) authzen.EvaluationResponse {
 	}
 }
 
-// StartBackgroundRefresher starts a background goroutine that periodically refreshes
-// all registered trust registries. This keeps TSL data and other trust information
-// up-to-date without requiring a full pipeline.
-//
-// The refresh is executed immediately upon calling this function, then repeated
-// at the specified frequency. This ensures registries have data as soon as the
-// server starts.
-//
-// Success and failure events are logged using the ServerContext's structured logger:
-// - On success: An info-level message with the update frequency and registry stats
-// - On failure: An error-level message with the error details
-//
-// Parameters:
-//   - serverCtx: The server context with RegistryManager to refresh (must have a valid logger)
-//   - freq: The frequency at which to refresh registries (e.g., 5m for every 5 minutes)
-//
-// Returns an error if the RegistryManager is not configured.
-func StartBackgroundRefresher(serverCtx *ServerContext, freq time.Duration) error {
-	if serverCtx.RegistryManager == nil {
-		return fmt.Errorf("RegistryManager not configured")
-	}
-
-	ctx := context.Background()
-
-	// Refresh immediately to ensure data is loaded
-	start := time.Now()
-	err := serverCtx.RegistryManager.Refresh(ctx)
-	duration := time.Since(start)
-
-	serverCtx.Lock()
-	serverCtx.LastProcessed = time.Now()
-	serverCtx.Unlock()
-
-	if err == nil {
-		registryCount := len(serverCtx.RegistryManager.ListRegistries())
-		serverCtx.Logger.Info("Initial registry refresh successful",
-			logging.F("registry_count", registryCount),
-			logging.F("duration_ms", duration.Milliseconds()))
-
-		// Record metrics if available
-		if serverCtx.Metrics != nil {
-			serverCtx.Metrics.RecordRefreshExecution(duration, registryCount, nil)
-		}
-	} else {
-		serverCtx.Logger.Error("Initial registry refresh failed",
-			logging.F("error", err.Error()))
-
-		// Record error metrics if available
-		if serverCtx.Metrics != nil {
-			serverCtx.Metrics.RecordRefreshExecution(duration, 0, err)
-		}
-	}
-
-	// Start background refresh
-	go func() {
-		ticker := time.NewTicker(freq)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			start := time.Now()
-			err := serverCtx.RegistryManager.Refresh(ctx)
-			duration := time.Since(start)
-
-			serverCtx.Lock()
-			serverCtx.LastProcessed = time.Now()
-			serverCtx.Unlock()
-
-			if err != nil {
-				serverCtx.Logger.Error("Registry refresh failed",
-					logging.F("error", err.Error()),
-					logging.F("frequency", freq.String()))
-
-				// Record error metrics if available
-				if serverCtx.Metrics != nil {
-					serverCtx.Metrics.RecordRefreshExecution(duration, 0, err)
-				}
-			} else {
-				registryCount := len(serverCtx.RegistryManager.ListRegistries())
-				serverCtx.Logger.Info("Registry refresh successful",
-					logging.F("frequency", freq.String()),
-					logging.F("registry_count", registryCount),
-					logging.F("duration_ms", duration.Milliseconds()))
-
-				// Record metrics if available
-				if serverCtx.Metrics != nil {
-					serverCtx.Metrics.RecordRefreshExecution(duration, registryCount, nil)
-				}
-			}
-		}
-	}()
-	return nil
-}
-
 // NewServerContext creates a new ServerContext with a configured logger.
 // The ServerContext will always have a valid logger - if none is provided,
 // it will use the DefaultLogger.
@@ -274,6 +179,9 @@ func RegisterAPIRoutes(r *gin.Engine, serverCtx *ServerContext) {
 			logging.F("rps", serverCtx.RateLimiter.rps),
 			logging.F("burst", serverCtx.RateLimiter.burst))
 	}
+
+	// Register health check endpoints (required for Kubernetes probes)
+	RegisterHealthEndpoints(r, serverCtx)
 
 	// AuthZEN well-known discovery endpoint (Section 9 of base spec)
 	r.GET("/.well-known/authzen-configuration", WellKnownHandler(serverCtx.BaseURL))

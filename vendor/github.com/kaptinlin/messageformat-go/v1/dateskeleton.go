@@ -126,12 +126,10 @@ func ParseDateTokens(src string) []DateToken {
 		var token DateToken
 		switch {
 		case isLetter(ch):
-			// Date field pattern (e.g., 'y', 'yy', 'yyyy')
 			char := string(ch)
 			width := 1
 			pos++
 
-			// Count consecutive same characters
 			for pos < len(runes) && runes[pos] == ch {
 				width++
 				pos++
@@ -142,27 +140,22 @@ func ParseDateTokens(src string) []DateToken {
 				Width: width,
 			}
 		case ch == '\'':
-			// Quoted literal handling
-			pos++ // skip opening quote
+			pos++
 
 			if pos < len(runes) && runes[pos] == '\'' {
-				// Two single quotes = escaped single quote
 				token = &DateTokenString{Value: "'"}
 				pos++
 			} else {
-				// Quoted string literal
 				var str strings.Builder
 
 				for pos < len(runes) {
 					next := runes[pos]
 					if next == '\'' {
-						pos++ // consume closing quote
+						pos++
 						if pos < len(runes) && runes[pos] == '\'' {
-							// Two quotes inside = escaped quote
 							str.WriteRune('\'')
 							pos++
 						} else {
-							// End of quoted section
 							break
 						}
 					} else {
@@ -171,7 +164,6 @@ func ParseDateTokens(src string) []DateToken {
 					}
 				}
 
-				// Check if we reached end without closing quote
 				if pos > len(runes) || (pos == len(runes) && src[len(src)-1] != '\'') {
 					token = &DateTokenError{
 						Error: fmt.Sprintf("Unterminated quoted literal in pattern: %s", src),
@@ -181,12 +173,10 @@ func ParseDateTokens(src string) []DateToken {
 				}
 			}
 		default:
-			// Non-letter, non-quote characters (literal text)
 			var str strings.Builder
 			str.WriteRune(ch)
 			pos++
 
-			// Collect consecutive non-letter, non-quote characters
 			for pos < len(runes) && !isLetter(runes[pos]) && runes[pos] != '\'' {
 				str.WriteRune(runes[pos])
 				pos++
@@ -389,7 +379,7 @@ func GetDateTimeFormatOptions(tokens []DateToken, onError func(errorType, messag
 //	onError?: (error: DateFormatError) => void
 //
 // ): (date: Date | number) => string
-func GetDateFormatter(locales interface{}, skeleton string, timeZone string, onError func(*DateFormatError)) (func(interface{}) (string, error), error) {
+func GetDateFormatter(locales any, skeleton string, timeZone string, onError func(*DateFormatError)) (func(any) (string, error), error) {
 	tokens := ParseDateTokens(skeleton)
 
 	// Convert DateFormatError callback to internal format
@@ -408,7 +398,7 @@ func GetDateFormatter(locales interface{}, skeleton string, timeZone string, onE
 
 	// For Go implementation, we'll create a simple formatter function
 	// In a real implementation, this would use Go's time formatting with the converted options
-	formatter := func(date interface{}) (string, error) {
+	formatter := func(date any) (string, error) {
 		// This is a simplified implementation
 		// In practice, you'd use Go's time.Format with the appropriate layout
 		// converted from the DateTimeFormatOptions
@@ -430,7 +420,7 @@ func GetDateFormatter(locales interface{}, skeleton string, timeZone string, onE
 //	onError?: (err: DateFormatError) => void
 //
 // ): string
-func GetDateFormatterSource(locales interface{}, skeleton string, timeZone string, onError func(*DateFormatError)) (string, error) {
+func GetDateFormatterSource(locales any, skeleton string, timeZone string, onError func(*DateFormatError)) (string, error) {
 	tokens := ParseDateTokens(skeleton)
 
 	// Convert DateFormatError callback to internal format
@@ -455,7 +445,7 @@ func GetDateFormatterSource(locales interface{}, skeleton string, timeZone strin
 	case []string:
 		localesStr = fmt.Sprintf(`[%s]`, strings.Join(v, ","))
 	default:
-		return "", ErrUnsupportedType
+		return "", ErrInvalidType
 	}
 
 	// Generate JavaScript source (simplified)

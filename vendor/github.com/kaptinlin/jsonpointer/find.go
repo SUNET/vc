@@ -16,18 +16,16 @@ func find(val any, path Path) (*Reference, error) {
 	var key string
 	current := val
 
-	for i := 0; i < pathLength; i++ {
+	for i := range pathLength {
 		obj = current
-		key = path[i] // key is already a string
+		key = path[i]
 
 		if current == nil {
 			return nil, ErrNotFound
 		}
 
-		// Inline ultra-fast path - avoid function call overhead
 		switch v := current.(type) {
 		case map[string]any:
-			// Most common case: map[string]any - direct string key access
 			if result, exists := v[key]; exists {
 				current = result
 			} else {
@@ -35,7 +33,6 @@ func find(val any, path Path) (*Reference, error) {
 			}
 
 		case *map[string]any:
-			// Pointer to map optimization
 			if v == nil {
 				return nil, ErrNilPointer
 			}
@@ -46,7 +43,6 @@ func find(val any, path Path) (*Reference, error) {
 			}
 
 		case []any:
-			// Array access - optimized inline parsing
 			index, err := validateAndAccessArray(key, len(v))
 			if err != nil {
 				return nil, err
@@ -54,7 +50,6 @@ func find(val any, path Path) (*Reference, error) {
 			current = v[index]
 
 		case *[]any:
-			// Pointer to slice optimization
 			if v == nil {
 				return nil, ErrNilPointer
 			}
@@ -65,15 +60,14 @@ func find(val any, path Path) (*Reference, error) {
 			current = (*v)[index]
 
 		default:
-			// Reflection fallback for other types
 			objVal, err := derefValue(reflect.ValueOf(current))
 			if err != nil {
 				return nil, err
 			}
 
+			//nolint:exhaustive // Only handling traversable types
 			switch objVal.Kind() {
 			case reflect.Slice, reflect.Array:
-				// Array access using reflection
 				index, err := validateAndAccessArray(key, objVal.Len())
 				if err != nil {
 					return nil, err
@@ -81,7 +75,6 @@ func find(val any, path Path) (*Reference, error) {
 				current = objVal.Index(index).Interface()
 
 			case reflect.Map:
-				// Map access using reflection
 				mapKey := reflect.ValueOf(key)
 				mapVal := objVal.MapIndex(mapKey)
 				if mapVal.IsValid() {
@@ -91,18 +84,13 @@ func find(val any, path Path) (*Reference, error) {
 				}
 
 			case reflect.Struct:
-				// Struct field access using reflection
 				if structField(key, &objVal) {
 					current = objVal.Interface()
 				} else {
 					return nil, ErrFieldNotFound
 				}
 
-			case reflect.Invalid, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-				reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128,
-				reflect.Chan, reflect.Func, reflect.Interface, reflect.Ptr, reflect.String, reflect.UnsafePointer:
-				// Handle all other reflect.Kind types not supported for JSON Pointer traversal
+			default:
 				return nil, ErrNotFound
 			}
 		}

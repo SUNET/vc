@@ -11,7 +11,7 @@ import (
 // resolveRef resolves a reference to another schema, either locally or globally, supporting both $ref and $dynamicRef.
 func (s *Schema) resolveRef(ref string) (*Schema, error) {
 	if ref == "#" {
-		return s.getRootSchema(), nil
+		return s.rootSchema(), nil
 	}
 
 	if strings.HasPrefix(ref, "#") {
@@ -52,13 +52,12 @@ func (s *Schema) resolveAnchor(anchorName string) (*Schema, error) {
 
 // resolveRefWithFullURL resolves a full URL reference to another schema.
 func (s *Schema) resolveRefWithFullURL(ref string) (*Schema, error) {
-	root := s.getRootSchema()
+	root := s.rootSchema()
 	if resolved, err := root.getSchema(ref); err == nil {
 		return resolved, nil
 	}
 
-	// If not found in the current schema or its parents, look for the reference in the compiler
-	resolved, err := s.GetCompiler().GetSchema(ref)
+	resolved, err := s.Compiler().Schema(ref)
 	if err != nil {
 		return nil, ErrGlobalReferenceResolution
 	}
@@ -71,15 +70,11 @@ func (s *Schema) resolveJSONPointer(pointer string) (*Schema, error) {
 		return s, nil
 	}
 
-	// Parse JSON Pointer using the jsonpointer library
-	// This handles ~ escaping (~ -> ~0, / -> ~1) automatically
 	segments := jsonpointer.Parse(pointer)
 	currentSchema := s
 	previousSegment := ""
 
 	for i, segment := range segments {
-		// jsonpointer.Parse handles ~0 and ~1 escaping, but not URL percent encoding
-		// We need to handle URL percent encoding separately for JSON Schema compatibility
 		decodedSegment, err := url.PathUnescape(segment)
 		if err != nil {
 			return nil, ErrJSONPointerSegmentDecode
@@ -92,8 +87,7 @@ func (s *Schema) resolveJSONPointer(pointer string) (*Schema, error) {
 			continue
 		}
 
-		if !found && i == len(segments)-1 {
-			// If no schema is found and it's the last segment, throw error
+		if i == len(segments)-1 {
 			return nil, ErrJSONPointerSegmentNotFound
 		}
 
@@ -103,7 +97,7 @@ func (s *Schema) resolveJSONPointer(pointer string) (*Schema, error) {
 	return currentSchema, nil
 }
 
-// Helper function to find a schema within a given segment
+// findSchemaInSegment finds a schema within a given segment.
 func findSchemaInSegment(currentSchema *Schema, segment string, previousSegment string) (*Schema, bool) {
 	switch previousSegment {
 	case "properties":
@@ -114,11 +108,10 @@ func findSchemaInSegment(currentSchema *Schema, segment string, previousSegment 
 		}
 	case "prefixItems":
 		index, err := strconv.Atoi(segment)
-
 		if err == nil && currentSchema.PrefixItems != nil && index < len(currentSchema.PrefixItems) {
 			return currentSchema.PrefixItems[index], true
 		}
-	case "$defs", "definitions": // Support both $defs (2020-12) and definitions (Draft-7) for backward compatibility
+	case "$defs", "definitions":
 		if defSchema, exists := currentSchema.Defs[segment]; exists {
 			return defSchema, true
 		}
@@ -130,8 +123,8 @@ func findSchemaInSegment(currentSchema *Schema, segment string, previousSegment 
 	return nil, false
 }
 
-// ResolveUnresolvedReferences tries to resolve any previously unresolved references
-// This is called after new schemas are added to the compiler
+// ResolveUnresolvedReferences tries to resolve any previously unresolved references.
+// This is called after new schemas are added to the compiler.
 func (s *Schema) ResolveUnresolvedReferences() {
 	// Try to resolve unresolved $ref
 	if s.Ref != "" && s.ResolvedRef == nil {
@@ -147,203 +140,86 @@ func (s *Schema) ResolveUnresolvedReferences() {
 		}
 	}
 
-	// Recursively resolve references within definitions
-	if s.Defs != nil {
-		for _, defSchema := range s.Defs {
-			defSchema.ResolveUnresolvedReferences()
-		}
-	}
-
-	// Recursively resolve references in properties
-	if s.Properties != nil {
-		for _, schema := range *s.Properties {
-			if schema != nil {
-				schema.ResolveUnresolvedReferences()
-			}
-		}
-	}
-
-	// Additional fields that can have subschemas
-	resolveUnresolvedInList(s.AllOf)
-	resolveUnresolvedInList(s.AnyOf)
-	resolveUnresolvedInList(s.OneOf)
-	if s.Not != nil {
-		s.Not.ResolveUnresolvedReferences()
-	}
-	if s.Items != nil {
-		s.Items.ResolveUnresolvedReferences()
-	}
-	if s.PrefixItems != nil {
-		for _, schema := range s.PrefixItems {
-			schema.ResolveUnresolvedReferences()
-		}
-	}
-
-	if s.AdditionalProperties != nil {
-		s.AdditionalProperties.ResolveUnresolvedReferences()
-	}
-	if s.Contains != nil {
-		s.Contains.ResolveUnresolvedReferences()
-	}
-	if s.PatternProperties != nil {
-		for _, schema := range *s.PatternProperties {
-			schema.ResolveUnresolvedReferences()
-		}
-	}
+	s.walkNestedSchemas((*Schema).ResolveUnresolvedReferences)
 }
 
 func (s *Schema) resolveReferences() {
-	// Resolve the root reference if this schema itself is a reference
 	if s.Ref != "" {
-		resolved, err := s.resolveRef(s.Ref)
-		if err == nil {
+		if resolved, err := s.resolveRef(s.Ref); err == nil {
 			s.ResolvedRef = resolved
 		}
-		// If resolution fails, leave ResolvedRef as nil and validation will handle this gracefully
 	}
 
 	if s.DynamicRef != "" {
-		resolved, err := s.resolveRef(s.DynamicRef)
-		if err == nil {
+		if resolved, err := s.resolveRef(s.DynamicRef); err == nil {
 			s.ResolvedDynamicRef = resolved
 		}
-		// If resolution fails, leave ResolvedDynamicRef as nil and validation will handle this gracefully
 	}
 
-	// Recursively resolve references within definitions
+	s.walkNestedSchemas((*Schema).resolveReferences)
+}
+
+// walkNestedSchemas applies fn recursively to all nested subschemas.
+func (s *Schema) walkNestedSchemas(fn func(*Schema)) {
 	if s.Defs != nil {
 		for _, defSchema := range s.Defs {
-			defSchema.resolveReferences()
+			fn(defSchema)
 		}
 	}
 
-	// Recursively resolve references in properties
 	if s.Properties != nil {
 		for _, schema := range *s.Properties {
 			if schema != nil {
-				schema.resolveReferences()
+				fn(schema)
 			}
 		}
 	}
 
-	// Additional fields that can have subschemas
-	resolveSubschemaList(s.AllOf)
-	resolveSubschemaList(s.AnyOf)
-	resolveSubschemaList(s.OneOf)
-	if s.Not != nil {
-		s.Not.resolveReferences()
-	}
-	if s.Items != nil {
-		s.Items.resolveReferences()
-	}
-	if s.PrefixItems != nil {
-		for _, schema := range s.PrefixItems {
-			schema.resolveReferences()
-		}
-	}
-
-	if s.AdditionalProperties != nil {
-		s.AdditionalProperties.resolveReferences()
-	}
-	if s.Contains != nil {
-		s.Contains.resolveReferences()
-	}
-	if s.PatternProperties != nil {
-		for _, schema := range *s.PatternProperties {
-			schema.resolveReferences()
-		}
-	}
-}
-
-// Helper function to resolve references in a list of schemas
-func resolveSubschemaList(schemas []*Schema) {
-	for _, schema := range schemas {
-		if schema != nil {
-			schema.resolveReferences()
-		}
-	}
-}
-
-// Helper function to resolve unresolved references in a list of schemas
-func resolveUnresolvedInList(schemas []*Schema) {
-	for _, schema := range schemas {
-		if schema != nil {
-			schema.ResolveUnresolvedReferences()
-		}
-	}
-}
-
-// GetUnresolvedReferenceURIs returns a list of URIs that this schema references but are not yet resolved
-func (s *Schema) GetUnresolvedReferenceURIs() []string {
-	var unresolvedURIs []string
-
-	// Check direct references
-	if s.Ref != "" && s.ResolvedRef == nil {
-		unresolvedURIs = append(unresolvedURIs, s.Ref)
-	}
-
-	if s.DynamicRef != "" && s.ResolvedDynamicRef == nil {
-		unresolvedURIs = append(unresolvedURIs, s.DynamicRef)
-	}
-
-	// Recursively check nested schemas
-	if s.Defs != nil {
-		for _, defSchema := range s.Defs {
-			unresolvedURIs = append(unresolvedURIs, defSchema.GetUnresolvedReferenceURIs()...)
-		}
-	}
-
-	if s.Properties != nil {
-		for _, propSchema := range *s.Properties {
-			if propSchema != nil {
-				unresolvedURIs = append(unresolvedURIs, propSchema.GetUnresolvedReferenceURIs()...)
+	for _, schemas := range [][]*Schema{s.AllOf, s.AnyOf, s.OneOf} {
+		for _, schema := range schemas {
+			if schema != nil {
+				fn(schema)
 			}
 		}
 	}
 
-	// Check other schema fields
-	unresolvedURIs = append(unresolvedURIs, getUnresolvedFromList(s.AllOf)...)
-	unresolvedURIs = append(unresolvedURIs, getUnresolvedFromList(s.AnyOf)...)
-	unresolvedURIs = append(unresolvedURIs, getUnresolvedFromList(s.OneOf)...)
-
 	if s.Not != nil {
-		unresolvedURIs = append(unresolvedURIs, s.Not.GetUnresolvedReferenceURIs()...)
+		fn(s.Not)
 	}
-
 	if s.Items != nil {
-		unresolvedURIs = append(unresolvedURIs, s.Items.GetUnresolvedReferenceURIs()...)
+		fn(s.Items)
 	}
-
-	if s.PrefixItems != nil {
-		for _, schema := range s.PrefixItems {
-			unresolvedURIs = append(unresolvedURIs, schema.GetUnresolvedReferenceURIs()...)
-		}
+	for _, schema := range s.PrefixItems {
+		fn(schema)
 	}
-
 	if s.AdditionalProperties != nil {
-		unresolvedURIs = append(unresolvedURIs, s.AdditionalProperties.GetUnresolvedReferenceURIs()...)
+		fn(s.AdditionalProperties)
 	}
-
 	if s.Contains != nil {
-		unresolvedURIs = append(unresolvedURIs, s.Contains.GetUnresolvedReferenceURIs()...)
+		fn(s.Contains)
 	}
-
 	if s.PatternProperties != nil {
 		for _, schema := range *s.PatternProperties {
-			unresolvedURIs = append(unresolvedURIs, schema.GetUnresolvedReferenceURIs()...)
+			fn(schema)
 		}
 	}
-
-	return unresolvedURIs
 }
 
-// Helper function to get unresolved references from a list of schemas
-func getUnresolvedFromList(schemas []*Schema) []string {
+// UnresolvedReferenceURIs returns a list of URIs that this schema references but are not yet resolved.
+func (s *Schema) UnresolvedReferenceURIs() []string {
 	var unresolvedURIs []string
-	for _, schema := range schemas {
-		if schema != nil {
-			unresolvedURIs = append(unresolvedURIs, schema.GetUnresolvedReferenceURIs()...)
+
+	var collect func(*Schema)
+	collect = func(schema *Schema) {
+		if schema.Ref != "" && schema.ResolvedRef == nil {
+			unresolvedURIs = append(unresolvedURIs, schema.Ref)
 		}
+		if schema.DynamicRef != "" && schema.ResolvedDynamicRef == nil {
+			unresolvedURIs = append(unresolvedURIs, schema.DynamicRef)
+		}
+		schema.walkNestedSchemas(collect)
 	}
+	collect(s)
+
 	return unresolvedURIs
 }

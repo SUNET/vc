@@ -27,11 +27,12 @@ func NewEvaluationError(keyword string, code string, message string, params ...m
 	}
 }
 
+// Error returns a string representation of the evaluation error.
 func (e *EvaluationError) Error() string {
 	return replace(e.Message, e.Params)
 }
 
-// Localize returns a localized error message using the provided localizer
+// Localize returns a localized error message using the provided localizer.
 func (e *EvaluationError) Localize(localizer *i18n.Localizer) string {
 	if localizer != nil {
 		return localizer.Get(e.Code, i18n.Vars(e.Params))
@@ -86,6 +87,7 @@ func (e *EvaluationResult) SetEvaluationPath(evaluationPath string) *EvaluationR
 	return e
 }
 
+// Error returns a string representation of the evaluation failure.
 func (e *EvaluationResult) Error() string {
 	return "evaluation failed"
 }
@@ -122,10 +124,7 @@ func (e *EvaluationResult) AddError(err *EvaluationError) *EvaluationResult {
 		e.Errors = make(map[string]*EvaluationError)
 	}
 
-	if e.Valid {
-		e.Valid = false
-	}
-
+	e.Valid = false
 	e.Errors[err.Keyword] = err
 	return e
 }
@@ -191,7 +190,6 @@ func (e *EvaluationResult) ToFlag() *Flag {
 // ToList converts the evaluation results into a list format with optional hierarchy
 // includeHierarchy is variadic; if not provided, it defaults to true
 func (e *EvaluationResult) ToList(includeHierarchy ...bool) *List {
-	// Set default value for includeHierarchy to true
 	hierarchyIncluded := true
 	if len(includeHierarchy) > 0 {
 		hierarchyIncluded = includeHierarchy[0]
@@ -200,10 +198,9 @@ func (e *EvaluationResult) ToList(includeHierarchy ...bool) *List {
 	return e.ToLocalizeList(nil, hierarchyIncluded)
 }
 
-// ToLocalizeList converts the evaluation results into a list format with optional hierarchy with localization
+// ToLocalizeList converts the evaluation results into a list format with optional hierarchy with localization.
 // includeHierarchy is variadic; if not provided, it defaults to true
 func (e *EvaluationResult) ToLocalizeList(localizer *i18n.Localizer, includeHierarchy ...bool) *List {
-	// Set default value for includeHierarchy to true
 	hierarchyIncluded := true
 	if len(includeHierarchy) > 0 {
 		hierarchyIncluded = includeHierarchy[0]
@@ -221,11 +218,11 @@ func (e *EvaluationResult) ToLocalizeList(localizer *i18n.Localizer, includeHier
 
 	if hierarchyIncluded {
 		for _, detail := range e.Details {
-			childList := detail.ToLocalizeList(localizer, true) // recursively include hierarchy
+			childList := detail.ToLocalizeList(localizer, true)
 			list.Details = append(list.Details, *childList)
 		}
 	} else {
-		e.flattenDetailsToList(localizer, list, e.Details) // flat structure
+		e.flattenDetailsToList(localizer, list, e.Details)
 	}
 
 	return list
@@ -250,7 +247,7 @@ func (e *EvaluationResult) flattenDetailsToList(localizer *i18n.Localizer, list 
 }
 
 func (e *EvaluationResult) convertErrors(localizer *i18n.Localizer) map[string]string {
-	errors := make(map[string]string)
+	errors := make(map[string]string, len(e.Errors))
 	for key, err := range e.Errors {
 		if localizer != nil {
 			errors[key] = err.Localize(localizer)
@@ -261,11 +258,11 @@ func (e *EvaluationResult) convertErrors(localizer *i18n.Localizer) map[string]s
 	return errors
 }
 
-// GetDetailedErrors collects all detailed validation errors from the nested Details hierarchy.
+// DetailedErrors collects all detailed validation errors from the nested Details hierarchy.
 // This method helps users access specific validation failures that might be buried in nested structures.
 // Returns a map where keys are field paths and values are the most specific error messages.
 // For localized messages, pass a localizer; for default English messages, call without arguments.
-func (e *EvaluationResult) GetDetailedErrors(localizer ...*i18n.Localizer) map[string]string {
+func (e *EvaluationResult) DetailedErrors(localizer ...*i18n.Localizer) map[string]string {
 	var loc *i18n.Localizer
 	if len(localizer) > 0 {
 		loc = localizer[0]
@@ -277,7 +274,6 @@ func (e *EvaluationResult) GetDetailedErrors(localizer ...*i18n.Localizer) map[s
 }
 
 // collectDetailedErrors recursively traverses the Details hierarchy to collect leaf-level errors.
-// This is a private helper method that implements the core logic for detailed error collection.
 func (e *EvaluationResult) collectDetailedErrors(collector map[string]string, localizer *i18n.Localizer, basePath string) {
 	// Collect errors from current level
 	if len(e.Errors) > 0 {

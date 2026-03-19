@@ -169,8 +169,8 @@ func New(opts ...Option) *Server {
 	}
 
 	// Register routes AFTER setting BaseURL (WellKnownHandler captures baseURL)
+	// Note: RegisterAPIRoutes already includes health endpoints
 	api.RegisterAPIRoutes(r, serverCtx)
-	api.RegisterHealthEndpoints(r, serverCtx)
 
 	return &Server{
 		httpServer: httpServer,
@@ -217,9 +217,9 @@ func NewHandler(opts ...Option) http.Handler {
 	gin.SetMode(gin.TestMode)
 
 	// Create Gin router
+	// Note: RegisterAPIRoutes already includes health endpoints
 	r := gin.New()
 	api.RegisterAPIRoutes(r, serverCtx)
-	api.RegisterHealthEndpoints(r, serverCtx)
 
 	return r
 }

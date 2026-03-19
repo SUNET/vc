@@ -1,6 +1,6 @@
 package jsonschema
 
-// EvaluateContent checks if the given data conforms to the encoding, media type, and content schema specified in the schema.
+// evaluateContent checks if the given data conforms to the encoding, media type, and content schema specified in the schema.
 // According to the JSON Schema Draft 2020-12:
 //   - The "contentEncoding" property defines how a string should be decoded from encoded binary data.
 //   - The "contentMediaType" describes the media type that the decoded data should conform to.
@@ -67,7 +67,7 @@ func evaluateContent(schema *Schema, instance any, _ map[string]bool, _ map[int]
 		if result != nil {
 			//nolint:errcheck
 			result.SetEvaluationPath("/contentSchema").
-				SetSchemaLocation(schema.GetSchemaLocation("/contentSchema"))
+				SetSchemaLocation(schema.SchemaLocation("/contentSchema"))
 
 			if !result.IsValid() {
 				return result, NewEvaluationError("contentSchema", "content_schema_mismatch", "Content does not match the schema")

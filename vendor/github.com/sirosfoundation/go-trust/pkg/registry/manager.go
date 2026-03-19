@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirosfoundation/g119612/pkg/logging"
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 )
 
@@ -20,6 +21,7 @@ type RegistryManager struct {
 	timeout         time.Duration
 	circuitBreakers map[string]*CircuitBreaker
 	policyManager   *PolicyManager
+	logger          logging.Logger
 	mu              sync.RWMutex
 }
 
@@ -33,7 +35,25 @@ func NewRegistryManager(strategy ResolutionStrategy, timeout time.Duration) *Reg
 		strategy:        strategy,
 		timeout:         timeout,
 		circuitBreakers: make(map[string]*CircuitBreaker),
+		logger:          logging.SilentLogger(),
 	}
+}
+
+// SetLogger sets the logger for debug trace messages.
+// If not called, a silent (no-op) logger is used.
+func (m *RegistryManager) SetLogger(logger logging.Logger) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logger = logger
+}
+
+// getLogger returns the configured logger, or a SilentLogger if none is set.
+// This guards against nil logger when RegistryManager is created without NewRegistryManager.
+func (m *RegistryManager) getLogger() logging.Logger {
+	if m.logger == nil {
+		return logging.SilentLogger()
+	}
+	return m.logger
 }
 
 // SetPolicyManager sets the policy manager for action-based routing.
@@ -67,8 +87,21 @@ func (m *RegistryManager) Register(registry TrustRegistry) {
 // according to the configured strategy. If a PolicyManager is set, it resolves the policy
 // from action.name and applies constraints.
 func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationRequest) (*authzen.EvaluationResponse, error) {
+	startTime := time.Now()
+	logger := m.getLogger()
+
+	logger.Debug("Evaluate: incoming request",
+		logging.F("subject_id", req.Subject.ID),
+		logging.F("subject_type", req.Subject.Type),
+		logging.F("resource_type", req.Resource.Type),
+		logging.F("resource_id", req.Resource.ID),
+		logging.F("resolution_only", req.IsResolutionOnlyRequest()),
+		logging.F("strategy", string(m.strategy)))
+
 	// Validate request first
 	if err := req.Validate(); err != nil {
+		logger.Debug("Evaluate: request validation failed",
+			logging.F("error", err.Error()))
 		return &authzen.EvaluationResponse{
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
@@ -82,22 +115,79 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 	// Resolve policy from action.name
 	policyCtx := m.resolvePolicyContext(req)
 
+	if policyCtx.Policy != nil {
+		logger.Debug("Evaluate: policy resolved",
+			logging.F("policy", policyCtx.Policy.Name),
+			logging.F("action", policyCtx.ActionName),
+			logging.F("allowed_key_types", policyCtx.Policy.Constraints.AllowedKeyTypes),
+			logging.F("policy_registries", policyCtx.Policy.Registries))
+	} else {
+		logger.Debug("Evaluate: no policy matched",
+			logging.F("action", policyCtx.ActionName))
+	}
+
+	// Enforce AllowedKeyTypes at the entry layer before routing to registries
+	if policyCtx.Policy != nil && len(policyCtx.Policy.Constraints.AllowedKeyTypes) > 0 && !req.IsResolutionOnlyRequest() {
+		allowed := false
+		for _, kt := range policyCtx.Policy.Constraints.AllowedKeyTypes {
+			if kt == req.Resource.Type {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			logger.Debug("Evaluate: resource type rejected by policy",
+				logging.F("resource_type", req.Resource.Type),
+				logging.F("allowed_key_types", policyCtx.Policy.Constraints.AllowedKeyTypes))
+			return &authzen.EvaluationResponse{
+				Decision: false,
+				Context: &authzen.EvaluationResponseContext{
+					Reason: map[string]interface{}{
+						"error":             "resource type not allowed by policy",
+						"resource_type":     req.Resource.Type,
+						"allowed_key_types": policyCtx.Policy.Constraints.AllowedKeyTypes,
+						"policy":            policyCtx.Policy.Name,
+					},
+				},
+			}, nil
+		}
+	}
+
 	// Apply policy constraints to the request context
 	m.applyPolicyToRequest(req, policyCtx)
 
+	logger.Debug("Evaluate: dispatching to strategy",
+		logging.F("strategy", string(m.strategy)))
+
 	// Route to appropriate strategy
+	var resp *authzen.EvaluationResponse
+	var err error
 	switch m.strategy {
 	case FirstMatch:
-		return m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
+		resp, err = m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
 	case AllRegistries:
-		return m.evaluateAllWithPolicy(ctx, req, policyCtx)
+		resp, err = m.evaluateAllWithPolicy(ctx, req, policyCtx)
 	case BestMatch:
-		return m.evaluateBestMatchWithPolicy(ctx, req, policyCtx)
+		resp, err = m.evaluateBestMatchWithPolicy(ctx, req, policyCtx)
 	case Sequential:
-		return m.evaluateSequentialWithPolicy(ctx, req, policyCtx)
+		resp, err = m.evaluateSequentialWithPolicy(ctx, req, policyCtx)
 	default:
-		return m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
+		resp, err = m.evaluateFirstMatchWithPolicy(ctx, req, policyCtx)
 	}
+
+	duration := time.Since(startTime)
+	if err != nil {
+		logger.Debug("Evaluate: completed with error",
+			logging.F("error", err.Error()),
+			logging.F("duration_ms", duration.Milliseconds()))
+	} else {
+		logger.Debug("Evaluate: completed",
+			logging.F("decision", resp.Decision),
+			logging.F("duration_ms", duration.Milliseconds()),
+			logging.F("subject_id", req.Subject.ID))
+	}
+
+	return resp, err
 }
 
 // resolvePolicyContext resolves the policy for the request based on action.name.
@@ -159,6 +249,34 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		}
 		if len(etsi.Countries) > 0 {
 			req.Context["countries"] = etsi.Countries
+		}
+	}
+
+	// Apply DID constraints
+	if policyCtx.Policy.DID != nil {
+		didPolicy := policyCtx.Policy.DID
+		if len(didPolicy.AllowedDomains) > 0 {
+			req.Context["allowed_domains"] = didPolicy.AllowedDomains
+		}
+		if len(didPolicy.RequiredVerificationMethods) > 0 {
+			req.Context["required_verification_methods"] = didPolicy.RequiredVerificationMethods
+		}
+		if len(didPolicy.RequiredServices) > 0 {
+			req.Context["required_services"] = didPolicy.RequiredServices
+		}
+		if didPolicy.RequireVerifiableHistory {
+			req.Context["require_verifiable_history"] = true
+		}
+	}
+
+	// Apply mDOC IACA constraints
+	if policyCtx.Policy.MDOCIACA != nil {
+		mdoc := policyCtx.Policy.MDOCIACA
+		if len(mdoc.IssuerAllowlist) > 0 {
+			req.Context["issuer_allowlist"] = mdoc.IssuerAllowlist
+		}
+		if mdoc.RequireIACAEndpoint {
+			req.Context["require_iaca_endpoint"] = true
 		}
 	}
 
@@ -264,6 +382,8 @@ func (m *RegistryManager) getApplicableRegistriesWithPolicy(req *authzen.Evaluat
 
 		// Filter by policy registries if specified
 		if allowedRegistries != nil && !allowedRegistries[info.Name] {
+			m.getLogger().Debug("Registry filtering: skipped by policy",
+				logging.F("registry", info.Name))
 			continue
 		}
 
@@ -282,6 +402,17 @@ func (m *RegistryManager) getApplicableRegistriesWithPolicy(req *authzen.Evaluat
 			}
 		}
 	}
+
+	names := make([]string, len(applicable))
+	for i, reg := range applicable {
+		names[i] = reg.Info().Name
+	}
+	m.getLogger().Debug("Registry filtering: applicable registries",
+		logging.F("total_registries", len(m.registries)),
+		logging.F("applicable_count", len(applicable)),
+		logging.F("applicable_names", names),
+		logging.F("resource_type", req.Resource.Type),
+		logging.F("resolution_only", isResolutionOnly))
 
 	return applicable
 }
