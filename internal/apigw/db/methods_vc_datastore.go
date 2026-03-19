@@ -36,10 +36,10 @@ func (c *VCDatastoreColl) createIndex(ctx context.Context) error {
 	indexIdentityLookup := mongo.IndexModel{
 		Keys: bson.D{
 			bson.E{Key: "meta.scope", Value: 1},
-			bson.E{Key: "meta.authentic_source", Value: 1},
 			bson.E{Key: "identities.family_name", Value: 1},
 			bson.E{Key: "identities.given_name", Value: 1},
 			bson.E{Key: "identities.birth_date", Value: 1},
+			bson.E{Key: "meta.authentic_source", Value: 1},
 		},
 		Options: options.Index().SetName("identity_lookup"),
 	}
