@@ -462,6 +462,74 @@ func TestCredentialIssuerMetadataParameters_OpenID4VCI_Compliance(t *testing.T) 
 	})
 }
 
+func TestCredentialMetadataDisplay_MarshalOmitsNilFields(t *testing.T) {
+	t.Run("logo and background_image omitted when nil", func(t *testing.T) {
+		display := CredentialMetadataDisplay{
+			Name:            "Test",
+			Locale:          "en-US",
+			BackgroundColor: "#000000",
+			TextColor:       "#FFFFFF",
+		}
+
+		data, err := json.Marshal(display)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(data, &raw))
+
+		_, hasLogo := raw["logo"]
+		_, hasBgImage := raw["background_image"]
+		assert.False(t, hasLogo, "logo key should be absent when nil")
+		assert.False(t, hasBgImage, "background_image key should be absent when nil")
+
+		// YAML
+		yamlData, err := yaml.Marshal(display)
+		require.NoError(t, err)
+
+		var rawYAML map[string]any
+		require.NoError(t, yaml.Unmarshal(yamlData, &rawYAML))
+
+		_, hasLogo = rawYAML["logo"]
+		_, hasBgImage = rawYAML["background_image"]
+		assert.False(t, hasLogo, "logo key should be absent in YAML when nil")
+		assert.False(t, hasBgImage, "background_image key should be absent in YAML when nil")
+	})
+
+	t.Run("logo and background_image present when non-nil", func(t *testing.T) {
+		display := CredentialMetadataDisplay{
+			Name:   "Test",
+			Locale: "en-US",
+			Logo: &MetadataLogo{
+				URI:     "https://example.com/logo.png",
+				AltText: "logo",
+			},
+			BackgroundImage: &MetadataBackgroundImage{
+				URI: "https://example.com/bg.png",
+			},
+			BackgroundColor: "#000000",
+			TextColor:       "#FFFFFF",
+		}
+
+		data, err := json.Marshal(display)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(data, &raw))
+
+		_, hasLogo := raw["logo"]
+		_, hasBgImage := raw["background_image"]
+		assert.True(t, hasLogo, "logo key should be present when non-nil")
+		assert.True(t, hasBgImage, "background_image key should be present when non-nil")
+
+		logoMap := raw["logo"].(map[string]any)
+		assert.Equal(t, "https://example.com/logo.png", logoMap["uri"])
+		assert.Equal(t, "logo", logoMap["alt_text"])
+
+		bgMap := raw["background_image"].(map[string]any)
+		assert.Equal(t, "https://example.com/bg.png", bgMap["uri"])
+	})
+}
+
 func TestCredentialConfigurationsSupported_StructureCompliance(t *testing.T) {
 	for configID, config := range mockIssuerMetadata.CredentialConfigurationsSupported {
 		t.Run(configID, func(t *testing.T) {
