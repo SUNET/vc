@@ -33,7 +33,7 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		if errors.Is(err, oauth2.ErrInvalidClient) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 				"error":             "invalid_client",
-				"error_description": err.Error(),
+				"error_description": oauth2.ErrInvalidClient.Error(),
 			})
 			return nil, nil
 		}
