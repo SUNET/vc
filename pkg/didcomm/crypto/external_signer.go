@@ -66,7 +66,7 @@ func (es *ExternalSigner) Sign(ctx context.Context, plaintext []byte, opts SignO
 	}
 
 	// Build protected header as a map
-	header := map[string]interface{}{
+	header := map[string]any{
 		"alg": es.algorithm.String(),
 	}
 	if es.kid != "" {

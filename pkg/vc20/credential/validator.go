@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -235,13 +237,7 @@ func (v *Validator) validateType(obj map[string]any, requiredType string) error 
 	}
 
 	if requiredType != "" {
-		found := false
-		for _, val := range types {
-			if val == requiredType {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(types, requiredType)
 		if !found {
 			return fmt.Errorf("missing required type: %s", requiredType)
 		}
@@ -398,9 +394,7 @@ func (v *Validator) loadContextTerms(contextURL string, terms map[string]string)
 		ctxObj = make(map[string]any)
 		for _, item := range val {
 			if obj, ok := item.(map[string]any); ok {
-				for k, v := range obj {
-					ctxObj[k] = v
-				}
+				maps.Copy(ctxObj, obj)
 			}
 		}
 	default:

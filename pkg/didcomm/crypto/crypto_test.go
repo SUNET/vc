@@ -257,7 +257,7 @@ func TestJWEWithX25519(t *testing.T) {
 	}
 
 	// Verify it's valid JSON (for JSON serialization)
-	var jweMsg map[string]interface{}
+	var jweMsg map[string]any
 	if err := json.Unmarshal(encrypted, &jweMsg); err != nil {
 		// Might be compact serialization for single recipient
 		t.Logf("Not JSON format (compact serialization): %v", err)
@@ -339,7 +339,7 @@ func TestMultiRecipientEncryption(t *testing.T) {
 
 	// Generate multiple recipient keys
 	var recipients []jwk.Key
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		key, err := generateECDHKey(CurveX25519)
 		if err != nil {
 			t.Fatalf("Failed to generate key %d: %v", i, err)

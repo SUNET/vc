@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -502,20 +503,18 @@ func ParseCRLDistributionPoint(cert *x509.Certificate) (*url.URL, error) {
 func ExportCertificateChainPEM(chain []*x509.Certificate) []byte {
 	var result []byte
 	for _, cert := range chain {
-		block := "-----BEGIN CERTIFICATE-----\n"
+		var block strings.Builder
+		block.WriteString("-----BEGIN CERTIFICATE-----\n")
 		// Base64 encode the DER
 		b64 := make([]byte, ((len(cert.Raw)+2)/3)*4)
 		encodeBase64(b64, cert.Raw)
 		// Split into 64-char lines
 		for i := 0; i < len(b64); i += 64 {
-			end := i + 64
-			if end > len(b64) {
-				end = len(b64)
-			}
-			block += string(b64[i:end]) + "\n"
+			end := min(i+64, len(b64))
+			block.WriteString(string(b64[i:end]) + "\n")
 		}
-		block += "-----END CERTIFICATE-----\n"
-		result = append(result, []byte(block)...)
+		block.WriteString("-----END CERTIFICATE-----\n")
+		result = append(result, []byte(block.String())...)
 	}
 	return result
 }

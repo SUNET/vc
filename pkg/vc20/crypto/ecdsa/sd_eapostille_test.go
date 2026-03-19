@@ -117,13 +117,6 @@ func TestDecodeEApostilleProofValue(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // TestDecodeP256Multikey tests decoding a P-256 public key from publicKeyMultibase
 func TestDecodeP256Multikey(t *testing.T) {
 	// This is the publicKeyMultibase from SAL's DID document

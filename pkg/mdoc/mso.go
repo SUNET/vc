@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash"
 	"maps"
+	"slices"
 	"sort"
 	"time"
 )
@@ -362,7 +363,7 @@ func GetDigestIDs(mso *MobileSecurityObject, namespace string) []uint {
 	for id := range nsDigests {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids
 }
 

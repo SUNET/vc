@@ -263,8 +263,8 @@ func matchPattern(pattern, value string) bool {
 	}
 
 	// Handle prefix wildcard (e.g., "https://didcomm.org/*")
-	if strings.HasSuffix(pattern, "*") {
-		prefix := strings.TrimSuffix(pattern, "*")
+	if before, ok := strings.CutSuffix(pattern, "*"); ok {
+		prefix := before
 		return strings.HasPrefix(value, prefix)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/piprate/json-gold/ld"
@@ -592,9 +593,7 @@ func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 	nodesToMove := make(map[string]string) // node -> targetGraph
 
 	// Initialize with VC roots
-	for vcNode, targetGraph := range vcMoves {
-		nodesToMove[vcNode] = targetGraph
-	}
+	maps.Copy(nodesToMove, vcMoves)
 
 	// Iteratively find all reachable nodes to move
 	// This is a simplification: we assume VCs are trees rooted at the VC node
@@ -667,9 +666,7 @@ func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 
 	// Update dataset
 	rc.dataset.Graphs["@default"] = newDefaultGraph
-	for name, quads := range newGraphs {
-		rc.dataset.Graphs[name] = quads
-	}
+	maps.Copy(rc.dataset.Graphs, newGraphs)
 
 	return nil
 }

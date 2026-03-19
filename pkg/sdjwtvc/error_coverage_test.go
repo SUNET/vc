@@ -81,8 +81,6 @@ func TestDiscloserHash_ErrorHandling(t *testing.T) {
 	})
 }
 
-
-
 // TestSign_JSONMarshalError tests signing with unmarshalable header
 func TestSign_JSONMarshalError(t *testing.T) {
 	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -190,7 +188,7 @@ func TestAddHashToPath_Errors(t *testing.T) {
 // TestGenerateSalt_ErrorSimulation tests salt generation
 func TestGenerateSalt_Coverage(t *testing.T) {
 	// Generate multiple salts to ensure coverage
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		salt, err := generateSalt()
 		if err != nil {
 			t.Fatalf("generateSalt failed: %v", err)

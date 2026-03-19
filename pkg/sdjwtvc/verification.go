@@ -508,14 +508,15 @@ func (c *Client) verifyKeyBindingJWT(
 // calculateSDHashForVerification calculates sd_hash for verification
 func (c *Client) calculateSDHashForVerification(issuerJWT string, disclosures []string, hashMethod hash.Hash) (string, error) {
 	// Reconstruct the SD-JWT without KB-JWT: <Issuer-signed JWT>~<Disclosure 1>~...~
-	sdJWT := issuerJWT
+	var sdJWT strings.Builder
+	sdJWT.WriteString(issuerJWT)
 	for _, disclosure := range disclosures {
-		sdJWT += "~" + disclosure
+		sdJWT.WriteString("~" + disclosure)
 	}
-	sdJWT += "~" // Trailing ~
+	sdJWT.WriteString("~") // Trailing ~
 
 	hashMethod.Reset()
-	hashMethod.Write([]byte(sdJWT))
+	hashMethod.Write([]byte(sdJWT.String()))
 	return base64.RawURLEncoding.EncodeToString(hashMethod.Sum(nil)), nil
 }
 

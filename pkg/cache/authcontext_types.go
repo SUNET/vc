@@ -37,7 +37,7 @@ type AuthorizationContext struct {
 	// Core session fields
 	SessionID string        `json:"session_id" bson:"session_id" validate:"required,max=128,printascii"`
 	Status    SessionStatus `json:"status,omitempty" bson:"status,omitempty" validate:"omitempty,max=32,printascii"`
-	CreatedAt time.Time     `json:"created_at,omitempty" bson:"created_at,omitempty"`
+	CreatedAt time.Time     `json:"created_at" bson:"created_at,omitempty"`
 	ExpiresAt int64         `json:"expires_at" bson:"expires_at"`
 
 	// Client and authorization fields

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"vc/internal/apigw/oidcrp"
 	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
@@ -99,9 +100,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				}
 			}
 			// Merge: UserInfo claims take precedence per OIDC Core §5.3.2
-			for k, v := range userInfoClaims {
-				authResp.Claims[k] = v
-			}
+			maps.Copy(authResp.Claims, userInfoClaims)
 		}
 	}
 

@@ -96,8 +96,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *HTTPHandler) isAllowedContentType(contentType string) bool {
 	// Handle content types with parameters (e.g., "application/json; charset=utf-8")
 	baseType := contentType
-	if idx := strings.Index(contentType, ";"); idx != -1 {
-		baseType = strings.TrimSpace(contentType[:idx])
+	if before, _, ok := strings.Cut(contentType, ";"); ok {
+		baseType = strings.TrimSpace(before)
 	}
 
 	for _, allowed := range h.allowedTypes {

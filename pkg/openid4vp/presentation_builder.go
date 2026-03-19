@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"context"
 	"fmt"
+	"slices"
 )
 
 // PresentationRequestTemplate represents a template for creating presentation requests.
@@ -277,10 +278,8 @@ func scopesMatch(requestedScopes []string, templateScopes []string) bool {
 
 	// Check if template contains any of the requested scopes
 	for _, requestedScope := range requestedScopes {
-		for _, templateScope := range templateScopes {
-			if requestedScope == templateScope {
-				return true // Match found
-			}
+		if slices.Contains(templateScopes, requestedScope) {
+			return true // Match found
 		}
 	}
 

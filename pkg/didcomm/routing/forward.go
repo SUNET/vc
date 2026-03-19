@@ -97,7 +97,7 @@ func (f *Forward) GetWrappedMessage() ([]byte, error) {
 
 // ToMessage converts the Forward to a generic DIDComm message.
 func (f *Forward) ToMessage() *message.Message {
-	bodyMap := map[string]interface{}{
+	bodyMap := map[string]any{
 		"next": f.Body.Next,
 	}
 
@@ -123,7 +123,7 @@ func ParseForward(msg *message.Message) (*Forward, error) {
 	}
 
 	// Extract 'next' from body
-	body, ok := msg.Body.(map[string]interface{})
+	body, ok := msg.Body.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("%w: body is not a map", ErrInvalidForward)
 	}

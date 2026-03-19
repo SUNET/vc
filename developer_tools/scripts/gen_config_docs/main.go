@@ -336,7 +336,7 @@ func determineRequired(tag TagInfo) string {
 	if m := re.FindStringSubmatch(v); len(m) > 1 {
 		return fmt.Sprintf("Yes (if %s not set)", camelToSnake(m[1]))
 	}
-	for _, r := range strings.Split(v, ",") {
+	for r := range strings.SplitSeq(v, ",") {
 		r = strings.TrimSpace(r)
 		if r == "required" {
 			// If a default value is provided, the field is not required from
@@ -373,7 +373,7 @@ func fieldDescription(f *FieldDef) string {
 	if raw == "" {
 		return titleFromGoName(f.GoName)
 	}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -418,7 +418,7 @@ func fieldExample(f *FieldDef) string {
 	if raw == "" {
 		return ""
 	}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -471,8 +471,8 @@ func cleanFieldDesc(line, goName string) string {
 		goName + " sets ",
 	}
 	for _, p := range prefixes {
-		if strings.HasPrefix(line, p) {
-			rest := strings.TrimPrefix(line, p)
+		if after, ok := strings.CutPrefix(line, p); ok {
+			rest := after
 			if len(rest) > 0 {
 				return strings.ToUpper(rest[:1]) + rest[1:]
 			}
@@ -1029,13 +1029,13 @@ func renderDocument(sections []*DocSection) string {
 
 func sectionLabel(yamlKey string) string {
 	labels := map[string]string{
-		"common":   "Common",
-		"apigw":    "API Gateway (APIGW)",
-		"issuer":   "Issuer",
-		"verifier": "Verifier",
-		"registry": "Registry",
-		"mock_as":  "Mock AS",
-		"ui":       "UI",
+		"common":       "Common",
+		"apigw":        "API Gateway (APIGW)",
+		"issuer":       "Issuer",
+		"verifier":     "Verifier",
+		"registry":     "Registry",
+		"mock_as":      "Mock AS",
+		"ui":           "UI",
 		"secrets_file": "Secrets File Reference",
 	}
 	if l, ok := labels[yamlKey]; ok {

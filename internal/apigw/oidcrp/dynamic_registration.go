@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"vc/pkg/model"
 )
 
@@ -166,12 +167,12 @@ func (s *Service) buildRegistrationRequest() *RegistrationRequest {
 
 // joinScopes converts scope slice to space-separated string
 func joinScopes(scopes []string) string {
-	result := ""
+	var result strings.Builder
 	for i, scope := range scopes {
 		if i > 0 {
-			result += " "
+			result.WriteString(" ")
 		}
-		result += scope
+		result.WriteString(scope)
 	}
-	return result
+	return result.String()
 }

@@ -2,6 +2,7 @@ package sdjwtvc
 
 import (
 	"crypto/sha256"
+	sha30 "crypto/sha3"
 	"crypto/sha512"
 	"encoding/base64"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/sha3"
 )
 
 // KeyBindingJWT represents a Key Binding JWT for SD-JWT+KB
@@ -105,9 +105,11 @@ func getHashFromAlgorithm(algName string) (hash.Hash, error) {
 	case "sha-512":
 		return sha512.New(), nil
 	case "sha3-256":
-		return sha3.New256(), nil
+		return hash.
+			Hash(sha30.New256()), nil
 	case "sha3-512":
-		return sha3.New512(), nil
+		return hash.
+			Hash(sha30.New512()), nil
 	default:
 		return nil, fmt.Errorf("unsupported hash algorithm: %s", algName)
 	}

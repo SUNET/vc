@@ -2,16 +2,18 @@ package sdjwtvc
 
 import (
 	"crypto/sha256"
+	sha30 "crypto/sha3"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"hash"
+	"maps"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -302,7 +304,7 @@ func TestSaltEntropy(t *testing.T) {
 
 	// Generate multiple credentials to verify salt randomness
 	salts := make(map[string]bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		dataCopy := map[string]any{"first_name": "John", "last_name": "Doe"}
 		_, disclosures, err := client.MakeCredential(sha256.New(), dataCopy, vctm, 0)
 		require.NoError(t, err)
@@ -410,15 +412,15 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 			vctm: &VCTM{
 				Claims: []Claim{
 					{
-						Path: []*string{stringPtr("user"), stringPtr("profile"), stringPtr("contact")},
+						Path: []*string{new("user"), new("profile"), new("contact")},
 						SD:   "always",
 					},
 					{
-						Path: []*string{stringPtr("user"), stringPtr("profile")},
+						Path: []*string{new("user"), new("profile")},
 						SD:   "always",
 					},
 					{
-						Path: []*string{stringPtr("user")},
+						Path: []*string{new("user")},
 						SD:   "always",
 					},
 				},
@@ -430,15 +432,15 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 			vctm: &VCTM{
 				Claims: []Claim{
 					{
-						Path: []*string{stringPtr("user")},
+						Path: []*string{new("user")},
 						SD:   "always",
 					},
 					{
-						Path: []*string{stringPtr("user"), stringPtr("profile")},
+						Path: []*string{new("user"), new("profile")},
 						SD:   "always",
 					},
 					{
-						Path: []*string{stringPtr("user"), stringPtr("profile"), stringPtr("contact")},
+						Path: []*string{new("user"), new("profile"), new("contact")},
 						SD:   "always",
 					},
 				},
@@ -450,15 +452,15 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 			vctm: &VCTM{
 				Claims: []Claim{
 					{
-						Path: []*string{stringPtr("user"), stringPtr("profile")},
+						Path: []*string{new("user"), new("profile")},
 						SD:   "always",
 					},
 					{
-						Path: []*string{stringPtr("user")},
+						Path: []*string{new("user")},
 						SD:   "always",
 					},
 					{
-						Path: []*string{stringPtr("user"), stringPtr("profile"), stringPtr("contact")},
+						Path: []*string{new("user"), new("profile"), new("contact")},
 						SD:   "always",
 					},
 				},
@@ -531,8 +533,10 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 }
 
 // Helper function to create string pointers
+//
+//go:fix inline
 func stringPtr(s string) *string {
-	return &s
+	return new(s)
 }
 
 func TestGetHashAlgorithmName(t *testing.T) {
@@ -557,13 +561,15 @@ func TestGetHashAlgorithmName(t *testing.T) {
 			expectedName: "sha-512",
 		},
 		{
-			name:         "SHA3-256",
-			hasher:       sha3.New256(),
+			name: "SHA3-256",
+			hasher: hash.
+				Hash(sha30.New256()),
 			expectedName: "sha3-256",
 		},
 		{
-			name:         "SHA3-512",
-			hasher:       sha3.New512(),
+			name: "SHA3-512",
+			hasher: hash.
+				Hash(sha30.New512()),
 			expectedName: "sha3-512",
 		},
 		{
@@ -607,13 +613,15 @@ func TestMakeCredential_AlternativeHashAlgorithms(t *testing.T) {
 			expectedSdAlg: "sha-512",
 		},
 		{
-			name:          "SHA3-256",
-			hasher:        sha3.New256(),
+			name: "SHA3-256",
+			hasher: hash.
+				Hash(sha30.New256()),
 			expectedSdAlg: "sha3-256",
 		},
 		{
-			name:          "SHA3-512",
-			hasher:        sha3.New512(),
+			name: "SHA3-512",
+			hasher: hash.
+				Hash(sha30.New512()),
 			expectedSdAlg: "sha3-512",
 		},
 	}
@@ -738,7 +746,7 @@ func TestGenerateSalt_Uniqueness(t *testing.T) {
 	// Generate multiple salts and ensure they're unique
 	salts := make(map[string]bool)
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		salt, err := generateSalt()
 		require.NoError(t, err)
 		require.NotEmpty(t, salt)
@@ -812,9 +820,9 @@ func TestSortSDArray_NonStringElements(t *testing.T) {
 func TestSortClaimsByDepth(t *testing.T) {
 	t.Run("sorts_claims_by_depth_descending", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{stringPtr("a")}, SD: "always"},                                 // depth 1
-			{Path: []*string{stringPtr("a"), stringPtr("b"), stringPtr("c")}, SD: "always"}, // depth 3
-			{Path: []*string{stringPtr("a"), stringPtr("b")}, SD: "always"},                 // depth 2
+			{Path: []*string{new("a")}, SD: "always"},                     // depth 1
+			{Path: []*string{new("a"), new("b"), new("c")}, SD: "always"}, // depth 3
+			{Path: []*string{new("a"), new("b")}, SD: "always"},           // depth 2
 		}
 
 		sorted := sortClaimsByDepth(claims)
@@ -833,7 +841,7 @@ func TestSortClaimsByDepth(t *testing.T) {
 
 	t.Run("handles_single_claim", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{stringPtr("a")}, SD: "always"},
+			{Path: []*string{new("a")}, SD: "always"},
 		}
 		sorted := sortClaimsByDepth(claims)
 		assert.Len(t, sorted, 1)
@@ -842,8 +850,8 @@ func TestSortClaimsByDepth(t *testing.T) {
 
 	t.Run("does_not_modify_original", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{stringPtr("a")}, SD: "always"},
-			{Path: []*string{stringPtr("a"), stringPtr("b")}, SD: "always"},
+			{Path: []*string{new("a")}, SD: "always"},
+			{Path: []*string{new("a"), new("b")}, SD: "always"},
 		}
 
 		original := make([]Claim, len(claims))
@@ -857,9 +865,9 @@ func TestSortClaimsByDepth(t *testing.T) {
 
 	t.Run("stable_sort_for_equal_depths", func(t *testing.T) {
 		claims := []Claim{
-			{Path: []*string{stringPtr("first")}, SD: "always"},
-			{Path: []*string{stringPtr("second")}, SD: "always"},
-			{Path: []*string{stringPtr("third")}, SD: "always"},
+			{Path: []*string{new("first")}, SD: "always"},
+			{Path: []*string{new("second")}, SD: "always"},
+			{Path: []*string{new("third")}, SD: "always"},
 		}
 
 		sorted := sortClaimsByDepth(claims)
@@ -886,7 +894,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			VCT: "TestCredential",
 			Claims: []Claim{
 				{
-					Path: []*string{stringPtr("nationalities"), nil},
+					Path: []*string{new("nationalities"), nil},
 					SD:   "always",
 				},
 			},
@@ -949,7 +957,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			VCT: "TestCredential",
 			Claims: []Claim{
 				{
-					Path: []*string{stringPtr("person"), stringPtr("languages"), nil},
+					Path: []*string{new("person"), new("languages"), nil},
 					SD:   "always",
 				},
 			},
@@ -986,7 +994,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			VCT: "TestCredential",
 			Claims: []Claim{
 				{
-					Path: []*string{stringPtr("items"), nil},
+					Path: []*string{new("items"), nil},
 					SD:   "always",
 				},
 			},
@@ -1018,13 +1026,13 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Array element disclosure (processed first - depth 2)
-					Path: []*string{stringPtr("nationalities"), nil},
+					Path: []*string{new("nationalities"), nil},
 					SD:   "always",
 				},
 				{
 					// Whole array disclosure (processed second - depth 1)
 					// Makes the entire SD array recursively selectively disclosable
-					Path: []*string{stringPtr("nationalities")},
+					Path: []*string{new("nationalities")},
 					SD:   "always",
 				},
 			},
@@ -1078,7 +1086,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Array element disclosure for single element
-					Path: []*string{stringPtr("nationalities"), nil},
+					Path: []*string{new("nationalities"), nil},
 					SD:   "always",
 				},
 			},
@@ -1128,12 +1136,12 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 			Claims: []Claim{
 				{
 					// Array element disclosure (processed first - depth 2)
-					Path: []*string{stringPtr("nationalities"), nil},
+					Path: []*string{new("nationalities"), nil},
 					SD:   "always",
 				},
 				{
 					// Whole array disclosure (processed second - depth 1)
-					Path: []*string{stringPtr("nationalities")},
+					Path: []*string{new("nationalities")},
 					SD:   "always",
 				},
 			},
@@ -1181,7 +1189,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			"birthdate":   "1990-01-01",
 		}
 
-		path := []*string{stringPtr("family_name")}
+		path := []*string{new("family_name")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err)
@@ -1213,7 +1221,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			},
 		}
 
-		path := []*string{stringPtr("address"), stringPtr("street_address")}
+		path := []*string{new("address"), new("street_address")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err)
@@ -1246,7 +1254,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			},
 		}
 
-		path := []*string{stringPtr("place_of_birth"), stringPtr("locality")}
+		path := []*string{new("place_of_birth"), new("locality")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err)
@@ -1266,7 +1274,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			"given_name":  "John",
 		}
 
-		path := []*string{stringPtr("non_existent_claim")}
+		path := []*string{new("non_existent_claim")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err, "Should not error on non-existent claim")
@@ -1284,7 +1292,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			},
 		}
 
-		path := []*string{stringPtr("address"), stringPtr("non_existent_field")}
+		path := []*string{new("address"), new("non_existent_field")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err)
@@ -1302,7 +1310,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			"_sd": []any{"some_hash"},
 		}
 
-		path := []*string{stringPtr("_sd")}
+		path := []*string{new("_sd")}
 		_, _, err := client.processClaimPath(data, path, hashMethod)
 
 		require.Error(t, err)
@@ -1315,7 +1323,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			"...": "value",
 		}
 
-		path := []*string{stringPtr("...")}
+		path := []*string{new("...")}
 		_, _, err := client.processClaimPath(data, path, hashMethod)
 
 		require.Error(t, err)
@@ -1335,7 +1343,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 		}
 
 		// Disclose the entire address object
-		path := []*string{stringPtr("address")}
+		path := []*string{new("address")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err)
@@ -1364,7 +1372,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			"given_name": "Alice",
 		}
 
-		path := []*string{stringPtr("given_name")}
+		path := []*string{new("given_name")}
 		disclosure, hash, err := client.processClaimPath(data, path, hashMethod)
 
 		require.NoError(t, err)
@@ -1397,7 +1405,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 		}
 
 		// First disclosure
-		path1 := []*string{stringPtr("address"), stringPtr("street_address")}
+		path1 := []*string{new("address"), new("street_address")}
 		disclosure1, hash1, err := client.processClaimPath(data, path1, hashMethod)
 		require.NoError(t, err)
 		assert.NotEmpty(t, disclosure1)
@@ -1407,7 +1415,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 		hashMethod.Reset()
 
 		// Second disclosure from the same object
-		path2 := []*string{stringPtr("address"), stringPtr("postal_code")}
+		path2 := []*string{new("address"), new("postal_code")}
 		disclosure2, hash2, err := client.processClaimPath(data, path2, hashMethod)
 		require.NoError(t, err)
 		assert.NotEmpty(t, disclosure2)
@@ -1463,11 +1471,9 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 		for _, claimName := range testClaims {
 			// Make a copy of data for each test
 			dataCopy := make(map[string]any)
-			for k, v := range data {
-				dataCopy[k] = v
-			}
+			maps.Copy(dataCopy, data)
 
-			path := []*string{stringPtr(claimName)}
+			path := []*string{new(claimName)}
 			disclosure, hash, err := client.processClaimPath(dataCopy, path, sha256.New())
 
 			require.NoError(t, err, "Failed for claim: %s", claimName)
@@ -1617,9 +1623,10 @@ func joinStrings(parts []string, sep string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	result := parts[0]
+	var result strings.Builder
+	result.WriteString(parts[0])
 	for i := 1; i < len(parts); i++ {
-		result += sep + parts[i]
+		result.WriteString(sep + parts[i])
 	}
-	return result
+	return result.String()
 }

@@ -223,7 +223,7 @@ func TestIntegration_HighVolumeWebhooks(t *testing.T) {
 	const webhookCount = 50
 	start := time.Now()
 
-	for i := 0; i < webhookCount; i++ {
+	for i := range webhookCount {
 		service.AddAuditLog(ctx, "high_volume_test", map[string]int{
 			"iteration": i,
 		})
@@ -290,7 +290,7 @@ func TestIntegration_WebhookRetryOnFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send audit logs - each failed webhook will be logged but not retried
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		service.AddAuditLog(ctx, "retry_test", map[string]int{
 			"attempt": i + 1,
 		})
@@ -328,7 +328,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{server.URL},
 			},
 		},

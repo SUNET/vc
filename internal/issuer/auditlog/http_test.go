@@ -54,7 +54,7 @@ func TestHTTP_SendToDestination_Webhook_Success(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -89,7 +89,7 @@ func TestHTTP_SendToDestination_Webhook_Failure(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -118,7 +118,7 @@ func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -152,7 +152,7 @@ func TestHTTP_SendWebhook_Timeout(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -218,7 +218,7 @@ func TestHTTP_MessageDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -256,7 +256,7 @@ func TestHTTP_QueueFull(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{server.URL},
 			},
 		},
@@ -267,7 +267,7 @@ func TestHTTP_QueueFull(t *testing.T) {
 	require.NoError(t, err)
 
 	// Fill the queue beyond capacity
-	for i := 0; i < 150; i++ { // More than buffer size of 100
+	for i := range 150 { // More than buffer size of 100
 		err = service.SendWebHook(t.Context(), map[string]int{"iteration": i})
 		// Should not error even when queue is full (messages are dropped)
 		assert.NoError(t, err)

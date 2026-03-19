@@ -206,7 +206,7 @@ func TestSignerConfig_ThreadSafety(t *testing.T) {
 	const numGoroutines = 10
 	done := make(chan error, numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			// Each goroutine performs multiple operations
 			_, err := config.Sign([]byte("test"))
@@ -228,7 +228,7 @@ func TestSignerConfig_ThreadSafety(t *testing.T) {
 	}
 
 	// Wait for all goroutines and check for errors
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		if err := <-done; err != nil {
 			t.Errorf("goroutine error: %v", err)
 		}

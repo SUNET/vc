@@ -98,9 +98,9 @@ func TestMDoc_OptionalFields(t *testing.T) {
 		AgeBirthYear:                &ageBirthYear,
 		PortraitCaptureDate:         &captureDate,
 		AgeOver: &AgeOver{
-			Over18: boolPtr(true),
-			Over21: boolPtr(true),
-			Over65: boolPtr(false),
+			Over18: new(true),
+			Over21: new(true),
+			Over65: new(false),
 		},
 	}
 

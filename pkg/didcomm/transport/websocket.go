@@ -237,7 +237,7 @@ func (c *WebSocketClient) Receive(ctx context.Context) ([]byte, string, error) {
 func (c *WebSocketClient) detectMediaType(msgType int, data []byte) string {
 	if msgType == websocket.TextMessage {
 		// Try to parse as JSON and check for ciphertext (encrypted) or payload (signed)
-		var probe map[string]interface{}
+		var probe map[string]any
 		if json.Unmarshal(data, &probe) == nil {
 			if _, ok := probe["ciphertext"]; ok {
 				return didcomm.MediaTypeEncrypted
@@ -486,7 +486,7 @@ func (h *WebSocketHandler) sendResponse(conn *websocket.Conn, response []byte, m
 // detectMediaTypeFromMessage determines the DIDComm media type from message content.
 func detectMediaTypeFromMessage(msgType int, data []byte) string {
 	if msgType == websocket.TextMessage {
-		var probe map[string]interface{}
+		var probe map[string]any
 		if json.Unmarshal(data, &probe) == nil {
 			if _, ok := probe["ciphertext"]; ok {
 				return didcomm.MediaTypeEncrypted

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,12 +23,12 @@ func TestVCTM_Attributes(t *testing.T) {
 				Path: []*string{&name},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: label1,
+						Locale: "en",
+						Label:  label1,
 					},
 					{
-						Locale:  "fr",
-						Label: "Nom",
+						Locale: "fr",
+						Label:  "Nom",
 					},
 				},
 			},
@@ -35,8 +36,8 @@ func TestVCTM_Attributes(t *testing.T) {
 				Path: []*string{&email},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: label2,
+						Locale: "en",
+						Label:  label2,
 					},
 				},
 			},
@@ -128,13 +129,7 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 					if paths, ok := attrs[lang][label]; ok {
 						assert.NotEmpty(t, paths, "Label '%s' should have paths", label)
 						// Check if the expected path is in the paths slice
-						found := false
-						for _, path := range paths {
-							if path == expectedPath {
-								found = true
-								break
-							}
-						}
+						found := slices.Contains(paths, expectedPath)
 						assert.True(t, found, "Expected path '%s' not found for label '%s'", expectedPath, label)
 					}
 				}
@@ -170,12 +165,12 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 				Path: []*string{&simpleName},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Name",
+						Locale: "en",
+						Label:  "Name",
 					},
 					{
-						Locale:  "fr",
-						Label: "Nom",
+						Locale: "fr",
+						Label:  "Nom",
 					},
 				},
 			},
@@ -184,8 +179,8 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 				Path: []*string{&addressPath1, &addressPath2},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Street Address",
+						Locale: "en",
+						Label:  "Street Address",
 					},
 				},
 			},
@@ -194,8 +189,8 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 				Path: []*string{&simpleEmail},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Email",
+						Locale: "en",
+						Label:  "Email",
 					},
 				},
 			},
@@ -204,12 +199,12 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 				Path: []*string{&contactPath1, &contactPath2},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Phone Number",
+						Locale: "en",
+						Label:  "Phone Number",
 					},
 					{
-						Locale:  "fr",
-						Label: "Numéro de téléphone",
+						Locale: "fr",
+						Label:  "Numéro de téléphone",
 					},
 				},
 			},
@@ -218,8 +213,8 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 				Path: []*string{&simpleAge},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Age",
+						Locale: "en",
+						Label:  "Age",
 					},
 				},
 			},
@@ -274,8 +269,8 @@ func TestVCTM_AttributesWithoutObjects_OnlyObjects(t *testing.T) {
 				Path: []*string{&path1, &path2},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Street Address",
+						Locale: "en",
+						Label:  "Street Address",
 					},
 				},
 			},
@@ -283,8 +278,8 @@ func TestVCTM_AttributesWithoutObjects_OnlyObjects(t *testing.T) {
 				Path: []*string{&path3, &path4},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Contact Email",
+						Locale: "en",
+						Label:  "Contact Email",
 					},
 				},
 			},
@@ -308,8 +303,8 @@ func TestVCTM_AttributesWithoutObjects_OnlySimple(t *testing.T) {
 				Path: []*string{&name},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Name",
+						Locale: "en",
+						Label:  "Name",
 					},
 				},
 			},
@@ -317,8 +312,8 @@ func TestVCTM_AttributesWithoutObjects_OnlySimple(t *testing.T) {
 				Path: []*string{&email},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Email",
+						Locale: "en",
+						Label:  "Email",
 					},
 				},
 			},
@@ -326,8 +321,8 @@ func TestVCTM_AttributesWithoutObjects_OnlySimple(t *testing.T) {
 				Path: []*string{&age},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Age",
+						Locale: "en",
+						Label:  "Age",
 					},
 				},
 			},
@@ -356,8 +351,8 @@ func TestVCTM_AttributesWithoutObjects_CompareWithAttributes(t *testing.T) {
 				Path: []*string{&simpleName},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Name",
+						Locale: "en",
+						Label:  "Name",
 					},
 				},
 			},
@@ -365,8 +360,8 @@ func TestVCTM_AttributesWithoutObjects_CompareWithAttributes(t *testing.T) {
 				Path: []*string{&addressPath1, &addressPath2},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Street Address",
+						Locale: "en",
+						Label:  "Street Address",
 					},
 				},
 			},
@@ -374,8 +369,8 @@ func TestVCTM_AttributesWithoutObjects_CompareWithAttributes(t *testing.T) {
 				Path: []*string{&simpleEmail},
 				Display: []ClaimDisplay{
 					{
-						Locale:  "en",
-						Label: "Email",
+						Locale: "en",
+						Label:  "Email",
 					},
 				},
 			},

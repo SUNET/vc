@@ -472,7 +472,7 @@ func TestResolverWithLocalResolver(t *testing.T) {
 func TestEd25519PublicKeyToX25519(t *testing.T) {
 	// Generate several Ed25519 keys and verify our conversion matches
 	// the reference implementation
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		pub, _, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			t.Fatalf("Failed to generate Ed25519 key: %v", err)

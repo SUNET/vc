@@ -1,6 +1,7 @@
 package openid4vp_test
 
 import (
+	"slices"
 	"testing"
 	"vc/pkg/configuration"
 	"vc/pkg/openid4vp"
@@ -342,11 +343,8 @@ func TestPresentationBuilder_ScopePriority(t *testing.T) {
 	templates := config.GetEnabledTemplates()
 	hasOpenIDTemplate := false
 	for _, tmpl := range templates {
-		for _, scope := range tmpl.OIDCScopes {
-			if scope == "openid" {
-				hasOpenIDTemplate = true
-				break
-			}
+		if slices.Contains(tmpl.OIDCScopes, "openid") {
+			hasOpenIDTemplate = true
 		}
 	}
 	if !hasOpenIDTemplate {

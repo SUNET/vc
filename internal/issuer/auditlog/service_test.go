@@ -272,7 +272,7 @@ func TestClose(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile, "console"},
 			},
 		},
@@ -308,7 +308,7 @@ func TestDestinationWorker(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{logFile},
 			},
 		},
@@ -319,7 +319,7 @@ func TestDestinationWorker(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send multiple messages
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		service.AddAuditLog(ctx, "test_event", map[string]any{
 			"iteration": i,
 		})
@@ -380,7 +380,7 @@ func TestSendToDestination_UnknownType(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},

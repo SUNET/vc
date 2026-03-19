@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -202,10 +204,8 @@ func TestGoTrustResolver_WithTestServer_DynamicDecision_ByRole(t *testing.T) {
 			return &authzen.EvaluationResponse{Decision: true}, nil
 		}
 
-		for _, role := range allowedRoles {
-			if req.Action.Name == role {
-				return &authzen.EvaluationResponse{Decision: true}, nil
-			}
+		if slices.Contains(allowedRoles, req.Action.Name) {
+			return &authzen.EvaluationResponse{Decision: true}, nil
 		}
 
 		return &authzen.EvaluationResponse{
@@ -1165,23 +1165,23 @@ func TestECDSAToJWK_DifferentCurves(t *testing.T) {
 // DIDTestCase represents a test case for DID resolution.
 // This structure is designed to be compatible with external test vector formats.
 type DIDTestCase struct {
-	Name        string                 // Test case name/description
-	DID         string                 // The DID to resolve (e.g., "did:web:example.com")
-	Method      string                 // DID method (e.g., "web", "key")
-	DIDDocument map[string]any // Expected DID document structure
-	Keys        []DIDKeyTestCase       // Keys to test resolution for
-	ExpectError bool                   // Whether resolution should fail
-	ErrorMatch  string                 // Expected error substring (if ExpectError)
+	Name        string           // Test case name/description
+	DID         string           // The DID to resolve (e.g., "did:web:example.com")
+	Method      string           // DID method (e.g., "web", "key")
+	DIDDocument map[string]any   // Expected DID document structure
+	Keys        []DIDKeyTestCase // Keys to test resolution for
+	ExpectError bool             // Whether resolution should fail
+	ErrorMatch  string           // Expected error substring (if ExpectError)
 }
 
 // DIDKeyTestCase represents a key within a DID document for testing.
 type DIDKeyTestCase struct {
-	KeyID        string                 // Verification method ID (e.g., "did:web:example.com#key-1")
-	KeyType      string                 // "Ed25519" or "ECDSA"
-	Curve        string                 // For ECDSA: "P-256", "P-384", "P-521"
+	KeyID        string         // Verification method ID (e.g., "did:web:example.com#key-1")
+	KeyType      string         // "Ed25519" or "ECDSA"
+	Curve        string         // For ECDSA: "P-256", "P-384", "P-521"
 	PublicKeyJwk map[string]any // JWK representation (for verification)
-	ExpectTrust  bool                   // Whether trust evaluation should succeed
-	Role         string                 // Role for trust evaluation
+	ExpectTrust  bool           // Whether trust evaluation should succeed
+	Role         string         // Role for trust evaluation
 }
 
 // createMockDIDDocument generates a DID document for testing.
@@ -1460,10 +1460,8 @@ func TestDIDWeb_TrustEvaluation_RoleBased(t *testing.T) {
 			return &authzen.EvaluationResponse{Decision: true}, nil
 		}
 
-		for _, role := range roles {
-			if role == requestedRole {
-				return &authzen.EvaluationResponse{Decision: true}, nil
-			}
+		if slices.Contains(roles, requestedRole) {
+			return &authzen.EvaluationResponse{Decision: true}, nil
 		}
 
 		return &authzen.EvaluationResponse{
@@ -1758,13 +1756,13 @@ func TestDIDWeb_PrepareForRealResolution(t *testing.T) {
 // SingaporeTestVector represents a test vector from the Singapore test suite.
 // This structure is designed to match the expected test vector format.
 type SingaporeTestVector struct {
-	ID           string                 `json:"id"`
-	Description  string                 `json:"description"`
-	DID          string                 `json:"did"`
+	ID           string         `json:"id"`
+	Description  string         `json:"description"`
+	DID          string         `json:"did"`
 	DIDDocument  map[string]any `json:"didDocument"`
 	Credentials  []any          `json:"credentials,omitempty"`
-	ExpectValid  bool                   `json:"expectValid"`
-	ErrorMessage string                 `json:"errorMessage,omitempty"`
+	ExpectValid  bool           `json:"expectValid"`
+	ErrorMessage string         `json:"errorMessage,omitempty"`
 }
 
 func TestSingaporeTestVector_Framework(t *testing.T) {
@@ -2334,9 +2332,7 @@ func RunSingaporeTestVectorWithRealResolution(t *testing.T, tv SingaporeTestVect
 
 	// Copy the DID document structure but update IDs
 	adaptedDoc := make(map[string]any)
-	for k, v := range tv.DIDDocument {
-		adaptedDoc[k] = v
-	}
+	maps.Copy(adaptedDoc, tv.DIDDocument)
 	adaptedDoc["id"] = testDID
 
 	// Update verification method IDs

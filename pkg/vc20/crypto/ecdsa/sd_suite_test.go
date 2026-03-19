@@ -90,7 +90,7 @@ func TestSdSuite_SignVerifyDerive(t *testing.T) {
 
 	// Reveal all
 	revealIndices := make([]int, len(quads))
-	for i := 0; i < len(quads); i++ {
+	for i := range quads {
 		revealIndices[i] = i
 	}
 

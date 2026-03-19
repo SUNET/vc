@@ -6,11 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	sha30 "crypto/sha3"
 	"crypto/sha512"
+	"hash"
+	"strings"
 	"testing"
 	"vc/pkg/jose"
-
-	"golang.org/x/crypto/sha3"
 )
 
 // TestBuildCredentialWithOptions_DefaultOptions tests default option handling
@@ -22,7 +23,7 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 
 	mockName := "name"
 	vctm := &VCTM{
-		VCT:    "https://example.com/credential/test",
+		VCT: "https://example.com/credential/test",
 		Claims: []Claim{
 			{
 				Path: []*string{&mockName},
@@ -114,7 +115,7 @@ func TestBuildCredentialWithOptions_DefaultOptions(t *testing.T) {
 // TestHashAlgorithmDetection tests SHA3 algorithm detection
 func TestHashAlgorithmDetection(t *testing.T) {
 	t.Run("SHA3-256_detection", func(t *testing.T) {
-		h := sha3.New256()
+		h := hash.Hash(sha30.New256())
 		name, err := getHashAlgorithmName(h)
 		if err != nil {
 			t.Fatalf("getHashAlgorithmName failed: %v", err)
@@ -125,7 +126,7 @@ func TestHashAlgorithmDetection(t *testing.T) {
 	})
 
 	t.Run("SHA3-512_detection", func(t *testing.T) {
-		h := sha3.New512()
+		h := hash.Hash(sha30.New512())
 		name, err := getHashAlgorithmName(h)
 		if err != nil {
 			t.Fatalf("getHashAlgorithmName failed: %v", err)
@@ -496,14 +497,15 @@ func TestCalculateSDHash_EdgeCases(t *testing.T) {
 
 	t.Run("hash_long_sd_jwt", func(t *testing.T) {
 		// Create a long SD-JWT
-		sdJWT := "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJ0ZXN0In0.sig"
-		for i := 0; i < 100; i++ {
-			sdJWT += "~" + "WyJzYWx0IiwgImNsYWltIiwgInZhbHVlIl0"
+		var sdJWT strings.Builder
+		sdJWT.WriteString("eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJ0ZXN0In0.sig")
+		for range 100 {
+			sdJWT.WriteString("~" + "WyJzYWx0IiwgImNsYWltIiwgInZhbHVlIl0")
 		}
-		sdJWT += "~"
+		sdJWT.WriteString("~")
 
 		h := sha256.New()
-		hash, err := calculateSDHash(sdJWT, h)
+		hash, err := calculateSDHash(sdJWT.String(), h)
 		if err != nil {
 			t.Fatalf("calculateSDHash failed: %v", err)
 		}
@@ -520,7 +522,7 @@ func TestGenerateDecoyDigest_Randomness(t *testing.T) {
 
 	// Generate multiple decoys and ensure they're all different
 	decoys := make(map[string]bool)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		decoy, err := generateDecoyDigest(h)
 		if err != nil {
 			t.Fatalf("generateDecoyDigest failed: %v", err)
@@ -544,7 +546,7 @@ func TestGenerateDecoyDigest_Randomness(t *testing.T) {
 // TestGenerateSalt_Randomness tests salt generation
 func TestGenerateSalt_Randomness(t *testing.T) {
 	salts := make(map[string]bool)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		salt, err := generateSalt()
 		if err != nil {
 			t.Fatalf("generateSalt failed: %v", err)

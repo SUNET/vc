@@ -19,7 +19,8 @@
 				"ms-azuretools.vscode-docker",
 				"zenghongtu.vscode-asciiflow2",
 				"Gruntfuggly.todo-tree",
-				"tomoki1207.pdf"
+				"tomoki1207.pdf",
+				"anthropic.claude-code"
 			]
 		}
 	},

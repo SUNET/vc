@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	sha30 "crypto/sha3"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
@@ -16,7 +17,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/crypto/sha3"
 )
 
 // CredentialOptions contains optional parameters for credential building
@@ -536,7 +536,7 @@ func addDecoyDigestsRecursive(data map[string]any, hashMethod hash.Hash, decoyCo
 		if key == "_sd" {
 			if sdArray, ok := value.([]any); ok {
 				// Generate decoy digests
-				for i := 0; i < decoyCount; i++ {
+				for range decoyCount {
 					decoy, err := generateDecoyDigest(hashMethod)
 					if err != nil {
 						return fmt.Errorf("failed to generate decoy digest: %w", err)
@@ -703,7 +703,7 @@ func isSHA3_256(h hash.Hash) bool {
 	h.Reset()
 
 	// Compare with known SHA3-256 hash
-	ref := sha3.New256()
+	ref := hash.Hash(sha30.New256())
 	ref.Write(testData)
 	expected := ref.Sum(nil)
 
@@ -751,7 +751,7 @@ func isSHA3_512(h hash.Hash) bool {
 	h.Reset()
 
 	// Compare with known SHA3-512 hash
-	ref := sha3.New512()
+	ref := hash.Hash(sha30.New512())
 	ref.Write(testData)
 	expected := ref.Sum(nil)
 

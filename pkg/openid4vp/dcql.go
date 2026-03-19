@@ -1,5 +1,7 @@
 package openid4vp
 
+import "slices"
+
 type DCQL struct {
 	// Credentials REQUIRED. A non-empty array of Credential Queries as defined in Section 6.1 that specify the requested Credentials.
 	Credentials []CredentialQuery `json:"credentials" yaml:"credentials" validate:"required,min=1,dive,required"`
@@ -218,12 +220,7 @@ func MatchCryptosuite(cryptosuite string, cryptosuiteValues []string) bool {
 	if len(cryptosuiteValues) == 0 {
 		return true
 	}
-	for _, allowed := range cryptosuiteValues {
-		if cryptosuite == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cryptosuiteValues, cryptosuite)
 }
 
 // MatchProofType checks if a proof type is supported by the format configuration.
@@ -232,12 +229,7 @@ func MatchProofType(proofType string, proofTypeValues []string) bool {
 	if len(proofTypeValues) == 0 {
 		return true
 	}
-	for _, allowed := range proofTypeValues {
-		if proofType == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(proofTypeValues, proofType)
 }
 
 // TrustedAuthorityType constants per OpenID4VP spec Section 6.1.1

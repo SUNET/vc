@@ -166,9 +166,7 @@ func TestOIDCIntegration_UserInfo(t *testing.T) {
 			"sub in UserInfo must match sub in ID token (OIDC Core §5.3.2)")
 
 		// Verify merge: UserInfo claims take precedence
-		for k, v := range userInfoClaims {
-			authResp.Claims[k] = v
-		}
+		maps.Copy(authResp.Claims, userInfoClaims)
 		assert.Equal(t, "john.doe@example.com", authResp.Claims["email"])
 	})
 

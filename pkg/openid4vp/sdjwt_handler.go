@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,13 +120,7 @@ func (h *SDJWTHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*S
 
 	// Validate trusted issuer if configured
 	if len(h.trustedIssuers) > 0 {
-		trusted := false
-		for _, ti := range h.trustedIssuers {
-			if ti == issuer {
-				trusted = true
-				break
-			}
-		}
+		trusted := slices.Contains(h.trustedIssuers, issuer)
 		if !trusted {
 			return nil, fmt.Errorf("issuer %s is not trusted", issuer)
 		}
@@ -315,12 +310,7 @@ func isInternalSDJWTClaim(claim string) bool {
 		"vct",
 		"status",
 	}
-	for _, ic := range internalClaims {
-		if claim == ic {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(internalClaims, claim)
 }
 
 // getStringClaim safely extracts a string claim from the claims map.

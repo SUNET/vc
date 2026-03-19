@@ -13,8 +13,10 @@ import (
 )
 
 // boolPtr returns a pointer to a bool value.
+//
+//go:fix inline
 func boolPtr(b bool) *bool {
-	return &b
+	return new(b)
 }
 
 func createTestIssuerConfig(t *testing.T) IssuerConfig {
@@ -328,7 +330,7 @@ func TestIssuer_OptionalElements(t *testing.T) {
 	mdoc.Nationality = &nationality
 	mdoc.ResidentCity = &residentCity
 	mdoc.ResidentState = &residentState
-	mdoc.AgeOver = &AgeOver{Over18: boolPtr(true), Over21: boolPtr(true)}
+	mdoc.AgeOver = &AgeOver{Over18: new(true), Over21: new(true)}
 
 	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
 	req := &IssuanceRequest{
@@ -351,7 +353,7 @@ func TestIssuer_DrivingPrivileges(t *testing.T) {
 	issuer, _ := NewIssuer(config)
 
 	mdoc := createTestMDoc()
-	
+
 	// Define string pointers for optional fields
 	bIssue := "2020-01-01"
 	bExpiry := "2030-01-01"
@@ -359,7 +361,7 @@ func TestIssuer_DrivingPrivileges(t *testing.T) {
 	aExpiry := "2031-01-01"
 	sign := "="
 	value := "automatic"
-	
+
 	mdoc.DrivingPrivileges = []DrivingPrivilege{
 		{
 			VehicleCategoryCode: "B",

@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"maps"
 	"testing"
 )
 
@@ -43,9 +44,7 @@ func makeTestVM(id, vmType, controller string, keyData map[string]any) map[strin
 		"type":       vmType,
 		"controller": controller,
 	}
-	for k, v := range keyData {
-		vm[k] = v
-	}
+	maps.Copy(vm, keyData)
 	return vm
 }
 

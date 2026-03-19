@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -836,9 +837,7 @@ func (c *Client) createProofJWT(ctx context.Context, audience, cNonce string) (s
 
 	signingMethod, _ := jose.GetSigningMethodFromKey(c.signingKey)
 	token := jwtv5.NewWithClaims(signingMethod, body)
-	for k, v := range header {
-		token.Header[k] = v
-	}
+	maps.Copy(token.Header, header)
 
 	signed, err := token.SignedString(c.signingKey)
 	if err != nil {
@@ -875,9 +874,7 @@ func (c *Client) createDPoPProof(method, uri, accessToken string) (string, error
 
 	signingMethod, _ := jose.GetSigningMethodFromKey(c.signingKey)
 	token := jwtv5.NewWithClaims(signingMethod, body)
-	for k, v := range header {
-		token.Header[k] = v
-	}
+	maps.Copy(token.Header, header)
 
 	signed, err := token.SignedString(c.signingKey)
 	if err != nil {

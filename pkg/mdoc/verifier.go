@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"vc/pkg/trust"
@@ -394,9 +395,7 @@ func (r *VerificationResult) ExtractElements() map[string]map[string]any {
 			if result[namespace] == nil {
 				result[namespace] = make(map[string]any)
 			}
-			for id, value := range elements {
-				result[namespace][id] = value
-			}
+			maps.Copy(result[namespace], elements)
 		}
 	}
 
@@ -420,9 +419,7 @@ func (r *VerificationResult) GetMDocElements() map[string]any {
 	elements := make(map[string]any)
 
 	if nsElements, ok := r.ExtractElements()[Namespace]; ok {
-		for k, v := range nsElements {
-			elements[k] = v
-		}
+		maps.Copy(elements, nsElements)
 	}
 
 	return elements

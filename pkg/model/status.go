@@ -26,7 +26,7 @@ type Probe struct {
 	Name          string    `json:"name,omitempty"`
 	Healthy       bool      `json:"healthy,omitempty"`
 	Message       string    `json:"message,omitempty"`
-	LastCheckedTS time.Time `json:"timestamp,omitempty"`
+	LastCheckedTS time.Time `json:"timestamp"`
 }
 
 // ProbeStore contains the previous probe result and the next time to check

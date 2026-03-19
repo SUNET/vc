@@ -21,9 +21,9 @@ const testIDPMetadata = `<?xml version="1.0"?>
 func TestMDQClient_GetIDPMetadata_Success(t *testing.T) {
 	// Create test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// Verify request path contains URL-encoded entity ID (first slash is from path)
+		// Verify request path contains URL-encoded entity ID (first slash is from path)
 		assert.Contains(t, r.URL.Path, "idp.example.com")
-		
+
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(testIDPMetadata))
@@ -201,7 +201,7 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 
 	// Make multiple concurrent requests
 	done := make(chan bool)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		go func() {
 			_, err := client.GetIDPMetadata(ctx, entityID)
 			assert.NoError(t, err)
@@ -210,7 +210,7 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		<-done
 	}
 

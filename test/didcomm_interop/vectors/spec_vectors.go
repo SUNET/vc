@@ -611,8 +611,8 @@ func BobDIDDocument() string {
 }
 
 // ParseSpecPlaintext parses the spec plaintext into a map.
-func ParseSpecPlaintext() (map[string]interface{}, error) {
-	var result map[string]interface{}
+func ParseSpecPlaintext() (map[string]any, error) {
+	var result map[string]any
 	if err := json.Unmarshal([]byte(SpecPlaintext), &result); err != nil {
 		return nil, err
 	}

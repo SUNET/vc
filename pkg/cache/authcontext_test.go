@@ -735,7 +735,7 @@ func TestConcurrentAccess(t *testing.T) {
 	cache := NewMemoryStore(5 * time.Minute)
 
 	// Create multiple documents
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		doc := &AuthorizationContext{
 			SessionID: fmt.Sprintf("session-%d", i),
 			Code:      fmt.Sprintf("code-%d", i),
@@ -745,7 +745,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 	// Concurrent reads
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		i := i
 		go func() {
 			defer func() { done <- true }()
@@ -757,7 +757,7 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }
