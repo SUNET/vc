@@ -82,6 +82,11 @@ type VerifierSecrets struct {
 // OIDCOPSecrets holds OIDC OP configuration secrets
 type OIDCOPSecrets struct {
 	SubjectSalt string `yaml:"subject_salt"`
+	// StaticClients maps client_id to client_secret for static OIDC clients.
+	// Only clients listed here will have their secrets applied; clients not
+	// present in this map keep whatever value the main config provides (which
+	// will be empty after ClearSecrets).
+	StaticClients map[string]string `yaml:"static_clients,omitempty"`
 }
 
 // UISecrets holds UI secrets
@@ -112,6 +117,9 @@ func (cfg *Cfg) ClearSecrets() {
 
 	if cfg.Verifier != nil && cfg.Verifier.OIDCOP != nil {
 		cfg.Verifier.OIDCOP.SubjectSalt = ""
+		for i := range cfg.Verifier.OIDCOP.StaticClients {
+			cfg.Verifier.OIDCOP.StaticClients[i].ClientSecret = ""
+		}
 	}
 
 	if cfg.UI != nil {
@@ -175,11 +183,18 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.Verifier == nil {
 			cfg.Verifier = &Verifier{}
 		}
-		if secrets.Verifier.OIDCOP.SubjectSalt != "" {
+		if secrets.Verifier.OIDCOP.SubjectSalt != "" || len(secrets.Verifier.OIDCOP.StaticClients) > 0 {
 			if cfg.Verifier.OIDCOP == nil {
 				cfg.Verifier.OIDCOP = &OIDCOPConfig{}
 			}
-			cfg.Verifier.OIDCOP.SubjectSalt = secrets.Verifier.OIDCOP.SubjectSalt
+			if secrets.Verifier.OIDCOP.SubjectSalt != "" {
+				cfg.Verifier.OIDCOP.SubjectSalt = secrets.Verifier.OIDCOP.SubjectSalt
+			}
+			for i := range cfg.Verifier.OIDCOP.StaticClients {
+				if secret, ok := secrets.Verifier.OIDCOP.StaticClients[cfg.Verifier.OIDCOP.StaticClients[i].ClientID]; ok {
+					cfg.Verifier.OIDCOP.StaticClients[i].ClientSecret = secret
+				}
+			}
 		}
 	}
 

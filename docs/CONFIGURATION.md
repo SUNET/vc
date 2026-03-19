@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-12
+**Generated:** 2026-03-19
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -955,9 +955,10 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.verifier.oidc_op`
 
-| Field          | Type     | Description  | Example | Default | Required |
-| -------------- | -------- | ------------ | ------- | ------- | -------- |
-| `subject_salt` | `string` | Subject Salt | -       | -       | No       |
+| Field            | Type     | Description                                         | Example | Default | Required |
+| ---------------- | -------- | --------------------------------------------------- | ------- | ------- | -------- |
+| `subject_salt`   | `string` | Subject Salt                                        | -       | -       | No       |
+| `static_clients` | `object` | Client_id to client_secret for static OIDC clients. | -       | -       | No       |
 
 ### `ui`
 
@@ -993,6 +994,8 @@ registry:
 verifier:
   oidc_op:
     subject_salt: "random-salt-for-pairwise-subjects"
+    static_clients:
+      <username>: "<password>"
 ui:
   password: "change-me-in-production"
 ```

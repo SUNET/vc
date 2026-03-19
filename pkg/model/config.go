@@ -534,9 +534,8 @@ type StaticOIDCClient struct {
 	// ClientID is the unique identifier for the client
 	ClientID string `yaml:"client_id" validate:"required"`
 	// ClientSecret is the client secret for authentication.
-	// Note: This is stored in plaintext in config.yaml. The secrets.yaml mechanism
-	// currently only supports oidc.subject_salt, not static client secrets.
-	// For production deployments, consider using dynamic client registration instead.
+	// Can be defined in the secrets file under verifier.oidc.static_clients
+	// as a map of client_id to client_secret.
 	// Required unless TokenEndpointAuthMethod is "none" (public client).
 	ClientSecret string `yaml:"client_secret" validate:"required_unless=TokenEndpointAuthMethod none"`
 	// RedirectURIs is the list of allowed redirect URIs for this client

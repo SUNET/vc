@@ -189,8 +189,9 @@ verifier:
     # Static OIDC clients (optional)
     # Pre-configured clients that don't require dynamic registration
     # These are checked in addition to dynamically registered clients in the database
-    # Note: secrets.yaml currently only supports oidc.subject_salt, not static client secrets.
-    # For production, consider using dynamic client registration or environment variables.
+    # Client secrets can be stored in secrets.yaml under verifier.oidc_op.static_clients
+    # as a map of client_id to client_secret.
+    # For production, consider using dynamic client registration.
     # static_clients:
     #   - client_id: "example-client-id"
     #     client_secret: ""  # Set via environment variable or leave empty for public clients
