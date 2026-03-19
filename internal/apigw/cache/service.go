@@ -62,12 +62,12 @@ type Service struct {
 
 // New creates the apigw cache service and initialises all caches.
 func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
-	cs := pkgcache.New(cfg.Common.HA, dbService.MongoClient, log.New("cache"))
 	s := &Service{
 		cfg:    cfg,
 		log:    log.New("cache"),
 		tracer: tracer,
 	}
+	cs := pkgcache.New(s.cfg.Common.HA.Enable, s.cfg.Common.HA.CacheDatabaseName, dbService.MongoClient, s.log)
 	var err error
 
 	if s.AuthContext, err = cs.NewAuthContextCache(ctx, "apigw_auth_context", 10*time.Minute); err != nil {

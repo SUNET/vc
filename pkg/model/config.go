@@ -67,6 +67,14 @@ type Mongo struct {
 	URI string `yaml:"uri" validate:"required"`
 }
 
+// HAConfig holds the high-availability configuration
+type HAConfig struct {
+	// Enable enables HA mode; when true caches are backed by MongoDB instead of in-memory storage.
+	Enable bool `yaml:"enable" default:"false"`
+	// CacheDatabaseName is the MongoDB database name used for caches.
+	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
+}
+
 // Kafka holds the Kafka message broker configuration
 type Kafka struct {
 	// Enable enables Kafka integration
@@ -98,9 +106,9 @@ type Common struct {
 	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
 	// SecretFilePath is the path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. Example: "/etc/vc/secrets.yaml"
 	SecretFilePath string `yaml:"secret_file_path,omitempty"`
-	// HA enables high-availability mode. When true, caches use MongoDB (Common.Mongo.URI)
-	// instead of in-memory storage so state is shared across instances.
-	HA bool `yaml:"ha" default:"false"`
+	// HA configures high-availability mode. When Enabled is true, caches use MongoDB
+	// (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.
+	HA HAConfig `yaml:"ha" validate:"omitempty"`
 
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope

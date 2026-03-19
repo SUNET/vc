@@ -7,25 +7,25 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-const defaultDatabase = "vc_cache"
-
 // Service manages cache creation. When HA is enabled, caches are
 // backed by MongoDB using the provided client; otherwise in-memory.
 type Service struct {
-	ha     bool
-	client *mongo.Client
-	log    Logger
+	ha           bool
+	databaseName string
+	client       *mongo.Client
+	log          Logger
 }
 
 // New creates a cache Service.
 // When ha is true the supplied mongo client is used for all caches;
 // otherwise every cache is in-memory. The caller owns the client lifecycle.
+// databaseName is the MongoDB database name to use for all caches.
 // If log is nil operational errors from mongo-backed caches are silently discarded.
-func New(ha bool, client *mongo.Client, log Logger) *Service {
+func New(ha bool, databaseName string, client *mongo.Client, log Logger) *Service {
 	if log == nil {
 		log = nopLogger{}
 	}
-	return &Service{ha: ha, client: client, log: log}
+	return &Service{ha: ha, databaseName: databaseName, client: client, log: log}
 }
 
 // NewAuthContextCache creates an AuthContextStore backed by the service's backend.
@@ -33,7 +33,7 @@ func (s *Service) NewAuthContextCache(ctx context.Context, collection string, tt
 	if !s.ha {
 		return NewMemoryStore(ttl), nil
 	}
-	return NewMongoStore(ctx, s.client, defaultDatabase, collection, ttl)
+	return NewMongoStore(ctx, s.client, s.databaseName, collection, ttl)
 }
 
 // NewGenericCache creates a Cache[V] backed by the service's backend.
@@ -41,5 +41,5 @@ func NewGenericCache[V any](s *Service, ctx context.Context, collection string, 
 	if !s.ha {
 		return NewMemoryCache[V](ttl), nil
 	}
-	return NewMongoCache[V](ctx, s.client, defaultDatabase, collection, ttl, s.log)
+	return NewMongoCache[V](ctx, s.client, s.databaseName, collection, ttl, s.log)
 }
