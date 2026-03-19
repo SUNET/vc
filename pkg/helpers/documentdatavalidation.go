@@ -13,7 +13,7 @@ func getValidationSchema(schemaRef string, compiler *jsonschema.Compiler) (*json
 
 	switch origin {
 	case "http:", "https:":
-		return compiler.GetSchema(schemaRef)
+		return compiler.Schema(schemaRef)
 
 	case "file:":
 		filePath := strings.TrimPrefix(filepath.SplitList(schemaRef)[1:][0], "//")
