@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-12
+**Generated:** 2026-03-19
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -46,6 +46,7 @@ Shared configuration used across all services.
 | `credential_offer_qr`    | `object` | Credential offer QR code settings                                                                                                                                | -                        | -       | No       |
 | `secret_file_path`       | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied. | `"/etc/vc/secrets.yaml"` | -       | No       |
 | `ha`                     | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI)                                                                                         | -                        | `false` | No       |
+| `branding`               | `object` | Custom branding configuration (logo and favicon paths)                                                                                                           | -                        | -       | No       |
 | `credential_constructor` | `object` | OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier                                                                  | -                        | -       | No       |
 
 ### `log`
@@ -100,6 +101,15 @@ Shared configuration used across all services.
 | ---------------- | ----- | ---------------------------- | ------- | ------- | -------- |
 | `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
 | `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
+
+### `branding`
+
+> **Path:** `.common.branding`
+
+| Field          | Type     | Description                                                                         | Example | Default | Required |
+| -------------- | -------- | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `logo_path`    | `string` | File path to a custom logo image; when empty, the built-in SUNET logo is used       | -       | -       | No       |
+| `favicon_path` | `string` | File path to a custom favicon image; when empty, the built-in SUNET favicon is used | -       | -       | No       |
 
 ### `credential_constructor` entry
 

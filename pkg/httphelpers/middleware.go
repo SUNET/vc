@@ -3,9 +3,11 @@ package httphelpers
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 	"vc/pkg/helpers"
 	"vc/pkg/logger"
+	"vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lithammer/shortuuid/v4"
@@ -156,7 +158,7 @@ type RateLimiter struct {
 
 // NewRateLimiter creates a new rate limiter using token bucket algorithm.
 // requestsPerMinute: maximum requests allowed per minute per IP
-func NewRateLimiter(requestsPerMinute int) *RateLimiter {
+func (m *middlewareHandler) NewRateLimiter(requestsPerMinute int) *RateLimiter {
 	tb := ginratelimit.NewTokenBucket(requestsPerMinute, 1*time.Minute)
 	return &RateLimiter{
 		tokenBucket: tb,
@@ -166,4 +168,31 @@ func NewRateLimiter(requestsPerMinute int) *RateLimiter {
 // Middleware returns a Gin middleware handler that enforces rate limiting by IP
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return ginratelimit.RateLimitByIP(rl.tokenBucket)
+}
+
+// CustomBranding returns a middleware that serves custom logo and favicon files
+// when configured in common.branding. Requests not matching /static/logo.png or
+// /static/favicon.png are passed through unchanged.
+func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.URL.Path {
+		case "/static/logo.png":
+			if branding.LogoPath != "" {
+				if _, err := os.Stat(branding.LogoPath); err == nil {
+					c.File(branding.LogoPath)
+					c.Abort()
+					return
+				}
+			}
+		case "/static/favicon.png":
+			if branding.FaviconPath != "" {
+				if _, err := os.Stat(branding.FaviconPath); err == nil {
+					c.File(branding.FaviconPath)
+					c.Abort()
+					return
+				}
+			}
+		}
+		c.Next()
+	}
 }
