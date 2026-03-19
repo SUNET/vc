@@ -46,7 +46,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.MockAS.APIServer.Addr)
+	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.MockAS.APIServer)
 	if err != nil {
 		return nil, err
 	}

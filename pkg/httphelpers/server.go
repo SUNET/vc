@@ -91,7 +91,7 @@ func (s *serverHandler) SetGinProductionMode() {
 }
 
 // Default sets the default server configuration
-func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, serverGin *gin.Engine, APIAddr string) (*gin.RouterGroup, error) {
+func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, serverGin *gin.Engine, apiServer model.APIServer) (*gin.RouterGroup, error) {
 	s.SetGinProductionMode()
 
 	var err error
@@ -101,7 +101,7 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	}
 
 	serverHTTP.Handler = serverGin
-	serverHTTP.Addr = APIAddr
+	serverHTTP.Addr = apiServer.Addr
 	serverHTTP.ReadTimeout = 5 * time.Second
 	serverHTTP.WriteTimeout = 30 * time.Second
 	serverHTTP.IdleTimeout = 90 * time.Second
@@ -111,6 +111,7 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	serverHTTP.ReadHeaderTimeout = 2 * time.Second
 
 	// Middlewares
+	serverGin.Use(s.client.Middleware.ServedBy(ctx, apiServer.ServedByHeader))
 	serverGin.Use(s.client.Middleware.RequestID(ctx))
 	serverGin.Use(s.client.Middleware.Duration(ctx))
 	serverGin.Use(s.client.Middleware.Logger(ctx))

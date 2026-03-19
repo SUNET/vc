@@ -57,7 +57,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 		return nil, err
 	}
 
-	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Registry.APIServer.Addr)
+	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Registry.APIServer)
 	if err != nil {
 		return nil, err
 	}

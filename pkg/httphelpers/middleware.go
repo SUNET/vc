@@ -3,6 +3,7 @@ package httphelpers
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 	"vc/pkg/helpers"
 	"vc/pkg/logger"
@@ -43,6 +44,28 @@ func (m *middlewareHandler) RequestID(ctx context.Context) gin.HandlerFunc {
 		id := shortuuid.New()
 		c.Set("req_id", id)
 		c.Header("req_id", id)
+		c.Next()
+	}
+}
+
+// ServedBy middleware sets the X-Served-By response header for HA troubleshooting.
+// The value is resolved once at startup: custom value if configured, otherwise os.Hostname().
+func (m *middlewareHandler) ServedBy(ctx context.Context, servedByHeader string) gin.HandlerFunc {
+	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:ServedBy")
+	defer span.End()
+
+	value := servedByHeader
+	if value == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			m.log.Error(err, "failed to get hostname for X-Served-By header")
+			hostname = "unknown"
+		}
+		value = hostname
+	}
+
+	return func(c *gin.Context) {
+		c.Header("X-Served-By", value)
 		c.Next()
 	}
 }

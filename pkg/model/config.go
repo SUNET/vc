@@ -37,10 +37,14 @@ func BoolPtr(v bool) *bool {
 // APIServer holds the HTTP API server configuration
 type APIServer struct {
 	// Addr is the listen address for the HTTP server
-	Addr    string  `yaml:"addr" validate:"required" default:":8080"`
-	TLS     TLS     `yaml:"tls" validate:"omitempty"`
-	APIAuth APIAuth `yaml:"api_auth"`
-	CORS    *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
+	Addr string `yaml:"addr" validate:"required" default:":8080"`
+	// ServedByHeader sets the X-Served-By response header value for HA troubleshooting.
+	// When empty (default), os.Hostname() is used.
+	// Set to a custom string (e.g. a hash) to avoid exposing the real hostname.
+	ServedByHeader string  `yaml:"served_by_header,omitempty"`
+	TLS            TLS     `yaml:"tls" validate:"omitempty"`
+	APIAuth        APIAuth `yaml:"api_auth"`
+	CORS           *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
 }
 
 // CORS holds the CORS configuration
