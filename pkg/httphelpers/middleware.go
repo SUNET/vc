@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 	"vc/pkg/helpers"
 	"vc/pkg/logger"
@@ -174,23 +175,49 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 // when configured in common.branding. Requests not matching /static/logo.png or
 // /static/favicon.png are passed through unchanged.
 func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerFunc {
+	log := m.log.New("branding")
+	loggedErrors := make(map[string]bool)
+
+	serveIfReadable := func(c *gin.Context, path string) bool {
+		if path == "" {
+			return false
+		}
+		path = filepath.Clean(path)
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			if !loggedErrors[path] {
+				if err != nil {
+					log.Error(err, "custom branding file not readable, falling back to default", "path", path)
+				} else {
+					log.Error(nil, "custom branding path is a directory, falling back to default", "path", path)
+				}
+				loggedErrors[path] = true
+			}
+			return false
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			if !loggedErrors[path] {
+				log.Error(err, "custom branding file not readable, falling back to default", "path", path)
+				loggedErrors[path] = true
+			}
+			return false
+		}
+		f.Close()
+		c.File(path)
+		c.Abort()
+		return true
+	}
+
 	return func(c *gin.Context) {
 		switch c.Request.URL.Path {
 		case "/static/logo.png":
-			if branding.LogoPath != "" {
-				if _, err := os.Stat(branding.LogoPath); err == nil {
-					c.File(branding.LogoPath)
-					c.Abort()
-					return
-				}
+			if serveIfReadable(c, branding.LogoPath) {
+				return
 			}
 		case "/static/favicon.png":
-			if branding.FaviconPath != "" {
-				if _, err := os.Stat(branding.FaviconPath); err == nil {
-					c.File(branding.FaviconPath)
-					c.Abort()
-					return
-				}
+			if serveIfReadable(c, branding.FaviconPath) {
+				return
 			}
 		}
 		c.Next()
