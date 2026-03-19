@@ -175,7 +175,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		Scope:           authorizationContext.Scopes[0],
 		State:           authorizationContext.State,
 		CNonce:          authorizationContext.Nonce,
-		CNonceExpiresIn: 0,
+		CNonceExpiresIn: 3600,
 	}
 
 	// Per OID4VCI 1.0 Section 6.2: authorization_details is REQUIRED in the Token Response when

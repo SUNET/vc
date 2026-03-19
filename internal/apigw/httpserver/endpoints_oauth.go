@@ -31,7 +31,10 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "par error")
 		if errors.Is(err, oauth2.ErrInvalidClient) {
-			c.AbortWithStatus(http.StatusMethodNotAllowed)
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				"error":             "invalid_client",
+				"error_description": err.Error(),
+			})
 			return nil, nil
 		}
 		return nil, err
