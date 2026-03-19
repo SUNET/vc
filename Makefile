@@ -56,7 +56,7 @@ BUILD_CONFIGS           := \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
-	check-protoc diagram install-tools clean-apt-cache vscode \
+	check-protoc diagram install-tools clean-apt-cache vscode vendor-js \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
@@ -569,6 +569,38 @@ oidc-conformance-test-oidc: ## Test OIDC OP (verifier) conformance
 oidc-conformance-status: ## Show OpenID conformance test results
 	@chmod +x ./scripts/oidc-conformance.sh
 	@CONFORMANCE_URL=$(OIDC_CONFORMANCE_URL) ./scripts/oidc-conformance.sh status
+
+# ==============================================================================
+# Vendored JS/CSS Dependencies
+# ==============================================================================
+# Re-run this target to update vendored frontend dependencies.
+# After updating versions here, commit the downloaded files.
+
+ALPINEJS_VERSION        := 3.14.8
+VALIBOT_VERSION         := 1.1.0
+JSON_VIEWER_VERSION     := 2.2.0
+
+APIGW_STATIC            := internal/apigw/staticembed
+VERIFIER_STATIC         := internal/verifier/static
+
+vendor-js: ## Download vendored JS/CSS dependencies
+	$(info Downloading Alpine.js $(ALPINEJS_VERSION))
+	curl -sL -o $(APIGW_STATIC)/alpinejs.esm.min.js \
+		"https://cdn.jsdelivr.net/npm/alpinejs@$(ALPINEJS_VERSION)/dist/module.esm.min.js"
+	curl -sL -o $(VERIFIER_STATIC)/alpinejs.esm.min.js \
+		"https://cdn.jsdelivr.net/npm/alpinejs@$(ALPINEJS_VERSION)/dist/module.esm.min.js"
+	$(info Downloading Valibot $(VALIBOT_VERSION))
+	curl -sL -o $(APIGW_STATIC)/valibot.min.js \
+		"https://cdn.jsdelivr.net/npm/valibot@$(VALIBOT_VERSION)/dist/index.min.js"
+	curl -sL -o $(VERIFIER_STATIC)/valibot.min.js \
+		"https://cdn.jsdelivr.net/npm/valibot@$(VALIBOT_VERSION)/dist/index.min.js"
+	$(info Downloading Tailwind CSS CDN)
+	curl -sL -o $(APIGW_STATIC)/tailwindcss.js \
+		"https://cdn.tailwindcss.com"
+	$(info Downloading @andypf/json-viewer $(JSON_VIEWER_VERSION))
+	curl -sL -o $(VERIFIER_STATIC)/json-viewer.esm.js \
+		"https://cdn.jsdelivr.net/npm/@andypf/json-viewer@$(JSON_VIEWER_VERSION)/+esm"
+	$(info Done — vendored JS/CSS dependencies updated)
 
 # ==============================================================================
 # Development Tools
