@@ -45,7 +45,7 @@ Shared configuration used across all services.
 | `kafka`                  | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                    | -                        | -       | No       |
 | `credential_offer_qr`    | `object` | Credential offer QR code settings                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `secret_file_path`       | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                      | `"/etc/vc/secrets.yaml"` | -       | No       |
-| `ha`                     | `bool`   | High-availability mode. When true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                            | -                        | `false` | No       |
+| `ha`                     | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                  | -                        | -       | No       |
 | `credential_constructor` | `object` | OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope The constructor contains the VCT URN and other configuration for issuing that credential type | -                        | -       | No       |
 
 ### `log`
@@ -100,6 +100,15 @@ Shared configuration used across all services.
 | ---------------- | ----- | ---------------------------- | ------- | ------- | -------- |
 | `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
 | `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
+
+### `ha`
+
+> **Path:** `.common.ha`
+
+| Field                 | Type     | Description                                                                   | Example | Default    | Required |
+| --------------------- | -------- | ----------------------------------------------------------------------------- | ------- | ---------- | -------- |
+| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage. | -       | `false`    | No       |
+| `cache_database_name` | `string` | MongoDB database name used for caches.                                        | -       | `vc_cache` | No       |
 
 ### `credential_constructor` entry
 
