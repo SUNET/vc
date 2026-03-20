@@ -42,7 +42,7 @@ type APIAuthSecrets struct {
 // BasicAuthSecrets holds basic auth user/password pairs
 type BasicAuthSecrets struct {
 	// Users maps usernames to passwords for HTTP Basic Authentication
-	Users map[string]string `yaml:"users,omitempty"`
+	Users map[string]string `yaml:"users,omitempty" doc_example:"<username>: \"<password>\""`
 }
 
 // OIDCRPSecrets holds OIDC Relying Party secrets
@@ -92,7 +92,7 @@ type OIDCOPSecrets struct {
 	// Only clients listed here will have their secrets applied; clients not
 	// present in this map keep whatever value the main config provides (which
 	// will be empty after ClearSecrets).
-	StaticClients map[string]string `yaml:"static_clients,omitempty"`
+	StaticClients map[string]string `yaml:"static_clients,omitempty" doc_example:"<client_id>: \"<client_secret>\""`
 }
 
 // UISecrets holds UI secrets
