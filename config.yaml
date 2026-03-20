@@ -3,6 +3,10 @@ common:
   # secret_file_path: "/path/to/secrets.yaml"  # When set, all secrets are read from this file and secret values in config.yaml are ignored
   mongo:
     uri: mongodb://mongo:27017
+    # tls: true                           # Enable TLS for MongoDB (also enabled implicitly when ca/cert/key paths are set)
+    # ca_file_path: "/pki/mongo_ca.crt"   # CA certificate to verify the MongoDB server
+    # cert_file_path: "/pki/mongo.crt"    # Client certificate for mTLS authentication
+    # key_file_path: "/pki/mongo.key"     # Client private key for mTLS authentication
   production: false
   tracing:
     enable: false

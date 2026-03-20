@@ -60,9 +60,13 @@ Shared configuration used across all services.
 
 > **Path:** `.common.mongo`
 
-| Field | Type     | Description            | Example                                    | Default | Required |
-| ----- | -------- | ---------------------- | ------------------------------------------ | ------- | -------- |
-| `uri` | `string` | MongoDB connection URI | `"mongodb://user:password@mongo:27017/vc"` | -       | Yes      |
+| Field            | Type     | Description                                                                                                                     | Example                                    | Default | Required |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------- | -------- |
+| `uri`            | `string` | MongoDB connection URI                                                                                                          | `"mongodb://user:password@mongo:27017/vc"` | -       | Yes      |
+| `tls`            | `bool`   | TLS for the MongoDB connection. Can also be enabled via the connection URI parameter "tls=true".                                | -                                          | `false` | No       |
+| `ca_file_path`   | `string` | Path to a PEM-encoded CA certificate used to verify the MongoDB server's certificate. When empty, the system root CAs are used. | -                                          | -       | No       |
+| `cert_file_path` | `string` | Path to a PEM-encoded client certificate for mutual TLS (mTLS). Must be set together with KeyFilePath.                          | -                                          | -       | No       |
+| `key_file_path`  | `string` | Path to a PEM-encoded client private key for mutual TLS (mTLS). Must be set together with CertFilePath.                         | -                                          | -       | No       |
 
 ### `tracing`
 
