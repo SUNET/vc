@@ -43,7 +43,7 @@ func EnsureSharedSecrets(ctx context.Context, s *Service, serviceName string) (*
 		return candidate, nil
 	}
 
-	coll := s.client.Database(defaultDatabase).Collection(sharedSecretsCollection)
+	coll := s.client.Database(s.databaseName).Collection(sharedSecretsCollection)
 
 	// Atomic upsert: only sets values if no document exists for this _id.
 	filter := bson.M{"_id": serviceName}

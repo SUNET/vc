@@ -26,7 +26,7 @@ import (
 
 func testCfg(ha bool) *model.Cfg {
 	return &model.Cfg{
-		Common: &model.Common{HA: ha},
+		Common: &model.Common{HA: model.HAConfig{Enable: ha, CacheDatabaseName: "vc_cache"}},
 	}
 }
 

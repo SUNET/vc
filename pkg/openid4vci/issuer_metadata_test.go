@@ -42,7 +42,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "Person Identification Data",
 						BackgroundColor: "#1b263b",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#FFFFFF",
@@ -68,7 +68,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "Person Identification Data",
 						BackgroundColor: "#4CC3DD",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#000000",
@@ -92,11 +92,11 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 					{
 						Name:   "Bachelor Diploma - SD-JWT VC",
 						Locale: "en-US",
-						Logo: MetadataLogo{
+						Logo: &MetadataLogo{
 							URI: "http://vc_dev_apigw:8080/images/diploma-logo.png",
 						},
 						BackgroundColor: "#b1d3ff",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#ffffff",
@@ -122,7 +122,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "European Health Insurance Card",
 						BackgroundColor: "#1b263b",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#FFFFFF",
@@ -148,7 +148,7 @@ var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
 						Locale:          "en-US",
 						Description:     "Power of Representation",
 						BackgroundColor: "#c3b25d",
-						BackgroundImage: MetadataBackgroundImage{
+						BackgroundImage: &MetadataBackgroundImage{
 							URI: "http://vc_dev_apigw:8080/images/background-image.png",
 						},
 						TextColor: "#363531",
@@ -273,12 +273,12 @@ func TestMarshal(t *testing.T) {
 			{
 				Name:   "European Health Insurance Card",
 				Locale: "en-US",
-				Logo:   MetadataLogo{},
+				Logo:   nil,
 			},
 			{
 				Name:   "Carte européenne d'assurance maladie",
 				Locale: "fr-FR",
-				Logo:   MetadataLogo{},
+				Logo:   nil,
 			},
 		},
 		CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
@@ -296,13 +296,13 @@ func TestMarshal(t *testing.T) {
 						{
 							Name:   "European Health Insurance Card Credential",
 							Locale: "en-US",
-							Logo: MetadataLogo{
+							Logo: &MetadataLogo{
 								URI:     "https://example.edu/public/logo.png",
 								AltText: "a square logo of a EHIC card",
 							},
 							Description:     "",
 							BackgroundColor: "#12107c",
-							BackgroundImage: MetadataBackgroundImage{
+							BackgroundImage: &MetadataBackgroundImage{
 								URI: "https://example.edu/public/background.png",
 							},
 							TextColor: "#FFFFFF",
@@ -459,6 +459,74 @@ func TestCredentialIssuerMetadataParameters_OpenID4VCI_Compliance(t *testing.T) 
 				assert.NotEmpty(t, config.CredentialMetadata.Display[0].Name, "Display should have a name")
 			})
 		}
+	})
+}
+
+func TestCredentialMetadataDisplay_MarshalOmitsNilFields(t *testing.T) {
+	t.Run("logo and background_image omitted when nil", func(t *testing.T) {
+		display := CredentialMetadataDisplay{
+			Name:            "Test",
+			Locale:          "en-US",
+			BackgroundColor: "#000000",
+			TextColor:       "#FFFFFF",
+		}
+
+		data, err := json.Marshal(display)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(data, &raw))
+
+		_, hasLogo := raw["logo"]
+		_, hasBgImage := raw["background_image"]
+		assert.False(t, hasLogo, "logo key should be absent when nil")
+		assert.False(t, hasBgImage, "background_image key should be absent when nil")
+
+		// YAML
+		yamlData, err := yaml.Marshal(display)
+		require.NoError(t, err)
+
+		var rawYAML map[string]any
+		require.NoError(t, yaml.Unmarshal(yamlData, &rawYAML))
+
+		_, hasLogo = rawYAML["logo"]
+		_, hasBgImage = rawYAML["background_image"]
+		assert.False(t, hasLogo, "logo key should be absent in YAML when nil")
+		assert.False(t, hasBgImage, "background_image key should be absent in YAML when nil")
+	})
+
+	t.Run("logo and background_image present when non-nil", func(t *testing.T) {
+		display := CredentialMetadataDisplay{
+			Name:   "Test",
+			Locale: "en-US",
+			Logo: &MetadataLogo{
+				URI:     "https://example.com/logo.png",
+				AltText: "logo",
+			},
+			BackgroundImage: &MetadataBackgroundImage{
+				URI: "https://example.com/bg.png",
+			},
+			BackgroundColor: "#000000",
+			TextColor:       "#FFFFFF",
+		}
+
+		data, err := json.Marshal(display)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(data, &raw))
+
+		_, hasLogo := raw["logo"]
+		_, hasBgImage := raw["background_image"]
+		assert.True(t, hasLogo, "logo key should be present when non-nil")
+		assert.True(t, hasBgImage, "background_image key should be present when non-nil")
+
+		logoMap := raw["logo"].(map[string]any)
+		assert.Equal(t, "https://example.com/logo.png", logoMap["uri"])
+		assert.Equal(t, "logo", logoMap["alt_text"])
+
+		bgMap := raw["background_image"].(map[string]any)
+		assert.Equal(t, "https://example.com/bg.png", bgMap["uri"])
 	})
 }
 

@@ -11,7 +11,6 @@ import (
 	"vc/pkg/trace"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -99,7 +98,11 @@ func (s *Service) connect(ctx context.Context) error {
 	ctx, span := s.tracer.Start(ctx, "apigw:db:connect")
 	defer span.End()
 
-	client, err := mongo.Connect(options.Client().ApplyURI(s.cfg.Common.Mongo.URI))
+	opts, err := s.cfg.Common.Mongo.MongoClientOptions()
+	if err != nil {
+		return err
+	}
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return err
 	}

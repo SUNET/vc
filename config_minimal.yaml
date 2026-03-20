@@ -10,7 +10,8 @@
 
 common:
   production: false            # default: true — set false for local development
-  ha: true
+  ha:
+    enable: true
   mongo:
     uri: mongodb://mongo:27017
 

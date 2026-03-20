@@ -20,8 +20,7 @@ type Client struct {
 	// that cannot securely store credentials and rely on PKCE instead.
 	Type string `json:"type" yaml:"type" validate:"required,oneof=public confidential" default:"public"`
 	// RedirectURI is the allowed redirect URI for the client
-	// Example: "https://example.com/callback"
-	RedirectURI string `json:"redirect_uri" yaml:"redirect_uri" validate:"required"`
+	RedirectURI string `json:"redirect_uri" yaml:"redirect_uri" validate:"required" doc_example:"\"https://example.com/callback\""`
 	// Scopes is the list of OAuth2 scopes allowed for the client
 	Scopes []string `json:"scopes" yaml:"scopes" validate:"required"`
 }

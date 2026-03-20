@@ -57,9 +57,8 @@ type KeyConfig struct {
 	EnableHSM bool `yaml:"enable_hsm"`
 
 	// Priority defines fallback order when both are enabled
-	// Example: []KeySource{KeySourceHSM, KeySourceFile} tries HSM first, falls back to file
 	// If nil, uses Source field or auto-detects based on what's configured
-	Priority []KeySource `yaml:"priority"`
+	Priority []KeySource `yaml:"priority" doc_example:"[\"hsm\", \"file\"]"`
 }
 
 // KeyLoader provides centralized key and certificate loading functionality.
