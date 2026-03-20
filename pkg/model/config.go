@@ -39,8 +39,8 @@ type APIServer struct {
 	// Addr is the listen address for the HTTP server
 	Addr string `yaml:"addr" validate:"required" default:":8080"`
 	// ServedByHeader sets the X-Served-By response header value for HA troubleshooting.
-	// When empty (default), os.Hostname() is used.
-	// Set to a custom string (e.g. a hash) to avoid exposing the real hostname.
+	// Empty (default): header is not set. "hostname": uses os.Hostname().
+	// Any other value is used as-is.
 	ServedByHeader string  `yaml:"served_by_header,omitempty"`
 	TLS            TLS     `yaml:"tls" validate:"omitempty"`
 	APIAuth        APIAuth `yaml:"api_auth"`

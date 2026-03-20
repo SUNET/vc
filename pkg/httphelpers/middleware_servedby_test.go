@@ -29,13 +29,30 @@ func TestServedBy_ConfiguredValue(t *testing.T) {
 	assert.Equal(t, "custom-node-42", w.Header().Get("X-Served-By"))
 }
 
-func TestServedBy_EmptyConfigResolvesHostname(t *testing.T) {
+func TestServedBy_EmptyConfigNoHeader(t *testing.T) {
 	m := newTestMiddleware(t)
 	ctx := context.Background()
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(m.ServedBy(ctx, ""))
+	r.GET("/ping", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, w.Header().Get("X-Served-By"))
+}
+
+func TestServedBy_HostnameSentinel(t *testing.T) {
+	m := newTestMiddleware(t)
+	ctx := context.Background()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(m.ServedBy(ctx, "hostname"))
 	r.GET("/ping", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	w := httptest.NewRecorder()
@@ -68,11 +85,6 @@ func TestServedBy_HeaderSetOnEveryResponse(t *testing.T) {
 }
 
 func TestServedBy_ErrorPathDoesNotPanic(t *testing.T) {
-	// The production error path (os.Hostname failure) is difficult to trigger
-	// directly, but we can verify the fallback by checking the code path:
-	// when ServedBy is called with an empty string and hostname resolution
-	// would fail, it falls back to "unknown". We test that the middleware
-	// never panics regardless of input, including edge cases.
 	m := newTestMiddleware(t)
 	ctx := context.Background()
 
@@ -80,14 +92,13 @@ func TestServedBy_ErrorPathDoesNotPanic(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		r := gin.New()
-		r.Use(m.ServedBy(ctx, ""))
+		r.Use(m.ServedBy(ctx, "hostname"))
 		r.GET("/ping", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 		r.ServeHTTP(w, req)
 
-		// Header must be non-empty (either hostname or "unknown" fallback).
 		assert.NotEmpty(t, w.Header().Get("X-Served-By"))
 	})
 }

@@ -153,12 +153,13 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`, `.mock_as.api_server`, `.ui.api_server`
 
-| Field      | Type     | Description                        | Example | Default | Required |
-| ---------- | -------- | ---------------------------------- | ------- | ------- | -------- |
-| `addr`     | `string` | Listen address for the HTTP server | -       | `:8080` | No       |
-| `tls`      | `object` | TLS                                | -       | -       | No       |
-| `api_auth` | `object` | API Auth                           | -       | -       | No       |
-| `cors`     | `object` | CORS                               | -       | -       | No       |
+| Field              | Type     | Description                                                                                                                                                      | Example | Default | Required |
+| ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `addr`             | `string` | Listen address for the HTTP server                                                                                                                               | -       | `:8080` | No       |
+| `served_by_header` | `string` | The X-Served-By response header value for HA troubleshooting. Empty (default): header is not set. "hostname": uses os.Hostname(). Any other value is used as-is. | -       | -       | No       |
+| `tls`              | `object` | TLS                                                                                                                                                              | -       | -       | No       |
+| `api_auth`         | `object` | API Auth                                                                                                                                                         | -       | -       | No       |
+| `cors`             | `object` | CORS                                                                                                                                                             | -       | -       | No       |
 
 ### `tls`
 
