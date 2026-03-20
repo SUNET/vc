@@ -24,10 +24,11 @@ import (
 // ---- Data types ----
 
 type TagInfo struct {
-	YAMLName  string
-	Omitempty bool
-	Validate  string
-	Default   string
+	YAMLName   string
+	Omitempty  bool
+	Validate   string
+	Default    string
+	DocExample string
 }
 
 type StructDef struct {
@@ -277,7 +278,8 @@ func parseStructTag(raw string) TagInfo {
 	omit := len(parts) > 1 && strings.Contains(parts[1], "omitempty")
 	validate, _ := tag.Lookup("validate")
 	def, _ := tag.Lookup("default")
-	return TagInfo{YAMLName: yamlName, Omitempty: omit, Validate: validate, Default: def}
+	docExample, _ := tag.Lookup("doc_example")
+	return TagInfo{YAMLName: yamlName, Omitempty: omit, Validate: validate, Default: def, DocExample: docExample}
 }
 
 // ---- Display helpers ----
@@ -373,75 +375,24 @@ func fieldDescription(f *FieldDef) string {
 	if raw == "" {
 		return titleFromGoName(f.GoName)
 	}
+	var parts []string
 	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Skip example lines
-		if isExampleLine(line) {
-			continue
-		}
-		// Strip inline " example: ..." suffix from description
-		line = stripInlineExample(line)
 		if line != "" {
-			return cleanFieldDesc(line, f.GoName)
+			parts = append(parts, line)
 		}
 	}
-	return titleFromGoName(f.GoName)
-}
-
-// isExampleLine returns true if the line is a standalone example line.
-func isExampleLine(line string) bool {
-	lower := strings.ToLower(strings.TrimSpace(line))
-	return strings.HasPrefix(lower, "example:") || strings.HasPrefix(lower, "example :")
-}
-
-// stripInlineExample removes a trailing " example: ..." from a description line.
-func stripInlineExample(line string) string {
-	lower := strings.ToLower(line)
-	if idx := strings.Index(lower, " example:"); idx > 0 {
-		return strings.TrimSpace(line[:idx])
+	if len(parts) == 0 {
+		return titleFromGoName(f.GoName)
 	}
-	if idx := strings.Index(lower, " example :"); idx > 0 {
-		return strings.TrimSpace(line[:idx])
-	}
-	return line
+	// Clean the first line (strip "FieldName is the ..." prefix), keep the rest as-is
+	parts[0] = cleanFieldDesc(parts[0], f.GoName)
+	return strings.Join(parts, " ")
 }
 
-// fieldExample extracts the example value from a field's doc comment.
+// fieldExample returns the doc_example tag value for a field.
 func fieldExample(f *FieldDef) string {
-	raw := f.Doc
-	if raw == "" {
-		raw = f.InlineDoc
-	}
-	if raw == "" {
-		return ""
-	}
-	for line := range strings.SplitSeq(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Standalone example line: "Example: ..."
-		if isExampleLine(line) {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-		// Inline example in description: "... example: ..."
-		lower := strings.ToLower(line)
-		if idx := strings.Index(lower, " example:"); idx > 0 {
-			rest := line[idx+len(" example:"):]
-			return strings.TrimSpace(rest)
-		}
-		if idx := strings.Index(lower, " example :"); idx > 0 {
-			rest := line[idx+len(" example :"):]
-			return strings.TrimSpace(rest)
-		}
-	}
-	return ""
+	return f.Tag.DocExample
 }
 
 func cleanFieldDesc(line, goName string) string {
@@ -689,7 +640,11 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 			buf.WriteString(generateSecretsExample(reg, childDef, indent+1))
 		} else if _, ok := asMapType(f.TypeExpr); ok {
 			buf.WriteString(fmt.Sprintf("%s%s:\n", prefix, f.Tag.YAMLName))
-			buf.WriteString(fmt.Sprintf("%s  <username>: \"<password>\"\n", prefix))
+			if f.Tag.DocExample != "" {
+				buf.WriteString(fmt.Sprintf("%s  %s\n", prefix, f.Tag.DocExample))
+			} else {
+				buf.WriteString(fmt.Sprintf("%s  <key>: \"<value>\"\n", prefix))
+			}
 		} else {
 			placeholder := secretPlaceholder(f.Tag.YAMLName)
 			buf.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, f.Tag.YAMLName, placeholder))

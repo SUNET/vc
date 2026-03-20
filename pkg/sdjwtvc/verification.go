@@ -511,7 +511,8 @@ func (c *Client) calculateSDHashForVerification(issuerJWT string, disclosures []
 	var sdJWT strings.Builder
 	sdJWT.WriteString(issuerJWT)
 	for _, disclosure := range disclosures {
-		sdJWT.WriteString("~" + disclosure)
+		sdJWT.WriteByte('~')
+		sdJWT.WriteString(disclosure)
 	}
 	sdJWT.WriteString("~") // Trailing ~
 

@@ -234,7 +234,7 @@ func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 			{
 				Name:   "Example Issuer",
 				Locale: "en-US",
-				Logo: openid4vci.MetadataLogo{
+				Logo: &openid4vci.MetadataLogo{
 					URI:     "https://example.com/logo.png",
 					AltText: "Logo",
 				},
@@ -255,6 +255,7 @@ func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 	require.Len(t, metadata.Display, 1)
 	assert.Equal(t, "Example Issuer", metadata.Display[0].Name)
 	assert.Equal(t, "en-US", metadata.Display[0].Locale)
+	require.NotNil(t, metadata.Display[0].Logo)
 	assert.Equal(t, "https://example.com/logo.png", metadata.Display[0].Logo.URI)
 }
 
