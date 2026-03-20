@@ -19,6 +19,7 @@ type CommonSecrets struct {
 
 // MongoSecrets holds the mongo connection URI (may contain credentials)
 type MongoSecrets struct {
+	// URI is the MongoDB connection string, which may include authentication credentials
 	URI string `yaml:"uri"`
 }
 
@@ -40,7 +41,8 @@ type APIAuthSecrets struct {
 
 // BasicAuthSecrets holds basic auth user/password pairs
 type BasicAuthSecrets struct {
-	Users map[string]string `yaml:"users,omitempty"`
+	// Users maps usernames to passwords for HTTP Basic Authentication
+	Users map[string]string `yaml:"users,omitempty" doc_example:"<username>: \"<password>\""`
 }
 
 // OIDCRPSecrets holds OIDC Relying Party secrets
@@ -56,11 +58,13 @@ type OIDCRPRegistrationSecrets struct {
 
 // OIDCRPPreconfiguredSecrets holds pre-registered client secrets
 type OIDCRPPreconfiguredSecrets struct {
+	// ClientSecret is the shared secret for the pre-configured OIDC RP client
 	ClientSecret string `yaml:"client_secret"`
 }
 
 // OIDCRPDynamicSecrets holds dynamic registration secrets
 type OIDCRPDynamicSecrets struct {
+	// InitialAccessToken is the bearer token required by the OP for dynamic client registration
 	InitialAccessToken string `yaml:"initial_access_token"`
 }
 
@@ -71,6 +75,7 @@ type RegistrySecrets struct {
 
 // AdminGUISecrets holds admin GUI secrets
 type AdminGUISecrets struct {
+	// Password is the admin GUI login password
 	Password string `yaml:"password"`
 }
 
@@ -81,11 +86,18 @@ type VerifierSecrets struct {
 
 // OIDCOPSecrets holds OIDC OP configuration secrets
 type OIDCOPSecrets struct {
+	// SubjectSalt is a secret value used to derive pairwise subject identifiers for OIDC clients
 	SubjectSalt string `yaml:"subject_salt"`
+	// StaticClients maps client_id to client_secret for static OIDC clients.
+	// Only clients listed here will have their secrets applied; clients not
+	// present in this map keep whatever value the main config provides (which
+	// will be empty after ClearSecrets).
+	StaticClients map[string]string `yaml:"static_clients,omitempty" doc_example:"<client_id>: \"<client_secret>\""`
 }
 
 // UISecrets holds UI secrets
 type UISecrets struct {
+	// Password is the UI login password
 	Password string `yaml:"password"`
 }
 
@@ -112,6 +124,9 @@ func (cfg *Cfg) ClearSecrets() {
 
 	if cfg.Verifier != nil && cfg.Verifier.OIDCOP != nil {
 		cfg.Verifier.OIDCOP.SubjectSalt = ""
+		for i := range cfg.Verifier.OIDCOP.StaticClients {
+			cfg.Verifier.OIDCOP.StaticClients[i].ClientSecret = ""
+		}
 	}
 
 	if cfg.UI != nil {
@@ -175,11 +190,18 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.Verifier == nil {
 			cfg.Verifier = &Verifier{}
 		}
-		if secrets.Verifier.OIDCOP.SubjectSalt != "" {
+		if secrets.Verifier.OIDCOP.SubjectSalt != "" || len(secrets.Verifier.OIDCOP.StaticClients) > 0 {
 			if cfg.Verifier.OIDCOP == nil {
 				cfg.Verifier.OIDCOP = &OIDCOPConfig{}
 			}
-			cfg.Verifier.OIDCOP.SubjectSalt = secrets.Verifier.OIDCOP.SubjectSalt
+			if secrets.Verifier.OIDCOP.SubjectSalt != "" {
+				cfg.Verifier.OIDCOP.SubjectSalt = secrets.Verifier.OIDCOP.SubjectSalt
+			}
+			for i := range cfg.Verifier.OIDCOP.StaticClients {
+				if secret, ok := secrets.Verifier.OIDCOP.StaticClients[cfg.Verifier.OIDCOP.StaticClients[i].ClientID]; ok {
+					cfg.Verifier.OIDCOP.StaticClients[i].ClientSecret = secret
+				}
+			}
 		}
 	}
 
