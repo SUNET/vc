@@ -46,6 +46,7 @@ Shared configuration used across all services.
 | `credential_offer_qr`    | `object` | Credential offer QR code settings                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `secret_file_path`       | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                      | `"/etc/vc/secrets.yaml"` | -       | No       |
 | `ha`                     | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                  | -                        | -       | No       |
+| `branding`               | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                | -                        | -       | No       |
 | `credential_constructor` | `object` | OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope The constructor contains the VCT URN and other configuration for issuing that credential type | -                        | -       | No       |
 
 ### `log`
@@ -113,6 +114,15 @@ Shared configuration used across all services.
 | --------------------- | -------- | ----------------------------------------------------------------------------- | ------- | ---------- | -------- |
 | `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage. | -       | `false`    | No       |
 | `cache_database_name` | `string` | MongoDB database name used for caches.                                        | -       | `vc_cache` | No       |
+
+### `branding`
+
+> **Path:** `.common.branding`
+
+| Field          | Type     | Description                                                                             | Example | Default | Required |
+| -------------- | -------- | --------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `logo_path`    | `string` | File path to a custom logo PNG image; when empty, the built-in SUNET logo is used       | -       | -       | No       |
+| `favicon_path` | `string` | File path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used | -       | -       | No       |
 
 ### `credential_constructor` entry
 

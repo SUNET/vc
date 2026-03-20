@@ -119,10 +119,21 @@ type Common struct {
 	// (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.
 	HA HAConfig `yaml:"ha" validate:"omitempty"`
 
+	// Branding holds custom branding configuration (logo and favicon paths)
+	Branding Branding `yaml:"branding"`
+
 	// CredentialConstructor maps OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
 	// The constructor contains the VCT URN and other configuration for issuing that credential type
 	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
+}
+
+// Branding holds custom branding paths for logo and favicon
+type Branding struct {
+	// LogoPath is the file path to a custom logo PNG image; when empty, the built-in SUNET logo is used
+	LogoPath string `yaml:"logo_path,omitempty" validate:"omitempty,image_png"`
+	// FaviconPath is the file path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used
+	FaviconPath string `yaml:"favicon_path,omitempty" validate:"omitempty,image_png"`
 }
 
 // CredentialOfferQRConfig holds credential offer QR code settings

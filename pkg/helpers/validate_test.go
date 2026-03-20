@@ -1,10 +1,17 @@
 package helpers
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 	"vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidationIdentity(t *testing.T) {
@@ -402,4 +409,50 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestImagePNGValidator(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	type testStruct struct {
+		Path string `validate:"omitempty,image_png"`
+	}
+
+	// Helper: write a valid 1x1 PNG to a temp file.
+	writePNG := func(t *testing.T) string {
+		t.Helper()
+		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+		img.Set(0, 0, color.White)
+		var buf bytes.Buffer
+		require.NoError(t, png.Encode(&buf, img))
+		p := filepath.Join(t.TempDir(), "img.png")
+		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0644))
+		return p
+	}
+
+	t.Run("valid PNG", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{Path: writePNG(t)}))
+	})
+
+	t.Run("empty is OK with omitempty", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{Path: ""}))
+	})
+
+	t.Run("non-existent file", func(t *testing.T) {
+		assert.Error(t, validate.Struct(testStruct{Path: "/no/such/file.png"}))
+	})
+
+	t.Run("not a PNG", func(t *testing.T) {
+		p := filepath.Join(t.TempDir(), "text.png")
+		require.NoError(t, os.WriteFile(p, []byte("hello"), 0644))
+		assert.Error(t, validate.Struct(testStruct{Path: p}))
+	})
+
+	t.Run("JPEG is rejected", func(t *testing.T) {
+		// JPEG magic bytes
+		p := filepath.Join(t.TempDir(), "fake.png")
+		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644))
+		assert.Error(t, validate.Struct(testStruct{Path: p}))
+	})
 }
