@@ -84,7 +84,7 @@ func TestServedBy_HeaderSetOnEveryResponse(t *testing.T) {
 	}
 }
 
-func TestServedBy_ErrorPathDoesNotPanic(t *testing.T) {
+func TestServedBy_HostnameSentinelDoesNotPanic(t *testing.T) {
 	m := newTestMiddleware(t)
 	ctx := context.Background()
 
