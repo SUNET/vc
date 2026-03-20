@@ -54,12 +54,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		gin:    gin.New(),
 		notify: notify,
 		tracer: tracer,
-		server: &http.Server{
-			// ReadHeaderTimeout limits the time to read request headers.
-			// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
-			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
-			ReadHeaderTimeout: 3 * time.Second,
-		},
+		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
 		sessionsName:     "verifier_user_session",
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),

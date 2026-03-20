@@ -3,7 +3,6 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"time"
 	"vc/internal/registry/apiv1"
 	"vc/internal/registry/cache"
 	"vc/pkg/httphelpers"
@@ -42,12 +41,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 		apiv1:  api,
 		gin:    gin.New(),
 		tracer: tracer,
-		server: &http.Server{
-			// ReadHeaderTimeout limits the time to read request headers.
-			// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
-			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
-			ReadHeaderTimeout: 3 * time.Second,
-		},
+		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
 	}
 
 	var err error
