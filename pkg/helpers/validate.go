@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -166,6 +168,26 @@ func NewValidator() (*validator.Validate, error) {
 		}
 
 		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for image_png - validates that the file exists and is a PNG image.
+	// Uses net/http.DetectContentType on the first 512 bytes to check the MIME type.
+	err = validate.RegisterValidation("image_png", func(fl validator.FieldLevel) bool {
+		path := fl.Field().String()
+		if path == "" {
+			return false
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		header := make([]byte, 512)
+		n, _ := f.Read(header)
+		return http.DetectContentType(header[:n]) == "image/png"
 	})
 	if err != nil {
 		return nil, err

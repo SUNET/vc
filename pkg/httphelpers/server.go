@@ -116,6 +116,7 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	serverGin.Use(s.client.Middleware.Duration(ctx))
 	serverGin.Use(s.client.Middleware.Logger(ctx))
 	serverGin.Use(s.client.Middleware.Crash(ctx))
+	serverGin.Use(s.client.Middleware.CustomBranding(s.client.cfg.Common.Branding))
 	problem404 := helpers.Problem404()
 	serverGin.NoRoute(func(c *gin.Context) { c.JSON(http.StatusNotFound, problem404) })
 

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
 	"vc/pkg/helpers"
 	"vc/pkg/logger"
+	"vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lithammer/shortuuid/v4"
@@ -188,7 +191,7 @@ type RateLimiter struct {
 
 // NewRateLimiter creates a new rate limiter using token bucket algorithm.
 // requestsPerMinute: maximum requests allowed per minute per IP
-func NewRateLimiter(requestsPerMinute int) *RateLimiter {
+func (m *middlewareHandler) NewRateLimiter(requestsPerMinute int) *RateLimiter {
 	tb := ginratelimit.NewTokenBucket(requestsPerMinute, 1*time.Minute)
 	return &RateLimiter{
 		tokenBucket: tb,
@@ -198,4 +201,55 @@ func NewRateLimiter(requestsPerMinute int) *RateLimiter {
 // Middleware returns a Gin middleware handler that enforces rate limiting by IP
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return ginratelimit.RateLimitByIP(rl.tokenBucket)
+}
+
+// CustomBranding returns a middleware that serves custom logo and favicon files
+// when configured in common.branding. Requests not matching /static/logo.png or
+// /static/favicon.png are passed through unchanged.
+func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerFunc {
+	log := m.log.New("branding")
+	var logoOnce, faviconOnce sync.Once
+
+	serveIfReadable := func(c *gin.Context, path string, logOnce *sync.Once) bool {
+		if path == "" {
+			return false
+		}
+		path = filepath.Clean(path)
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			logOnce.Do(func() {
+				if err != nil {
+					log.Error(err, "custom branding file not readable, falling back to default", "path", path)
+				} else {
+					log.Error(nil, "custom branding path is a directory, falling back to default", "path", path)
+				}
+			})
+			return false
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			logOnce.Do(func() {
+				log.Error(err, "custom branding file not readable, falling back to default", "path", path)
+			})
+			return false
+		}
+		f.Close()
+		c.File(path)
+		c.Abort()
+		return true
+	}
+
+	return func(c *gin.Context) {
+		switch c.Request.URL.Path {
+		case "/static/logo.png":
+			if serveIfReadable(c, branding.LogoPath, &logoOnce) {
+				return
+			}
+		case "/static/favicon.png":
+			if serveIfReadable(c, branding.FaviconPath, &faviconOnce) {
+				return
+			}
+		}
+		c.Next()
+	}
 }

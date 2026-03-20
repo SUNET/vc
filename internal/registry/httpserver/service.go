@@ -48,7 +48,6 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
 			ReadHeaderTimeout: 3 * time.Second,
 		},
-		statusListsRateLimiter: httphelpers.NewRateLimiter(rateLimitRequestsPerMinute),
 	}
 
 	var err error
@@ -56,6 +55,8 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 	if err != nil {
 		return nil, err
 	}
+
+	s.statusListsRateLimiter = s.httpHelpers.Middleware.NewRateLimiter(rateLimitRequestsPerMinute)
 
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Registry.APIServer)
 	if err != nil {
