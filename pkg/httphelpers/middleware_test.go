@@ -112,6 +112,9 @@ func TestCustomBranding_FallsBackWhenPathIsDirectory(t *testing.T) {
 }
 
 func TestCustomBranding_FallsBackWhenFileUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("skipping: file permissions are not enforced when running as root")
+	}
 	gin.SetMode(gin.TestMode)
 	m := newTestMiddleware(t)
 
