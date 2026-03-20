@@ -24,7 +24,7 @@ import (
 
 func testCfg(ha bool) *model.Cfg {
 	cfg := &model.Cfg{
-		Common:   &model.Common{HA: ha},
+		Common:   &model.Common{HA: model.HAConfig{Enable: ha, CacheDatabaseName: "vc_cache"}},
 		Registry: &model.Registry{TokenStatusLists: &model.TokenStatusLists{TokenRefreshInterval: 3600}},
 	}
 	_ = defaults.Set(cfg)
@@ -181,7 +181,7 @@ func TestNew_NilMongoClient(t *testing.T) {
 // TestNew_DefaultTokenRefreshInterval verifies the default is used when TokenRefreshInterval <= 0.
 func TestNew_DefaultTokenRefreshInterval(t *testing.T) {
 	cfg := &model.Cfg{
-		Common:   &model.Common{HA: false},
+		Common:   &model.Common{HA: model.HAConfig{Enable: false, CacheDatabaseName: "vc_cache"}},
 		Registry: &model.Registry{TokenStatusLists: &model.TokenStatusLists{TokenRefreshInterval: 0}},
 	}
 	log := testLogger(t)
