@@ -159,7 +159,7 @@ type GRPCTLS struct {
 	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.crt"` // Server certificate
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enable true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" doc_example:"a1b2c3...: issuer-prod"`                    // SHA256 fingerprint -> friendly name
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" doc_example:"a1b2c3...: issuer-prod"`                 // SHA256 fingerprint -> friendly name
 	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns" doc_example:"CN=apigw,O=SUNET: apigw-prod"`                    // Certificate Subject DN -> friendly name
 }
 
@@ -975,7 +975,7 @@ type CredentialConstructor struct {
 	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
 	// AuthClaims lists identity claims to extract from the authentication credential.
 	// Required when AuthMethod is "openid4vp".
-	AuthClaims []string                       `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
+	AuthClaims []string `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
