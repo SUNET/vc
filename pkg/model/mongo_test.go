@@ -22,6 +22,7 @@ func TestMongoClientOptions_URIOnly(t *testing.T) {
 	opts, err := m.MongoClientOptions()
 	require.NoError(t, err)
 	assert.NotNil(t, opts)
+	assert.Nil(t, opts.TLSConfig, "TLSConfig should be nil when TLS is not configured")
 }
 
 func TestMongoClientOptions_TLSWithCA(t *testing.T) {
@@ -34,7 +35,9 @@ func TestMongoClientOptions_TLSWithCA(t *testing.T) {
 	}
 	opts, err := m.MongoClientOptions()
 	require.NoError(t, err)
-	assert.NotNil(t, opts)
+	require.NotNil(t, opts.TLSConfig, "TLSConfig should be set when TLS is enabled")
+	assert.NotNil(t, opts.TLSConfig.RootCAs, "RootCAs should be populated from CA file")
+	assert.Empty(t, opts.TLSConfig.Certificates, "Certificates should be empty without mTLS")
 }
 
 func TestMongoClientOptions_MTLS(t *testing.T) {
@@ -50,7 +53,9 @@ func TestMongoClientOptions_MTLS(t *testing.T) {
 	}
 	opts, err := m.MongoClientOptions()
 	require.NoError(t, err)
-	assert.NotNil(t, opts)
+	require.NotNil(t, opts.TLSConfig, "TLSConfig should be set for mTLS")
+	assert.NotNil(t, opts.TLSConfig.RootCAs, "RootCAs should be populated from CA file")
+	assert.Len(t, opts.TLSConfig.Certificates, 1, "Certificates should contain the client cert")
 }
 
 func TestMongoClientOptions_ImplicitTLS(t *testing.T) {
@@ -63,7 +68,32 @@ func TestMongoClientOptions_ImplicitTLS(t *testing.T) {
 	// TLS is false but CAFilePath is set, so TLS should be configured implicitly.
 	opts, err := m.MongoClientOptions()
 	require.NoError(t, err)
-	assert.NotNil(t, opts)
+	require.NotNil(t, opts.TLSConfig, "TLSConfig should be set when CAFilePath implies TLS")
+	assert.NotNil(t, opts.TLSConfig.RootCAs, "RootCAs should be populated from CA file")
+}
+
+func TestMongoClientOptions_CertWithoutKey(t *testing.T) {
+	m := Mongo{
+		URI:          "mongodb://localhost:27017",
+		TLS:          true,
+		CertFilePath: "/some/cert.crt",
+	}
+	opts, err := m.MongoClientOptions()
+	require.NoError(t, err)
+	require.NotNil(t, opts.TLSConfig, "TLSConfig should be set when TLS is enabled")
+	assert.Empty(t, opts.TLSConfig.Certificates, "Certificates should be empty when only CertFilePath is set")
+}
+
+func TestMongoClientOptions_KeyWithoutCert(t *testing.T) {
+	m := Mongo{
+		URI:         "mongodb://localhost:27017",
+		TLS:         true,
+		KeyFilePath: "/some/key.pem",
+	}
+	opts, err := m.MongoClientOptions()
+	require.NoError(t, err)
+	require.NotNil(t, opts.TLSConfig, "TLSConfig should be set when TLS is enabled")
+	assert.Empty(t, opts.TLSConfig.Certificates, "Certificates should be empty when only KeyFilePath is set")
 }
 
 func TestMongoClientOptions_MissingCAFile(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// MongoClientOptions returns a *options.ClientOptionsBuilder configured from the
+// MongoClientOptions returns a *options.ClientOptions configured from the
 // Mongo settings. It applies the connection URI and, when TLS is enabled,
 // builds the appropriate *tls.Config (CA verification and/or mTLS client
 // certificate).
