@@ -89,13 +89,11 @@ type VPFormatsSupported struct {
 type LDPVCFormat struct {
 	// ProofTypeValues is a non-empty array containing identifiers of proof types supported.
 	// If present, the proof type of the presented VC/VP MUST match one of the array values.
-	// Examples: "DataIntegrityProof", "Ed25519Signature2020"
-	ProofTypeValues []string `json:"proof_type_values,omitempty" yaml:"proof_type_values,omitempty"`
+	ProofTypeValues []string `json:"proof_type_values,omitempty" yaml:"proof_type_values,omitempty" doc_example:"[\"DataIntegrityProof\", \"Ed25519Signature2020\"]"`
 
 	// CryptosuiteValues is a non-empty array containing identifiers of crypto suites supported.
 	// Used when one of the algorithms in ProofTypeValues supports multiple crypto suites.
-	// Examples: "ecdsa-rdfc-2019", "ecdsa-sd-2023", "eddsa-rdfc-2022", "bbs-2023"
-	CryptosuiteValues []string `json:"cryptosuite_values,omitempty" yaml:"cryptosuite_values,omitempty"`
+	CryptosuiteValues []string `json:"cryptosuite_values,omitempty" yaml:"cryptosuite_values,omitempty" doc_example:"[\"ecdsa-rdfc-2019\", \"ecdsa-sd-2023\", \"eddsa-rdfc-2022\", \"bbs-2023\"]"`
 }
 
 // JWTVCFormat defines format-specific parameters for JWT-based W3C VC (jwt_vc_json).
