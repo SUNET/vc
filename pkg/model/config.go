@@ -113,10 +113,10 @@ type Common struct {
 
 // Branding holds custom branding paths for logo and favicon
 type Branding struct {
-	// LogoPath is the file path to a custom logo image; when empty, the built-in SUNET logo is used
-	LogoPath string `yaml:"logo_path,omitempty"`
-	// FaviconPath is the file path to a custom favicon image; when empty, the built-in SUNET favicon is used
-	FaviconPath string `yaml:"favicon_path,omitempty"`
+	// LogoPath is the file path to a custom logo PNG image; when empty, the built-in SUNET logo is used
+	LogoPath string `yaml:"logo_path,omitempty" validate:"omitempty,image_png"`
+	// FaviconPath is the file path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used
+	FaviconPath string `yaml:"favicon_path,omitempty" validate:"omitempty,image_png"`
 }
 
 // CredentialOfferQRConfig holds credential offer QR code settings

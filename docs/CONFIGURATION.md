@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-19
+**Generated:** 2026-03-20
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -106,10 +106,10 @@ Shared configuration used across all services.
 
 > **Path:** `.common.branding`
 
-| Field          | Type     | Description                                                                         | Example | Default | Required |
-| -------------- | -------- | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `logo_path`    | `string` | File path to a custom logo image; when empty, the built-in SUNET logo is used       | -       | -       | No       |
-| `favicon_path` | `string` | File path to a custom favicon image; when empty, the built-in SUNET favicon is used | -       | -       | No       |
+| Field          | Type     | Description                                                                             | Example | Default | Required |
+| -------------- | -------- | --------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `logo_path`    | `string` | File path to a custom logo PNG image; when empty, the built-in SUNET logo is used       | -       | -       | No       |
+| `favicon_path` | `string` | File path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used | -       | -       | No       |
 
 ### `credential_constructor` entry
 
