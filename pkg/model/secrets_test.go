@@ -40,6 +40,10 @@ func TestClearSecrets(t *testing.T) {
 		Verifier: &Verifier{
 			OIDCOP: &OIDCOPConfig{
 				SubjectSalt: "salt-value", //NOSONAR
+				StaticClients: []StaticOIDCClient{
+					{ClientID: "client-a", ClientSecret: "secret-a"}, //NOSONAR
+					{ClientID: "client-b", ClientSecret: "secret-b"}, //NOSONAR
+				},
 			},
 		},
 		UI: &UI{
@@ -55,6 +59,8 @@ func TestClearSecrets(t *testing.T) {
 	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken, "APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken should be cleared") //NOSONAR
 	assert.Empty(t, cfg.Registry.AdminGUI.Password, "Registry.AdminGUI.Password should be cleared")                                                     //NOSONAR
 	assert.Empty(t, cfg.Verifier.OIDCOP.SubjectSalt, "Verifier.OIDCOP.SubjectSalt should be cleared")                                                       //NOSONAR
+	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret, "static client-a secret should be cleared")                                      //NOSONAR
+	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[1].ClientSecret, "static client-b secret should be cleared")                                      //NOSONAR
 	assert.Empty(t, cfg.UI.Password, "UI.Password should be cleared")                                                                                   //NOSONAR
 }
 
@@ -70,8 +76,16 @@ func TestApplySecrets(t *testing.T) {
 		Common:   &Common{},
 		APIGW:    &APIGW{},
 		Registry: &Registry{},
-		Verifier: &Verifier{},
-		UI:       &UI{},
+		Verifier: &Verifier{
+			OIDCOP: &OIDCOPConfig{
+				StaticClients: []StaticOIDCClient{
+					{ClientID: "client-a"},
+					{ClientID: "client-b"},
+					{ClientID: "client-c"}, // not in secrets — should stay empty
+				},
+			},
+		},
+		UI: &UI{},
 	}
 
 	secrets := &Secrets{
@@ -105,6 +119,10 @@ func TestApplySecrets(t *testing.T) {
 		Verifier: &VerifierSecrets{
 			OIDCOP: OIDCOPSecrets{
 				SubjectSalt: "secret-salt", //NOSONAR
+				StaticClients: map[string]string{ //NOSONAR
+					"client-a": "secret-for-a",
+					"client-b": "secret-for-b",
+				},
 			},
 		},
 		UI: &UISecrets{
@@ -120,6 +138,9 @@ func TestApplySecrets(t *testing.T) {
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                              //NOSONAR
 	assert.Equal(t, "secret-salt", cfg.Verifier.OIDCOP.SubjectSalt)                                     //NOSONAR
+	assert.Equal(t, "secret-for-a", cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret)                //NOSONAR
+	assert.Equal(t, "secret-for-b", cfg.Verifier.OIDCOP.StaticClients[1].ClientSecret)                //NOSONAR
+	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[2].ClientSecret, "client-c should have no secret") //NOSONAR
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                //NOSONAR
 }
 
@@ -204,6 +225,9 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		Verifier: &Verifier{
 			OIDCOP: &OIDCOPConfig{
 				SubjectSalt: "config-salt", //NOSONAR
+				StaticClients: []StaticOIDCClient{
+					{ClientID: "client-x", ClientSecret: "config-secret-x"}, //NOSONAR
+				},
 			},
 		},
 		UI: &UI{
@@ -216,6 +240,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "after clear: Mongo URI should be empty")
 	assert.Empty(t, cfg.UI.Password, "after clear: UI Password should be empty")
+	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret, "after clear: static client secret should be empty") //NOSONAR
 
 	// Step 2: Apply secrets from external file
 	secrets := &Secrets{
@@ -249,6 +274,9 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		Verifier: &VerifierSecrets{
 			OIDCOP: OIDCOPSecrets{
 				SubjectSalt: "secret-salt", //NOSONAR
+				StaticClients: map[string]string{ //NOSONAR
+					"client-x": "secret-for-x",
+				},
 			},
 		},
 		UI: &UISecrets{
@@ -263,5 +291,6 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                              //NOSONAR
 	assert.Equal(t, "secret-salt", cfg.Verifier.OIDCOP.SubjectSalt)                                     //NOSONAR
+	assert.Equal(t, "secret-for-x", cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret)                //NOSONAR
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                //NOSONAR
 }

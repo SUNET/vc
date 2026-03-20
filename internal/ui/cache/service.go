@@ -32,7 +32,7 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 	}
 
 	// When HA, connect to MongoDB for shared secrets.
-	if cfg.Common.HA {
+	if s.cfg.Common.HA.Enable {
 		connTimeout := 20 * time.Second
 
 		connCtx, cancel := context.WithTimeout(ctx, connTimeout)
@@ -57,7 +57,7 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 		s.log.Info("MongoDB connected for HA session keys")
 	}
 
-	cs := pkgcache.New(cfg.Common.HA, s.client, s.log)
+	cs := pkgcache.New(s.cfg.Common.HA.Enable, s.cfg.Common.HA.CacheDatabaseName, s.client, s.log)
 
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).
 	sharedSecrets, err := pkgcache.EnsureSharedSecrets(ctx, cs, "ui")
