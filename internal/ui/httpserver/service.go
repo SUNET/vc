@@ -3,7 +3,6 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"time"
 	"vc/internal/ui/apiv1"
 	"vc/internal/ui/cache"
 	"vc/pkg/httphelpers"
@@ -49,12 +48,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		tracer: tracer,
 		apiv1:  apiv1,
 		gin:    gin.New(),
-		server: &http.Server{
-			// ReadHeaderTimeout limits the time to read request headers.
-			// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
-			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
-			ReadHeaderTimeout: 3 * time.Second,
-		},
+		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
 		cacheService: cacheService,
 		sessionConfig: &sessionConfig{
 			name:                       "vc_ui_auth_session",
@@ -77,7 +71,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// extra middlewares (must be declared before Server.Default)
 	s.gin.Use(s.middlewareUserSession(ctx, s.cfg))
 
-	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.UI.APIServer.Addr)
+	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.UI.APIServer)
 	if err != nil {
 		return nil, err
 	}

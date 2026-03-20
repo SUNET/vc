@@ -51,12 +51,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		apiv1:  apiv1,
 		gin:    gin.New(),
 		tracer: tracer,
-		server: &http.Server{
-			// ReadHeaderTimeout limits the time to read request headers.
-			// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
-			// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
-			ReadHeaderTimeout: 3 * time.Second,
-		},
+		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
 		eventPublisher: eventPublisher,
 		samlSPService:  samlSPService,
 		oidcrpService:  oidcrpService,
@@ -127,16 +122,12 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// This avoids unintentionally allowing cross-origin access when operators have
 	// not explicitly configured allowed origins.
 
-	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
+	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer)
 	if err != nil {
 		return nil, err
 	}
 
-	rgRestricted, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.APIGW.APIServer.Addr)
-	if err != nil {
-		return nil, err
-	}
-
+	rgRestricted := rgRoot.Group("/")
 	rgRestricted.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)

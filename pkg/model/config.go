@@ -37,10 +37,14 @@ func BoolPtr(v bool) *bool {
 // APIServer holds the HTTP API server configuration
 type APIServer struct {
 	// Addr is the listen address for the HTTP server
-	Addr    string  `yaml:"addr" validate:"required" default:":8080"`
-	TLS     TLS     `yaml:"tls" validate:"omitempty"`
-	APIAuth APIAuth `yaml:"api_auth"`
-	CORS    *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
+	Addr string `yaml:"addr" validate:"required" default:":8080"`
+	// ServedByHeader sets the X-Served-By response header value for HA troubleshooting.
+	// Empty (default): header is not set. "hostname": uses os.Hostname().
+	// Any other value is used as-is.
+	ServedByHeader string  `yaml:"served_by_header,omitempty"`
+	TLS            TLS     `yaml:"tls" validate:"omitempty"`
+	APIAuth        APIAuth `yaml:"api_auth"`
+	CORS           *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
 }
 
 // CORS holds the CORS configuration
@@ -166,7 +170,7 @@ type GRPCTLS struct {
 	CertFilePath              string            `yaml:"cert_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.crt"` // Server certificate
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enable true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
-	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" doc_example:"a1b2c3...: issuer-prod"`                    // SHA256 fingerprint -> friendly name
+	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" doc_example:"a1b2c3...: issuer-prod"`                 // SHA256 fingerprint -> friendly name
 	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns" doc_example:"CN=apigw,O=SUNET: apigw-prod"`                    // Certificate Subject DN -> friendly name
 }
 
@@ -982,7 +986,7 @@ type CredentialConstructor struct {
 	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
 	// AuthClaims lists identity claims to extract from the authentication credential.
 	// Required when AuthMethod is "openid4vp".
-	AuthClaims []string                       `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
+	AuthClaims []string `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
