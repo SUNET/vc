@@ -20,6 +20,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -47,17 +48,21 @@ import (
 
 // Stack service addresses (Docker bridge IPs on vc-dev-net)
 var (
-	apigwURL    = envOrDefault("STACK_APIGW_URL", "http://172.16.50.2:8080")    // NOSONAR
-	verifierURL = envOrDefault("STACK_VERIFIER_URL", "http://172.16.50.6:8080") // NOSONAR
-	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "http://172.16.50.13:8080")  // NOSONAR
+	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")    // NOSONAR
+	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080") // NOSONAR
+	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "https://172.16.50.13:8080")  // NOSONAR
 
 	// The public URLs the services use for self-referencing
-	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "http://apigw.vc.docker:8080")       // NOSONAR
-	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "http://verifier.vc.docker:8080") // NOSONAR
+	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "https://apigw.vc.docker:8080")       // NOSONAR
+	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "https://verifier.vc.docker:8080") // NOSONAR
+
+	// tlsTransport is a shared TLS transport that trusts the dev rootCA.
+	// Initialised by TestMain before any tests run.
+	tlsTransport *http.Transport
 
 	// OAuth client config matching config.yaml
 	oauthClientID = "1003"                        // NOSONAR
-	oauthRedirect = "https://dev.wallet.sunet.se" // NOSONAR
+	oauthRedirect = "http://localhost:3000" // NOSONAR — must match apigw oauth_server in config_minimal.yaml
 	testUsername  = "wallet_test_user"            // NOSONAR
 	testPassword  = "wallet_test_pass_42"         // NOSONAR
 
@@ -71,6 +76,32 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// TestMain sets up an http.DefaultClient that trusts the dev rootCA so all
+// stack tests can talk to TLS-enabled services without per-call changes.
+func TestMain(m *testing.M) {
+	caPath := envOrDefault("STACK_ROOT_CA", "../../../developer_tools/pki/rootCA.crt")
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading rootCA %s: %v\n", caPath, err)
+		os.Exit(1)
+	}
+	pool, _ := x509.SystemCertPool()
+	if pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(caPEM) {
+		fmt.Fprintf(os.Stderr, "rootCA %s contains no valid certificates\n", caPath)
+		os.Exit(1)
+	}
+	tlsTransport = http.DefaultTransport.(*http.Transport).Clone()
+	tlsTransport.TLSClientConfig.RootCAs = pool
+	http.DefaultClient = &http.Client{
+		Transport: tlsTransport,
+		Timeout:   30 * time.Second,
+	}
+	os.Exit(m.Run())
 }
 
 // rewritePublicToInternal replaces Docker-internal hostnames with bridge IPs
@@ -1179,9 +1210,9 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
-		Jar:     jar,
-		Timeout: 15 * time.Second,
-		// Follow redirects (consent page redirects)
+		Transport: tlsTransport,
+		Jar:       jar,
+		Timeout:   15 * time.Second,
 	}
 
 	// Step 1: GET /authorize?request_uri=...&client_id=...
@@ -1224,8 +1255,9 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 
 	// Use no-redirect client to capture the response with the code
 	noRedirectClient := &http.Client{
-		Jar:     jar,
-		Timeout: 15 * time.Second,
+		Transport: tlsTransport,
+		Jar:       jar,
+		Timeout:   15 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

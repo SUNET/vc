@@ -68,7 +68,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	if s.cfg.APIGW.APIServer.TLS.Enable {
 		s.sessionsOptions.Secure = true
-		//s.sessionsOptions.SameSite = http.SameSiteStrictMode
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
