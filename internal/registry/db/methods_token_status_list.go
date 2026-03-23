@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"vc/pkg/logger"
 
@@ -86,7 +87,14 @@ func (c *TokenStatusListColl) createIndex(ctx context.Context) error {
 		},
 		Options: options.Index().SetName("index_uniq").SetUnique(true),
 	}
-	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUniq})
+	indexDecoyLookup := mongo.IndexModel{
+		Keys: bson.D{
+			bson.E{Key: "section", Value: 1},
+			bson.E{Key: "decoy", Value: 1},
+		},
+		Options: options.Index().SetName("decoy_lookup"),
+	}
+	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUniq, indexDecoyLookup})
 	if err != nil {
 		return err
 	}
@@ -161,26 +169,39 @@ func (c *TokenStatusListColl) CreateNewSection(ctx context.Context, section int6
 func (c *TokenStatusListColl) getRandomDecoys(ctx context.Context, section int64) ([]TokenStatusListDoc, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:getRandomDecoyIndexes")
 	defer span.End()
-	match := bson.D{{Key: "section", Value: section}, {Key: "decoy", Value: true}}
-	sample := bson.M{"size": 10}
 
-	pipeline := mongo.Pipeline{
-		{{"$match", match}},
-		{{"$sample", sample}},
+	sectionSize := c.Service.cfg.Registry.TokenStatusLists.SectionSize
+	if sectionSize <= 0 {
+		sectionSize = 1000000
 	}
 
-	cursor, err := c.Coll.Aggregate(ctx, pipeline)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Error(err, "cant get decoy indexes")
-		return nil, err
-	}
-
+	// Generate random indices and look them up directly via the {index, section} unique index.
+	// This is O(n) index seeks instead of O(sectionSize) collection scan from $match + $sample.
+	const want = 10
+	const maxAttempts = 50
 	var docs []TokenStatusListDoc
-	if err = cursor.All(ctx, &docs); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Error(err, "cant decode decoy indexes")
-		return nil, err
+	seen := make(map[int64]bool, maxAttempts)
+
+	for attempt := 0; len(docs) < want && attempt < maxAttempts; attempt++ {
+		idx := rand.Int64N(sectionSize)
+		if seen[idx] {
+			continue
+		}
+		seen[idx] = true
+
+		var doc TokenStatusListDoc
+		err := c.Coll.FindOne(ctx, bson.M{"index": idx, "section": section}).Decode(&doc)
+		if err != nil {
+			continue
+		}
+		if !doc.Decoy {
+			continue // skip already-allocated entries
+		}
+		docs = append(docs, doc)
+	}
+
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("no decoy entries found in section %d", section)
 	}
 
 	return docs, nil
@@ -205,28 +226,30 @@ func (c *TokenStatusListColl) Add(ctx context.Context, section int64, status uin
 		Section: section,
 	}
 
-	_, err = c.Coll.UpdateOne(ctx, bson.M{"index": doc.Index, "section": doc.Section}, bson.M{"$set": doc})
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Error(err, "cant add status")
-		return 0, err
-	}
+	// Batch all updates (real entry + noise decoys) into a single BulkWrite
+	// to avoid sequential round-trips to MongoDB.
+	models := make([]mongo.WriteModel, 0, len(decoys))
 
-	// Update random decoys to add noise
+	// The real status entry
+	models = append(models, mongo.NewUpdateOneModel().
+		SetFilter(bson.M{"index": doc.Index, "section": doc.Section}).
+		SetUpdate(bson.M{"$set": doc}))
+
+	// Noise updates for the remaining decoys
 	for _, decoy := range decoys {
 		if decoy.Index == doc.Index {
 			continue
 		}
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"index": decoy.Index, "section": section}).
+			SetUpdate(bson.M{"$set": bson.M{"status": rand.IntN(maxRandomLimit)}}))
+	}
 
-		filter := bson.M{"index": decoy.Index, "section": section}
-		updateDoc := bson.M{"$set": bson.M{"status": rand.IntN(maxRandomLimit)}}
-
-		_, err := c.Coll.UpdateOne(ctx, filter, updateDoc)
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			c.log.Error(err, "cant update status")
-			return 0, err
-		}
+	_, err = c.Coll.BulkWrite(ctx, models)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		c.log.Error(err, "cant add status with noise updates")
+		return 0, err
 	}
 
 	return doc.Index, nil
