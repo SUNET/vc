@@ -20,7 +20,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -96,11 +95,8 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "rootCA %s contains no valid certificates\n", caPath)
 		os.Exit(1)
 	}
-	tlsTransport = &http.Transport{
-		TLSClientConfig: &tls.Config{
-			RootCAs: pool,
-		},
-	}
+	tlsTransport = http.DefaultTransport.(*http.Transport).Clone()
+	tlsTransport.TLSClientConfig.RootCAs = pool
 	http.DefaultClient = &http.Client{
 		Transport: tlsTransport,
 		Timeout:   30 * time.Second,
