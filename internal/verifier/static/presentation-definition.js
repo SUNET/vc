@@ -138,7 +138,7 @@ Alpine.data("app", () => ({
                     id: "pid",
                     format: "dc+sd-jwt",
                     meta: {
-                        vct_values: ["urn:eudi:pid:arf-1.5:1"],
+                        vct_values: [],
                     },
                     claims: [
                         { path: ["age_in_years"] },
@@ -185,7 +185,7 @@ Alpine.data("app", () => ({
                 id: "ehic",
                 format: "dc+sd-jwt",
                 meta: {
-                    vct_values: ["urn:eudi:ehic:1"],
+                    vct_values: [],
                 },
                 claims: [
                     { path: ["document_number"] },
@@ -218,13 +218,24 @@ Alpine.data("app", () => ({
     notifyEventSource: null,
 
     async init() {
-        // TODO: this is a bit hacky...
+        await this.lookupCredentialsList();
+
+        // Populate vct_values dynamically from backend metadata (/ui/metadata)
+        // instead of hardcoding them, so presets stay in sync with the configured VCTs.
+        for (const def of Object.values(this.predefinedPresentationDefinitions)) {
+            for (const cred of def.credentials) {
+                const meta = this.credentialsList?.[cred.id];
+                if (meta?.vct) {
+                    cred.meta.vct_values = [meta.vct];
+                }
+            }
+        }
+
         this.predefinedPresentationDefinitions.pid_ehic.credentials = [
             ...this.predefinedPresentationDefinitions.pid.credentials,
             ...this.predefinedPresentationDefinitions.ehic.credentials,
         ];
 
-        await this.lookupCredentialsList();
         this.loading = false;
 
         this.$watch("error", (newVal) => {
@@ -232,7 +243,7 @@ Alpine.data("app", () => ({
                 console.error(`Error: ${newVal}`);
             }
         });
-      
+
     },
 
     async lookupCredentialsList() {
