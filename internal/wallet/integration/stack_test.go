@@ -87,8 +87,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "reading rootCA %s: %v\n", caPath, err)
 		os.Exit(1)
 	}
-	pool, _ := x509.SystemCertPool()
-	if pool == nil {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading system cert pool: %v; falling back to empty pool\n", err)
 		pool = x509.NewCertPool()
 	}
 	if !pool.AppendCertsFromPEM(caPEM) {
