@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"vc/pkg/logger"
@@ -135,15 +136,9 @@ func (c *TokenStatusListColl) FindOne(ctx context.Context, section, index int64)
 }
 
 // CreateNewSection creates a new section with decoy entries.
-// If sectionSize is 0 or negative, it defaults to 500,000.
 func (c *TokenStatusListColl) CreateNewSection(ctx context.Context, section int64, sectionSize int64) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:createNewSection")
 	defer span.End()
-
-	// Default to 500,000 if not set
-	if sectionSize <= 0 {
-		sectionSize = 500000
-	}
 
 	docs := []*TokenStatusListDoc{}
 	for i := int64(0); i < sectionSize; i++ {
@@ -171,9 +166,6 @@ func (c *TokenStatusListColl) getRandomDecoys(ctx context.Context, section int64
 	defer span.End()
 
 	sectionSize := c.Service.cfg.Registry.TokenStatusLists.SectionSize
-	if sectionSize <= 0 {
-		sectionSize = 1000000
-	}
 
 	// Generate random indices and look them up directly via the {index, section} unique index.
 	// This is O(n) index seeks instead of O(sectionSize) collection scan from $match + $sample.
@@ -192,7 +184,11 @@ func (c *TokenStatusListColl) getRandomDecoys(ctx context.Context, section int64
 		var doc TokenStatusListDoc
 		err := c.Coll.FindOne(ctx, bson.M{"index": idx, "section": section}).Decode(&doc)
 		if err != nil {
-			continue
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				continue
+			}
+			span.SetStatus(codes.Error, err.Error())
+			return nil, fmt.Errorf("lookup decoy index %d in section %d: %w", idx, section, err)
 		}
 		if !doc.Decoy {
 			continue // skip already-allocated entries
@@ -201,7 +197,9 @@ func (c *TokenStatusListColl) getRandomDecoys(ctx context.Context, section int64
 	}
 
 	if len(docs) == 0 {
-		return nil, fmt.Errorf("no decoy entries found in section %d", section)
+		err := fmt.Errorf("no decoy entries found in section %d", section)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
 	return docs, nil
@@ -212,47 +210,59 @@ func (c *TokenStatusListColl) Add(ctx context.Context, section int64, status uin
 	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:add")
 	defer span.End()
 
-	decoys, err := c.getRandomDecoys(ctx, section)
-	if err != nil {
-		return 0, err
-	}
+	const maxRetries = 3
+	for retry := 0; retry < maxRetries; retry++ {
+		decoys, err := c.getRandomDecoys(ctx, section)
+		if err != nil {
+			return 0, err
+		}
 
-	c.log.Debug("add", "decoys", decoys)
+		c.log.Debug("add", "decoys", decoys)
 
-	doc := &TokenStatusListDoc{
-		Index:   decoys[rand.IntN(len(decoys))].Index,
-		Status:  status,
-		Decoy:   false,
-		Section: section,
-	}
+		doc := &TokenStatusListDoc{
+			Index:   decoys[rand.IntN(len(decoys))].Index,
+			Status:  status,
+			Decoy:   false,
+			Section: section,
+		}
 
-	// Batch all updates (real entry + noise decoys) into a single BulkWrite
-	// to avoid sequential round-trips to MongoDB.
-	models := make([]mongo.WriteModel, 0, len(decoys))
+		// Atomically claim the decoy slot by requiring decoy: true in the filter.
+		// If another caller already claimed this index, MatchedCount will be 0.
+		result, err := c.Coll.UpdateOne(ctx,
+			bson.M{"index": doc.Index, "section": doc.Section, "decoy": true},
+			bson.M{"$set": doc})
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			c.log.Error(err, "cant allocate status entry")
+			return 0, err
+		}
 
-	// The real status entry
-	models = append(models, mongo.NewUpdateOneModel().
-		SetFilter(bson.M{"index": doc.Index, "section": doc.Section}).
-		SetUpdate(bson.M{"$set": doc}))
-
-	// Noise updates for the remaining decoys
-	for _, decoy := range decoys {
-		if decoy.Index == doc.Index {
+		if result.MatchedCount == 0 {
+			c.log.Info("decoy already claimed, retrying", "index", doc.Index, "retry", retry)
 			continue
 		}
-		models = append(models, mongo.NewUpdateOneModel().
-			SetFilter(bson.M{"index": decoy.Index, "section": section}).
-			SetUpdate(bson.M{"$set": bson.M{"status": rand.IntN(maxRandomLimit)}}))
+
+		// Noise updates for the remaining decoys — guard with decoy: true
+		// so we don't overwrite already-allocated real entries.
+		if len(decoys) > 1 {
+			models := make([]mongo.WriteModel, 0, len(decoys)-1)
+			for _, decoy := range decoys {
+				if decoy.Index == doc.Index {
+					continue
+				}
+				models = append(models, mongo.NewUpdateOneModel().
+					SetFilter(bson.M{"index": decoy.Index, "section": section, "decoy": true}).
+					SetUpdate(bson.M{"$set": bson.M{"status": rand.IntN(maxRandomLimit)}}))
+			}
+			if _, err = c.Coll.BulkWrite(ctx, models); err != nil {
+				c.log.Error(err, "noise updates failed (real entry already allocated)", "index", doc.Index)
+			}
+		}
+
+		return doc.Index, nil
 	}
 
-	_, err = c.Coll.BulkWrite(ctx, models)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Error(err, "cant add status with noise updates")
-		return 0, err
-	}
-
-	return doc.Index, nil
+	return 0, fmt.Errorf("failed to allocate status entry after %d retries in section %d", maxRetries, section)
 }
 
 // GetAllStatusesForSection retrieves all status entries for a given section, ordered by index.
