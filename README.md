@@ -301,6 +301,47 @@ Set the image version with `VERSION=x.x.x` (default: `latest`).
 | `make staticcheck`   | Run static analysis                       |
 | `make vulncheck`     | Run vulnerability checker                 |
 
+## Supported Signature Types
+
+### SD-JWT VC (`dc+sd-jwt`)
+
+The signing algorithm is auto-detected from the loaded key (`pkg/pki/keyloader.go`):
+
+| Key Type | Curve / Size | Algorithm |
+| -------- | ------------ | --------- |
+| ECDSA    | P-256        | ES256     |
+| ECDSA    | P-384        | ES384     |
+| ECDSA    | P-521        | ES512     |
+| RSA      | < 3072 bits  | RS256     |
+| RSA      | >= 3072 bits | RS384     |
+| RSA      | >= 4096 bits | RS512     |
+
+### mDOC (`mso_mdoc`)
+
+Uses COSE algorithm identifiers (`pkg/mdoc/cose.go`):
+
+| COSE ID | Algorithm |
+| ------- | --------- |
+| -7      | ES256     |
+| -35     | ES384     |
+| -36     | ES512     |
+| -8      | EdDSA     |
+
+### Key Sources
+
+- **Software keys**: PEM files (PKCS#8, SEC1/EC, PKCS#1/RSA)
+- **Hardware keys**: HSM via PKCS#11 (requires `pkcs11` build tag)
+
+ECDSA signatures use IEEE P1363 format (fixed-size R||S) per JWT RFC 7518. RSA signatures use PKCS#1 v1.5.
+
+### Metadata
+
+The issuer advertises supported algorithms via:
+- `/.well-known/jwt-vc-issuer`
+- `/.well-known/openid-configuration`
+
+Default configured algorithms: `["ES256", "ES384"]`. See `config.yaml` under `apigw.issuer_metadata.credential_signing_alg_values_supported`.
+
 ## Swagger
 
 ### Endpoint
