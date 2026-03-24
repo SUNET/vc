@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/sirosfoundation/go-cryptoutil"
 )
 
 // ErrPKCS11NotSupported is returned when PKCS#11 support is not compiled in.
@@ -64,7 +65,8 @@ type KeyConfig struct {
 // KeyLoader provides centralized key and certificate loading functionality.
 // Methods are safe for concurrent use.
 type KeyLoader struct {
-	// Future: add caching, file watching, KMS support
+	// CryptoExt provides extended algorithm and certificate support.
+	CryptoExt *cryptoutil.Extensions
 }
 
 // NewKeyLoader creates a new KeyLoader instance
@@ -151,7 +153,7 @@ func (kl *KeyLoader) LoadCertificateChain(path string) ([]*x509.Certificate, []s
 			return nil, nil, fmt.Errorf("unexpected PEM block type '%s' in chain file %s", block.Type, path)
 		}
 
-		cert, err := x509.ParseCertificate(block.Bytes)
+		cert, err := ParseCertificate(block.Bytes, kl.CryptoExt)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to parse certificate in chain file %s: %w", path, err)
 		}

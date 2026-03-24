@@ -4,6 +4,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+
+	"github.com/sirosfoundation/go-cryptoutil"
 )
 
 type TrustService struct {
@@ -32,13 +34,18 @@ type TrustService struct {
 //	return jwk.Key, nil
 //}
 
-func (ts *TrustService) ExtractPublicKeyFromX5C(x5cBase64 string) (any, error) {
+func (ts *TrustService) ExtractPublicKeyFromX5C(x5cBase64 string, ext ...*cryptoutil.Extensions) (any, error) {
 	derCert, err := base64.StdEncoding.DecodeString(x5cBase64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 x5c certificate: %w", err)
 	}
 
-	cert, err := x509.ParseCertificate(derCert)
+	var cert *x509.Certificate
+	if len(ext) > 0 && ext[0] != nil {
+		cert, err = ext[0].ParseCertificate(derCert)
+	} else {
+		cert, err = x509.ParseCertificate(derCert)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse certificate: %w", err)
 	}

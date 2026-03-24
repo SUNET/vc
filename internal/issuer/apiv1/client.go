@@ -170,7 +170,7 @@ func (c *Client) loadCertificateChain(path string) ([]*x509.Certificate, error) 
 			break
 		}
 		if block.Type == "CERTIFICATE" {
-			cert, err := x509.ParseCertificate(block.Bytes)
+			cert, err := pki.ParseCertificate(block.Bytes, nil)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse certificate: %w", err)
 			}
