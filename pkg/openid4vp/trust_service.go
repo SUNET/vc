@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/sirosfoundation/go-cryptoutil"
 )

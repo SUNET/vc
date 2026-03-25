@@ -66,7 +66,7 @@ func encodeFixedSizeRS(r, s *big.Int, keySize int) ([]byte, error) {
 	sBytes := s.Bytes()
 
 	if len(rBytes) > keySize || len(sBytes) > keySize {
-		return nil, fmt.Errorf("R or S component exceeds expected key size %d", keySize)
+		return nil, fmt.Errorf("r or s component exceeds expected key size %d", keySize)
 	}
 
 	sig := make([]byte, 2*keySize)
