@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )

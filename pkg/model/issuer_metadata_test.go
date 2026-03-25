@@ -3,8 +3,8 @@ package model
 import (
 	"context"
 	"testing"
-	"vc/pkg/openid4vci"
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

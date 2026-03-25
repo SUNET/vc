@@ -18,10 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"vc/internal/wallet/config"
-	"vc/internal/wallet/credential"
-	"vc/pkg/jose"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/internal/wallet/config"
+	"github.com/SUNET/vc/internal/wallet/credential"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"

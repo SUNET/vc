@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"vc/internal/apigw/oidcrp"
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/apigw/oidcrp"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"

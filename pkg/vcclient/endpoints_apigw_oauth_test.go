@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"testing"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/stretchr/testify/assert"
 )

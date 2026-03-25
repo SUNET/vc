@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"vc/internal/registry/db"
-	"vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // TokenStatusListsRequest represents the request for fetching a Status List Token.

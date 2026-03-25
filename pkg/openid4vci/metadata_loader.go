@@ -2,7 +2,7 @@ package openid4vci
 
 import (
 	"context"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 )
 
 // MetadataConfig holds the configuration parameters needed to generate and sign issuer metadata

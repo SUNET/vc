@@ -3,11 +3,11 @@ package grpcserver
 import (
 	"context"
 	"net"
-	"vc/internal/gen/issuer/apiv1_issuer"
-	"vc/internal/issuer/apiv1"
-	"vc/pkg/grpchelpers"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/issuer/apiv1"
+	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"google.golang.org/grpc"
 )

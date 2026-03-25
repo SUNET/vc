@@ -10,11 +10,11 @@ import (
 	"os"
 	"sync"
 	"time"
-	"vc/pkg/oauth2"
-	"vc/pkg/openid4vci"
-	"vc/pkg/openid4vp"
-	"vc/pkg/pki"
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 // BoolVal safely dereferences a *bool, returning the pointed-to value or

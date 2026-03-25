@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/vc20/credential"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 
 	"github.com/piprate/json-gold/ld"
 	"github.com/stretchr/testify/require"

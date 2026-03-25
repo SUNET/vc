@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 // mockResolver implements both Resolver and ECDSAResolver for testing

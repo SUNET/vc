@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // int64Ptr is a helper to create a pointer to an int64

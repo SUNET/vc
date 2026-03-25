@@ -9,8 +9,8 @@ import (
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 
-	"vc/pkg/didcomm/crypto"
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/crypto"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 func TestPackPlaintext(t *testing.T) {

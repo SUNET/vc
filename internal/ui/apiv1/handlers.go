@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
 func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {

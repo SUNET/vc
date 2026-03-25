@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"vc/pkg/mdoc"
-	"vc/pkg/trust"
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"

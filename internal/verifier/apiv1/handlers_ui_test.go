@@ -2,8 +2,8 @@ package apiv1
 
 import (
 	"testing"
-	"vc/pkg/model"
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

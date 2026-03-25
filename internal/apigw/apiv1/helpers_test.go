@@ -3,8 +3,8 @@ package apiv1
 import (
 	"encoding/json"
 	"testing"
-	"vc/pkg/openid4vci"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

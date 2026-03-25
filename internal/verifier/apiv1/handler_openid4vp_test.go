@@ -5,8 +5,8 @@ import (
 	"crypto/rsa"
 	"testing"
 	"time"
-	"vc/pkg/cache"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -6,18 +6,18 @@ import (
 	"html/template"
 	"net/http"
 	"time"
-	"vc/internal/apigw/apiv1"
-	"vc/internal/apigw/cache"
-	"vc/internal/apigw/staticembed"
-	"vc/pkg/httphelpers"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/internal/apigw/cache"
+	"github.com/SUNET/vc/internal/apigw/staticembed"
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-contrib/sessions"
 
 	// Swagger
-	_ "vc/docs/apigw"
+	_ "github.com/SUNET/vc/docs/apigw"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"

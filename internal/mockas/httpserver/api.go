@@ -2,8 +2,8 @@ package httpserver
 
 import (
 	"context"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
 // Apiv1 interface

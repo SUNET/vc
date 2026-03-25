@@ -1,8 +1,8 @@
 package oidcrp
 
 import (
-	"vc/pkg/credential"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // ClaimTransformer transforms OIDC claims into credential claims.

@@ -3,9 +3,9 @@ package apiv1
 import (
 	"context"
 	"time"
-	"vc/pkg/helpers"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/brianvoe/gofakeit/v6"
 )

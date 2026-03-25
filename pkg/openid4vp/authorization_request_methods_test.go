@@ -12,7 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 )
 
 func mockRSAPrivateKey(t *testing.T, bits int) crypto.PrivateKey {

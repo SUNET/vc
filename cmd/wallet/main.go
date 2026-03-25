@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"vc/internal/wallet/apiv1"
-	"vc/internal/wallet/config"
-	"vc/internal/wallet/credential"
+	"github.com/SUNET/vc/internal/wallet/apiv1"
+	"github.com/SUNET/vc/internal/wallet/config"
+	"github.com/SUNET/vc/internal/wallet/credential"
 )
 
 const usage = `vc_wallet - OpenID4VCI/VP CLI test tool

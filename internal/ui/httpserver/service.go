@@ -3,13 +3,13 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"vc/internal/ui/apiv1"
-	"vc/internal/ui/cache"
-	"vc/pkg/httphelpers"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/ui/apiv1"
+	"github.com/SUNET/vc/internal/ui/cache"
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/trace"
 
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 )

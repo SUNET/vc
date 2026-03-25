@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
-	"vc/pkg/helpers"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

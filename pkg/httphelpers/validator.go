@@ -2,7 +2,7 @@ package httphelpers
 
 import (
 	"reflect"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"

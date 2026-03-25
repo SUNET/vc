@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"maps"
 
-	"vc/internal/apigw/oidcrp"
-	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
-	"vc/pkg/crypto"
-	"vc/pkg/grpchelpers"
-	"vc/pkg/model"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/internal/apigw/oidcrp"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/crypto"
+	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"go.opentelemetry.io/otel/codes"
 )

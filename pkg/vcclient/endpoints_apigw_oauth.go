@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"vc/pkg/logger"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 type oauthHandler struct {

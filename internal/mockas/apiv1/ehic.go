@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"vc/pkg/socialsecurity"
+	"github.com/SUNET/vc/pkg/socialsecurity"
 
 	"github.com/brianvoe/gofakeit/v6"
 )

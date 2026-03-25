@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 type rootHandler struct {

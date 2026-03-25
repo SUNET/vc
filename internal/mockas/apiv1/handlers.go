@@ -3,9 +3,9 @@ package apiv1
 import (
 	"context"
 	"errors"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
 // MockNext sends one mock upload to the datastore

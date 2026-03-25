@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"testing"
-	"vc/pkg/helpers"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/stretchr/testify/assert"
 )

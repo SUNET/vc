@@ -7,7 +7,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"fmt"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 )
 
 // SigningService doesn't care whether keys come from files or HSM

@@ -2,7 +2,7 @@ package apiv1
 
 import (
 	"context"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
 type EventPublisher interface {

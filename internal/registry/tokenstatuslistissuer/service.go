@@ -9,12 +9,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"vc/internal/registry/cache"
-	"vc/internal/registry/db"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/pki"
-	"vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/internal/registry/cache"
+	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // Service is the token status list issuer service

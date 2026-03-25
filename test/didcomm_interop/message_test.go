@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"vc/pkg/didcomm/message"
-	"vc/test/didcomm_interop/vectors"
+	"github.com/SUNET/vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/test/didcomm_interop/vectors"
 )
 
 // TestMessageParsing tests parsing of DIDComm messages from JSON.

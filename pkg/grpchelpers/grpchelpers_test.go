@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // TestNormalizeFingerprint tests the fingerprint normalization function

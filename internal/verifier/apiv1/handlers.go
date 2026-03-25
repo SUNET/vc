@@ -2,8 +2,8 @@ package apiv1
 
 import (
 	"context"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // Status returns the status for each instance.

@@ -20,11 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"vc/internal/wallet/apiv1"
-	"vc/internal/wallet/config"
-	"vc/internal/wallet/credential"
-	"vc/pkg/openid4vci"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/internal/wallet/apiv1"
+	"github.com/SUNET/vc/internal/wallet/config"
+	"github.com/SUNET/vc/internal/wallet/credential"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"

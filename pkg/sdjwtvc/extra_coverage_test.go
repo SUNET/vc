@@ -7,7 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"testing"
-	"vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/jose"
 )
 
 // TestGetSigningMethodFromKey_AllKeyTypes tests all key type branches

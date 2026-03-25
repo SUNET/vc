@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 type VPResponse struct {

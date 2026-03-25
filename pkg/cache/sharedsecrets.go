@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"vc/pkg/crypto"
+	"github.com/SUNET/vc/pkg/crypto"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"

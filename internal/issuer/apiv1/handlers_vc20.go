@@ -9,12 +9,12 @@ import (
 	"slices"
 	"time"
 
-	"vc/internal/gen/registry/apiv1_registry"
-	"vc/pkg/helpers"
-	"vc/pkg/openid4vp"
-	"vc/pkg/vc20/credential"
-	ecdsaSuite "vc/pkg/vc20/crypto/ecdsa"
-	eddsaSuite "vc/pkg/vc20/crypto/eddsa"
+	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
+	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
 
 	"github.com/google/uuid"
 )

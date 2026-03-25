@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-	"vc/pkg/logger"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"

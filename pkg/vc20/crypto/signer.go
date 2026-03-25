@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 )
 
 // VCSigner abstracts signing operations for Verifiable Credentials Data Integrity proofs.

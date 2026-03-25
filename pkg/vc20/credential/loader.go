@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"vc/pkg/logger"
-	"vc/pkg/vc20/contextstore"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/vc20/contextstore"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/piprate/json-gold/ld"

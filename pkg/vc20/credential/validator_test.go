@@ -3,7 +3,7 @@ package credential
 import (
 	"testing"
 
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/logger"
 )
 
 func TestNewValidator(t *testing.T) {

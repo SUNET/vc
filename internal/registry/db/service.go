@@ -3,9 +3,9 @@ package db
 import (
 	"context"
 	"time"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )

@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 // ForwardMessageType is the DIDComm message type for forward messages.

@@ -6,14 +6,14 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"vc/internal/issuer/apiv1"
-	"vc/internal/issuer/auditlog"
-	"vc/internal/issuer/grpcserver"
-	"vc/internal/issuer/httpserver"
-	"vc/pkg/configuration"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/issuer/apiv1"
+	"github.com/SUNET/vc/internal/issuer/auditlog"
+	"github.com/SUNET/vc/internal/issuer/grpcserver"
+	"github.com/SUNET/vc/internal/issuer/httpserver"
+	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 )
 
 type service interface {

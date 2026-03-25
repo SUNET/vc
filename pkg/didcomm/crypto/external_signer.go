@@ -15,7 +15,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
 
-	vccrypto "vc/pkg/vc20/crypto"
+	vccrypto "github.com/SUNET/vc/pkg/vc20/crypto"
 )
 
 // ExternalSigner wraps a VCSigner for use with DIDComm JWS operations.

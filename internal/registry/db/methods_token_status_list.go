@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"

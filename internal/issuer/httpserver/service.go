@@ -3,14 +3,14 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"vc/internal/issuer/apiv1"
-	"vc/pkg/httphelpers"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/issuer/apiv1"
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	// swagger docs
-	_ "vc/docs/issuer"
+	_ "github.com/SUNET/vc/docs/issuer"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"

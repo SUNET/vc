@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	"vc/pkg/openid4vci"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 // deriveVPFormatsFromMetadata derives VP formats configuration from issuer metadata.

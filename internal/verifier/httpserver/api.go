@@ -2,10 +2,10 @@ package httpserver
 
 import (
 	"context"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/internal/verifier/apiv1"
-	"vc/pkg/jose"
-	"vc/pkg/oauth2"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/internal/verifier/apiv1"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/oauth2"
 )
 
 type Apiv1 interface {

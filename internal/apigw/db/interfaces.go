@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-	"vc/pkg/model"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // UsersStore defines the interface for user operations

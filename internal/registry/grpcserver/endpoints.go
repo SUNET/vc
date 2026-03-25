@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/url"
 
-	"vc/internal/gen/registry/apiv1_registry"
-	"vc/internal/registry/apiv1"
+	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/internal/registry/apiv1"
 )
 
 // TokenStatusListAdd adds a new status entry to the Token Status List

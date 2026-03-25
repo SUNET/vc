@@ -11,7 +11,7 @@ import (
 	"hash"
 	"strings"
 	"testing"
-	"vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/jose"
 )
 
 // TestBuildCredentialWithOptions_DefaultOptions tests default option handling

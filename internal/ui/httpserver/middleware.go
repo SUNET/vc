@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"

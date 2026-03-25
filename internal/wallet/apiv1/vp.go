@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"vc/internal/wallet/config"
-	"vc/pkg/jose"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/internal/wallet/config"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"

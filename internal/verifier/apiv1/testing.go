@@ -1,9 +1,9 @@
 package apiv1
 
 import (
-	"vc/pkg/configuration"
-	"vc/pkg/openid4vp"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/pki"
 )
 
 // SetSigningKeyForTesting sets the OIDC signing key for testing purposes.

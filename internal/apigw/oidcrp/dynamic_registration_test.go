@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 func TestBuildRegistrationRequest(t *testing.T) {

@@ -3,8 +3,8 @@ package httphelpers
 import (
 	"context"
 	"encoding/json"
-	"vc/pkg/helpers"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/creasty/defaults"
 	"github.com/gin-gonic/gin"

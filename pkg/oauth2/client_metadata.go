@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"time"
-	"vc/pkg/jose"
-	"vc/pkg/openid4vp"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )

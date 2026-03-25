@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
 	"github.com/golang-jwt/jwt/v5"
 )

@@ -2,9 +2,9 @@ package httphelpers
 
 import (
 	"context"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 )
 
 // Client is the client object for httphelpers

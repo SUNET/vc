@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-	"vc/internal/gen/issuer/apiv1_issuer"
-	"vc/internal/gen/registry/apiv1_registry"
-	"vc/pkg/helpers"
-	"vc/pkg/mdoc"
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 // CreateCredentialRequest is the request for Credential

@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // RegistrationRequest represents RFC 7591 client registration request

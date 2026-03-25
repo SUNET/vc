@@ -2,7 +2,7 @@ package grpcserver
 
 import (
 	"context"
-	"vc/internal/registry/apiv1"
+	"github.com/SUNET/vc/internal/registry/apiv1"
 )
 
 // TokenStatusListIssuer interface for Token Status List operations

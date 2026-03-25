@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"vc/pkg/helpers"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // StatusCode returns the status code of the error

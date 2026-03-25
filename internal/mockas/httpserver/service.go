@@ -3,11 +3,11 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"vc/internal/mockas/apiv1"
-	"vc/pkg/httphelpers"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/mockas/apiv1"
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-gonic/gin"
 )

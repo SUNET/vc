@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"vc/pkg/didcomm"
+	"github.com/SUNET/vc/pkg/didcomm"
 )
 
 // HTTPClient sends DIDComm messages over HTTP.

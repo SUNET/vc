@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"vc/pkg/vc20/credential"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/multiformats/go-multibase"

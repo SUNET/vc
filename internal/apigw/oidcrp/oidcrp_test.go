@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // TestSessionStore tests the session store functionality

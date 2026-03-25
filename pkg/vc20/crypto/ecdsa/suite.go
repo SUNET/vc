@@ -13,9 +13,9 @@ import (
 	"math/big"
 	"time"
 
-	"vc/pkg/vc20/credential"
-	vccrypto "vc/pkg/vc20/crypto"
-	"vc/pkg/vc20/crypto/common"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	vccrypto "github.com/SUNET/vc/pkg/vc20/crypto"
+	"github.com/SUNET/vc/pkg/vc20/crypto/common"
 
 	"github.com/multiformats/go-multibase"
 	"github.com/piprate/json-gold/ld"

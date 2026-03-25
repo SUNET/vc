@@ -3,7 +3,7 @@ package httphelpers
 import (
 	"context"
 	"crypto/tls"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/logger"
 )
 
 type tlsHandler struct {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"vc/internal/apigw/apiv1"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"

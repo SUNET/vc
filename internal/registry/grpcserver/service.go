@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"vc/internal/gen/registry/apiv1_registry"
-	"vc/pkg/grpchelpers"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"google.golang.org/grpc"
 )

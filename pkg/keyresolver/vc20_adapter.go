@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 // VC20ResolverAdapter adapts the keyresolver interfaces to openid4vp.VC20KeyResolver.

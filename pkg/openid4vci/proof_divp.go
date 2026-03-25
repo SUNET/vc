@@ -3,7 +3,7 @@ package openid4vci
 import (
 	"fmt"
 	"slices"
-	"vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 )
 
 // ProofDIVP represents a W3C Verifiable Presentation with Data Integrity Proof

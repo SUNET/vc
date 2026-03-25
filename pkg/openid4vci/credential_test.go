@@ -2,7 +2,7 @@ package openid4vci
 
 import (
 	"testing"
-	"vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	"github.com/stretchr/testify/assert"
 )

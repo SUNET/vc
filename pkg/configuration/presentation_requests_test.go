@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 func TestLoadTemplateFile_SingleTemplate(t *testing.T) {

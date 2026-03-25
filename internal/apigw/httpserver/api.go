@@ -3,13 +3,13 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"vc/internal/apigw/apiv1"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/model"
-	"vc/pkg/oauth2"
-	"vc/pkg/openid4vci"
-	"vc/pkg/sdjwtvc"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
 // Apiv1 interface

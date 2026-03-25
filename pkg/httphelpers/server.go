@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-	"vc/pkg/helpers"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"

@@ -13,7 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
-	"vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/jose"
 )
 
 // testSigner implements the Signer interface for unit tests.

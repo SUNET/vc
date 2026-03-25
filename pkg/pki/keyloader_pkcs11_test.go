@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
