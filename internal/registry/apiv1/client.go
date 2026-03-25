@@ -2,9 +2,9 @@ package apiv1
 
 import (
 	"context"
-	"vc/internal/registry/db"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // TokenStatusListIssuer defines the interface for the Token Status List issuer service

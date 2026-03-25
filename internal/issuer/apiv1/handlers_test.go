@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"vc/internal/gen/issuer/apiv1_issuer"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

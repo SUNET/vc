@@ -4,9 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"testing"
-	"vc/internal/verifier/db"
-	"vc/pkg/helpers"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/verifier/db"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"

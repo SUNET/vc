@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

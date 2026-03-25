@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"vc/test/didcomm_interop/vectors"
+	"github.com/SUNET/vc/test/didcomm_interop/vectors"
 )
 
 // TestMultiKeyDecryption tests that messages encrypted to a DID with multiple

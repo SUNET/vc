@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 // ExampleNewEphemeralEncryptionKeyCache demonstrates creating an ephemeral encryption key cache

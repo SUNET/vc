@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // NewServerOptions returns gRPC server options with optional TLS/mTLS support.

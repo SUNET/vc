@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/url"
 	"time"
-	"vc/pkg/cache"
-	"vc/pkg/crypto"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/crypto"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference

@@ -3,7 +3,7 @@ package httpserver
 import (
 	"context"
 
-	"vc/internal/verifier/apiv1"
+	"github.com/SUNET/vc/internal/verifier/apiv1"
 
 	"github.com/gin-gonic/gin"
 )

@@ -12,7 +12,7 @@ import (
 	"os"
 	"strings"
 	"time"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/beevik/etree"
 	"github.com/crewjam/saml"

@@ -27,10 +27,10 @@ import (
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 
-	"vc/pkg/didcomm"
-	"vc/pkg/didcomm/message"
-	"vc/pkg/didcomm/protocol/trustping"
-	"vc/pkg/didcomm/routing"
+	"github.com/SUNET/vc/pkg/didcomm"
+	"github.com/SUNET/vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/protocol/trustping"
+	"github.com/SUNET/vc/pkg/didcomm/routing"
 )
 
 // Public mediator DID for integration tests

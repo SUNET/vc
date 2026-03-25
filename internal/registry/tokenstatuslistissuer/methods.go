@@ -7,8 +7,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"vc/pkg/pki"
-	"vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // TokenConfig embeds tokenstatuslist.TokenConfig and adds signing method configuration.

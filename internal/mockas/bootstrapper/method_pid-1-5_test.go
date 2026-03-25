@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

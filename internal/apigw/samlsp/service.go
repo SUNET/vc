@@ -11,9 +11,9 @@ import (
 	"net/url"
 	"time"
 
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/crewjam/saml"
 	"github.com/crewjam/saml/samlsp"

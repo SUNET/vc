@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-	"vc/pkg/cache"
-	"vc/pkg/helpers"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwk"

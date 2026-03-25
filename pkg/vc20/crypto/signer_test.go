@@ -8,7 +8,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 )
 
 // generateECDSATestKey generates an ECDSA key for testing.

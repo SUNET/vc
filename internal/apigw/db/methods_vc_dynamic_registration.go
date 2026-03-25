@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 	"time"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/logger"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"

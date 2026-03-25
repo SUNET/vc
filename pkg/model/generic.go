@@ -3,7 +3,7 @@ package model
 import (
 	"encoding/json"
 	"time"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // CompleteDocument is a generic type for upload

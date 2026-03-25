@@ -736,6 +736,11 @@ release: check_current_branch ## Create and push a git tag (BUMP=major|minor|pat
 	$(MAKE) docker-push VERSION=dev _RELEASE_MODE=1; \
 	echo ""; \
 	echo "==> Docker images built and pushed for $$NEW_TAG (:dev)"; \
+	echo ""; \
+	echo "Requesting Go module proxy indexing for $$NEW_TAG..."; \
+	curl -sf "https://proxy.golang.org/github.com/SUNET/vc/@v/$${NEW_TAG}.info" > /dev/null && \
+		echo "==> Go module proxy indexed $$NEW_TAG" || \
+		echo "==> Warning: Go module proxy indexing request failed (will be indexed on first fetch)"; \
 	echo ""
 
 #### Prod promotion

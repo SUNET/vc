@@ -8,8 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
-	"vc/pkg/sdjwtvc"
-	"vc/pkg/trust"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"

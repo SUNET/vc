@@ -3,8 +3,8 @@ package openid4vp_test
 import (
 	"slices"
 	"testing"
-	"vc/pkg/configuration"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 func TestPresentationBuilder_BuildFromScopes(t *testing.T) {

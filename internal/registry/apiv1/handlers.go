@@ -2,11 +2,11 @@ package apiv1
 
 import (
 	"context"
-	"vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 
 	// swagger complains if this is not imported
-	_ "vc/pkg/helpers"
-	"vc/pkg/model"
+	_ "github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // Status return status for the registry service

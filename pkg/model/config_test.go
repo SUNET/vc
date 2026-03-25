@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

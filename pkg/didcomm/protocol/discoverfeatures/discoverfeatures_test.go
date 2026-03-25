@@ -3,7 +3,7 @@ package discoverfeatures
 import (
 	"testing"
 
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 func TestNewQuery(t *testing.T) {

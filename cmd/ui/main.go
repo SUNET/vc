@@ -8,14 +8,14 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"vc/internal/ui/apiv1"
-	"vc/internal/ui/cache"
-	"vc/internal/ui/httpserver"
-	"vc/internal/ui/outbound"
-	"vc/pkg/configuration"
-	"vc/pkg/model"
-	"vc/pkg/logger"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/ui/apiv1"
+	"github.com/SUNET/vc/internal/ui/cache"
+	"github.com/SUNET/vc/internal/ui/httpserver"
+	"github.com/SUNET/vc/internal/ui/outbound"
+	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/trace"
 )
 
 func init() {

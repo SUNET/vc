@@ -3,8 +3,8 @@ package trace
 import (
 	"context"
 	"time"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	jaegerPropagator "go.opentelemetry.io/contrib/propagators/jaeger"
 	"go.opentelemetry.io/otel"

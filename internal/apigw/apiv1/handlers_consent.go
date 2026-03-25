@@ -3,8 +3,8 @@ package apiv1
 import (
 	"context"
 	"time"
-	"vc/internal/apigw/db"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // AddConsentRequest is the request for AddConsent

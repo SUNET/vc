@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"vc/pkg/cache"
-	"vc/pkg/model"
-	"vc/pkg/sdjwtvc"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"golang.org/x/crypto/bcrypt"
 )

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

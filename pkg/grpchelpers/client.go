@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // NewClientConn creates a gRPC client connection with optional mTLS support.

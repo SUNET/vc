@@ -11,10 +11,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"vc/pkg/openid4vci"
-	"vc/pkg/openid4vp"
-	"vc/pkg/sdjwtvc"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/skip2/go-qrcode"
 )

@@ -12,8 +12,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"vc/pkg/jose"
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 func TestNewSDJWTHandler(t *testing.T) {

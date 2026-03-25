@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"vc/internal/apigw/db"
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/crypto"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	pkgoauth2 "vc/pkg/oauth2"
+	"github.com/SUNET/vc/internal/apigw/db"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/crypto"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	pkgoauth2 "github.com/SUNET/vc/pkg/oauth2"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"

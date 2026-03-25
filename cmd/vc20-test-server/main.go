@@ -17,9 +17,9 @@ import (
 	"github.com/multiformats/go-multibase"
 	"github.com/piprate/json-gold/ld"
 
-	"vc/pkg/vc20/credential"
-	vc_ecdsa "vc/pkg/vc20/crypto/ecdsa"
-	vc_eddsa "vc/pkg/vc20/crypto/eddsa"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	vc_ecdsa "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
+	vc_eddsa "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
 )
 
 var (

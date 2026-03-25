@@ -21,7 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 const (

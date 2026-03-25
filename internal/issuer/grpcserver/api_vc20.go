@@ -2,7 +2,7 @@ package grpcserver
 
 import (
 	"context"
-	"vc/internal/issuer/apiv1"
+	"github.com/SUNET/vc/internal/issuer/apiv1"
 )
 
 // Apiv1VC20 extends the Apiv1 interface with W3C VC 2.0 support

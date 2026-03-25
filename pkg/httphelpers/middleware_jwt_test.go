@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v3/jwa"

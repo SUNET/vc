@@ -2,9 +2,9 @@ package grpcserver
 
 import (
 	"context"
-	"vc/internal/gen/issuer/apiv1_issuer"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/internal/issuer/apiv1"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/internal/issuer/apiv1"
 )
 
 // Apiv1 interface

@@ -7,9 +7,9 @@ import (
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 
-	"vc/pkg/didcomm/crypto"
-	"vc/pkg/didcomm/routing"
-	"vc/test/didcomm_interop/harness"
+	"github.com/SUNET/vc/pkg/didcomm/crypto"
+	"github.com/SUNET/vc/pkg/didcomm/routing"
+	"github.com/SUNET/vc/test/didcomm_interop/harness"
 )
 
 // TestRoutingForwardMessage tests forward message creation and parsing.

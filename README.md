@@ -1,5 +1,7 @@
 # VC
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/SUNET/vc.svg)](https://pkg.go.dev/github.com/SUNET/vc)
+
 A Go-based microservices backend for issuing and verifying digital credentials, originally created within the [DC4EU](https://www.dc4eu.eu/) (Digital Credentials for Europe) project.
 
 The platform implements the OpenID4VCI and OpenID4VP protocols to issue and verify credentials in SD-JWT VC, W3C Verifiable Credentials 2.0, and ISO/IEC 18013-5 mdoc formats.

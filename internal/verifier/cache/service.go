@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"vc/internal/verifier/db"
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/openid4vp"
-	"vc/pkg/sdjwtvc"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/verifier/db"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )

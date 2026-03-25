@@ -34,7 +34,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"vc/pkg/didcomm"
+	"github.com/SUNET/vc/pkg/didcomm"
 )
 
 const (

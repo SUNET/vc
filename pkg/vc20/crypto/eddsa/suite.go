@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"vc/pkg/vc20/credential"
-	"vc/pkg/vc20/crypto/common"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	"github.com/SUNET/vc/pkg/vc20/crypto/common"
 
 	"github.com/multiformats/go-multibase"
 	"github.com/piprate/json-gold/ld"

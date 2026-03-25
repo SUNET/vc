@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"

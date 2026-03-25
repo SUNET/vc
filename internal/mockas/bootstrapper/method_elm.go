@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 type elmClient struct {

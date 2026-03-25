@@ -2,7 +2,7 @@ package pid
 
 import (
 	"encoding/json"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 type Document struct {

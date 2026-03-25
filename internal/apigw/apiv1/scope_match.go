@@ -2,7 +2,7 @@ package apiv1
 
 import (
 	"fmt"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // matchScope finds the first scope that has a corresponding credential constructor

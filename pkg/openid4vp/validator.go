@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 // VPTokenValidator validates VP Token according to Section 8.6

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"vc/pkg/vc20/credential"
-	ecdsaSuite "vc/pkg/vc20/crypto/ecdsa"
-	eddsaSuite "vc/pkg/vc20/crypto/eddsa"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
+	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
 )
 
 // VC20Format identifiers per OpenID4VC spec Appendix A

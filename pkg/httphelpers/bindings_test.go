@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"

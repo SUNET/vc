@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"gotest.tools/v3/golden"

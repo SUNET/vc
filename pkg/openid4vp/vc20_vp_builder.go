@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"time"
 
-	"vc/pkg/vc20/credential"
-	ecdsaSuite "vc/pkg/vc20/crypto/ecdsa"
-	eddsaSuite "vc/pkg/vc20/crypto/eddsa"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
+	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
 )
 
 // VPBuilder builds W3C Verifiable Presentations for OpenID4VP flows.

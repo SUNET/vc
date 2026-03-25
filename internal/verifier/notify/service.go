@@ -3,8 +3,8 @@ package notify
 import (
 	"context"
 	"sync"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/dustin/go-broadcast"
 )

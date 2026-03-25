@@ -6,14 +6,14 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"vc/internal/mockas/apiv1"
-	"vc/internal/mockas/bootstrapper"
-	"vc/internal/mockas/httpserver"
-	"vc/internal/mockas/inbound"
-	"vc/pkg/configuration"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/mockas/apiv1"
+	"github.com/SUNET/vc/internal/mockas/bootstrapper"
+	"github.com/SUNET/vc/internal/mockas/httpserver"
+	"github.com/SUNET/vc/internal/mockas/inbound"
+	"github.com/SUNET/vc/pkg/configuration"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 )
 
 type service interface {

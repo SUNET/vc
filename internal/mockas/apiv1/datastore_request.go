@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-	"vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/helpers"
 )
 
 func (c *Client) uploader(ctx context.Context, upload *uploadMock) (*http.Response, error) {

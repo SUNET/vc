@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/IBM/sarama"
 )

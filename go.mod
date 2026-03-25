@@ -1,4 +1,4 @@
-module vc
+module github.com/SUNET/vc
 
 go 1.26
 

@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"vc/pkg/keyresolver"
+	"github.com/SUNET/vc/pkg/keyresolver"
 
 	"filippo.io/edwards25519"
 )

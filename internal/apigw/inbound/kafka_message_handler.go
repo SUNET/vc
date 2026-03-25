@@ -3,13 +3,13 @@ package inbound
 import (
 	"context"
 	"encoding/json"
-	"vc/internal/apigw/apiv1"
-	"vc/pkg/logger"
-	"vc/pkg/messagebroker"
-	"vc/pkg/messagebroker/kafka"
-	"vc/pkg/model"
-	"vc/pkg/trace"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/messagebroker"
+	"github.com/SUNET/vc/pkg/messagebroker/kafka"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/IBM/sarama"
 )

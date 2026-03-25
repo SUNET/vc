@@ -9,10 +9,10 @@ import (
 
 	"github.com/creasty/defaults"
 
-	"vc/internal/registry/db"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/registry/db"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

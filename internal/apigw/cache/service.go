@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"vc/internal/apigw/db"
-	"vc/internal/apigw/oidcrp"
-	"vc/internal/apigw/samlsp"
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/internal/apigw/oidcrp"
+	"github.com/SUNET/vc/internal/apigw/samlsp"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )

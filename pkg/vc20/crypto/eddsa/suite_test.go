@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/vc20/credential"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 )
 
 func TestNewSuite(t *testing.T) {

@@ -2,7 +2,7 @@ package httpserver
 
 import (
 	"context"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/codes"

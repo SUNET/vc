@@ -34,9 +34,9 @@
 // # Quick Start
 //
 //	import (
-//	    "vc/pkg/didcomm"
-//	    "vc/pkg/didcomm/message"
-//	    "vc/pkg/didcomm/agent"
+//	    "github.com/SUNET/vc/pkg/didcomm"
+//	    "github.com/SUNET/vc/pkg/didcomm/message"
+//	    "github.com/SUNET/vc/pkg/didcomm/agent"
 //	)
 //
 //	// Create a DIDComm agent

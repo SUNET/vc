@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 type identityHandler struct {

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"hash"
 	"testing"
-	"vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/jose"
 )
 
 // mockFailingHash implements hash.Hash but fails on Write

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"vc/internal/registry/db"
-	pkgcache "vc/pkg/cache"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/trace"
+	"github.com/SUNET/vc/internal/registry/db"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/trace"
 )
 
 // Re-export types from pkg/cache so consumers only need this import.

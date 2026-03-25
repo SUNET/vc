@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // DestinationType represents the type of audit log destination

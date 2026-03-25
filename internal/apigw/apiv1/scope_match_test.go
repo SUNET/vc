@@ -2,7 +2,7 @@ package apiv1
 
 import (
 	"testing"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

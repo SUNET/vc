@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"vc/pkg/jose"
-	"vc/pkg/trust"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"

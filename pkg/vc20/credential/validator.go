@@ -18,8 +18,8 @@ import (
 
 	"github.com/multiformats/go-multibase"
 
-	"vc/pkg/logger"
-	"vc/pkg/vc20/contextstore"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/vc20/contextstore"
 )
 
 // Validator performs structural validation on Verifiable Credentials and Presentations

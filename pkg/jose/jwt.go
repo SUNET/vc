@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"vc/pkg/logger"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/xuri/excelize/v2"
 )

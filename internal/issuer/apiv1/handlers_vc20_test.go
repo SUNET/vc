@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"vc/pkg/logger"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

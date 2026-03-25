@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
-	"vc/pkg/cache"
-	"vc/pkg/crypto"
-	"vc/pkg/helpers"
-	"vc/pkg/oauth2"
-	"vc/pkg/openid4vci"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/crypto"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/google/uuid"
 )

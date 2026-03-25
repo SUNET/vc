@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/brianvoe/gofakeit/v7"
 )

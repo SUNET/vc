@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"vc/pkg/didcomm"
-	"vc/pkg/didcomm/crypto"
-	"vc/pkg/didcomm/message"
-	"vc/test/didcomm_interop/harness"
-	"vc/test/didcomm_interop/vectors"
+	"github.com/SUNET/vc/pkg/didcomm"
+	"github.com/SUNET/vc/pkg/didcomm/crypto"
+	"github.com/SUNET/vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/test/didcomm_interop/harness"
+	"github.com/SUNET/vc/test/didcomm_interop/vectors"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )

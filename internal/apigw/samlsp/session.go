@@ -3,7 +3,7 @@ package samlsp
 import (
 	"time"
 
-	apiv1_issuer "vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 )
 
 // Session represents an active SAML authentication session

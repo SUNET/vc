@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 func TestNewForward(t *testing.T) {

@@ -3,7 +3,7 @@ package apiv1
 import (
 	"context"
 	"time"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/brianvoe/gofakeit/v6"
 )

@@ -3,7 +3,7 @@ package trustping
 import (
 	"testing"
 
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 func TestNewPing(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-	"vc/pkg/helpers"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/logger"
 )
 
 // Client is the client

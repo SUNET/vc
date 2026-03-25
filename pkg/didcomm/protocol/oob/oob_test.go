@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"vc/pkg/didcomm"
-	"vc/pkg/didcomm/message"
+	"github.com/SUNET/vc/pkg/didcomm"
+	"github.com/SUNET/vc/pkg/didcomm/message"
 )
 
 func TestNewInvitation(t *testing.T) {

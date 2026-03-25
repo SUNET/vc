@@ -2,7 +2,7 @@ package httpserver
 
 import (
 	"context"
-	"vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 
 	"github.com/gin-gonic/gin"
 )

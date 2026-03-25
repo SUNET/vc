@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"vc/internal/gen/status/apiv1_status"
-	"vc/pkg/logger"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/logger"
 )
 
 type mockasRootHandler struct {

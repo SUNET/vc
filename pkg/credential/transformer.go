@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // ClaimTransformer transforms external attributes/claims into credential document structures.

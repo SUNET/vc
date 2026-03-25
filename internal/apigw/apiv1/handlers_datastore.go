@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"vc/internal/apigw/db"
-	"vc/pkg/helpers"
-	"vc/pkg/model"
-	"vc/pkg/openid4vci"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"go.opentelemetry.io/otel/codes"
 )

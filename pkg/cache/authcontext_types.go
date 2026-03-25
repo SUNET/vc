@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"vc/pkg/model"
-	"vc/pkg/openid4vci"
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/go-playground/validator/v10"
 )

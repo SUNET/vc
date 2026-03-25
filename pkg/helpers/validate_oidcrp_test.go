@@ -2,7 +2,7 @@ package helpers
 
 import (
 	"testing"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"

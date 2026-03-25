@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"vc/pkg/vc20/credential"
-	ecdsaSuite "vc/pkg/vc20/crypto/ecdsa"
+	"github.com/SUNET/vc/pkg/vc20/credential"
+	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 
 	"github.com/stretchr/testify/require"
 )

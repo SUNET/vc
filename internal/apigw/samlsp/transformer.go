@@ -1,8 +1,8 @@
 package samlsp
 
 import (
-	"vc/pkg/credential"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/credential"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 // ClaimTransformer transforms SAML attributes into credential claims.

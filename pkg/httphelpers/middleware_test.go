@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"vc/pkg/model"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
 )
 
 type MicroCredentialClient struct {

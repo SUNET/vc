@@ -10,7 +10,7 @@ import (
 	"crypto/sha512"
 	"hash"
 	"testing"
-	"vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/jose"
 )
 
 // TestComprehensiveCoverage targets remaining uncovered branches

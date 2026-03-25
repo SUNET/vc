@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )

@@ -2,8 +2,8 @@ package apiv1
 
 import (
 	"context"
-	"vc/pkg/helpers"
-	"vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/oauth2"
 
 )
 

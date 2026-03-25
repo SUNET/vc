@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-	"vc/pkg/model"
-	"vc/pkg/socialsecurity"
-	"vc/pkg/vcclient"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/socialsecurity"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/xuri/excelize/v2"
 )

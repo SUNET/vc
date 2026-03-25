@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"vc/internal/verifier/db"
+	"github.com/SUNET/vc/internal/verifier/db"
 
 	"golang.org/x/crypto/bcrypt"
 )

@@ -3,8 +3,8 @@ package oauth2
 import (
 	"context"
 	"testing"
-	"vc/pkg/openid4vp"
-	"vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"

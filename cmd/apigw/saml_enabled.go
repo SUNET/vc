@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"vc/internal/apigw/cache"
-	"vc/internal/apigw/httpserver"
-	"vc/internal/apigw/samlsp"
-	"vc/pkg/logger"
-	"vc/pkg/model"
+	"github.com/SUNET/vc/internal/apigw/cache"
+	"github.com/SUNET/vc/internal/apigw/httpserver"
+	"github.com/SUNET/vc/internal/apigw/samlsp"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 )
 
 func initSAMLSPService(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, log *logger.Log) (httpserver.SAMLSPService, error) {
