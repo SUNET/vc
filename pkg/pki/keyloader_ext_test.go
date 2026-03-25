@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"encoding/base64"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,12 +31,13 @@ func TestKeyLoader_LoadCertificateChain_WithExtensions(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath := filepath.Join(tmpDir, "test-chain.pem")
 
-	// Write PEM-encoded certificate
-	certPEM := "-----BEGIN CERTIFICATE-----\n"
-	certPEM += encodeBase64Lines(testCert.Raw)
-	certPEM += "-----END CERTIFICATE-----\n"
+	// Write PEM-encoded certificate using pem.EncodeToMemory
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: testCert.Raw,
+	})
 
-	err := os.WriteFile(certPath, []byte(certPEM), 0600)
+	err := os.WriteFile(certPath, certPEM, 0600)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -97,20 +98,4 @@ func TestKeyLoader_LoadCertificateChain_NoCerts(t *testing.T) {
 	kl := NewKeyLoader()
 	_, _, err = kl.LoadCertificateChain(certPath)
 	assert.Error(t, err)
-}
-
-// encodeBase64Lines encodes data to base64 with 64-char line wrapping
-func encodeBase64Lines(data []byte) string {
-	encoded := base64.StdEncoding.EncodeToString(data)
-
-	// Add line breaks every 64 characters
-	result := ""
-	for i := 0; i < len(encoded); i += 64 {
-		end := i + 64
-		if end > len(encoded) {
-			end = len(encoded)
-		}
-		result += encoded[i:end] + "\n"
-	}
-	return result
 }
