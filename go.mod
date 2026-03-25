@@ -40,6 +40,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.8.0
 	github.com/russellhaering/goxmldsig v1.6.0
+	github.com/sirosfoundation/go-cryptoutil v0.2.0
 	github.com/sirosfoundation/go-spocp v0.0.0-20260316113016-2a5043ce9fc1
 	github.com/sirosfoundation/go-trust v0.1.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
@@ -179,7 +180,6 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280 // indirect
-	github.com/sirosfoundation/go-cryptoutil v0.2.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect

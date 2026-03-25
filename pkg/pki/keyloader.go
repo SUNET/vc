@@ -63,15 +63,22 @@ type KeyConfig struct {
 }
 
 // KeyLoader provides centralized key and certificate loading functionality.
-// Methods are safe for concurrent use.
+// Methods are safe for concurrent use after initialization.
 type KeyLoader struct {
-	// CryptoExt provides extended algorithm and certificate support.
+	// CryptoExt provides extended algorithm and certificate support
+	// (e.g. brainpool curves). Must be set before concurrent use and
+	// not mutated afterwards.
 	CryptoExt *cryptoutil.Extensions
 }
 
-// NewKeyLoader creates a new KeyLoader instance
+// NewKeyLoader creates a new KeyLoader instance.
 func NewKeyLoader() *KeyLoader {
 	return &KeyLoader{}
+}
+
+// NewKeyLoaderWithExtensions creates a new KeyLoader with crypto extensions.
+func NewKeyLoaderWithExtensions(ext *cryptoutil.Extensions) *KeyLoader {
+	return &KeyLoader{CryptoExt: ext}
 }
 
 // LoadPrivateKey loads a private key from a PEM file.
