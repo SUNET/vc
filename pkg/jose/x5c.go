@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/sirosfoundation/go-cryptoutil"
 )
 
 // ExtractKIDFromCompactJWT extracts the "kid" field from the header of a compact-serialized JWT/JWE.
@@ -42,7 +43,9 @@ func ExtractKIDFromCompactJWT(compactToken string) (string, error) {
 // The x5c header is an array of base64-encoded DER certificates,
 // with the leaf certificate first.
 // Supports both standard and URL-safe base64 encoding.
-func ParseX5CHeader(x5cRaw any) ([]*x509.Certificate, error) {
+// If ext is provided, certificates are parsed using extension-aware parsing
+// (e.g. to support brainpool curves).
+func ParseX5CHeader(x5cRaw any, ext ...*cryptoutil.Extensions) ([]*x509.Certificate, error) {
 	x5cArray, ok := x5cRaw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("x5c header must be an array")
@@ -69,7 +72,12 @@ func ParseX5CHeader(x5cRaw any) ([]*x509.Certificate, error) {
 			}
 		}
 
-		cert, err := x509.ParseCertificate(certDER)
+		var cert *x509.Certificate
+		if len(ext) > 0 && ext[0] != nil {
+			cert, err = ext[0].ParseCertificate(certDER)
+		} else {
+			cert, err = x509.ParseCertificate(certDER)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse x5c[%d]: %w", i, err)
 		}

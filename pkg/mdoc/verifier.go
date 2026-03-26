@@ -11,6 +11,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/trust"
 
+	"github.com/sirosfoundation/go-cryptoutil"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
@@ -19,6 +20,7 @@ type Verifier struct {
 	trustEvaluator      trust.TrustEvaluator
 	skipRevocationCheck bool
 	clock               func() time.Time
+	cryptoExt           *cryptoutil.Extensions
 }
 
 // VerifierConfig contains configuration options for the Verifier.
@@ -35,6 +37,10 @@ type VerifierConfig struct {
 	// Clock is an optional function that returns the current time.
 	// If nil, time.Now() is used.
 	Clock func() time.Time
+
+	// CryptoExt provides extended algorithm and certificate support
+	// (e.g. brainpool curves).
+	CryptoExt *cryptoutil.Extensions
 }
 
 // VerificationResult contains the result of verifying a DeviceResponse.
@@ -87,6 +93,7 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 		trustEvaluator:      config.TrustEvaluator,
 		skipRevocationCheck: config.SkipRevocationCheck,
 		clock:               clock,
+		cryptoExt:           config.CryptoExt,
 	}, nil
 }
 
@@ -151,7 +158,7 @@ func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *Document)
 	}
 
 	// Step 2: Extract and verify the certificate chain
-	certChain, err := GetCertificateChainFromSign1(issuerAuth)
+	certChain, err := GetCertificateChainFromSign1(issuerAuth, v.cryptoExt)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("failed to extract certificate chain: %w", err))
 		result.Valid = false
@@ -341,7 +348,7 @@ func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSigned, docType string
 	}
 
 	// Extract and verify the certificate chain
-	certChain, err := GetCertificateChainFromSign1(issuerAuth)
+	certChain, err := GetCertificateChainFromSign1(issuerAuth, v.cryptoExt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract certificate chain: %w", err)
 	}

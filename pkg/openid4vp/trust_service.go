@@ -1,9 +1,12 @@
 package openid4vp
 
 import (
-	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+
+	"github.com/SUNET/vc/pkg/pki"
+
+	"github.com/sirosfoundation/go-cryptoutil"
 )
 
 type TrustService struct {
@@ -32,13 +35,19 @@ type TrustService struct {
 //	return jwk.Key, nil
 //}
 
-func (ts *TrustService) ExtractPublicKeyFromX5C(x5cBase64 string) (any, error) {
+func (ts *TrustService) ExtractPublicKeyFromX5C(x5cBase64 string, ext ...*cryptoutil.Extensions) (any, error) {
 	derCert, err := base64.StdEncoding.DecodeString(x5cBase64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 x5c certificate: %w", err)
 	}
 
-	cert, err := x509.ParseCertificate(derCert)
+	// Use the first extension if provided, otherwise nil for stdlib fallback
+	var cryptoExt *cryptoutil.Extensions
+	if len(ext) > 0 {
+		cryptoExt = ext[0]
+	}
+
+	cert, err := pki.ParseCertificate(derCert, cryptoExt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse certificate: %w", err)
 	}

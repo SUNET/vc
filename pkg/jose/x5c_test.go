@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirosfoundation/go-cryptoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -198,4 +199,99 @@ func generateTestCertificate(t *testing.T) *x509.Certificate {
 	require.NoError(t, err)
 
 	return cert
+}
+
+func TestParseX5CHeader_WithExtensions(t *testing.T) {
+	testCert := generateTestCertificate(t)
+	certB64 := base64.StdEncoding.EncodeToString(testCert.Raw)
+
+	tests := []struct {
+		name      string
+		x5cRaw    any
+		ext       *cryptoutil.Extensions
+		wantCerts int
+		wantErr   bool
+	}{
+		{
+			name:      "valid cert with nil extensions",
+			x5cRaw:    []any{certB64},
+			ext:       nil,
+			wantCerts: 1,
+			wantErr:   false,
+		},
+		{
+			name:      "valid cert with empty extensions",
+			x5cRaw:    []any{certB64},
+			ext:       &cryptoutil.Extensions{},
+			wantCerts: 1,
+			wantErr:   false,
+		},
+		{
+			name:      "valid cert with configured extensions",
+			x5cRaw:    []any{certB64},
+			ext:       cryptoutil.New(),
+			wantCerts: 1,
+			wantErr:   false,
+		},
+		{
+			name:      "multiple certs with extensions",
+			x5cRaw:    []any{certB64, certB64},
+			ext:       cryptoutil.New(),
+			wantCerts: 2,
+			wantErr:   false,
+		},
+		{
+			name:    "invalid cert with extensions still fails",
+			x5cRaw:  []any{base64.StdEncoding.EncodeToString([]byte("not-a-cert"))},
+			ext:     cryptoutil.New(),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var certs []*x509.Certificate
+			var err error
+
+			if tt.ext != nil {
+				certs, err = ParseX5CHeader(tt.x5cRaw, tt.ext)
+			} else {
+				certs, err = ParseX5CHeader(tt.x5cRaw)
+			}
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Len(t, certs, tt.wantCerts)
+
+			// Verify certificate content
+			for _, cert := range certs {
+				assert.Equal(t, testCert.Subject.CommonName, cert.Subject.CommonName)
+			}
+		})
+	}
+}
+
+func TestParseX5CHeader_ExtensionVariadic(t *testing.T) {
+	testCert := generateTestCertificate(t)
+	certB64 := base64.StdEncoding.EncodeToString(testCert.Raw)
+
+	// Test that variadic with nil first element falls back properly
+	ext := cryptoutil.New()
+
+	// Call with extension
+	certs, err := ParseX5CHeader([]any{certB64}, ext)
+	require.NoError(t, err)
+	assert.Len(t, certs, 1)
+
+	// Call without extension (no variadic args)
+	certs2, err := ParseX5CHeader([]any{certB64})
+	require.NoError(t, err)
+	assert.Len(t, certs2, 1)
+
+	// Both should return equivalent certificates
+	assert.Equal(t, certs[0].Subject.CommonName, certs2[0].Subject.CommonName)
 }

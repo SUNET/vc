@@ -173,7 +173,7 @@ func (ce *ClaimsExtractor) extractNestedClaim(claims map[string]any, path string
 // ApplyClaimTransforms applies transformations to claim values
 // transformDefs: Map of OIDC claim name to transform definition
 func (ce *ClaimsExtractor) ApplyClaimTransforms(claims map[string]any, transformDefs map[string]ClaimTransformDef) (map[string]any, error) {
-	if transformDefs == nil || len(transformDefs) == 0 {
+	if len(transformDefs) == 0 {
 		return claims, nil // No transforms to apply
 	}
 
@@ -328,7 +328,7 @@ func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	}
 
 	// Step 3: Apply transformations
-	if transformDefs != nil && len(transformDefs) > 0 {
+	if len(transformDefs) > 0 {
 		oidcClaims, err = ce.ApplyClaimTransforms(oidcClaims, transformDefs)
 		if err != nil {
 			return nil, fmt.Errorf("transformation failed: %w", err)

@@ -40,6 +40,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.8.0
 	github.com/russellhaering/goxmldsig v1.6.0
+	github.com/sirosfoundation/go-cryptoutil v0.2.0
 	github.com/sirosfoundation/go-spocp v0.0.0-20260316113016-2a5043ce9fc1
 	github.com/sirosfoundation/go-trust v0.1.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e

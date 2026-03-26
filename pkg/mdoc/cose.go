@@ -15,6 +15,7 @@ import (
 	"math/big"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/sirosfoundation/go-cryptoutil"
 )
 
 // COSE Algorithm identifiers per RFC 8152 and ISO 18013-5
@@ -692,7 +693,9 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 }
 
 // GetCertificateChainFromSign1 extracts the x5chain from a COSE_Sign1.
-func GetCertificateChainFromSign1(sign1 *COSESign1) ([]*x509.Certificate, error) {
+// If ext is provided, certificates are parsed using extension-aware parsing
+// (e.g. to support brainpool curves).
+func GetCertificateChainFromSign1(sign1 *COSESign1, ext ...*cryptoutil.Extensions) ([]*x509.Certificate, error) {
 	var headers map[int64]any
 	if err := cbor.Unmarshal(sign1.Protected, &headers); err != nil {
 		return nil, fmt.Errorf("failed to decode protected headers: %w", err)
@@ -726,7 +729,13 @@ func GetCertificateChainFromSign1(sign1 *COSESign1) ([]*x509.Certificate, error)
 
 	var certs []*x509.Certificate
 	for _, b := range certBytes {
-		cert, err := x509.ParseCertificate(b)
+		var cert *x509.Certificate
+		var err error
+		if len(ext) > 0 && ext[0] != nil {
+			cert, err = ext[0].ParseCertificate(b)
+		} else {
+			cert, err = x509.ParseCertificate(b)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse certificate: %w", err)
 		}

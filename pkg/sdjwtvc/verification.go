@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/sirosfoundation/go-cryptoutil"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
@@ -65,6 +66,9 @@ type VerificationOptions struct {
 	// If set, this is passed to the TrustEvaluator for policy-based routing.
 	// If not set, it will be extracted from the 'vct' claim if present.
 	CredentialType string
+	// CryptoExt provides extended algorithm and certificate support
+	// (e.g. brainpool curves).
+	CryptoExt *cryptoutil.Extensions
 }
 
 // ParseAndVerify parses and verifies an SD-JWT credential
@@ -124,7 +128,7 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 	if preToken != nil {
 		// Check for x5c header
 		if x5cRaw, ok := preToken.Header["x5c"]; ok && opts.TrustEvaluator != nil {
-			chain, err := jose.ParseX5CHeader(x5cRaw)
+			chain, err := jose.ParseX5CHeader(x5cRaw, opts.CryptoExt)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Errorf("failed to parse x5c header: %w", err))
 				return result, err

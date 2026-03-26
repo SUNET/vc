@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	crypto_sha256 "crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"github.com/SUNET/vc/internal/wallet/config"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/pki"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -50,7 +50,7 @@ func requestObjectKeyFunc(token *jwtv5.Token) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decoding x5c leaf certificate: %w", err)
 		}
-		cert, err := x509.ParseCertificate(derBytes)
+		cert, err := pki.ParseCertificate(derBytes, nil)
 		if err != nil {
 			return nil, fmt.Errorf("parsing x5c leaf certificate: %w", err)
 		}

@@ -191,7 +191,9 @@ func TestVPBuilder_BuildVC20Presentation_MultipleCredentials(t *testing.T) {
 	}
 
 	var vp map[string]any
-	json.Unmarshal(vpBytes, &vp)
+	if err := json.Unmarshal(vpBytes, &vp); err != nil {
+		t.Fatalf("failed to unmarshal VP: %v", err)
+	}
 
 	// Check credentials array
 	creds, ok := vp["verifiableCredential"].([]any)
@@ -343,7 +345,9 @@ func TestVPBuilder_UsesDefaultCryptosuite(t *testing.T) {
 	}
 
 	var vp map[string]any
-	json.Unmarshal(vpBytes, &vp)
+	if err := json.Unmarshal(vpBytes, &vp); err != nil {
+		t.Fatalf("failed to unmarshal VP: %v", err)
+	}
 
 	proof := vp["proof"].(map[string]any)
 	if proof["cryptosuite"] != CryptosuiteECDSA2019 {
@@ -377,7 +381,9 @@ func TestVPBuilder_UsesDefaultHolderDID(t *testing.T) {
 	}
 
 	var vp map[string]any
-	json.Unmarshal(vpBytes, &vp)
+	if err := json.Unmarshal(vpBytes, &vp); err != nil {
+		t.Fatalf("failed to unmarshal VP: %v", err)
+	}
 
 	if vp["holder"] != "did:example:default-holder" {
 		t.Errorf("expected default holder DID, got %v", vp["holder"])
@@ -431,7 +437,9 @@ func TestVPBuilder_CustomCreatedTime(t *testing.T) {
 	}
 
 	var vp map[string]any
-	json.Unmarshal(vpBytes, &vp)
+	if err := json.Unmarshal(vpBytes, &vp); err != nil {
+		t.Fatalf("failed to unmarshal VP: %v", err)
+	}
 
 	proof := vp["proof"].(map[string]any)
 	created, ok := proof["created"].(string)
