@@ -738,6 +738,7 @@ release: check_current_branch ## Create and push a git tag (BUMP=major|minor|pat
 	echo "==> Docker images built and pushed for $$NEW_TAG (:dev)"; \
 	echo ""; \
 	echo "Requesting Go module proxy indexing for $$NEW_TAG..."; \
+	for i in 5 4 3 2 1; do printf "\r    Waiting for tag to propagate... $$i "; sleep 1; done; printf "\r                                       \r"; \
 	curl -sf "https://proxy.golang.org/github.com/SUNET/vc/@v/$${NEW_TAG}.info" > /dev/null && \
 		echo "==> Go module proxy indexed $$NEW_TAG" || \
 		echo "==> Warning: Go module proxy indexing request failed (will be indexed on first fetch)"; \
