@@ -1,0 +1,10 @@
+profile: cover.out
+threshold:
+   file: 70
+   package: 80
+   total: 80
+exclude:
+   paths:
+      - brainpool
+git-branch: badges
+git-token: ${{ github.ref_name == 'main' && secrets.GITHUB_TOKEN || '' }}
