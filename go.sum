@@ -340,8 +340,8 @@ github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp
 github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
 github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280 h1:9xXylH++9mXY/JYsftp7Es7DBwSNN2UkJfmqwHk7t/0=
 github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280/go.mod h1:x2q0DHfpzuOO64X9gqdt2HlfzysiXm+gMlCk28Ou/Jk=
-github.com/sirosfoundation/go-cryptoutil v0.2.0 h1:oR+YQPWAbxbf0i+/rmwmsFtk5tFEcP/n6yyxU9OeMCg=
-github.com/sirosfoundation/go-cryptoutil v0.2.0/go.mod h1:OZi673Xmf5o2LzF/QMceptIpiB2GKYAYBfEa75ocBss=
+github.com/sirosfoundation/go-cryptoutil v0.4.0 h1:RWs1hkbExIxqgr8mmv7z1LgaC9IlSrGMfY+Wc8XbeHk=
+github.com/sirosfoundation/go-cryptoutil v0.4.0/go.mod h1:OZi673Xmf5o2LzF/QMceptIpiB2GKYAYBfEa75ocBss=
 github.com/sirosfoundation/go-spocp v0.0.0-20260316113016-2a5043ce9fc1 h1:eSX9yfkaKNLg/6iBHe9xRprcV0fZ+xt/lq206EIEoq8=
 github.com/sirosfoundation/go-spocp v0.0.0-20260316113016-2a5043ce9fc1/go.mod h1:a6WtxG5hnsUzcqUt5iHmSMvyX4PLUPMDFK7FLoDMSMs=
 github.com/sirosfoundation/go-trust v0.1.0 h1:bVSEMNoeiIdYvFTLeakZDg03sSuZGB/mJqLgLfboHVU=

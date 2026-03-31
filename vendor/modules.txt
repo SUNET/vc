@@ -710,7 +710,7 @@ github.com/shopspring/decimal
 # github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280
 ## explicit; go 1.25.1
 github.com/sirosfoundation/g119612/pkg/logging
-# github.com/sirosfoundation/go-cryptoutil v0.2.0
+# github.com/sirosfoundation/go-cryptoutil v0.4.0
 ## explicit; go 1.25.1
 github.com/sirosfoundation/go-cryptoutil
 # github.com/sirosfoundation/go-spocp v0.0.0-20260316113016-2a5043ce9fc1
