@@ -14,7 +14,7 @@ require (
 	github.com/crewjam/saml v0.5.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/dustin/go-broadcast v0.0.0-20211018055107-71439988bd91
-	github.com/fxamacker/cbor/v2 v2.9.0
+	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-contrib/gzip v1.2.5
 	github.com/gin-contrib/sessions v1.0.4
