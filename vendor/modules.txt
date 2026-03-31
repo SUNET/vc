@@ -139,7 +139,7 @@ github.com/crewjam/saml
 github.com/crewjam/saml/logger
 github.com/crewjam/saml/samlsp
 github.com/crewjam/saml/xmlenc
-# github.com/davecgh/go-spew v1.1.1
+# github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 ## explicit
 github.com/davecgh/go-spew/spew
 # github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
@@ -620,7 +620,7 @@ github.com/piprate/json-gold/ld/internal/jsoncanonicalizer
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
-# github.com/pmezard/go-difflib v1.0.0
+# github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
 # github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c
@@ -707,7 +707,7 @@ github.com/shirou/gopsutil/v4/process
 # github.com/shopspring/decimal v1.4.0
 ## explicit; go 1.10
 github.com/shopspring/decimal
-# github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280
+# github.com/sirosfoundation/g119612 v0.0.0-20260324144233-345907d5f149
 ## explicit; go 1.25.1
 github.com/sirosfoundation/g119612/pkg/logging
 # github.com/sirosfoundation/go-cryptoutil v0.2.0
@@ -720,8 +720,8 @@ github.com/sirosfoundation/go-spocp/pkg/compare
 github.com/sirosfoundation/go-spocp/pkg/persist
 github.com/sirosfoundation/go-spocp/pkg/sexp
 github.com/sirosfoundation/go-spocp/pkg/starform
-# github.com/sirosfoundation/go-trust v0.1.0
-## explicit; go 1.25.1
+# github.com/sirosfoundation/go-trust v0.3.0
+## explicit; go 1.26
 github.com/sirosfoundation/go-trust/pkg/api
 github.com/sirosfoundation/go-trust/pkg/authzen
 github.com/sirosfoundation/go-trust/pkg/authzenclient

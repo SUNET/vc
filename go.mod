@@ -42,7 +42,7 @@ require (
 	github.com/russellhaering/goxmldsig v1.6.0
 	github.com/sirosfoundation/go-cryptoutil v0.2.0
 	github.com/sirosfoundation/go-spocp v0.0.0-20260316113016-2a5043ce9fc1
-	github.com/sirosfoundation/go-trust v0.1.0
+	github.com/sirosfoundation/go-trust v0.3.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/files v1.0.1
@@ -87,7 +87,7 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/docker v28.5.1+incompatible // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
@@ -164,7 +164,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/pquerna/cachecontrol v0.2.0 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
@@ -179,7 +179,7 @@ require (
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/sirosfoundation/g119612 v0.0.0-20260108094825-5b3123230280 // indirect
+	github.com/sirosfoundation/g119612 v0.0.0-20260324144233-345907d5f149 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
