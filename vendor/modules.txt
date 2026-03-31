@@ -216,8 +216,8 @@ github.com/gabriel-vasile/mimetype/internal/scan
 # github.com/gin-contrib/cors v1.7.6
 ## explicit; go 1.23.0
 github.com/gin-contrib/cors
-# github.com/gin-contrib/gzip v1.2.5
-## explicit; go 1.24.0
+# github.com/gin-contrib/gzip v1.2.6
+## explicit; go 1.25.0
 github.com/gin-contrib/gzip
 # github.com/gin-contrib/sessions v1.0.4
 ## explicit; go 1.23.0
