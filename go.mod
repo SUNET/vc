@@ -19,7 +19,7 @@ require (
 	github.com/gin-contrib/gzip v1.2.5
 	github.com/gin-contrib/sessions v1.0.4
 	github.com/gin-gonic/gin v1.12.0
-	github.com/go-jose/go-jose/v4 v4.1.3
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
