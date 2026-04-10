@@ -219,6 +219,57 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 	return nil, fmt.Errorf("no proofs found")
 }
 
+// ExtractAllJWKs extracts one JWK per proof for batch credential issuance.
+// For JWT and DIVP proof types, each proof in the array yields one JWK.
+// For Attestation, all keys from the attested_keys claim are returned.
+func (p *Proofs) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
+	if len(p.JWT) > 0 {
+		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.JWT))
+		for i, token := range p.JWT {
+			jwk, err := token.ExtractJWK()
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract JWK from JWT proof %d: %w", i, err)
+			}
+			jwks = append(jwks, jwk)
+		}
+		return jwks, nil
+	}
+
+	if len(p.DIVP) > 0 {
+		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.DIVP))
+		for i, vp := range p.DIVP {
+			jwk, err := vp.ExtractJWK()
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract JWK from DIVP proof %d: %w", i, err)
+			}
+			jwks = append(jwks, jwk)
+		}
+		return jwks, nil
+	}
+
+	if p.Attestation != "" {
+		return p.Attestation.ExtractAllJWKs()
+	}
+
+	return nil, fmt.Errorf("no proofs found")
+}
+
+// Count returns the number of proofs present in the batch.
+// Only one proof type should be populated per request.
+func (p *Proofs) Count() int {
+	if len(p.JWT) > 0 {
+		return len(p.JWT)
+	}
+	if len(p.DIVP) > 0 {
+		return len(p.DIVP)
+	}
+	if p.Attestation != "" {
+		// Attestation has one JWT but may attest multiple keys
+		return 1
+	}
+	return 0
+}
+
 // CredentialResponseEncryption contains information for encrypting the Credential Response.
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-request
 type CredentialResponseEncryption struct {

@@ -147,6 +147,55 @@ func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 	return jwk, nil
 }
 
+// ExtractAllJWKs extracts all attested keys from the attestation JWT.
+// The attested_keys claim contains an array of JWKs; this returns all of them.
+func (p ProofAttestation) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
+	if p == "" {
+		return nil, fmt.Errorf("attestation is empty")
+	}
+
+	token, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse attestation JWT: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwtv5.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("failed to extract claims from attestation JWT")
+	}
+
+	attestedKeys, ok := claims["attested_keys"]
+	if !ok {
+		return nil, fmt.Errorf("attested_keys claim not found in attestation")
+	}
+
+	keysArr, ok := attestedKeys.([]any)
+	if !ok || len(keysArr) == 0 {
+		return nil, fmt.Errorf("attested_keys must be a non-empty array")
+	}
+
+	jwks := make([]*apiv1_issuer.Jwk, 0, len(keysArr))
+	for i, key := range keysArr {
+		keyMap, ok := key.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("attested key %d is not a valid JWK object", i)
+		}
+
+		jwkByte, err := json.Marshal(keyMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal attested key %d: %w", i, err)
+		}
+
+		jwk := &apiv1_issuer.Jwk{}
+		if err := json.Unmarshal(jwkByte, jwk); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal attested key %d: %w", i, err)
+		}
+		jwks = append(jwks, jwk)
+	}
+
+	return jwks, nil
+}
+
 // Verify verifies a Key Attestation proof according to OpenID4VCI 1.0 Appendix D.1
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-key-attestation
 func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {

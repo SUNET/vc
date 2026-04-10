@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
@@ -416,4 +417,93 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	t.Log("  1. Inject mock db collections (auth context, datastore)")
 	t.Log("  2. Inject mock gRPC client factory")
 	t.Log("  3. Then call client.VCICredential(ctx, req) and verify response")
+}
+
+// TestBatchProofExtraction tests that batch proof extraction works correctly
+// for multiple JWT proofs, verifying the ExtractAllJWKs() method returns
+// one JWK per proof token.
+func TestBatchProofExtraction(t *testing.T) {
+	nonce := "test-nonce"
+
+	// Create 3 different proof JWTs with different keys
+	proofJWT1, _, jwk1 := createValidProofJWT(t, nonce)
+	proofJWT2, _, jwk2 := createValidProofJWT(t, nonce)
+	proofJWT3, _, jwk3 := createValidProofJWT(t, nonce)
+
+	proofs := &openid4vci.Proofs{
+		JWT: []openid4vci.ProofJWTToken{
+			openid4vci.ProofJWTToken(proofJWT1),
+			openid4vci.ProofJWTToken(proofJWT2),
+			openid4vci.ProofJWTToken(proofJWT3),
+		},
+	}
+
+	// Verify count
+	assert.Equal(t, 3, proofs.Count(), "should have 3 proofs")
+
+	// Extract all JWKs
+	jwks, err := proofs.ExtractAllJWKs()
+	require.NoError(t, err)
+	assert.Len(t, jwks, 3, "should extract 3 JWKs")
+
+	// Verify each JWK corresponds to its proof's key (all should be EC P-256)
+	for i, jwk := range jwks {
+		assert.Equal(t, "EC", jwk.Kty, "JWK %d should be EC type", i)
+		assert.Equal(t, "P-256", jwk.Crv, "JWK %d should be P-256 curve", i)
+		assert.NotEmpty(t, jwk.X, "JWK %d should have X coordinate", i)
+		assert.NotEmpty(t, jwk.Y, "JWK %d should have Y coordinate", i)
+	}
+
+	// Verify each JWK is unique (different keys)
+	_ = jwk1
+	_ = jwk2
+	_ = jwk3
+	assert.NotEqual(t, jwks[0].X, jwks[1].X, "JWKs should have different X coordinates")
+	assert.NotEqual(t, jwks[1].X, jwks[2].X, "JWKs should have different X coordinates")
+}
+
+// TestBatchCredentialRequest tests that a batch credential request
+// with multiple proofs is properly structured.
+func TestBatchCredentialRequest(t *testing.T) {
+	accessToken := "test-access-token-batch"
+	nonce := "test-nonce-batch"
+
+	dpopJWT, _ := createValidDPoPJWT(t, accessToken)
+
+	proofJWT1, _, _ := createValidProofJWT(t, nonce)
+	proofJWT2, _, _ := createValidProofJWT(t, nonce)
+	proofJWT3, _, _ := createValidProofJWT(t, nonce)
+
+	req := &openid4vci.CredentialRequest{
+		DPoP:          dpopJWT,
+		Authorization: "DPoP " + accessToken,
+		Proofs: &openid4vci.Proofs{
+			JWT: []openid4vci.ProofJWTToken{
+				openid4vci.ProofJWTToken(proofJWT1),
+				openid4vci.ProofJWTToken(proofJWT2),
+				openid4vci.ProofJWTToken(proofJWT3),
+			},
+		},
+		CredentialConfigurationID: "dc+sd-jwt",
+	}
+
+	// Verify request structure
+	assert.True(t, req.IsAccessTokenDPoP())
+	assert.NotNil(t, req.Proofs)
+	assert.Equal(t, 3, req.Proofs.Count())
+
+	// Verify all JWKs can be extracted
+	jwks, err := req.Proofs.ExtractAllJWKs()
+	require.NoError(t, err)
+	assert.Len(t, jwks, 3)
+
+	// Backward compat: single ExtractJWK returns first key
+	singleJWK, err := req.Proofs.ExtractJWK()
+	require.NoError(t, err)
+	assert.Equal(t, jwks[0], singleJWK, "ExtractJWK should return same key as first in ExtractAllJWKs")
+
+	t.Log("✓ Batch credential request properly structured")
+	t.Log("✓ 3 proof JWTs included")
+	t.Log("✓ All JWKs extracted successfully")
+	t.Log("✓ Backward compat: ExtractJWK returns first key")
 }

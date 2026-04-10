@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
@@ -167,18 +168,30 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Extract JWK from proof (singular) or proofs (plural/batch)
-	var jwk *apiv1_issuer.Jwk
+	// Extract JWKs from proof (singular) or proofs (plural/batch)
+	var jwks []*apiv1_issuer.Jwk
 	if req.Proof != nil {
-		jwk, err = req.Proof.ExtractJWK()
+		jwk, err := req.Proof.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proof")
 			return nil, err
 		}
+		jwks = []*apiv1_issuer.Jwk{jwk}
 	} else if req.Proofs != nil {
-		jwk, err = req.Proofs.ExtractJWK()
+		// Validate batch size against issuer metadata
+		proofCount := req.Proofs.Count()
+		maxBatch := 1
+		if c.issuerMetadata.BatchCredentialIssuance != nil && c.issuerMetadata.BatchCredentialIssuance.BatchSize > 0 {
+			maxBatch = c.issuerMetadata.BatchCredentialIssuance.BatchSize
+		}
+		if proofCount > maxBatch {
+			c.log.Error(nil, "batch size exceeded", "requested", proofCount, "max", maxBatch)
+			return nil, fmt.Errorf("batch size %d exceeds maximum allowed %d", proofCount, maxBatch)
+		}
+
+		jwks, err = req.Proofs.ExtractAllJWKs()
 		if err != nil {
-			c.log.Error(err, "failed to extract JWK from proofs")
+			c.log.Error(err, "failed to extract JWKs from proofs")
 			return nil, err
 		}
 	} else {
@@ -192,29 +205,47 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Branch based on requested credential format
-	switch format {
-	case "mso_mdoc":
-		return c.issueMDoc(ctx, scope, documentData, jwk, document)
+	// Issue one credential per JWK (batch loop)
+	credentials := make([]openid4vci.Credential, 0, len(jwks))
+	for i, jwk := range jwks {
+		var cred string
+		var issueErr error
 
-	case "vc+sd-jwt", "dc+sd-jwt":
-		return c.issueSDJWT(ctx, scope, documentData, jwk, document)
+		switch format {
+		case "mso_mdoc":
+			cred, issueErr = c.issueMDoc(ctx, scope, documentData, jwk, document)
+		case "vc+sd-jwt", "dc+sd-jwt":
+			cred, issueErr = c.issueSDJWT(ctx, scope, documentData, jwk, document)
+		case "ldp_vc", "vc+ld+json":
+			cred, issueErr = c.issueVC20(ctx, scope, documentData, document, req, i)
+		default:
+			c.log.Error(nil, "unsupported or missing credential format", "format", format)
+			return nil, errors.New("unsupported or missing credential format: " + format)
+		}
 
-	case "ldp_vc", "vc+ld+json":
-		// W3C VC 2.0 Data Integrity credential
-		return c.issueVC20(ctx, scope, documentData, document, req)
+		if issueErr != nil {
+			c.log.Error(issueErr, "batch issuance failed", "index", i, "format", format)
+			return nil, issueErr
+		}
 
-	default:
-		c.log.Error(nil, "unsupported or missing credential format", "format", format)
-		return nil, errors.New("unsupported or missing credential format: " + format)
+		credentials = append(credentials, openid4vci.Credential{Credential: cred})
 	}
+
+	if len(credentials) == 0 {
+		return nil, errors.New("no credentials were issued")
+	}
+
+	return &openid4vci.CredentialResponse{
+		Credentials: credentials,
+	}, nil
 }
 
-// issueSDJWT issues an SD-JWT credential
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (*openid4vci.CredentialResponse, error) {
+// issueSDJWT issues a single SD-JWT credential bound to the given JWK.
+// Returns the credential string for inclusion in the batch response.
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (string, error) {
 	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
 	if credentialConstructor == nil {
-		return nil, fmt.Errorf("unsupported scope: %s", scope)
+		return "", fmt.Errorf("unsupported scope: %s", scope)
 	}
 
 	reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
@@ -226,11 +257,11 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")
-		return nil, err
+		return "", err
 	}
 
 	if reply == nil {
-		return nil, errors.New("MakeSDJWT reply is nil")
+		return "", errors.New("MakeSDJWT reply is nil")
 	}
 
 	// Save credential subject info to registry for status management
@@ -248,29 +279,21 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 	}
 
-	response := &openid4vci.CredentialResponse{}
-	switch len(reply.Credentials) {
-	case 0:
-		return nil, helpers.ErrNoDocumentFound
-	case 1:
-		response.Credentials = []openid4vci.Credential{
-			{
-				Credential: reply.Credentials[0].Credential,
-			},
-		}
-		return response, nil
-	default:
-		return nil, errors.New("multiple credentials returned from issuer, not supported")
+	if len(reply.Credentials) == 0 {
+		return "", helpers.ErrNoDocumentFound
 	}
+
+	return reply.Credentials[0].Credential, nil
 }
 
-// issueMDoc issues an mDL/mDoc credential (ISO 18013-5)
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (*openid4vci.CredentialResponse, error) {
+// issueMDoc issues a single mDL/mDoc credential (ISO 18013-5) bound to the given JWK.
+// Returns the base64-encoded credential string for inclusion in the batch response.
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (string, error) {
 	// Convert JWK to COSE key bytes for mDoc
 	deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
 	if err != nil {
 		c.log.Error(err, "failed to convert JWK to COSE key")
-		return nil, err
+		return "", err
 	}
 
 	reply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
@@ -282,11 +305,11 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeMDoc")
-		return nil, err
+		return "", err
 	}
 
 	if reply == nil {
-		return nil, errors.New("MakeMDoc reply is nil")
+		return "", errors.New("MakeMDoc reply is nil")
 	}
 
 	// Save credential subject info to registry for status management
@@ -305,21 +328,13 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 	}
 
 	// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
-	mdocBase64 := base64.StdEncoding.EncodeToString(reply.Mdoc)
-
-	response := &openid4vci.CredentialResponse{
-		Credentials: []openid4vci.Credential{
-			{
-				Credential: mdocBase64,
-			},
-		},
-	}
-
-	return response, nil
+	return base64.StdEncoding.EncodeToString(reply.Mdoc), nil
 }
 
-// issueVC20 issues a W3C VC 2.0 Data Integrity credential
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+// issueVC20 issues a single W3C VC 2.0 Data Integrity credential.
+// proofIndex identifies which proof in a batch request to extract the subject DID from.
+// Returns the credential string for inclusion in the batch response.
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest, proofIndex int) (string, error) {
 	// Extract cryptosuite from credential configuration
 	var cryptosuite string
 	var mandatoryPointers []string
@@ -331,7 +346,6 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			if config.CredentialDefinition != nil {
 				credentialTypes = config.CredentialDefinition.Type
 			}
-			// Mandatory pointers could be specified in config in future
 		}
 	}
 
@@ -345,10 +359,12 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		credentialTypes = []string{"VerifiableCredential"}
 	}
 
-	// Extract subject DID from proof if available
+	// Extract subject DID from the appropriate proof
 	var subjectDID string
 	if req.Proof != nil {
 		subjectDID = req.Proof.ExtractSubjectDID()
+	} else if req.Proofs != nil && proofIndex < len(req.Proofs.JWT) {
+		subjectDID = req.Proofs.JWT[proofIndex].ExtractSubjectDID()
 	}
 
 	reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
@@ -361,11 +377,11 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeVC20")
-		return nil, err
+		return "", err
 	}
 
 	if reply == nil {
-		return nil, errors.New("MakeVC20 reply is nil")
+		return "", errors.New("MakeVC20 reply is nil")
 	}
 
 	// Save credential subject info to registry for status management
@@ -383,16 +399,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		}
 	}
 
-	response := &openid4vci.CredentialResponse{
-		Credentials: []openid4vci.Credential{
-			{
-				// VC20 Data Integrity credentials are JSON-LD, return as-is
-				Credential: string(reply.Credential),
-			},
-		},
-	}
-
-	return response, nil
+	return string(reply.Credential), nil
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes

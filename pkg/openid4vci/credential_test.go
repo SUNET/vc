@@ -195,6 +195,70 @@ func TestExtractJWK(t *testing.T) {
 	}
 }
 
+func TestExtractAllJWKs(t *testing.T) {
+	expectedJWK := &apiv1_issuer.Jwk{
+		Crv:    "P-256",
+		Kty:    "EC",
+		X:      "uhfw3zr9bAY9DD5tBCtEU_9WMhWoMaeaUR4f7SgJC9o",
+		Y:      "bYGbeWlVbRk6KqOXQ_ETylZgsJ04t6WyQ6bdXX0u1WE",
+		KeyOps: []string{"verify"},
+		Ext:    true,
+	}
+
+	t.Run("single JWT proof", func(t *testing.T) {
+		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT}}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.NoError(t, err)
+		assert.Len(t, jwks, 1)
+		assert.Equal(t, expectedJWK, jwks[0])
+	})
+
+	t.Run("multiple JWT proofs", func(t *testing.T) {
+		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT, mockProofJWT, mockProofJWT}}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.NoError(t, err)
+		assert.Len(t, jwks, 3)
+		for i, jwk := range jwks {
+			assert.Equal(t, expectedJWK, jwk, "JWK at index %d should match", i)
+		}
+	})
+
+	t.Run("empty proofs", func(t *testing.T) {
+		proofs := &Proofs{}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.Error(t, err)
+		assert.Nil(t, jwks)
+		assert.Contains(t, err.Error(), "no proofs found")
+	})
+}
+
+func TestProofsCount(t *testing.T) {
+	t.Run("JWT proofs count", func(t *testing.T) {
+		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT, mockProofJWT, mockProofJWT}}
+		assert.Equal(t, 3, proofs.Count())
+	})
+
+	t.Run("single JWT proof count", func(t *testing.T) {
+		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT}}
+		assert.Equal(t, 1, proofs.Count())
+	})
+
+	t.Run("DIVP proofs count", func(t *testing.T) {
+		proofs := &Proofs{DIVP: []ProofDIVP{{}, {}}}
+		assert.Equal(t, 2, proofs.Count())
+	})
+
+	t.Run("attestation count", func(t *testing.T) {
+		proofs := &Proofs{Attestation: ProofAttestation("some.jwt.token")}
+		assert.Equal(t, 1, proofs.Count())
+	})
+
+	t.Run("empty proofs count", func(t *testing.T) {
+		proofs := &Proofs{}
+		assert.Equal(t, 0, proofs.Count())
+	})
+}
+
 func TestResolveCredentialFormat(t *testing.T) {
 	tests := []struct {
 		name        string
