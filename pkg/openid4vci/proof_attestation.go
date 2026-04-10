@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
@@ -104,45 +105,16 @@ func (p ProofAttestation) Validate() error {
 // ExtractJWK extracts the first attested key (JWK) from the attestation JWT.
 // The attested_keys claim contains an array of JWKs that are attested by this proof.
 func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
-	if p == "" {
-		return nil, fmt.Errorf("attestation is empty")
-	}
-
-	token, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
+	jwks, err := p.ExtractAllJWKs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse attestation JWT: %w", err)
+		return nil, err
 	}
 
-	claims, ok := token.Claims.(jwtv5.MapClaims)
-	if !ok {
-		return nil, fmt.Errorf("failed to extract claims from attestation JWT")
+	if len(jwks) == 0 {
+		return nil, fmt.Errorf("no attested keys found in attestation")
 	}
 
-	attestedKeys, ok := claims["attested_keys"]
-	if !ok {
-		return nil, fmt.Errorf("attested_keys claim not found in attestation")
-	}
-
-	keysArr, ok := attestedKeys.([]any)
-	if !ok || len(keysArr) == 0 {
-		return nil, fmt.Errorf("attested_keys must be a non-empty array")
-	}
-
-	// Extract the first key
-	firstKey, ok := keysArr[0].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("first attested key is not a valid JWK object")
-	}
-
-	jwkByte, err := json.Marshal(firstKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal JWK: %w", err)
-	}
-
-	jwk := &apiv1_issuer.Jwk{}
-	if err := json.Unmarshal(jwkByte, jwk); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JWK: %w", err)
-	}
+	jwk := jwks[0]
 
 	return jwk, nil
 }
