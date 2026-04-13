@@ -279,8 +279,8 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 	}
 
-	if len(reply.Credentials) == 0 {
-		return "", helpers.ErrNoDocumentFound
+	if len(reply.Credentials) != 1 {
+		return "", fmt.Errorf("expected exactly 1 credential from MakeSDJWT, got %d", len(reply.Credentials))
 	}
 
 	return reply.Credentials[0].Credential, nil
