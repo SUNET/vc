@@ -22,10 +22,7 @@ func (l *Localizer) Locale() string {
 // Get returns the translation for name with optional MessageFormat variables.
 // Returns name as fallback if no translation is found.
 func (l *Localizer) Get(name string, data ...Vars) string {
-	pt, err := l.lookup(name)
-	if err != nil {
-		return name
-	}
+	pt, _ := l.resolve(name)
 	return l.localize(pt, data...)
 }
 
@@ -36,33 +33,31 @@ func (l *Localizer) GetX(name, context string, data ...Vars) string {
 	return l.Get(name+" <"+context+">", data...)
 }
 
-// Getf returns the translation for name formatted with fmt.Sprintf.
-// Uses name as the format string if no translation is found.
-func (l *Localizer) Getf(name string, args ...any) string {
-	pt, err := l.lookup(name)
-	if err != nil {
-		return name
+// Lookup returns the translation for name with full lookup details.
+// Use [Localizer.Get] for the common case where only the text is needed.
+func (l *Localizer) Lookup(name string, data ...Vars) TranslationResult {
+	pt, found := l.resolve(name)
+	source := TranslationSourceMissing
+	if found {
+		source = TranslationSourceFallback
+		if pt.locale == l.locale {
+			source = TranslationSourceDirect
+		}
 	}
-	return fmt.Sprintf(l.localize(pt), args...)
+	return TranslationResult{
+		Text:   l.localize(pt, data...),
+		Locale: pt.locale,
+		Source: source,
+	}
 }
 
-// lookup resolves the translation for name by checking the locale's
-// pre-parsed translations first, then falling back to runtime-parsed
-// translations from the default locale. If no translation exists, it
-// creates a new runtime translation using the name as the text.
-func (l *Localizer) lookup(name string) (*parsedTranslation, error) {
+// resolve finds the parsedTranslation for name.
+// Returns (pt, true) if found in loaded translations, (pt, false) for runtime fallback.
+func (l *Localizer) resolve(name string) (*parsedTranslation, bool) {
 	if pt, ok := l.bundle.parsedTranslations[l.locale][name]; ok {
-		return pt, nil
+		return pt, true
 	}
-	if pt, ok := l.bundle.runtimeParsedTranslations[name]; ok {
-		return pt, nil
-	}
-	pt, err := l.bundle.parseTranslation(l.bundle.defaultLocale, name, trimContext(name))
-	if err != nil {
-		return nil, err
-	}
-	l.bundle.runtimeParsedTranslations[name] = pt
-	return pt, nil
+	return l.bundle.getRuntimeParsedTranslation(name), false
 }
 
 // localize formats a parsed translation with the given variables.
@@ -88,8 +83,9 @@ func (l *Localizer) localize(pt *parsedTranslation, data ...Vars) string {
 }
 
 // Format compiles and formats a MessageFormat message directly.
-// This bypasses translation lookup and is useful for dynamic messages
-// not stored in translation files.
+// This bypasses translation lookup and recompiles the message on each call,
+// so it is intended for dynamic, non-hot-path messages that are not stored in
+// translation files. Prefer [Localizer.Get] for normal translated content.
 func (l *Localizer) Format(message string, data ...Vars) (string, error) {
 	base, _ := language.MustParse(l.locale).Base()
 

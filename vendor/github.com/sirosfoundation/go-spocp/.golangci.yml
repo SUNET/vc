@@ -1,82 +1,92 @@
-# golangci-lint configuration
-# https://golangci-lint.run/usage/configuration/
-
+version: "2"
 run:
-  timeout: 5m
-  tests: true
   modules-download-mode: readonly
-
+  tests: true
 linters:
   enable:
-    - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
-    - govet         # Vet examines Go source code
-    - ineffassign   # Detect ineffectual assignments
-    - staticcheck   # Static analysis checks
-    - unused        # Find unused code
-    - gofmt         # Check formatting
-    - goimports     # Check imports
-    - misspell      # Find commonly misspelled words
-    - revive        # Drop-in replacement for golint
-    - stylecheck    # Replacement for golint
-    - unconvert     # Remove unnecessary type conversions
-    - unparam       # Find unused function parameters
-    - gosec         # Security checks
-    - bodyclose     # Check HTTP response bodies are closed
-    - noctx         # Find HTTP requests without context
-
-linters-settings:
-  errcheck:
-    check-blank: true
-    check-type-assertions: false  # Type assertions are checked by prior type switches
-  
-  govet:
-    enable-all: true
-    disable:
-      - shadow      # Shadow variables are sometimes intentional
-      - fieldalignment  # Field alignment optimization not critical for this project
-  
-  revive:
-    rules:
-      - name: exported
-        severity: warning
-        disabled: false
-      - name: var-naming
-        severity: warning
-        disabled: false
-      - name: package-comments
-        severity: warning
-        disabled: false
-  
-  stylecheck:
-    checks: ["all"]
-
-issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-        - unused
+    - bodyclose
+    - gosec
+    - misspell
+    - noctx
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: true
+    govet:
+      disable:
+        - shadow
         - fieldalignment
-    
-    # Exclude security checks from cmd tools (benchmarks, etc.)
-    - path: ^cmd/
-      linters:
-        - gosec
-    
-    # Type assertions in compare.go are safe due to prior type checking
-    - path: pkg/compare/compare\.go
-      linters:
-        - errcheck
-      text: "type assertion on error"
-    
-    # Type assertions in starform.go are safe due to prior type checking  
-    - path: pkg/starform/starform\.go
-      linters:
-        - errcheck
-      text: "type assertion on error"
-  
+      enable-all: true
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+        - name: var-naming
+          severity: warning
+          disabled: false
+        - name: package-comments
+          severity: warning
+          disabled: false
+    staticcheck:
+      checks:
+        - all
+        - -QF1012  # Allow WriteString(fmt.Sprintf(...)) pattern
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - fieldalignment
+          - gosec
+          - noctx
+          - unused
+        path: _test\.go
+      - linters:
+          - gosec
+          - noctx
+        path: ^cmd/
+      - linters:
+          - gosec
+          - noctx
+          - errcheck
+        path: ^examples/
+      - linters:
+          - noctx
+        path: pkg/client/client\.go
+      - linters:
+          - noctx
+        path: pkg/server/server\.go
+      - linters:
+          - errcheck
+        path: pkg/compare/compare\.go
+        text: type assertion on error
+      - linters:
+          - errcheck
+        path: pkg/starform/starform\.go
+        text: type assertion on error
+    paths:
+      - third_party$
+      - builtin$
+issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

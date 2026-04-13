@@ -8,11 +8,12 @@
 - **High Performance**: Optimized with Go 1.26 features (slices, maps, built-in functions)
 - **ICU MessageFormat v1**: Full support with [kaptinlin/messageformat-go](https://github.com/kaptinlin/messageformat-go)
 - **Flexible Loading**: From maps, files, glob patterns, or `go:embed`
-- **Smart Fallbacks**: Recursive fallback chains with language confidence matching
+- **Deterministic Fallbacks**: Recursive fallback chains rooted in the default locale
 - **Custom Formatters**: Extensible formatting system for complex use cases
 - **Accept-Language**: Built-in HTTP header parsing support
 
 ## Index
+
 -   [Installation](#installation)
 -   [Getting Started](#getting-started)
 -   [Advanced Configuration](#advanced-configuration)
@@ -26,12 +27,17 @@
     -   [Load from Embedded Files](#load-from-embedded-files)
 -   [Translations](#translations)
     -   [Passing Data to Translation](#passing-data-to-translation)
-    -   [Direct Formatting](#direct-formatting)
+    -   [Dynamic Formatting](#dynamic-formatting)
+-   [Translation Lookup](#translation-lookup)
+    -   [Detecting Fallback vs Direct Hit](#detecting-fallback-vs-direct-hit)
+    -   [Google AIP-193 Compliance](#google-aip-193-compliance)
+    -   [Translation Coverage Analytics](#translation-coverage-analytics)
 -   [Pluralization](#pluralization)
 -   [Text-based Translations](#text-based-translations)
     -   [Disambiguation by context](#disambiguation-by-context)
     -   [Act as fallback](#act-as-fallback)
 -   [Fallbacks](#fallbacks)
+-   [Introspection](#introspection)
 -   [Custom Unmarshaler](#custom-unmarshaler)
     -   [YAML Unmarshaler](#yaml-unmarshaler)
     -   [TOML Unmarshaler](#toml-unmarshaler)
@@ -44,7 +50,7 @@
 ## Installation
 
 ```bash
-$ go get github.com/kaptinlin/go-i18n@latest
+go get github.com/kaptinlin/go-i18n@latest
 ```
 
 &nbsp;
@@ -60,23 +66,25 @@ Create a folder named `./locales` and put some `YAML`, `TOML`, `INI` or `JSON` f
     └───zh-Hans.json
 ```
 
-Now, put the key-values content for each locale, e.g. 
+Now, put the key-values content for each locale, e.g.
 
-**locales/en.json** 
+File: `locales/en.json`
+
 ```json
 {
   "hello": "Hello, {name}"
 }
 ```
 
-**locales/zh-Hans.json**
+File: `locales/zh-Hans.json`
+
 ```json
 {
   "hello": "你好, {name}"
 }
 ```
 
-**main.go**
+File: `main.go`
 
 ```go
 package main
@@ -305,9 +313,12 @@ localizer.Get("message_vars", i18n.Vars{
 })
 ```
 
-### Direct Formatting
+### Dynamic Formatting
 
-Use the `Format` method to compile and format MessageFormat strings directly:
+Use `Format` only for dynamic messages that are not stored in translation files.
+It recompiles the MessageFormat string on every call, so it is not the primary
+translation path and should not be used in hot paths. Prefer `Get` for normal
+localized content.
 
 ```go
 localizer := bundle.NewLocalizer("en")
@@ -348,6 +359,7 @@ localizer.Get("message", i18n.Vars{
 ```
 
 Using exact matches (`=0`):
+
 ```json
 {
     "messages": "{count, plural, =0 {No messages} one {1 message} other {# messages}}"
@@ -375,7 +387,7 @@ localizer.Get("messages", i18n.Vars{
 
 ## Text-based Translations
 
-Translations can also be named with sentences so it will act like fallbacks when the translation was not found.
+Translations can also be named with sentences. When no translation is found, the key text itself is returned.
 
 ```json
 {
@@ -427,7 +439,7 @@ localizer.GetX("Post", "adjective")
 
 ### Act as fallback
 
-Remember, if a translation was not found, the token name will be output directly. The token name can also be used as template content.
+If a translation is not found, the key text is returned directly. That makes literal text keys usable as their own fallback content.
 
 ```go
 // Output: Hello, World
@@ -445,33 +457,136 @@ localizer.Get("{count, plural, =0 {No Post} one {1 Post} other {# Posts}}", i18n
 
 ## Fallbacks
 
-A fallback language will be used when a translation is missing from the current language. If it's still missing from the fallback language, it will lookup from the default language.
+A fallback language is used when a translation is missing from the current language. If it is still missing from the fallback chain, lookup ends at the default language.
 
 If a translation cannot be found from any language, the token name will be output directly.
 
 ```go
 // `ja-jp` is the default language
-bundle :=i18n.New(
+bundle := i18n.NewBundle(
     i18n.WithDefaultLocale("ja-JP"),
     i18n.WithFallback(map[string][]string{
         // `zh-Hans` uses `zh`, `zh-Hant` as fallbacks.
         // `en-GB` uses `en-US` as fallback.
-        "zh-Hans": []string{"zh", "zh-Hant"},
-        "en-GB": []string{"en-US"},
-    },
-))
+        "zh-Hans": {"zh", "zh-Hant"},
+        "en-GB":   {"en-US"},
+    }),
+)
 ```
 
 Lookup path looks like this with the example above:
 
-```
+```text
 zh-Hans -> zh -> zh-Hant -> ja-JP
 en-GB -> en-US -> ja-JP
 ```
 
-Recursive fallback is also supported. If `zh-Hans` has a `zh` fallback, and `zh` has a `zh-Hant` fallback, `zh-Hans` will have either `zh` and `zh-Hant` fallbacks.
+Recursive fallback is also supported. If `zh-Hans` falls back to `zh`, and `zh` falls back to `zh-Hant`, lookup walks that chain before returning to the default locale.
 
-Fallback only works if the translation exists in default language.
+Two rules define the model:
+
+- Fallback chains only apply to keys that exist in the default locale.
+- `Has` and `Keys` report only keys defined directly on a locale. They do not include inherited fallback keys.
+
+In practice, the default locale should contain the complete key set. Other locales selectively override it.
+
+&nbsp;
+
+## Translation Lookup
+
+When you need to know which locale produced a translation, use `Lookup`. It returns the rendered text, the locale that produced it, and the result source.
+
+```go
+r := localizer.Lookup("hello", i18n.Vars{"name": "World"})
+fmt.Println(r.Text)   // "你好，World！"
+fmt.Println(r.Locale) // "zh-Hans"
+fmt.Println(r.Source) // "direct"
+```
+
+`TranslationResult` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Text` | `string` | Translated message, or the key itself if not found. Always populated. |
+| `Locale` | `string` | BCP 47 locale tag that provided the translation. Always populated. |
+| `Source` | `TranslationSource` | `direct`, `fallback`, or `missing`. |
+
+**Complete Example:**
+
+```go
+bundle := i18n.NewBundle(
+    i18n.WithDefaultLocale("en"),
+    i18n.WithLocales("en", "zh-Hans"),
+)
+
+bundle.LoadMessages(map[string]map[string]string{
+    "en":      {"hello": "Hello", "bye": "Goodbye"},
+    "zh-Hans": {"hello": "你好"},
+})
+
+localizer := bundle.NewLocalizer("zh-Hans")
+
+// Direct hit in requested locale
+r := localizer.Lookup("hello")
+// r.Text: "你好", r.Locale: "zh-Hans", r.Source: "direct"
+
+// Fallback to default locale
+r = localizer.Lookup("bye")
+// r.Text: "Goodbye", r.Locale: "en", r.Source: "fallback"
+
+// Not found anywhere
+r = localizer.Lookup("nonexistent")
+// r.Text: "nonexistent", r.Locale: "en", r.Source: "missing"
+
+// With context (use the full key convention)
+r = localizer.Lookup("Post <verb>")
+```
+
+&nbsp;
+
+### Detecting Fallback vs Direct Hit
+
+```go
+r := localizer.Lookup("hello")
+
+switch r.Source {
+case i18n.TranslationSourceMissing:
+    // Key not in any translation file
+case i18n.TranslationSourceFallback:
+    // Found via fallback chain
+case i18n.TranslationSourceDirect:
+    // Direct hit in requested locale
+}
+```
+
+&nbsp;
+
+### Google AIP-193 Compliance
+
+`TranslationResult` maps directly to [AIP-193 `LocalizedMessage`](https://google.aip.dev/193):
+
+```go
+r := localizer.Lookup("error_invalid_input", i18n.Vars{"field": fieldName})
+
+// Both fields always populated — AIP-193 compliant
+localizedMsg := &errdetails.LocalizedMessage{
+    Locale:  r.Locale, // e.g. "zh-Hans" or "en" (never empty)
+    Message: r.Text,   // e.g. "字段无效" or "error_invalid_input" (never empty)
+}
+```
+
+&nbsp;
+
+### Translation Coverage Analytics
+
+```go
+r := localizer.Lookup(key, data)
+if r.Source == i18n.TranslationSourceMissing {
+    metrics.TranslationMiss(r.Locale, key)
+} else {
+    metrics.TranslationHit(r.Locale, key)
+}
+```
 
 &nbsp;
 
@@ -480,6 +595,7 @@ Fallback only works if the translation exists in default language.
 Translations are JSON format by default using `github.com/go-json-experiment/json` as the default unmarshaler. Change it by calling `WithUnmarshaler`.
 
 ### YAML Unmarshaler
+
 Uses [`go-yaml/yaml`](https://github.com/go-yaml/yaml) to read the files, so you can write the translation files in YAML format.
 
 ```go
@@ -617,6 +733,41 @@ func(w http.ResponseWriter, r *http.Request) {
 
 Orders of the languages that passed to `NewLocalizer` won't affect the fallback priorities, it will use the first language that was found in loaded translations.
 
+## Introspection
+
+Use `Has` and `Keys` when you need to inspect what a locale defines directly.
+
+```go
+bundle := i18n.NewBundle(
+    i18n.WithDefaultLocale("en"),
+    i18n.WithLocales("en", "zh-Hans", "ja-JP"),
+    i18n.WithFallback(map[string][]string{
+        "ja-JP": {"zh-Hans"},
+    }),
+)
+
+bundle.LoadMessages(map[string]map[string]string{
+    "en": {
+        "hello": "Hello",
+        "bye":   "Goodbye",
+    },
+    "zh-Hans": {
+        "hello": "你好",
+    },
+    "ja-JP": {},
+})
+
+bundle.Has("zh-Hans", "hello") // true
+bundle.Has("zh-Hans", "bye")   // false
+bundle.Has("ja-JP", "hello")   // false
+
+bundle.Keys("en")      // []string{"bye", "hello"}
+bundle.Keys("zh-Hans") // []string{"hello"}
+bundle.Keys("ja-JP")   // nil or empty, depending on what was loaded directly
+```
+
+`Get` and `Lookup` still use fallback resolution. Introspection does not.
+
 &nbsp;
 
 ## Performance
@@ -635,6 +786,7 @@ This library is optimized with Go 1.26 features for maximum performance:
 ### Benchmarks
 
 The modernized codebase shows significant improvements:
+
 - **String normalization**: 40-60% faster with reduced allocations
 - **File loading**: 25-35% faster with batch operations
 - **Translation lookup**: Optimized with pre-allocated data structures
@@ -644,11 +796,11 @@ The modernized codebase shows significant improvements:
 
 ## Thanks
 
-- https://github.com/teacat/i18n
-- https://github.com/kataras/i18n
-- https://github.com/nicksnyder/go-i18n
-- https://github.com/vorlif/spreak
-- https://github.com/oblq/i18n
+- [teacat/i18n](https://github.com/teacat/i18n)
+- [kataras/i18n](https://github.com/kataras/i18n)
+- [nicksnyder/go-i18n](https://github.com/nicksnyder/go-i18n)
+- [vorlif/spreak](https://github.com/vorlif/spreak)
+- [oblq/i18n](https://github.com/oblq/i18n)
 
 ## License
 

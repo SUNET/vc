@@ -114,11 +114,15 @@ func (p *Parser) parseAtom() (*Atom, error) {
 }
 
 // parseList parses an S-expression list: (<tag> <elements>...)
+// Whitespace between elements is allowed for better readability.
 func (p *Parser) parseList() (*List, error) {
 	if p.input[p.pos] != '(' {
 		return nil, fmt.Errorf("expected '(' at position %d", p.pos)
 	}
 	p.pos++ // skip '('
+
+	// Skip any whitespace after opening paren
+	p.skipWhitespace()
 
 	// Parse the tag (must be an atom)
 	tag, err := p.parseAtom()
@@ -128,16 +132,23 @@ func (p *Parser) parseList() (*List, error) {
 
 	// Parse elements until we hit ')'
 	var elements []Element
-	for p.pos < len(p.input) && p.input[p.pos] != ')' {
+	for {
+		// Skip whitespace before next element or closing paren
+		p.skipWhitespace()
+
+		if p.pos >= len(p.input) {
+			return nil, fmt.Errorf("unclosed list starting at tag '%s'", tag.Value)
+		}
+
+		if p.input[p.pos] == ')' {
+			break
+		}
+
 		elem, err := p.Parse()
 		if err != nil {
 			return nil, err
 		}
 		elements = append(elements, elem)
-	}
-
-	if p.pos >= len(p.input) {
-		return nil, fmt.Errorf("unclosed list starting at tag '%s'", tag.Value)
 	}
 
 	p.pos++ // skip ')'
@@ -160,4 +171,59 @@ func AdvancedForm(elem Element) string {
 	default:
 		return ""
 	}
+}
+
+// HasMore returns true if there is more content to parse after skipping whitespace.
+func (p *Parser) HasMore() bool {
+	p.skipWhitespace()
+	return p.pos < len(p.input)
+}
+
+// skipWhitespace advances past any whitespace characters
+func (p *Parser) skipWhitespace() {
+	for p.pos < len(p.input) {
+		c := p.input[p.pos]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			p.pos++
+		} else {
+			break
+		}
+	}
+}
+
+// SkipToNextExpression skips characters until finding the start of a potential
+// S-expression (either '(' for a list or a digit for an atom length prefix).
+// Returns true if a potential start was found, false if end of input reached.
+func (p *Parser) SkipToNextExpression() bool {
+	for p.pos < len(p.input) {
+		c := p.input[p.pos]
+		// S-expression starts with '(' for list or digit for atom length
+		if c == '(' || (c >= '0' && c <= '9') {
+			return true
+		}
+		p.pos++
+	}
+	return false
+}
+
+// ParseAll parses all S-expressions from the input, returning a slice of Elements.
+// Whitespace between expressions is ignored.
+func (p *Parser) ParseAll() ([]Element, error) {
+	var elements []Element
+
+	for p.HasMore() {
+		elem, err := p.Parse()
+		if err != nil {
+			return nil, fmt.Errorf("at position %d: %w", p.pos, err)
+		}
+		elements = append(elements, elem)
+	}
+
+	return elements, nil
+}
+
+// ParseAllFromString is a convenience function that parses all S-expressions from a string.
+func ParseAllFromString(input string) ([]Element, error) {
+	parser := NewParser(input)
+	return parser.ParseAll()
 }

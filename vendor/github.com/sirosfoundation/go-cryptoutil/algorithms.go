@@ -23,6 +23,8 @@ type Algorithm struct {
 type AlgorithmRegistry struct {
 	// CurveAlgorithms maps elliptic curve Params().Name to Algorithm.
 	CurveAlgorithms map[string]*Algorithm
+	// xmldsigIndex maps XML-DSIG algorithm URI to Algorithm.
+	xmldsigIndex map[string]*Algorithm
 	// All is the full list of registered algorithms.
 	All []*Algorithm
 }
@@ -31,6 +33,7 @@ type AlgorithmRegistry struct {
 func NewAlgorithmRegistry() *AlgorithmRegistry {
 	reg := &AlgorithmRegistry{
 		CurveAlgorithms: make(map[string]*Algorithm),
+		xmldsigIndex:    make(map[string]*Algorithm),
 	}
 	for _, a := range standardAlgorithms {
 		reg.Register(a)
@@ -45,6 +48,15 @@ func (r *AlgorithmRegistry) Register(a *Algorithm) {
 	if a.KeyType == "EC" {
 		r.CurveAlgorithms[a.Name] = a
 	}
+	if a.XMLDSIG != "" {
+		r.xmldsigIndex[a.XMLDSIG] = a
+	}
+}
+
+// ByXMLDSIG returns the Algorithm registered for the given XML-DSIG URI,
+// or nil if the URI is not recognized.
+func (r *AlgorithmRegistry) ByXMLDSIG(uri string) *Algorithm {
+	return r.xmldsigIndex[uri]
 }
 
 // ForKey returns the Algorithm for the given public key, or an error if the

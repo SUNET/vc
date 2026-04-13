@@ -2,6 +2,7 @@
 
 [![Run CI Lint](https://github.com/gin-contrib/sessions/actions/workflows/lint.yml/badge.svg?branch=master)](https://github.com/gin-contrib/sessions/actions/workflows/lint.yml)
 [![Run Testing](https://github.com/gin-contrib/sessions/actions/workflows/testing.yml/badge.svg?branch=master)](https://github.com/gin-contrib/sessions/actions/workflows/testing.yml)
+[![Trivy Security Scan](https://github.com/gin-contrib/sessions/actions/workflows/trivy-scan.yml/badge.svg)](https://github.com/gin-contrib/sessions/actions/workflows/trivy-scan.yml)
 [![codecov](https://codecov.io/gh/gin-contrib/sessions/branch/master/graph/badge.svg)](https://codecov.io/gh/gin-contrib/sessions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/gin-contrib/sessions)](https://goreportcard.com/report/github.com/gin-contrib/sessions)
 [![GoDoc](https://godoc.org/github.com/gin-contrib/sessions?status.svg)](https://godoc.org/github.com/gin-contrib/sessions)
@@ -15,6 +16,7 @@ Gin middleware for session management with multi-backend support:
 - [GORM](#gorm)
 - [memstore](#memstore)
 - [PostgreSQL](#postgresql)
+- [Filesystem](#Filesystem)
 
 ## Usage
 
@@ -80,6 +82,56 @@ func main() {
   store := cookie.NewStore([]byte("secret"))
   sessionNames := []string{"a", "b"}
   r.Use(sessions.SessionsMany(sessionNames, store))
+
+  r.GET("/hello", func(c *gin.Context) {
+    sessionA := sessions.DefaultMany(c, "a")
+    sessionB := sessions.DefaultMany(c, "b")
+
+    if sessionA.Get("hello") != "world!" {
+      sessionA.Set("hello", "world!")
+      sessionA.Save()
+    }
+
+    if sessionB.Get("hello") != "world?" {
+      sessionB.Set("hello", "world?")
+      sessionB.Save()
+    }
+
+    c.JSON(200, gin.H{
+      "a": sessionA.Get("hello"),
+      "b": sessionB.Get("hello"),
+    })
+  })
+  r.Run(":8000")
+}
+```
+
+### multiple sessions with different stores
+
+```go
+package main
+
+import (
+  "github.com/gin-contrib/sessions"
+  "github.com/gin-contrib/sessions/cookie"
+  "github.com/gin-gonic/gin"
+)
+
+func main() {
+  r := gin.Default()
+  cookieStore := cookie.NewStore([]byte("secret"))
+  redisStore, _ := redis.NewStore(10, "tcp", "localhost:6379", "", []byte("secret"))
+  sessionStores := []sessions.SessionStore{
+    {
+      Name:  "a",
+      Store: cookieStore,
+    },
+    {
+      Name:  "b",
+      Store: redisStore,
+    },
+  }
+  r.Use(sessions.SessionsManyStores(sessionStores))
 
   r.GET("/hello", func(c *gin.Context) {
     sessionA := sessions.DefaultMany(c, "a")
@@ -437,6 +489,43 @@ func main() {
     // handle err
   }
 
+  r.Use(sessions.Sessions("mysession", store))
+
+  r.GET("/incr", func(c *gin.Context) {
+    session := sessions.Default(c)
+    var count int
+    v := session.Get("count")
+    if v == nil {
+      count = 0
+    } else {
+      count = v.(int)
+      count++
+    }
+    session.Set("count", count)
+    session.Save()
+    c.JSON(200, gin.H{"count": count})
+  })
+  r.Run(":8000")
+}
+```
+
+### Filesystem
+
+```go
+package main
+
+import (
+  "github.com/gin-contrib/sessions"
+  "github.com/gin-contrib/sessions/filesystem"
+  "github.com/gin-gonic/gin"
+)
+
+func main() {
+  r := gin.Default()
+
+  var sessionPath = "/tmp/" // in case of empty string, the system's default tmp folder is used
+
+  store := filesystem.NewStore(sessionPath,[]byte("secret"))
   r.Use(sessions.Sessions("mysession", store))
 
   r.GET("/incr", func(c *gin.Context) {
