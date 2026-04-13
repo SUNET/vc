@@ -198,12 +198,39 @@ type Proofs struct {
 	Attestation ProofAttestation `json:"attestation,omitempty"`
 }
 
+// AssertSingleProofType checks that only one proof type is used per request.
+func (p *Proofs) AssertSingleProofType() error {
+	proofTypesUsed := make([]string, 0, 3)
+	if len(p.JWT) > 0 {
+		proofTypesUsed = append(proofTypesUsed, "jwt")
+	}
+	if len(p.DIVP) > 0 {
+		proofTypesUsed = append(proofTypesUsed, "di_vp")
+	}
+	if p.Attestation != "" {
+		proofTypesUsed = append(proofTypesUsed, "attestation")
+	}
+
+	if len(proofTypesUsed) == 0 {
+		return fmt.Errorf("no proofs provided")
+	}
+	if len(proofTypesUsed) > 1 {
+		return fmt.Errorf("multiple proof types provided (%s); only one is allowed per request", strings.Join(proofTypesUsed, ", "))
+	}
+	return nil
+}
+
 // ExtractJWK extracts the holder's public key (JWK) from the proofs.
 // It automatically detects which proof type is present and extracts accordingly:
 // - jwt: from the jwk header of the first JWT
 // - di_vp: from the verificationMethod of the first proof
 // - attestation: from the attested_keys claim
 func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
+	err := p.AssertSingleProofType()
+	if err != nil {
+		return nil, err
+	}
+
 	// Check which proof type is present and extract accordingly
 	if len(p.JWT) > 0 {
 		return p.JWT[0].ExtractJWK()
@@ -224,6 +251,11 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 // For JWT and DIVP proof types, each proof in the array yields one JWK.
 // For Attestation, all keys from the attested_keys claim are returned.
 func (p *Proofs) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
+	err := p.AssertSingleProofType()
+	if err != nil {
+		return nil, err
+	}
+
 	if len(p.JWT) > 0 {
 		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.JWT))
 		for i, token := range p.JWT {
