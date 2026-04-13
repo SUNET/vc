@@ -199,25 +199,30 @@ type Proofs struct {
 }
 
 // AssertSingleProofType checks that only one proof type is used per request.
-func (p *Proofs) AssertSingleProofType() error {
+func (p *Proofs) AssertSingleProofType() (string, error) {
 	proofTypesUsed := make([]string, 0, 3)
+
 	if len(p.JWT) > 0 {
 		proofTypesUsed = append(proofTypesUsed, "jwt")
 	}
+
 	if len(p.DIVP) > 0 {
 		proofTypesUsed = append(proofTypesUsed, "di_vp")
 	}
+
 	if p.Attestation != "" {
 		proofTypesUsed = append(proofTypesUsed, "attestation")
 	}
 
 	if len(proofTypesUsed) == 0 {
-		return fmt.Errorf("no proofs provided")
+		return "", fmt.Errorf("no proofs provided")
 	}
+
 	if len(proofTypesUsed) > 1 {
-		return fmt.Errorf("multiple proof types provided (%s); only one is allowed per request", strings.Join(proofTypesUsed, ", "))
+		return "", fmt.Errorf("multiple proof types provided (%s); only one is allowed per request", strings.Join(proofTypesUsed, ", "))
 	}
-	return nil
+
+	return proofTypesUsed[0], nil
 }
 
 // ExtractJWK extracts the holder's public key (JWK) from the proofs.
@@ -226,21 +231,17 @@ func (p *Proofs) AssertSingleProofType() error {
 // - di_vp: from the verificationMethod of the first proof
 // - attestation: from the attested_keys claim
 func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
-	err := p.AssertSingleProofType()
+	proofType, err := p.AssertSingleProofType()
 	if err != nil {
 		return nil, err
 	}
 
-	// Check which proof type is present and extract accordingly
-	if len(p.JWT) > 0 {
+	switch proofType {
+	case "jwt":
 		return p.JWT[0].ExtractJWK()
-	}
-
-	if len(p.DIVP) > 0 {
+	case "di_vp":
 		return p.DIVP[0].ExtractJWK()
-	}
-
-	if p.Attestation != "" {
+	case "attestation":
 		return p.Attestation.ExtractJWK()
 	}
 
@@ -251,7 +252,7 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 // For JWT and DIVP proof types, each proof in the array yields one JWK.
 // For Attestation, all keys from the attested_keys claim are returned.
 func (p *Proofs) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
-	err := p.AssertSingleProofType()
+	proofType, err := p.AssertSingleProofType()
 	if err != nil {
 		return nil, err
 	}
@@ -260,43 +261,48 @@ func (p *Proofs) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
 		return nil, fmt.Errorf("maxLength must be at least 1")
 	}
 
-	if len(p.JWT) > 0 {
-		if len(p.JWT) > maxLength {
-			return nil, fmt.Errorf("number of JWT proofs (%d) exceeds maxLength (%d)", len(p.JWT), maxLength)
-		}
-
-		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.JWT))
-		for i, token := range p.JWT {
-			jwk, err := token.ExtractJWK()
-			if err != nil {
-				return nil, fmt.Errorf("failed to extract JWK from JWT proof %d: %w", i, err)
-			}
-			jwks = append(jwks, jwk)
-		}
-		return jwks, nil
-	}
-
-	if len(p.DIVP) > 0 {
-		if len(p.DIVP) > maxLength {
-			return nil, fmt.Errorf("number of DIVP proofs (%d) exceeds maxLength (%d)", len(p.DIVP), maxLength)
-		}
-
-		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.DIVP))
-		for i, vp := range p.DIVP {
-			jwk, err := vp.ExtractJWK()
-			if err != nil {
-				return nil, fmt.Errorf("failed to extract JWK from DIVP proof %d: %w", i, err)
-			}
-			jwks = append(jwks, jwk)
-		}
-		return jwks, nil
-	}
-
-	if p.Attestation != "" {
+	switch proofType {
+	case "jwt":
+		return p.extractAllJWKsFromJWT(maxLength)
+	case "di_vp":
+		return p.extractAllJWKsFromDIVP(maxLength)
+	case "attestation":
 		return p.Attestation.ExtractAllJWKs(maxLength)
 	}
 
 	return nil, fmt.Errorf("no proofs found")
+}
+
+func (p *Proofs) extractAllJWKsFromJWT(maxLength int) ([]*apiv1_issuer.Jwk, error) {
+	if len(p.JWT) > maxLength {
+		return nil, fmt.Errorf("number of JWT proofs (%d) exceeds maxLength (%d)", len(p.JWT), maxLength)
+	}
+
+	jwks := make([]*apiv1_issuer.Jwk, 0, len(p.JWT))
+	for i, token := range p.JWT {
+		jwk, err := token.ExtractJWK()
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract JWK from JWT proof %d: %w", i, err)
+		}
+		jwks = append(jwks, jwk)
+	}
+	return jwks, nil
+}
+
+func (p *Proofs) extractAllJWKsFromDIVP(maxLength int) ([]*apiv1_issuer.Jwk, error) {
+	if len(p.DIVP) > maxLength {
+		return nil, fmt.Errorf("number of DIVP proofs (%d) exceeds maxLength (%d)", len(p.DIVP), maxLength)
+	}
+
+	jwks := make([]*apiv1_issuer.Jwk, 0, len(p.DIVP))
+	for i, vp := range p.DIVP {
+		jwk, err := vp.ExtractJWK()
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract JWK from DIVP proof %d: %w", i, err)
+		}
+		jwks = append(jwks, jwk)
+	}
+	return jwks, nil
 }
 
 // CredentialResponseEncryption contains information for encrypting the Credential Response.
