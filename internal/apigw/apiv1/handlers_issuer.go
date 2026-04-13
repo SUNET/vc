@@ -240,7 +240,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 }
 
 // issueSDJWT issues a single SD-JWT credential bound to the given JWK.
-// Returns the credential string for inclusion in the batch response.
 func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (string, error) {
 	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
 	if credentialConstructor == nil {
@@ -286,7 +285,6 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 }
 
 // issueMDoc issues a single mDL/mDoc credential (ISO 18013-5) bound to the given JWK.
-// Returns the base64-encoded credential string for inclusion in the batch response.
 func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (string, error) {
 	// Convert JWK to COSE key bytes for mDoc
 	deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
@@ -332,7 +330,6 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues a single W3C VC 2.0 Data Integrity credential.
 // proofIndex identifies which proof in a batch request to extract the subject DID from.
-// Returns the credential string for inclusion in the batch response.
 func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest, proofIndex int) (string, error) {
 	// Extract cryptosuite from credential configuration
 	var cryptosuite string
