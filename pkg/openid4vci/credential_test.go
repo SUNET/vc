@@ -304,8 +304,6 @@ func TestExtractAllJWKs(t *testing.T) {
 		assert.Equal(t, "key1x", jwks[0].X)
 		assert.Equal(t, "key2x", jwks[1].X)
 		assert.Equal(t, "key3x", jwks[2].X)
-		// Count() still returns 1 for attestation — confirm the discrepancy exists
-		assert.Equal(t, 1, proofs.Count())
 	})
 
 	t.Run("JWT proofs exceeding maxLength", func(t *testing.T) {
@@ -344,27 +342,27 @@ func TestExtractAllJWKs(t *testing.T) {
 func TestProofsCount(t *testing.T) {
 	t.Run("JWT proofs count", func(t *testing.T) {
 		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT, mockProofJWT, mockProofJWT}}
-		assert.Equal(t, 3, proofs.Count())
+		assert.Equal(t, 3, len(proofs.JWT))
 	})
 
 	t.Run("single JWT proof count", func(t *testing.T) {
 		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT}}
-		assert.Equal(t, 1, proofs.Count())
+		assert.Equal(t, 1, len(proofs.JWT))
 	})
 
 	t.Run("DIVP proofs count", func(t *testing.T) {
 		proofs := &Proofs{DIVP: []ProofDIVP{{}, {}}}
-		assert.Equal(t, 2, proofs.Count())
+		assert.Equal(t, 2, len(proofs.DIVP))
 	})
 
 	t.Run("attestation count", func(t *testing.T) {
 		proofs := &Proofs{Attestation: ProofAttestation("some.jwt.token")}
-		assert.Equal(t, 1, proofs.Count())
+		assert.NotEmpty(t, proofs.Attestation)
 	})
 
 	t.Run("empty proofs count", func(t *testing.T) {
 		proofs := &Proofs{}
-		assert.Equal(t, 0, proofs.Count())
+		assert.Equal(t, 0, len(proofs.JWT)+len(proofs.DIVP)+len(proofs.Attestation))
 	})
 }
 

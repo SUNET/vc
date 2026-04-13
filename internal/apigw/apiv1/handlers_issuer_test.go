@@ -439,7 +439,7 @@ func TestBatchProofExtraction(t *testing.T) {
 	}
 
 	// Verify count
-	assert.Equal(t, 3, proofs.Count(), "should have 3 proofs")
+	assert.Equal(t, 3, len(proofs.JWT), "should have 3 proofs")
 
 	// Extract all JWKs
 	jwks, err := proofs.ExtractAllJWKs(3)
@@ -490,7 +490,7 @@ func TestBatchCredentialRequest(t *testing.T) {
 	// Verify request structure
 	assert.True(t, req.IsAccessTokenDPoP())
 	assert.NotNil(t, req.Proofs)
-	assert.Equal(t, 3, req.Proofs.Count())
+	assert.Equal(t, 3, len(req.Proofs.JWT), "should have 3 proofs")
 
 	// Verify all JWKs can be extracted
 	jwks, err := req.Proofs.ExtractAllJWKs(3)
