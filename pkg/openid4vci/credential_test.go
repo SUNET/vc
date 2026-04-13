@@ -507,3 +507,68 @@ func TestResolveCredentialFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestAssertSingleProofType(t *testing.T) {
+	t.Run("JWT only", func(t *testing.T) {
+		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT}}
+		assert.NoError(t, proofs.AssertSingleProofType())
+	})
+
+	t.Run("DIVP only", func(t *testing.T) {
+		proofs := &Proofs{DIVP: []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}}}
+		assert.NoError(t, proofs.AssertSingleProofType())
+	})
+
+	t.Run("attestation only", func(t *testing.T) {
+		proofs := &Proofs{Attestation: ProofAttestation("some.jwt.token")}
+		assert.NoError(t, proofs.AssertSingleProofType())
+	})
+
+	t.Run("empty proofs", func(t *testing.T) {
+		proofs := &Proofs{}
+		err := proofs.AssertSingleProofType()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no proofs provided")
+	})
+
+	t.Run("JWT + DIVP", func(t *testing.T) {
+		proofs := &Proofs{
+			JWT:  []ProofJWTToken{mockProofJWT},
+			DIVP: []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}},
+		}
+		err := proofs.AssertSingleProofType()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple proof types")
+	})
+
+	t.Run("JWT + attestation", func(t *testing.T) {
+		proofs := &Proofs{
+			JWT:         []ProofJWTToken{mockProofJWT},
+			Attestation: ProofAttestation("some.jwt.token"),
+		}
+		err := proofs.AssertSingleProofType()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple proof types")
+	})
+
+	t.Run("DIVP + attestation", func(t *testing.T) {
+		proofs := &Proofs{
+			DIVP:        []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}},
+			Attestation: ProofAttestation("some.jwt.token"),
+		}
+		err := proofs.AssertSingleProofType()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple proof types")
+	})
+
+	t.Run("all three proof types", func(t *testing.T) {
+		proofs := &Proofs{
+			JWT:         []ProofJWTToken{mockProofJWT},
+			DIVP:        []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}},
+			Attestation: ProofAttestation("some.jwt.token"),
+		}
+		err := proofs.AssertSingleProofType()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple proof types")
+	})
+}
