@@ -267,26 +267,11 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	}
 
 	// Save credential subject info to registry for status management
-	if len(document.Identities) > 0 {
-		identity := document.Identities[0]
-
-		for _, reply := range replies {
-			if reply.TokenStatusListSection == 0 {
-				continue
-			}
-
-			_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-				FirstName:   identity.GivenName,
-				LastName:    identity.FamilyName,
-				DateOfBirth: identity.BirthDate,
-				Section:     reply.TokenStatusListSection,
-				Index:       reply.TokenStatusListIndex,
-			})
-			if err != nil {
-				c.log.Error(err, "failed to save credential subject to registry")
-			}
-		}
+	entries := make([]statusEntry, len(replies))
+	for i, r := range replies {
+		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex}
 	}
+	c.saveCredentialSubjects(ctx, document, entries)
 
 	return credentials, nil
 }
@@ -327,27 +312,11 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		credentials[i] = openid4vci.Credential{Credential: base64.StdEncoding.EncodeToString(reply.Mdoc)}
 	}
 
-	// Save credential subject info to registry for status management
-	if len(document.Identities) > 0 {
-		identity := document.Identities[0]
-
-		for _, reply := range replies {
-			if reply.StatusListSection == 0 {
-				continue
-			}
-
-			_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-				FirstName:   identity.GivenName,
-				LastName:    identity.FamilyName,
-				DateOfBirth: identity.BirthDate,
-				Section:     reply.StatusListSection,
-				Index:       reply.StatusListIndex,
-			})
-			if err != nil {
-				c.log.Error(err, "failed to save credential subject to registry")
-			}
-		}
+	entries := make([]statusEntry, len(replies))
+	for i, r := range replies {
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
 	}
+	c.saveCredentialSubjects(ctx, document, entries)
 
 	return credentials, nil
 }
@@ -429,28 +398,43 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	}
 
 	// Save credential subject info to registry for status management
-	if len(document.Identities) > 0 {
-		identity := document.Identities[0]
-
-		for _, reply := range replies {
-			if reply.StatusListSection == 0 {
-				continue
-			}
-
-			_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-				FirstName:   identity.GivenName,
-				LastName:    identity.FamilyName,
-				DateOfBirth: identity.BirthDate,
-				Section:     reply.StatusListSection,
-				Index:       reply.StatusListIndex,
-			})
-			if err != nil {
-				c.log.Error(err, "failed to save credential subject to registry")
-			}
-		}
+	entries := make([]statusEntry, len(replies))
+	for i, r := range replies {
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
 	}
+	c.saveCredentialSubjects(ctx, document, entries)
 
 	return credentials, nil
+}
+
+type statusEntry struct {
+	Section int64
+	Index   int64
+}
+
+// Save credential subject information to the registry for status management.
+func (c *Client) saveCredentialSubjects(ctx context.Context, document *model.CompleteDocument, entries []statusEntry) {
+	if len(document.Identities) == 0 {
+		return
+	}
+
+	identity := document.Identities[0]
+
+	for _, e := range entries {
+		if e.Section == 0 {
+			continue
+		}
+		_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+			FirstName:   identity.GivenName,
+			LastName:    identity.FamilyName,
+			DateOfBirth: identity.BirthDate,
+			Section:     e.Section,
+			Index:       e.Index,
+		})
+		if err != nil {
+			c.log.Error(err, "failed to save credential subject to registry")
+		}
+	}
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes
