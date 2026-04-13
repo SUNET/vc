@@ -509,6 +509,12 @@ func TestResolveCredentialFormat(t *testing.T) {
 }
 
 func TestAssertSingleProofType(t *testing.T) {
+	didExampleKey := "did:example:1#k1"
+	jwtExample := "some.jwt.token"
+
+	errorMultipleProofTypes := "multiple proof types"
+	errorNoProofs := "no proofs provided"
+
 	t.Run("JWT only", func(t *testing.T) {
 		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT}}
 		_, err := proofs.AssertSingleProofType()
@@ -516,13 +522,13 @@ func TestAssertSingleProofType(t *testing.T) {
 	})
 
 	t.Run("DIVP only", func(t *testing.T) {
-		proofs := &Proofs{DIVP: []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}}}
+		proofs := &Proofs{DIVP: []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: didExampleKey}}}}
 		_, err := proofs.AssertSingleProofType()
 		assert.NoError(t, err)
 	})
 
 	t.Run("attestation only", func(t *testing.T) {
-		proofs := &Proofs{Attestation: ProofAttestation("some.jwt.token")}
+		proofs := &Proofs{Attestation: ProofAttestation(jwtExample)}
 		_, err := proofs.AssertSingleProofType()
 		assert.NoError(t, err)
 	})
@@ -531,47 +537,47 @@ func TestAssertSingleProofType(t *testing.T) {
 		proofs := &Proofs{}
 		_, err := proofs.AssertSingleProofType()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no proofs provided")
+		assert.Contains(t, err.Error(), errorNoProofs)
 	})
 
 	t.Run("JWT + DIVP", func(t *testing.T) {
 		proofs := &Proofs{
 			JWT:  []ProofJWTToken{mockProofJWT},
-			DIVP: []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}},
+			DIVP: []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: didExampleKey}}},
 		}
 		_, err := proofs.AssertSingleProofType()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "multiple proof types")
+		assert.Contains(t, err.Error(), errorMultipleProofTypes)
 	})
 
 	t.Run("JWT + attestation", func(t *testing.T) {
 		proofs := &Proofs{
 			JWT:         []ProofJWTToken{mockProofJWT},
-			Attestation: ProofAttestation("some.jwt.token"),
+			Attestation: ProofAttestation(jwtExample),
 		}
 		_, err := proofs.AssertSingleProofType()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "multiple proof types")
+		assert.Contains(t, err.Error(), errorMultipleProofTypes)
 	})
 
 	t.Run("DIVP + attestation", func(t *testing.T) {
 		proofs := &Proofs{
-			DIVP:        []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}},
-			Attestation: ProofAttestation("some.jwt.token"),
+			DIVP:        []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: didExampleKey}}},
+			Attestation: ProofAttestation(jwtExample),
 		}
 		_, err := proofs.AssertSingleProofType()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "multiple proof types")
+		assert.Contains(t, err.Error(), errorMultipleProofTypes)
 	})
 
 	t.Run("all three proof types", func(t *testing.T) {
 		proofs := &Proofs{
 			JWT:         []ProofJWTToken{mockProofJWT},
-			DIVP:        []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: "did:example:1#k1"}}},
-			Attestation: ProofAttestation("some.jwt.token"),
+			DIVP:        []ProofDIVP{{Proof: &DIVPProof{VerificationMethod: didExampleKey}}},
+			Attestation: ProofAttestation(jwtExample),
 		}
 		_, err := proofs.AssertSingleProofType()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "multiple proof types")
+		assert.Contains(t, err.Error(), errorMultipleProofTypes)
 	})
 }
