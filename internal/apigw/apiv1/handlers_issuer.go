@@ -199,30 +199,24 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Issue one credential per JWK (batch loop)
-	credentials := make([]openid4vci.Credential, 0, len(jwks))
-	for i, jwk := range jwks {
-		var cred string
-		var issueErr error
+	var credentials []openid4vci.Credential
+	var issueErr error
 
-		switch format {
-		case "mso_mdoc":
-			cred, issueErr = c.issueMDoc(ctx, scope, documentData, jwk, document)
-		case "vc+sd-jwt", "dc+sd-jwt":
-			cred, issueErr = c.issueSDJWT(ctx, scope, documentData, jwk, document)
-		case "ldp_vc", "vc+ld+json":
-			cred, issueErr = c.issueVC20(ctx, scope, documentData, document, req, i)
-		default:
-			c.log.Error(nil, "unsupported or missing credential format", "format", format)
-			return nil, errors.New("unsupported or missing credential format: " + format)
-		}
+	switch format {
+	case "mso_mdoc":
+		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, document)
+	case "vc+sd-jwt", "dc+sd-jwt":
+		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, document)
+	case "ldp_vc", "vc+ld+json":
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, document, req)
+	default:
+		c.log.Error(nil, "unsupported or missing credential format", "format", format)
+		return nil, errors.New("unsupported or missing credential format: " + format)
+	}
 
-		if issueErr != nil {
-			c.log.Error(issueErr, "batch issuance failed", "index", i, "format", format)
-			return nil, issueErr
-		}
-
-		credentials = append(credentials, openid4vci.Credential{Credential: cred})
+	if issueErr != nil {
+		c.log.Error(issueErr, "issuance failed", "format", format)
+		return nil, issueErr
 	}
 
 	if len(credentials) == 0 {
@@ -234,98 +228,137 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}, nil
 }
 
-// issueSDJWT issues a single SD-JWT credential bound to the given JWK.
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (string, error) {
+// issueSDJWT issues SD-JWT credentials, one per JWK.
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, document *model.CompleteDocument) ([]openid4vci.Credential, error) {
 	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
 	if credentialConstructor == nil {
-		return "", fmt.Errorf("unsupported scope: %s", scope)
+		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
-	reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
-		Scope:        scope,
-		DocumentData: documentData,
-		Jwk:          jwk,
-		Integrity:    credentialConstructor.GetIntegrity(),
-		Vctm:         credentialConstructor.GetVCTMRaw(),
-	})
-	if err != nil {
-		c.log.Error(err, "failed to call MakeSDJWT")
-		return "", err
+	replies := make([]*apiv1_issuer.MakeSDJWTReply, 0, len(jwks))
+
+	for _, jwk := range jwks {
+		reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
+			Scope:        scope,
+			DocumentData: documentData,
+			Jwk:          jwk,
+			Integrity:    credentialConstructor.GetIntegrity(),
+			Vctm:         credentialConstructor.GetVCTMRaw(),
+		})
+		if err != nil {
+			c.log.Error(err, "failed to call MakeSDJWT")
+			return nil, err
+		}
+
+		if reply == nil {
+			return nil, errors.New("MakeSDJWT reply is nil")
+		}
+
+		replies = append(replies, reply)
 	}
 
-	if reply == nil {
-		return "", errors.New("MakeSDJWT reply is nil")
+	credentials := make([]openid4vci.Credential, len(replies))
+	for i, reply := range replies {
+		if len(reply.Credentials) != 1 {
+			return nil, fmt.Errorf("expected exactly 1 credential from MakeSDJWT, got %d", len(reply.Credentials))
+		}
+
+		credentials[i] = openid4vci.Credential{Credential: reply.Credentials[0].Credential}
 	}
 
 	// Save credential subject info to registry for status management
 	if len(document.Identities) > 0 {
 		identity := document.Identities[0]
-		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			FirstName:   identity.GivenName,
-			LastName:    identity.FamilyName,
-			DateOfBirth: identity.BirthDate,
-			Section:     reply.TokenStatusListSection,
-			Index:       reply.TokenStatusListIndex,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
+
+		for _, reply := range replies {
+			if reply.TokenStatusListSection == 0 {
+				continue
+			}
+
+			_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+				FirstName:   identity.GivenName,
+				LastName:    identity.FamilyName,
+				DateOfBirth: identity.BirthDate,
+				Section:     reply.TokenStatusListSection,
+				Index:       reply.TokenStatusListIndex,
+			})
+			if err != nil {
+				c.log.Error(err, "failed to save credential subject to registry")
+			}
 		}
 	}
 
-	if len(reply.Credentials) != 1 {
-		return "", fmt.Errorf("expected exactly 1 credential from MakeSDJWT, got %d", len(reply.Credentials))
-	}
-
-	return reply.Credentials[0].Credential, nil
+	return credentials, nil
 }
 
-// issueMDoc issues a single mDL/mDoc credential (ISO 18013-5) bound to the given JWK.
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (string, error) {
-	// Convert JWK to COSE key bytes for mDoc
-	deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
-	if err != nil {
-		c.log.Error(err, "failed to convert JWK to COSE key")
-		return "", err
+// issueMDoc issues mDL/mDoc credentials (ISO 18013-5), one per JWK.
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, document *model.CompleteDocument) ([]openid4vci.Credential, error) {
+	replies := make([]*apiv1_issuer.MakeMDocReply, 0, len(jwks))
+
+	for _, jwk := range jwks {
+		deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
+		if err != nil {
+			c.log.Error(err, "failed to convert JWK to COSE key")
+			return nil, err
+		}
+
+		reply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
+			Scope:           scope,
+			DocType:         mdoc.DocType, // org.iso.18013.5.1.mDL
+			DocumentData:    documentData,
+			DevicePublicKey: deviceKeyBytes,
+			DeviceKeyFormat: "cose",
+		})
+		if err != nil {
+			c.log.Error(err, "failed to call MakeMDoc")
+			return nil, err
+		}
+
+		if reply == nil {
+			return nil, errors.New("MakeMDoc reply is nil")
+		}
+
+		replies = append(replies, reply)
 	}
 
-	reply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
-		Scope:           scope,
-		DocType:         mdoc.DocType, // org.iso.18013.5.1.mDL
-		DocumentData:    documentData,
-		DevicePublicKey: deviceKeyBytes,
-		DeviceKeyFormat: "cose",
-	})
-	if err != nil {
-		c.log.Error(err, "failed to call MakeMDoc")
-		return "", err
-	}
-
-	if reply == nil {
-		return "", errors.New("MakeMDoc reply is nil")
+	credentials := make([]openid4vci.Credential, len(replies))
+	for i, reply := range replies {
+		// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
+		credentials[i] = openid4vci.Credential{Credential: base64.StdEncoding.EncodeToString(reply.Mdoc)}
 	}
 
 	// Save credential subject info to registry for status management
-	if len(document.Identities) > 0 && reply.StatusListSection > 0 {
+	if len(document.Identities) > 0 {
 		identity := document.Identities[0]
-		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			FirstName:   identity.GivenName,
-			LastName:    identity.FamilyName,
-			DateOfBirth: identity.BirthDate,
-			Section:     reply.StatusListSection,
-			Index:       reply.StatusListIndex,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
+
+		for _, reply := range replies {
+			if reply.StatusListSection == 0 {
+				continue
+			}
+
+			_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+				FirstName:   identity.GivenName,
+				LastName:    identity.FamilyName,
+				DateOfBirth: identity.BirthDate,
+				Section:     reply.StatusListSection,
+				Index:       reply.StatusListIndex,
+			})
+			if err != nil {
+				c.log.Error(err, "failed to save credential subject to registry")
+			}
 		}
 	}
 
-	// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
-	return base64.StdEncoding.EncodeToString(reply.Mdoc), nil
+	return credentials, nil
 }
 
-// issueVC20 issues a single W3C VC 2.0 Data Integrity credential.
-// proofIndex identifies which proof in a batch request to extract the subject DID from.
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest, proofIndex int) (string, error) {
+// issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
+// Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+	if (req.Proof != nil && req.Proof.ProofType != "jwt") || (req.Proofs != nil && len(req.Proofs.JWT) == 0) {
+		return nil, errors.New("vc+ld+json format requires JWT proof type")
+	}
+
 	// Extract cryptosuite from credential configuration
 	var cryptosuite string
 	var mandatoryPointers []string
@@ -350,47 +383,74 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		credentialTypes = []string{"VerifiableCredential"}
 	}
 
-	// Extract subject DID from the appropriate proof
-	var subjectDID string
-	if req.Proof != nil {
-		subjectDID = req.Proof.ExtractSubjectDID()
-	} else if req.Proofs != nil && proofIndex < len(req.Proofs.JWT) {
-		subjectDID = req.Proofs.JWT[proofIndex].ExtractSubjectDID()
-	}
-
-	reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
-		Scope:             scope,
-		DocumentData:      documentData,
-		CredentialTypes:   credentialTypes,
-		SubjectDid:        subjectDID,
-		Cryptosuite:       cryptosuite,
-		MandatoryPointers: mandatoryPointers,
-	})
-	if err != nil {
-		c.log.Error(err, "failed to call MakeVC20")
-		return "", err
-	}
-
-	if reply == nil {
-		return "", errors.New("MakeVC20 reply is nil")
-	}
-
-	// Save credential subject info to registry for status management
-	if len(document.Identities) > 0 && reply.StatusListSection > 0 {
-		identity := document.Identities[0]
-		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			FirstName:   identity.GivenName,
-			LastName:    identity.FamilyName,
-			DateOfBirth: identity.BirthDate,
-			Section:     reply.StatusListSection,
-			Index:       reply.StatusListIndex,
+	makeOne := func(subjectDID string) (*apiv1_issuer.MakeVC20Reply, error) {
+		reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
+			Scope:             scope,
+			DocumentData:      documentData,
+			CredentialTypes:   credentialTypes,
+			SubjectDid:        subjectDID,
+			Cryptosuite:       cryptosuite,
+			MandatoryPointers: mandatoryPointers,
 		})
 		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
+			c.log.Error(err, "failed to call MakeVC20")
+			return nil, err
+		}
+		if reply == nil {
+			return nil, errors.New("MakeVC20 reply is nil")
+		}
+		return reply, nil
+	}
+
+	var replies []*apiv1_issuer.MakeVC20Reply
+
+	if req.Proof != nil {
+		// Single proof — one credential
+		reply, err := makeOne(req.Proof.ExtractSubjectDID())
+		if err != nil {
+			return nil, err
+		}
+		replies = append(replies, reply)
+	} else if req.Proofs != nil {
+		// Batch — one credential per JWT proof
+		replies = make([]*apiv1_issuer.MakeVC20Reply, 0, len(req.Proofs.JWT))
+		for _, jwt := range req.Proofs.JWT {
+			reply, err := makeOne(jwt.ExtractSubjectDID())
+			if err != nil {
+				return nil, err
+			}
+			replies = append(replies, reply)
 		}
 	}
 
-	return string(reply.Credential), nil
+	credentials := make([]openid4vci.Credential, len(replies))
+	for i, reply := range replies {
+		credentials[i] = openid4vci.Credential{Credential: string(reply.Credential)}
+	}
+
+	// Save credential subject info to registry for status management
+	if len(document.Identities) > 0 {
+		identity := document.Identities[0]
+
+		for _, reply := range replies {
+			if reply.StatusListSection == 0 {
+				continue
+			}
+
+			_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+				FirstName:   identity.GivenName,
+				LastName:    identity.FamilyName,
+				DateOfBirth: identity.BirthDate,
+				Section:     reply.StatusListSection,
+				Index:       reply.StatusListIndex,
+			})
+			if err != nil {
+				c.log.Error(err, "failed to save credential subject to registry")
+			}
+		}
+	}
+
+	return credentials, nil
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes
