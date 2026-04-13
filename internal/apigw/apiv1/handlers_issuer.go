@@ -178,21 +178,20 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 		jwks = []*apiv1_issuer.Jwk{jwk}
 	} else if req.Proofs != nil {
-		// Validate batch size against issuer metadata
-		proofCount := req.Proofs.Count()
-		maxBatch := 1
-		if c.issuerMetadata.BatchCredentialIssuance != nil && c.issuerMetadata.BatchCredentialIssuance.BatchSize > 0 {
-			maxBatch = c.issuerMetadata.BatchCredentialIssuance.BatchSize
-		}
-		if proofCount > maxBatch {
-			c.log.Error(nil, "batch size exceeded", "requested", proofCount, "max", maxBatch)
-			return nil, fmt.Errorf("batch size %d exceeds maximum allowed %d", proofCount, maxBatch)
-		}
-
 		jwks, err = req.Proofs.ExtractAllJWKs()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWKs from proofs")
 			return nil, err
+		}
+
+		maxBatch := 1
+		if c.issuerMetadata.BatchCredentialIssuance != nil && c.issuerMetadata.BatchCredentialIssuance.BatchSize > 0 {
+			maxBatch = c.issuerMetadata.BatchCredentialIssuance.BatchSize
+		}
+
+		if len(jwks) > maxBatch {
+			c.log.Error(nil, "batch size exceeded", "requested", len(jwks), "max", maxBatch)
+			return nil, fmt.Errorf("batch size %d exceeds maximum allowed %d", len(jwks), maxBatch)
 		}
 	} else {
 		return nil, errors.New("no proof found in credential request")

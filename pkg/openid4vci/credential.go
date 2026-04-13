@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -256,6 +257,11 @@ func (p *Proofs) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
 
 // Count returns the number of proofs present in the batch.
 // Only one proof type should be populated per request.
+//
+// DEPRECATED: Since getting the correct count for Attestation proofs
+// requires extracting the JWKs, it makes more sense to use `len(ExtractAllJWKs())`
+// to get the count of proofs for batch processing, making this redundant and currently
+// only accurate for JWT and DIVP proof types.
 func (p *Proofs) Count() int {
 	if len(p.JWT) > 0 {
 		return len(p.JWT)
