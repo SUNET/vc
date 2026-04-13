@@ -1,13 +1,31 @@
 package openid4vci
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var mockProofJWT ProofJWTToken = "eyJhbGciOiJFUzI1NiIsInR5cCI6Im9wZW5pZDR2Y2ktcHJvb2Yrand0IiwiandrIjp7ImNydiI6IlAtMjU2IiwiZXh0Ijp0cnVlLCJrZXlfb3BzIjpbInZlcmlmeSJdLCJrdHkiOiJFQyIsIngiOiJ1aGZ3M3pyOWJBWTlERDV0QkN0RVVfOVdNaFdvTWFlYVVSNGY3U2dKQzlvIiwieSI6ImJZR2JlV2xWYlJrNktxT1hRX0VUeWxaZ3NKMDR0Nld5UTZiZFhYMHUxV0UifX0.eyJub25jZSI6IiIsImF1ZCI6Imh0dHBzOi8vdmMtaW50ZXJvcC0zLnN1bmV0LnNlIiwiaXNzIjoiMTAwMyIsImlhdCI6MTc1MTM2ODI1NX0.ri7zfnClkmVYFPRxV5IWiatmXHjmDNcd9FGJJNngUFjvDkVIfeYKr-bb_aUXU0DgkesIi8XvyKM149tlP-e6gA"
+
+// build an unsigned key-attestation JWT containing the
+// given attested_keys. ExtractAllJWKs uses ParseUnverified, so the signature
+// segment is a placeholder and does not need to be valid.
+func makeTestAttestationJWT(t *testing.T, keys []map[string]any) ProofAttestation {
+	t.Helper()
+	header, err := json.Marshal(map[string]any{"alg": "ES256", "typ": "key-attestation+jwt"})
+	require.NoError(t, err)
+	claims, err := json.Marshal(map[string]any{"iat": int64(1234567890), "attested_keys": keys})
+	require.NoError(t, err)
+	h := base64.RawURLEncoding.EncodeToString(header)
+	c := base64.RawURLEncoding.EncodeToString(claims)
+	return ProofAttestation(h + "." + c + ".fakesig")
+}
 
 func TestCredentialValidation(t *testing.T) {
 	tts := []struct {
@@ -230,6 +248,62 @@ func TestExtractAllJWKs(t *testing.T) {
 		assert.Nil(t, jwks)
 		assert.Contains(t, err.Error(), "no proofs found")
 	})
+
+	t.Run("single DIVP proof", func(t *testing.T) {
+		proofs := &Proofs{DIVP: []ProofDIVP{
+			{Proof: &DIVPProof{VerificationMethod: "did:example:123#key-1"}},
+		}}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.NoError(t, err)
+		assert.Len(t, jwks, 1)
+		assert.Equal(t, &apiv1_issuer.Jwk{Kid: "did:example:123#key-1"}, jwks[0])
+	})
+
+	t.Run("multiple DIVP proofs", func(t *testing.T) {
+		proofs := &Proofs{DIVP: []ProofDIVP{
+			{Proof: &DIVPProof{VerificationMethod: "did:example:123#key-1"}},
+			{Proof: &DIVPProof{VerificationMethod: "did:example:456#key-2"}},
+		}}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.NoError(t, err)
+		assert.Len(t, jwks, 2)
+		assert.Equal(t, &apiv1_issuer.Jwk{Kid: "did:example:123#key-1"}, jwks[0])
+		assert.Equal(t, &apiv1_issuer.Jwk{Kid: "did:example:456#key-2"}, jwks[1])
+	})
+
+	t.Run("attestation with single attested key", func(t *testing.T) {
+		attestation := makeTestAttestationJWT(t, []map[string]any{
+			{"kty": "EC", "crv": "P-256", "x": "key1x", "y": "key1y"},
+		})
+		proofs := &Proofs{Attestation: attestation}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.NoError(t, err)
+		assert.Len(t, jwks, 1)
+		assert.Equal(t, "EC", jwks[0].Kty)
+		assert.Equal(t, "P-256", jwks[0].Crv)
+		assert.Equal(t, "key1x", jwks[0].X)
+		assert.Equal(t, "key1y", jwks[0].Y)
+	})
+
+	t.Run("attestation with multiple attested keys", func(t *testing.T) {
+		// This is the critical regression test: Count() returns 1 for any attestation
+		// but ExtractAllJWKs returns one JWK per key, so batch-size enforcement
+		// must validate len(jwks) rather than Count().
+		attestation := makeTestAttestationJWT(t, []map[string]any{
+			{"kty": "EC", "crv": "P-256", "x": "key1x", "y": "key1y"},
+			{"kty": "EC", "crv": "P-256", "x": "key2x", "y": "key2y"},
+			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
+		})
+		proofs := &Proofs{Attestation: attestation}
+		jwks, err := proofs.ExtractAllJWKs()
+		assert.NoError(t, err)
+		assert.Len(t, jwks, 3)
+		assert.Equal(t, "key1x", jwks[0].X)
+		assert.Equal(t, "key2x", jwks[1].X)
+		assert.Equal(t, "key3x", jwks[2].X)
+		// Count() still returns 1 for attestation — confirm the discrepancy exists
+		assert.Equal(t, 1, proofs.Count())
+	})
 }
 
 func TestProofsCount(t *testing.T) {
@@ -338,7 +412,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 			errContains: "unknown credential_configuration_id",
 		},
 		{
-			name: "error when neither credential_configuration_id nor credential_identifier provided",
+			name:    "error when neither credential_configuration_id nor credential_identifier provided",
 			request: &CredentialRequest{
 				// Both fields empty
 			},
