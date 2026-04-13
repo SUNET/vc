@@ -324,7 +324,9 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
 func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
-	if (req.Proof != nil && req.Proof.ProofType != "jwt") || (req.Proofs != nil && len(req.Proofs.JWT) == 0) {
+	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
+	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
+	if hasNoJWTProof || hasNoJWTProofs {
 		return nil, errors.New("vc+ld+json format requires JWT proof type")
 	}
 
@@ -352,12 +354,22 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		credentialTypes = []string{"VerifiableCredential"}
 	}
 
-	makeOne := func(subjectDID string) (*apiv1_issuer.MakeVC20Reply, error) {
+	var subjectDIDs []string
+	if req.Proof != nil {
+		subjectDIDs = []string{req.Proof.ExtractSubjectDID()}
+	} else if req.Proofs != nil {
+		for _, jwt := range req.Proofs.JWT {
+			subjectDIDs = append(subjectDIDs, jwt.ExtractSubjectDID())
+		}
+	}
+
+	replies := make([]*apiv1_issuer.MakeVC20Reply, 0, len(subjectDIDs))
+	for _, did := range subjectDIDs {
 		reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
 			Scope:             scope,
 			DocumentData:      documentData,
 			CredentialTypes:   credentialTypes,
-			SubjectDid:        subjectDID,
+			SubjectDid:        did,
 			Cryptosuite:       cryptosuite,
 			MandatoryPointers: mandatoryPointers,
 		})
@@ -368,28 +380,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		if reply == nil {
 			return nil, errors.New("MakeVC20 reply is nil")
 		}
-		return reply, nil
-	}
-
-	var replies []*apiv1_issuer.MakeVC20Reply
-
-	if req.Proof != nil {
-		// Single proof — one credential
-		reply, err := makeOne(req.Proof.ExtractSubjectDID())
-		if err != nil {
-			return nil, err
-		}
 		replies = append(replies, reply)
-	} else if req.Proofs != nil {
-		// Batch — one credential per JWT proof
-		replies = make([]*apiv1_issuer.MakeVC20Reply, 0, len(req.Proofs.JWT))
-		for _, jwt := range req.Proofs.JWT {
-			reply, err := makeOne(jwt.ExtractSubjectDID())
-			if err != nil {
-				return nil, err
-			}
-			replies = append(replies, reply)
-		}
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
