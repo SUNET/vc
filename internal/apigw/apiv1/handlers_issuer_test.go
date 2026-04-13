@@ -442,7 +442,7 @@ func TestBatchProofExtraction(t *testing.T) {
 	assert.Equal(t, 3, proofs.Count(), "should have 3 proofs")
 
 	// Extract all JWKs
-	jwks, err := proofs.ExtractAllJWKs()
+	jwks, err := proofs.ExtractAllJWKs(3)
 	require.NoError(t, err)
 	assert.Len(t, jwks, 3, "should extract 3 JWKs")
 
@@ -493,7 +493,7 @@ func TestBatchCredentialRequest(t *testing.T) {
 	assert.Equal(t, 3, req.Proofs.Count())
 
 	// Verify all JWKs can be extracted
-	jwks, err := req.Proofs.ExtractAllJWKs()
+	jwks, err := req.Proofs.ExtractAllJWKs(3)
 	require.NoError(t, err)
 	assert.Len(t, jwks, 3)
 

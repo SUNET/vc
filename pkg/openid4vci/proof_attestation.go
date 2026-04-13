@@ -105,7 +105,7 @@ func (p ProofAttestation) Validate() error {
 // ExtractJWK extracts the first attested key (JWK) from the attestation JWT.
 // The attested_keys claim contains an array of JWKs that are attested by this proof.
 func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
-	jwks, err := p.ExtractAllJWKs()
+	jwks, err := p.ExtractAllJWKs(1)
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +121,14 @@ func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 
 // ExtractAllJWKs extracts all attested keys from the attestation JWT.
 // The attested_keys claim contains an array of JWKs; this returns all of them.
-func (p ProofAttestation) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
+// maxLength limits the number of keys that can be extracted to prevent abuse. It must be at least 1.
+func (p ProofAttestation) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
 	if p == "" {
 		return nil, fmt.Errorf("attestation is empty")
+	}
+
+	if maxLength < 1 {
+		return nil, fmt.Errorf("maxLength must be at least 1")
 	}
 
 	token, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
@@ -144,6 +149,10 @@ func (p ProofAttestation) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
 	keysArr, ok := attestedKeys.([]any)
 	if !ok || len(keysArr) == 0 {
 		return nil, fmt.Errorf("attested_keys must be a non-empty array")
+	}
+
+	if len(keysArr) > maxLength {
+		return nil, fmt.Errorf("number of attested keys (%d) exceeds maxLength (%d)", len(keysArr), maxLength)
 	}
 
 	jwks := make([]*apiv1_issuer.Jwk, 0, len(keysArr))

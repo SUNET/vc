@@ -250,13 +250,21 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 // ExtractAllJWKs extracts one JWK per proof for batch credential issuance.
 // For JWT and DIVP proof types, each proof in the array yields one JWK.
 // For Attestation, all keys from the attested_keys claim are returned.
-func (p *Proofs) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
+func (p *Proofs) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
 	err := p.AssertSingleProofType()
 	if err != nil {
 		return nil, err
 	}
 
+	if maxLength < 1 {
+		return nil, fmt.Errorf("maxLength must be at least 1")
+	}
+
 	if len(p.JWT) > 0 {
+		if len(p.JWT) > maxLength {
+			return nil, fmt.Errorf("number of JWT proofs (%d) exceeds maxLength (%d)", len(p.JWT), maxLength)
+		}
+
 		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.JWT))
 		for i, token := range p.JWT {
 			jwk, err := token.ExtractJWK()
@@ -269,6 +277,10 @@ func (p *Proofs) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
 	}
 
 	if len(p.DIVP) > 0 {
+		if len(p.DIVP) > maxLength {
+			return nil, fmt.Errorf("number of DIVP proofs (%d) exceeds maxLength (%d)", len(p.DIVP), maxLength)
+		}
+
 		jwks := make([]*apiv1_issuer.Jwk, 0, len(p.DIVP))
 		for i, vp := range p.DIVP {
 			jwk, err := vp.ExtractJWK()
@@ -281,7 +293,7 @@ func (p *Proofs) ExtractAllJWKs() ([]*apiv1_issuer.Jwk, error) {
 	}
 
 	if p.Attestation != "" {
-		return p.Attestation.ExtractAllJWKs()
+		return p.Attestation.ExtractAllJWKs(maxLength)
 	}
 
 	return nil, fmt.Errorf("no proofs found")

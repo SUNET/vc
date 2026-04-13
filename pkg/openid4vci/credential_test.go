@@ -225,7 +225,7 @@ func TestExtractAllJWKs(t *testing.T) {
 
 	t.Run("single JWT proof", func(t *testing.T) {
 		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT}}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(1)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 1)
 		assert.Equal(t, expectedJWK, jwks[0])
@@ -233,7 +233,7 @@ func TestExtractAllJWKs(t *testing.T) {
 
 	t.Run("multiple JWT proofs", func(t *testing.T) {
 		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT, mockProofJWT, mockProofJWT}}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(3)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 3)
 		for i, jwk := range jwks {
@@ -243,10 +243,10 @@ func TestExtractAllJWKs(t *testing.T) {
 
 	t.Run("empty proofs", func(t *testing.T) {
 		proofs := &Proofs{}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(1)
 		assert.Error(t, err)
 		assert.Nil(t, jwks)
-		assert.Contains(t, err.Error(), "no proofs found")
+		assert.Contains(t, err.Error(), "no proofs provided")
 	})
 
 	didKey1 := "did:example:123#key-1"
@@ -256,7 +256,7 @@ func TestExtractAllJWKs(t *testing.T) {
 		proofs := &Proofs{DIVP: []ProofDIVP{
 			{Proof: &DIVPProof{VerificationMethod: didKey1}},
 		}}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(1)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 1)
 		assert.Equal(t, &apiv1_issuer.Jwk{Kid: didKey1}, jwks[0])
@@ -267,7 +267,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{Proof: &DIVPProof{VerificationMethod: didKey1}},
 			{Proof: &DIVPProof{VerificationMethod: didKey2}},
 		}}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(2)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 2)
 		assert.Equal(t, &apiv1_issuer.Jwk{Kid: didKey1}, jwks[0])
@@ -279,7 +279,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{"kty": "EC", "crv": "P-256", "x": "key1x", "y": "key1y"},
 		})
 		proofs := &Proofs{Attestation: attestation}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(1)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 1)
 		assert.Equal(t, "EC", jwks[0].Kty)
@@ -298,7 +298,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
 		})
 		proofs := &Proofs{Attestation: attestation}
-		jwks, err := proofs.ExtractAllJWKs()
+		jwks, err := proofs.ExtractAllJWKs(3)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 3)
 		assert.Equal(t, "key1x", jwks[0].X)
@@ -306,6 +306,38 @@ func TestExtractAllJWKs(t *testing.T) {
 		assert.Equal(t, "key3x", jwks[2].X)
 		// Count() still returns 1 for attestation — confirm the discrepancy exists
 		assert.Equal(t, 1, proofs.Count())
+	})
+
+	t.Run("JWT proofs exceeding maxLength", func(t *testing.T) {
+		proofs := &Proofs{JWT: []ProofJWTToken{mockProofJWT, mockProofJWT, mockProofJWT}}
+		jwks, err := proofs.ExtractAllJWKs(2)
+		assert.Error(t, err)
+		assert.Nil(t, jwks)
+		assert.Contains(t, err.Error(), "exceeds")
+	})
+
+	t.Run("DIVP proofs exceeding maxLength", func(t *testing.T) {
+		proofs := &Proofs{DIVP: []ProofDIVP{
+			{Proof: &DIVPProof{VerificationMethod: didKey1}},
+			{Proof: &DIVPProof{VerificationMethod: didKey2}},
+		}}
+		jwks, err := proofs.ExtractAllJWKs(1)
+		assert.Error(t, err)
+		assert.Nil(t, jwks)
+		assert.Contains(t, err.Error(), "exceeds")
+	})
+
+	t.Run("attestation exceeding maxLength", func(t *testing.T) {
+		attestation := makeTestAttestationJWT(t, []map[string]any{
+			{"kty": "EC", "crv": "P-256", "x": "key1x", "y": "key1y"},
+			{"kty": "EC", "crv": "P-256", "x": "key2x", "y": "key2y"},
+			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
+		})
+		proofs := &Proofs{Attestation: attestation}
+		jwks, err := proofs.ExtractAllJWKs(2)
+		assert.Error(t, err)
+		assert.Nil(t, jwks)
+		assert.Contains(t, err.Error(), "exceeds")
 	})
 }
 
