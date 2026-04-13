@@ -249,26 +249,29 @@ func TestExtractAllJWKs(t *testing.T) {
 		assert.Contains(t, err.Error(), "no proofs found")
 	})
 
+	didKey1 := "did:example:123#key-1"
+	didKey2 := "did:example:456#key-2"
+
 	t.Run("single DIVP proof", func(t *testing.T) {
 		proofs := &Proofs{DIVP: []ProofDIVP{
-			{Proof: &DIVPProof{VerificationMethod: "did:example:123#key-1"}},
+			{Proof: &DIVPProof{VerificationMethod: didKey1}},
 		}}
 		jwks, err := proofs.ExtractAllJWKs()
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 1)
-		assert.Equal(t, &apiv1_issuer.Jwk{Kid: "did:example:123#key-1"}, jwks[0])
+		assert.Equal(t, &apiv1_issuer.Jwk{Kid: didKey1}, jwks[0])
 	})
 
 	t.Run("multiple DIVP proofs", func(t *testing.T) {
 		proofs := &Proofs{DIVP: []ProofDIVP{
-			{Proof: &DIVPProof{VerificationMethod: "did:example:123#key-1"}},
-			{Proof: &DIVPProof{VerificationMethod: "did:example:456#key-2"}},
+			{Proof: &DIVPProof{VerificationMethod: didKey1}},
+			{Proof: &DIVPProof{VerificationMethod: didKey2}},
 		}}
 		jwks, err := proofs.ExtractAllJWKs()
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 2)
-		assert.Equal(t, &apiv1_issuer.Jwk{Kid: "did:example:123#key-1"}, jwks[0])
-		assert.Equal(t, &apiv1_issuer.Jwk{Kid: "did:example:456#key-2"}, jwks[1])
+		assert.Equal(t, &apiv1_issuer.Jwk{Kid: didKey1}, jwks[0])
+		assert.Equal(t, &apiv1_issuer.Jwk{Kid: didKey2}, jwks[1])
 	})
 
 	t.Run("attestation with single attested key", func(t *testing.T) {
