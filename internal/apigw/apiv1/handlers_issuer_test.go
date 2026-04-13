@@ -110,7 +110,7 @@ func createValidDPoPJWT(t *testing.T, accessToken string) (string, *ecdsa.Privat
 }
 
 // createValidProofJWT creates a valid proof JWT for testing
-func createValidProofJWT(t *testing.T, nonce string) (string, *ecdsa.PrivateKey, []byte) {
+func createValidProofJWT(t *testing.T, nonce string) (string, []byte) {
 	t.Helper()
 
 	// Generate ECDSA key
@@ -147,7 +147,7 @@ func createValidProofJWT(t *testing.T, nonce string) (string, *ecdsa.PrivateKey,
 	signed, err := token.SignedString(privateKey)
 	require.NoError(t, err)
 
-	return signed, privateKey, jwkJSON
+	return signed, jwkJSON
 }
 
 // TestVCINonce tests the nonce generation endpoint
@@ -269,7 +269,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	assert.Contains(t, dpopJWT, ".", "DPoP JWT should be in JWT format")
 
 	// Create valid proof JWT
-	proofJWT, _, proofJWK := createValidProofJWT(t, nonce)
+	proofJWT, proofJWK := createValidProofJWT(t, nonce)
 	assert.NotEmpty(t, proofJWT, "Proof JWT should be generated")
 	assert.NotEmpty(t, proofJWK, "Proof JWK should be extracted")
 	assert.Contains(t, proofJWT, ".", "Proof JWT should be in JWT format")
@@ -426,9 +426,9 @@ func TestBatchProofExtraction(t *testing.T) {
 	nonce := "test-nonce"
 
 	// Create 3 different proof JWTs with different keys
-	proofJWT1, _, jwk1 := createValidProofJWT(t, nonce)
-	proofJWT2, _, jwk2 := createValidProofJWT(t, nonce)
-	proofJWT3, _, jwk3 := createValidProofJWT(t, nonce)
+	proofJWT1, jwk1 := createValidProofJWT(t, nonce)
+	proofJWT2, jwk2 := createValidProofJWT(t, nonce)
+	proofJWT3, jwk3 := createValidProofJWT(t, nonce)
 
 	proofs := &openid4vci.Proofs{
 		JWT: []openid4vci.ProofJWTToken{
@@ -470,9 +470,9 @@ func TestBatchCredentialRequest(t *testing.T) {
 
 	dpopJWT, _ := createValidDPoPJWT(t, accessToken)
 
-	proofJWT1, _, _ := createValidProofJWT(t, nonce)
-	proofJWT2, _, _ := createValidProofJWT(t, nonce)
-	proofJWT3, _, _ := createValidProofJWT(t, nonce)
+	proofJWT1, _ := createValidProofJWT(t, nonce)
+	proofJWT2, _ := createValidProofJWT(t, nonce)
+	proofJWT3, _ := createValidProofJWT(t, nonce)
 
 	req := &openid4vci.CredentialRequest{
 		DPoP:          dpopJWT,
