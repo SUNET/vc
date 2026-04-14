@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -454,5 +455,117 @@ func TestImagePNGValidator(t *testing.T) {
 		p := filepath.Join(t.TempDir(), "fake.png")
 		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644))
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
+	})
+}
+
+func TestSingleProofTypeValidator(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	type Proofs struct {
+		JWT         []string
+		DIVP        []string
+		Attestation string
+	}
+
+	type testStruct struct {
+		Proofs *Proofs `validate:"single_proof_type"`
+	}
+
+	type testStructOmitempty struct {
+		Proofs *Proofs `validate:"omitempty,single_proof_type"`
+	}
+
+	t.Run("only JWT", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT: []string{"jwt1"},
+			},
+		}))
+	})
+	t.Run("only DIVP", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				DIVP: []string{"divp1"},
+			},
+		}))
+	})
+	t.Run("only Attestation", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				Attestation: "attest1",
+			},
+		}))
+	})
+	t.Run("multiple proof types is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:  []string{"jwt1"},
+				DIVP: []string{"divp1"},
+			},
+		})
+		assert.Error(t, err)
+	})
+	t.Run("nil Proofs pointer is valid (omitempty)", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStructOmitempty{
+			Proofs: nil,
+		}))
+	})
+	t.Run("Attestation with empty JWT and DIVP is valid", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{},
+				DIVP:        []string{},
+				Attestation: "attest1",
+			},
+		}))
+	})
+	t.Run("JWT with empty DIVP and Attestation is valid", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{"jwt1"},
+				DIVP:        []string{},
+				Attestation: "",
+			},
+		}))
+	})
+	t.Run("DIVP with empty JWT and Attestation is valid", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{},
+				DIVP:        []string{"divp1"},
+				Attestation: "",
+			},
+		}))
+	})
+	t.Run("Attestation with non-empty JWT is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{"jwt1"},
+				DIVP:        []string{},
+				Attestation: "attest1",
+			},
+		})
+		assert.Error(t, err)
+	})
+	t.Run("DIVP with non-empty Attestation is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{},
+				DIVP:        []string{"divp1"},
+				Attestation: "attest1",
+			},
+		})
+		assert.Error(t, err)
+	})
+	t.Run("JWT with non-empty DIVP is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{"jwt1"},
+				DIVP:        []string{"divp1"},
+				Attestation: "",
+			},
+		})
+		assert.Error(t, err)
 	})
 }

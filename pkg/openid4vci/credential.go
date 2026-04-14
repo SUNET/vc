@@ -48,7 +48,7 @@ type CredentialRequest struct {
 	// to which the issued Credential instances will be bound to. The proofs parameter contains exactly one
 	// parameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array
 	// containing parameters as defined by the corresponding proof type.
-	Proofs *Proofs `json:"proofs,omitempty" validate:"omitempty"`
+	Proofs *Proofs `json:"proofs,omitempty" validate:"single_proof_type,omitempty"`
 
 	// Proof OPTIONAL. Single proof object for non-batch requests.
 	// Deprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.
@@ -198,31 +198,18 @@ type Proofs struct {
 	Attestation ProofAttestation `json:"attestation,omitempty"`
 }
 
-// AssertSingleProofType checks that only one proof type is used per request.
-func (p *Proofs) AssertSingleProofType() (string, error) {
-	proofTypesUsed := make([]string, 0, 3)
-
+// ProofType returns the proof type of the proofs contained in this struct.
+func (p *Proofs) ProofType() string {
 	if len(p.JWT) > 0 {
-		proofTypesUsed = append(proofTypesUsed, "jwt")
+		return "jwt"
 	}
-
 	if len(p.DIVP) > 0 {
-		proofTypesUsed = append(proofTypesUsed, "di_vp")
+		return "di_vp"
 	}
-
 	if p.Attestation != "" {
-		proofTypesUsed = append(proofTypesUsed, "attestation")
+		return "attestation"
 	}
-
-	if len(proofTypesUsed) == 0 {
-		return "", fmt.Errorf("no proofs provided")
-	}
-
-	if len(proofTypesUsed) > 1 {
-		return "", fmt.Errorf("multiple proof types provided (%s); only one is allowed per request", strings.Join(proofTypesUsed, ", "))
-	}
-
-	return proofTypesUsed[0], nil
+	return ""
 }
 
 // ExtractJWK extracts the holder's public key (JWK) from the proofs.
@@ -231,12 +218,7 @@ func (p *Proofs) AssertSingleProofType() (string, error) {
 // - di_vp: from the verificationMethod of the first proof
 // - attestation: from the attested_keys claim
 func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
-	proofType, err := p.AssertSingleProofType()
-	if err != nil {
-		return nil, err
-	}
-
-	switch proofType {
+	switch p.ProofType() {
 	case "jwt":
 		return p.JWT[0].ExtractJWK()
 	case "di_vp":
@@ -252,16 +234,11 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 // For JWT and DIVP proof types, each proof in the array yields one JWK.
 // For Attestation, all keys from the attested_keys claim are returned.
 func (p *Proofs) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
-	proofType, err := p.AssertSingleProofType()
-	if err != nil {
-		return nil, err
-	}
-
 	if maxLength < 1 {
 		return nil, fmt.Errorf("maxLength must be at least 1")
 	}
 
-	switch proofType {
+	switch p.ProofType() {
 	case "jwt":
 		return p.extractAllJWKsFromJWT(maxLength)
 	case "di_vp":
