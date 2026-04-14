@@ -24,7 +24,7 @@ func makeTestAttestationJWT(t *testing.T, keys []map[string]any) ProofAttestatio
 	require.NoError(t, err)
 	h := base64.RawURLEncoding.EncodeToString(header)
 	c := base64.RawURLEncoding.EncodeToString(claims)
-	return ProofAttestation(h + "." + c + ".fakesig")
+	return ProofAttestation(h + "." + c + ".fakeSig")
 }
 
 func TestCredentialValidation(t *testing.T) {
