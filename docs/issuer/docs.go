@@ -25,7 +25,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "Revoke",
                 "operationId": "generic-revoke",

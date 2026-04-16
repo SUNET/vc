@@ -61,5 +61,5 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: Revoke
       tags:
-      - dc4eu
+      - vc-platform
 swagger: "2.0"
