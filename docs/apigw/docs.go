@@ -25,7 +25,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "AddConsent",
                 "operationId": "add-consent",
@@ -63,7 +63,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "GetConsent",
                 "operationId": "get-consent",
@@ -104,7 +104,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "OIDCCredential",
                 "operationId": "create-credential",
@@ -145,7 +145,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "JWKS",
                 "operationId": "issuer-JWKS",
@@ -175,7 +175,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "GetDocument",
                 "operationId": "get-document",
@@ -214,7 +214,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "DeleteDocument",
                 "operationId": "delete-document",
@@ -252,7 +252,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "GetDocumentByCollectID",
                 "operationId": "get-document-collect-id",
@@ -293,7 +293,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "AddDocumentIdentity",
                 "operationId": "add-document-identity",
@@ -329,7 +329,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "DeleteDocumentIdentity",
                 "operationId": "delete-document-identity",
@@ -367,7 +367,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "DocumentList",
                 "operationId": "document-list",
@@ -408,7 +408,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "RevokeDocument",
                 "operationId": "revoke-document",
@@ -446,7 +446,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "IdentityMapping",
                 "operationId": "identity-mapping",
@@ -487,7 +487,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "Notification",
                 "operationId": "generic-notification",
@@ -528,7 +528,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "Revoke",
                 "operationId": "generic-revoke",
@@ -569,7 +569,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "dc4eu"
+                    "vc-platform"
                 ],
                 "summary": "Upload",
                 "operationId": "generic-upload",

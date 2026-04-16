@@ -18,7 +18,7 @@ import (
 //	@Summary		Upload
 //	@ID				generic-upload
 //	@Description	Upload endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	"Success"
@@ -146,7 +146,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 //	@Summary		Notification
 //	@ID				generic-notification
 //	@Description	notification endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	vcclient.NotificationReply		"Success"
@@ -187,7 +187,7 @@ type IdentityMappingReply struct {
 //	@Summary		IdentityMapping
 //	@ID				identity-mapping
 //	@Description	Identity mapping endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	IdentityMappingReply	"Success"
@@ -234,7 +234,7 @@ type AddDocumentIdentityRequest struct {
 //	@Summary		AddDocumentIdentity
 //	@ID				add-document-identity
 //	@Description	Adding array of identities to one document
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
@@ -279,7 +279,7 @@ type DeleteDocumentIdentityRequest struct {
 //	@Summary		DeleteDocumentIdentity
 //	@ID				delete-document-identity
 //	@Description	Delete identity to document endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
@@ -320,7 +320,7 @@ type DeleteDocumentRequest struct {
 //	@Summary		DeleteDocument
 //	@ID				delete-document
 //	@Description	delete one document endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	"Success"
@@ -357,7 +357,7 @@ type GetDocumentReply struct {
 //	@Summary		GetDocument
 //	@ID				get-document
 //	@Description	Get document endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	GetDocumentReply		"Success"
@@ -402,7 +402,7 @@ type DocumentListReply struct {
 //	@Summary		DocumentList
 //	@ID				document-list
 //	@Description	List documents for an identity
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	DocumentListReply		"Success"
@@ -444,7 +444,7 @@ type GetDocumentCollectIDReply struct {
 //	@Summary		GetDocumentByCollectID
 //	@ID				get-document-collect-id
 //	@Description	Get one document with collect id
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	GetDocumentCollectIDReply	"Success"
@@ -487,7 +487,7 @@ type RevokeDocumentRequest struct {
 //	@Summary		RevokeDocument
 //	@ID				revoke-document
 //	@Description	Revoke one document
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	"Success"

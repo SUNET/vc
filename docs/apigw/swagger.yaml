@@ -824,7 +824,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: AddConsent
       tags:
-      - dc4eu
+      - vc-platform
   /consent/get:
     post:
       consumes:
@@ -851,7 +851,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: GetConsent
       tags:
-      - dc4eu
+      - vc-platform
   /credential:
     post:
       consumes:
@@ -878,7 +878,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: OIDCCredential
       tags:
-      - dc4eu
+      - vc-platform
   /credential/.well-known/jwks:
     get:
       consumes:
@@ -898,7 +898,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: JWKS
       tags:
-      - dc4eu
+      - vc-platform
   /document:
     delete:
       consumes:
@@ -923,7 +923,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: DeleteDocument
       tags:
-      - dc4eu
+      - vc-platform
     post:
       consumes:
       - application/json
@@ -949,7 +949,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: GetDocument
       tags:
-      - dc4eu
+      - vc-platform
   /document/collect_id:
     post:
       consumes:
@@ -976,7 +976,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: GetDocumentByCollectID
       tags:
-      - dc4eu
+      - vc-platform
   /document/identity:
     delete:
       consumes:
@@ -1001,7 +1001,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: DeleteDocumentIdentity
       tags:
-      - dc4eu
+      - vc-platform
     put:
       consumes:
       - application/json
@@ -1025,7 +1025,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: AddDocumentIdentity
       tags:
-      - dc4eu
+      - vc-platform
   /document/list:
     post:
       consumes:
@@ -1052,7 +1052,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: DocumentList
       tags:
-      - dc4eu
+      - vc-platform
   /document/revoke:
     post:
       consumes:
@@ -1077,7 +1077,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: RevokeDocument
       tags:
-      - dc4eu
+      - vc-platform
   /identity/mapping:
     post:
       consumes:
@@ -1104,7 +1104,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: IdentityMapping
       tags:
-      - dc4eu
+      - vc-platform
   /notification:
     post:
       consumes:
@@ -1131,7 +1131,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: Notification
       tags:
-      - dc4eu
+      - vc-platform
   /revoke:
     post:
       consumes:
@@ -1158,7 +1158,7 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: Revoke
       tags:
-      - dc4eu
+      - vc-platform
   /upload:
     post:
       consumes:
@@ -1183,5 +1183,5 @@ paths:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: Upload
       tags:
-      - dc4eu
+      - vc-platform
 swagger: "2.0"

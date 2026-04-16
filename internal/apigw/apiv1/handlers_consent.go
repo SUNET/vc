@@ -20,7 +20,7 @@ type AddConsentRequest struct {
 //	@Summary		AddConsent
 //	@ID				add-consent
 //	@Description	Add consent endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	"Success"
@@ -55,7 +55,7 @@ type GetConsentRequest struct {
 //	@Summary		GetConsent
 //	@ID				get-consent
 //	@Description	Get consent endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	model.Consent			"Success"

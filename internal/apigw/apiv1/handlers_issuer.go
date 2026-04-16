@@ -60,7 +60,7 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Summary		VCICredential
 //	@ID				create-credential
 //	@Description	Create credential endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	apiv1_issuer.MakeSDJWTReply		"Success"
