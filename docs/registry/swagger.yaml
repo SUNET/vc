@@ -1,61 +1,7 @@
 basePath: /api/v1
-definitions:
-  apiv1.ValidateReply:
-    properties:
-      data:
-        $ref: '#/definitions/apiv1_registry.ValidateReply'
-    type: object
-  apiv1_registry.ValidateReply:
-    properties:
-      Valid:
-        type: boolean
-    type: object
-  apiv1_registry.ValidateRequest:
-    properties:
-      Entity:
-        type: string
-    type: object
-  helpers.Error:
-    properties:
-      details: {}
-      title:
-        type: string
-    type: object
-  helpers.ErrorResponse:
-    properties:
-      error:
-        $ref: '#/definitions/helpers.Error'
-    type: object
 info:
   contact: {}
   title: Registry API
   version: 0.1.0
-paths:
-  /ladok/pdf/sign:
-    post:
-      consumes:
-      - application/json
-      description: validates an entity in the registry
-      operationId: registry-validate
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1_registry.ValidateRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/apiv1.ValidateReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: Validate entity
-      tags:
-      - registry
+paths: {}
 swagger: "2.0"
