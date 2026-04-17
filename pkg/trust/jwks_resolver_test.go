@@ -454,6 +454,26 @@ func TestJWKSKeyResolverInvalidateIssuer(t *testing.T) {
 	assert.Equal(t, 2, callCount) // now 2, fetched again
 }
 
+func TestParseRawKeysEmptyArray(t *testing.T) {
+	testKey := generateTestKey(t)
+	resolver := NewJWKSKeyResolver(JWKSResolverConfig{
+		ParseJWKToPublicKey: mockParseJWK(testKey),
+	})
+	defer resolver.Stop()
+
+	// nil rawKeys
+	result, err := resolver.parseRawKeys(nil)
+	assert.Nil(t, result)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "JWKS contains no keys")
+
+	// empty rawKeys
+	result, err = resolver.parseRawKeys([]json.RawMessage{})
+	assert.Nil(t, result)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "JWKS contains no keys")
+}
+
 func TestBuildWellKnownURL(t *testing.T) {
 	tests := []struct {
 		entity string
