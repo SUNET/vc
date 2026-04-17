@@ -299,6 +299,10 @@ func (r *JWKSKeyResolver) extractJWKSFromMetadata(ctx context.Context, jwks *str
 
 // parseRawKeys parses raw JSON JWK entries into cached key entries.
 func (r *JWKSKeyResolver) parseRawKeys(rawKeys []json.RawMessage) (*cachedJWKS, error) {
+	if len(rawKeys) == 0 {
+		return nil, fmt.Errorf("JWKS contains no keys")
+	}
+
 	entries := make([]jwkEntry, 0, len(rawKeys))
 	var parseErr error
 	for _, raw := range rawKeys {
