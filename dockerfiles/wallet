@@ -1,5 +1,5 @@
 # Wallet test tool - lightweight build without swagger/proto
-FROM golang:1.24 AS builder
+FROM golang:latest AS builder
 
 ARG SERVICE_NAME=wallet
 

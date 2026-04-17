@@ -37,14 +37,21 @@ const dcqlQueryCredentialSchema = v.object({
         }),
         v.record(v.string(), v.union([v.string(), v.array(v.string())])),
     ]),
-    claims: v.array(v.object({
+    claims: v.optional(v.array(v.object({
         path: v.array(v.string()),
-    })),
+    }))),
+});
+
+const credentialSetQuerySchema = v.object({
+    options: v.array(v.array(v.string())),
+    required: v.optional(v.boolean()),
+    purpose: v.optional(v.string()),
 });
 
 /** @typedef {v.InferOutput<typeof dcqlQuerySchema>} DCQLQuery */
 const dcqlQuerySchema = v.object({
     credentials: v.array(dcqlQueryCredentialSchema),
+    credential_sets: v.optional(v.array(credentialSetQuerySchema)),
 });
 
 /** @typedef {v.InferOutput<typeof presentationDefinitionSchema>} PresentationDefinition */
@@ -198,6 +205,21 @@ Alpine.data("app", () => ({
                 ],
                 },
             ],
+        },
+        pid_age_over_18: {
+            label: "PID Age Over 18",
+            credentials: [
+                {
+                    id: "pid",
+                    format: "dc+sd-jwt",
+                    meta: {
+                        vct_values: [],
+                    },
+                    claims: [
+                        { path: ["age_over_18"] },
+                    ],
+                },
+            ]
         },
         pid_ehic: {
             label: "PID + EHIC",
