@@ -219,7 +219,7 @@ Alpine.data("app", () => ({
                         { path: ["age_over_18"] },
                     ],
                 },
-            ]
+            ],
         },
         pid_ehic: {
             label: "PID + EHIC",
