@@ -28,6 +28,9 @@
 //
 //	// Validate JSON Pointer
 //	err = jsonpointer.Validate("/users/0/name")
+//
+// Public traversal APIs return errors for invalid paths and unsupported access patterns.
+// This package does not expose Must* wrappers and does not use panic for traversal failures.
 package jsonpointer
 
 // Get retrieves a value from document using string path components.

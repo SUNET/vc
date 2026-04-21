@@ -53,6 +53,27 @@ func derefValue(v reflect.Value) (reflect.Value, error) {
 	return v, nil
 }
 
+// mapValueByPathKey looks up a map entry using a JSON Pointer path key.
+func mapValueByPathKey(mapVal reflect.Value, key string) (reflect.Value, error) {
+	mapKey := reflect.ValueOf(key)
+	mapKeyType := mapVal.Type().Key()
+
+	switch {
+	case mapKey.Type().AssignableTo(mapKeyType):
+	case mapKey.Type().ConvertibleTo(mapKeyType):
+		mapKey = mapKey.Convert(mapKeyType)
+	default:
+		return reflect.Value{}, ErrNotFound
+	}
+
+	mapEntry := mapVal.MapIndex(mapKey)
+	if !mapEntry.IsValid() {
+		return reflect.Value{}, ErrKeyNotFound
+	}
+
+	return mapEntry, nil
+}
+
 // unescapeComponent un-escapes a JSON pointer path component.
 //
 // TypeScript Original:

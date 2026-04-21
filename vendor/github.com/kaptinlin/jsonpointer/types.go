@@ -8,13 +8,6 @@ import (
 // Path represents a JSON Pointer path as array of string tokens.
 type Path []string
 
-// internalToken represents a single token in a JSON Pointer path with precomputed data.
-// This is used internally for performance optimization, not exposed in the API.
-type internalToken struct {
-	key   string // original key string
-	index int    // precomputed array index, -1 if not a valid array index
-}
-
 // Reference represents a found reference with context.
 type Reference struct {
 	Val any    `json:"val"`

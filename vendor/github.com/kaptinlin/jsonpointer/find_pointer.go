@@ -82,19 +82,25 @@ func findByPointer(pointer string, val any) (*Reference, error) {
 			keyStr = unescapeComponent(keyStr)
 			key = keyStr
 
-			objVal := reflect.ValueOf(obj)
-			if objVal.Kind() == reflect.Map {
-				mapKey := reflect.ValueOf(keyStr)
-				mapVal := objVal.MapIndex(mapKey)
-				if !mapVal.IsValid() {
-					return nil, ErrKeyNotFound
+			objVal, err := derefValue(reflect.ValueOf(obj))
+			if err != nil {
+				return nil, err
+			}
+
+			switch objVal.Kind() {
+			case reflect.Map:
+				mapEntry, err := mapValueByPathKey(objVal, keyStr)
+				if err != nil {
+					return nil, err
 				}
-				val = mapVal.Interface()
-			} else {
+				val = mapEntry.Interface()
+			case reflect.Struct:
 				if !structField(keyStr, &objVal) {
 					return nil, ErrFieldNotFound
 				}
 				val = objVal.Interface()
+			default:
+				return nil, ErrNotFound
 			}
 
 		default:

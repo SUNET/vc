@@ -39,12 +39,33 @@ build/
 
 # .ralphy
 .ralphy/deferred.json
+.ralphy/*.json
 .ralphy/*.txt
 
 # todo files
 .todo
 TODO.md
+TODO*.md
 
 # Project-specific
 .reference/
 .vscode/
+
+# Scratch/planning docs
+.plans/
+.plans/*
+.plan/*.md
+reports/
+reports/*
+plan*.md
+PLAN*.md
+improve*.md
+IMPROVE.md
+IMPROVE*.md
+refactor*.md
+REFACTOR.md
+REFACTOR*.md
+ANALYSIS.md
+
+# Meeting records
+.meetings/

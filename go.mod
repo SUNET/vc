@@ -1,6 +1,6 @@
 module github.com/SUNET/vc
 
-go 1.26.1
+go 1.26.2
 
 require (
 	filippo.io/edwards25519 v1.2.0
@@ -29,7 +29,7 @@ require (
 	github.com/gorilla/sessions v1.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jellydator/ttlcache/v3 v3.4.0
-	github.com/kaptinlin/jsonschema v0.7.7
+	github.com/kaptinlin/jsonschema v0.7.8
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lestrrat-go/jwx/v3 v3.0.13
 	github.com/lithammer/shortuuid/v4 v4.2.0
@@ -129,8 +129,8 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kaptinlin/go-i18n v0.4.0 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.17 // indirect
+	github.com/kaptinlin/go-i18n v0.4.1 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.18 // indirect
 	github.com/kaptinlin/messageformat-go v0.4.20 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect

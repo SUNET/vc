@@ -53,7 +53,7 @@ func getStructFields(t reflect.Type) structFields {
 			continue
 		}
 
-		name := getFieldName(field)
+		name := getFieldName(&field)
 		if name == "-" {
 			continue
 		}
@@ -67,7 +67,7 @@ func getStructFields(t reflect.Type) structFields {
 
 // getFieldName extracts the JSON name from a struct field.
 // Supports basic JSON tags and falls back to the field name.
-func getFieldName(field reflect.StructField) string {
+func getFieldName(field *reflect.StructField) string {
 	tag := field.Tag.Get("json")
 	if tag == "" {
 		return field.Name
@@ -77,6 +77,5 @@ func getFieldName(field reflect.StructField) string {
 	if name != "" {
 		return name
 	}
-
 	return field.Name
 }
