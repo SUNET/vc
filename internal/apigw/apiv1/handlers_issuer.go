@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
@@ -68,6 +69,7 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
 func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+	c.log.Debug("VCICredential request", "credential_identifier", req.CredentialIdentifier, "credential_configuration_id", req.CredentialConfigurationID)
 	jti, err := oauth2.ExtractJTI(req.DPoP)
 	if err != nil {
 		c.log.Error(err, "failed to extract JTI from DPoP")
@@ -116,7 +118,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Match a scope from the authorization context to a known credential constructor
-	scope, credentialConstructor, err := c.matchScope(authContext.Scopes)
+	scope, _, err := c.matchScope(authContext.Scopes)
 	if err != nil {
 		c.log.Error(err, "no matching scope in auth context")
 		return nil, err
@@ -127,7 +129,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	// Determine retrieval strategy based on auth method
 	// - "basic": Identity-based authentication → retrieve from datastore
 	// - Other methods (e.g., "openid4vp"): Session-based → retrieve from cache
-	authMethod := credentialConstructor.AuthMethod
+	authMethod := c.cfg.GetAuthMethodForScope(scope)
 	switch authMethod {
 	case model.AuthMethodBasic:
 		// Basic auth: retrieve from datastore using identity
@@ -212,8 +214,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 // issueSDJWT issues an SD-JWT credential
 func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, document *model.CompleteDocument) (*openid4vci.CredentialResponse, error) {
-	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
-	if credentialConstructor == nil {
+	credMeta := c.cfg.GetCredentialMetadata(scope)
+	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
@@ -221,8 +223,8 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		Scope:        scope,
 		DocumentData: documentData,
 		Jwk:          jwk,
-		Integrity:    credentialConstructor.GetIntegrity(),
-		Vctm:         credentialConstructor.GetVCTMRaw(),
+		Integrity:    credMeta.GetIntegrity(),
+		Vctm:         credMeta.GetVCTMRaw(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")
@@ -451,8 +453,6 @@ func (c *Client) VCINotification(ctx context.Context, req *openid4vci.Notificati
 
 // VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
-	c.log.Debug("metadata request")
-
 	if err := helpers.Check(ctx, c.cfg, c.issuerMetadata, c.log); err != nil {
 		c.log.Error(err, "failed to check metadata")
 		return nil, err

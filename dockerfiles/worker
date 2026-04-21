@@ -6,19 +6,17 @@ ARG BUILDTAG
 ARG GO_BUILD_TAGS
 
 ENV GOTOOLCHAIN=auto
+ENV GOFLAGS=-mod=vendor
+ENV GOPROXY=off
+ENV GONOSUMDB=*
+ENV GONOSUMCHECK=*
 
-# Copy only dependency files first for better caching
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-
-# Copy source code
+# Copy source code (includes vendor/)
 COPY . .
 
 # Run make commands
-RUN make swagger
-RUN make proto
+RUN make swagger-${SERVICE_NAME} swagger-fmt
+RUN make proto-${SERVICE_NAME}
 
 # Build with caching for both build cache and module cache
 # GO_BUILD_TAGS is optional - if set, adds -tags flag

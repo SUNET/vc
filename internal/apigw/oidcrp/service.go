@@ -19,7 +19,7 @@ import (
 
 // Service provides OIDC Relying Party functionality
 type Service struct {
-	cfg          *model.OIDCRPConfig
+	cfg          *model.OIDCRP
 	provider     *oidc.Provider
 	verifier     *oidc.IDTokenVerifier
 	oauth2Config *oauth2.Config
@@ -30,7 +30,7 @@ type Service struct {
 }
 
 // New creates a new OIDC RP service
-func New(ctx context.Context, cfg *model.OIDCRPConfig, sessionCache pkgcache.Cache[*Session], dbService *db.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Session], dbService *db.Service, log *logger.Log) (*Service, error) {
 	if !cfg.Enable {
 		log.Info("OIDC RP support disabled")
 		return nil, nil
@@ -142,14 +142,13 @@ type AuthRequest struct {
 // InitiateAuth initiates an OIDC authentication flow
 func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*AuthRequest, error) {
 	// Validate credential type exists in configuration
-	credMapping, exists := s.cfg.CredentialMappings[credentialType]
+	_, exists := s.cfg.CredentialMappings[credentialType]
 	if !exists {
 		return nil, fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
 
 	s.log.Debug("Initiating OIDC auth",
-		"credential_type", credentialType,
-		"credential_config_id", credMapping.CredentialConfigID)
+		"credential_type", credentialType)
 
 	// Create session with state, nonce, and PKCE verifier
 	session, err := s.createSession(ctx, credentialType)

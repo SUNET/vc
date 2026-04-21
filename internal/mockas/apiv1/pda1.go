@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"time"
+
 	"github.com/SUNET/vc/pkg/socialsecurity"
 
 	"github.com/brianvoe/gofakeit/v6"

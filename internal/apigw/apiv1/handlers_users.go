@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"

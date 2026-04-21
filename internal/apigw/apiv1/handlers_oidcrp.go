@@ -126,13 +126,6 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to create transformer: %w", err)
 	}
 
-	// Get the mapping for this credential type
-	mapping, err := transformer.GetMapping(session.CredentialType)
-	if err != nil {
-		span.SetStatus(codes.Error, "no mapping found")
-		return nil, err
-	}
-
 	// Transform OIDC claims to credential claims
 	claims, err := transformer.TransformClaims(session.CredentialType, authResp.Claims)
 	if err != nil {
@@ -140,22 +133,16 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, err
 	}
 
-	// Log the mapping attributes and resulting document data for diagnostics.
-	// This helps identify mismatches between credential_mappings and the VCTM claims.
+	// Log the resulting document data for diagnostics.
 	claimKeys := make([]string, 0, len(claims))
 	for k := range claims {
 		claimKeys = append(claimKeys, k)
-	}
-	mappingKeys := make([]string, 0, len(mapping.Attributes))
-	for k := range mapping.Attributes {
-		mappingKeys = append(mappingKeys, k)
 	}
 
 	c.log.Info("OIDC authentication successful",
 		"credential_type", session.CredentialType,
 		"claims_count", len(claims),
 		"claim_keys", claimKeys,
-		"mapping_attributes", mappingKeys,
 		"subject", authResp.IDToken.Subject)
 
 	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
@@ -210,7 +197,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	// Generate credential offer for wallet
-	credentialOffer, err := c.generateCredentialOfferOIDCRP(ctx, session.CredentialType, mapping.CredentialConfigID)
+	credentialOffer, err := c.generateCredentialOfferOIDCRP(ctx, session.CredentialType, session.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
@@ -248,8 +235,8 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 
 	client := apiv1_issuer.NewIssuerServiceClient(conn)
 
-	credentialConstructor := c.cfg.GetCredentialConstructor(credentialType)
-	if credentialConstructor == nil {
+	credMeta := c.cfg.GetCredentialMetadata(credentialType)
+	if credMeta == nil {
 		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
 
@@ -258,8 +245,8 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 		Scope:        credentialType,
 		DocumentData: documentData,
 		Jwk:          jwk,
-		Integrity:    credentialConstructor.GetIntegrity(),
-		Vctm:         credentialConstructor.GetVCTMRaw(),
+		Integrity:    credMeta.GetIntegrity(),
+		Vctm:         credMeta.GetVCTMRaw(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")
@@ -286,7 +273,7 @@ func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialTy
 
 	// Build credential offer parameters
 	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.CredentialOffers.IssuerURL,
+		CredentialIssuer:           c.cfg.APIGW.Outbound.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]any{
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{

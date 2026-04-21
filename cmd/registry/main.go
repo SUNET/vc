@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
 	"github.com/SUNET/vc/internal/registry/apiv1"
 	"github.com/SUNET/vc/internal/registry/cache"
 	"github.com/SUNET/vc/internal/registry/db"

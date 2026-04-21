@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -195,7 +196,7 @@ func NewValidator() (*validator.Validate, error) {
 
 	// Register struct-level validation for SAMLConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		cfg := sl.Current().Interface().(model.SAMLConfig)
+		cfg := sl.Current().Interface().(model.SAMLSP)
 		if !cfg.Enable {
 			return
 		}
@@ -209,11 +210,11 @@ func NewValidator() (*validator.Validate, error) {
 		if hasMDQ && hasStatic {
 			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_exclusive", "")
 		}
-	}, model.SAMLConfig{})
+	}, model.SAMLSP{})
 
 	// Register struct-level validation for OIDCRPConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		cfg := sl.Current().Interface().(model.OIDCRPConfig)
+		cfg := sl.Current().Interface().(model.OIDCRP)
 		if !cfg.Enable {
 			return
 		}
@@ -222,30 +223,65 @@ func NewValidator() (*validator.Validate, error) {
 		if !slices.Contains(cfg.Scopes, "openid") {
 			sl.ReportError(cfg.Scopes, "Scopes", "Scopes", "oidc_openid_scope_required", "")
 		}
-	}, model.OIDCRPConfig{})
+	}, model.OIDCRP{})
 
-	// Register struct-level validation for Common: credential constructor constraints
+	// Register struct-level validation for APIGWInbound: at least one auth method must be configured
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		common := sl.Current().Interface().(model.Common)
-		for scope, cc := range common.CredentialConstructor {
-			if cc == nil {
-				continue
-			}
+		inbound := sl.Current().Interface().(model.APIGWInbound)
+		hasBasic := len(inbound.Basic.CredentialTypes) > 0
+		hasSAML := inbound.SAML.Enable
+		hasOIDC := inbound.OIDC.Enable
+		hasOpenID4VP := len(inbound.OpenID4VP.CredentialTypes) > 0
+		if !hasBasic && !hasSAML && !hasOIDC && !hasOpenID4VP {
+			sl.ReportError(inbound, "", "APIGWInbound", "apigw_inbound_auth_method_required", "")
+		}
+	}, model.APIGWInbound{})
+
+	// Register struct-level validation for APIGWInboundOpenID4VP: auth_scopes/auth_claims constraints
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		inbound := sl.Current().Interface().(model.APIGWInboundOpenID4VP)
+		for scope, auth := range inbound.CredentialTypes {
 			// auth_scopes must not reference self
-			if slices.Contains(cc.AuthScopes, scope) {
-				sl.ReportError(cc.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
-			}
-			// openid4vp requires non-empty auth_scopes and auth_claims
-			if cc.AuthMethod == "openid4vp" {
-				if len(cc.AuthScopes) == 0 {
-					sl.ReportError(cc.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
-				}
-				if len(cc.AuthClaims) == 0 {
-					sl.ReportError(cc.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_openid4vp", scope)
-				}
+			if slices.Contains(auth.AuthScopes, scope) {
+				sl.ReportError(auth.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
 			}
 		}
-	}, model.Common{})
+	}, model.APIGWInboundOpenID4VP{})
+
+	// Register struct-level validation for OpenID4VPConfig: supported_credentials scopes must cover all client scopes
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.OpenID4VPConfig)
+
+		// Collect the union of all scopes from supported_credentials
+		supportedScopes := make(map[string]bool)
+		for _, cred := range cfg.SupportedCredentials {
+			for _, scope := range cred.Scopes {
+				supportedScopes[scope] = true
+			}
+		}
+
+		// Collect the union of all client scopes
+		clientScopes := make(map[string]bool)
+		for _, client := range cfg.Clients {
+			for _, scope := range client.Scopes {
+				clientScopes[scope] = true
+			}
+		}
+
+		// Every client scope must exist in supported_credentials
+		for scope := range clientScopes {
+			if !supportedScopes[scope] {
+				sl.ReportError(cfg.Clients, "Clients", "Clients", "client_scope_not_in_supported_credentials", scope)
+			}
+		}
+
+		// Every supported_credentials scope must be used by at least one client
+		for scope := range supportedScopes {
+			if !clientScopes[scope] {
+				sl.ReportError(cfg.SupportedCredentials, "SupportedCredentials", "SupportedCredentials", "supported_credential_scope_unused", scope)
+			}
+		}
+	}, model.OpenID4VPConfig{})
 
 	return validate, nil
 }

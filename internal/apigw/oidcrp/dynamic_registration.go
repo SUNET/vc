@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
 	"github.com/SUNET/vc/pkg/model"
 )
 

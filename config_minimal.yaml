@@ -49,19 +49,19 @@ verifier:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
   public_url: "https://verifier.vc.docker:8080"
-  oauth_server:
-    token_endpoint: "https://verifier.vc.docker:8080/token"
-    clients:
-      "1003":
-        type: "public"
-        redirect_uri: "http://localhost:3000/cb"
-        scopes:
-          - "pid_1_5"
-  openid4vp:
-    supported_credentials:
-      - vct: "urn:eudi:pid:arf-1.5:1"
-        scopes:
-          - "pid_1_5"
+  inbound:
+    openid4vp:
+      token_endpoint: "https://verifier.vc.docker:8080/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "http://localhost:3000/cb"
+          scopes:
+            - "pid_1_5"
+      supported_credentials:
+        - vct: "urn:eudi:pid:arf-1.5:1"
+          scopes:
+            - "pid_1_5"
 
 registry:
   api_server:
@@ -91,20 +91,21 @@ apigw:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
-  credential_offers:
-    issuer_url: "https://apigw.vc.docker:8080"
-    wallets:
-      local:
-        label: "Local Wallet"
-        redirect_uri: "http://localhost:3000/cb"
-  oauth_server:
-    token_endpoint: "https://apigw.vc.docker:8080/token"
-    clients:
-      "1003":
-        type: "public"
-        redirect_uri: "http://localhost:3000"
-        scopes:
-          - "pid_1_5"
+  outbound:
+    openid4vci:
+      token_endpoint: "https://apigw.vc.docker:8080/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "http://localhost:3000"
+          scopes:
+            - "pid_1_5"
+    credential_offers:
+      issuer_url: "https://apigw.vc.docker:8080"
+      wallets:
+        local:
+          label: "Local Wallet"
+          redirect_uri: "http://localhost:3000/cb"
 
 mock_as:
   api_server:

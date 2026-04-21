@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 

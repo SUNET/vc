@@ -25,8 +25,10 @@ func testCfg(ha bool) *model.Cfg {
 	return &model.Cfg{
 		Common: &model.Common{HA: model.HAConfig{Enable: ha, CacheDatabaseName: "vc_cache"}},
 		APIGW: &model.APIGW{
-			OIDCRP: model.OIDCRPConfig{SessionDuration: 300},
-			SAML:   model.SAMLConfig{SessionDuration: 300},
+			Inbound: model.APIGWInbound{
+				OIDC: model.OIDCRP{SessionDuration: 300},
+				SAML: model.SAMLSP{SessionDuration: 300},
+			},
 		},
 	}
 }

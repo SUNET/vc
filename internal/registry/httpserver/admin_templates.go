@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+
 	"github.com/SUNET/vc/internal/registry/apiv1"
 )
 

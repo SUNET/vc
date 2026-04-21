@@ -15,16 +15,15 @@ func TestUIMetadata(t *testing.T) {
 
 	tests := []struct {
 		name              string
-		credentials       map[string]*model.CredentialConstructor
+		credentials       map[string]*model.CredentialMetadata
 		supportedWallets  map[string]string
 		expectCredentials int
 		expectWallets     int
 	}{
 		{
 			name: "with credentials and wallets",
-			credentials: map[string]*model.CredentialConstructor{
+			credentials: map[string]*model.CredentialMetadata{
 				"pid": {
-					AuthMethod:   "client_secret",
 					VCTMFilePath: "/path/to/vctm",
 					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 					Attributes: map[string]map[string][]string{
@@ -32,7 +31,6 @@ func TestUIMetadata(t *testing.T) {
 					},
 				},
 				"diploma": {
-					AuthMethod:   "client_secret",
 					VCTMFilePath: "/path/to/diploma_vctm",
 					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
 				},
@@ -53,9 +51,8 @@ func TestUIMetadata(t *testing.T) {
 		},
 		{
 			name: "credentials only",
-			credentials: map[string]*model.CredentialConstructor{
+			credentials: map[string]*model.CredentialMetadata{
 				"ehic": {
-					AuthMethod: "bearer_token",
 					VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 				},
 			},
@@ -69,7 +66,7 @@ func TestUIMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: tt.credentials,
+					CredentialMetadata: tt.credentials,
 				},
 				Verifier: &model.Verifier{
 					SupportedWallets: tt.supportedWallets,

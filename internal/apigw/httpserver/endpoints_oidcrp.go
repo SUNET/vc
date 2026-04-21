@@ -50,8 +50,8 @@ func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (a
 //	@Tags			OIDCRP
 //	@Accept			application/x-www-form-urlencoded
 //	@Produce		json
-//	@Param			code	query		string					true	"Authorization code"
-//	@Param			state	query		string					true	"OAuth2 state parameter"
+//	@Param			code	query		string	true	"Authorization code"
+//	@Param			state	query		string	true	"OAuth2 state parameter"
 //	@Success		200		{object}	apiv1.OIDCRPCallbackResponse
 //	@Failure		400		{object}	map[string]any	"Bad request"
 //	@Failure		500		{object}	map[string]any	"Internal server error"

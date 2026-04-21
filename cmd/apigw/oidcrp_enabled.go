@@ -12,15 +12,15 @@ import (
 )
 
 func initOIDCRPService(ctx context.Context, cfg *model.Cfg, cacheService *cache.Service, dbService *db.Service, log *logger.Log) (httpserver.OIDCRPService, error) {
-	if !cfg.APIGW.OIDCRP.Enable {
+	if !cfg.APIGW.Inbound.OIDC.Enable {
 		return nil, nil
 	}
 
-	oidcrpService, err := oidcrp.New(ctx, &cfg.APIGW.OIDCRP, cacheService.OIDCRPSession, dbService, log)
+	oidcrpService, err := oidcrp.New(ctx, &cfg.APIGW.Inbound.OIDC, cacheService.OIDCRPSession, dbService, log)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Info("OIDC RP service initialized", "issuer_url", cfg.APIGW.OIDCRP.IssuerURL)
+	log.Info("OIDC RP service initialized", "issuer_url", cfg.APIGW.Inbound.OIDC.IssuerURL)
 	return oidcrpService, nil
 }

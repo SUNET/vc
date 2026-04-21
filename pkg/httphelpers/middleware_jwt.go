@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"

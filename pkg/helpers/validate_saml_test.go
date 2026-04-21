@@ -11,13 +11,13 @@ import (
 func TestValidateSAMLConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		config      model.SAMLConfig
+		config      model.SAMLSP
 		expectError bool
 		errorMsg    string
 	}{
 		{
 			name: "disabled config is valid",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable:          false,
 				SessionDuration: 300,
 			},
@@ -25,8 +25,9 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "valid MDQ configuration",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable:             true,
+				CredentialTypes:    []string{"pid"},
 				EntityID:           "https://sp.example.com",
 				MDQServer:          "https://md.example.org/entities/",
 				CertificatePath:    "/pki/saml.crt",
@@ -39,8 +40,9 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "valid static IdP with path",
-			config: model.SAMLConfig{
-				Enable: true,
+			config: model.SAMLSP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:     "https://idp.example.com",
 					MetadataPath: "/path/to/metadata.xml",
@@ -56,8 +58,9 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "valid static IdP with URL",
-			config: model.SAMLConfig{
-				Enable: true,
+			config: model.SAMLSP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:    "https://idp.example.com",
 					MetadataURL: "https://idp.example.com/metadata",
@@ -73,7 +76,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "enabled but no MDQ or static IdP",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable: true,
 			},
 			expectError: true,
@@ -81,7 +84,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "both MDQ and static IdP configured",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable:   true,
 				MDQServer: "https://md.example.org/entities/",
 				StaticIDPMetadata: &model.StaticIDPConfig{
@@ -94,7 +97,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "static IdP without entityID",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable: true,
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					MetadataPath: "/path/to/metadata.xml",
@@ -105,7 +108,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "static IdP without metadata source",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable: true,
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID: "https://idp.example.com",
@@ -116,7 +119,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 		},
 		{
 			name: "static IdP with both path and URL",
-			config: model.SAMLConfig{
+			config: model.SAMLSP{
 				Enable: true,
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:     "https://idp.example.com",

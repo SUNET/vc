@@ -15,7 +15,7 @@ func TestSessionStore(t *testing.T) {
 	log := logger.NewSimple("test")
 	ctx := context.Background()
 	svc := &Service{
-		cfg:          &model.OIDCRPConfig{IssuerURL: "https://accounts.google.com", SessionDuration: 300},
+		cfg:          &model.OIDCRP{IssuerURL: "https://accounts.google.com", SessionDuration: 300},
 		sessionCache: cache.NewMemoryCache[*Session](5 * time.Minute),
 		log:          log,
 	}
@@ -58,7 +58,7 @@ func TestSessionExpiration(t *testing.T) {
 	log := logger.NewSimple("test")
 	ctx := context.Background()
 	svc := &Service{
-		cfg:          &model.OIDCRPConfig{IssuerURL: "https://accounts.google.com", SessionDuration: 1},
+		cfg:          &model.OIDCRP{IssuerURL: "https://accounts.google.com", SessionDuration: 1},
 		sessionCache: cache.NewMemoryCache[*Session](1 * time.Millisecond),
 		log:          log,
 	}
@@ -83,7 +83,6 @@ func TestSessionExpiration(t *testing.T) {
 func TestClaimTransformer(t *testing.T) {
 	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialConfigID: "urn:eudi:pid:1",
 			Attributes: map[string]model.AttributeConfig{
 				"given_name": {
 					Claim:    "identity.given_name",
@@ -152,7 +151,6 @@ func TestClaimTransformer(t *testing.T) {
 func TestClaimTransformerMissingRequired(t *testing.T) {
 	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialConfigID: "urn:eudi:pid:1",
 			Attributes: map[string]model.AttributeConfig{
 				"given_name": {
 					Claim:    "identity.given_name",
@@ -177,7 +175,6 @@ func TestClaimTransformerMissingRequired(t *testing.T) {
 func TestClaimTransformerTransformations(t *testing.T) {
 	mappings := map[string]model.CredentialMapping{
 		"test": {
-			CredentialConfigID: "test:1",
 			Attributes: map[string]model.AttributeConfig{
 				"lowercase_field": {
 					Claim:     "result.lowercase",
@@ -240,7 +237,6 @@ func TestServiceInitialization(t *testing.T) {
 func BenchmarkClaimTransform(b *testing.B) {
 	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialConfigID: "urn:eudi:pid:1",
 			Attributes: map[string]model.AttributeConfig{
 				"given_name":  {Claim: "identity.given_name", Required: true},
 				"family_name": {Claim: "identity.family_name", Required: true},

@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
@@ -13,8 +14,8 @@ import (
 	"github.com/SUNET/vc/internal/apigw/inbound"
 	"github.com/SUNET/vc/internal/apigw/outbound"
 	"github.com/SUNET/vc/pkg/configuration"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
 )
 

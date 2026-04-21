@@ -20,14 +20,16 @@ func TestClearSecrets(t *testing.T) {
 					},
 				},
 			},
-			OIDCRP: OIDCRPConfig{
-				Registration: &OIDCRPRegistrationConfig{
-					Preconfigured: &OIDCRPPreconfiguredConfig{
-						ClientSecret: "my-client-secret", //NOSONAR
-					},
-					Dynamic: &OIDCRPDynamicRegistrationConfig{
-						Enable:             true,
-						InitialAccessToken: "my-initial-token", //NOSONAR
+			Inbound: APIGWInbound{
+				OIDC: OIDCRP{
+					Registration: &OIDCRPRegistrationConfig{
+						Preconfigured: &OIDCRPPreconfiguredConfig{
+							ClientSecret: "my-client-secret", //NOSONAR
+						},
+						Dynamic: &OIDCRPDynamicRegistrationConfig{
+							Enable:             true,
+							InitialAccessToken: "my-initial-token", //NOSONAR
+						},
 					},
 				},
 			},
@@ -38,11 +40,13 @@ func TestClearSecrets(t *testing.T) {
 			},
 		},
 		Verifier: &Verifier{
-			OIDCOP: &OIDCOPConfig{
-				SubjectSalt: "salt-value", //NOSONAR
-				StaticClients: []StaticOIDCClient{
-					{ClientID: "client-a", ClientSecret: "secret-a"}, //NOSONAR
-					{ClientID: "client-b", ClientSecret: "secret-b"}, //NOSONAR
+			Outbound: VerifierOutbound{
+				OIDCProvider: &OIDCOP{
+					SubjectSalt: "salt-value", //NOSONAR
+					StaticClients: []StaticOIDCClient{
+						{ClientID: "client-a", ClientSecret: "secret-a"}, //NOSONAR
+						{ClientID: "client-b", ClientSecret: "secret-b"}, //NOSONAR
+					},
 				},
 			},
 		},
@@ -55,12 +59,12 @@ func TestClearSecrets(t *testing.T) {
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "Common.Mongo.URI should be cleared")                                                                         //NOSONAR
 	assert.Nil(t, cfg.APIGW.APIServer.APIAuth.BasicAuth.Users, "APIGW.APIServer.APIAuth.BasicAuth.Users should be nil")                                 //NOSONAR
-	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret, "APIGW.OIDCRP.Registration.Preconfigured.ClientSecret should be cleared") //NOSONAR
-	assert.Empty(t, cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken, "APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken should be cleared") //NOSONAR
+	assert.Empty(t, cfg.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret, "APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret should be cleared") //NOSONAR
+	assert.Empty(t, cfg.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken, "APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken should be cleared") //NOSONAR
 	assert.Empty(t, cfg.Registry.AdminGUI.Password, "Registry.AdminGUI.Password should be cleared")                                                     //NOSONAR
-	assert.Empty(t, cfg.Verifier.OIDCOP.SubjectSalt, "Verifier.OIDCOP.SubjectSalt should be cleared")                                                       //NOSONAR
-	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret, "static client-a secret should be cleared")                                      //NOSONAR
-	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[1].ClientSecret, "static client-b secret should be cleared")                                      //NOSONAR
+	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.SubjectSalt, "Verifier.Outbound.OIDCProvider.SubjectSalt should be cleared")                                                       //NOSONAR
+	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret, "static client-a secret should be cleared")                                      //NOSONAR
+	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[1].ClientSecret, "static client-b secret should be cleared")                                      //NOSONAR
 	assert.Empty(t, cfg.UI.Password, "UI.Password should be cleared")                                                                                   //NOSONAR
 }
 
@@ -77,11 +81,13 @@ func TestApplySecrets(t *testing.T) {
 		APIGW:    &APIGW{},
 		Registry: &Registry{},
 		Verifier: &Verifier{
-			OIDCOP: &OIDCOPConfig{
-				StaticClients: []StaticOIDCClient{
-					{ClientID: "client-a"},
-					{ClientID: "client-b"},
-					{ClientID: "client-c"}, // not in secrets — should stay empty
+			Outbound: VerifierOutbound{
+				OIDCProvider: &OIDCOP{
+					StaticClients: []StaticOIDCClient{
+						{ClientID: "client-a"},
+						{ClientID: "client-b"},
+						{ClientID: "client-c"}, // not in secrets — should stay empty
+					},
 				},
 			},
 		},
@@ -100,13 +106,15 @@ func TestApplySecrets(t *testing.T) {
 					},
 				},
 			},
-			OIDCRP: OIDCRPSecrets{
-				Registration: OIDCRPRegistrationSecrets{
-					Preconfigured: &OIDCRPPreconfiguredSecrets{
-						ClientSecret: "secret-client-secret", //NOSONAR
-					},
-					Dynamic: &OIDCRPDynamicSecrets{
-						InitialAccessToken: "secret-initial-token", //NOSONAR
+			Inbound: APIGWInboundSecrets{
+				OIDC: OIDCRPSecrets{
+					Registration: OIDCRPRegistrationSecrets{
+						Preconfigured: &OIDCRPPreconfiguredSecrets{
+							ClientSecret: "secret-client-secret", //NOSONAR
+						},
+						Dynamic: &OIDCRPDynamicSecrets{
+							InitialAccessToken: "secret-initial-token", //NOSONAR
+						},
 					},
 				},
 			},
@@ -117,11 +125,13 @@ func TestApplySecrets(t *testing.T) {
 			},
 		},
 		Verifier: &VerifierSecrets{
-			OIDCOP: OIDCOPSecrets{
-				SubjectSalt: "secret-salt", //NOSONAR
-				StaticClients: map[string]string{ //NOSONAR
-					"client-a": "secret-for-a",
-					"client-b": "secret-for-b",
+			Outbound: VerifierOutboundSecrets{
+				OIDCProvider: OIDCOPSecrets{
+					SubjectSalt: "secret-salt", //NOSONAR
+					StaticClients: map[string]string{ //NOSONAR
+						"client-a": "secret-for-a",
+						"client-b": "secret-for-b",
+					},
 				},
 			},
 		},
@@ -134,13 +144,13 @@ func TestApplySecrets(t *testing.T) {
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)             //NOSONAR
 	assert.Equal(t, "from-secrets-file", cfg.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])        //NOSONAR
-	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret) //NOSONAR
-	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken) //NOSONAR
+	assert.Equal(t, "secret-client-secret", cfg.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret) //NOSONAR
+	assert.Equal(t, "secret-initial-token", cfg.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                              //NOSONAR
-	assert.Equal(t, "secret-salt", cfg.Verifier.OIDCOP.SubjectSalt)                                     //NOSONAR
-	assert.Equal(t, "secret-for-a", cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret)                //NOSONAR
-	assert.Equal(t, "secret-for-b", cfg.Verifier.OIDCOP.StaticClients[1].ClientSecret)                //NOSONAR
-	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[2].ClientSecret, "client-c should have no secret") //NOSONAR
+	assert.Equal(t, "secret-salt", cfg.Verifier.Outbound.OIDCProvider.SubjectSalt)                                     //NOSONAR
+	assert.Equal(t, "secret-for-a", cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret)                //NOSONAR
+	assert.Equal(t, "secret-for-b", cfg.Verifier.Outbound.OIDCProvider.StaticClients[1].ClientSecret)                //NOSONAR
+	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[2].ClientSecret, "client-c should have no secret") //NOSONAR
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                //NOSONAR
 }
 
@@ -205,14 +215,16 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 					},
 				},
 			},
-			OIDCRP: OIDCRPConfig{
-				Registration: &OIDCRPRegistrationConfig{
-					Preconfigured: &OIDCRPPreconfiguredConfig{
-						ClientSecret: "config-client-secret", //NOSONAR
-					},
-					Dynamic: &OIDCRPDynamicRegistrationConfig{
-						Enable:             true,
-						InitialAccessToken: "config-initial-token", //NOSONAR
+			Inbound: APIGWInbound{
+				OIDC: OIDCRP{
+					Registration: &OIDCRPRegistrationConfig{
+						Preconfigured: &OIDCRPPreconfiguredConfig{
+							ClientSecret: "config-client-secret", //NOSONAR
+						},
+						Dynamic: &OIDCRPDynamicRegistrationConfig{
+							Enable:             true,
+							InitialAccessToken: "config-initial-token", //NOSONAR
+						},
 					},
 				},
 			},
@@ -223,10 +235,12 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		Verifier: &Verifier{
-			OIDCOP: &OIDCOPConfig{
-				SubjectSalt: "config-salt", //NOSONAR
-				StaticClients: []StaticOIDCClient{
-					{ClientID: "client-x", ClientSecret: "config-secret-x"}, //NOSONAR
+			Outbound: VerifierOutbound{
+				OIDCProvider: &OIDCOP{
+					SubjectSalt: "config-salt", //NOSONAR
+					StaticClients: []StaticOIDCClient{
+						{ClientID: "client-x", ClientSecret: "config-secret-x"}, //NOSONAR
+					},
 				},
 			},
 		},
@@ -240,7 +254,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "after clear: Mongo URI should be empty")
 	assert.Empty(t, cfg.UI.Password, "after clear: UI Password should be empty")
-	assert.Empty(t, cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret, "after clear: static client secret should be empty") //NOSONAR
+	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret, "after clear: static client secret should be empty") //NOSONAR
 
 	// Step 2: Apply secrets from external file
 	secrets := &Secrets{
@@ -255,13 +269,15 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 					},
 				},
 			},
-			OIDCRP: OIDCRPSecrets{
-				Registration: OIDCRPRegistrationSecrets{
-					Preconfigured: &OIDCRPPreconfiguredSecrets{
-						ClientSecret: "secret-client-secret", //NOSONAR
-					},
-					Dynamic: &OIDCRPDynamicSecrets{
-						InitialAccessToken: "secret-initial-token", //NOSONAR
+			Inbound: APIGWInboundSecrets{
+				OIDC: OIDCRPSecrets{
+					Registration: OIDCRPRegistrationSecrets{
+						Preconfigured: &OIDCRPPreconfiguredSecrets{
+							ClientSecret: "secret-client-secret", //NOSONAR
+						},
+						Dynamic: &OIDCRPDynamicSecrets{
+							InitialAccessToken: "secret-initial-token", //NOSONAR
+						},
 					},
 				},
 			},
@@ -272,10 +288,12 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		Verifier: &VerifierSecrets{
-			OIDCOP: OIDCOPSecrets{
-				SubjectSalt: "secret-salt", //NOSONAR
-				StaticClients: map[string]string{ //NOSONAR
-					"client-x": "secret-for-x",
+			Outbound: VerifierOutboundSecrets{
+				OIDCProvider: OIDCOPSecrets{
+					SubjectSalt: "secret-salt", //NOSONAR
+					StaticClients: map[string]string{ //NOSONAR
+						"client-x": "secret-for-x",
+					},
 				},
 			},
 		},
@@ -287,10 +305,10 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)             //NOSONAR
 	assert.Equal(t, "secret-password", cfg.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])          //NOSONAR
-	assert.Equal(t, "secret-client-secret", cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret) //NOSONAR
-	assert.Equal(t, "secret-initial-token", cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken) //NOSONAR
+	assert.Equal(t, "secret-client-secret", cfg.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret) //NOSONAR
+	assert.Equal(t, "secret-initial-token", cfg.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                              //NOSONAR
-	assert.Equal(t, "secret-salt", cfg.Verifier.OIDCOP.SubjectSalt)                                     //NOSONAR
-	assert.Equal(t, "secret-for-x", cfg.Verifier.OIDCOP.StaticClients[0].ClientSecret)                //NOSONAR
+	assert.Equal(t, "secret-salt", cfg.Verifier.Outbound.OIDCProvider.SubjectSalt)                                     //NOSONAR
+	assert.Equal(t, "secret-for-x", cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret)                //NOSONAR
 	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                //NOSONAR
 }

@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/pkg/model"

@@ -89,7 +89,7 @@ func TestJWTAttributeDefaults(t *testing.T) {
 }
 
 func TestSAMLConfigDefaults(t *testing.T) {
-	var cfg SAMLConfig
+	var cfg SAMLSP
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
@@ -97,7 +97,7 @@ func TestSAMLConfigDefaults(t *testing.T) {
 }
 
 func TestOIDCRPConfigDefaults(t *testing.T) {
-	var cfg OIDCRPConfig
+	var cfg OIDCRP
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
@@ -185,7 +185,7 @@ func TestTrustPolicyConfigDefaults(t *testing.T) {
 }
 
 func TestOIDCOPConfigDefaults(t *testing.T) {
-	var cfg OIDCOPConfig
+	var cfg OIDCOP
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 

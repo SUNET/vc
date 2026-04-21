@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+
 	"github.com/SUNET/vc/internal/registry/db"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )

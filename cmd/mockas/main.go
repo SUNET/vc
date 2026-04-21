@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
 	"github.com/SUNET/vc/internal/mockas/apiv1"
 	"github.com/SUNET/vc/internal/mockas/bootstrapper"
 	"github.com/SUNET/vc/internal/mockas/httpserver"

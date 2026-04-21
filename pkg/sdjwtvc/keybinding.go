@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"time"
+
 	"github.com/SUNET/vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"

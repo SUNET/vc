@@ -120,11 +120,11 @@ type LDProofVCDetail struct {
 
 // LDProofOptions specifies signing options for LD Proof credentials.
 type LDProofOptions struct {
-	ProofType  string `json:"proofType,omitempty"`
+	ProofType    string `json:"proofType,omitempty"`
 	ProofPurpose string `json:"proofPurpose,omitempty"`
-	Created    string `json:"created,omitempty"`
-	Challenge  string `json:"challenge,omitempty"`
-	Domain     string `json:"domain,omitempty"`
+	Created      string `json:"created,omitempty"`
+	Challenge    string `json:"challenge,omitempty"`
+	Domain       string `json:"domain,omitempty"`
 }
 
 // OfferOption configures offer creation.

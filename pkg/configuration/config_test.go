@@ -24,18 +24,20 @@ apigw:
       basic_auth:
         users:
           admin: "secret-admin-pass"
-  oidc_rp:
-    registration:
-      preconfigured:
-        client_secret: "secret-client-secret"
-      dynamic:
-        initial_access_token: "secret-initial-token"
+  inbound:
+    oidc:
+      registration:
+        preconfigured:
+          client_secret: "secret-client-secret"
+        dynamic:
+          initial_access_token: "secret-initial-token"
 registry:
   admin_gui:
     password: "secret-registry-pass"
 verifier:
-  oidc_op:
-    subject_salt: "secret-salt-value"
+  outbound:
+    oidc_provider:
+      subject_salt: "secret-salt-value"
 ui:
   password: "secret-ui-pass"
 `, testMongoURI)
@@ -53,10 +55,10 @@ ui:
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)
 	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
-	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Preconfigured)
-	assert.Equal(t, "secret-client-secret", secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
-	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Dynamic)
-	assert.Equal(t, "secret-initial-token", secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
+	require.NotNil(t, secrets.APIGW.Inbound.OIDC.Registration.Preconfigured)
+	assert.Equal(t, "secret-client-secret", secrets.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret)
+	require.NotNil(t, secrets.APIGW.Inbound.OIDC.Registration.Dynamic)
+	assert.Equal(t, "secret-initial-token", secrets.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken)
 
 	// Verify Registry secrets
 	require.NotNil(t, secrets.Registry)
@@ -64,7 +66,7 @@ ui:
 
 	// Verify Verifier secrets
 	require.NotNil(t, secrets.Verifier)
-	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDCOP.SubjectSalt)
+	assert.Equal(t, "secret-salt-value", secrets.Verifier.Outbound.OIDCProvider.SubjectSalt)
 
 	// Verify UI secrets
 	require.NotNil(t, secrets.UI)

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -46,7 +47,7 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	}
 
 	offerParams := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.CredentialOffers.IssuerURL,
+		CredentialIssuer:           c.cfg.APIGW.Outbound.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{req.Scope},
 		Grants: map[string]any{
 			"authorization_code": map[string]any{},
@@ -58,7 +59,7 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 		return nil, err
 	}
 
-	wallet, ok := c.cfg.APIGW.CredentialOffers.Wallets[req.WalletID]
+	wallet, ok := c.cfg.APIGW.Outbound.CredentialOffers.Wallets[req.WalletID]
 	if !ok {
 		err := errors.New("invalid wallet id")
 		return nil, err
@@ -91,13 +92,13 @@ type GetVCTMFromScopeRequest struct {
 }
 
 func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error) {
-	credentialConstructor, ok := c.cfg.Common.CredentialConstructor[req.Scope]
+	credMeta, ok := c.cfg.Common.CredentialMetadata[req.Scope]
 	if !ok {
 		err := errors.New("scope is not valid credential")
 		return nil, err
 	}
 
-	vctm := credentialConstructor.GetVCTM()
+	vctm := credMeta.GetVCTM()
 	if vctm == nil {
 		return nil, fmt.Errorf("VCTM not loaded for scope: %s", req.Scope)
 	}
@@ -112,7 +113,7 @@ type TypeMetadataRequest struct {
 
 // TypeMetadata returns the raw VCTM JSON for a locally-published scope.
 func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (json.RawMessage, error) {
-	constructor := c.cfg.GetCredentialConstructor(req.Scope)
+	constructor := c.cfg.GetCredentialMetadata(req.Scope)
 	if constructor == nil {
 		return nil, errors.New("unknown scope: " + req.Scope)
 	}

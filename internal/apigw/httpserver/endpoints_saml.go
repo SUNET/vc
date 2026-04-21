@@ -22,7 +22,7 @@ import (
 //	@Description	Returns the SAML Service Provider metadata XML for IdP configuration
 //	@Tags			SAML
 //	@Produce		xml
-//	@Success		200	{string}	string					"SAML metadata XML"
+//	@Success		200	{string}	string			"SAML metadata XML"
 //	@Failure		500	{object}	map[string]any	"Internal server error"
 //	@Router			/saml/metadata [get]
 func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any, error) {
@@ -105,8 +105,8 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 //	@Tags			SAML
 //	@Accept			application/x-www-form-urlencoded
 //	@Produce		json
-//	@Param			SAMLResponse	formData	string					true	"Base64-encoded SAML Response"
-//	@Param			RelayState		formData	string					false	"Relay state from initial request"
+//	@Param			SAMLResponse	formData	string			true	"Base64-encoded SAML Response"
+//	@Param			RelayState		formData	string			false	"Relay state from initial request"
 //	@Success		200				{object}	map[string]any	"Success with credential claims or offer"
 //	@Failure		400				{object}	map[string]any	"Bad request"
 //	@Failure		500				{object}	map[string]any	"Internal server error"
@@ -155,13 +155,6 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	if err != nil {
 		span.SetStatus(codes.Error, "transformer creation failed")
 		return nil, fmt.Errorf("failed to create transformer: %w", err)
-	}
-
-	// Get the mapping for this credential type
-	mapping, err := transformer.GetMapping(session.CredentialType)
-	if err != nil {
-		span.SetStatus(codes.Error, "no mapping found")
-		return nil, err
 	}
 
 	// Convert SAML attributes (map[string][]string) to map[string]any
@@ -250,7 +243,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Generate credential offer for wallet
-	credentialOffer, err := s.generateCredentialOffer(ctx, session.CredentialType, mapping.CredentialConfigID)
+	credentialOffer, err := s.generateCredentialOffer(ctx, session.CredentialType, session.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
@@ -291,8 +284,8 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 
 	client := apiv1_issuer.NewIssuerServiceClient(conn)
 
-	credentialConstructor := s.cfg.GetCredentialConstructor(credentialType)
-	if credentialConstructor == nil {
+	credMeta := s.cfg.GetCredentialMetadata(credentialType)
+	if credMeta == nil {
 		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
 
@@ -301,8 +294,8 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 		Scope:        credentialType,
 		DocumentData: documentData,
 		Jwk:          jwk,
-		Integrity:    credentialConstructor.GetIntegrity(),
-		Vctm:         credentialConstructor.GetVCTMRaw(),
+		Integrity:    credMeta.GetIntegrity(),
+		Vctm:         credMeta.GetVCTMRaw(),
 	})
 	if err != nil {
 		s.log.Error(err, "failed to call MakeSDJWT")
@@ -330,7 +323,7 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	}
 
 	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           s.cfg.APIGW.CredentialOffers.IssuerURL,
+		CredentialIssuer:           s.cfg.APIGW.Outbound.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]any{
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{

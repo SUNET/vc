@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
@@ -207,7 +208,7 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 		return nil, err
 	}
 
-	client, ok := s.cfg.APIGW.OauthServer.Clients[walletClientID]
+	client, ok := s.cfg.APIGW.Outbound.OpenID4VCI.Clients[walletClientID]
 	if !ok {
 		err := errors.New("invalid wallet_client_id")
 		span.SetStatus(codes.Error, err.Error())

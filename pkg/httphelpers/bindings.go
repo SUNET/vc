@@ -3,6 +3,7 @@ package httphelpers
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 

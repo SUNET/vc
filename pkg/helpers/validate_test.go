@@ -312,16 +312,15 @@ func TestAuthScopesSelfReference(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		common        model.Common
+		inbound       model.APIGWInboundOpenID4VP
 		shouldError   bool
 		errorContains string
 	}{
 		{
 			name: "self-reference in auth_scopes is rejected",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+			inbound: model.APIGWInboundOpenID4VP{
+				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{
 					"eduid": {
-						AuthMethod: "openid4vp",
 						AuthScopes: []string{"pid", "eduid"},
 						AuthClaims: []string{"given_name"},
 					},
@@ -332,10 +331,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 		},
 		{
 			name: "no self-reference passes",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+			inbound: model.APIGWInboundOpenID4VP{
+				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{
 					"eduid": {
-						AuthMethod: "openid4vp",
 						AuthScopes: []string{"pid"},
 						AuthClaims: []string{"given_name"},
 					},
@@ -345,49 +343,18 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			errorContains: "",
 		},
 		{
-			name: "empty auth_scopes passes for basic auth",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"pid": {
-						AuthMethod: "basic",
-					},
-				},
+			name: "empty credential types passes",
+			inbound: model.APIGWInboundOpenID4VP{
+				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{},
 			},
 			shouldError:   false,
 			errorContains: "",
 		},
 		{
-			name: "openid4vp without auth_scopes is rejected",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+			name: "multiple credentials with no self-reference passes",
+			inbound: model.APIGWInboundOpenID4VP{
+				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{
 					"diploma": {
-						AuthMethod: "openid4vp",
-						AuthClaims: []string{"given_name"},
-					},
-				},
-			},
-			shouldError:   true,
-			errorContains: "auth_scopes_required_for_openid4vp",
-		},
-		{
-			name: "openid4vp without auth_claims is rejected",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"diploma": {
-						AuthMethod: "openid4vp",
-						AuthScopes: []string{"pid"},
-					},
-				},
-			},
-			shouldError:   true,
-			errorContains: "auth_claims_required_for_openid4vp",
-		},
-		{
-			name: "openid4vp with both auth_scopes and auth_claims passes",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"diploma": {
-						AuthMethod: "openid4vp",
 						AuthScopes: []string{"pid"},
 						AuthClaims: []string{"given_name", "family_name"},
 					},
@@ -400,7 +367,7 @@ func TestAuthScopesSelfReference(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validate.StructPartial(tt.common)
+			err := validate.StructPartial(tt.inbound)
 			if tt.shouldError {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorContains)

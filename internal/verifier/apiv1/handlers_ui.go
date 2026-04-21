@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -30,7 +31,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		SupportedWallets: c.cfg.Verifier.SupportedWallets,
 	}
 
-	for scope, constructor := range c.cfg.Common.CredentialConstructor {
+	for scope, constructor := range c.cfg.Common.CredentialMetadata {
 		info := &UICredentialInfo{
 			Attributes: constructor.GetAttributes(),
 		}

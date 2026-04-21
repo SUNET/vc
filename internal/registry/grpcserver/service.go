@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/logger"

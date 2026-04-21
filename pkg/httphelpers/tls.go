@@ -3,6 +3,7 @@ package httphelpers
 import (
 	"context"
 	"crypto/tls"
+
 	"github.com/SUNET/vc/pkg/logger"
 )
 

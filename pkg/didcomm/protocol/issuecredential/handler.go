@@ -58,7 +58,7 @@ type Handler struct {
 	autoAccept bool
 
 	// Thread state tracking
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	conversations map[string]*ConversationState
 }
 

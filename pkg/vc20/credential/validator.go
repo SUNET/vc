@@ -286,7 +286,7 @@ func (v *Validator) validateTypeMappings(obj map[string]any, types []string) err
 			return fmt.Errorf("type %q is not mapped to an IRI in @context", typ)
 		}
 		if vocab != "" {
-			// @vocab is set; the term would resolve to vocab + typ
+			//	@vocab	is set; the term would resolve to vocab + typ
 			resolved := vocab + typ
 			if !isAbsoluteURL(resolved) {
 				return fmt.Errorf("type %q resolves to an invalid IRI via @vocab: %s", typ, resolved)

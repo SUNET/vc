@@ -12,7 +12,7 @@ import (
 
 func TestBuildRegistrationRequest(t *testing.T) {
 	s := &Service{
-		cfg: &model.OIDCRPConfig{
+		cfg: &model.OIDCRP{
 			RedirectURI: "https://example.com/callback",
 			ClientName:  "Test Client",
 			ClientURI:   "https://example.com",
@@ -61,7 +61,7 @@ func TestBuildRegistrationRequest(t *testing.T) {
 
 func TestBuildRegistrationRequest_MinimalConfig(t *testing.T) {
 	s := &Service{
-		cfg: &model.OIDCRPConfig{
+		cfg: &model.OIDCRP{
 			RedirectURI: "https://example.com/callback",
 			Scopes:      []string{"openid"},
 		},
@@ -129,7 +129,7 @@ func TestRegister_Success(t *testing.T) {
 	// Create service
 	log := logger.NewSimple("test")
 	s := &Service{
-		cfg: &model.OIDCRPConfig{
+		cfg: &model.OIDCRP{
 			RedirectURI: "https://example.com/callback",
 			ClientName:  "Test Client",
 			Scopes:      []string{"openid", "profile"},
@@ -189,7 +189,7 @@ func TestRegister_WithInitialAccessToken(t *testing.T) {
 	// Create service
 	log := logger.NewSimple("test")
 	s := &Service{
-		cfg: &model.OIDCRPConfig{
+		cfg: &model.OIDCRP{
 			RedirectURI: "https://example.com/callback",
 			Scopes:      []string{"openid"},
 		},
@@ -226,7 +226,7 @@ func TestRegister_ServerError(t *testing.T) {
 	// Create service
 	log := logger.NewSimple("test")
 	s := &Service{
-		cfg:        &model.OIDCRPConfig{},
+		cfg:        &model.OIDCRP{},
 		httpClient: &http.Client{},
 		log:        log.New("oidcrp"),
 	}
@@ -252,7 +252,7 @@ func TestRegister_InvalidEndpoint(t *testing.T) {
 	// Create service
 	log := logger.NewSimple("test")
 	s := &Service{
-		cfg: &model.OIDCRPConfig{
+		cfg: &model.OIDCRP{
 			RedirectURI: "https://example.com/callback",
 			Scopes:      []string{"openid"},
 		},

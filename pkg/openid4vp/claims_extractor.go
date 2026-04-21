@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 

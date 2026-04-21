@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
 	"github.com/SUNET/vc/internal/issuer/apiv1"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
 	"github.com/SUNET/vc/internal/issuer/grpcserver"

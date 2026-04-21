@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/socialsecurity"
 	"github.com/SUNET/vc/pkg/vcclient"

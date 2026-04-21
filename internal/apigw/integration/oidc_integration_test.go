@@ -225,7 +225,7 @@ type oidcTestEnvironment struct {
 	mockOP       *mockOIDCProvider
 	sessionCache pkgcache.Cache[*oidcrp.Session]
 	log          *logger.Log
-	config       *model.OIDCRPConfig
+	config       *model.OIDCRP
 	cleanup      func()
 }
 
@@ -488,8 +488,8 @@ func setupOIDCTestEnvironment(t *testing.T) *oidcTestEnvironment {
 }
 
 // createTestOIDCRPConfig creates a test OIDC RP configuration pointing at the mock OP
-func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
-	return &model.OIDCRPConfig{
+func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRP {
+	return &model.OIDCRP{
 		Enable: true,
 		Registration: &model.OIDCRPRegistrationConfig{
 			Preconfigured: &model.OIDCRPPreconfiguredConfig{
@@ -507,7 +507,6 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 		SessionDuration: 300,
 		CredentialMappings: map[string]model.CredentialMapping{
 			"pid": {
-				CredentialConfigID: "urn:eudi:pid:1",
 				Attributes: map[string]model.AttributeConfig{
 					"given_name": {
 						Claim:    "given_name",
@@ -524,7 +523,6 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 				},
 			},
 			"diploma": {
-				CredentialConfigID: "urn:eudi:diploma:1",
 				Attributes: map[string]model.AttributeConfig{
 					"given_name": {
 						Claim:    "credentialSubject.givenName",
@@ -541,7 +539,6 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 				},
 			},
 			"ehic": {
-				CredentialConfigID: "urn:eudi:ehic:1",
 				Attributes: map[string]model.AttributeConfig{
 					"given_name": {
 						Claim:    "given_name",
@@ -558,7 +555,6 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRPConfig {
 				},
 			},
 			"test_transforms": {
-				CredentialConfigID: "test:transforms:1",
 				Attributes: map[string]model.AttributeConfig{
 					"email": {
 						Claim:     "email",

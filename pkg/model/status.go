@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 )
 

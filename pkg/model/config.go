@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -126,10 +128,10 @@ type Common struct {
 	// Branding holds custom branding configuration (logo and favicon paths)
 	Branding Branding `yaml:"branding"`
 
-	// CredentialConstructor maps OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier
+	// CredentialMetadata maps OAuth2 scope values to their credential configuration, required by apigw, issuer, and verifier
 	// Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope
-	// The constructor contains the VCT URN and other configuration for issuing that credential type
-	CredentialConstructor map[string]*CredentialConstructor `yaml:"credential_constructor" validate:"omitempty,dive"`
+	// Each entry contains the VCTM reference, format, and other configuration for that credential type
+	CredentialMetadata map[string]*CredentialMetadata `yaml:"credential_metadata" validate:"omitempty,dive"`
 }
 
 // Branding holds custom branding paths for logo and favicon
@@ -199,10 +201,13 @@ type JWTAttribute struct {
 	Kid string `yaml:"kid"`
 }
 
-// SAMLConfig holds SAML Service Provider configuration for the issuer
-type SAMLConfig struct {
+// SAMLSP holds SAML Service Provider configuration for the issuer
+type SAMLSP struct {
 	// Enable turns on SAML support (default: false)
 	Enable bool `yaml:"enable" default:"false"`
+
+	// CredentialTypes lists credential types that can be issued via SAML authentication
+	CredentialTypes []string `yaml:"credential_types" validate:"required_if=Enable true,omitempty,min=1"`
 
 	// EntityID is the SAML SP entity identifier (typically the metadata URL)
 	EntityID string `yaml:"entity_id" validate:"required_if=Enable true" doc_example:"\"https://issuer.sunet.se/saml/metadata\""`
@@ -234,9 +239,10 @@ type SAMLConfig struct {
 	// (AuthnRequest → Response) may remain active before it expires
 	SessionDuration int `yaml:"session_duration" validate:"required" default:"300"`
 
-	// CredentialMappings defines how to map external attributes to credential claims
-	// Key: credential type identifier (e.g., "pid", "diploma")
-	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
+	// CredentialMappings defines how to map SAML attributes (OIDs) to credential claims.
+	// Key: credential type identifier (must match a credential_metadata key).
+	// Required when SAML is enabled: SAML attribute OIDs (e.g. urn:oid:2.5.4.42)
+	// differ from credential claim names, so auto-generation is not possible.
 	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
 
 	// MetadataSigningCertPath is the path to the X.509 certificate used to verify
@@ -260,10 +266,13 @@ type StaticIDPConfig struct {
 	MetadataURL string `yaml:"metadata_url,omitempty"`
 }
 
-// OIDCRPConfig holds OIDC Relying Party configuration for credential issuance.
-type OIDCRPConfig struct {
+// OIDCRP holds OIDC Relying Party configuration for credential issuance.
+type OIDCRP struct {
 	// Enable turns on OIDC RP support (default: false)
 	Enable bool `yaml:"enable" default:"false"`
+
+	// CredentialTypes lists credential types that can be issued via OIDC authentication
+	CredentialTypes []string `yaml:"credential_types" validate:"required_if=Enable true,omitempty,min=1"`
 
 	// Registration configures how the client obtains credentials from the OIDC Provider.
 	// Exactly one of preconfigured or dynamic must be set:
@@ -298,10 +307,10 @@ type OIDCRPConfig struct {
 	// PolicyURI is a URL to the client's Privacy Policy document
 	PolicyURI string `yaml:"policy_uri,omitempty"`
 
-	// CredentialMappings defines how to map OIDC claims to credential claims
-	// Key: credential type identifier (e.g., "pid", "diploma")
-	// Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids
-	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings" validate:"required_if=Enable true"`
+	// CredentialMappings defines how to map OIDC claims to credential claims.
+	// Key: credential type identifier (must match a credential_metadata key).
+	// Optional: when omitted, a passthrough mapping is auto-generated from the VCTM claims.
+	CredentialMappings map[string]CredentialMapping `yaml:"credential_mappings,omitempty"`
 }
 
 // OIDCRPRegistrationConfig configures how the client obtains its credentials.
@@ -340,16 +349,17 @@ type OIDCRPDynamicRegistrationConfig struct {
 	InitialAccessToken string `yaml:"initial_access_token,omitempty" validate:"required_if=Enable true"`
 }
 
-// CredentialMapping defines how to issue a specific credential type via SAML
-// The credential type identifier (map key) is used in API requests and session state
+// CredentialMapping defines how to map external attributes (OIDC claims, SAML attributes)
+// to credential claims for a specific credential type.
+// The map key (credential type) must match a credential_metadata key.
 type CredentialMapping struct {
-	// CredentialConfigID is the OpenID4VCI credential configuration identifier
-	CredentialConfigID string `yaml:"credential_config_id" validate:"required" doc_example:"\"urn:eudi:pid:1\""`
+	// Attributes maps external attribute names to claim paths with transformation rules.
+	// Optional: if omitted, a 1:1 passthrough mapping is auto-generated from the
+	// matching the credential's VCTM claims, using claim names as both source
+	// and target with mandatory flags from the VCTM.
+	Attributes map[string]AttributeConfig `yaml:"attributes,omitempty" doc_example:"\"urn:oid:2.5.4.42\": {claim: \"given_name\", required: true}"`
 
-	// Attributes maps SAML attribute OIDs to claim paths with transformation rules
-	Attributes map[string]AttributeConfig `yaml:"attributes" validate:"required" doc_example:"\"urn:oid:2.5.4.42\": {claim: \"identity.given_name\", required: true}"`
-
-	// DefaultIdP is the optional default IdP entityID for this credential type
+	// DefaultIdP is the optional default IdP entityID for this credential type (SAML only)
 	DefaultIdP string `yaml:"default_idp,omitempty"`
 }
 
@@ -479,6 +489,18 @@ type MockAS struct {
 	BootstrapUsers []string `yaml:"bootstrap_users" default:"[\"100\", \"102\"]"`
 }
 
+// VerifierInbound groups inbound credential verification configuration
+type VerifierInbound struct {
+	// OpenID4VP holds the OpenID4VP configuration for accepting wallet presentations
+	OpenID4VP *OpenID4VPConfig `yaml:"openid4vp" validate:"required"`
+}
+
+// VerifierOutbound groups outbound identity assertion configuration
+type VerifierOutbound struct {
+	// OIDCProvider holds the OIDC Provider configuration for asserting verified identity to downstream RPs
+	OIDCProvider *OIDCOP `yaml:"oidc_provider,omitempty" validate:"omitempty"`
+}
+
 // Verifier holds the configuration for the Verifier service that verifies credentials and acts as an OIDC Provider
 type Verifier struct {
 	// APIServer is the HTTP API server configuration
@@ -487,16 +509,14 @@ type Verifier struct {
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://verifier.sunet.se\""`
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
-	// OAuthServer is the OAuth2 server configuration
-	OAuthServer OAuthServer `yaml:"oauth_server" validate:"required"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
-	// OIDCOP holds the OIDC Provider configuration
-	OIDCOP *OIDCOPConfig `yaml:"oidc_op,omitempty" validate:"omitempty"`
-	// OpenID4VP holds the OpenID4VP configuration
-	OpenID4VP *OpenID4VPConfig `yaml:"openid4vp" validate:"omitempty"`
+	// Inbound groups inbound credential verification
+	Inbound VerifierInbound `yaml:"inbound,omitempty"`
+	// Outbound groups outbound identity assertion
+	Outbound VerifierOutbound `yaml:"outbound,omitempty"`
 	// DigitalCredentials holds the W3C Digital Credentials API configuration
 	DigitalCredentials DigitalCredentialsConfig `yaml:"digital_credentials,omitempty"`
 	// AuthorizationPageCSS holds the authorization page styling configuration
@@ -583,7 +603,7 @@ type StaticOIDCClient struct {
 // This configures how the verifier issues ID tokens and access tokens to relying parties.
 // Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 // The signing key is shared from the parent Verifier.KeyConfig.
-type OIDCOPConfig struct {
+type OIDCOP struct {
 	// Issuer is the OIDC Provider identifier that appears in ID tokens and discovery metadata.
 	// This identifies the verifier as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
@@ -615,6 +635,10 @@ type OpenID4VPConfig struct {
 	SupportedCredentials []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	// PresentationRequestsDir is an optional directory with presentation request templates
 	PresentationRequestsDir string `yaml:"presentation_requests_dir,omitempty"`
+	// TokenEndpoint is the OAuth2 token endpoint URL used for VP token exchange
+	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
+	// Clients holds the OAuth2 client configurations for RP interactions
+	Clients oauth2.Clients `yaml:"clients" validate:"required"`
 }
 
 // GetSupportedCredentials returns the supported credentials, or nil if the config is nil.
@@ -631,6 +655,15 @@ func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
 		return ""
 	}
 	return c.PresentationRequestsDir
+}
+
+// GenerateMetadata generates OAuth2 metadata from the OpenID4VP configuration.
+// Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
+func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+	return oauth2.GenerateMetadata(&oauth2.MetadataConfig{
+		IssuerURL:     issuerURL,
+		TokenEndpoint: c.TokenEndpoint,
+	})
 }
 
 // DigitalCredentialsConfig holds W3C Digital Credentials API configuration
@@ -810,24 +843,60 @@ type CredentialOffers struct {
 	Wallets map[string]CredentialOfferWallets `yaml:"wallets" validate:"required"`
 }
 
+// APIGWInboundBasic configures basic (username/password) authentication for credential issuance
+type APIGWInboundBasic struct {
+	// CredentialTypes lists credential types that can be issued via basic authentication
+	CredentialTypes []string `yaml:"credential_types" validate:"omitempty"`
+}
+
+// OpenID4VPCredentialAuth holds per-credential OpenID4VP authentication requirements
+type OpenID4VPCredentialAuth struct {
+	// AuthScopes lists credential keys whose VCTs are acceptable for wallet authentication
+	AuthScopes []string `yaml:"auth_scopes" validate:"required,min=1"`
+	// AuthClaims lists identity claims to extract from the authentication credential
+	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1"`
+}
+
+// APIGWInboundOpenID4VP configures OpenID4VP wallet authentication for credential issuance
+type APIGWInboundOpenID4VP struct {
+	// CredentialTypes maps credential type to its OpenID4VP authentication requirements
+	CredentialTypes map[string]OpenID4VPCredentialAuth `yaml:"credential_types" validate:"omitempty,dive"`
+}
+
+// APIGWInbound groups all inbound authentication methods for the API Gateway
+type APIGWInbound struct {
+	// Basic configures basic (username/password) authentication
+	Basic APIGWInboundBasic `yaml:"basic,omitempty"`
+	// SAML configures SAML SP authentication
+	SAML SAMLSP `yaml:"saml,omitempty" validate:"omitempty"`
+	// OIDC configures OIDC Relying Party authentication
+	OIDC OIDCRP `yaml:"oidc,omitempty" validate:"omitempty"`
+	// OpenID4VP configures OpenID4VP wallet authentication
+	OpenID4VP APIGWInboundOpenID4VP `yaml:"openid4vp,omitempty"`
+}
+
+// APIGWOutbound groups outbound credential delivery configuration
+type APIGWOutbound struct {
+	// OpenID4VCI configures the OpenID4VCI Authorization Server for wallet credential issuance
+	OpenID4VCI OAuthServer `yaml:"openid4vci" validate:"required"`
+	// CredentialOffers holds credential offer wallet configurations
+	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
+}
+
 // APIGW holds the configuration for the API Gateway service that handles credential issuance requests
 type APIGW struct {
 	// APIServer is the HTTP API server configuration
 	APIServer APIServer `yaml:"api_server" validate:"required"`
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
-	// CredentialOffers holds credential offer wallet configurations
-	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"omitempty"`
-	// OauthServer is the OAuth2 server configuration
-	OauthServer OAuthServer `yaml:"oauth_server" validate:"omitempty"`
+	// Inbound groups all inbound authentication methods
+	Inbound APIGWInbound `yaml:"inbound,omitempty"`
+	// Outbound groups outbound credential delivery
+	Outbound APIGWOutbound `yaml:"outbound" validate:"required"`
 	// IssuerMetadata holds the OpenID4VCI issuer metadata
 	IssuerMetadata IssuerMetadata `yaml:"issuer_metadata" validate:"omitempty"`
 	// PublicURL is the public URL of this service (must be valid HTTP/HTTPS URL)
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://issuer.sunet.se\""`
-	// SAML holds the SAML Service Provider configuration
-	SAML SAMLConfig `yaml:"saml,omitempty" validate:"omitempty"`
-	// OIDCRP holds the OIDC Relying Party configuration
-	OIDCRP OIDCRPConfig `yaml:"oidc_rp,omitempty" validate:"omitempty"`
 	// IssuerClient is the gRPC client config for issuer
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry
@@ -898,24 +967,55 @@ type Cfg struct {
 	UI       *UI       `yaml:"ui" validate:"omitempty"`
 }
 
-// GetCredentialConstructorAuthMethod returns the auth method for the given credential type or "basic" if not found
-func (c *Cfg) GetCredentialConstructorAuthMethod(credentialType string) string {
-	if c.Common == nil {
+// GetAuthMethodForScope returns the auth method for a credential type by checking
+// which inbound section lists it. Falls back to "basic" if not found.
+func (c *Cfg) GetAuthMethodForScope(scope string) string {
+	if c.APIGW == nil {
 		return "basic"
 	}
-	if constructor, ok := c.Common.CredentialConstructor[credentialType]; ok {
-		return constructor.AuthMethod
+	for _, t := range c.APIGW.Inbound.Basic.CredentialTypes {
+		if t == scope {
+			return AuthMethodBasic
+		}
+	}
+	if c.APIGW.Inbound.SAML.Enable {
+		for _, t := range c.APIGW.Inbound.SAML.CredentialTypes {
+			if t == scope {
+				return AuthMethodSAML
+			}
+		}
+	}
+	if c.APIGW.Inbound.OIDC.Enable {
+		for _, t := range c.APIGW.Inbound.OIDC.CredentialTypes {
+			if t == scope {
+				return AuthMethodOIDC
+			}
+		}
+	}
+	if _, ok := c.APIGW.Inbound.OpenID4VP.CredentialTypes[scope]; ok {
+		return AuthMethodOpenID4VP
 	}
 	return "basic"
 }
 
-// GetCredentialConstructor returns the credential constructor for a given scope
-func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
+// GetOpenID4VPAuth returns the OpenID4VP authentication config for a credential type, or nil if not found
+func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
+	if c.APIGW == nil {
+		return nil
+	}
+	if auth, ok := c.APIGW.Inbound.OpenID4VP.CredentialTypes[scope]; ok {
+		return &auth
+	}
+	return nil
+}
+
+// GetCredentialMetadata returns the credential constructor for a given scope
+func (c *Cfg) GetCredentialMetadata(scope string) *CredentialMetadata {
 	if c.Common == nil {
 		return nil
 	}
 	// Direct lookup by scope (map key)
-	if constructor, ok := c.Common.CredentialConstructor[scope]; ok {
+	if constructor, ok := c.Common.CredentialMetadata[scope]; ok {
 		return constructor
 	}
 
@@ -923,9 +1023,9 @@ func (c *Cfg) GetCredentialConstructor(scope string) *CredentialConstructor {
 }
 
 // GetFormatForScope returns the credential format for the given scope key.
-// Returns empty string if the scope is not found in credential_constructor.
+// Returns empty string if the scope is not found in credentials.
 func (c *Cfg) GetFormatForScope(scope string) string {
-	constructor := c.GetCredentialConstructor(scope)
+	constructor := c.GetCredentialMetadata(scope)
 	if constructor == nil {
 		return ""
 	}
@@ -937,7 +1037,7 @@ func (c *Cfg) GetFormatForScope(scope string) string {
 func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 	urls := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		constructor := c.GetCredentialConstructor(scope)
+		constructor := c.GetCredentialMetadata(scope)
 		if constructor == nil {
 			continue
 		}
@@ -954,7 +1054,7 @@ func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		constructor := c.GetCredentialConstructor(scope)
+		constructor := c.GetCredentialMetadata(scope)
 		if constructor == nil {
 			continue
 		}
@@ -965,7 +1065,7 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	return ids
 }
 
-type CredentialConstructor struct {
+type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Mutually exclusive with VCTMUrl (one of the two is required).
@@ -979,14 +1079,6 @@ type CredentialConstructor struct {
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 	// Format is the credential format to issue
 	Format string `yaml:"format" json:"format" validate:"required" doc_example:"\"vc+sd-jwt\""`
-	// AuthMethod is the authentication method used to verify the holder's identity. Supported values: basic, saml, oidc, openid4vp
-	AuthMethod string `yaml:"auth_method" json:"auth_method" validate:"required,oneof=basic saml oidc openid4vp"`
-	// AuthScopes lists credential_constructor keys whose VCTs are acceptable for
-	// wallet authentication. Required when AuthMethod is "openid4vp".
-	AuthScopes []string `yaml:"auth_scopes,omitempty" json:"auth_scopes,omitempty"`
-	// AuthClaims lists identity claims to extract from the authentication credential.
-	// Required when AuthMethod is "openid4vp".
-	AuthClaims []string `yaml:"auth_claims,omitempty" json:"auth_claims,omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
@@ -1007,7 +1099,7 @@ type CredentialConstructor struct {
 }
 
 // The scope parameter is used only for error messages.
-func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope string) error {
+func (c *CredentialMetadata) LoadVCTMetadata(ctx context.Context, scope string) error {
 	var (
 		rawBytes []byte
 		err      error
@@ -1067,35 +1159,35 @@ func (c *CredentialConstructor) LoadVCTMetadata(ctx context.Context, scope strin
 
 // GetVCTM returns the cached VCTM under a read lock so it is safe to call
 // concurrently with the background refresh loop.
-func (c *CredentialConstructor) GetVCTM() *sdjwtvc.VCTM {
+func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTM
 }
 
 // GetVCTURL returns the published URL where the VCTM is served.
-func (c *CredentialConstructor) GetVCTURL() string {
+func (c *CredentialMetadata) GetVCTURL() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTURL
 }
 
 // GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
-func (c *CredentialConstructor) GetVCTMRaw() []byte {
+func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTMRaw
 }
 
 // GetAttributes returns the derived attributes under a read lock.
-func (c *CredentialConstructor) GetAttributes() map[string]map[string][]string {
+func (c *CredentialMetadata) GetAttributes() map[string]map[string][]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Attributes
 }
 
 // GetIntegrity returns the SRI integrity hash of the VCTM under a read lock.
-func (c *CredentialConstructor) GetIntegrity() string {
+func (c *CredentialMetadata) GetIntegrity() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Integrity
@@ -1103,11 +1195,11 @@ func (c *CredentialConstructor) GetIntegrity() string {
 
 // IsLocalVCTM returns true when the VCTM is loaded from a local file
 // (i.e. apigw should publish it at /type-metadata/:scope).
-func (c *CredentialConstructor) IsLocalVCTM() bool {
+func (c *CredentialMetadata) IsLocalVCTM() bool {
 	return c.VCTMFilePath != ""
 }
 
-// ResolveVCTUrls computes the URL-based VCT for each credential constructor
+// ResolveVCTUrls computes the URL-based VCT for each credential metadata entry
 // and stores it in VCTURL.  VCTM.VCT, VCTMRaw, and Integrity are left
 // unchanged — the served VCTM document preserves the original VCT
 // identifier from the VCTM file (e.g. a URN).
@@ -1117,7 +1209,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	if cfg.Common == nil {
 		return nil
 	}
-	for scope, constructor := range cfg.Common.CredentialConstructor {
+	for scope, constructor := range cfg.Common.CredentialMetadata {
 		if constructor == nil || constructor.GetVCTM() == nil {
 			continue
 		}
@@ -1140,7 +1232,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	}
 
 	// Validate that every constructor got a non-empty VCTURL.
-	for scope, constructor := range cfg.Common.CredentialConstructor {
+	for scope, constructor := range cfg.Common.CredentialMetadata {
 		if constructor == nil || constructor.GetVCTM() == nil {
 			continue
 		}
@@ -1152,12 +1244,121 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	return nil
 }
 
+// ResolveCredentialMappings auto-generates or completes credential_mappings
+// from credentials at startup.
+//
+// When credential_mappings is omitted entirely, a mapping entry is created
+// for every credentials key, with attributes derived from the
+// VCTM claims (1:1 passthrough: claim name → claim name, mandatory → required).
+//
+// When credential_mappings is present, each key is validated against
+// credentials and missing attributes are auto-filled from the VCTM.
+func (cfg *Cfg) ResolveCredentialMappings() error {
+	if cfg.Common == nil {
+		return nil
+	}
+
+	// generate creates a full credential_mappings map from credentials.
+	generate := func() map[string]CredentialMapping {
+		mappings := make(map[string]CredentialMapping, len(cfg.Common.CredentialMetadata))
+		for scope, cc := range cfg.Common.CredentialMetadata {
+			if cc == nil {
+				continue
+			}
+			m := CredentialMapping{}
+			if vctm := cc.GetVCTM(); vctm != nil && len(vctm.Claims) > 0 {
+				m.Attributes = vctmClaimsToAttributes(vctm.Claims)
+			}
+			mappings[scope] = m
+		}
+		return mappings
+	}
+
+	// resolve validates existing mappings and fills in missing attributes.
+	resolve := func(name string, mappings map[string]CredentialMapping) error {
+		for scope, mapping := range mappings {
+			cc := cfg.GetCredentialMetadata(scope)
+			if cc == nil {
+				return fmt.Errorf("%s credential_mappings[%s]: no matching credentials entry", name, scope)
+			}
+			if len(mapping.Attributes) == 0 {
+				if vctm := cc.GetVCTM(); vctm != nil && len(vctm.Claims) > 0 {
+					mapping.Attributes = vctmClaimsToAttributes(vctm.Claims)
+				}
+			}
+			mappings[scope] = mapping
+		}
+		return nil
+	}
+
+	if cfg.APIGW != nil {
+		if cfg.APIGW.Inbound.OIDC.Enable {
+			if len(cfg.APIGW.Inbound.OIDC.CredentialMappings) == 0 {
+				cfg.APIGW.Inbound.OIDC.CredentialMappings = generate()
+			} else if err := resolve("oidc", cfg.APIGW.Inbound.OIDC.CredentialMappings); err != nil {
+				return err
+			}
+		}
+		if cfg.APIGW.Inbound.SAML.Enable {
+			if len(cfg.APIGW.Inbound.SAML.CredentialMappings) == 0 {
+				cfg.APIGW.Inbound.SAML.CredentialMappings = generate()
+			} else if err := resolve("saml", cfg.APIGW.Inbound.SAML.CredentialMappings); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// vctmClaimsToAttributes generates a 1:1 passthrough attribute mapping from
+// VCTM claims. Each leaf claim (single-element path without nil) becomes an
+// entry where the source key equals the target claim path, and the required
+// flag mirrors the VCTM mandatory flag.
+// Nested paths (e.g. ["address", "street_address"]) use dot-notation for both
+// the source key and target claim (e.g. "address.street_address").
+func vctmClaimsToAttributes(claims []sdjwtvc.Claim) map[string]AttributeConfig {
+	attrs := make(map[string]AttributeConfig, len(claims))
+
+	for _, c := range claims {
+		// Skip claims with nil path elements (array wildcards)
+		hasNil := false
+		for _, p := range c.Path {
+			if p == nil {
+				hasNil = true
+				break
+			}
+		}
+		if hasNil || len(c.Path) == 0 {
+			continue
+		}
+
+		// Build dot-notation path
+		parts := make([]string, len(c.Path))
+		for i, p := range c.Path {
+			parts[i] = *p
+		}
+		claimPath := strings.Join(parts, ".")
+
+		// Skip parent object claims that have child claims
+		// (e.g. "address" when "address.street_address" also exists)
+		// We include them since the transformer handles nested structures
+
+		attrs[claimPath] = AttributeConfig{
+			Claim:    claimPath,
+			Required: c.Mandatory,
+		}
+	}
+
+	return attrs
+}
+
 // Generate generates issuer metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentialConstructors map[string]*CredentialConstructor) (*openid4vci.CredentialIssuerMetadataParameters, error) {
-	// Convert CredentialConstructor to CredentialConfigurationsSupported
+func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentials map[string]*CredentialMetadata) (*openid4vci.CredentialIssuerMetadataParameters, error) {
+	// Convert CredentialMetadata to CredentialConfigurationsSupported
 	credentialConfigs := make(map[string]openid4vci.CredentialConfigurationsSupported)
-	for scope, constructor := range credentialConstructors {
+	for scope, constructor := range credentials {
 		if constructor == nil {
 			continue
 		}

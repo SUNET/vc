@@ -1093,11 +1093,13 @@ func TestGetClientByID(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(&model.Cfg{
 		Verifier: &model.Verifier{
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:        "https://test.example.com",
-				SubjectType:   "pairwise",
-				SubjectSalt:   "test-salt",
-				StaticClients: staticClients,
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:        "https://test.example.com",
+					SubjectType:   "pairwise",
+					SubjectSalt:   "test-salt",
+					StaticClients: staticClients,
+				},
 			},
 		},
 	})
@@ -1213,11 +1215,13 @@ func TestAuthenticateClientWithStaticClients(t *testing.T) {
 
 	client, _ := CreateTestClientWithMock(&model.Cfg{
 		Verifier: &model.Verifier{
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:        "https://test.example.com",
-				SubjectType:   "pairwise",
-				SubjectSalt:   "test-salt",
-				StaticClients: staticClients,
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:        "https://test.example.com",
+					SubjectType:   "pairwise",
+					SubjectSalt:   "test-salt",
+					StaticClients: staticClients,
+				},
 			},
 		},
 	})

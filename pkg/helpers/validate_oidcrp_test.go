@@ -12,21 +12,22 @@ import (
 func TestValidateOIDCRPConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		config      model.OIDCRPConfig
+		config      model.OIDCRP
 		expectError bool
 		errorMsg    string
 	}{
 		{
 			name: "disabled config is valid",
-			config: model.OIDCRPConfig{
+			config: model.OIDCRP{
 				Enable: false,
 			},
 			expectError: false,
 		},
 		{
 			name: "valid config with static credentials",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						ClientID:     "test-client",
@@ -42,8 +43,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with dynamic registration",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Dynamic: &model.OIDCRPDynamicRegistrationConfig{},
 				},
@@ -56,8 +58,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with default scopes",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						ClientID:     "test-client",
@@ -73,8 +76,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "missing openid scope",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						ClientID:     "test-client",
@@ -91,8 +95,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "no registration configured",
-			config: model.OIDCRPConfig{
+			config: model.OIDCRP{
 				Enable:            true,
+				CredentialTypes:   []string{"pid"},
 				RedirectURI:        "https://example.com/callback",
 				IssuerURL:          "https://issuer.example.com",
 				Scopes:             []string{"openid"},
@@ -103,8 +108,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "both preconfigured and dynamic registration",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						ClientID:     "test-client",
@@ -122,8 +128,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "both preconfigured and dynamic with initial access token",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						ClientID:     "test-client",
@@ -143,8 +150,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "dynamic with initial access token is valid",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Dynamic: &model.OIDCRPDynamicRegistrationConfig{
 						InitialAccessToken: "some-token",
@@ -159,8 +167,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "preconfigured missing client_id",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						Enable:      true,
@@ -177,8 +186,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 		},
 		{
 			name: "preconfigured missing client_secret",
-			config: model.OIDCRPConfig{
-				Enable: true,
+			config: model.OIDCRP{
+				Enable:          true,
+				CredentialTypes: []string{"pid"},
 				Registration: &model.OIDCRPRegistrationConfig{
 					Preconfigured: &model.OIDCRPPreconfiguredConfig{
 						Enable:  true,
@@ -214,8 +224,9 @@ func TestValidateOIDCRPConfig(t *testing.T) {
 
 func TestValidateOIDCRPRegistrationExclusion(t *testing.T) {
 	t.Run("excluded_with reports errors on both fields", func(t *testing.T) {
-		cfg := model.OIDCRPConfig{
-			Enable: true,
+		cfg := model.OIDCRP{
+			Enable:          true,
+			CredentialTypes: []string{"pid"},
 			Registration: &model.OIDCRPRegistrationConfig{
 				Preconfigured: &model.OIDCRPPreconfiguredConfig{
 					ClientID:     "test-client",
@@ -240,8 +251,9 @@ func TestValidateOIDCRPRegistrationExclusion(t *testing.T) {
 	})
 
 	t.Run("only preconfigured does not trigger exclusion", func(t *testing.T) {
-		cfg := model.OIDCRPConfig{
-			Enable: true,
+		cfg := model.OIDCRP{
+			Enable:          true,
+			CredentialTypes: []string{"pid"},
 			Registration: &model.OIDCRPRegistrationConfig{
 				Preconfigured: &model.OIDCRPPreconfiguredConfig{
 					ClientID:     "test-client",
@@ -260,8 +272,9 @@ func TestValidateOIDCRPRegistrationExclusion(t *testing.T) {
 	})
 
 	t.Run("only dynamic does not trigger exclusion", func(t *testing.T) {
-		cfg := model.OIDCRPConfig{
-			Enable: true,
+		cfg := model.OIDCRP{
+			Enable:          true,
+			CredentialTypes: []string{"pid"},
 			Registration: &model.OIDCRPRegistrationConfig{
 				Dynamic: &model.OIDCRPDynamicRegistrationConfig{},
 			},
@@ -277,8 +290,9 @@ func TestValidateOIDCRPRegistrationExclusion(t *testing.T) {
 	})
 
 	t.Run("neither set triggers registration required", func(t *testing.T) {
-		cfg := model.OIDCRPConfig{
+		cfg := model.OIDCRP{
 			Enable:            true,
+			CredentialTypes:   []string{"pid"},
 			RedirectURI:        "https://example.com/callback",
 			IssuerURL:          "https://issuer.example.com",
 			Scopes:             []string{"openid"},

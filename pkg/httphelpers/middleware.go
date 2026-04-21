@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"

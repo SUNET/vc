@@ -21,7 +21,7 @@ import (
 
 // Service provides SAML Service Provider functionality
 type Service struct {
-	cfg          *model.SAMLConfig
+	cfg          *model.SAMLSP
 	sp           *saml.ServiceProvider
 	mdqClient    *MDQClient
 	sessionCache pkgcache.Cache[*Session]
@@ -29,7 +29,7 @@ type Service struct {
 }
 
 // New creates a new SAML service
-func New(ctx context.Context, cfg *model.SAMLConfig, sessionCache pkgcache.Cache[*Session], log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.SAMLSP, sessionCache pkgcache.Cache[*Session], log *logger.Log) (*Service, error) {
 	if !cfg.Enable {
 		log.Info("SAML support disabled")
 		return nil, nil
@@ -148,7 +148,7 @@ type AuthRequest struct {
 // InitiateAuth initiates a SAML authentication flow
 func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType string) (*AuthRequest, error) {
 	// Validate credential type exists in configuration
-	credMapping, exists := s.cfg.CredentialMappings[credentialType]
+	_, exists := s.cfg.CredentialMappings[credentialType]
 	if !exists {
 		return nil, fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
@@ -193,11 +193,10 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 
 	// Store session
 	session := &Session{
-		ID:                 req.ID,
-		CredentialType:     credentialType,
-		CredentialConfigID: credMapping.CredentialConfigID,
-		IDPEntityID:        idpEntityID,
-		CreatedAt:          time.Now(),
+		ID:             req.ID,
+		CredentialType: credentialType,
+		IDPEntityID:    idpEntityID,
+		CreatedAt:      time.Now(),
 	}
 	s.sessionCache.Set(ctx, req.ID, session)
 
@@ -373,7 +372,7 @@ func (s *Service) IsStaticIDPMode() bool {
 }
 
 // BuildTransformer creates a ClaimTransformer from SAML configuration (package-level for testing)
-func BuildTransformer(cfg *model.SAMLConfig) (*ClaimTransformer, error) {
+func BuildTransformer(cfg *model.SAMLSP) (*ClaimTransformer, error) {
 	if cfg == nil || !cfg.Enable {
 		return nil, fmt.Errorf("SAML not enabled")
 	}

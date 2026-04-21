@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/openid4vp"

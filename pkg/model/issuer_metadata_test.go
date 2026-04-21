@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -13,42 +14,40 @@ import (
 func TestIssuerMetadata_Generate_CustomFormat(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			VCTURL:     "https://issuer.example.com/type-metadata/test_cred",
-			Format:     "dc+sd-jwt", // Custom format
-			AuthMethod: "basic",
+			VCTM:   &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred"},
+			VCTURL: "https://issuer.sunet.se/type-metadata/test_cred",
+			Format: "dc+sd-jwt", // Custom format
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
-	assert.Equal(t, "https://issuer.example.com", metadata.CredentialIssuer)
+	assert.Equal(t, "https://issuer.sunet.se", metadata.CredentialIssuer)
 
 	credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
 	require.True(t, exists)
 	assert.Equal(t, "dc+sd-jwt", credConfig.Format)
-	assert.Equal(t, "https://issuer.example.com/type-metadata/test_cred", credConfig.VCT)
+	assert.Equal(t, "https://issuer.sunet.se/type-metadata/test_cred", credConfig.VCT)
 }
 
 func TestIssuerMetadata_Generate_CustomDisplay(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
 	// Test that display must come from VCTM, not from constructor
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			Format:     "vc+sd-jwt",
-			AuthMethod: "basic",
+			VCTM:   &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred"},
+			Format: "vc+sd-jwt",
 			// Display comes from VCTM, not from constructor
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
 
@@ -63,7 +62,7 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 
 	// Mock VCTM with display
 	mockVCTM := &sdjwtvc.VCTM{
-		VCT:         "urn:test:1",
+		VCT:         "https://issuer.sunet.se/type-metadata/test_cred",
 		Name:        "Test VCTM",
 		Description: "Test Description",
 		Display: []sdjwtvc.VCTMDisplay{
@@ -75,15 +74,14 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 		},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			AuthMethod: "basic",
-			VCTM:       mockVCTM,
+			VCTM: mockVCTM,
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 	require.NotNil(t, metadata)
 
@@ -102,15 +100,14 @@ func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
 		CryptographicBindingMethodsSupported: []string{"jwk", "did:key"},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -122,15 +119,14 @@ func TestIssuerMetadata_Generate_CustomSigningAlgorithms(t *testing.T) {
 		CredentialSigningAlgValuesSupported: []string{"ES256", "ES512"},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:example:test:1"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -144,15 +140,14 @@ func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 		ProofSigningAlgValuesSupported: []string{"ES256", "RS256"},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:example:test:1"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -162,24 +157,23 @@ func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 
 func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
 	cfg := &IssuerMetadata{
-		AuthorizationServers:       []string{"https://oauth.example.com"},
-		DeferredCredentialEndpoint: "https://issuer.example.com/deferred",
-		NotificationEndpoint:       "https://issuer.example.com/notification",
+		AuthorizationServers:       []string{"https://oauth.sunet.se"},
+		DeferredCredentialEndpoint: "https://issuer.sunet.se/deferred",
+		NotificationEndpoint:       "https://issuer.sunet.se/notification",
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://oauth.example.com"}, metadata.AuthorizationServers)
-	assert.Equal(t, "https://issuer.example.com/deferred", metadata.DeferredCredentialEndpoint)
-	assert.Equal(t, "https://issuer.example.com/notification", metadata.NotificationEndpoint)
+	assert.Equal(t, []string{"https://oauth.sunet.se"}, metadata.AuthorizationServers)
+	assert.Equal(t, "https://issuer.sunet.se/deferred", metadata.DeferredCredentialEndpoint)
+	assert.Equal(t, "https://issuer.sunet.se/notification", metadata.NotificationEndpoint)
 }
 
 func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
@@ -191,15 +185,14 @@ func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
 		},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:example:test:1"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 	require.NotNil(t, metadata.CredentialResponseEncryption)
 	assert.Equal(t, []string{"ECDH-ES", "ECDH-ES+A128KW"}, metadata.CredentialResponseEncryption.AlgValuesSupported)
@@ -214,15 +207,14 @@ func TestIssuerMetadata_Generate_BatchCredentialIssuance(t *testing.T) {
 		},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 	require.NotNil(t, metadata.BatchCredentialIssuance)
 	assert.Equal(t, 10, metadata.BatchCredentialIssuance.BatchSize)
@@ -232,46 +224,44 @@ func TestIssuerMetadata_Generate_IssuerDisplay(t *testing.T) {
 	cfg := &IssuerMetadata{
 		Display: []openid4vci.MetadataDisplay{
 			{
-				Name:   "Example Issuer",
+				Name:   "SUNET Issuer",
 				Locale: "en-US",
 				Logo: &openid4vci.MetadataLogo{
-					URI:     "https://example.com/logo.png",
+					URI:     "https://issuer.sunet.se/logo.png",
 					AltText: "Logo",
 				},
 			},
 		},
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "urn:example:test:1"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 	require.Len(t, metadata.Display, 1)
-	assert.Equal(t, "Example Issuer", metadata.Display[0].Name)
+	assert.Equal(t, "SUNET Issuer", metadata.Display[0].Name)
 	assert.Equal(t, "en-US", metadata.Display[0].Locale)
 	require.NotNil(t, metadata.Display[0].Logo)
-	assert.Equal(t, "https://example.com/logo.png", metadata.Display[0].Logo.URI)
+	assert.Equal(t, "https://issuer.sunet.se/logo.png", metadata.Display[0].Logo.URI)
 }
 
 func TestIssuerMetadata_Generate_NilConstructor(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": nil, // Nil constructor should be skipped
 		"test_cred2": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:2"},
-			AuthMethod: "basic",
+			VCTM: &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred2"},
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 
 	// Should only have test_cred2
@@ -286,7 +276,7 @@ func TestIssuerMetadata_Generate_EmptyConstructors(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", map[string]*CredentialConstructor{})
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", map[string]*CredentialMetadata{})
 	require.NoError(t, err)
 	assert.Empty(t, metadata.CredentialConfigurationsSupported)
 }
@@ -296,17 +286,16 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 		// All optional fields omitted to test defaults
 	}
 
-	credentialConstructors := map[string]*CredentialConstructor{
+	credMeta := map[string]*CredentialMetadata{
 		"test_cred": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:test:1"},
-			Format:     "vc+sd-jwt",
-			AuthMethod: "basic",
+			VCTM:   &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/test_cred"},
+			Format: "vc+sd-jwt",
 			// No custom crypto methods, etc. - testing defaults
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credentialConstructors)
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
 	require.NoError(t, err)
 
 	credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
@@ -326,34 +315,31 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
-	baseURL := "https://issuer.example.com"
-	credentialConstructors := map[string]*CredentialConstructor{
+	baseURL := "https://issuer.sunet.se"
+	credMeta := map[string]*CredentialMetadata{
 		"pid": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-			VCTURL:     baseURL + "/type-metadata/pid",
-			AuthMethod: "basic",
-			Format:     "dc+sd-jwt",
+			VCTM:   &sdjwtvc.VCTM{VCT: "https://issuer.sunet.se/type-metadata/pid"},
+			VCTURL: baseURL + "/type-metadata/pid",
+			Format: "dc+sd-jwt",
 		},
 		"ehic": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-			VCTURL:     baseURL + "/type-metadata/ehic",
-			AuthMethod: "openid4vp",
-			Format:     "vc+sd-jwt",
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
+			VCTURL: baseURL + "/type-metadata/ehic",
+			Format: "vc+sd-jwt",
 		},
 		"diploma": {
-			VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
-			VCTURL:     baseURL + "/type-metadata/diploma",
-			AuthMethod: "basic",
-			Format:     "vc+sd-jwt",
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL: baseURL + "/type-metadata/diploma",
+			Format: "vc+sd-jwt",
 		},
 	}
 
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, baseURL, credentialConstructors)
+	metadata, err := cfg.Generate(ctx, baseURL, credMeta)
 	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)
 
-	// Verify each credential
+	// Verify each credential - keys are scope names
 	pidConfig := metadata.CredentialConfigurationsSupported["pid"]
 	assert.Equal(t, "dc+sd-jwt", pidConfig.Format)
 	assert.Equal(t, baseURL+"/type-metadata/pid", pidConfig.VCT)

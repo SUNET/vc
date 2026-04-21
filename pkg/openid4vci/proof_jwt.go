@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"

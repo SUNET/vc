@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"gopkg.in/yaml.v2"

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"

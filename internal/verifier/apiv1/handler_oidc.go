@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -133,7 +134,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix(),
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -367,10 +368,10 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Update session with tokens
 	authCtx.AccessToken = accessToken
-	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.AccessTokenDuration) * time.Second).Unix()
+	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second).Unix()
 	authCtx.IDToken = idToken
 	authCtx.RefreshToken = refreshToken
-	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.RefreshTokenDuration) * time.Second).Unix()
+	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
@@ -381,7 +382,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.Verifier.OIDCOP.AccessTokenDuration,
+		ExpiresIn:    c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration,
 		RefreshToken: refreshToken,
 		IDToken:      idToken,
 		Scope:        strings.Join(authCtx.Scopes, " "),
@@ -402,10 +403,10 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
-	idTokenTTL := time.Duration(c.cfg.Verifier.OIDCOP.IDTokenDuration) * time.Second
+	idTokenTTL := time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.Verifier.OIDCOP.Issuer,
+		"iss":   c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		"sub":   sub,
 		"aud":   client.ClientID,
 		"exp":   now.Add(idTokenTTL).Unix(),
@@ -492,7 +493,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	metadata := &DiscoveryMetadata{
-		Issuer:                           c.cfg.Verifier.OIDCOP.Issuer,
+		Issuer:                           c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		AuthorizationEndpoint:            authorizationEndpoint,
 		TokenEndpoint:                    tokenEndpoint,
 		UserInfoEndpoint:                 userInfoEndpoint,
@@ -512,7 +513,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	// Add configured credential scopes
-	for _, cred := range c.cfg.Verifier.OpenID4VP.GetSupportedCredentials() {
+	for _, cred := range c.cfg.Verifier.Inbound.OpenID4VP.GetSupportedCredentials() {
 		for _, scope := range cred.Scopes {
 			metadata.ScopesSupported = append(metadata.ScopesSupported, scope)
 		}
@@ -687,7 +688,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Error(err, "Failed to generate authorization code")
 		return nil, ErrServerError
 	}
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second)
 
 	session.Code = code
 	session.CodeExpiresAt = codeExpiry.Unix()

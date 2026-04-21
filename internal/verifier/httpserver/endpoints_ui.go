@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 
 	"github.com/gin-contrib/sessions"

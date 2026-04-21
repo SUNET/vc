@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/registry/apiv1"
 	"github.com/SUNET/vc/internal/registry/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"

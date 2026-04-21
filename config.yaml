@@ -21,72 +21,42 @@ common:
       recovery_level: 2
       size: 256
 
-  credential_constructor:
+  credential_metadata:
     pid:
       vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
-      auth_method: basic
       format: "dc+sd-jwt"
     pid_1_5:
       vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
-      auth_method: basic
       format: "dc+sd-jwt"
     pid_1_8:
       vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
-      auth_method: basic
       format: "dc+sd-jwt"
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     pda1:
       vctm_file_path: "/metadata/vctm_pda1.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     elm:
       vctm_file_path: "/metadata/vctm_elm.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     diploma:
       vctm_file_path: "/metadata/vctm_diploma.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     micro_credential:
       vctm_file_path: "/metadata/vctm_microcredential.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     eduid:
       vctm_file_path: "/metadata/vctm_eduid.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     openbadge_complete:
       vctm_file_path: "/metadata/vctm_elm.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     openbadge_basic:
       vctm_file_path: "/metadata/vctm_elm.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
     openbadge_endorsements:
       vctm_file_path: "/metadata/vctm_elm.json"
-      auth_method: openid4vp
-      auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-      auth_claims: ["given_name", "birthdate", "family_name"]
       format: "dc+sd-jwt"
 
 kafka:
@@ -158,19 +128,6 @@ verifier:
     # priority: ["file", "hsm"]  # Fallback order
   supported_wallets:
     "SUNET dev": "https://dev.wallet.sunet.se/cb"
-  oauth_server:
-    token_endpoint: "http://verifier.vc.docker:8080/token"
-    clients:
-      "1003":
-        type: "public"
-        redirect_uri: "https://dev.wallet.sunet.se"
-        scopes:
-          - "pid"
-          - "diploma"
-          - "ehic"
-          - "pda1"
-          - "elm"
-          - "eduid"
   # Preferred VP formats - informs wallets what formats/algorithms the verifier supports
   # Note: Per OpenID4VP spec, this is informational only and not enforced during verification
   preferred_vp_formats:
@@ -180,11 +137,47 @@ verifier:
     mso_mdoc:
       issuerauth_alg_values: [-7, -35, -36]  # ES256, ES384, ES512
       deviceauth_alg_values: [-7, -35, -36]
-  oidc:
-    # OIDC Provider identifier (issuer of ID tokens and access tokens)
-    # This identifies the verifier as an OpenID Provider
-    # NOT related to verifiable credential issuance (see cmd/issuer/)
-    # Must match the 'iss' claim in ID tokens sent to relying parties
+  inbound:
+    openid4vp:
+      token_endpoint: "http://verifier.vc.docker:8080/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
+            - "diploma"
+            - "ehic"
+            - "pda1"
+            - "elm"
+            - "eduid"
+      presentation_timeout: 300
+      # Template-based presentation requests (optional)
+      # When configured, DCQL queries are loaded from YAML templates
+      # Falls back to supported_credentials if templates not found or disabled
+      presentation_requests_dir: "/presentation_requests"
+      supported_credentials:
+        - vct: "urn:eudi:pid:1"
+          scopes:
+            - "profile"
+            - "pid"
+        - vct: "urn:eudi:ehic:1"
+          scopes:
+            - "ehic"
+        - vct: "urn:eudi:pda1:1"
+          scopes:
+            - "pda1"
+        - vct: "urn:eudi:elm:1"
+          scopes:
+            - "elm"
+        - vct: "urn:eudi:diploma:1"
+          scopes:
+            - "diploma"
+        - vct: "urn:credential:eduid:1"
+          scopes:
+            - "eduid"
+  outbound:
+    oidc_provider:
     issuer: "http://verifier.vc.docker:8080"
     session_duration: 900                # Session duration in seconds (15 minutes)
     code_duration: 600                   # Authorization code duration in seconds (10 minutes)
@@ -214,33 +207,6 @@ verifier:
     #     response_types:  # Optional, default: ["code"]
     #       - "code"
     #     client_name: "Example Static Client"  # Optional
-  openid4vp:
-    presentation_timeout: 300
-    # Template-based presentation requests (optional)
-    # When configured, DCQL queries are loaded from YAML templates
-    # Falls back to supported_credentials if templates not found or disabled
-    presentation_requests_dir: "/presentation_requests"
-    supported_credentials:
-      - vct: "urn:eudi:pid:1"
-        scopes:
-          - "profile"
-          - "pid"
-      - vct: "urn:eudi:ehic:1"
-        scopes:
-          - "ehic"
-      - vct: "urn:eudi:pda1:1"
-        scopes:
-          - "pda1"
-      - vct: "urn:eudi:elm:1"
-        scopes:
-          - "elm"
-      - vct: "urn:eudi:diploma:1"
-        scopes:
-          - "diploma"
-      - vct: "urn:credential:eduid:1"
-        scopes:
-          - "eduid"
-
 registry:
   api_server:
     addr: :8080
@@ -326,43 +292,96 @@ apigw:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
-  credential_offers:
-    issuer_url: http://apigw.vc.docker:8080
-    wallets:
-      sunet_dev: 
-        label: SUNET Dev Wallet
-        redirect_uri: https://dev.wallet.sunet.se/cb
-      funke: 
-        label: Funke Wallet
-        redirect_uri: https://funke.wwwallet.org/cb
-      dc4eu: 
-        label: DC4EU Wallet
-        redirect_uri: https://dc4eu.wwwallet.org/cb
-      vanilla: 
-        label: Vanilla wwWallet
-        redirect_uri: https://demo.wwwallet.org/cb
-      siros_sunet:
-        label: Siros SUNET Wallet
-        redirect_uri: https://sunetwallet-dev.app.siros.org/cb
+  inbound:
+    basic:
+      credential_types: ["pid", "pid_1_5", "pid_1_8"]
+    openid4vp:
+      credential_types:
+        ehic:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        pda1:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        elm:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        diploma:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        micro_credential:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        eduid:
+          auth_scopes: ["pid_1_5", "pid_1_8"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        openbadge_complete:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        openbadge_basic:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+        openbadge_endorsements:
+          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
+          auth_claims: ["given_name", "birthdate", "family_name"]
+    # oidc:
+    #   enable: true
+    #   credential_types: ["pid"]
+    #   issuer_url: "https://accounts.google.com"
+    #   registration:
+    #     preconfigured:
+    #       client_id: "your-client-id"
+    #       client_secret: "your-client-secret"
+    #   redirect_uri: "https://issuer.example.com/oidcrp/callback"
+    #   scopes: ["openid", "profile", "email"]
+    # saml:
+    #   enable: true
+    #   credential_types: ["pid"]
+    #   entity_id: "https://issuer.sunet.se/saml/metadata"
+    #   credential_mappings:
+    #     pid:
+    #       attributes:
+    #         "urn:oid:2.5.4.42":
+    #           claim: "given_name"
+    #           required: true
+  outbound:
+    openid4vci:
+      token_endpoint: "http://apigw.vc.docker:8080/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
+            - "pid_1_5"
+            - "pid_1_8"
+            - "diploma"
+            - "ehic"
+            - "pda1"
+            - "elm"
+            - "eduid"
+    credential_offers:
+      issuer_url: http://apigw.vc.docker:8080
+      wallets:
+        sunet_dev: 
+          label: SUNET Dev Wallet
+          redirect_uri: https://dev.wallet.sunet.se/cb
+        funke: 
+          label: Funke Wallet
+          redirect_uri: https://funke.wwwallet.org/cb
+        dc4eu: 
+          label: DC4EU Wallet
+          redirect_uri: https://dc4eu.wwwallet.org/cb
+        vanilla: 
+          label: Vanilla wwWallet
+          redirect_uri: https://demo.wwwallet.org/cb
+        siros_sunet:
+          label: Siros SUNET Wallet
+          redirect_uri: https://sunetwallet-dev.app.siros.org/cb
   trust_model:
     type: "openid_federation"
     trust_anchors:
       - "https://example.com/trust_anchor.pem"
-  oauth_server:
-    token_endpoint: "http://apigw.vc.docker:8080/token"
-    clients:
-      "1003":
-        type: "public"
-        redirect_uri: "https://dev.wallet.sunet.se"
-        scopes:
-          - "pid"
-          - "pid_1_5"
-          - "pid_1_8"
-          - "diploma"
-          - "ehic"
-          - "pda1"
-          - "elm"
-          - "eduid"
   issuer_metadata:
     # Optional: Authorization servers (if different from credential issuer)
     # authorization_servers:
@@ -399,95 +418,6 @@ apigw:
     #     logo:
     #       uri: "http://apigw.vc.docker:8080/logo.png"
     #       alt_text: "SUNET Logo"
-  # OIDC Relying Party configuration for issuing credentials via external OIDC Providers
-  # Requires building with -tags oidcrp
-  #
-  # registration: choose exactly ONE of:
-  #   preconfigured: pre-registered client_id and client_secret
-  #   dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)
-  #
-  oidc_rp:
-    enable: false
-    # --- Option A: Pre-registered credentials ---
-    registration:
-      preconfigured:
-        client_id: "your-client-id"
-        client_secret: "your-client-secret"
-    # --- Option B: Dynamic registration (uncomment and remove preconfigured above) ---
-    # registration:
-    #   dynamic:
-    #     initial_access_token: ""  # Optional, required by some providers (e.g., Keycloak)
-    # client_name: "My Credential Issuer"
-    # client_uri: "https://issuer.example.com"
-    redirect_uri: "https://issuer.example.com/oidcrp/callback"
-    issuer_url: "https://accounts.google.com"
-    # OAuth2/OIDC scopes to request (must include "openid")
-    scopes:
-      - "openid"
-      - "profile"
-      - "email"
-    # Session duration in seconds (default: 300)
-    session_duration: 300
-    # Credential mappings: how to transform OIDC claims into credentials
-    # Key: credential type identifier (must match credential_constructor keys)
-    credential_mappings:
-      pid:
-        # OpenID4VCI credential configuration ID
-        credential_config_id: "urn:eudi:pid:1"
-        # Attribute mappings: OIDC claim name -> credential claim path
-        # Supports dot-notation for nested structures (e.g., "identity.given_name")
-        attributes:
-          # Standard OpenID Connect claims
-          given_name:
-            claim: "identity.given_name"
-            required: true
-          family_name:
-            claim: "identity.family_name"
-            required: true
-          email:
-            claim: "identity.email"
-            required: true
-          email_verified:
-            claim: "identity.email_verified"
-            required: false
-          # Subject identifier
-          sub:
-            claim: "identity.subject_id"
-            required: true
-            transform: "lowercase"
-          # Optional claims with defaults
-          locale:
-            claim: "identity.locale"
-            required: false
-            default: "en-US"
-      # Example: diploma credential from university OIDC provider
-      diploma:
-        credential_config_id: "urn:eudi:diploma:1"
-        attributes:
-          given_name:
-            claim: "student.given_name"
-            required: true
-          family_name:
-            claim: "student.family_name"
-            required: true
-          email:
-            claim: "student.email"
-            required: true
-          # Custom claims from the OIDC provider
-          student_id:
-            claim: "student.id"
-            required: true
-          degree:
-            claim: "diploma.degree"
-            required: true
-          graduation_date:
-            claim: "diploma.graduation_date"
-            required: true
-          university:
-            claim: "diploma.university"
-            required: false
-            default: "Unknown University"
-
 mock_as:
   api_server:
     addr: :8080

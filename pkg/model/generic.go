@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"time"
+
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
 

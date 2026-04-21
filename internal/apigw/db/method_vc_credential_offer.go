@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vci"
 

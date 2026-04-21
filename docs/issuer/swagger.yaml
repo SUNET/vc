@@ -1,65 +1,7 @@
 basePath: /issuer/api/v1
-definitions:
-  apiv1.RevokeReply:
-    properties:
-      data:
-        properties:
-          status:
-            type: boolean
-        type: object
-    type: object
-  apiv1.RevokeRequest:
-    properties:
-      authentic_source:
-        type: string
-      document_id:
-        type: string
-      revocation_id:
-        type: string
-      vct:
-        type: string
-    type: object
-  helpers.Error:
-    properties:
-      details: {}
-      title:
-        type: string
-    type: object
-  helpers.ErrorResponse:
-    properties:
-      error:
-        $ref: '#/definitions/helpers.Error'
-    type: object
 info:
   contact: {}
   title: Issuer API
   version: 0.1.0
-paths:
-  /revoke:
-    post:
-      consumes:
-      - application/json
-      description: Revoke endpoint
-      operationId: generic-revoke
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1.RevokeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/apiv1.RevokeReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: Revoke
-      tags:
-      - vc-platform
+paths: {}
 swagger: "2.0"

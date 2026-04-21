@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -40,16 +41,16 @@ type AuditLog struct {
 
 // Service holds auditlog service
 type Service struct {
-	cfg            *model.Cfg
-	log            *logger.Log
-	auditLogChan   chan *AuditLog
-	wg             sync.WaitGroup
-	cancel         context.CancelFunc // cancels processAuditLog
-	destinations   []*Destination     // pre-parsed destinations
-	mu             sync.Mutex         // mutex for file operations
-	done           chan struct{}       // closed on shutdown to prevent sends
-	closeOnce      sync.Once          // ensures done is closed exactly once
-	fileSyncInterval time.Duration    // file destinations: 0 = fsync every write, >0 = periodic batched fsync
+	cfg              *model.Cfg
+	log              *logger.Log
+	auditLogChan     chan *AuditLog
+	wg               sync.WaitGroup
+	cancel           context.CancelFunc // cancels processAuditLog
+	destinations     []*Destination     // pre-parsed destinations
+	mu               sync.Mutex         // mutex for file operations
+	done             chan struct{}      // closed on shutdown to prevent sends
+	closeOnce        sync.Once          // ensures done is closed exactly once
+	fileSyncInterval time.Duration      // file destinations: 0 = fsync every write, >0 = periodic batched fsync
 }
 
 // New creates a new auditlog service

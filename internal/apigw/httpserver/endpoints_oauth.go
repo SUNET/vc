@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -62,10 +63,10 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 		return nil, err
 	}
 
-	s.log.Debug("endpointAuthorize", "scope", reply.Scope, "auth_method", s.cfg.GetCredentialConstructorAuthMethod(reply.Scope))
+	s.log.Debug("endpointAuthorize", "scope", reply.Scope, "auth_method", s.cfg.GetAuthMethodForScope(reply.Scope))
 
 	session.Set("scope", reply.Scope)
-	session.Set("auth_method", s.cfg.GetCredentialConstructorAuthMethod(reply.Scope))
+	session.Set("auth_method", s.cfg.GetAuthMethodForScope(reply.Scope))
 	session.Set("request_uri", request.RequestURI)
 	session.Set("session_id", reply.SessionID)
 	session.Set("client_id", reply.ClientID)
@@ -217,7 +218,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		// Skip re-initiating auth if the callback already stored documents.
 		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
 			scope, _ := session.Get("scope").(string)
-			if s.cfg.GetCredentialConstructor(scope) == nil {
+			if s.cfg.GetCredentialMetadata(scope) == nil {
 				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
@@ -248,7 +249,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		// Skip re-initiating auth if the callback already stored documents.
 		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
 			scope, _ := session.Get("scope").(string)
-			if s.cfg.GetCredentialConstructor(scope) == nil {
+			if s.cfg.GetCredentialMetadata(scope) == nil {
 				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err

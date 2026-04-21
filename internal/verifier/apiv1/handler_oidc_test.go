@@ -360,7 +360,7 @@ func TestStandardClaims(t *testing.T) {
 // ============================================================================
 
 // TestAuthorize_ClientValidation tests client validation in the Authorize handler
-// Note: Full Authorize flow requires CredentialConstructor config which is complex to mock
+// Note: Full Authorize flow requires CredentialMetadata config which is complex to mock
 func TestAuthorize_ClientValidation(t *testing.T) {
 	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
@@ -940,10 +940,10 @@ func TestGenerateIDToken(t *testing.T) {
 	ctx := t.Context()
 
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDCOP.Issuer = "https://issuer.example.com"
-	client.cfg.Verifier.OIDCOP.IDTokenDuration = 3600
-	client.cfg.Verifier.OIDCOP.SubjectType = "public"
-	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
+	client.cfg.Verifier.Outbound.OIDCProvider.Issuer = "https://issuer.example.com"
+	client.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration = 3600
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
@@ -1230,7 +1230,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-			client.cfg.Verifier.OIDCOP.SessionDuration = 900
+			client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
 			client.cfg.Verifier.DigitalCredentials.UseJAR = true
@@ -1302,7 +1302,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enable = false
 	// Clear CSS title to test default fallback
@@ -1352,7 +1352,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	client.cfg.Verifier.SupportedWallets = map[string]string{
 		"SUNET Wallet": "https://wallet.sunet.se/cb",
 		"Test Wallet":  "https://test-wallet.example.com/authorize",
@@ -1422,7 +1422,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// No supported wallets configured
 	client.cfg.Verifier.SupportedWallets = nil
 
@@ -2271,20 +2271,24 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{
-					{
-						VCT:    "https://credentials.example.com/person_id",
-						Scopes: []string{"pid"},
-					},
-					{
-						VCT:    "https://credentials.example.com/diploma",
-						Scopes: []string{"edu_diploma"},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{
+						{
+							VCT:    "https://credentials.example.com/person_id",
+							Scopes: []string{"pid"},
+						},
+						{
+							VCT:    "https://credentials.example.com/diploma",
+							Scopes: []string{"edu_diploma"},
+						},
 					},
 				},
 			},
@@ -2346,13 +2350,17 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{},
+				},
 			},
 		},
 	}
@@ -2400,13 +2408,17 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
 					PublicURL: tt.externalURL,
-					OIDCOP: &model.OIDCOPConfig{
-						Issuer:      tt.externalURL,
-						SubjectType: "public",
-						SubjectSalt: "test-salt",
+					Outbound: model.VerifierOutbound{
+						OIDCProvider: &model.OIDCOP{
+							Issuer:      tt.externalURL,
+							SubjectType: "public",
+							SubjectSalt: "test-salt",
+						},
 					},
-					OpenID4VP: &model.OpenID4VPConfig{
-						SupportedCredentials: []model.SupportedCredentialConfig{},
+					Inbound: model.VerifierInbound{
+						OpenID4VP: &model.OpenID4VPConfig{
+							SupportedCredentials: []model.SupportedCredentialConfig{},
+						},
 					},
 				},
 			}
@@ -2431,10 +2443,12 @@ func TestGetJWKS(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
 		},
 	}
@@ -2517,16 +2531,20 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{
-					{VCT: "cred1", Scopes: []string{"scope1"}},
-					{VCT: "cred2", Scopes: []string{"scope2"}},
-					{VCT: "cred3", Scopes: []string{"scope3"}},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{
+						{VCT: "cred1", Scopes: []string{"scope1"}},
+						{VCT: "cred2", Scopes: []string{"scope2"}},
+						{VCT: "cred3", Scopes: []string{"scope3"}},
+					},
 				},
 			},
 		},
@@ -2545,10 +2563,12 @@ func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
 		},
 	}
@@ -2622,8 +2642,10 @@ func TestMatchRedirectURI(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer: "https://verifier.example.com",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer: "https://verifier.example.com",
+				},
 			},
 		},
 	}

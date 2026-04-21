@@ -103,7 +103,7 @@ type testEnvironment struct {
 	mockMDQServer      *httptest.Server
 	samlSPSessionCache pkgcache.Cache[*samlsp.Session]
 	log                *logger.Log
-	config             *model.SAMLConfig
+	config             *model.SAMLSP
 	idpEntityID        string
 	idpKey             *rsa.PrivateKey   // IdP signing key
 	idpCert            *x509.Certificate // IdP signing certificate
@@ -178,8 +178,8 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 }
 
 // createTestSAMLConfig creates a test SAML configuration
-func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath string) *model.SAMLConfig {
-	return &model.SAMLConfig{
+func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath string) *model.SAMLSP {
+	return &model.SAMLSP{
 		Enable:          true,
 		EntityID:         "https://issuer.example.com/saml",
 		ACSEndpoint:      "https://issuer.example.com/saml/acs",
@@ -191,7 +191,6 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 		SessionDuration:  3600,
 		CredentialMappings: map[string]model.CredentialMapping{
 			"pid": {
-				CredentialConfigID: "urn:eudi:pid:1",
 				Attributes: map[string]model.AttributeConfig{
 					"urn:oid:2.5.4.42": {
 						Claim:    "given_name",
@@ -209,7 +208,6 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 				DefaultIdP: idpEntityID,
 			},
 			"diploma": {
-				CredentialConfigID: "urn:eudi:diploma:1",
 				Attributes: map[string]model.AttributeConfig{
 					"urn:oid:2.5.4.42": {
 						Claim:    "credentialSubject.givenName",
@@ -227,7 +225,6 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 				DefaultIdP: idpEntityID,
 			},
 			"ehic": {
-				CredentialConfigID: "urn:eudi:ehic:1",
 				Attributes: map[string]model.AttributeConfig{
 					"urn:oid:2.5.4.42": {
 						Claim:    "given_name",

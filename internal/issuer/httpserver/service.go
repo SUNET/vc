@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/issuer/apiv1"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -31,10 +32,10 @@ type Service struct {
 // New creates a new httpserver service
 func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
 	s := &Service{
-		cfg:   cfg,
-		log:   log.New("httpserver"),
-		apiv1: apiv1,
-		gin:   gin.New(),
+		cfg:    cfg,
+		log:    log.New("httpserver"),
+		apiv1:  apiv1,
+		gin:    gin.New(),
 		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
 		tracer: tracer,
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"github.com/SUNET/vc/pkg/model"
 )
 

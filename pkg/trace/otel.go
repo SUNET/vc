@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 

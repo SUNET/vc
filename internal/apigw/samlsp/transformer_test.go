@@ -12,7 +12,6 @@ import (
 func TestNewClaimTransformer(t *testing.T) {
 	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialConfigID: "urn:eudi:pid:1",
 			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42": {Claim: "given_name", Required: true},
 			},
@@ -339,7 +338,6 @@ func TestTransformClaims_ComplexRealWorld(t *testing.T) {
 	// Simulate a real-world PID credential with nested identity structure
 	mappings := map[string]model.CredentialMapping{
 		"pid": {
-			CredentialConfigID: "urn:eudi:pid:1",
 			Attributes: map[string]model.AttributeConfig{
 				"urn:oid:2.5.4.42":                  {Claim: "identity.given_name", Required: true},
 				"urn:oid:2.5.4.4":                   {Claim: "identity.family_name", Required: true},

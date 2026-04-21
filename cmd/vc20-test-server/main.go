@@ -62,11 +62,11 @@ type VerifyRequest struct {
 }
 
 type VerifyResponse struct {
-	Verified bool          `json:"verified"`
-	Errors   []string      `json:"errors,omitempty"`
-	Results  []any `json:"results,omitempty"`
-	Checks   []string      `json:"checks,omitempty"`
-	Warnings []string      `json:"warnings,omitempty"`
+	Verified bool     `json:"verified"`
+	Errors   []string `json:"errors,omitempty"`
+	Results  []any    `json:"results,omitempty"`
+	Checks   []string `json:"checks,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 func respondError(w http.ResponseWriter, message string, code int) {
