@@ -31,7 +31,7 @@ require (
 	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/kaptinlin/jsonschema v0.7.7
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/lestrrat-go/jwx/v3 v3.0.13
+	github.com/lestrrat-go/jwx/v3 v3.1.0
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/ljahier/gin-ratelimit v1.0.0
 	github.com/miekg/pkcs11 v1.1.2
