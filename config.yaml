@@ -255,10 +255,10 @@ registry:
     #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
     #   # Pin specific certs by fingerprint
     #   allowed_client_fingerprints:
-    #     "sha256:aa:bb:cc:...": "apigw-prod"
-    #   # Allow certs by Subject DN
+    #     "sha256:aa:bb:cc:...":  "apigw-prod"
+    #   # Allow certs by Subject DN (key is friendly name, value is Subject DN)
     #   allowed_client_dns:
-    #     "CN=apigw.example.com,O=MyOrg": "apigw-acme"
+    #     apigw-acme: "CN=apigw.example.com,O=MyOrg"
   # Token Status Lists configuration per draft-ietf-oauth-status-list
   token_status_lists:
     key_config:
