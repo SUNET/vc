@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -73,16 +74,54 @@ type IDMappingQuery struct {
 
 // IDMapping return authentic source person id if any
 func (c *VCDatastoreColl) IDMapping(ctx context.Context, query *IDMappingQuery) (string, error) {
+	// Build an $elemMatch filter so all identity predicates must match
+	// the same array element, preventing cross-element false positives.
+	identityMatch := bson.M{
+		"schema.version": bson.M{"$eq": query.Identity.Schema.Version},
+		"family_name":    bson.M{"$eq": query.Identity.FamilyName},
+		"given_name":     bson.M{"$eq": query.Identity.GivenName},
+		"birth_date":     bson.M{"$eq": query.Identity.BirthDate},
+	}
+
+	// Add optional identity fields to narrow the match when provided
+	if query.Identity.BirthPlace != "" {
+		identityMatch["birth_place"] = bson.M{"$eq": query.Identity.BirthPlace}
+	}
+	if len(query.Identity.Nationality) > 0 {
+		identityMatch["nationality"] = bson.M{"$all": query.Identity.Nationality}
+	}
+	if query.Identity.PersonalAdministrativeNumber != "" {
+		identityMatch["personal_administrative_number"] = bson.M{"$eq": query.Identity.PersonalAdministrativeNumber}
+	}
+	if query.Identity.BirthFamilyName != "" {
+		identityMatch["birth_family_name"] = bson.M{"$eq": query.Identity.BirthFamilyName}
+	}
+	if query.Identity.BirthGivenName != "" {
+		identityMatch["birth_given_name"] = bson.M{"$eq": query.Identity.BirthGivenName}
+	}
+	if query.Identity.Sex != "" {
+		identityMatch["sex"] = bson.M{"$eq": query.Identity.Sex}
+	}
+	if query.Identity.EmailAddress != "" {
+		identityMatch["email_address"] = bson.M{"$eq": query.Identity.EmailAddress}
+	}
+	if query.Identity.MobilePhoneNumber != "" {
+		identityMatch["mobile_phone_number"] = bson.M{"$eq": query.Identity.MobilePhoneNumber}
+	}
+	if query.Identity.IssuingAuthority != "" {
+		identityMatch["issuing_authority"] = bson.M{"$eq": query.Identity.IssuingAuthority}
+	}
+	if query.Identity.IssuingCountry != "" {
+		identityMatch["issuing_country"] = bson.M{"$eq": query.Identity.IssuingCountry}
+	}
+
 	filter := bson.M{
-		"meta.authentic_source":     bson.M{"$eq": query.AuthenticSource},
-		"identities.schema.version": bson.M{"$eq": query.Identity.Schema.Version},
-		"identities.family_name":    bson.M{"$eq": query.Identity.FamilyName},
-		"identities.given_name":     bson.M{"$eq": query.Identity.GivenName},
-		"identities.birth_date":     bson.M{"$eq": query.Identity.BirthDate},
+		"meta.authentic_source": bson.M{"$eq": query.AuthenticSource},
+		"identities":            bson.M{"$elemMatch": identityMatch},
 	}
 
 	opts := options.FindOne().SetProjection(bson.M{
-		"identities.authentic_source_person_id": 1,
+		"identities.$": 1,
 	})
 	res := &model.CompleteDocument{}
 	if err := c.Coll.FindOne(ctx, filter, opts).Decode(&res); err != nil {

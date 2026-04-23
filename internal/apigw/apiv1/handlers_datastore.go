@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -169,12 +170,34 @@ func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationReq
 	return reply, nil
 }
 
+// IdentityMappingIdentity is the identity input for the mapping endpoint.
+// Unlike model.Identity, authentic_source_person_id is not required here because
+// the purpose of identity mapping is to look it up from the other identity fields.
+type IdentityMappingIdentity struct {
+	Schema *model.IdentitySchema `json:"schema" validate:"required"`
+
+	FamilyName string `json:"family_name" validate:"required,min=1,max=100,printascii"`
+	GivenName  string `json:"given_name" validate:"required,min=1,max=100,printascii"`
+	BirthDate  string `json:"birth_date" validate:"required,datetime=2006-01-02,printascii"`
+
+	BirthPlace                  string   `json:"birth_place,omitempty" validate:"omitempty,min=2,max=100,printascii"`
+	Nationality                 []string `json:"nationality,omitempty" validate:"omitempty,dive,iso3166_1_alpha2"`
+	PersonalAdministrativeNumber string  `json:"personal_administrative_number,omitempty" validate:"omitempty,min=4,max=50,printascii"`
+	BirthFamilyName             string   `json:"birth_family_name,omitempty" validate:"omitempty,min=1,max=100,printascii"`
+	BirthGivenName              string   `json:"birth_given_name,omitempty" validate:"omitempty,min=1,max=100,printascii"`
+	Sex                         string   `json:"sex,omitempty" validate:"omitempty,oneof=0 1 2 3 4 5 6 7 8 9"`
+	EmailAddress                string   `json:"email_address,omitempty" validate:"omitempty,email"`
+	MobilePhoneNumber           string   `json:"mobile_phone_number,omitempty" validate:"omitempty,e164"`
+	IssuingAuthority            string   `json:"issuing_authority,omitempty" validate:"omitempty,printascii"`
+	IssuingCountry              string   `json:"issuing_country,omitempty" validate:"omitempty,iso3166_1_alpha2"`
+}
+
 // IdentityMappingRequest is the request for IDMapping
 type IdentityMappingRequest struct {
 	// required: true
 	// example: SUNET
-	AuthenticSource string          `json:"authentic_source" validate:"required,max=128,printascii"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
+	AuthenticSource string                   `json:"authentic_source" validate:"required,max=128,printascii"`
+	Identity        *IdentityMappingIdentity `json:"identity" validate:"required"`
 }
 
 // IdentityMappingReply is the reply for a IDMapping
@@ -195,9 +218,25 @@ type IdentityMappingReply struct {
 //	@Param			req	body		IdentityMappingRequest	true	" "
 //	@Router			/identity/mapping [post]
 func (c *Client) IdentityMapping(ctx context.Context, reg *IdentityMappingRequest) (*IdentityMappingReply, error) {
+	identity := &model.Identity{
+		Schema:                       reg.Identity.Schema,
+		FamilyName:                   reg.Identity.FamilyName,
+		GivenName:                    reg.Identity.GivenName,
+		BirthDate:                    reg.Identity.BirthDate,
+		BirthPlace:                   reg.Identity.BirthPlace,
+		Nationality:                  reg.Identity.Nationality,
+		PersonalAdministrativeNumber: reg.Identity.PersonalAdministrativeNumber,
+		BirthFamilyName:              reg.Identity.BirthFamilyName,
+		BirthGivenName:               reg.Identity.BirthGivenName,
+		Sex:                          reg.Identity.Sex,
+		EmailAddress:                 reg.Identity.EmailAddress,
+		MobilePhoneNumber:            reg.Identity.MobilePhoneNumber,
+		IssuingAuthority:             reg.Identity.IssuingAuthority,
+		IssuingCountry:               reg.Identity.IssuingCountry,
+	}
 	authenticSourcePersonID, err := c.datastoreStore.IDMapping(ctx, &db.IDMappingQuery{
 		AuthenticSource: reg.AuthenticSource,
-		Identity:        reg.Identity,
+		Identity:        identity,
 	})
 	if err != nil {
 		return nil, err

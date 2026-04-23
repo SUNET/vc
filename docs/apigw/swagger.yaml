@@ -3,16 +3,22 @@ definitions:
   apiv1.AddConsentRequest:
     properties:
       authentic_source:
+        maxLength: 128
         type: string
       authentic_source_person_id:
+        maxLength: 128
         type: string
       consent_to:
+        maxLength: 128
         type: string
       session_id:
+        maxLength: 128
         type: string
     required:
     - authentic_source
     - authentic_source_person_id
+    - consent_to
+    - session_id
     type: object
   apiv1.AddDocumentIdentityRequest:
     properties:
@@ -116,8 +122,10 @@ definitions:
   apiv1.GetConsentRequest:
     properties:
       authentic_source:
+        maxLength: 128
         type: string
       authentic_source_person_id:
+        maxLength: 128
         type: string
     required:
     - authentic_source
@@ -162,6 +170,67 @@ definitions:
     - document_id
     - vct
     type: object
+  apiv1.IdentityMappingIdentity:
+    properties:
+      birth_date:
+        type: string
+      birth_family_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      birth_given_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      birth_place:
+        maxLength: 100
+        minLength: 2
+        type: string
+      email_address:
+        type: string
+      family_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      given_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      issuing_authority:
+        type: string
+      issuing_country:
+        type: string
+      mobile_phone_number:
+        type: string
+      nationality:
+        items:
+          type: string
+        type: array
+      personal_administrative_number:
+        maxLength: 50
+        minLength: 4
+        type: string
+      schema:
+        $ref: '#/definitions/model.IdentitySchema'
+      sex:
+        enum:
+        - "0"
+        - "1"
+        - "2"
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+        - "7"
+        - "8"
+        - "9"
+        type: string
+    required:
+    - birth_date
+    - family_name
+    - given_name
+    - schema
+    type: object
   apiv1.IdentityMappingReply:
     properties:
       data:
@@ -173,30 +242,13 @@ definitions:
         description: |-
           required: true
           example: SUNET
+        maxLength: 128
         type: string
       identity:
-        $ref: '#/definitions/model.Identity'
+        $ref: '#/definitions/apiv1.IdentityMappingIdentity'
     required:
     - authentic_source
     - identity
-    type: object
-  apiv1.NotificationReply:
-    properties:
-      data:
-        $ref: '#/definitions/openid4vci.QR'
-    type: object
-  apiv1.NotificationRequest:
-    properties:
-      authentic_source:
-        type: string
-      document_id:
-        type: string
-      vct:
-        type: string
-    required:
-    - authentic_source
-    - document_id
-    - vct
     type: object
   apiv1.RevokeDocumentRequest:
     properties:
@@ -211,64 +263,10 @@ definitions:
     - revocation
     - vct
     type: object
-  apiv1.RevokeReply:
-    properties:
-      data:
-        properties:
-          status:
-            type: boolean
-        type: object
-    type: object
-  apiv1.RevokeRequest:
-    properties:
-      authentic_source:
-        type: string
-      document_id:
-        type: string
-      revocation_id:
-        type: string
-      vct:
-        type: string
-    type: object
   apiv1_issuer.Credential:
     properties:
       credential:
         type: string
-    type: object
-  apiv1_issuer.Jwk:
-    properties:
-      crv:
-        type: string
-      d:
-        type: string
-      ext:
-        type: boolean
-      key_ops:
-        items:
-          type: string
-        type: array
-      kid:
-        type: string
-      kty:
-        type: string
-      x:
-        type: string
-      "y":
-        type: string
-    type: object
-  apiv1_issuer.JwksReply:
-    properties:
-      issuer:
-        type: string
-      jwks:
-        $ref: '#/definitions/apiv1_issuer.Keys'
-    type: object
-  apiv1_issuer.Keys:
-    properties:
-      keys:
-        items:
-          $ref: '#/definitions/apiv1_issuer.Jwk'
-        type: array
     type: object
   apiv1_issuer.MakeSDJWTReply:
     properties:
@@ -276,6 +274,12 @@ definitions:
         items:
           $ref: '#/definitions/apiv1_issuer.Credential'
         type: array
+      token_status_list_index:
+        description: Token Status List index
+        type: integer
+      token_status_list_section:
+        description: Token Status List section
+        type: integer
     type: object
   helpers.Error:
     properties:
@@ -294,6 +298,7 @@ definitions:
         description: |-
           required: false
           example: 98fe67fc-c03f-11ee-bbee-4345224d414f
+        maxLength: 128
         type: string
       valid_until:
         description: |-
@@ -308,6 +313,7 @@ definitions:
         description: |-
           required: true
           example: "Using my data for research"
+        maxLength: 128
         type: string
       created_at:
         description: |-
@@ -319,6 +325,7 @@ definitions:
         description: |-
           required: true
           example: "sess-123"
+        maxLength: 128
         type: string
     required:
     - consent_to
@@ -373,6 +380,7 @@ definitions:
   model.IDMapping:
     properties:
       authentic_source_person_id:
+        maxLength: 128
         type: string
     type: object
   model.Identity:
@@ -395,6 +403,7 @@ definitions:
         description: |-
           required: true
           example: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a
+        maxLength: 128
         type: string
       birth_date:
         description: |-
@@ -420,6 +429,7 @@ definitions:
         description: |-
           required: false
           example:
+        maxLength: 128
         type: string
       email_address:
         description: |-
@@ -461,6 +471,7 @@ definitions:
         description: |-
           required: false
           example:
+        maxLength: 128
         type: string
       mobile_phone_number:
         description: |-
@@ -542,8 +553,10 @@ definitions:
         - "9"
         type: string
       trust_anchor:
+        maxLength: 128
         type: string
     required:
+    - authentic_source_person_id
     - birth_date
     - family_name
     - given_name
@@ -555,6 +568,7 @@ definitions:
         description: |-
           required: true
           example: "SE"
+        maxLength: 128
         type: string
       version:
         description: |-
@@ -570,6 +584,7 @@ definitions:
         description: |-
           required: true
           example: SUNET
+        maxLength: 128
         type: string
       collect:
         $ref: '#/definitions/model.Collect'
@@ -590,11 +605,13 @@ definitions:
           required: false
           example: file://path/to/schema.json or http://example.com/schema.json
           format: string
+        maxLength: 128
         type: string
       document_id:
         description: |-
           required: true
           example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
+        maxLength: 128
         type: string
       document_version:
         description: |-
@@ -611,16 +628,25 @@ definitions:
         allOf:
         - $ref: '#/definitions/model.Revocation'
         description: Revocation is a collection of fields representing a revocation
+      scope:
+        description: |-
+          Scope is the credential configuration ID scope
+          required: false
+          example: "ehic", "pda1"
+        maxLength: 128
+        type: string
       vct:
         description: |-
           VCT is the Verifiable Credential Type
           required: true
           example: "urn:eudi:pid:1"
+        maxLength: 128
         type: string
     required:
     - authentic_source
     - document_id
     - document_version
+    - scope
     - vct
     type: object
   model.Revocation:
@@ -630,12 +656,14 @@ definitions:
           ID is the ID of the revocation
           required: false
           example: 8dbd2680-c03f-11ee-a21b-034aafe41222
+        maxLength: 128
         type: string
       reason:
         description: |-
           Reason is the reason for revocation
           required: false
           example: lost or stolen
+        maxLength: 128
         type: string
       reference:
         $ref: '#/definitions/model.RevocationReference'
@@ -656,80 +684,126 @@ definitions:
   model.RevocationReference:
     properties:
       authentic_source:
+        maxLength: 128
         type: string
       document_id:
+        maxLength: 128
         type: string
       vct:
+        maxLength: 128
         type: string
     type: object
   openid4vci.CredentialRequest:
     properties:
+      authorization:
+        type: string
+      credential_configuration_id:
+        description: |-
+          CredentialConfigurationID REQUIRED if a credential_identifiers parameter was not returned from
+          the Token Response as part of the authorization_details parameter. It MUST NOT be used otherwise.
+          String that uniquely identifies one of the keys in the name/value pairs stored in the
+          credential_configurations_supported Credential Issuer metadata. When this parameter is used,
+          the credential_identifier MUST NOT be present.
+        type: string
       credential_identifier:
-        description: REQUIRED when credential_identifiers parameter was returned from
-          the Token Response. It MUST NOT be used otherwise. It is a String that identifies
-          a Credential that is being requested to be issued. When this parameter is
-          used, the format parameter and any other Credential format specific parameters
-          such as those defined in Appendix A MUST NOT be present.
+        description: |-
+          CredentialIdentifier REQUIRED when an Authorization Details of type openid_credential was returned
+          from the Token Response. It MUST NOT be used otherwise. A string that identifies a Credential Dataset
+          that is requested for issuance. When this parameter is used, the credential_configuration_id MUST NOT be present.
         type: string
       credential_response_encryption:
         allOf:
         - $ref: '#/definitions/openid4vci.CredentialResponseEncryption'
-        description: CredentialIdentifier REQUIRED when credential_identifiers parameter
-          was returned from the Token Response. It MUST NOT be used otherwise. It
-          is a String that identifies a Credential that is being requested to be issued.
-          When this parameter is used, the format parameter and any other Credential
-          format specific parameters such as those defined in Appendix A MUST NOT
-          be present.
-      format:
-        description: Format REQUIRED when the credential_identifiers parameter was
-          not returned from the Token Response. It MUST NOT be used otherwise. It
-          is a String that determines the format of the Credential to be issued, which
-          may determine the type and any other information related to the Credential
-          to be issued. Credential Format Profiles consist of the Credential format
-          specific parameters that are defined in Appendix A. When this parameter
-          is used, the credential_identifier Credential Request parameter MUST NOT
-          be present.
+        description: |-
+          CredentialResponseEncryption OPTIONAL. Object containing information for encrypting the Credential Response.
+          If this request element is not present, the corresponding credential response returned is not encrypted.
+      dpoP:
+        description: Header fields
         type: string
-      headers:
-        $ref: '#/definitions/openid4vci.CredentialRequestHeader'
       proof:
         allOf:
         - $ref: '#/definitions/openid4vci.Proof'
-        description: 'Proof OPTIONAL. Object containing the proof of possession of
-          the cryptographic key material the issued Credential would be bound to.
-          The proof object is REQUIRED if the proof_types_supported parameter is non-empty
-          and present in the credential_configurations_supported parameter of the
-          Issuer metadata for the requested Credential. The proof object MUST contain
-          the following:'
-    type: object
-  openid4vci.CredentialRequestHeader:
-    properties:
-      authorization:
-        type: string
-      dpoP:
-        type: string
+        description: |-
+          Proof OPTIONAL. Single proof object for non-batch requests.
+          Deprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.
+      proofs:
+        allOf:
+        - $ref: '#/definitions/openid4vci.Proofs'
+        description: |-
+          Proofs OPTIONAL. Object providing one or more proof of possessions of the cryptographic key material
+          to which the issued Credential instances will be bound to. The proofs parameter contains exactly one
+          parameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array
+          containing parameters as defined by the corresponding proof type.
     required:
     - authorization
     - dpoP
     type: object
   openid4vci.CredentialResponseEncryption:
     properties:
-      alg:
-        type: string
       enc:
+        description: Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.
         type: string
       jwk:
-        $ref: '#/definitions/openid4vci.JWK'
+        allOf:
+        - $ref: '#/definitions/openid4vci.JWK'
+        description: JWK REQUIRED. Object containing a single public key as a JWK
+          used for encrypting the Credential Response.
+      zip:
+        description: |-
+          Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.
+          If absent then compression MUST not be used.
+        type: string
     required:
-    - alg
     - enc
     - jwk
+    type: object
+  openid4vci.DIVPProof:
+    properties:
+      challenge:
+        description: Challenge MUST be the c_nonce value provided by the Credential
+          Issuer (when provided)
+        type: string
+      created:
+        description: Created is the creation time of the proof
+        type: string
+      cryptosuite:
+        description: |-
+          Cryptosuite identifies the cryptographic suite used
+          Supported: eddsa-rdfc-2022, ecdsa-rdfc-2019, ecdsa-sd-2023, eddsa-jcs-2022, ecdsa-jcs-2019
+        enum:
+        - eddsa-rdfc-2022
+        - ecdsa-rdfc-2019
+        - ecdsa-sd-2023
+        - eddsa-jcs-2022
+        - ecdsa-jcs-2019
+        type: string
+      domain:
+        description: Domain MUST be the Credential Issuer Identifier
+        type: string
+      proofPurpose:
+        description: ProofPurpose MUST be "authentication" for OpenID4VCI
+        type: string
+      proofValue:
+        description: ProofValue is the actual proof signature value
+        type: string
+      type:
+        description: Type is the proof type, e.g., "DataIntegrityProof"
+        type: string
+      verificationMethod:
+        description: VerificationMethod is a URL that identifies the public key to
+          use for verification
+        type: string
+    required:
+    - cryptosuite
+    - domain
+    - proofPurpose
+    - proofValue
+    - type
+    - verificationMethod
     type: object
   openid4vci.JWK:
     properties:
       crv:
-        type: string
-      d:
         type: string
       kid:
         type: string
@@ -741,7 +815,6 @@ definitions:
         type: string
     required:
     - crv
-    - d
     - kid
     - kty
     - x
@@ -749,24 +822,79 @@ definitions:
     type: object
   openid4vci.Proof:
     properties:
-      attestation:
+      cwt:
+        description: CWT The CWT proof, when proof_type is "cwt"
         type: string
       jwt:
+        description: JWT The JWT proof, when proof_type is "jwt"
         type: string
       ldp_vp:
-        type: string
+        description: LDPVp The Linked Data Proof VP, when proof_type is "ldp_vp"
       proof_type:
-        description: ProofType REQUIRED. String denoting the key proof type. The value
-          of this parameter determines other parameters in the key proof object and
-          its respective processing rules. Key proof types defined in this specification
-          can be found in Section 7.2.1.
-        enum:
-        - jwt
-        - ldp_vp
-        - cwt
+        description: ProofType REQUIRED. String denoting the key proof type.
         type: string
     required:
     - proof_type
+    type: object
+  openid4vci.ProofDIVP:
+    properties:
+      '@context':
+        description: Context is the JSON-LD context, REQUIRED per W3C VC Data Model
+        items:
+          type: string
+        minItems: 1
+        type: array
+      holder:
+        description: Holder is the DID of the holder
+        type: string
+      id:
+        description: ID is an optional identifier for the presentation
+        type: string
+      proof:
+        allOf:
+        - $ref: '#/definitions/openid4vci.DIVPProof'
+        description: Proof contains the Data Integrity Proof(s), one of Proof or Proofs
+          REQUIRED
+      proofs:
+        description: Proofs contains multiple Data Integrity Proofs if more than one
+          is present
+        items:
+          $ref: '#/definitions/openid4vci.DIVPProof'
+        type: array
+      type:
+        description: Type is the type of the presentation, REQUIRED, must include
+          "VerifiablePresentation"
+        items:
+          type: string
+        minItems: 1
+        type: array
+      verifiableCredential:
+        description: VerifiableCredential contains the credentials being presented
+        items: {}
+        type: array
+    required:
+    - '@context'
+    - type
+    type: object
+  openid4vci.Proofs:
+    properties:
+      attestation:
+        description: |-
+          Attestation contains a single JWT representing a key attestation
+          as defined in Appendix D.1
+        type: string
+      di_vp:
+        description: |-
+          DIVP contains an array of W3C Verifiable Presentations
+          signed using Data Integrity Proof as defined in Appendix F.2
+        items:
+          $ref: '#/definitions/openid4vci.ProofDIVP'
+        type: array
+      jwt:
+        description: JWT contains an array of JWTs as defined in Appendix F.1
+        items:
+          type: string
+        type: array
     type: object
   openid4vci.QR:
     properties:
@@ -774,6 +902,24 @@ definitions:
         type: string
       qr_base64:
         type: string
+    type: object
+  vcclient.NotificationReply:
+    properties:
+      data:
+        $ref: '#/definitions/openid4vci.QR'
+    type: object
+  vcclient.NotificationRequest:
+    properties:
+      authentic_source:
+        type: string
+      document_id:
+        type: string
+      vct:
+        type: string
+    required:
+    - authentic_source
+    - document_id
+    - vct
     type: object
   vcclient.UploadRequest:
     properties:
@@ -876,27 +1022,7 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
-      summary: OIDCCredential
-      tags:
-      - vc-platform
-  /credential/.well-known/jwks:
-    get:
-      consumes:
-      - application/json
-      description: JWKS endpoint
-      operationId: issuer-JWKS
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/apiv1_issuer.JwksReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: JWKS
+      summary: VCICredential
       tags:
       - vc-platform
   /document:
@@ -1117,46 +1243,19 @@ paths:
         name: req
         required: true
         schema:
-          $ref: '#/definitions/apiv1.NotificationRequest'
+          $ref: '#/definitions/vcclient.NotificationRequest'
       produces:
       - application/json
       responses:
         "200":
           description: Success
           schema:
-            $ref: '#/definitions/apiv1.NotificationReply'
+            $ref: '#/definitions/vcclient.NotificationReply'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: Notification
-      tags:
-      - vc-platform
-  /revoke:
-    post:
-      consumes:
-      - application/json
-      description: Revoke endpoint
-      operationId: generic-revoke
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1.RevokeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/apiv1.RevokeReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: Revoke
       tags:
       - vc-platform
   /upload:
