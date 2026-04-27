@@ -201,7 +201,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `key_config`      | `object` | Signing key configuration                                                      | -                           | -       | Yes      |
 | `data_sources`    | `object` | Credential types to their data sources                                         | -                           | -       | Yes      |
 | `auth_providers`  | `object` | How users authenticate (SAML, OIDC)                                            | -                           | -       | No       |
-| `remotes`         | `object` | Named external API connections referenced by DataSources.ExternalAPI           | -                           | -       | No       |
+| `remotes`         | `object` | Named external API connections referenced by DataSources.ExternalAPI           | `"ladok"`                   | -       | No       |
 | `delivery`        | `object` | Delivery groups credential delivery to wallets (OpenID4VCI, credential offers) | -                           | -       | Yes      |
 | `issuer_metadata` | `object` | OpenID4VCI issuer metadata                                                     | -                           | -       | No       |
 | `public_url`      | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                      | `"https://issuer.sunet.se"` | -       | Yes      |
@@ -463,7 +463,7 @@ persisted in the database.
 
 ### `remotes` entry
 
-> **Path:** `.apigw.remotes.<key>`
+> **Path:** `.apigw.remotes.<remote name>`
 
 | Field           | Type       | Description                                           | Example                               | Default | Required |
 | --------------- | ---------- | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
