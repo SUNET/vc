@@ -329,7 +329,7 @@ Each key under a data source is a credential type.
 
 ### `datastore` entry
 
-> **Path:** `.apigw.data_sources.datastore.<key>`
+> **Path:** `.apigw.data_sources.datastore.<credential scope>`
 
 | Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example                                 | Default | Required |
 | --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
@@ -339,7 +339,7 @@ Each key under a data source is a credential type.
 
 ### `assertion` entry
 
-> **Path:** `.apigw.data_sources.assertion.<key>`
+> **Path:** `.apigw.data_sources.assertion.<credential scope>`
 
 The data comes directly from the SAML attributes or OIDC claims.
 
@@ -349,7 +349,7 @@ The data comes directly from the SAML attributes or OIDC claims.
 
 ### `external_api` entry
 
-> **Path:** `.apigw.data_sources.external_api.<key>`
+> **Path:** `.apigw.data_sources.external_api.<credential scope>`
 
 | Field               | Type     | Description                                       | Example | Default | Required |
 | ------------------- | -------- | ------------------------------------------------- | ------- | ------- | -------- |
@@ -359,7 +359,7 @@ The data comes directly from the SAML attributes or OIDC claims.
 
 ### `attribute_mapping` entry
 
-> **Path:** `.apigw.data_sources.external_api.<key>.attribute_mapping.<key>`, `.apigw.auth_providers.saml.attribute_mapping.<key>`, `.apigw.auth_providers.oidc.attribute_mapping.<key>`
+> **Path:** `.apigw.data_sources.external_api.<credential scope>.attribute_mapping.<attribute>`, `.apigw.auth_providers.saml.attribute_mapping.<attribute>`, `.apigw.auth_providers.oidc.attribute_mapping.<attribute>`
 
 Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
 
