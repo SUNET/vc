@@ -1,10 +1,8 @@
 name: Update VCTM
 
+# Disabled: registry-cli now handles credential discovery centrally.
+# The vctm branch is maintained directly. To regenerate, run manually.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'credentials/**/*.md'
   workflow_dispatch:
 
 permissions:
