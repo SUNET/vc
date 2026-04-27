@@ -126,7 +126,7 @@ Shared configuration used across all services.
 
 ### `credential_metadata` entry
 
-> **Path:** `.common.credential_metadata.<key>`
+> **Path:** `.common.credential_metadata.<credential scope>`
 
 https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 
@@ -137,7 +137,7 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 
 ### `display` entry
 
-> **Path:** `.common.credential_metadata.<key>.display[]`
+> **Path:** `.common.credential_metadata.<credential scope>.display[]`
 
 | Field              | Type     | Description                                                                                                                                                                                                                                                                         | Example | Default | Required |
 | ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -151,7 +151,7 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 
 ### `logo`
 
-> **Path:** `.common.credential_metadata.<key>.display[].logo`, `.apigw.issuer_metadata.display[].logo`
+> **Path:** `.common.credential_metadata.<credential scope>.display[].logo`, `.apigw.issuer_metadata.display[].logo`
 
 | Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -160,7 +160,7 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 
 ### `background_image`
 
-> **Path:** `.common.credential_metadata.<key>.display[].background_image`
+> **Path:** `.common.credential_metadata.<credential scope>.display[].background_image`
 
 | Field | Type     | Description                                                                                                                                                                                                                                                     | Example | Default | Required |
 | ----- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -168,7 +168,7 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 
 ### `claims` entry
 
-> **Path:** `.common.credential_metadata.<key>.claims[]`
+> **Path:** `.common.credential_metadata.<credential scope>.claims[]`
 
 https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-claims-description-for-issu
 
@@ -180,7 +180,7 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 
 ### `display` entry
 
-> **Path:** `.common.credential_metadata.<key>.claims[].display[]`
+> **Path:** `.common.credential_metadata.<credential scope>.claims[].display[]`
 
 | Field    | Type     | Description                                                                 | Example | Default | Required |
 | -------- | -------- | --------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -495,7 +495,7 @@ persisted in the database.
 
 ### `clients` entry
 
-> **Path:** `.apigw.delivery.openid4vci.clients.<key>`, `.verifier.inbound.openid4vp.clients.<key>`
+> **Path:** `.apigw.delivery.openid4vci.clients.<client id>`, `.verifier.inbound.openid4vp.clients.<client id>`
 
 | Field          | Type       | Description                                                                                                                                                                                                     | Example                          | Default  | Required |
 | -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | -------- | -------- |
@@ -514,7 +514,7 @@ persisted in the database.
 
 ### `wallets` entry
 
-> **Path:** `.apigw.delivery.credential_offers.wallets.<key>`
+> **Path:** `.apigw.delivery.credential_offers.wallets.<wallet name>`
 
 | Field          | Type     | Description                  | Example                            | Default | Required |
 | -------------- | -------- | ---------------------------- | ---------------------------------- | ------- | -------- |
@@ -859,7 +859,7 @@ Trust evaluation operates in one of two modes:
 
 ### `trust_policies` entry
 
-> **Path:** `.verifier.trust.trust_policies.<key>`
+> **Path:** `.verifier.trust.trust_policies.<role>`
 
 | Field                      | Type       | Description                                                                                                                           | Example                                                           | Default | Required |
 | -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
