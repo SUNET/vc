@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 829 504" width="829" height="504">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#f5f5f5"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f28c2e"/>
+      <stop offset="100%" style="stop-color:#e8711a"/>
+    </linearGradient>
+    <clipPath id="photoClip">
+      <rect x="48" y="140" width="120" height="150" rx="8" ry="8"/>
+    </clipPath>
+  </defs>
+
+  <!-- Card background -->
+  <rect width="829" height="504" rx="24" ry="24" fill="url(#bg)"/>
+
+  <!-- Header band -->
+  <rect width="829" height="90" rx="24" ry="24" fill="url(#header)"/>
+  <rect y="60" width="829" height="30" fill="url(#header)"/>
+
+  <!-- eduID wordmark -->
+  <text x="48" y="55" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="bold" letter-spacing="0.5">
+    <tspan fill="white">edu</tspan><tspan fill="#fff3e0">ID</tspan>
+  </text>
+
+  <!-- Subtitle -->
+  <text x="170" y="55" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="16" opacity="0.85">Digital Identity Credential</text>
+
+  <!-- SUNET logo (simplified wordmark + dot) -->
+  <g transform="translate(700, 30)">
+    <circle cx="0" cy="0" r="10" fill="white" opacity="0.9"/>
+    <circle cx="0" cy="0" r="6" fill="#e8711a"/>
+    <text x="16" y="5" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="bold" opacity="0.9">SUNET</text>
+  </g>
+
+  <!-- Photo frame -->
+  <rect x="48" y="140" width="120" height="150" rx="8" ry="8" fill="#e8711a" opacity="0.1"/>
+  <image id="picture" x="48" y="140" width="120" height="150" clip-path="url(#photoClip)" preserveAspectRatio="xMidYMid slice" href="{{picture}}"/>
+  <text x="108" y="222" fill="#999" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" opacity="0.5">PHOTO</text>
+
+  <!-- Name -->
+  <text x="200" y="165" fill="#888" font-family="Arial, Helvetica, sans-serif" font-size="13">Given name</text>
+  <text x="200" y="195" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="bold">{{given_name}}</text>
+
+  <text x="200" y="240" fill="#888" font-family="Arial, Helvetica, sans-serif" font-size="13">Family name</text>
+  <text x="200" y="270" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="bold">{{family_name}}</text>
+
+  <!-- Date of birth -->
+  <text x="200" y="320" fill="#888" font-family="Arial, Helvetica, sans-serif" font-size="13">Date of birth</text>
+  <text x="200" y="348" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="20">{{birth_date}}</text>
+
+  <!-- Bottom bar -->
+  <rect y="410" width="829" height="94" rx="0" ry="0" fill="#e8711a" opacity="0.05"/>
+  <rect y="480" width="829" height="24" rx="24" ry="24" fill="#e8711a" opacity="0.05"/>
+
+  <!-- Expiry -->
+  <text x="680" y="445" fill="#888" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="end">Valid until</text>
+  <text x="680" y="470" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="18" text-anchor="end">{{expiry_date}}</text>
+
+  <!-- Decorative accent line -->
+  <rect x="48" y="395" width="100" height="3" rx="2" fill="#e8711a" opacity="0.3"/>
+
+  <!-- Decorative rings -->
+  <circle cx="770" cy="445" r="30" fill="none" stroke="#e8711a" stroke-width="2" opacity="0.15"/>
+  <circle cx="770" cy="445" r="20" fill="none" stroke="#e8711a" stroke-width="1.5" opacity="0.15"/>
+</svg>

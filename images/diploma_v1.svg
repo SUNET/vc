@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 829 504" width="829" height="504">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6b1d1d"/>
+      <stop offset="100%" style="stop-color:#3a0e0e"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#872424"/>
+      <stop offset="100%" style="stop-color:#6b1d1d"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card background -->
+  <rect width="829" height="504" rx="24" ry="24" fill="url(#bg)"/>
+
+  <!-- Header band -->
+  <rect width="829" height="90" rx="24" ry="24" fill="url(#header)"/>
+  <rect y="60" width="829" height="30" fill="url(#header)"/>
+
+  <!-- Mortarboard icon -->
+  <g transform="translate(48, 18)" fill="white" opacity="0.85">
+    <polygon points="22,6 0,18 22,30 44,18"/>
+    <rect x="20" y="18" width="4" height="14"/>
+    <path d="M8,22 Q8,34 22,34 Q36,34 36,22" fill="none" stroke="white" stroke-width="2.5"/>
+  </g>
+
+  <!-- Title -->
+  <text x="110" y="46" fill="white" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-weight="bold" letter-spacing="0.5">DIPLOMA</text>
+  <text x="110" y="75" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" opacity="0.7">Higher Education Credential</text>
+
+  <!-- Student name -->
+  <text x="48" y="145" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.6">Given name</text>
+  <text x="48" y="178" fill="white" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-weight="bold">{{givenName}}</text>
+
+  <text x="48" y="218" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.6">Family name</text>
+  <text x="48" y="250" fill="white" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-weight="bold">{{familyName}}</text>
+
+  <!-- Title of diploma -->
+  <text x="48" y="305" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.6">Title</text>
+  <text x="48" y="335" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="22">{{title}}</text>
+
+  <!-- Awarding institution -->
+  <text x="480" y="145" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.6">Awarding institution</text>
+  <text x="480" y="175" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="bold">{{awardingInstitution}}</text>
+
+  <!-- Country -->
+  <text x="480" y="220" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.6">Country</text>
+  <text x="480" y="248" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="18">{{country}}</text>
+
+  <!-- Bottom bar -->
+  <rect y="410" width="829" height="94" rx="0" ry="0" fill="white" opacity="0.05"/>
+  <rect y="480" width="829" height="24" rx="24" ry="24" fill="white" opacity="0.05"/>
+
+  <!-- Awarding date -->
+  <text x="48" y="445" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="12" opacity="0.55">Awarded</text>
+  <text x="48" y="470" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="18">{{awardingDate}}</text>
+
+  <!-- Decorative seal -->
+  <circle cx="760" cy="300" r="45" fill="none" stroke="white" stroke-width="2" opacity="0.08"/>
+  <circle cx="760" cy="300" r="35" fill="none" stroke="white" stroke-width="1.5" opacity="0.08"/>
+  <circle cx="760" cy="300" r="25" fill="none" stroke="white" stroke-width="1" opacity="0.08"/>
+
+  <!-- Decorative rings -->
+  <circle cx="770" cy="445" r="30" fill="none" stroke="white" stroke-width="2" opacity="0.12"/>
+  <circle cx="770" cy="445" r="20" fill="none" stroke="white" stroke-width="1.5" opacity="0.12"/>
+</svg>
