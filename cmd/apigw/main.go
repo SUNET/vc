@@ -9,11 +9,11 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
-	"github.com/SUNET/vc/internal/apigw/importer"
 	"github.com/SUNET/vc/internal/apigw/cache"
 	datasources "github.com/SUNET/vc/internal/apigw/data_sources"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/apigw/httpserver"
+	"github.com/SUNET/vc/internal/apigw/importer"
 	"github.com/SUNET/vc/internal/apigw/inbound"
 	"github.com/SUNET/vc/internal/apigw/outbound"
 	"github.com/SUNET/vc/pkg/configuration"

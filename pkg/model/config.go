@@ -1223,8 +1223,6 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	return nil
 }
 
-
-
 // Generate generates issuer metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
 func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentials map[string]*CredentialMetadata) (*openid4vci.CredentialIssuerMetadataParameters, error) {
