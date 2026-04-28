@@ -41,7 +41,9 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 	session := sessions.Default(c)
 	sessionID := uuid.NewString()
 	session.Set("session_id", sessionID)
-	session.Save()
+	if err := session.Save(); err != nil {
+		s.log.Error(err, "failed to save session")
+	}
 
 	request := &apiv1.UIInteractionRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {

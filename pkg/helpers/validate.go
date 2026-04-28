@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -185,7 +186,7 @@ func NewValidator() (*validator.Validate, error) {
 		if path == "" {
 			return false
 		}
-		f, err := os.Open(path)
+		f, err := os.Open(filepath.Clean(path))
 		if err != nil {
 			return false
 		}

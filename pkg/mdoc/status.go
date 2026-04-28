@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -563,6 +564,9 @@ func parseStatusElement(value any) (*StatusReference, bool) {
 	case int:
 		index = int64(idx)
 	case uint64:
+		if idx > math.MaxInt64 {
+			return nil, false
+		}
 		index = int64(idx)
 	case float64:
 		index = int64(idx)

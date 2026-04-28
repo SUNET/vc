@@ -89,7 +89,10 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Return the response
 	w.Header().Set("Content-Type", responseMediaType)
 	w.WriteHeader(http.StatusOK)
-	w.Write(response)
+	if _, err := w.Write(response); err != nil { //#nosec G705 -- DIDComm protocol response (JWE/JWS), not HTML
+		http.Error(w, "failed to write response", http.StatusInternalServerError)
+		return
+	}
 }
 
 // isAllowedContentType checks if a content type is allowed.

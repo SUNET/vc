@@ -753,10 +753,14 @@ func (c *Client) pollDeferredCredential(ctx context.Context, deferredEndpoint, a
 		if resp.StatusCode == http.StatusOK {
 			var credResp openid4vci.CredentialResponse
 			if err := json.NewDecoder(resp.Body).Decode(&credResp); err != nil {
-				resp.Body.Close()
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					return nil, fmt.Errorf("%w; close body: %w", err, closeErr)
+				}
 				return nil, err
 			}
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				return nil, fmt.Errorf("close body: %w", err)
+			}
 
 			if len(credResp.Credentials) > 0 {
 				return &credResp, nil
@@ -765,7 +769,9 @@ func (c *Client) pollDeferredCredential(ctx context.Context, deferredEndpoint, a
 				transactionID = credResp.TransactionID
 			}
 		} else {
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				return nil, fmt.Errorf("close body: %w", err)
+			}
 		}
 
 		select {

@@ -42,7 +42,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 		apiv1:  api,
 		gin:    gin.New(),
 		tracer: tracer,
-		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		server: &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 	}
 
 	var err error

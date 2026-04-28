@@ -55,7 +55,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		gin:              gin.New(),
 		notify:           notify,
 		tracer:           tracer,
-		server:           &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		server:           &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 		sessionsName:     "verifier_user_session",
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
@@ -115,8 +115,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			if err != nil {
 				return "", err
 			}
-			// Return as template.JS to prevent escaping in JavaScript context
-			return template.JS(string(jsonBytes)), nil
+			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
 		},
 	})
 

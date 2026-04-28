@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -387,6 +388,9 @@ func concatKDF(z []byte, algorithm string, apu, apv []byte, keySize int) ([]byte
 
 	// SuppPubInfo (key length in bits, big-endian)
 	keySizeBits := make([]byte, 4)
+	if keySize < 0 || keySize > math.MaxInt32/8 {
+		return nil, fmt.Errorf("key size out of range: %d", keySize)
+	}
 	binary.BigEndian.PutUint32(keySizeBits, uint32(keySize*8))
 	otherInfo = append(otherInfo, keySizeBits...)
 
@@ -397,12 +401,12 @@ func concatKDF(z []byte, algorithm string, apu, apv []byte, keySize int) ([]byte
 
 	derivedKey := make([]byte, 0, rounds*hashSize)
 
-	for counter := uint32(1); counter <= uint32(rounds); counter++ {
+	for counter := 1; counter <= rounds; counter++ {
 		h := sha256.New()
 
 		// Write counter as big-endian 32-bit
 		counterBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(counterBytes, counter)
+		binary.BigEndian.PutUint32(counterBytes, uint32(counter))
 		h.Write(counterBytes)
 
 		// Write Z (shared secret)
@@ -422,7 +426,7 @@ func concatKDF(z []byte, algorithm string, apu, apv []byte, keySize int) ([]byte
 // The length is encoded as a big-endian 32-bit integer.
 func appendLengthPrefixed(dst, data []byte) []byte {
 	length := make([]byte, 4)
-	binary.BigEndian.PutUint32(length, uint32(len(data)))
+	binary.BigEndian.PutUint32(length, uint32(len(data)&math.MaxUint32))
 	dst = append(dst, length...)
 	dst = append(dst, data...)
 	return dst
@@ -457,6 +461,9 @@ func concatKDF1PU(z []byte, algorithm string, apu, apv, ccTag []byte, keySize in
 
 	// SuppPubInfo: keydatalen (key length in bits)
 	keySizeBits := make([]byte, 4)
+	if keySize < 0 || keySize > math.MaxInt32/8 {
+		return nil, fmt.Errorf("key size out of range: %d", keySize)
+	}
 	binary.BigEndian.PutUint32(keySizeBits, uint32(keySize*8))
 	otherInfo = append(otherInfo, keySizeBits...)
 
@@ -473,12 +480,12 @@ func concatKDF1PU(z []byte, algorithm string, apu, apv, ccTag []byte, keySize in
 
 	derivedKey := make([]byte, 0, rounds*hashSize)
 
-	for counter := uint32(1); counter <= uint32(rounds); counter++ {
+	for counter := 1; counter <= rounds; counter++ {
 		h := sha256.New()
 
 		// Write counter as big-endian 32-bit
 		counterBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(counterBytes, counter)
+		binary.BigEndian.PutUint32(counterBytes, uint32(counter))
 		h.Write(counterBytes)
 
 		// Write Z (shared secret)

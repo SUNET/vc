@@ -36,7 +36,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		log:    log.New("httpserver"),
 		apiv1:  apiv1,
 		gin:    gin.New(),
-		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		server: &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 		tracer: tracer,
 	}
 

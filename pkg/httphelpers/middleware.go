@@ -234,7 +234,9 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 			})
 			return false
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			log.Error(err, "failed to close file", "path", path)
+		}
 		c.File(path)
 		c.Abort()
 		return true

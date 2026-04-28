@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -134,7 +135,7 @@ func (s *Service) parseDestinations(dests []string) ([]*Destination, error) {
 
 		// File path
 		// Open file in append mode, create if not exists
-		f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(filepath.Clean(dest), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open audit log file %s: %w", dest, err)
 		}

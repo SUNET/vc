@@ -170,7 +170,7 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 		return nil, fmt.Errorf("presentation requests file path is empty")
 	}
 
-	fileBytes, err := os.ReadFile(filePath)
+	fileBytes, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
@@ -195,7 +195,7 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 // Each file may contain a single template (top-level fields) or multiple
 // templates wrapped in a "templates:" list.
 func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
-	fileBytes, err := os.ReadFile(filePath)
+	fileBytes, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}

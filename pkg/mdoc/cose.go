@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"hash"
+	"math"
 	"math/big"
 
 	"github.com/fxamacker/cbor/v2"
@@ -453,6 +454,9 @@ func Verify1(sign1 *COSESign1, payload []byte, pubKey crypto.PublicKey, external
 		case int:
 			algorithm = int64(v)
 		case uint64:
+			if v > math.MaxInt64 {
+				return fmt.Errorf("algorithm value overflow")
+			}
 			algorithm = int64(v)
 		default:
 			return fmt.Errorf("invalid algorithm type")
@@ -663,6 +667,9 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 	case int:
 		algorithm = int64(v)
 	case uint64:
+		if v > math.MaxInt64 {
+			return fmt.Errorf("algorithm value overflow: %T", algRaw)
+		}
 		algorithm = int64(v)
 	default:
 		return fmt.Errorf("invalid algorithm type: %T", algRaw)

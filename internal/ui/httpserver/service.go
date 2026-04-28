@@ -49,7 +49,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		tracer:       tracer,
 		apiv1:        apiv1,
 		gin:          gin.New(),
-		server:       &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		server:       &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 		cacheService: cacheService,
 		sessionConfig: &sessionConfig{
 			name:                       "vc_ui_auth_session",

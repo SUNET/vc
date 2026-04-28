@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func NewStaticMDQClient(metadataSource, entityID string, isURL bool, signingCert
 	} else {
 		// Read metadata from file
 		log.Debug("loading static IdP metadata from file", "path", metadataSource)
-		metadataXML, err = os.ReadFile(metadataSource)
+		metadataXML, err = os.ReadFile(filepath.Clean(metadataSource))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read metadata file: %w", err)
 		}
@@ -272,7 +273,7 @@ func (m *MDQClient) verifyMetadataSignature(metadataXML []byte) error {
 // LoadMetadataSigningCert loads an X.509 certificate from a PEM file for
 // metadata signature verification.
 func LoadMetadataSigningCert(certPath string) (*x509.Certificate, error) {
-	certPEM, err := os.ReadFile(certPath)
+	certPEM, err := os.ReadFile(filepath.Clean(certPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata signing certificate: %w", err)
 	}

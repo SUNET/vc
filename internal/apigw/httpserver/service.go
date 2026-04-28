@@ -56,7 +56,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		apiv1:          apiv1,
 		gin:            gin.New(),
 		tracer:         tracer,
-		server:         &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		server:         &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 		eventPublisher: eventPublisher,
 		authProviders:  authProviders,
 		dataSources:    dataSources,
@@ -100,8 +100,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			if err != nil {
 				return "", err
 			}
-			// Return as template.JS to prevent escaping in JavaScript context
-			return template.JS(string(jsonBytes)), nil
+			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
 		},
 	})
 

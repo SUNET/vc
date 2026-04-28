@@ -137,7 +137,9 @@ func (c *WebSocketClient) Connect(ctx context.Context, endpoint string) error {
 
 	// Verify subprotocol was accepted
 	if resp.Header.Get("Sec-WebSocket-Protocol") != DIDCommSubprotocol {
-		conn.Close()
+		if err = conn.Close(); err != nil {
+			return fmt.Errorf("%w: server did not accept didcomm/v2 subprotocol (close error: %v)", ErrConnectionFailed, err)
+		}
 		return fmt.Errorf("%w: server did not accept didcomm/v2 subprotocol", ErrConnectionFailed)
 	}
 
@@ -290,7 +292,7 @@ func (c *WebSocketClient) readLoop() {
 
 		msgType, data, err := c.readNextMessage(conn)
 		if err != nil {
-			c.Close()
+			c.Close() //#nosec G104 -- best-effort cleanup in background goroutine
 			return
 		}
 

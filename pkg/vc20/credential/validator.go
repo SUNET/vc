@@ -10,6 +10,7 @@ import (
 	"hash"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -853,6 +854,9 @@ func (v *Validator) validateRelatedResource(cred map[string]any) error {
 				return nil
 			}
 
+			if length > math.MaxInt {
+				return fmt.Errorf("multihash length overflow")
+			}
 			if len(decoded) != headerLen+int(length) {
 				if sriVerified {
 					v.log.Info("WARN: validateRelatedResource ignoring invalid multihash length because SRI verified")
