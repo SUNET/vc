@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-04-27
+**Generated:** 2026-04-28
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -321,15 +321,24 @@ Supports both file-based and HSM-based keys with explicit control.
 
 Each key under a data source is a credential type.
 
-| Field          | Type     | Description                                                                                                                    | Example | Default | Required |
-| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `datastore`    | `object` | Credential types whose data is pre-loaded by an authentic source (e.g. MongoDB)                                                | -       | -       | No       |
-| `assertion`    | `object` | Credential types whose data comes from the authentication response (SAML attributes or OIDC claims)                            | -       | -       | No       |
-| `external_api` | `object` | Credential types whose data is fetched from an external API Each credential references a named remote defined in APIGW.Remotes | -       | -       | No       |
+| Field          | Type     | Description                                                                                                   | Example | Default | Required |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `datastore`    | `object` | Credential types backed by a pre-loaded datastore (e.g. MongoDB)                                              | -       | -       | No       |
+| `assertion`    | `object` | Credential types backed by authentication assertions (SAML attributes or OIDC claims)                         | -       | -       | No       |
+| `external_api` | `object` | Credential types backed by an external API Each credential references a named remote defined in APIGW.Remotes | -       | -       | No       |
 
-### `datastore` entry
+### `datastore`
 
-> **Path:** `.apigw.data_sources.datastore.<credential scope>`
+> **Path:** `.apigw.data_sources.datastore`
+
+| Field    | Type     | Description                                                                                                                                                                      | Example | Default | Required |
+| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their datastore configuration                                                                                                                          | -       | -       | No       |
+| `import` | `object` | Automatic data import from JSON files at startup. When configured, APIGW reads JSON files and imports them into the datastore on first startup (skipped if data already exists). | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
 
 | Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example                                 | Default | Required |
 | --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
@@ -337,9 +346,26 @@ Each key under a data source is a credential type.
 | `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup. These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
 | `auth_scopes`   | `[]string` | Credential keys whose VCTs are acceptable for wallet authentication (for OpenID4VP)                                                                                                                                                                                                                                                                                                                                                                             | `[pid]`                                 | -       | No       |
 
-### `assertion` entry
+### `import`
 
-> **Path:** `.apigw.data_sources.assertion.<credential scope>`
+> **Path:** `.apigw.data_sources.datastore.import`
+
+| Field        | Type       | Description                                                                                                                                                                       | Example                                                         | Default | Required |
+| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------- | -------- |
+| `file_paths` | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. Import is skipped if the datastore already contains data. | `["./bootstrapping/pid-1-5.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
+| `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                      | `["100", "102"]`                                                | -       | No       |
+
+### `assertion`
+
+> **Path:** `.apigw.data_sources.assertion`
+
+| Field    | Type     | Description                                             | Example | Default | Required |
+| -------- | -------- | ------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their assertion configuration | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.assertion.scopes.<credential scope>`
 
 The data comes directly from the SAML attributes or OIDC claims.
 
@@ -347,9 +373,17 @@ The data comes directly from the SAML attributes or OIDC claims.
 | --------------- | -------- | ----------------------------------------------------- | ------- | ------- | -------- |
 | `auth_provider` | `string` | Auth provider for this credential type (saml or oidc) | -       | -       | Yes      |
 
-### `external_api` entry
+### `external_api`
 
-> **Path:** `.apigw.data_sources.external_api.<credential scope>`
+> **Path:** `.apigw.data_sources.external_api`
+
+| Field    | Type     | Description                                                | Example | Default | Required |
+| -------- | -------- | ---------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their external API configuration | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>`
 
 | Field               | Type     | Description                                       | Example | Default | Required |
 | ------------------- | -------- | ------------------------------------------------- | ------- | ------- | -------- |
@@ -359,7 +393,7 @@ The data comes directly from the SAML attributes or OIDC claims.
 
 ### `attribute_mapping` entry
 
-> **Path:** `.apigw.data_sources.external_api.<credential scope>.attribute_mapping.<attribute>`, `.apigw.auth_providers.saml.attribute_mapping.<attribute>`, `.apigw.auth_providers.oidc.attribute_mapping.<attribute>`
+> **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>.attribute_mapping.<attribute>`, `.apigw.auth_providers.saml.attribute_mapping.<attribute>`, `.apigw.auth_providers.oidc.attribute_mapping.<attribute>`
 
 Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
 
@@ -374,10 +408,28 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers`
 
-| Field  | Type     | Description               | Example | Default | Required |
-| ------ | -------- | ------------------------- | ------- | ------- | -------- |
-| `saml` | `object` | The SAML SP auth provider | -       | -       | No       |
-| `oidc` | `object` | The OIDC RP auth provider | -       | -       | No       |
+| Field   | Type     | Description                                 | Example | Default | Required |
+| ------- | -------- | ------------------------------------------- | ------- | ------- | -------- |
+| `basic` | `object` | The basic (username/password) auth provider | -       | -       | No       |
+| `saml`  | `object` | The SAML SP auth provider                   | -       | -       | No       |
+| `oidc`  | `object` | The OIDC RP auth provider                   | -       | -       | No       |
+
+### `basic`
+
+> **Path:** `.apigw.auth_providers.basic`
+
+| Field    | Type     | Description                                                                                                                                                                                      | Example | Default | Required |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `import` | `object` | Automatic import of test users from a JSON file at startup. When configured, APIGW reads the file and imports users into the users collection on first startup (skipped if users already exist). | -       | -       | No       |
+
+### `import`
+
+> **Path:** `.apigw.auth_providers.basic.import`
+
+| Field       | Type       | Description                                                                                                                 | Example                                   | Default | Required |
+| ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `file_path` | `string`   | Path to a JSON file containing user definitions to import. Import is skipped if the users collection already contains data. | `"./bootstrapping/basic_auth_users.json"` | -       | Yes      |
+| `users`     | `[]string` | Users limits which person IDs to import. If empty, all users are imported.                                                  | `["100", "102"]`                          | -       | No       |
 
 ### `saml`
 
