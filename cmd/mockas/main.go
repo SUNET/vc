@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/SUNET/vc/internal/mockas/apiv1"
-	"github.com/SUNET/vc/internal/mockas/bootstrapper"
 	"github.com/SUNET/vc/internal/mockas/httpserver"
 	"github.com/SUNET/vc/internal/mockas/inbound"
 	"github.com/SUNET/vc/pkg/configuration"
@@ -47,17 +46,6 @@ func main() {
 	mainLog := log.New("main")
 
 	tracer, err := trace.New(ctx, cfg, serviceName, log)
-	if err != nil {
-		panic(err)
-	}
-
-	//eduClient, err := education.New(ctx, cfg.MockAS.DatastoreURL, log.New("education"))
-	//services["eduClient"] = eduClient
-	//if err != nil {
-	//	panic(err)
-	//}
-
-	_, err = bootstrapper.New(ctx, cfg, log)
 	if err != nil {
 		panic(err)
 	}
