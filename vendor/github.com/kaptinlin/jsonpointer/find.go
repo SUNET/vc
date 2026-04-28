@@ -4,8 +4,7 @@ import (
 	"reflect"
 )
 
-// find locates a reference in document using string path components.
-// Optimized with inline fast paths and minimal allocations.
+// find locates a reference in a document using string path components.
 func find(val any, path Path) (*Reference, error) {
 	pathLength := len(path)
 	if pathLength == 0 {
@@ -65,7 +64,6 @@ func find(val any, path Path) (*Reference, error) {
 				return nil, err
 			}
 
-			//nolint:exhaustive // Only handling traversable types
 			switch objVal.Kind() {
 			case reflect.Slice, reflect.Array:
 				index, err := validateAndAccessArray(key, objVal.Len())
@@ -75,13 +73,11 @@ func find(val any, path Path) (*Reference, error) {
 				current = objVal.Index(index).Interface()
 
 			case reflect.Map:
-				mapKey := reflect.ValueOf(key)
-				mapVal := objVal.MapIndex(mapKey)
-				if mapVal.IsValid() {
-					current = mapVal.Interface()
-				} else {
-					return nil, ErrKeyNotFound
+				mapEntry, err := mapValueByPathKey(objVal, key)
+				if err != nil {
+					return nil, err
 				}
+				current = mapEntry.Interface()
 
 			case reflect.Struct:
 				if structField(key, &objVal) {

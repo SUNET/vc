@@ -441,9 +441,13 @@ func GetDateFormatterSource(locales any, skeleton string, timeZone string, onErr
 	var localesStr string
 	switch v := locales.(type) {
 	case string:
-		localesStr = fmt.Sprintf(`"%s"`, v)
+		localesStr = fmt.Sprintf("%q", v)
 	case []string:
-		localesStr = fmt.Sprintf(`[%s]`, strings.Join(v, ","))
+		quotedLocales := make([]string, 0, len(v))
+		for _, locale := range v {
+			quotedLocales = append(quotedLocales, fmt.Sprintf("%q", locale))
+		}
+		localesStr = fmt.Sprintf("[%s]", strings.Join(quotedLocales, ","))
 	default:
 		return "", ErrInvalidType
 	}
@@ -465,40 +469,40 @@ func toJSON(options *DateTimeFormatOptions) string {
 	var parts []string
 
 	if options.Era != "" {
-		parts = append(parts, fmt.Sprintf(`"era":"%s"`, options.Era))
+		parts = append(parts, fmt.Sprintf(`"era":%q`, options.Era))
 	}
 	if options.Year != "" {
-		parts = append(parts, fmt.Sprintf(`"year":"%s"`, options.Year))
+		parts = append(parts, fmt.Sprintf(`"year":%q`, options.Year))
 	}
 	if options.Month != "" {
-		parts = append(parts, fmt.Sprintf(`"month":"%s"`, options.Month))
+		parts = append(parts, fmt.Sprintf(`"month":%q`, options.Month))
 	}
 	if options.Day != "" {
-		parts = append(parts, fmt.Sprintf(`"day":"%s"`, options.Day))
+		parts = append(parts, fmt.Sprintf(`"day":%q`, options.Day))
 	}
 	if options.Weekday != "" {
-		parts = append(parts, fmt.Sprintf(`"weekday":"%s"`, options.Weekday))
+		parts = append(parts, fmt.Sprintf(`"weekday":%q`, options.Weekday))
 	}
 	if options.Hour != "" {
-		parts = append(parts, fmt.Sprintf(`"hour":"%s"`, options.Hour))
+		parts = append(parts, fmt.Sprintf(`"hour":%q`, options.Hour))
 	}
 	if options.Minute != "" {
-		parts = append(parts, fmt.Sprintf(`"minute":"%s"`, options.Minute))
+		parts = append(parts, fmt.Sprintf(`"minute":%q`, options.Minute))
 	}
 	if options.Second != "" {
-		parts = append(parts, fmt.Sprintf(`"second":"%s"`, options.Second))
+		parts = append(parts, fmt.Sprintf(`"second":%q`, options.Second))
 	}
 	if options.HourCycle != "" {
-		parts = append(parts, fmt.Sprintf(`"hourCycle":"%s"`, options.HourCycle))
+		parts = append(parts, fmt.Sprintf(`"hourCycle":%q`, options.HourCycle))
 	}
 	if options.TimeZoneName != "" {
-		parts = append(parts, fmt.Sprintf(`"timeZoneName":"%s"`, options.TimeZoneName))
+		parts = append(parts, fmt.Sprintf(`"timeZoneName":%q`, options.TimeZoneName))
 	}
 	if options.Calendar != "" {
-		parts = append(parts, fmt.Sprintf(`"calendar":"%s"`, options.Calendar))
+		parts = append(parts, fmt.Sprintf(`"calendar":%q`, options.Calendar))
 	}
 	if options.TimeZone != "" {
-		parts = append(parts, fmt.Sprintf(`"timeZone":"%s"`, options.TimeZone))
+		parts = append(parts, fmt.Sprintf(`"timeZone":%q`, options.TimeZone))
 	}
 
 	return "{" + strings.Join(parts, ",") + "}"

@@ -494,9 +494,8 @@ func (p *Parser) parseArgToken(lt *LexerToken, inPlural bool) (Token, error) {
 	case TokenSelect:
 		if isSelectType(argType.Value) {
 			return p.parseSelect(lt, inPlural, ctx, argType.Value)
-		} else {
-			return nil, NewParseError(argType, fmt.Sprintf("Unexpected select type %s", argType.Value))
 		}
+		return nil, NewParseError(argType, fmt.Sprintf("Unexpected select type %s", argType.Value))
 
 	default:
 		return nil, NewParseError(argType, fmt.Sprintf("Unexpected lexer token: %s", argType.Type))
