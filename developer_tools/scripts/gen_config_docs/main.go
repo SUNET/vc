@@ -666,7 +666,9 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 }
 
 func secretPlaceholder(yamlName string) string {
-	placeholders := map[string]string{
+	// Placeholders for secrets file documentation examples.
+	// These are NOT real credentials — they are shown as fill-in templates.
+	placeholders := map[string]string{ //#nosec G101 -- documentation placeholders, not real credentials
 		"uri":                               "\"mongodb://user:password@mongo:27017/vc\"",
 		"client_secret":                     "\"your-oidc-client-secret\"",
 		"password":                          "\"change-me-in-production\"",
@@ -1000,7 +1002,7 @@ func renderDocument(sections []*DocSection) string {
 }
 
 func sectionLabel(yamlKey string) string {
-	labels := map[string]string{
+	labels := map[string]string{ //#nosec G101 -- section labels, not credentials
 		"common":       "Common",
 		"apigw":        "API Gateway (APIGW)",
 		"issuer":       "Issuer",
@@ -1145,10 +1147,10 @@ func main() {
 	markdown := renderDocument(sections)
 
 	outPath := filepath.Join(root, *outFlag)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o750); err != nil {
 		log.Fatalf("creating output dir: %v", err)
 	}
-	if err := os.WriteFile(outPath, []byte(markdown), 0o644); err != nil {
+	if err := os.WriteFile(outPath, []byte(markdown), 0o600); err != nil {
 		log.Fatalf("writing %s: %v", outPath, err)
 	}
 	fmt.Printf("Generated %s (%d bytes)\n", outPath, len(markdown))

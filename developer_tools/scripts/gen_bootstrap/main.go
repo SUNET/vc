@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -116,11 +117,13 @@ func main() {
 	}
 
 	var input InputFile
-	if err := yaml.Unmarshal(data, &input); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&input); err != nil { //#nosec G709 -- developer CLI tool, input is trusted
 		fatal("parse yaml: %v", err)
 	}
 
-	if err := os.MkdirAll(outputDir, 0750); err != nil {
+	cleanOutputDir := filepath.Clean(outputDir)
+	if err := os.MkdirAll(cleanOutputDir, 0750); err != nil {
 		fatal("create output dir: %v", err)
 	}
 
@@ -768,7 +771,7 @@ func writeJSON(dir, filename string, v any) {
 	}
 	// Append newline for consistent file formatting
 	b = append(b, '\n')
-	path := filepath.Join(dir, filename)
+	path := filepath.Join(filepath.Clean(dir), filepath.Clean(filename))
 	if err := os.WriteFile(path, b, 0600); err != nil {
 		fatal("write %s: %v", path, err)
 	}
