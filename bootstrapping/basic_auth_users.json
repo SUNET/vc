@@ -22,8 +22,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_100",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_100",
       "real_data": false
     }
   },
@@ -50,8 +50,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_101",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_101",
       "real_data": false
     }
   },
@@ -78,8 +78,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_102",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_102",
       "real_data": false
     }
   },
@@ -106,8 +106,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_103",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_103",
       "real_data": false
     }
   },
@@ -134,8 +134,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_104",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_104",
       "real_data": false
     }
   },
@@ -162,8 +162,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_105",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_105",
       "real_data": false
     }
   },
@@ -190,8 +190,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_106",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_106",
       "real_data": false
     }
   },
@@ -218,8 +218,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_107",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_107",
       "real_data": false
     }
   },
@@ -246,8 +246,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_108",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_108",
       "real_data": false
     }
   },
@@ -274,8 +274,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_109",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_109",
       "real_data": false
     }
   },
@@ -302,8 +302,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_110",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_110",
       "real_data": false
     }
   },
@@ -330,8 +330,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_111",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_111",
       "real_data": false
     }
   },
@@ -358,8 +358,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_112",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_112",
       "real_data": false
     }
   },
@@ -386,8 +386,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_113",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_113",
       "real_data": false
     }
   },
@@ -414,8 +414,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_114",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_114",
       "real_data": false
     }
   },
@@ -442,8 +442,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_115",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_115",
       "real_data": false
     }
   },
@@ -470,8 +470,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_116",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_116",
       "real_data": false
     }
   },
@@ -498,8 +498,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_117",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_117",
       "real_data": false
     }
   },
@@ -526,8 +526,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_118",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_118",
       "real_data": false
     }
   },
@@ -554,8 +554,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_119",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_119",
       "real_data": false
     }
   },
@@ -582,8 +582,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_120",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_120",
       "real_data": false
     }
   },
@@ -610,8 +610,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_121",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_121",
       "real_data": false
     }
   },
@@ -638,8 +638,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_122",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_122",
       "real_data": false
     }
   },
@@ -666,8 +666,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_123",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_123",
       "real_data": false
     }
   },
@@ -694,8 +694,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_124",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_124",
       "real_data": false
     }
   },
@@ -722,8 +722,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_125",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_125",
       "real_data": false
     }
   },
@@ -750,8 +750,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_126",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_126",
       "real_data": false
     }
   },
@@ -778,8 +778,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_127",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_127",
       "real_data": false
     }
   },
@@ -806,8 +806,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_128",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_128",
       "real_data": false
     }
   },
@@ -834,8 +834,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_129",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_129",
       "real_data": false
     }
   },
@@ -862,8 +862,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_130",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_130",
       "real_data": false
     }
   },
@@ -890,8 +890,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_131",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_131",
       "real_data": false
     }
   },
@@ -918,8 +918,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_132",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_132",
       "real_data": false
     }
   },
@@ -946,8 +946,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_133",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_133",
       "real_data": false
     }
   },
@@ -974,8 +974,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_134",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_134",
       "real_data": false
     }
   },
@@ -1002,8 +1002,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_135",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_135",
       "real_data": false
     }
   },
@@ -1030,8 +1030,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_136",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_136",
       "real_data": false
     }
   },
@@ -1058,8 +1058,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_137",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_137",
       "real_data": false
     }
   },
@@ -1086,8 +1086,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_138",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_138",
       "real_data": false
     }
   },
@@ -1114,8 +1114,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_139",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_139",
       "real_data": false
     }
   },
@@ -1142,8 +1142,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_140",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_140",
       "real_data": false
     }
   },
@@ -1170,8 +1170,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_141",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_141",
       "real_data": false
     }
   },
@@ -1198,8 +1198,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_142",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_142",
       "real_data": false
     }
   },
@@ -1226,8 +1226,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_143",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_143",
       "real_data": false
     }
   },
@@ -1254,8 +1254,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_144",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_144",
       "real_data": false
     }
   },
@@ -1282,8 +1282,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_145",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_145",
       "real_data": false
     }
   },
@@ -1310,8 +1310,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_146",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_146",
       "real_data": false
     }
   },
@@ -1338,8 +1338,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_147",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_147",
       "real_data": false
     }
   },
@@ -1366,8 +1366,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_148",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_148",
       "real_data": false
     }
   },
@@ -1394,8 +1394,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_149",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_149",
       "real_data": false
     }
   },
@@ -1422,8 +1422,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_70",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_70",
       "real_data": false
     }
   },
@@ -1450,8 +1450,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_71",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_71",
       "real_data": false
     }
   },
@@ -1478,8 +1478,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_72",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_72",
       "real_data": false
     }
   },
@@ -1506,8 +1506,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_73",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_73",
       "real_data": false
     }
   },
@@ -1534,8 +1534,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_74",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_74",
       "real_data": false
     }
   },
@@ -1562,8 +1562,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_75",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_75",
       "real_data": false
     }
   },
@@ -1590,8 +1590,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_76",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_76",
       "real_data": false
     }
   },
@@ -1618,8 +1618,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_77",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_77",
       "real_data": false
     }
   },
@@ -1646,8 +1646,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_78",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_78",
       "real_data": false
     }
   },
@@ -1674,8 +1674,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_79",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_79",
       "real_data": false
     }
   },
@@ -1702,8 +1702,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_80",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_80",
       "real_data": false
     }
   },
@@ -1730,8 +1730,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_81",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_81",
       "real_data": false
     }
   },
@@ -1758,8 +1758,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_82",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_82",
       "real_data": false
     }
   },
@@ -1786,8 +1786,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_83",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_83",
       "real_data": false
     }
   },
@@ -1814,8 +1814,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_84",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_84",
       "real_data": false
     }
   },
@@ -1842,8 +1842,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_85",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_85",
       "real_data": false
     }
   },
@@ -1870,8 +1870,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_86",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_86",
       "real_data": false
     }
   },
@@ -1898,8 +1898,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_87",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_87",
       "real_data": false
     }
   },
@@ -1926,8 +1926,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_88",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_88",
       "real_data": false
     }
   },
@@ -1954,8 +1954,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_89",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_89",
       "real_data": false
     }
   },
@@ -1982,8 +1982,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_90",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_90",
       "real_data": false
     }
   },
@@ -2010,8 +2010,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_91",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_91",
       "real_data": false
     }
   },
@@ -2038,8 +2038,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_92",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_92",
       "real_data": false
     }
   },
@@ -2066,8 +2066,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_93",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_93",
       "real_data": false
     }
   },
@@ -2094,8 +2094,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_94",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_94",
       "real_data": false
     }
   },
@@ -2122,8 +2122,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_95",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_95",
       "real_data": false
     }
   },
@@ -2150,8 +2150,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_96",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_96",
       "real_data": false
     }
   },
@@ -2178,8 +2178,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_97",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_97",
       "real_data": false
     }
   },
@@ -2206,8 +2206,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_98",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_98",
       "real_data": false
     }
   },
@@ -2234,8 +2234,8 @@
       "authentic_source": "PID_Provider:00001",
       "document_version": "1.0.0",
       "vct": "not_applicable",
-      "scope": "idp_user",
-      "document_id": "idp_user_99",
+      "scope": "basic_auth_users",
+      "document_id": "basic_auth_users_99",
       "real_data": false
     }
   }
