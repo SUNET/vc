@@ -1,8 +1,8 @@
+//go:build integration
+
 package integration
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -191,13 +191,16 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 		SessionDuration:  3600,
 		AttributeMapping: model.AttributeMapping{
 			"urn:oid:2.5.4.42": {
-				Claim: "given_name",
+				Claim:    "given_name",
+				Required: true,
 			},
 			"urn:oid:2.5.4.4": {
-				Claim: "family_name",
+				Claim:    "family_name",
+				Required: true,
 			},
 			"urn:oid:1.3.6.1.5.5.7.9.1": {
-				Claim: "birth_date",
+				Claim:    "birth_date",
+				Required: true,
 			},
 			"urn:eudi:degree": {
 				Claim: "degree",
