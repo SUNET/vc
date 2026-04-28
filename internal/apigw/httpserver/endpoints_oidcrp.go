@@ -27,7 +27,9 @@ func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (a
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCRPInitiate")
 	defer span.End()
 
-	if s.oidcrpService == nil {
+	s.log.Debug("endpointOIDCRPInitiate called")
+
+	if s.authProviders.OIDC() == nil {
 		span.SetStatus(codes.Error, "OIDC RP not configured")
 		return nil, fmt.Errorf("OIDC RP is not enabled")
 	}
@@ -39,7 +41,7 @@ func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (a
 	}
 
 	// Delegate to apiv1 layer
-	return s.apiv1.OIDCRPInitiate(ctx, &req, s.oidcrpService)
+	return s.apiv1.OIDCRPInitiate(ctx, &req, s.authProviders.OIDC())
 }
 
 // endpointOIDCRPCallback handles the OIDC Provider callback
@@ -60,7 +62,9 @@ func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (a
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCRPCallback")
 	defer span.End()
 
-	if s.oidcrpService == nil {
+	s.log.Debug("endpointOIDCRPCallback called", "query", c.Request.URL.RawQuery)
+
+	if s.authProviders.OIDC() == nil {
 		span.SetStatus(codes.Error, "OIDC RP not configured")
 		return nil, fmt.Errorf("OIDC RP is not enabled")
 	}
@@ -83,12 +87,14 @@ func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (a
 	}
 
 	if req.Code == "" || req.State == "" {
+		s.log.Debug("endpointOIDCRPCallback: missing code or state", "code_present", req.Code != "", "state_present", req.State != "")
 		span.SetStatus(codes.Error, "missing code or state parameter")
 		return nil, fmt.Errorf("missing required parameters: code and state")
 	}
 
+	s.log.Debug("endpointOIDCRPCallback: delegating to apiv1", "state", req.State)
 	// Delegate to apiv1 layer
-	reply, err := s.apiv1.OIDCRPCallback(ctx, req, s.oidcrpService)
+	reply, err := s.apiv1.OIDCRPCallback(ctx, req, s.authProviders.OIDC())
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -96,9 +102,11 @@ func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (a
 
 	// VCI mode: redirect browser back to consent page
 	if reply != nil && reply.VCIRedirectURL != "" {
+		s.log.Debug("endpointOIDCRPCallback: VCI mode, redirecting", "redirect_url", reply.VCIRedirectURL)
 		c.Redirect(http.StatusFound, reply.VCIRedirectURL)
 		return nil, nil
 	}
 
+	s.log.Debug("endpointOIDCRPCallback: standalone mode, returning response")
 	return reply, nil
 }

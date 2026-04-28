@@ -147,12 +147,6 @@ type AuthRequest struct {
 
 // InitiateAuth initiates a SAML authentication flow
 func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType string) (*AuthRequest, error) {
-	// Validate credential type exists in configuration
-	_, exists := s.cfg.CredentialMappings[credentialType]
-	if !exists {
-		return nil, fmt.Errorf("unsupported credential type: %s", credentialType)
-	}
-
 	// In static IdP mode, use the static entityID if none provided
 	if s.mdqClient.IsStaticMode() {
 		staticEntityID := s.mdqClient.GetStaticEntityID()
@@ -200,8 +194,9 @@ func (s *Service) InitiateAuth(ctx context.Context, idpEntityID, credentialType 
 	}
 	s.sessionCache.Set(ctx, req.ID, session)
 
-	// Generate redirect URL
-	redirectURL, err := req.Redirect("", s.sp)
+	// Generate redirect URL, passing the request ID as RelayState so that
+	// the ACS endpoint can look up the session when the IdP posts back.
+	redirectURL, err := req.Redirect(req.ID, s.sp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create redirect URL: %w", err)
 	}
@@ -377,5 +372,9 @@ func BuildTransformer(cfg *model.SAMLSP) (*ClaimTransformer, error) {
 		return nil, fmt.Errorf("SAML not enabled")
 	}
 
-	return NewClaimTransformer(cfg.CredentialMappings), nil
+	if len(cfg.AttributeMapping) == 0 {
+		return nil, fmt.Errorf("SAML attribute_mapping is required")
+	}
+
+	return NewClaimTransformer(cfg.AttributeMapping), nil
 }

@@ -81,7 +81,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand if needed)
-	c.oauth2Metadata = c.cfg.APIGW.Outbound.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)
+	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)
 
 	// Load PKI signing key and chain for metadata signing
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
@@ -202,7 +202,7 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 	}
 
 	wallets := map[string]string{}
-	for key, wallet := range c.cfg.APIGW.Outbound.CredentialOffers.Wallets {
+	for key, wallet := range c.cfg.APIGW.Delivery.CredentialOffers.Wallets {
 		wallets[key] = wallet.Label
 	}
 

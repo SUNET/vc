@@ -27,14 +27,13 @@ func TestValidateSAMLConfig(t *testing.T) {
 			name: "valid MDQ configuration",
 			config: model.SAMLSP{
 				Enable:             true,
-				CredentialTypes:    []string{"pid"},
 				EntityID:           "https://sp.example.com",
 				MDQServer:          "https://md.example.org/entities/",
 				CertificatePath:    "/pki/saml.crt",
 				PrivateKeyPath:     "/pki/saml.key",
 				ACSEndpoint:        "https://sp.example.com/acs",
 				SessionDuration:    300,
-				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
 			},
 			expectError: false,
 		},
@@ -42,7 +41,6 @@ func TestValidateSAMLConfig(t *testing.T) {
 			name: "valid static IdP with path",
 			config: model.SAMLSP{
 				Enable:          true,
-				CredentialTypes: []string{"pid"},
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:     "https://idp.example.com",
 					MetadataPath: "/path/to/metadata.xml",
@@ -52,7 +50,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 				PrivateKeyPath:     "/pki/saml.key",
 				ACSEndpoint:        "https://sp.example.com/acs",
 				SessionDuration:    300,
-				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
 			},
 			expectError: false,
 		},
@@ -60,7 +58,6 @@ func TestValidateSAMLConfig(t *testing.T) {
 			name: "valid static IdP with URL",
 			config: model.SAMLSP{
 				Enable:          true,
-				CredentialTypes: []string{"pid"},
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:    "https://idp.example.com",
 					MetadataURL: "https://idp.example.com/metadata",
@@ -70,7 +67,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 				PrivateKeyPath:     "/pki/saml.key",
 				ACSEndpoint:        "https://sp.example.com/acs",
 				SessionDuration:    300,
-				CredentialMappings: map[string]model.CredentialMapping{"pid": {}},
+				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
 			},
 			expectError: false,
 		},

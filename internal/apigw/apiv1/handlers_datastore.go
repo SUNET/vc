@@ -46,7 +46,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	}
 
 	credentialOfferParameter := openid4vci.CredentialOfferParameters{
-		CredentialIssuer: c.cfg.APIGW.Outbound.CredentialOffers.IssuerURL,
+		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{
 			req.Meta.Scope,
 		},
@@ -78,7 +78,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 		}
 
 		// Empty string defaults to "openid-credential-offer://" protocol handler
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.Outbound.CredentialOffers.IssuerURL)
+		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 		if err != nil {
 			return err
 		}

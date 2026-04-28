@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"github.com/SUNET/vc/internal/apigw/samlsp"
+	"github.com/SUNET/vc/internal/apigw/auth_providers/samlsp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -189,57 +189,21 @@ func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath stri
 		CertificatePath:  certPath,
 		PrivateKeyPath:   keyPath,
 		SessionDuration:  3600,
-		CredentialMappings: map[string]model.CredentialMapping{
-			"pid": {
-				Attributes: map[string]model.AttributeConfig{
-					"urn:oid:2.5.4.42": {
-						Claim:    "given_name",
-						Required: true,
-					},
-					"urn:oid:2.5.4.4": {
-						Claim:    "family_name",
-						Required: true,
-					},
-					"urn:oid:1.3.6.1.5.5.7.9.1": {
-						Claim:    "birth_date",
-						Required: true,
-					},
-				},
-				DefaultIdP: idpEntityID,
+		AttributeMapping: model.AttributeMapping{
+			"urn:oid:2.5.4.42": {
+				Claim: "given_name",
 			},
-			"diploma": {
-				Attributes: map[string]model.AttributeConfig{
-					"urn:oid:2.5.4.42": {
-						Claim:    "credentialSubject.givenName",
-						Required: true,
-					},
-					"urn:oid:2.5.4.4": {
-						Claim:    "credentialSubject.familyName",
-						Required: true,
-					},
-					"urn:eudi:degree": {
-						Claim:    "credentialSubject.degree",
-						Required: true,
-					},
-				},
-				DefaultIdP: idpEntityID,
+			"urn:oid:2.5.4.4": {
+				Claim: "family_name",
 			},
-			"ehic": {
-				Attributes: map[string]model.AttributeConfig{
-					"urn:oid:2.5.4.42": {
-						Claim:    "given_name",
-						Required: true,
-					},
-					"urn:oid:2.5.4.4": {
-						Claim:    "family_name",
-						Required: true,
-					},
-					"urn:eudi:ehic:cardnumber": {
-						Claim:    "card_number",
-						Required: true,
-					},
-				},
-				DefaultIdP: idpEntityID,
+			"urn:oid:1.3.6.1.5.5.7.9.1": {
+				Claim: "birth_date",
+			},
+			"urn:eudi:degree": {
+				Claim: "degree",
+			},
+			"urn:eudi:ehic:cardnumber": {
+				Claim: "card_number",
 			},
 		},
 	}
@@ -346,7 +310,7 @@ func testProcessAssertion(t *testing.T, env *testEnvironment) {
 	attributes := samlAttributesToMap(assertion.AttributeStatements)
 
 	// Transform claims
-	claims, err := transformer.TransformClaims("pid", attributes)
+	claims, err := transformer.TransformClaims(attributes)
 	require.NoError(t, err)
 	require.NotNil(t, claims)
 
@@ -362,15 +326,13 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 	require.NoError(t, err)
 
 	testCases := []struct {
-		name           string
-		credentialType string
-		attributes     []samltypes.AttributeStatement
-		expected       map[string]any
-		shouldError    bool
+		name        string
+		attributes  []samltypes.AttributeStatement
+		expected    map[string]any
+		shouldError bool
 	}{
 		{
-			name:           "PID_AllAttributes",
-			credentialType: "pid",
+			name: "AllAttributes",
 			attributes: []samltypes.AttributeStatement{
 				{
 					Attributes: []samltypes.Attribute{
@@ -388,39 +350,24 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 			shouldError: false,
 		},
 		{
-			name:           "Diploma_NestedClaims",
-			credentialType: "diploma",
+			name: "WithDegreeAndCardNumber",
 			attributes: []samltypes.AttributeStatement{
 				{
 					Attributes: []samltypes.Attribute{
 						{Name: "urn:oid:2.5.4.42", Values: []samltypes.AttributeValue{{Value: "Bob"}}},
 						{Name: "urn:oid:2.5.4.4", Values: []samltypes.AttributeValue{{Value: "Johnson"}}},
 						{Name: "urn:eudi:degree", Values: []samltypes.AttributeValue{{Value: "Bachelor of Science"}}},
+						{Name: "urn:eudi:ehic:cardnumber", Values: []samltypes.AttributeValue{{Value: "EHIC123"}}},
 					},
 				},
 			},
 			expected: map[string]any{
-				"credentialSubject": map[string]any{
-					"givenName":  "Bob",
-					"familyName": "Johnson",
-					"degree":     "Bachelor of Science",
-				},
+				"given_name":  "Bob",
+				"family_name": "Johnson",
+				"degree":      "Bachelor of Science",
+				"card_number": "EHIC123",
 			},
 			shouldError: false,
-		},
-		{
-			name:           "MissingRequiredAttribute",
-			credentialType: "pid",
-			attributes: []samltypes.AttributeStatement{
-				{
-					Attributes: []samltypes.Attribute{
-						{Name: "urn:oid:2.5.4.42", Values: []samltypes.AttributeValue{{Value: "Charlie"}}},
-						// Missing family_name (required)
-					},
-				},
-			},
-			expected:    nil,
-			shouldError: true,
 		},
 	}
 
@@ -429,7 +376,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 			// Convert AttributeStatements to simple map
 			attributes := samlAttributesToMap(tc.attributes)
 
-			claims, err := transformer.TransformClaims(tc.credentialType, attributes)
+			claims, err := transformer.TransformClaims(attributes)
 
 			if tc.shouldError {
 				assert.Error(t, err)
@@ -481,7 +428,7 @@ func testMissingAttributes(t *testing.T, env *testEnvironment) {
 	// Convert to map
 	attrMap := samlAttributesToMap(attributes)
 
-	_, err = transformer.TransformClaims("pid", attrMap)
+	_, err = transformer.TransformClaims(attrMap)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "required attribute")
 }

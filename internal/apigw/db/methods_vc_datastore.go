@@ -284,6 +284,37 @@ func (c *VCDatastoreColl) GetDocumentsWithIdentity(ctx context.Context, query *G
 	return docs, nil
 }
 
+// GetDocumentsByClaims returns matching documents for a scope using a dynamic set
+// of identity claims. The identityClaims map keys are BSON field names under
+// "identities." and values are the expected field values.
+func (c *VCDatastoreColl) GetDocumentsByClaims(ctx context.Context, scope string, identityClaims map[string]string) (map[string]*model.CompleteDocument, error) {
+	filter := bson.M{
+		"meta.scope": bson.M{"$eq": scope},
+	}
+	for bsonField, value := range identityClaims {
+		filter["identities."+bsonField] = bson.M{"$eq": value}
+	}
+
+	c.log.Debug("GetDocumentsByClaims", "filter", filter)
+
+	cursor, err := c.Coll.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	res := []*model.CompleteDocument{}
+	if err := cursor.All(ctx, &res); err != nil {
+		return nil, err
+	}
+
+	docs := make(map[string]*model.CompleteDocument, len(res))
+	for _, doc := range res {
+		docs[doc.Meta.AuthenticSource] = doc
+	}
+
+	return docs, nil
+}
+
 // DocumentListQuery is the query to get document list
 type DocumentListQuery struct {
 	AuthenticSource string          `json:"authentic_source" bson:"authentic_source"`

@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
 	"github.com/SUNET/vc/internal/apigw/cache"
+	datasources "github.com/SUNET/vc/internal/apigw/data_sources"
 	"github.com/SUNET/vc/internal/apigw/staticembed"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -40,12 +43,13 @@ type Service struct {
 	sessionsEncKey  string
 	sessionsAuthKey string
 	sessionsName    string
-	samlSPService   SAMLSPService
-	oidcrpService   OIDCRPService
+	authProviders   *authproviders.Service
+	dataSources     *datasources.Service
+	cacheService    *cache.Service
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlSPService SAMLSPService, oidcrpService OIDCRPService, cacheService *cache.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	s := &Service{
 		cfg:            cfg,
 		log:            log.New("httpserver"),
@@ -54,8 +58,8 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		tracer:         tracer,
 		server:         &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
 		eventPublisher: eventPublisher,
-		samlSPService:  samlSPService,
-		oidcrpService:  oidcrpService,
+		authProviders:  authProviders,
+		dataSources:    dataSources,
 		sessionsName:   "oauth_user_session",
 		sessionsOptions: sessions.Options{
 			Path:     "/",
@@ -74,6 +78,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
 	s.sessionsAuthKey = cacheService.SessionAuthKey
 	s.sessionsEncKey = cacheService.SessionEncKey
+	s.cacheService = cacheService
 
 	var err error
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
@@ -115,6 +120,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			AllowHeaders:     []string{"Content-Type", "Authorization", "DPoP"},
 			AllowCredentials: true,
 			MaxAge:           12 * time.Hour,
+			// Allow any origin for SAML and OIDC callback paths. These
+			// endpoints receive cross-origin POSTs/redirects from external
+			// IdPs via browser form submissions (SAML POST binding). The
+			// IdP origin is dynamic and CORS does not apply to navigations,
+			// but the browser still sends an Origin header which the CORS
+			// middleware would otherwise reject with 403.
+			AllowOriginWithContextFunc: func(c *gin.Context, origin string) bool {
+				return strings.HasPrefix(c.Request.URL.Path, "/samlsp/") ||
+					strings.HasPrefix(c.Request.URL.Path, "/oidcrp/")
+			},
 		}
 		s.gin.Use(cors.New(corsConfig))
 	}
@@ -156,7 +171,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "token", http.StatusOK, s.endpointOAuthToken)
 
 	// SAML endpoints
-	rgSAML := rgRoot.Group("/saml")
+	rgSAML := rgRoot.Group("/samlsp")
 	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodGet, "/metadata", http.StatusOK, s.endpointSAMLMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodPost, "/initiate", http.StatusOK, s.endpointSAMLInitiate)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgSAML, http.MethodPost, "/acs", http.StatusOK, s.endpointSAMLACS)

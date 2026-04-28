@@ -8,10 +8,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -260,26 +258,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
 
-	// Extract identity from validated credential
-	identity := &model.Identity{}
-	if givenName, ok := credential["given_name"].(string); ok {
-		identity.GivenName = givenName
-	}
-	if familyName, ok := credential["family_name"].(string); ok {
-		identity.FamilyName = familyName
-	}
-	if birthdate, ok := credential["birthdate"].(string); ok {
-		identity.BirthDate = birthdate
-	}
+	// Extract identity from validated credential using configured claim keys
+	dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
+	identityClaims := dsCred.ExtractIdentityClaims(credential)
 
 	// Retrieve documents matching the identity by scope
-	c.log.Debug("Querying documents", "scope", scope, "identity", identity)
-	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
-		Meta: &model.MetaData{
-			Scope: scope,
-		},
-		Identity: identity,
-	})
+	c.log.Debug("Querying documents", "scope", scope, "identity_claims", identityClaims)
+	documents, err := c.datastoreStore.GetDocumentsByClaims(ctx, scope, identityClaims)
 	if err != nil {
 		c.log.Debug("failed to get document", "error", err)
 		return nil, err
@@ -288,7 +273,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.log.Debug("Retrieved documents", "count", len(documents))
 
 	if len(documents) == 0 {
-		c.log.Error(nil, "no documents found for identity", "identity", identity)
+		c.log.Error(nil, "no documents found for identity", "identity_claims", identityClaims)
 		return nil, errors.New("no documents found for the provided identity")
 	}
 

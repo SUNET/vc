@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -29,12 +30,12 @@ func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLMetadata")
 	defer span.End()
 
-	if s.samlSPService == nil {
+	if s.authProviders.SAML() == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
 
-	metadata, err := s.samlSPService.GetSPMetadata(ctx)
+	metadata, err := s.authProviders.SAML().GetSPMetadata(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -74,7 +75,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLInitiate")
 	defer span.End()
 
-	if s.samlSPService == nil {
+	if s.authProviders.SAML() == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
@@ -85,7 +86,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 		return nil, err
 	}
 
-	authReq, err := s.samlSPService.InitiateAuth(ctx, req.IDPEntityID, req.CredentialType)
+	authReq, err := s.authProviders.SAML().InitiateAuth(ctx, req.IDPEntityID, req.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -115,7 +116,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLACS")
 	defer span.End()
 
-	if s.samlSPService == nil {
+	if s.authProviders.SAML() == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
@@ -131,7 +132,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Pass the base64-encoded SAMLResponse directly to ProcessAssertion.
 	// The crewjam/saml library handles base64 decoding internally.
-	assertion, err := s.samlSPService.ProcessAssertion(ctx, samlResponseB64, relayState)
+	assertion, err := s.authProviders.SAML().ProcessAssertion(ctx, samlResponseB64, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -139,19 +140,19 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Retrieve session to get credential type.
 	// Ensure session is cleaned up if any subsequent step fails.
-	session, err := s.samlSPService.GetSession(ctx, relayState)
+	session, err := s.authProviders.SAML().GetSession(ctx, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
 	defer func() {
 		if err != nil {
-			s.samlSPService.DeleteSession(ctx, relayState)
+			s.authProviders.SAML().DeleteSession(ctx, relayState)
 		}
 	}()
 
 	// Build transformer from config
-	transformer, err := s.samlSPService.BuildTransformer()
+	transformer, err := s.authProviders.SAML().BuildTransformer()
 	if err != nil {
 		span.SetStatus(codes.Error, "transformer creation failed")
 		return nil, fmt.Errorf("failed to create transformer: %w", err)
@@ -171,7 +172,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Transform SAML attributes to credential claims using the generic transformer
-	claims, err := transformer.TransformClaims(session.CredentialType, samlAttrs)
+	claims, err := transformer.TransformClaims(samlAttrs)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -190,29 +191,72 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// store the transformed claims as a document in the VCI session cache and redirect
 	// back to the consent page, where the standard VCI pipeline will continue.
 	if session.VCISessionID != "" {
-		s.log.Info("SAML ACS: VCI mode detected, storing document in VCI cache",
+		s.log.Info("SAML ACS: VCI mode detected",
 			"vci_session_id", session.VCISessionID,
 			"credential_type", session.CredentialType)
 
-		doc := &model.CompleteDocument{
-			Meta: &model.MetaData{
-				AuthenticSource: session.IDPEntityID,
-			},
-			DocumentData:        claims,
-			DocumentDataVersion: "1.0.0",
-		}
-		docs := map[string]*model.CompleteDocument{
-			session.IDPEntityID: doc,
+		// Check if this credential's data source is external_api — if so,
+		// we only need the person identifier from the assertion, not the full claims.
+		authCtx, lookupErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: session.VCISessionID})
+		if lookupErr != nil {
+			span.SetStatus(codes.Error, "auth context lookup failed")
+			return nil, fmt.Errorf("failed to get auth context for VCI session %s: %w", session.VCISessionID, lookupErr)
 		}
 
-		if err := s.apiv1.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
-			span.SetStatus(codes.Error, "VCI document storage failed")
-			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		if authCtx.DataSource == string(model.DataSourceExternalAPI) {
+			// External API: extract person identifier from claims for later API lookup.
+			// The actual credential data will be fetched from the remote in the consent endpoint.
+			personID, _ := claims["person_id"].(string)
+			if personID == "" {
+				// Fall back to subject identifier from assertion attributes
+				for _, key := range []string{"subject", "uid", "eppn", "eduPersonPrincipalName"} {
+					if v, ok := assertion.Attributes[key]; ok && len(v) > 0 {
+						personID = v[0]
+						break
+					}
+				}
+			}
+			if personID == "" {
+				span.SetStatus(codes.Error, "person_id not found in SAML assertion")
+				return nil, fmt.Errorf("external API flow requires person identifier but none found in SAML assertion")
+			}
+
+			authCtx.PersonID = personID
+			if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
+				span.SetStatus(codes.Error, "failed to store person_id")
+				return nil, fmt.Errorf("failed to update person_id on auth context: %w", updateErr)
+			}
+			s.log.Info("SAML ACS: stored person_id for external API flow",
+				"vci_session_id", session.VCISessionID, "person_id", personID)
+		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
+			// Datastore: use the authenticated identity to look up pre-loaded documents.
+			dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
+			if err := s.apiv1.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, claims, &dsCred); err != nil {
+				span.SetStatus(codes.Error, "datastore lookup failed")
+				return nil, fmt.Errorf("SAML datastore lookup failed: %w", err)
+			}
+		} else {
+			// Assertion: store the transformed claims directly as a document
+			doc := &model.CompleteDocument{
+				Meta: &model.MetaData{
+					AuthenticSource: session.IDPEntityID,
+				},
+				DocumentData:        claims,
+				DocumentDataVersion: "1.0.0",
+			}
+			docs := map[string]*model.CompleteDocument{
+				session.IDPEntityID: doc,
+			}
+
+			if err := s.apiv1.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
+				span.SetStatus(codes.Error, "VCI document storage failed")
+				return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+			}
 		}
 
 		// Clean up SAML session (clear err so defer doesn't double-delete)
 		err = nil
-		s.samlSPService.DeleteSession(ctx, relayState)
+		s.authProviders.SAML().DeleteSession(ctx, relayState)
 
 		// Redirect browser back to the consent page to continue the VCI flow
 		c.Redirect(http.StatusFound, "/authorization/consent/#/credentials")
@@ -251,7 +295,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Clean up SAML session (clear err so defer doesn't double-delete)
 	err = nil
-	s.samlSPService.DeleteSession(ctx, relayState)
+	s.authProviders.SAML().DeleteSession(ctx, relayState)
 
 	s.log.Info("Credential issued successfully",
 		"credential_type", session.CredentialType,
@@ -323,7 +367,7 @@ func (s *Service) generateCredentialOffer(ctx context.Context, credentialType st
 	}
 
 	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           s.cfg.APIGW.Outbound.CredentialOffers.IssuerURL,
+		CredentialIssuer:           s.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]any{
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{

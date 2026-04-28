@@ -10,39 +10,24 @@ import (
 // ClaimTransformer transforms external attributes/claims into credential document structures.
 // Protocol-agnostic — works for SAML OIDs, OIDC claim names, or any other attribute source.
 type ClaimTransformer struct {
-	mappings map[string]model.CredentialMapping // credential type → mapping
+	mapping model.AttributeMapping
 }
 
-// NewClaimTransformer creates a new claim transformer from credential mappings.
-func NewClaimTransformer(mappings map[string]model.CredentialMapping) *ClaimTransformer {
+// NewClaimTransformer creates a new claim transformer from an attribute mapping.
+func NewClaimTransformer(mapping model.AttributeMapping) *ClaimTransformer {
 	return &ClaimTransformer{
-		mappings: mappings,
+		mapping: mapping,
 	}
-}
-
-// GetMapping returns the credential mapping for a credential type.
-func (t *ClaimTransformer) GetMapping(credentialType string) (*model.CredentialMapping, error) {
-	mapping, exists := t.mappings[credentialType]
-	if !exists {
-		return nil, fmt.Errorf("unknown credential type: %s", credentialType)
-	}
-	return &mapping, nil
 }
 
 // TransformClaims converts external attributes (keyed by protocol-specific identifiers)
-// to a generic document structure using the configured mappings.
+// to a generic document structure using the configured mapping.
 func (t *ClaimTransformer) TransformClaims(
-	credentialType string,
 	attributes map[string]any,
 ) (map[string]any, error) {
-	mapping, err := t.GetMapping(credentialType)
-	if err != nil {
-		return nil, err
-	}
-
 	doc := make(map[string]any)
 
-	for attrID, attrCfg := range mapping.Attributes {
+	for attrID, attrCfg := range t.mapping {
 		value, exists := attributes[attrID]
 
 		if !exists {

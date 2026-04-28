@@ -9,7 +9,7 @@ import (
 // Delegates to the shared credential.ClaimTransformer.
 type ClaimTransformer = credential.ClaimTransformer
 
-// NewClaimTransformer creates a new claim transformer from credential mappings.
-func NewClaimTransformer(mappings map[string]model.CredentialMapping) *ClaimTransformer {
-	return credential.NewClaimTransformer(mappings)
+// NewClaimTransformer creates a new claim transformer from an attribute mapping.
+func NewClaimTransformer(mapping model.AttributeMapping) *ClaimTransformer {
+	return credential.NewClaimTransformer(mapping)
 }

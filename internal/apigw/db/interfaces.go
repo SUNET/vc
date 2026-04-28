@@ -12,6 +12,8 @@ type UsersStore interface {
 	Save(ctx context.Context, doc *model.OAuthUsers) error
 	GetUser(ctx context.Context, username string) (*model.OAuthUsers, error)
 	GetHashedPassword(ctx context.Context, username string) (string, error)
+	ListUsernames(ctx context.Context) ([]string, error)
+	DeleteByUsername(ctx context.Context, username string) error
 }
 
 // CredentialOfferStore defines the interface for credential offer operations
@@ -32,6 +34,7 @@ type DatastoreStore interface {
 	GetDocument(ctx context.Context, query *GetDocumentQuery) (*model.Document, error)
 	GetDocumentWithIdentity(ctx context.Context, query *GetDocumentQuery) (*model.CompleteDocument, error)
 	GetDocumentsWithIdentity(ctx context.Context, query *GetDocumentQuery) (map[string]*model.CompleteDocument, error)
+	GetDocumentsByClaims(ctx context.Context, scope string, identityClaims map[string]string) (map[string]*model.CompleteDocument, error)
 	DocumentList(ctx context.Context, query *DocumentListQuery) ([]*model.DocumentList, error)
 	GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error)
 	GetQRForUser(ctx context.Context, query *GetQRForUserFilter) (*openid4vci.QR, error)

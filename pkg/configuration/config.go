@@ -110,12 +110,6 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
-		// Auto-generate or complete credential_mappings from
-		// credentials. Fills in missing attributes from VCTM
-		// claims and generates the entire map when omitted.
-		if err := cfg.ResolveCredentialMappings(); err != nil {
-			return nil, fmt.Errorf("failed to resolve credential mappings: %w", err)
-		}
 	}
 
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {

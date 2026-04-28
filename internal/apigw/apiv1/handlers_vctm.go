@@ -37,6 +37,7 @@ type CredentialOfferReply struct {
 }
 
 func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialOfferRequest) (*CredentialOfferReply, error) {
+	c.log.Debug("UICreateCredentialOffer", "scope", req.Scope, "wallet_id", req.WalletID)
 	vctmReq := &GetVCTMFromScopeRequest{
 		Scope: req.Scope,
 	}
@@ -47,7 +48,7 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	}
 
 	offerParams := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.Outbound.CredentialOffers.IssuerURL,
+		CredentialIssuer:           c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{req.Scope},
 		Grants: map[string]any{
 			"authorization_code": map[string]any{},
@@ -59,13 +60,14 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 		return nil, err
 	}
 
-	wallet, ok := c.cfg.APIGW.Outbound.CredentialOffers.Wallets[req.WalletID]
+	wallet, ok := c.cfg.APIGW.Delivery.CredentialOffers.Wallets[req.WalletID]
 	if !ok {
 		err := errors.New("invalid wallet id")
 		return nil, err
 	}
 
 	credentialOfferURL := fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer)
+	c.log.Debug("UICreateCredentialOffer: offer created", "scope", req.Scope, "wallet_redirect_uri", wallet.RedirectURI, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 
 	u, err := url.Parse(credentialOfferURL)
 	if err != nil {

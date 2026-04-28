@@ -141,12 +141,6 @@ type AuthRequest struct {
 
 // InitiateAuth initiates an OIDC authentication flow
 func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*AuthRequest, error) {
-	// Validate credential type exists in configuration
-	_, exists := s.cfg.CredentialMappings[credentialType]
-	if !exists {
-		return nil, fmt.Errorf("unsupported credential type: %s", credentialType)
-	}
-
 	s.log.Debug("Initiating OIDC auth",
 		"credential_type", credentialType)
 
@@ -215,6 +209,8 @@ type AuthResponse struct {
 
 // ProcessCallback processes the OIDC provider callback
 func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*AuthResponse, error) {
+	s.log.Debug("ProcessCallback", "state", state)
+
 	// Retrieve and validate session
 	session, err := s.getSession(ctx, state)
 	if err != nil {
@@ -222,25 +218,31 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 	}
 
 	// Exchange authorization code for tokens with PKCE
+	s.log.Debug("ProcessCallback: exchanging authorization code", "state", state)
 	oauth2Token, err := s.oauth2Config.Exchange(
 		ctx,
 		code,
 		oauth2.SetAuthURLParam("code_verifier", session.CodeVerifier),
 	)
 	if err != nil {
+		s.log.Debug("ProcessCallback: code exchange failed", "state", state, "error", err)
 		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("failed to exchange authorization code: %w", err)
 	}
+	s.log.Debug("ProcessCallback: code exchange successful", "state", state)
 
 	// Extract and verify ID token
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
+		s.log.Debug("ProcessCallback: no id_token in token response", "state", state)
 		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("no id_token in token response")
 	}
 
+	s.log.Debug("ProcessCallback: verifying ID token", "state", state)
 	idToken, err := s.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
+		s.log.Debug("ProcessCallback: ID token verification failed", "state", state, "error", err)
 		s.deleteSession(ctx, state)
 		return nil, fmt.Errorf("failed to verify ID token: %w", err)
 	}
@@ -280,17 +282,14 @@ func (s *Service) DeleteSession(ctx context.Context, state string) {
 	s.deleteSession(ctx, state)
 }
 
-// BuildTransformer creates a claim transformer from the configuration
-func (s *Service) BuildTransformer() (*ClaimTransformer, error) {
-	if s.cfg == nil {
-		return nil, fmt.Errorf("OIDC RP configuration is nil")
+// BuildTransformer creates a claim transformer from the configuration.
+// Returns nil if no attribute_mapping is configured (OIDC claims pass through as-is).
+func (s *Service) BuildTransformer() *ClaimTransformer {
+	if s.cfg == nil || len(s.cfg.AttributeMapping) == 0 {
+		return nil
 	}
 
-	if len(s.cfg.CredentialMappings) == 0 {
-		return nil, fmt.Errorf("no credential mappings configured")
-	}
-
-	return NewClaimTransformer(s.cfg.CredentialMappings), nil
+	return NewClaimTransformer(s.cfg.AttributeMapping)
 }
 
 // createSession creates a new session with generated state, nonce, and PKCE code_verifier.

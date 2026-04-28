@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/creasty/defaults"
@@ -24,13 +25,13 @@ apigw:
       basic_auth:
         users:
           admin: "secret-admin-pass"
-  inbound:
+  auth_providers:
     oidc:
-      registration:
-        preconfigured:
-          client_secret: "secret-client-secret"
-        dynamic:
-          initial_access_token: "secret-initial-token"
+        registration:
+          preconfigured:
+            client_secret: "secret-client-secret"
+          dynamic:
+            initial_access_token: "secret-initial-token"
 registry:
   admin_gui:
     password: "secret-registry-pass"
@@ -55,10 +56,10 @@ ui:
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)
 	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
-	require.NotNil(t, secrets.APIGW.Inbound.OIDC.Registration.Preconfigured)
-	assert.Equal(t, "secret-client-secret", secrets.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret)
-	require.NotNil(t, secrets.APIGW.Inbound.OIDC.Registration.Dynamic)
-	assert.Equal(t, "secret-initial-token", secrets.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken)
+	require.NotNil(t, secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured)
+	assert.Equal(t, "secret-client-secret", secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret)
+	require.NotNil(t, secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic)
+	assert.Equal(t, "secret-initial-token", secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken)
 
 	// Verify Registry secrets
 	require.NotNil(t, secrets.Registry)

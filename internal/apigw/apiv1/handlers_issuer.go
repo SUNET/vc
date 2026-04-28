@@ -29,6 +29,29 @@ func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs m
 	return nil
 }
 
+// LookupDatastoreByIdentity queries the datastore for documents matching the
+// given identity claims and scope, then stores them in the VCI session cache.
+// Used when a datastore credential is authenticated via SAML/OIDC — the
+// identity extracted from the assertion is used to find the pre-loaded document.
+func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope string, claims map[string]any, dsCred *model.DatastoreScope) error {
+	identityClaims := dsCred.ExtractIdentityClaims(claims)
+
+	c.log.Debug("LookupDatastoreByIdentity", "scope", scope, "identity_claims", identityClaims)
+
+	docs, err := c.datastoreStore.GetDocumentsByClaims(ctx, scope, identityClaims)
+	if err != nil {
+		return fmt.Errorf("datastore lookup failed for scope %q: %w", scope, err)
+	}
+	if len(docs) == 0 {
+		return fmt.Errorf("no documents found in datastore for scope %q with the provided identity", scope)
+	}
+
+	c.cacheService.Document.Set(ctx, sessionID, docs)
+	c.log.Info("Datastore documents cached for VCI session",
+		"session_id", sessionID, "scope", scope, "doc_count", len(docs))
+	return nil
+}
+
 // HasVCIDocuments checks whether documents have already been stored for the given VCI session.
 // Used by the consent endpoint to avoid re-initiating external auth when documents are already cached.
 func (c *Client) HasVCIDocuments(ctx context.Context, sessionID string) bool {
@@ -126,12 +149,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	document := &model.CompleteDocument{}
 
-	// Determine retrieval strategy based on auth method
-	// - "basic": Identity-based authentication → retrieve from datastore
-	// - Other methods (e.g., "openid4vp"): Session-based → retrieve from cache
-	authMethod := c.cfg.GetAuthMethodForScope(scope)
-	switch authMethod {
-	case model.AuthMethodBasic:
+	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID)
+	// Retrieve credential data based on the auth provider used during authorization
+	switch authContext.AuthProvider {
+	case model.AuthProviderBasic:
 		// Basic auth: retrieve from datastore using identity
 		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
 			Meta: &model.MetaData{
@@ -143,10 +164,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		if err != nil {
 			return nil, err
 		}
-
-	default:
-		// Session-based auth methods (e.g., openid4vp): retrieve from session cache
-		// These credentials require presenting another credential for authentication
+	case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC:
+		// Session-based auth providers: retrieve from session cache
 		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)
 		if !ok || len(docs) == 0 {
 			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
@@ -162,6 +181,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		if document == nil || document.DocumentData == nil {
 			return nil, errors.New("cached document is empty for session " + authContext.SessionID)
 		}
+	default:
+		return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)

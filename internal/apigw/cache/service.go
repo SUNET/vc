@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
+	"github.com/SUNET/vc/internal/apigw/auth_providers/samlsp"
 	"github.com/SUNET/vc/internal/apigw/db"
-	"github.com/SUNET/vc/internal/apigw/oidcrp"
-	"github.com/SUNET/vc/internal/apigw/samlsp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -94,11 +94,11 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: jwks: %w", err)
 	}
 
-	if s.OIDCRPSession, err = pkgcache.NewGenericCache[*oidcrp.Session](cs, ctx, "apigw_oidcrp_sessions", time.Duration(cfg.APIGW.Inbound.OIDC.SessionDuration)*time.Second); err != nil {
+	if s.OIDCRPSession, err = pkgcache.NewGenericCache[*oidcrp.Session](cs, ctx, "apigw_oidcrp_sessions", time.Duration(cfg.APIGW.AuthProviders.OIDC.SessionDuration)*time.Second); err != nil {
 		return nil, fmt.Errorf("cache: oidcrp_sessions: %w", err)
 	}
 
-	if s.SAMLSession, err = pkgcache.NewGenericCache[*samlsp.Session](cs, ctx, "apigw_saml_sessions", time.Duration(cfg.APIGW.Inbound.SAML.SessionDuration)*time.Second); err != nil {
+	if s.SAMLSession, err = pkgcache.NewGenericCache[*samlsp.Session](cs, ctx, "apigw_saml_sessions", time.Duration(cfg.APIGW.AuthProviders.SAML.SessionDuration)*time.Second); err != nil {
 		return nil, fmt.Errorf("cache: saml_sessions: %w", err)
 	}
 

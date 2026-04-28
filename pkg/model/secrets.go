@@ -25,12 +25,12 @@ type MongoSecrets struct {
 
 // APIGWSecrets holds API gateway secrets
 type APIGWSecrets struct {
-	APIServer APIServerSecrets    `yaml:"api_server,omitempty"`
-	Inbound   APIGWInboundSecrets `yaml:"inbound,omitempty"`
+	APIServer     APIServerSecrets     `yaml:"api_server,omitempty"`
+	AuthProviders AuthProvidersSecrets `yaml:"auth_providers,omitempty"`
 }
 
-// APIGWInboundSecrets holds inbound auth secrets
-type APIGWInboundSecrets struct {
+// AuthProvidersSecrets holds secrets for auth providers
+type AuthProvidersSecrets struct {
 	OIDC OIDCRPSecrets `yaml:"oidc,omitempty"`
 }
 
@@ -120,11 +120,11 @@ func (cfg *Cfg) ClearSecrets() {
 
 	if cfg.APIGW != nil {
 		cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = nil
-		if cfg.APIGW.Inbound.OIDC.Registration != nil && cfg.APIGW.Inbound.OIDC.Registration.Preconfigured != nil {
-			cfg.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret = ""
+		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil {
+			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = ""
 		}
-		if cfg.APIGW.Inbound.OIDC.Registration != nil && cfg.APIGW.Inbound.OIDC.Registration.Dynamic != nil {
-			cfg.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken = ""
+		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic != nil {
+			cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken = ""
 		}
 	}
 
@@ -167,23 +167,23 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if len(secrets.APIGW.APIServer.APIAuth.BasicAuth.Users) > 0 {
 			cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = secrets.APIGW.APIServer.APIAuth.BasicAuth.Users
 		}
-		if secrets.APIGW.Inbound.OIDC.Registration.Preconfigured != nil && secrets.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret != "" {
-			if cfg.APIGW.Inbound.OIDC.Registration == nil {
-				cfg.APIGW.Inbound.OIDC.Registration = &OIDCRPRegistrationConfig{}
+		if secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil && secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret != "" {
+			if cfg.APIGW.AuthProviders.OIDC.Registration == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration = &OIDCRPRegistrationConfig{}
 			}
-			if cfg.APIGW.Inbound.OIDC.Registration.Preconfigured == nil {
-				cfg.APIGW.Inbound.OIDC.Registration.Preconfigured = &OIDCRPPreconfiguredConfig{}
+			if cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured = &OIDCRPPreconfiguredConfig{}
 			}
-			cfg.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret = secrets.APIGW.Inbound.OIDC.Registration.Preconfigured.ClientSecret
+			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret
 		}
-		if secrets.APIGW.Inbound.OIDC.Registration.Dynamic != nil && secrets.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken != "" {
-			if cfg.APIGW.Inbound.OIDC.Registration == nil {
-				cfg.APIGW.Inbound.OIDC.Registration = &OIDCRPRegistrationConfig{}
+		if secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic != nil && secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken != "" {
+			if cfg.APIGW.AuthProviders.OIDC.Registration == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration = &OIDCRPRegistrationConfig{}
 			}
-			if cfg.APIGW.Inbound.OIDC.Registration.Dynamic == nil {
-				cfg.APIGW.Inbound.OIDC.Registration.Dynamic = &OIDCRPDynamicRegistrationConfig{}
+			if cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic = &OIDCRPDynamicRegistrationConfig{}
 			}
-			cfg.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken = secrets.APIGW.Inbound.OIDC.Registration.Dynamic.InitialAccessToken
+			cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken = secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken
 		}
 	}
 

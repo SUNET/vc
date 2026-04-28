@@ -26,9 +26,13 @@ func NewValidator() (*validator.Validate, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		// Prefer yaml tag (used by config structs), fall back to json tag
+		name := strings.SplitN(fld.Tag.Get("yaml"), ",", 2)[0]
+		if name == "" || name == "-" {
+			name = strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		}
 
-		if name == "-" {
+		if name == "" || name == "-" {
 			return ""
 		}
 
@@ -225,28 +229,38 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.OIDCRP{})
 
-	// Register struct-level validation for APIGWInbound: at least one auth method must be configured
+	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		inbound := sl.Current().Interface().(model.APIGWInbound)
-		hasBasic := len(inbound.Basic.CredentialTypes) > 0
-		hasSAML := inbound.SAML.Enable
-		hasOIDC := inbound.OIDC.Enable
-		hasOpenID4VP := len(inbound.OpenID4VP.CredentialTypes) > 0
-		if !hasBasic && !hasSAML && !hasOIDC && !hasOpenID4VP {
-			sl.ReportError(inbound, "", "APIGWInbound", "apigw_inbound_auth_method_required", "")
-		}
-	}, model.APIGWInbound{})
-
-	// Register struct-level validation for APIGWInboundOpenID4VP: auth_scopes/auth_claims constraints
-	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		inbound := sl.Current().Interface().(model.APIGWInboundOpenID4VP)
-		for scope, auth := range inbound.CredentialTypes {
-			// auth_scopes must not reference self
-			if slices.Contains(auth.AuthScopes, scope) {
-				sl.ReportError(auth.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
+		ds := sl.Current().Interface().(model.DataSources)
+		for scope, cred := range ds.Datastore.Scopes {
+			switch cred.AuthProvider {
+			case model.AuthProviderOpenID4VP:
+				if slices.Contains(cred.AuthScopes, scope) {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
+				}
+				if len(cred.AuthScopes) == 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
+				}
+				if len(cred.AuthClaims) == 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_identity_lookup", scope)
+				}
+			case model.AuthProviderSAML, model.AuthProviderOIDC:
+				if len(cred.AuthClaims) == 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_identity_lookup", scope)
+				}
+				if len(cred.AuthScopes) > 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_only_for_openid4vp", scope)
+				}
+			case model.AuthProviderBasic:
+				if len(cred.AuthClaims) > 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_for_basic", scope)
+				}
+				if len(cred.AuthScopes) > 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_not_for_basic", scope)
+				}
 			}
 		}
-	}, model.APIGWInboundOpenID4VP{})
+	}, model.DataSources{})
 
 	// Register struct-level validation for OpenID4VPConfig: supported_credentials scopes must cover all client scopes
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {

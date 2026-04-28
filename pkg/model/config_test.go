@@ -189,83 +189,139 @@ func TestCredentialMetadata(t *testing.T) {
 	}
 }
 
-func TestGetAuthMethodForScope(t *testing.T) {
+func TestLookupCredentialSources(t *testing.T) {
+	cfg := &Cfg{
+		APIGW: &APIGW{
+			DataSources: DataSources{
+				Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
+					"pid": {AuthProvider: "basic"},
+					"ehic": {
+						AuthProvider: "openid4vp",
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+				Assertion: AssertionConfig{Scopes: map[string]AssertionScope{
+					"pid_saml": {AuthProvider: "saml"},
+				}},
+				ExternalAPI: ExternalAPIConfig{Scopes: map[string]ExternalAPIScope{
+					"diploma": {Remote: "ladok", AuthProvider: "saml"},
+				}},
+			},
+		},
+	}
+
+	t.Run("datastore", func(t *testing.T) {
+		srcs, err := cfg.LookupCredentialSources("pid")
+		assert.NoError(t, err)
+		assert.Equal(t, DataSourceDatastore, srcs[0].DataSource)
+		assert.Equal(t, "basic", srcs[0].AuthProvider)
+	})
+
+	t.Run("assertion", func(t *testing.T) {
+		srcs, err := cfg.LookupCredentialSources("pid_saml")
+		assert.NoError(t, err)
+		assert.Equal(t, DataSourceAssertion, srcs[0].DataSource)
+		assert.Equal(t, "saml", srcs[0].AuthProvider)
+	})
+
+	t.Run("external_api", func(t *testing.T) {
+		srcs, err := cfg.LookupCredentialSources("diploma")
+		assert.NoError(t, err)
+		assert.Equal(t, DataSourceExternalAPI, srcs[0].DataSource)
+		assert.Equal(t, "ladok", srcs[0].RemoteName)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := cfg.LookupCredentialSources("unknown")
+		assert.Error(t, err)
+	})
+
+	t.Run("nil apigw", func(t *testing.T) {
+		_, err := (&Cfg{}).LookupCredentialSources("pid")
+		assert.Error(t, err)
+	})
+}
+
+func TestResolveDataSource(t *testing.T) {
+	ds := &DataSources{
+		Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
+			"pid": {AuthProvider: AuthProviderBasic},
+		}},
+		Assertion: AssertionConfig{Scopes: map[string]AssertionScope{
+			"pid":     {AuthProvider: AuthProviderSAML},
+			"diploma": {AuthProvider: AuthProviderSAML},
+		}},
+		ExternalAPI: ExternalAPIConfig{Scopes: map[string]ExternalAPIScope{
+			"diploma": {Remote: "ladok", AuthProvider: AuthProviderOIDC},
+		}},
+	}
+
 	tests := []struct {
 		name           string
-		cfg            *Cfg
 		credentialType string
-		want           string
+		authProvider   string
+		wantSource     DataSourceType
+		wantRemote     string
+		wantErr        bool
 	}{
 		{
-			name: "Found in basic",
-			cfg: &Cfg{
-				APIGW: &APIGW{
-					Inbound: APIGWInbound{
-						Basic: APIGWInboundBasic{CredentialTypes: []string{"pid"}},
-					},
-				},
-			},
+			name:           "pid with basic -> datastore",
 			credentialType: "pid",
-			want:           "basic",
+			authProvider:   AuthProviderBasic,
+			wantSource:     DataSourceDatastore,
 		},
 		{
-			name: "Found in openid4vp",
-			cfg: &Cfg{
-				APIGW: &APIGW{
-					Inbound: APIGWInbound{
-						OpenID4VP: APIGWInboundOpenID4VP{
-							CredentialTypes: map[string]OpenID4VPCredentialAuth{
-								"ehic": {AuthScopes: []string{"pid"}, AuthClaims: []string{"given_name"}},
-							},
-						},
-					},
-				},
-			},
-			credentialType: "ehic",
-			want:           "openid4vp",
+			name:           "pid with openid4vp -> error (datastore uses basic)",
+			credentialType: "pid",
+			authProvider:   AuthProviderOpenID4VP,
+			wantErr:        true,
 		},
 		{
-			name: "Not found - returns default basic",
-			cfg: &Cfg{
-				APIGW: &APIGW{
-					Inbound: APIGWInbound{
-						Basic: APIGWInboundBasic{CredentialTypes: []string{"pid"}},
-					},
-				},
-			},
+			name:           "pid with saml -> assertion",
+			credentialType: "pid",
+			authProvider:   AuthProviderSAML,
+			wantSource:     DataSourceAssertion,
+		},
+		{
+			name:           "diploma with saml -> assertion",
+			credentialType: "diploma",
+			authProvider:   AuthProviderSAML,
+			wantSource:     DataSourceAssertion,
+		},
+		{
+			name:           "diploma with oidc -> external_api with remote",
+			credentialType: "diploma",
+			authProvider:   AuthProviderOIDC,
+			wantSource:     DataSourceExternalAPI,
+			wantRemote:     "ladok",
+		},
+		{
+			name:           "unknown credential -> error",
 			credentialType: "unknown",
-			want:           "basic",
+			authProvider:   AuthProviderBasic,
+			wantErr:        true,
 		},
 		{
-			name: "Nil APIGW - returns default basic",
-			cfg:            &Cfg{},
+			name:           "no matching auth provider -> error",
 			credentialType: "pid",
-			want:           "basic",
-		},
-		{
-			name: "Multiple inbound - finds correct one",
-			cfg: &Cfg{
-				APIGW: &APIGW{
-					Inbound: APIGWInbound{
-						Basic: APIGWInboundBasic{CredentialTypes: []string{"pid"}},
-						OpenID4VP: APIGWInboundOpenID4VP{
-							CredentialTypes: map[string]OpenID4VPCredentialAuth{
-								"ehic":    {AuthScopes: []string{"pid"}, AuthClaims: []string{"given_name"}},
-								"diploma": {AuthScopes: []string{"pid"}, AuthClaims: []string{"given_name"}},
-							},
-						},
-					},
-				},
-			},
-			credentialType: "ehic",
-			want:           "openid4vp",
+			authProvider:   "nonexistent",
+			wantErr:        true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.GetAuthMethodForScope(tt.credentialType)
-			assert.Equal(t, tt.want, got)
+			src, err := ds.ResolveDataSource(tt.credentialType, tt.authProvider)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantSource, src.DataSource)
+			if tt.wantRemote != "" {
+				assert.Equal(t, tt.wantRemote, src.RemoteName)
+			}
 		})
 	}
 }

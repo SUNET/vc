@@ -81,32 +81,28 @@ func TestSessionExpiration(t *testing.T) {
 
 // TestClaimTransformer tests claim transformation functionality
 func TestClaimTransformer(t *testing.T) {
-	mappings := map[string]model.CredentialMapping{
-		"pid": {
-			Attributes: map[string]model.AttributeConfig{
-				"given_name": {
-					Claim:    "identity.given_name",
-					Required: true,
-				},
-				"family_name": {
-					Claim:    "identity.family_name",
-					Required: true,
-				},
-				"email": {
-					Claim:     "identity.email",
-					Required:  false,
-					Transform: "lowercase",
-				},
-				"country": {
-					Claim:    "identity.country",
-					Required: false,
-					Default:  "SE",
-				},
-			},
+	mapping := model.AttributeMapping{
+		"given_name": {
+			Claim:    "identity.given_name",
+			Required: true,
+		},
+		"family_name": {
+			Claim:    "identity.family_name",
+			Required: true,
+		},
+		"email": {
+			Claim:     "identity.email",
+			Required:  false,
+			Transform: "lowercase",
+		},
+		"country": {
+			Claim:    "identity.country",
+			Required: false,
+			Default:  "SE",
 		},
 	}
 
-	transformer := NewClaimTransformer(mappings)
+	transformer := NewClaimTransformer(mapping)
 
 	// Test claims
 	inputClaims := map[string]any{
@@ -116,7 +112,7 @@ func TestClaimTransformer(t *testing.T) {
 		// country is missing, should use default
 	}
 
-	result, err := transformer.TransformClaims("pid", inputClaims)
+	result, err := transformer.TransformClaims(inputClaims)
 	if err != nil {
 		t.Fatalf("Failed to transform claims: %v", err)
 	}
@@ -149,23 +145,19 @@ func TestClaimTransformer(t *testing.T) {
 
 // TestClaimTransformerMissingRequired tests that missing required claims fail
 func TestClaimTransformerMissingRequired(t *testing.T) {
-	mappings := map[string]model.CredentialMapping{
-		"pid": {
-			Attributes: map[string]model.AttributeConfig{
-				"given_name": {
-					Claim:    "identity.given_name",
-					Required: true,
-				},
-			},
+	mapping := model.AttributeMapping{
+		"given_name": {
+			Claim:    "identity.given_name",
+			Required: true,
 		},
 	}
 
-	transformer := NewClaimTransformer(mappings)
+	transformer := NewClaimTransformer(mapping)
 
 	// Missing required claim
 	inputClaims := map[string]any{}
 
-	_, err := transformer.TransformClaims("pid", inputClaims)
+	_, err := transformer.TransformClaims(inputClaims)
 	if err == nil {
 		t.Error("Expected error for missing required claim")
 	}
@@ -173,29 +165,25 @@ func TestClaimTransformerMissingRequired(t *testing.T) {
 
 // TestClaimTransformerTransformations tests various transformations
 func TestClaimTransformerTransformations(t *testing.T) {
-	mappings := map[string]model.CredentialMapping{
-		"test": {
-			Attributes: map[string]model.AttributeConfig{
-				"lowercase_field": {
-					Claim:     "result.lowercase",
-					Required:  false,
-					Transform: "lowercase",
-				},
-				"uppercase_field": {
-					Claim:     "result.uppercase",
-					Required:  false,
-					Transform: "uppercase",
-				},
-				"trim_field": {
-					Claim:     "result.trimmed",
-					Required:  false,
-					Transform: "trim",
-				},
-			},
+	mapping := model.AttributeMapping{
+		"lowercase_field": {
+			Claim:     "result.lowercase",
+			Required:  false,
+			Transform: "lowercase",
+		},
+		"uppercase_field": {
+			Claim:     "result.uppercase",
+			Required:  false,
+			Transform: "uppercase",
+		},
+		"trim_field": {
+			Claim:     "result.trimmed",
+			Required:  false,
+			Transform: "trim",
 		},
 	}
 
-	transformer := NewClaimTransformer(mappings)
+	transformer := NewClaimTransformer(mapping)
 
 	inputClaims := map[string]any{
 		"lowercase_field": "HELLO WORLD",
@@ -203,7 +191,7 @@ func TestClaimTransformerTransformations(t *testing.T) {
 		"trim_field":      "  spaced  ",
 	}
 
-	result, err := transformer.TransformClaims("test", inputClaims)
+	result, err := transformer.TransformClaims(inputClaims)
 	if err != nil {
 		t.Fatalf("Failed to transform claims: %v", err)
 	}
@@ -235,17 +223,13 @@ func TestServiceInitialization(t *testing.T) {
 
 // BenchmarkClaimTransform benchmarks claim transformation
 func BenchmarkClaimTransform(b *testing.B) {
-	mappings := map[string]model.CredentialMapping{
-		"pid": {
-			Attributes: map[string]model.AttributeConfig{
-				"given_name":  {Claim: "identity.given_name", Required: true},
-				"family_name": {Claim: "identity.family_name", Required: true},
-				"email":       {Claim: "identity.email", Required: true},
-			},
-		},
+	mapping := model.AttributeMapping{
+		"given_name":  {Claim: "identity.given_name", Required: true},
+		"family_name": {Claim: "identity.family_name", Required: true},
+		"email":       {Claim: "identity.email", Required: true},
 	}
 
-	transformer := NewClaimTransformer(mappings)
+	transformer := NewClaimTransformer(mapping)
 
 	claims := map[string]any{
 		"given_name":  "John",
@@ -255,7 +239,7 @@ func BenchmarkClaimTransform(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := transformer.TransformClaims("pid", claims)
+		_, err := transformer.TransformClaims(claims)
 		if err != nil {
 			b.Fatal(err)
 		}

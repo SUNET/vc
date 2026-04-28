@@ -21,7 +21,7 @@ import (
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
-	oauthClient, err := c.cfg.APIGW.Outbound.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
+	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
 		return nil, errors.Join(oauth2.ErrInvalidClient, err)
 	}
@@ -133,7 +133,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	c.log.Debug("OAuthToken", "req", req)
 
 	// Look up the client to enforce type-specific requirements
-	oauthClient, err := c.cfg.APIGW.Outbound.OpenID4VCI.Clients.Get(req.ClientID)
+	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(req.ClientID)
 	if err != nil {
 		c.log.Error(err, "client validation failed")
 		return nil, errors.Join(oauth2.ErrInvalidClient, err)
@@ -220,8 +220,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	c.cacheService.DPopJTI.Set(ctx, jti, true)
 
 	// Validate HTU matches token endpoint
-	if dpop.HTU != c.cfg.APIGW.Outbound.OpenID4VCI.TokenEndpoint {
-		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.Outbound.OpenID4VCI.TokenEndpoint, dpop.HTU)
+	if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
+		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU)
 	}
 
 	// Validate HTM is POST (token endpoint only accepts POST)

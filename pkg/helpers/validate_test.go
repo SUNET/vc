@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -312,62 +313,178 @@ func TestAuthScopesSelfReference(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		inbound       model.APIGWInboundOpenID4VP
+		ds            model.DataSources
 		shouldError   bool
 		errorContains string
 	}{
 		{
 			name: "self-reference in auth_scopes is rejected",
-			inbound: model.APIGWInboundOpenID4VP{
-				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
-						AuthScopes: []string{"pid", "eduid"},
-						AuthClaims: []string{"given_name"},
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid", "eduid"},
+						AuthClaims:   []string{"given_name"},
 					},
-				},
+				}},
 			},
 			shouldError:   true,
 			errorContains: "auth_scopes_self_reference",
 		},
 		{
 			name: "no self-reference passes",
-			inbound: model.APIGWInboundOpenID4VP{
-				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
-						AuthScopes: []string{"pid"},
-						AuthClaims: []string{"given_name"},
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name"},
 					},
-				},
+				}},
 			},
 			shouldError:   false,
 			errorContains: "",
 		},
 		{
-			name: "empty credential types passes",
-			inbound: model.APIGWInboundOpenID4VP{
-				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{},
+			name: "empty datastore passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{}},
 			},
 			shouldError:   false,
 			errorContains: "",
 		},
 		{
 			name: "multiple credentials with no self-reference passes",
-			inbound: model.APIGWInboundOpenID4VP{
-				CredentialTypes: map[string]model.OpenID4VPCredentialAuth{
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"diploma": {
-						AuthScopes: []string{"pid"},
-						AuthClaims: []string{"given_name", "family_name"},
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name", "family_name"},
 					},
-				},
+				}},
 			},
 			shouldError:   false,
 			errorContains: "",
+		},
+		{
+			name: "basic with auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderBasic,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_not_for_basic",
+		},
+		{
+			name: "basic with auth_scopes is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderBasic,
+						AuthScopes:   []string{"pid"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_not_for_basic",
+		},
+		{
+			name: "basic without auth_claims or auth_scopes passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderBasic,
+					},
+				}},
+			},
+			shouldError: false,
+		},
+		{
+			name: "openid4vp without auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_required_for_identity_lookup",
+		},
+		{
+			name: "openid4vp without auth_scopes is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_required_for_openid4vp",
+		},
+		{
+			name: "saml without auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_required_for_identity_lookup",
+		},
+		{
+			name: "saml with auth_scopes is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
+						AuthClaims:   []string{"given_name"},
+						AuthScopes:   []string{"pid"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_only_for_openid4vp",
+		},
+		{
+			name: "saml with auth_claims passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
+						AuthClaims:   []string{"given_name", "family_name"},
+					},
+				}},
+			},
+			shouldError: false,
+		},
+		{
+			name: "oidc with auth_claims passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderOIDC,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validate.StructPartial(tt.inbound)
+			err := validate.StructPartial(tt.ds)
 			if tt.shouldError {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorContains)

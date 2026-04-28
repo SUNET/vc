@@ -53,7 +53,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 				},
 			},
 			APIGW: &model.APIGW{
-				Outbound: model.APIGWOutbound{
+				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						Wallets: map[string]model.CredentialOfferWallets{
 							"dc4eu": {
@@ -161,7 +161,7 @@ func TestCreateCredentialOfferLookupMetadata_EmptyConfig(t *testing.T) {
 				CredentialMetadata: map[string]*model.CredentialMetadata{},
 			},
 			APIGW: &model.APIGW{
-				Outbound: model.APIGWOutbound{
+				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						Wallets: map[string]model.CredentialOfferWallets{},
 					},
@@ -199,7 +199,7 @@ func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
 				},
 			},
 			APIGW: &model.APIGW{
-				Outbound: model.APIGWOutbound{
+				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						Wallets: map[string]model.CredentialOfferWallets{},
 					},
@@ -229,7 +229,7 @@ func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
 				},
 			},
 			APIGW: &model.APIGW{
-				Outbound: model.APIGWOutbound{
+				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						Wallets: map[string]model.CredentialOfferWallets{},
 					},
@@ -266,7 +266,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 				},
 			},
 			APIGW: &model.APIGW{
-				Outbound: model.APIGWOutbound{
+				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						Wallets: map[string]model.CredentialOfferWallets{},
 					},
@@ -303,7 +303,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 				},
 			},
 			APIGW: &model.APIGW{
-				Outbound: model.APIGWOutbound{
+				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						Wallets: map[string]model.CredentialOfferWallets{
 							"dc4eu":       {Label: "DC4EU Wallet"},
