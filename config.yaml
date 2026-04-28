@@ -1,142 +1,41 @@
 ---
 common:
-  # secret_file_path: "/path/to/secrets.yaml"  # When set, all secrets are read from this file and secret values in config.yaml are ignored
   mongo:
     uri: mongodb://mongo:27017
-    # tls: true                           # Enable TLS for MongoDB (also enabled implicitly when ca/cert/key paths are set)
-    # ca_file_path: "/pki/mongo_ca.crt"   # CA certificate to verify the MongoDB server
-    # cert_file_path: "/pki/mongo.crt"    # Client certificate for mTLS authentication
-    # key_file_path: "/pki/mongo.key"     # Client private key for mTLS authentication
   production: false
-  tracing:
-    enable: false
-    addr: jaeger:4318
-    #timeout: 10
-  # branding:
-  #   logo_path: /path/to/custom_logo.png
-  #   favicon_path: /path/to/custom_favicon.png
-  credential_offer_qr:
-    type: "credential_offer"
-    qr:
-      recovery_level: 2
-      size: 256
 
   credential_metadata:
-    pid:
-      vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
-      format: "dc+sd-jwt"
     pid_1_5:
       vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
-      format: "dc+sd-jwt"
-    pid_1_8:
-      vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
       format: "dc+sd-jwt"
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
-    pda1:
-      vctm_file_path: "/metadata/vctm_pda1.json"
-      format: "dc+sd-jwt"
-    elm:
-      vctm_file_path: "/metadata/vctm_elm.json"
-      format: "dc+sd-jwt"
-    diploma:
-      vctm_file_path: "/metadata/vctm_diploma.json"
-      format: "dc+sd-jwt"
-    micro_credential:
-      vctm_file_path: "/metadata/vctm_microcredential.json"
-      format: "dc+sd-jwt"
-    eduid:
-      vctm_file_path: "/metadata/vctm_eduid.json"
-      format: "dc+sd-jwt"
-    openbadge_complete:
-      vctm_file_path: "/metadata/vctm_elm.json"
-      format: "dc+sd-jwt"
-    openbadge_basic:
-      vctm_file_path: "/metadata/vctm_elm.json"
-      format: "dc+sd-jwt"
-    openbadge_endorsements:
-      vctm_file_path: "/metadata/vctm_elm.json"
-      format: "dc+sd-jwt"
-
-kafka:
-  enable: false
-  brokers:
-    - "kafka0:9092"
-    - "kafka1:9092"
 
 issuer:
   issuer_url: "http://apigw.vc.docker:8080"
-  wallet_url: ""
   api_server:
     addr: :8080
   grpc_server:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
-  audit_log:
-    enable: false
-    destinations:
-      - "console"
-      - "/var/log/vc/audit.log"
-      - "http://apigw.vc.docker:8080/api/v1/audit/notify"
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
-    # For HSM with PKCS#11 support, uncomment and configure:
-    # pkcs11:
-    #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
-    #   # slot_id: 0  # Default
-    #   # pin: "1234"  # Default
-    #   key_label: "issuer-key"  # Required, default: "vc_key"
-    #   key_id: "issuer-key-id"  # Required, default: "vc_key_id"
-    # Optional: configure fallback and priority
-    # priority: ["hsm", "file"]
-    # enable_hsm: true
-    # enable_file: true
   jwt_attribute:
     issuer: https://issuer.sunet.se
     enable_not_before: true
     valid_duration: 3600
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
-    static_host: "http://vc_dev_portal:8080/statics"
 
 verifier:
   api_server:
     addr: :8080
-    cors:
-      allowed_origins:
-        - "https://dev.wallet.sunet.se"
-        - "https://sunetwallet-dev.app.siros.org"
-  #Replace fqdn with same as in x5c_san_dns cert (used to build web-links etc. example: "vcverifier.sunet.se") - ip is only used when working in local dev env.
   public_url: "http://verifier.vc.docker:8080"
-  # Shared signing key configuration used for OAuth metadata, OIDC, and OpenID4VP
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
-    # Optional: HSM/PKCS#11 configuration (alternative to file-based keys)
-    # pkcs11:
-    #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
-    #   # slot_id: 0  # Default
-    #   # pin: "1234"  # Default
-    #   key_label: "verifier-key"  # Required, default: "vc_key"
-    #   key_id: "verifier-key-id"  # Required, default: "vc_key_id"
-    # Optional: Key source selection and priority
-    # source: "file"  # Options: "file", "hsm"
-    # enable_file: true
-    # enable_hsm: false
-    # priority: ["file", "hsm"]  # Fallback order
-  supported_wallets:
-    "SUNET dev": "https://dev.wallet.sunet.se/cb"
-  # Preferred VP formats - informs wallets what formats/algorithms the verifier supports
-  # Note: Per OpenID4VP spec, this is informational only and not enforced during verification
-  preferred_vp_formats:
-    "dc+sd-jwt":
-      sd-jwt_alg_values: ["ES256", "ES384", "ES512", "RS256"]
-      kb-jwt_alg_values: ["ES256", "ES384", "ES512", "RS256"]
-    mso_mdoc:
-      issuerauth_alg_values: [-7, -35, -36]  # ES256, ES384, ES512
-      deviceauth_alg_values: [-7, -35, -36]
   inbound:
     openid4vp:
       token_endpoint: "http://verifier.vc.docker:8080/token"
@@ -145,206 +44,53 @@ verifier:
           type: "public"
           redirect_uri: "https://dev.wallet.sunet.se"
           scopes:
-            - "pid"
-            - "diploma"
+            - "pid_1_5"
             - "ehic"
-            - "pda1"
-            - "elm"
-            - "eduid"
-      presentation_timeout: 300
-      # Template-based presentation requests (optional)
-      # When configured, DCQL queries are loaded from YAML templates
-      # Falls back to supported_credentials if templates not found or disabled
-      presentation_requests_dir: "/presentation_requests"
       supported_credentials:
-        - vct: "urn:eudi:pid:1"
+        - vct: "urn:eudi:pid:arf-1.5:1"
           scopes:
-            - "profile"
-            - "pid"
+            - "pid_1_5"
         - vct: "urn:eudi:ehic:1"
           scopes:
             - "ehic"
-        - vct: "urn:eudi:pda1:1"
-          scopes:
-            - "pda1"
-        - vct: "urn:eudi:elm:1"
-          scopes:
-            - "elm"
-        - vct: "urn:eudi:diploma:1"
-          scopes:
-            - "diploma"
-        - vct: "urn:credential:eduid:1"
-          scopes:
-            - "eduid"
-  outbound:
-    oidc_provider:
-    issuer: "http://verifier.vc.docker:8080"
-    session_duration: 900                # Session duration in seconds (15 minutes)
-    code_duration: 600                   # Authorization code duration in seconds (10 minutes)
-    access_token_duration: 3600          # Access token duration in seconds (1 hour)
-    id_token_duration: 3600              # ID token duration in seconds (1 hour)
-    refresh_token_duration: 86400        # Refresh token duration in seconds (24 hours)
-    subject_type: "pairwise"
-    subject_salt: "change-this-in-production"
-    # Static OIDC clients (optional)
-    # Pre-configured clients that don't require dynamic registration
-    # These are checked in addition to dynamically registered clients in the database
-    # Client secrets can be stored in secrets.yaml under verifier.oidc_op.static_clients
-    # as a map of client_id to client_secret.
-    # For production, consider using dynamic client registration.
-    # static_clients:
-    #   - client_id: "example-client-id"
-    #     client_secret: ""  # Set via environment variable or leave empty for public clients
-    #     redirect_uris:
-    #       - "https://example.com/callback"
-    #     allowed_scopes:  # If omitted, defaults to openid, profile, email, address, phone
-    #       - "openid"
-    #       - "profile"
-    #       - "pid"
-    #     token_endpoint_auth_method: "none"  # Use "none" for public clients (no secret required)
-    #     grant_types:  # Optional, default: ["authorization_code"]
-    #       - "authorization_code"
-    #     response_types:  # Optional, default: ["code"]
-    #       - "code"
-    #     client_name: "Example Static Client"  # Optional
+
 registry:
   api_server:
     addr: :8080
   public_url: "http://localhost:8080"
   grpc_server:
     addr: :8090
-    # mTLS configuration (optional)
-    # tls:
-    #   enable: true
-    #   cert_file_path: "/pki/grpc_server.crt"
-    #   key_file_path: "/pki/grpc_server.key"
-    #   client_ca_path: "/pki/client_ca.crt"  # For mutual TLS
-    #   # Pin specific certs by fingerprint
-    #   allowed_client_fingerprints:
-    #     "sha256:aa:bb:cc:...": "apigw-prod"
-    #   # Allow certs by Subject DN
-    #   allowed_client_dns:
-    #     "CN=apigw.example.com,O=MyOrg": "apigw-acme"
-  # Token Status Lists configuration per draft-ietf-oauth-status-list
   token_status_lists:
     key_config:
       private_key_path: "/pki/signing_ec_private.pem"
       chain_path: "/pki/signing_ec_chain.pem"
-      # pkcs11:
-      #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
-      #   # slot_id: 0  # Default
-      #   # pin: "1234"  # Default
-      #   key_label: "registry-tsl-key"  # Required, default: "vc_key"
-      #   key_id: "registry-tsl-key-id"  # Required, default: "vc_key_id"
-  # Admin GUI configuration (optional)
   admin_gui:
     enable: true
     username: "admin"
-    password: "admin_1234"  # Change this in production!
+    password: "admin_1234"
 
 apigw:
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
-    # pkcs11:
-    #   # module_path: /usr/lib/softhsm/libsofthsm2.so  # Default
-    #   # slot_id: 0  # Default
-    #   # pin: "1234"  # Default
-    #   key_label: "apigw-key"  # Required, default: "vc_key"
-    #   key_id: "apigw-key-id"  # Required, default: "vc_key_id"
   api_server:
     addr: :8080
-    cors:
-      allowed_origins:
-        - "https://dc4eu.wwwallet.org"
-        - "https://demo.wwwallet.org"
-        - "https://dev.wallet.sunet.se"
-        - "https://sunetwallet-dev.app.siros.org"
-    # api_auth configures authentication for the /api/v1 endpoints.
-    # Exactly one of basic_auth.enable or jwt.enable may be true.
-    # If neither is enabled, endpoints are open (no auth).
-    api_auth:
-      basic_auth:
-        enable: false
-        users:
-          admin: "secret123"
-      # jwt:
-      #   enable: true
-      #   jwks_url: "https://auth.example.com/.well-known/jwks.json"
-      #   issuer: "https://auth.example.com"
-      #   audience: "vc-apigw"
-      #   # Optional SPOCP rules for fine-grained per-endpoint authorization.
-      #   # The service name is supplied by the calling service (e.g. "apigw").
-      #   # Each request is checked as:
-      #   #   (api (service <SERVICE>)(method <METHOD>)(path <PATH>)(subject <JWT_SUB>))
-      #   # When no rules are configured, any valid JWT grants access.
-      #   rules:
-      #     # Allow alice full access to all /api/v1/ endpoints on this service
-      #     - "(api (service apigw)(method)(path (* prefix /api/v1/))(subject alice))"
-      #     # Allow bob to only POST to /api/v1/upload on this service
-      #     - "(api (service apigw)(method POST)(path /api/v1/upload)(subject bob))"
-      #     # Allow any subject to read documents
-      #     - "(api (service apigw)(method POST)(path /api/v1/document)(subject))"
-      #   # rules_file: "/etc/vc/api_rules.spocp"
   public_url: "http://apigw.vc.docker:8080"
   registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
-  inbound:
-    basic:
-      credential_types: ["pid", "pid_1_5", "pid_1_8"]
-    openid4vp:
-      credential_types:
+  data_sources:
+    datastore:
+      scopes:
+        pid_1_5:
+          auth_provider: basic
         ehic:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        pda1:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        elm:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        diploma:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        micro_credential:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        eduid:
-          auth_scopes: ["pid_1_5", "pid_1_8"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        openbadge_complete:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        openbadge_basic:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-        openbadge_endorsements:
-          auth_scopes: ["pid_1_5", "pid_1_8", "eduid"]
-          auth_claims: ["given_name", "birthdate", "family_name"]
-    # oidc:
-    #   enable: true
-    #   credential_types: ["pid"]
-    #   issuer_url: "https://accounts.google.com"
-    #   registration:
-    #     preconfigured:
-    #       client_id: "your-client-id"
-    #       client_secret: "your-client-secret"
-    #   redirect_uri: "https://issuer.example.com/oidcrp/callback"
-    #   scopes: ["openid", "profile", "email"]
-    # saml:
-    #   enable: true
-    #   credential_types: ["pid"]
-    #   entity_id: "https://issuer.sunet.se/saml/metadata"
-    #   credential_mappings:
-    #     pid:
-    #       attributes:
-    #         "urn:oid:2.5.4.42":
-    #           claim: "given_name"
-    #           required: true
-  outbound:
+          auth_provider: openid4vp
+          auth_scopes: ["pid_1_5"]
+          auth_claims: ["given_name", "family_name", "birthdate"]
+  delivery:
     openid4vci:
       token_endpoint: "http://apigw.vc.docker:8080/token"
       clients:
@@ -352,72 +98,9 @@ apigw:
           type: "public"
           redirect_uri: "https://dev.wallet.sunet.se"
           scopes:
-            - "pid"
             - "pid_1_5"
-            - "pid_1_8"
-            - "diploma"
             - "ehic"
-            - "pda1"
-            - "elm"
-            - "eduid"
-    credential_offers:
-      issuer_url: http://apigw.vc.docker:8080
-      wallets:
-        sunet_dev: 
-          label: SUNET Dev Wallet
-          redirect_uri: https://dev.wallet.sunet.se/cb
-        funke: 
-          label: Funke Wallet
-          redirect_uri: https://funke.wwwallet.org/cb
-        dc4eu: 
-          label: DC4EU Wallet
-          redirect_uri: https://dc4eu.wwwallet.org/cb
-        vanilla: 
-          label: Vanilla wwWallet
-          redirect_uri: https://demo.wwwallet.org/cb
-        siros_sunet:
-          label: Siros SUNET Wallet
-          redirect_uri: https://sunetwallet-dev.app.siros.org/cb
-  trust_model:
-    type: "openid_federation"
-    trust_anchors:
-      - "https://example.com/trust_anchor.pem"
-  issuer_metadata:
-    # Optional: Authorization servers (if different from credential issuer)
-    # authorization_servers:
-    #   - "https://oauth.example.com"
-    # Optional: Additional endpoints
-    # deferred_credential_endpoint: "http://apigw.vc.docker:8080/deferred"
-    # notification_endpoint: "http://apigw.vc.docker:8080/notification"
-    # Optional: Cryptographic binding methods (defaults to ["jwk"])
-    # cryptographic_binding_methods_supported:
-    #   - "jwk"
-    #   - "did:key"
-    # Optional: Credential signing algorithms (defaults to ["ES256", "ES384"])
-    # credential_signing_alg_values_supported:
-    #   - "ES256"
-    #   - "ES384"
-    #   - "ES512"
-    # Optional: Proof signing algorithms (defaults to ["ES256", "ES384", "ES512"])
-    # proof_signing_alg_values_supported:
-    #   - "ES256"
-    #   - "ES384"
-    #   - "ES512"
-    # Optional: Credential response encryption
-    # credential_response_encryption:
-    #   alg_values_supported: ["ECDH-ES", "ECDH-ES+A128KW"]
-    #   enc_values_supported: ["A256GCM", "A128GCM"]
-    #   encryption_required: false
-    # Optional: Batch credential issuance
-    # batch_credential_issuance:
-    #   batch_size: 10
-    # Optional: Issuer display information
-    # display:
-    #   - name: "SUNET Credential Issuer"
-    #     locale: "en-US"
-    #     logo:
-    #       uri: "http://apigw.vc.docker:8080/logo.png"
-    #       alt_text: "SUNET Logo"
+
 mock_as:
   api_server:
     addr: :8080
@@ -431,7 +114,6 @@ ui:
     addr: :8080
   username: "admin"
   password: "secret123"
-  session_inactivity_timeout_in_seconds: 1800
   services:
     apigw:
       base_url: http://apigw.vc.docker:8080
