@@ -172,7 +172,7 @@ type GRPCTLS struct {
 	KeyFilePath               string            `yaml:"key_file_path" validate:"required_if=Enable true" default:"/pki/grpc_server.key"`  // Server private key
 	ClientCAPath              string            `yaml:"client_ca_path" validate:"required_if=Enable true" default:"/pki/client_ca.crt"`   // CA to verify client certificates (for mTLS)
 	AllowedClientFingerprints map[string]string `yaml:"allowed_client_fingerprints" doc_example:"a1b2c3...: issuer-prod"`                 // SHA256 fingerprint -> friendly name
-	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns" doc_example:"CN=apigw,O=SUNET: apigw-prod"`                    // Certificate Subject DN -> friendly name
+	AllowedClientDNs          map[string]string `yaml:"allowed_client_dns" doc_example:"apigw-prod: CN=apigw,O=SUNET"`                    // Friendly name -> Certificate Subject DN
 }
 
 // JWTAttribute holds the jwt attribute configuration.

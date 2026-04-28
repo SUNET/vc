@@ -669,7 +669,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 | `key_file_path`               | `string` | Server private key                          | -                              | `/pki/grpc_server.key` | Yes (if enabled) |
 | `client_ca_path`              | `string` | CA to verify client certificates (for mTLS) | -                              | `/pki/client_ca.crt`   | Yes (if enabled) |
 | `allowed_client_fingerprints` | `object` | SHA256 fingerprint -> friendly name         | `a1b2c3...: issuer-prod`       | -                      | No               |
-| `allowed_client_dns`          | `object` | Certificate Subject DN -> friendly name     | `CN=apigw,O=SUNET: apigw-prod` | -                      | No               |
+| `allowed_client_dns`          | `object` | Friendly name -> Certificate Subject DN     | `apigw-prod: CN=apigw,O=SUNET` | -                      | No               |
 
 ### `jwt_attribute`
 

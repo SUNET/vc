@@ -61,7 +61,10 @@ func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	opts := []grpc.ServerOption{grpc.Creds(creds)}
 
 	// Add client identity verification interceptor if any allowlist is configured
-	allowedFingerprints, allowedDNs := buildClientAllowlists(cfg.TLS)
+	allowedFingerprints, allowedDNs, err := buildClientAllowlists(cfg.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("invalid client allowlist config: %w", err)
+	}
 	if allowedFingerprints != nil || allowedDNs != nil {
 		interceptor := clientAuthUnaryInterceptor(allowedFingerprints, allowedDNs)
 		streamInterceptor := clientAuthStreamInterceptor(allowedFingerprints, allowedDNs)
@@ -76,7 +79,8 @@ func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 
 // buildClientAllowlists normalizes the fingerprint and DN allowlists from the TLS config.
 // Returns nil maps when the respective allowlist is not configured.
-func buildClientAllowlists(tlsCfg model.GRPCTLS) (allowedFingerprints, allowedDNs map[string]string) {
+// Returns an error if any DN value cannot be canonicalized (likely a misconfigured entry).
+func buildClientAllowlists(tlsCfg model.GRPCTLS) (allowedFingerprints, allowedDNs map[string]string, err error) {
 	if len(tlsCfg.AllowedClientFingerprints) > 0 {
 		allowedFingerprints = make(map[string]string, len(tlsCfg.AllowedClientFingerprints))
 		for fp, name := range tlsCfg.AllowedClientFingerprints {
@@ -86,12 +90,16 @@ func buildClientAllowlists(tlsCfg model.GRPCTLS) (allowedFingerprints, allowedDN
 
 	if len(tlsCfg.AllowedClientDNs) > 0 {
 		allowedDNs = make(map[string]string, len(tlsCfg.AllowedClientDNs))
-		for dn, name := range tlsCfg.AllowedClientDNs {
-			allowedDNs[canonicalizeDN(dn)] = name
+		for name, dn := range tlsCfg.AllowedClientDNs {
+			canonical := canonicalizeDN(dn)
+			if canonical == "" {
+				return nil, nil, fmt.Errorf("allowed_client_dns entry %q has invalid DN value %q (canonicalizes to empty string)", name, dn)
+			}
+			allowedDNs[canonical] = name
 		}
 	}
 
-	return allowedFingerprints, allowedDNs
+	return allowedFingerprints, allowedDNs, nil
 }
 
 // normalizeFingerprint normalizes a fingerprint string for comparison.
