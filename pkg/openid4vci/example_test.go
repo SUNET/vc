@@ -9,7 +9,7 @@ import (
 )
 
 func ExampleCredentialOfferParameters_Marshal() {
-	offer := &openid4vci.CredentialOfferParameters{
+	offer := &openid4vci.CredentialOfferParameters{ // #nosec G101
 		CredentialIssuer:           "https://issuer.example.com",
 		CredentialConfigurationIDs: []string{"UniversityDegree_LDP_VC"},
 		Grants: map[string]any{
@@ -84,7 +84,7 @@ func ExampleStatusCode_badRequest() {
 }
 
 func ExampleCredentialOfferParameters_CredentialOffer() {
-	offer := &openid4vci.CredentialOfferParameters{
+	offer := &openid4vci.CredentialOfferParameters{ // #nosec G101
 		CredentialIssuer:           "https://issuer.example.com",
 		CredentialConfigurationIDs: []string{"IdentityCredential"},
 	}

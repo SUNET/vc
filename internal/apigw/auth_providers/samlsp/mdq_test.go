@@ -26,7 +26,7 @@ func TestMDQClient_GetIDPMetadata_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(testIDPMetadata))
+		w.Write([]byte(testIDPMetadata)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -54,7 +54,7 @@ func TestMDQClient_GetIDPMetadata_Caching(t *testing.T) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(testIDPMetadata))
+		w.Write([]byte(testIDPMetadata)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -89,7 +89,7 @@ func TestMDQClient_GetIDPMetadata_CacheExpiration(t *testing.T) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(testIDPMetadata))
+		w.Write([]byte(testIDPMetadata)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -118,7 +118,7 @@ func TestMDQClient_GetIDPMetadata_CacheExpiration(t *testing.T) {
 func TestMDQClient_GetIDPMetadata_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("IdP not found"))
+		w.Write([]byte("IdP not found")) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -137,7 +137,7 @@ func TestMDQClient_GetIDPMetadata_InvalidXML(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("invalid xml content"))
+		w.Write([]byte("invalid xml content")) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -163,7 +163,7 @@ func TestMDQClient_GetIDPMetadata_NoIDPDescriptor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(metadataWithoutIDP))
+		w.Write([]byte(metadataWithoutIDP)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -187,7 +187,7 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(testIDPMetadata))
+		w.Write([]byte(testIDPMetadata)) // #nosec G104
 	}))
 	defer server.Close()
 

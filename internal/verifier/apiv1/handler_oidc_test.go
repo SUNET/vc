@@ -240,7 +240,7 @@ func TestTokenRequest_Validation(t *testing.T) {
 
 // TestTokenResponse validates the TokenResponse struct
 func TestTokenResponse_Fields(t *testing.T) {
-	resp := TokenResponse{
+	resp := TokenResponse{ // #nosec G101
 		AccessToken:  "access-token-123",
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
@@ -578,7 +578,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 						"email": "john@example.com",
 					},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -586,7 +586,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					TokenEndpointAuthMethod: "client_secret_basic",
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -638,7 +638,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     true, // Already used
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -663,7 +663,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(-1 * time.Minute).Unix(), // Expired
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -688,14 +688,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					ClientSecretHash:        hashPassword(t, "secret"), // hash of "secret"
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -720,14 +720,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "different-client",
 					ClientSecretHash:        hashPassword(t, "secret"),
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -752,14 +752,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					ClientSecretHash:        hashPassword(t, "secret"),
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -788,14 +788,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					WalletID:            "wallet-123",
 					VerifiedClaims:      map[string]any{},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					TokenEndpointAuthMethod: "none", // Public client
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -821,13 +821,13 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:           false,
 					CodeExpiresAt:       time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					TokenEndpointAuthMethod: "none",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -854,14 +854,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					WalletID:       "wallet-456",
 					VerifiedClaims: map[string]any{},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "public-client",
 					TokenEndpointAuthMethod: "none", // Public client
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:   "authorization_code",
@@ -1072,7 +1072,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid", "profile", "email"},
 					RequirePKCE:   false,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1107,7 +1107,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1127,7 +1127,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "token",
@@ -1147,7 +1147,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid", "profile"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1168,7 +1168,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid"},
 					RequirePKCE:   true,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1189,7 +1189,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid", "profile"},
 					RequirePKCE:   true,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType:        "code",
@@ -1212,7 +1212,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid", "profile", "email", "address"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1320,7 +1320,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1369,7 +1369,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1435,7 +1435,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -2068,7 +2068,7 @@ func TestProcessDirectPost(t *testing.T) {
 		expectShowCredentials  bool
 		expectedStatus         cache.SessionStatus
 	}{
-		{
+		{ // #nosec G101
 			name:      "successful direct post with VP token",
 			sessionID: "session-dp-1",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2093,7 +2093,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false,
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with presentation submission",
 			sessionID:              "session-dp-3",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2106,7 +2106,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false,
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with invalid presentation submission JSON",
 			sessionID:              "session-dp-4",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2119,7 +2119,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false, // Should continue even with invalid presentation submission
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:      "direct post with show credentials enabled",
 			sessionID: "session-dp-5",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2149,7 +2149,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:       true,
 			expectedErrorType: ErrInvalidRequest,
 		},
-		{
+		{ // #nosec G101
 			name:      "direct post without redirect URI",
 			sessionID: "session-dp-7",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",

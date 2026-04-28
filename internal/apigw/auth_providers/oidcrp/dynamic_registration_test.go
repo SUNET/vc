@@ -122,7 +122,7 @@ func TestRegister_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(resp) // #nosec G104 G117
 	}))
 	defer mockServer.Close()
 
@@ -182,7 +182,7 @@ func TestRegister_WithInitialAccessToken(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(resp) // #nosec G104 G117
 	}))
 	defer mockServer.Close()
 
@@ -216,7 +216,7 @@ func TestRegister_ServerError(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
+		json.NewEncoder(w).Encode(map[string]string{ // #nosec G104
 			"error":             "invalid_request",
 			"error_description": "redirect_uri is required",
 		})

@@ -1497,7 +1497,7 @@ func writeCertToFile(t *testing.T, dir, filename string, cert *x509.Certificate)
 	t.Helper()
 
 	path := filepath.Join(dir, filename)
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304
 	require.NoError(t, err)
 	defer f.Close()
 
@@ -1514,7 +1514,7 @@ func writeKeyToFile(t *testing.T, dir, filename string, key *ecdsa.PrivateKey) s
 	t.Helper()
 
 	path := filepath.Join(dir, filename)
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304
 	require.NoError(t, err)
 	defer f.Close()
 

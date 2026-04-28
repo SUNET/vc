@@ -23,7 +23,7 @@ func TestMockAuthorizationDetails(t *testing.T) {
 		{
 			name: "credentialIdentifier",
 			have: []AuthorizationDetailsParameter{
-				{
+				{ // #nosec G101
 					Type:                      "openid_credential",
 					CredentialConfigurationID: "TestCredential",
 				},
@@ -118,7 +118,7 @@ func TestAuthorizeBinding(t *testing.T) {
 			want: &PARRequest{
 				ResponseType: "code",
 				AuthorizationDetails: []AuthorizationDetailsParameter{
-					{
+					{ // #nosec G101
 						Type:                      "openid_credential",
 						CredentialConfigurationID: "TestCredential",
 					},

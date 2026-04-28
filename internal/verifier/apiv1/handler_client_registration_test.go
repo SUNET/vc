@@ -600,7 +600,7 @@ func TestGetClientInformation(t *testing.T) {
 					ClientIDIssuedAt:            1699999999,
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", token
 			},
 			expectError: false,
@@ -622,7 +622,7 @@ func TestGetClientInformation(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", "wrong-token"
 			},
 			expectError:   true,
@@ -677,7 +677,7 @@ func TestDeleteClient(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", token
 			},
 			expectError: false,
@@ -699,7 +699,7 @@ func TestDeleteClient(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", "wrong-token"
 			},
 			expectError:   true,
@@ -760,7 +760,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", token
 			},
 			request: &ClientRegistrationRequest{
@@ -792,7 +792,7 @@ func TestUpdateClient(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", "wrong-token"
 			},
 			request: &ClientRegistrationRequest{
@@ -816,7 +816,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "full-update-client", token
 			},
 			request: &ClientRegistrationRequest{
@@ -850,7 +850,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "jwks-update-client", token
 			},
 			request: &ClientRegistrationRequest{
@@ -876,7 +876,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "invalid-update-client", token
 			},
 			request: &ClientRegistrationRequest{

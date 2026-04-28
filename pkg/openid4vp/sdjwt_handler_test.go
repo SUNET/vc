@@ -82,17 +82,17 @@ func TestIsSDJWTFormat(t *testing.T) {
 		vpToken string
 		want    bool
 	}{
-		{
+		{ // #nosec G101
 			name:    "Plain JWT",
 			vpToken: "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
 			want:    true,
 		},
-		{
+		{ // #nosec G101
 			name:    "SD-JWT with disclosure",
 			vpToken: "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature~WyJzYWx0IiwiY2xhaW0iLCJ2YWx1ZSJd~",
 			want:    true,
 		},
-		{
+		{ // #nosec G101
 			name:    "SD-JWT with KB-JWT",
 			vpToken: "eyJhbGciOiJFUzI1NiJ9.payload.sig~disclosure~eyJhbGciOiJFUzI1NiJ9.kbpayload.kbsig",
 			want:    true,

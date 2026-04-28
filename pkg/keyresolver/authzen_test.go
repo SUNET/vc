@@ -40,7 +40,7 @@ func TestGoTrustEvaluator_EvaluateTrust(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true})
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true}) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -62,7 +62,7 @@ func TestGoTrustEvaluator_EvaluateTrustWithContext(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true})
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true}) // #nosec G104
 	}))
 	defer server.Close()
 

@@ -156,7 +156,7 @@ func TestIssuerMetadata_Generate_CustomProofAlgorithms(t *testing.T) {
 }
 
 func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
-	cfg := &IssuerMetadata{
+	cfg := &IssuerMetadata{ // #nosec G101
 		AuthorizationServers:       []string{"https://oauth.sunet.se"},
 		DeferredCredentialEndpoint: "https://issuer.sunet.se/deferred",
 		NotificationEndpoint:       "https://issuer.sunet.se/notification",

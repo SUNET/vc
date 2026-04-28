@@ -511,7 +511,7 @@ func TestImagePNGValidator(t *testing.T) {
 		var buf bytes.Buffer
 		require.NoError(t, png.Encode(&buf, img))
 		p := filepath.Join(t.TempDir(), "img.png")
-		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0644))
+		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0644)) // #nosec G306
 		return p
 	}
 
@@ -529,14 +529,14 @@ func TestImagePNGValidator(t *testing.T) {
 
 	t.Run("not a PNG", func(t *testing.T) {
 		p := filepath.Join(t.TempDir(), "text.png")
-		require.NoError(t, os.WriteFile(p, []byte("hello"), 0644))
+		require.NoError(t, os.WriteFile(p, []byte("hello"), 0644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 
 	t.Run("JPEG is rejected", func(t *testing.T) {
 		// JPEG magic bytes
 		p := filepath.Join(t.TempDir(), "fake.png")
-		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644))
+		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 }

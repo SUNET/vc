@@ -125,7 +125,7 @@ func TestStatusChecker_CheckStatus_WithServer(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -180,7 +180,7 @@ func TestStatusChecker_CheckStatus_IndexOutOfRange(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -304,7 +304,7 @@ func TestStatusManager_Reinstate(t *testing.T) {
 	sm := NewStatusManager("https://example.com/status", 100)
 
 	// Suspend first
-	sm.Suspend(5)
+	sm.Suspend(5) // #nosec G104
 
 	// Then reinstate
 	err := sm.Reinstate(5)
@@ -517,7 +517,7 @@ func TestStatusChecker_CacheExpiry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -614,7 +614,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Valid(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -672,7 +672,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Revoked(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -725,7 +725,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Suspended(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -819,7 +819,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 	// 7. Verifier fetches status list from server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -876,7 +876,7 @@ func TestStatusChecker_CheckStatus_CWTFormat(t *testing.T) {
 	// Create test server that returns CWT
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeCWT)
-		w.Write(cwtToken)
+		w.Write(cwtToken) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -931,7 +931,7 @@ func TestStatusChecker_CheckStatus_CWTAutoDetect(t *testing.T) {
 	// Server returns CWT without proper content-type (auto-detect via 0xD2 tag)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(cwtToken)
+		w.Write(cwtToken) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -1044,7 +1044,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_CWT(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeCWT)
-		w.Write(cwtToken)
+		w.Write(cwtToken) // #nosec G104
 	}))
 	defer server.Close()
 

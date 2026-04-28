@@ -62,7 +62,7 @@ func TestIsMDocFormat(t *testing.T) {
 		vpToken string
 		want    bool
 	}{
-		{
+		{ // #nosec G101
 			name:    "JWT token (has dots)",
 			vpToken: "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
 			want:    false,

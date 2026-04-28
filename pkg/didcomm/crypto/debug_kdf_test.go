@@ -172,28 +172,28 @@ func buildOtherInfoWithTag(algorithm string, apu, apv, ccTag []byte, keySize int
 
 	// AlgorithmID
 	length := make([]byte, 4)
-	binary.BigEndian.PutUint32(length, uint32(len(algorithmBytes)))
+	binary.BigEndian.PutUint32(length, uint32(len(algorithmBytes))) // #nosec G115
 	otherInfo = append(otherInfo, length...)
 	otherInfo = append(otherInfo, algorithmBytes...)
 
 	// PartyUInfo (APU)
-	binary.BigEndian.PutUint32(length, uint32(len(apu)))
+	binary.BigEndian.PutUint32(length, uint32(len(apu))) // #nosec G115
 	otherInfo = append(otherInfo, length...)
 	otherInfo = append(otherInfo, apu...)
 
 	// PartyVInfo (APV)
-	binary.BigEndian.PutUint32(length, uint32(len(apv)))
+	binary.BigEndian.PutUint32(length, uint32(len(apv))) // #nosec G115
 	otherInfo = append(otherInfo, length...)
 	otherInfo = append(otherInfo, apv...)
 
 	// SuppPubInfo: keydatalen (key length in bits, big-endian)
 	keySizeBits := make([]byte, 4)
-	binary.BigEndian.PutUint32(keySizeBits, uint32(keySize*8))
+	binary.BigEndian.PutUint32(keySizeBits, uint32(keySize*8)) // #nosec G115
 	otherInfo = append(otherInfo, keySizeBits...)
 
 	// SuppPubInfo: ccTag (if present)
 	if len(ccTag) > 0 {
-		binary.BigEndian.PutUint32(length, uint32(len(ccTag)))
+		binary.BigEndian.PutUint32(length, uint32(len(ccTag))) // #nosec G115
 		otherInfo = append(otherInfo, length...)
 		otherInfo = append(otherInfo, ccTag...)
 	}

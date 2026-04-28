@@ -71,7 +71,7 @@ func TestJWKSKeyResolverResolveKeyByKID(t *testing.T) {
 				"jwks":   json.RawMessage(jwksData),
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+			json.NewEncoder(w).Encode(metadata) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -142,10 +142,10 @@ func TestJWKSKeyResolverJWKSURI(t *testing.T) {
 				"jwks_uri": serverURL + "/jwks",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+			json.NewEncoder(w).Encode(metadata) // #nosec G104 //nolint:errcheck
 		case "/jwks":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(jwksData) //nolint:errcheck
+			w.Write(jwksData) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -177,7 +177,7 @@ func TestJWKSKeyResolverIssuerMismatch(t *testing.T) {
 				"jwks":   json.RawMessage(newTestJWKS("key-1")),
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+			json.NewEncoder(w).Encode(metadata) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -208,7 +208,7 @@ func TestJWKSKeyResolverNoJWKSAnywhere(t *testing.T) {
 				// no jwks and no jwks_uri
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+			json.NewEncoder(w).Encode(metadata) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -261,17 +261,17 @@ func TestJWKSKeyResolverFallbackOAuthAS(t *testing.T) {
 				// no authorization_servers → defaults to issuer itself
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+			json.NewEncoder(w).Encode(meta) // #nosec G104 //nolint:errcheck
 		case "/.well-known/oauth-authorization-server":
 			meta := map[string]any{
 				"issuer":   serverURL,
 				"jwks_uri": serverURL + "/jwks",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+			json.NewEncoder(w).Encode(meta) // #nosec G104 //nolint:errcheck
 		case "/jwks":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(jwksData) //nolint:errcheck
+			w.Write(jwksData) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -305,10 +305,10 @@ func TestJWKSKeyResolverFallbackOIDCDiscovery(t *testing.T) {
 				"jwks_uri": serverURL + "/jwks",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+			json.NewEncoder(w).Encode(meta) // #nosec G104 //nolint:errcheck
 		case "/jwks":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(jwksData) //nolint:errcheck
+			w.Write(jwksData) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -343,10 +343,10 @@ func TestJWKSKeyResolverFallbackRFC8414(t *testing.T) {
 				"jwks_uri": serverURL + "/jwks",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+			json.NewEncoder(w).Encode(meta) // #nosec G104 //nolint:errcheck
 		case "/jwks":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(jwksData) //nolint:errcheck
+			w.Write(jwksData) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -380,7 +380,7 @@ func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
 				"authorization_servers": []string{serverURL + "/auth"},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+			json.NewEncoder(w).Encode(meta) // #nosec G104 //nolint:errcheck
 		case "/.well-known/oauth-authorization-server/auth":
 			// RFC 8615 §3: well-known suffix inserted between host and path
 			meta := map[string]any{
@@ -388,10 +388,10 @@ func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
 				"jwks_uri": serverURL + "/auth/jwks",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(meta) //nolint:errcheck
+			json.NewEncoder(w).Encode(meta) // #nosec G104 //nolint:errcheck
 		case "/auth/jwks":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(jwksData) //nolint:errcheck
+			w.Write(jwksData) // #nosec G104 //nolint:errcheck
 		default:
 			http.NotFound(w, r)
 		}
@@ -423,7 +423,7 @@ func TestJWKSKeyResolverInvalidateIssuer(t *testing.T) {
 			"jwks":   json.RawMessage(newTestJWKS("key-1")),
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(metadata) //nolint:errcheck
+		json.NewEncoder(w).Encode(metadata) // #nosec G104 //nolint:errcheck
 	}))
 	serverURL = server.URL
 	defer server.Close()

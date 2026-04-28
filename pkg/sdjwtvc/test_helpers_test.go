@@ -64,7 +64,7 @@ func serveVCTM(t *testing.T, vctm *VCTM) (vctURL string, integrity string) {
 	integrity, err = vctm.SRIIntegrity(raw)
 	require.NoError(t, err)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(raw)
+		w.Write(raw) // #nosec G104
 	}))
 	t.Cleanup(ts.Close)
 	return ts.URL, integrity

@@ -20,7 +20,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	// OAuth 2.0 token endpoint
 	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
 			"access_token": "test-token",
 			"token_type":   "Bearer",
 			"expires_in":   3600,
@@ -34,7 +34,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PersonResponse{
+		json.NewEncoder(w).Encode(PersonResponse{ // #nosec G104
 			Person: Person{
 				SourcedID:   "p-lisa",
 				Status:      "active",
@@ -79,13 +79,13 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 			persons = []Person{persons[2]}
 		}
 
-		json.NewEncoder(w).Encode(PersonsResponse{Persons: persons})
+		json.NewEncoder(w).Encode(PersonsResponse{Persons: persons}) // #nosec G104
 	})
 
 	// GET /persons/{personId}/enrollments
 	mux.HandleFunc("/ims/oneroster/rostering/v1p2/persons/p-lisa/enrollments", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(EnrollmentsResponse{
+		json.NewEncoder(w).Encode(EnrollmentsResponse{ // #nosec G104
 			Enrollments: []Enrollment{
 				{
 					SourcedID: "e-1001",
@@ -113,7 +113,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	// GET /classes/{classId}
 	mux.HandleFunc("/ims/oneroster/rostering/v1p2/classes/c-math301", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
 			"class": CourseOffering{
 				SourcedID:    "c-math301",
 				Status:       "active",
@@ -130,7 +130,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	// GET /orgs/{orgId}
 	mux.HandleFunc("/ims/oneroster/rostering/v1p2/orgs/org-su-math", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
 			"org": Organization{
 				SourcedID:  "org-su-math",
 				Name:       "Department of Mathematics",
@@ -144,7 +144,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	// GET /academicSessions/{sessionId}
 	mux.HandleFunc("/ims/oneroster/rostering/v1p2/academicSessions/term-ht2025", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
 			"academicSession": AcademicSession{
 				SourcedID:  "term-ht2025",
 				Title:      "Autumn Term 2025",
@@ -159,7 +159,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	// GET /students/{studentId}/results
 	mux.HandleFunc("/ims/oneroster/gradebook/v1p2/students/p-lisa/results", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ResultsResponse{
+		json.NewEncoder(w).Encode(ResultsResponse{ // #nosec G104
 			Results: []Result{
 				{
 					SourcedID:   "r-2001",

@@ -115,7 +115,7 @@ func jwksServer(t *testing.T, set jwk.Set) (*httptest.Server, *stubCache) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(raw)
+		w.Write(raw) // #nosec G104
 	}))
 	t.Cleanup(srv.Close)
 
@@ -173,7 +173,7 @@ func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := "(api (service test-svc)(method GET)(path /health)(subject))\n"
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		RulesFile: path,
@@ -199,7 +199,7 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := "(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		Rules:     []string{"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
@@ -770,7 +770,7 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644))
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	apiAuth := model.APIAuth{
 		JWT: model.APIAuthJWT{
@@ -811,7 +811,7 @@ func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 (api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
 (api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
@@ -832,7 +832,7 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 
 # trailing comment
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
@@ -844,7 +844,7 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 func TestLoadRulesFromFile_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	require.NoError(t, os.WriteFile(path, []byte(""), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(""), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
@@ -860,7 +860,7 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 	content := `# comment one
 # comment two
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
@@ -876,7 +876,7 @@ func TestLoadRulesFromFile_InvalidLine(t *testing.T) {
 this is not valid
 (api (service test-svc)(method POST)(path /upload)(subject bob))
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{RulesFile: path}
 	_, err := buildSPOCPEngine(cfg)
@@ -896,7 +896,7 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 # Set of methods
 (api (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie))
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
@@ -920,7 +920,7 @@ func TestRulesFile_E2E_MultipleUsersAndPaths(t *testing.T) {
 (api (service test-svc)(method GET)(path /api/v1/document)(subject bob))
 (api (service test-svc)(method)(path (* prefix /api/v1/))(subject admin))
 `
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644))
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		Enable:    true,
@@ -975,7 +975,7 @@ func TestRulesFile_E2E_WildcardSubject(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "# Any authenticated user can GET /api/v1/public\n(api (service test-svc)(method GET)(path /api/v1/public)(subject (*)))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644))
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		Enable:    true,
@@ -1020,7 +1020,7 @@ func TestRulesFile_E2E_SuffixPath(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "# alice can GET any .json path\n(api (service test-svc)(method GET)(path (* suffix .json))(subject alice))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644))
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		Enable:    true,
@@ -1061,7 +1061,7 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "# alice may GET or POST but not DELETE on /api/v1/items\n(api (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject alice))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644))
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		Enable:    true,
@@ -1109,7 +1109,7 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	fileRules := "(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(fileRules), 0644))
+	require.NoError(t, os.WriteFile(rulesPath, []byte(fileRules), 0644)) // #nosec G306
 
 	cfg := model.APIAuthJWT{
 		Enable:   true,

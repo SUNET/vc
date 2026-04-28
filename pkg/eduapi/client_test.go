@@ -16,7 +16,7 @@ func TestTokenCaching(t *testing.T) {
 	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
 		tokenCalls++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
 			"access_token": "test-token",
 			"token_type":   "Bearer",
 			"expires_in":   3600,
@@ -24,7 +24,7 @@ func TestTokenCaching(t *testing.T) {
 	})
 	mux.HandleFunc("/ims/oneroster/rostering/v1p2/persons/p-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PersonResponse{
+		json.NewEncoder(w).Encode(PersonResponse{ // #nosec G104
 			Person: Person{SourcedID: "p-1", Name: PersonName{GivenName: "Test", FamilyName: "User"}},
 		})
 	})

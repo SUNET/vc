@@ -10,7 +10,7 @@ import (
 func TestClearSecrets(t *testing.T) {
 	cfg := &Cfg{
 		Common: &Common{
-			Mongo: Mongo{URI: "mongodb://user:pass@host:27017"}, //NOSONAR
+			Mongo: Mongo{URI: "mongodb://user:pass@host:27017"}, // #nosec G101
 		},
 		APIGW: &APIGW{
 			APIServer: APIServer{
@@ -205,7 +205,7 @@ func TestApplySecrets_CreatesNilSections(t *testing.T) {
 func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 	cfg := &Cfg{
 		Common: &Common{
-			Mongo: Mongo{URI: "mongodb://config-user:config-pass@host:27017"}, //NOSONAR
+			Mongo: Mongo{URI: "mongodb://config-user:config-pass@host:27017"}, // #nosec G101
 		},
 		APIGW: &APIGW{
 			APIServer: APIServer{
@@ -218,10 +218,10 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			AuthProviders: APIGWAuthProviders{
 				OIDC: OIDCRP{
 					Registration: &OIDCRPRegistrationConfig{
-						Preconfigured: &OIDCRPPreconfiguredConfig{
+						Preconfigured: &OIDCRPPreconfiguredConfig{ // #nosec G101
 							ClientSecret: "config-client-secret", //NOSONAR
 						},
-						Dynamic: &OIDCRPDynamicRegistrationConfig{
+						Dynamic: &OIDCRPDynamicRegistrationConfig{ // #nosec G101
 							Enable:             true,
 							InitialAccessToken: "config-initial-token", //NOSONAR
 						},
@@ -230,7 +230,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 			},
 		},
 		Registry: &Registry{
-			AdminGUI: AdminGUI{
+			AdminGUI: AdminGUI{ // #nosec G101
 				Password: "config-admin-pass", //NOSONAR
 			},
 		},
@@ -239,12 +239,12 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 				OIDCProvider: &OIDCOP{
 					SubjectSalt: "config-salt", //NOSONAR
 					StaticClients: []StaticOIDCClient{
-						{ClientID: "client-x", ClientSecret: "config-secret-x"}, //NOSONAR
+						{ClientID: "client-x", ClientSecret: "config-secret-x"}, // #nosec G101
 					},
 				},
 			},
 		},
-		UI: &UI{
+		UI: &UI{ // #nosec G101
 			Password: "config-ui-pass", //NOSONAR
 		},
 	}

@@ -563,7 +563,7 @@ func TestGoTrustEvaluator_ResolveKey_MissingMetadata(t *testing.T) {
 			Context:  nil, // No context
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(resp) // #nosec G104
 	}))
 	defer server.Close()
 

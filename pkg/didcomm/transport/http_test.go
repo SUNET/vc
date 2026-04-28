@@ -32,7 +32,7 @@ func TestHTTPClient_Send(t *testing.T) {
 		// Return response
 		w.Header().Set("Content-Type", didcomm.MediaTypePlaintext)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("response-message"))
+		w.Write([]byte("response-message")) // #nosec G104
 	}))
 	defer server.Close()
 

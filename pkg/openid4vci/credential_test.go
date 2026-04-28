@@ -106,7 +106,7 @@ func TestCredentialValidation(t *testing.T) {
 		},
 		{
 			name: "credential_identifier matches second authorization_details entry",
-			credentialRequest: &CredentialRequest{
+			credentialRequest: &CredentialRequest{ // #nosec G101
 				CredentialIdentifier: "cred-id-2",
 			},
 			authorizationDetails: []AuthorizationDetailsParameter{
@@ -206,7 +206,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 	}{
 		{
 			name: "resolve by credential_configuration_id",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "pid_config",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
@@ -221,7 +221,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		},
 		{
 			name: "resolve by credential_identifier",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialIdentifier: "ehic_identifier",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
@@ -251,7 +251,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		},
 		{
 			name: "error when metadata is nil",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "pid_config",
 			},
 			metadata:    nil,
@@ -290,7 +290,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		},
 		{
 			name: "resolve vc+sd-jwt format",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "vc_config",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
@@ -305,7 +305,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		},
 		{
 			name: "resolve ldp_vc format",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "ldp_config",
 			},
 			metadata: &CredentialIssuerMetadataParameters{

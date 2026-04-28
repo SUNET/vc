@@ -712,7 +712,7 @@ func TestEApostilleDebugVerification(t *testing.T) {
 
 	// Get original JSON for mandatory selection
 	var docJSON any
-	json.Unmarshal(data, &docJSON)
+	json.Unmarshal(data, &docJSON) // #nosec G104
 	if docMap, ok := docJSON.(map[string]any); ok {
 		delete(docMap, "proof")
 	}

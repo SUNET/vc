@@ -23,11 +23,11 @@ const (
 	// Public key: multicodec ed25519-pub (0xed) + 32 bytes
 	w3cPublicKeyMultibase = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
 	// Secret key: multicodec ed25519-priv (0x1300) + 32 bytes (seed only)
-	w3cSecretKeyMultibase = "z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq"
+	w3cSecretKeyMultibase = "z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq" // #nosec G101
 
 	// Common W3C @context URLs
-	w3cCredentialsContextV2  = "https://www.w3.org/ns/credentials/v2"
-	w3cCredentialsExamplesV2 = "https://www.w3.org/ns/credentials/examples/v2"
+	w3cCredentialsContextV2  = "https://www.w3.org/ns/credentials/v2" // #nosec G101
+	w3cCredentialsExamplesV2 = "https://www.w3.org/ns/credentials/examples/v2" // #nosec G101
 
 	// W3C test vector values
 	w3cTestVerificationMethod = "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"
@@ -37,10 +37,10 @@ const (
 // Expected intermediate values from the specification
 const (
 	// EXAMPLE 31: Canonical Credential without Proof
-	expectedCanonicalCredential = `{"@context":["https://www.w3.org/ns/credentials/v2","https://www.w3.org/ns/credentials/examples/v2"],"credentialSubject":{"alumniOf":"The School of Examples","id":"did:example:abcdefgh"},"description":"A minimum viable example of an Alumni Credential.","id":"urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33","issuer":"https://vc.example/issuers/5678","name":"Alumni Credential","type":["VerifiableCredential","AlumniCredential"],"validFrom":"2023-01-01T00:00:00Z"}`
+	expectedCanonicalCredential = /* #nosec G101 */ `{"@context":["https://www.w3.org/ns/credentials/v2","https://www.w3.org/ns/credentials/examples/v2"],"credentialSubject":{"alumniOf":"The School of Examples","id":"did:example:abcdefgh"},"description":"A minimum viable example of an Alumni Credential.","id":"urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33","issuer":"https://vc.example/issuers/5678","name":"Alumni Credential","type":["VerifiableCredential","AlumniCredential"],"validFrom":"2023-01-01T00:00:00Z"}`
 
 	// EXAMPLE 32: Hash of Canonical Credential without Proof (hex)
-	expectedCredentialHash = "59b7cb6251b8991add1ce0bc83107e3db9dbbab5bd2c28f687db1a03abc92f19"
+	expectedCredentialHash = "59b7cb6251b8991add1ce0bc83107e3db9dbbab5bd2c28f687db1a03abc92f19" // #nosec G101
 
 	// EXAMPLE 34: Canonical Proof Options Document
 	expectedCanonicalProofOptions = `{"@context":["https://www.w3.org/ns/credentials/v2","https://www.w3.org/ns/credentials/examples/v2"],"created":"2023-02-24T23:36:38Z","cryptosuite":"eddsa-jcs-2022","proofPurpose":"assertionMethod","type":"DataIntegrityProof","verificationMethod":"did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2"}`

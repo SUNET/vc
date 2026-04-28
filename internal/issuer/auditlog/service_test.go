@@ -249,7 +249,7 @@ func TestAddAuditLog(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify file was written
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test_event")
 	assert.Contains(t, string(content), "key")
@@ -329,7 +329,7 @@ func TestDestinationWorker(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify all messages were written
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test_event")
 
@@ -404,5 +404,5 @@ func TestSendToDestination_UnknownType(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

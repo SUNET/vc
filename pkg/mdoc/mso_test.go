@@ -154,9 +154,9 @@ func TestMSOBuilder_Build(t *testing.T) {
 		WithSigner(priv, certChain)
 
 	// Add some data elements
-	builder.AddDataElement(Namespace, "family_name", "Doe")
-	builder.AddDataElement(Namespace, "given_name", "John")
-	builder.AddDataElement(Namespace, "birth_date", "1990-01-15")
+	builder.AddDataElement(Namespace, "family_name", "Doe") // #nosec G104
+	builder.AddDataElement(Namespace, "given_name", "John") // #nosec G104
+	builder.AddDataElement(Namespace, "birth_date", "1990-01-15") // #nosec G104
 
 	signedMSO, issuerNameSpaces, err := builder.Build()
 	if err != nil {
@@ -226,7 +226,7 @@ func TestVerifyMSO(t *testing.T) {
 		WithDeviceKey(deviceKey).
 		WithSigner(priv, certChain)
 
-	builder.AddDataElement(Namespace, "family_name", "Doe")
+	builder.AddDataElement(Namespace, "family_name", "Doe") // #nosec G104
 
 	signedMSO, _, err := builder.Build()
 	if err != nil {
@@ -389,7 +389,7 @@ func TestDigestAlgorithms(t *testing.T) {
 				WithDeviceKey(deviceKey).
 				WithSigner(priv, certChain)
 
-			builder.AddDataElement(Namespace, "test", "value")
+			builder.AddDataElement(Namespace, "test", "value") // #nosec G104
 
 			_, _, err := builder.Build()
 			if err != nil {
@@ -411,9 +411,9 @@ func TestVerifyDigest(t *testing.T) {
 		WithSigner(signerKey, signerCert)
 
 	// Add some data elements
-	builder.AddDataElement(Namespace, "family_name", "Andersson")
-	builder.AddDataElement(Namespace, "given_name", "Erik")
-	builder.AddDataElement(Namespace, "birth_date", "1990-03-15")
+	builder.AddDataElement(Namespace, "family_name", "Andersson") // #nosec G104
+	builder.AddDataElement(Namespace, "given_name", "Erik") // #nosec G104
+	builder.AddDataElement(Namespace, "birth_date", "1990-03-15") // #nosec G104
 
 	signedMSO, issuerNameSpaces, err := builder.Build()
 	if err != nil {
@@ -466,7 +466,7 @@ func TestVerifyDigest_InvalidItem(t *testing.T) {
 		WithDeviceKey(deviceKey).
 		WithSigner(signerKey, signerCert)
 
-	builder.AddDataElement(Namespace, "family_name", "Andersson")
+	builder.AddDataElement(Namespace, "family_name", "Andersson") // #nosec G104
 
 	signedMSO, _, err := builder.Build()
 	if err != nil {

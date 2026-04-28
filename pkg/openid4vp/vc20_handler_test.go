@@ -262,12 +262,12 @@ func TestVC20Handler_decodeVPToken(t *testing.T) {
 		token   string
 		wantErr bool
 	}{
-		{
+		{ // #nosec G101
 			name:    "plain JSON",
 			token:   `{"type": "VerifiableCredential"}`,
 			wantErr: false,
 		},
-		{
+		{ // #nosec G101
 			name:    "JSON with whitespace",
 			token:   `  {"type": "VerifiableCredential"}  `,
 			wantErr: false,

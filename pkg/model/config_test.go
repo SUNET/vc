@@ -34,7 +34,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write RSA private key to file in PKCS8 format
 	rsaKeyPath = filepath.Join(tmpDir, "test_rsa_key.pem")
-	rsaKeyFile, err := os.Create(rsaKeyPath)
+	rsaKeyFile, err := os.Create(rsaKeyPath) // #nosec G304
 	assert.NoError(t, err)
 	defer rsaKeyFile.Close()
 
@@ -68,7 +68,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write RSA certificate to file
 	rsaCertPath = filepath.Join(tmpDir, "test_rsa_cert.pem")
-	rsaCertFile, err := os.Create(rsaCertPath)
+	rsaCertFile, err := os.Create(rsaCertPath) // #nosec G304
 	assert.NoError(t, err)
 	defer rsaCertFile.Close()
 
@@ -85,7 +85,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write EC private key to file in PKCS8 format
 	ecKeyPath = filepath.Join(tmpDir, "test_ec_key.pem")
-	ecKeyFile, err := os.Create(ecKeyPath)
+	ecKeyFile, err := os.Create(ecKeyPath) // #nosec G304
 	assert.NoError(t, err)
 	defer ecKeyFile.Close()
 
@@ -119,7 +119,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write EC certificate to file
 	ecCertPath = filepath.Join(tmpDir, "test_ec_cert.pem")
-	ecCertFile, err := os.Create(ecCertPath)
+	ecCertFile, err := os.Create(ecCertPath) // #nosec G304
 	assert.NoError(t, err)
 	defer ecCertFile.Close()
 
@@ -504,7 +504,7 @@ func TestOAuthServerLoadAndSignMetadata(t *testing.T) {
 	}{
 		{
 			name: "Runtime-generated metadata",
-			server: OAuthServer{
+			server: OAuthServer{ // #nosec G101
 				TokenEndpoint: "https://test.oauth.example.com/token",
 			},
 			issuerURL: "https://test.oauth.example.com",

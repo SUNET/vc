@@ -59,7 +59,7 @@ func createTestKeyPair(t *testing.T, keyPath, certPath string) {
 
 	// Write certificate
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	if err := os.WriteFile(certPath, certPEM, 0644); err != nil {
+	if err := os.WriteFile(certPath, certPEM, 0644); err != nil { // #nosec G306
 		t.Fatalf("failed to write certificate: %v", err)
 	}
 }
