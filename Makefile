@@ -626,6 +626,14 @@ gen-config-docs: build-gen-config-docs ## Generate configuration reference docum
 	$(info Generating docs/CONFIGURATION.md)
 	./bin/gen_config_docs
 
+build-gen-bootstrap: ## Build gen_bootstrap tool
+	$(info Building gen_bootstrap)
+	$(CGO_ENABLED_STATIC) go build $(BUILD_FLAGS) -o ./bin/gen_bootstrap ./developer_tools/scripts/gen_bootstrap/
+
+gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAML source
+	$(info Generating bootstrapping/*.json from developer_tools/scripts/gen_bootstrap/users_paris.yaml)
+	./bin/gen_bootstrap developer_tools/scripts/gen_bootstrap/users_paris.yaml bootstrapping
+
 install-tools: ## Install required development tools
 	$(info Installing from apt)
 	apt-get update && apt-get install -y \
