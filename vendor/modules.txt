@@ -38,11 +38,6 @@ github.com/beorn7/perks/quantile
 ## explicit; go 1.21
 github.com/brianvoe/gofakeit/v6
 github.com/brianvoe/gofakeit/v6/data
-# github.com/brianvoe/gofakeit/v7 v7.14.1
-## explicit; go 1.22
-github.com/brianvoe/gofakeit/v7
-github.com/brianvoe/gofakeit/v7/data
-github.com/brianvoe/gofakeit/v7/source
 # github.com/bytedance/gopkg v0.1.4
 ## explicit; go 1.18
 github.com/bytedance/gopkg/lang/dirtmake
@@ -675,12 +670,6 @@ github.com/quic-go/quic-go/quicvarint
 # github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9
 ## explicit
 github.com/rcrowley/go-metrics
-# github.com/richardlehane/mscfb v1.0.6
-## explicit; go 1.18
-github.com/richardlehane/mscfb
-# github.com/richardlehane/msoleps v1.0.6
-## explicit
-github.com/richardlehane/msoleps/types
 # github.com/russellhaering/goxmldsig v1.6.0
 ## explicit; go 1.23.0
 github.com/russellhaering/goxmldsig
@@ -760,9 +749,6 @@ github.com/testcontainers/testcontainers-go/internal/core
 github.com/testcontainers/testcontainers-go/internal/core/network
 github.com/testcontainers/testcontainers-go/log
 github.com/testcontainers/testcontainers-go/wait
-# github.com/tiendc/go-deepcopy v1.7.2
-## explicit; go 1.18
-github.com/tiendc/go-deepcopy
 # github.com/tklauser/go-sysconf v0.3.12
 ## explicit; go 1.13
 github.com/tklauser/go-sysconf
@@ -807,15 +793,6 @@ github.com/xdg-go/scram
 # github.com/xdg-go/stringprep v1.0.4
 ## explicit; go 1.11
 github.com/xdg-go/stringprep
-# github.com/xuri/efp v0.0.1
-## explicit; go 1.11
-github.com/xuri/efp
-# github.com/xuri/excelize/v2 v2.10.1
-## explicit; go 1.24.0
-github.com/xuri/excelize/v2
-# github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9
-## explicit; go 1.15
-github.com/xuri/nfp
 # github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78
 ## explicit; go 1.17
 github.com/youmark/pkcs8
@@ -990,9 +967,6 @@ golang.org/x/mod/semver
 # golang.org/x/net v0.53.0
 ## explicit; go 1.25.0
 golang.org/x/net/bpf
-golang.org/x/net/html
-golang.org/x/net/html/atom
-golang.org/x/net/html/charset
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/h2c
@@ -1027,16 +1001,6 @@ golang.org/x/sys/windows/registry
 # golang.org/x/text v0.36.0
 ## explicit; go 1.25.0
 golang.org/x/text/cases
-golang.org/x/text/encoding
-golang.org/x/text/encoding/charmap
-golang.org/x/text/encoding/htmlindex
-golang.org/x/text/encoding/internal
-golang.org/x/text/encoding/internal/identifier
-golang.org/x/text/encoding/japanese
-golang.org/x/text/encoding/korean
-golang.org/x/text/encoding/simplifiedchinese
-golang.org/x/text/encoding/traditionalchinese
-golang.org/x/text/encoding/unicode
 golang.org/x/text/feature/plural
 golang.org/x/text/internal
 golang.org/x/text/internal/catmsg
@@ -1046,11 +1010,9 @@ golang.org/x/text/internal/language/compact
 golang.org/x/text/internal/number
 golang.org/x/text/internal/stringset
 golang.org/x/text/internal/tag
-golang.org/x/text/internal/utf8internal
 golang.org/x/text/language
 golang.org/x/text/message
 golang.org/x/text/message/catalog
-golang.org/x/text/runes
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
