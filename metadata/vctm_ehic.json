@@ -11,14 +11,14 @@
       "rendering": {
          "simple": {
           "logo": {
-            "uri": "https://demo-issuer.wwwallet.org/public/creds/ehic/european-health-insurance-card-svg-dc4eu-01.svg",
-            "uri#integrity": "sha256-kIV+WWH0aFROnkfy5gqx/cRivRNkCrkNBMgHgysNrn0="
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/ehic_v1.svg",
+            "uri#integrity": "sha256-coY+9dkr9M27l4ATJU+bTIt3hCMuZ9owr7MtX35WzYw="
           }
         },
         "svg_templates": [
           {
-            "uri": "https://demo-issuer.wwwallet.org/public/creds/ehic/european-health-insurance-card-svg-dc4eu-01.svg",
-            "uri#integrity": "sha256-kIV+WWH0aFROnkfy5gqx/cRivRNkCrkNBMgHgysNrn0=",
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/ehic_v1.svg",
+            "uri#integrity": "sha256-coY+9dkr9M27l4ATJU+bTIt3hCMuZ9owr7MtX35WzYw=",
             "properties": {
               "orientation": "landscape",
               "color_scheme": "light",

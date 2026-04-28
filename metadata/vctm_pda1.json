@@ -11,14 +11,14 @@
       "rendering": {
          "simple": {
           "logo": {
-            "uri": "https://demo-issuer.wwwallet.org/public/creds/pda1/portable-document-a1-svg-dc4eu-01.svg",
-            "uri#integrity": "sha256-Gkrm6M7doRcaQNTFUQJ8U2a+qqZTmNNo28yTAQN2tj4="
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/pda1_v1.svg",
+            "uri#integrity": "sha256-V1pbosE4Lg/tmPCmiBaN5P+3F9zmljujJPdF70aT1go="
           }
         },
         "svg_templates": [
           {
-            "uri": "https://demo-issuer.wwwallet.org/public/creds/pda1/portable-document-a1-svg-dc4eu-01.svg",
-            "uri#integrity": "sha256-Gkrm6M7doRcaQNTFUQJ8U2a+qqZTmNNo28yTAQN2tj4=",
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/pda1_v1.svg",
+            "uri#integrity": "sha256-V1pbosE4Lg/tmPCmiBaN5P+3F9zmljujJPdF70aT1go=",
             "properties": {
               "orientation": "landscape",
               "color_scheme": "light",
