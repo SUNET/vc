@@ -211,11 +211,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Extract VP Token from the map using the credential query ID
-	vpToken, ok := vpResponse.VPToken[credQueryID]
-	if !ok {
+	vpTokens, ok := vpResponse.VPToken[credQueryID]
+	if !ok || len(vpTokens) == 0 {
 		c.log.Error(nil, "VP Token not found for credential query", "query_id", credQueryID, "available_keys", vpResponse.VPToken)
 		return nil, fmt.Errorf("VP Token not found for credential query: %s", credQueryID)
 	}
+	vpToken := vpTokens[0]
 
 	// Prepare response parameters
 	responseParams := &openid4vp.ResponseParameters{
