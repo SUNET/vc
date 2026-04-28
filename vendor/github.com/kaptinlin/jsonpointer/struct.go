@@ -44,21 +44,17 @@ func getStructFields(t reflect.Type) structFields {
 	}
 
 	fields := make(structFields)
-	numField := t.NumField()
-
-	for i := range numField {
-		field := t.Field(i)
-
+	for field := range t.Fields() {
 		if !field.IsExported() {
 			continue
 		}
 
-		name := getFieldName(field)
+		name := getFieldName(&field)
 		if name == "-" {
 			continue
 		}
 
-		fields[name] = i
+		fields[name] = field.Index[0]
 	}
 
 	structFieldsCache.Store(t, fields)
@@ -67,7 +63,7 @@ func getStructFields(t reflect.Type) structFields {
 
 // getFieldName extracts the JSON name from a struct field.
 // Supports basic JSON tags and falls back to the field name.
-func getFieldName(field reflect.StructField) string {
+func getFieldName(field *reflect.StructField) string {
 	tag := field.Tag.Get("json")
 	if tag == "" {
 		return field.Name
@@ -77,6 +73,5 @@ func getFieldName(field reflect.StructField) string {
 	if name != "" {
 		return name
 	}
-
 	return field.Name
 }

@@ -29,6 +29,8 @@ pre-commit:
 
     - name: markdownlint
       glob: "*.md"
+      exclude:
+        - ".research/**/*.md"
       run: markdownlint-cli2 {staged_files}
 
     - name: yamllint

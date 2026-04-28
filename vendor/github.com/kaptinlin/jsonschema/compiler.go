@@ -129,8 +129,7 @@ func (c *Compiler) Compile(jsonSchema []byte, uris ...string) (*Schema, error) {
 	var schemasToResolve []*Schema
 	if schema.uri != "" {
 		if waitingSchemas, exists := c.unresolvedRefs[schema.uri]; exists {
-			schemasToResolve = make([]*Schema, len(waitingSchemas))
-			copy(schemasToResolve, waitingSchemas)
+			schemasToResolve = slices.Clone(waitingSchemas)
 			delete(c.unresolvedRefs, schema.uri) // Clear the waiting list
 		}
 	}
@@ -180,7 +179,7 @@ func (c *Compiler) resolveSchemaURL(url string) (*Schema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading schema from %s: %w", url, err)
 	}
-	defer body.Close() //nolint:errcheck
+	defer func() { _ = body.Close() }()
 
 	data, err := io.ReadAll(body)
 	if err != nil {
@@ -349,7 +348,7 @@ func (c *Compiler) setupLoaders() {
 // until all schemas are compiled. This is the most efficient approach when you have
 // many schemas with interdependencies.
 func (c *Compiler) CompileBatch(schemas map[string][]byte) (map[string]*Schema, error) {
-	compiledSchemas := make(map[string]*Schema)
+	compiledSchemas := make(map[string]*Schema, len(schemas))
 
 	// First pass: compile all schemas without resolving references
 	for id, schemaBytes := range schemas {

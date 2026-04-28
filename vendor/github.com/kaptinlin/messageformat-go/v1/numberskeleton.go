@@ -166,21 +166,17 @@ func NewTokenParser(onError func(error)) *TokenParser {
 //	  return parser.skeleton;
 //	}
 func ParseNumberSkeleton(src string, onError ...func(error)) (Skeleton, error) {
+	var firstErr error
 	var errorHandler func(error)
 	if len(onError) > 0 && onError[0] != nil {
 		errorHandler = onError[0]
 	} else {
-		// Default error handler - collect errors and return at the end
-		var errors []error
+		// Default error handler collects the first error and returns it normally.
 		errorHandler = func(err error) {
-			errors = append(errors, err)
-		}
-		defer func() {
-			if len(errors) > 0 {
-				// Return first error if any
-				panic(errors[0])
+			if firstErr == nil {
+				firstErr = err
 			}
-		}()
+		}
 	}
 
 	parser := NewTokenParser(errorHandler)
@@ -195,6 +191,9 @@ func ParseNumberSkeleton(src string, onError ...func(error)) (Skeleton, error) {
 		}
 	}
 
+	if firstErr != nil {
+		return Skeleton{}, firstErr
+	}
 	return parser.skeleton, nil
 }
 

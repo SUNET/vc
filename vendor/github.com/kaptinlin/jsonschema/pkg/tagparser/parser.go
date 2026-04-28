@@ -79,16 +79,17 @@ func (p *TagParser) parseFields(structType reflect.Type, seenTypes map[string]in
 			continue
 		}
 
-		if field.Anonymous {
+		currentField := field
+		if currentField.Anonymous {
 			// Handle embedded struct
-			embeddedFields, err := p.parseEmbeddedField(field, seenTypes, depth)
+			embeddedFields, err := p.parseEmbeddedField(&currentField, seenTypes, depth)
 			if err != nil {
 				continue // Skip problematic embedded types gracefully
 			}
 			allFields = append(allFields, embeddedFields...)
 		} else {
 			// Handle regular field
-			fieldInfo := p.parseRegularField(field, depth)
+			fieldInfo := p.parseRegularField(&currentField, depth)
 			if fieldInfo != nil {
 				allFields = append(allFields, *fieldInfo)
 			}
@@ -99,7 +100,7 @@ func (p *TagParser) parseFields(structType reflect.Type, seenTypes map[string]in
 }
 
 // parseEmbeddedField processes embedded struct fields
-func (p *TagParser) parseEmbeddedField(field reflect.StructField, seenTypes map[string]int, depth int) ([]FieldInfo, error) {
+func (p *TagParser) parseEmbeddedField(field *reflect.StructField, seenTypes map[string]int, depth int) ([]FieldInfo, error) {
 	fieldType := field.Type
 
 	// Handle pointer to struct
@@ -136,7 +137,7 @@ func (p *TagParser) parseEmbeddedField(field reflect.StructField, seenTypes map[
 }
 
 // parseRegularField processes regular (non-embedded) fields
-func (p *TagParser) parseRegularField(field reflect.StructField, depth int) *FieldInfo {
+func (p *TagParser) parseRegularField(field *reflect.StructField, depth int) *FieldInfo {
 	// Skip fields with jsonschema:"-" tag
 	jsonschemaTag := field.Tag.Get(p.tagName)
 	if jsonschemaTag == "-" {
@@ -147,11 +148,12 @@ func (p *TagParser) parseRegularField(field reflect.StructField, depth int) *Fie
 	fieldInfo := FieldInfo{
 		Name:           field.Name,
 		Type:           field.Type,
-		TypeName:       getFieldTypeName(field.Type),
+		TypeName:       typeToString(field.Type),
 		JSONName:       getJSONFieldName(field),
 		Tag:            jsonschemaTag,
 		EmbeddingDepth: depth,
 		IsPromoted:     depth > 0,
+		Optional:       field.Type.Kind() == reflect.Pointer,
 	}
 
 	// Parse validation rules from tag
@@ -162,12 +164,14 @@ func (p *TagParser) parseRegularField(field reflect.StructField, depth int) *Fie
 		}
 		fieldInfo.Rules = rules
 
-		// Check for special rules
-		fieldInfo.Required = hasRule(rules, "required")
+		for _, rule := range rules {
+			if rule.Name == "required" {
+				fieldInfo.Required = true
+				fieldInfo.Optional = false
+				break
+			}
+		}
 	}
-
-	// Determine if field should be optional
-	fieldInfo.Optional = shouldBeOptional(field, fieldInfo.Required)
 
 	return &fieldInfo
 }
@@ -177,8 +181,8 @@ func (p *TagParser) resolveFieldConflicts(fields []FieldInfo) []FieldInfo {
 	fieldMap := make(map[string][]FieldInfo)
 
 	// Group fields by JSON name
-	for _, field := range fields {
-		fieldMap[field.JSONName] = append(fieldMap[field.JSONName], field)
+	for i := range fields {
+		fieldMap[fields[i].JSONName] = append(fieldMap[fields[i].JSONName], fields[i])
 	}
 
 	resolved := make([]FieldInfo, 0, len(fields))
@@ -191,13 +195,14 @@ func (p *TagParser) resolveFieldConflicts(fields []FieldInfo) []FieldInfo {
 		// Apply Go's field promotion rules:
 		// 1. Shallowest depth wins
 		// 2. Among same depth, first declared wins
-		winner := candidates[0]
-		for _, candidate := range candidates[1:] {
+		winner := &candidates[0]
+		for i := 1; i < len(candidates); i++ {
+			candidate := &candidates[i]
 			if candidate.EmbeddingDepth < winner.EmbeddingDepth {
 				winner = candidate
 			}
 		}
-		resolved = append(resolved, winner)
+		resolved = append(resolved, *winner)
 	}
 
 	return resolved
@@ -421,14 +426,13 @@ func isValidRuleName(name string) bool {
 // needsCommaSeparation determines if a rule should split its parameters by commas
 func needsCommaSeparation(ruleName string) bool {
 	commaSeparatedRules := map[string]bool{
-		"allOf":             true, // allOf=BaseUser,AdminUser,ExtendedUser
-		"anyOf":             true, // anyOf=EmailContact,PhoneContact
-		"oneOf":             true, // oneOf=Individual,Company
-		"prefixItems":       true, // prefixItems=string,number,boolean
-		"dependentRequired": true, // dependentRequired=field1,field2,field3
-		"dependentSchemas":  true, // dependentSchemas=property,SchemaType
-		"patternProperties": true, // patternProperties=^pattern_,string
-		// Note: contains typically takes only one schema, so not included here
+		"allOf":             true,
+		"anyOf":             true,
+		"oneOf":             true,
+		"prefixItems":       true,
+		"dependentRequired": true,
+		"dependentSchemas":  true,
+		"patternProperties": true,
 	}
 	return commaSeparatedRules[ruleName]
 }
@@ -436,8 +440,8 @@ func needsCommaSeparation(ruleName string) bool {
 // needsSpaceSeparation determines if a rule should split its parameters by spaces
 func needsSpaceSeparation(ruleName string) bool {
 	spaceSeparatedRules := map[string]bool{
-		"enum":     true, // enum=red green blue
-		"examples": true, // examples=john@example.com jane@example.com
+		"enum":     true,
+		"examples": true,
 	}
 	return spaceSeparatedRules[ruleName]
 }
@@ -453,7 +457,7 @@ func unescapeString(s string) string {
 }
 
 // getJSONFieldName extracts JSON field name from struct field
-func getJSONFieldName(field reflect.StructField) string {
+func getJSONFieldName(field *reflect.StructField) string {
 	jsonTag := field.Tag.Get("json")
 	if jsonTag == "" {
 		return field.Name
@@ -475,37 +479,6 @@ func getJSONFieldName(field reflect.StructField) string {
 	}
 
 	return field.Name
-}
-
-// hasRule checks if a rule with given name exists in rules slice
-func hasRule(rules []TagRule, name string) bool {
-	for _, rule := range rules {
-		if rule.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// shouldBeOptional determines if a field should be optional based on type and rules
-func shouldBeOptional(field reflect.StructField, required bool) bool {
-	// If explicitly required, not optional
-	if required {
-		return false
-	}
-
-	// Pointer types are optional by default (unless required)
-	if field.Type.Kind() == reflect.Pointer {
-		return true
-	}
-
-	// Non-pointer types are not optional by default
-	return false
-}
-
-// getFieldTypeName converts a reflect.Type to a string representation for code generation
-func getFieldTypeName(fieldType reflect.Type) string {
-	return typeToString(fieldType)
 }
 
 // typeToString converts a reflect.Type to its string representation
