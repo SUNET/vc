@@ -90,10 +90,19 @@ func NewErrorDetailsWithStatus(title string, err any, httpStatus int) *Error {
 	return &Error{Title: title, Err: err, HTTPStatus: httpStatus}
 }
 
-// NewErrorFromError creates a new Error from an error
-func NewErrorFromError(err error) *Error {
-	if err == nil {
+// NewErrorFromError creates a new Error from an error or evaluation result
+func NewErrorFromError(v any) *Error {
+	if v == nil {
 		return nil
+	}
+
+	if vErr, ok := v.(*jsonschema.EvaluationResult); ok {
+		return &Error{Title: "document_data_schema_error", Err: formatValidationErrorsDocumentData(vErr)}
+	}
+
+	err, ok := v.(error)
+	if !ok {
+		return NewErrorDetails("internal_server_error", fmt.Sprintf("%+v", v))
 	}
 
 	if pbErr, ok := err.(*Error); ok {
@@ -109,9 +118,7 @@ func NewErrorFromError(err error) *Error {
 	if validatorErr, ok := err.(validator.ValidationErrors); ok {
 		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
 	}
-	if vErr, ok := err.(*jsonschema.EvaluationResult); ok {
-		return &Error{Title: "document_data_schema_error", Err: formatValidationErrorsDocumentData(vErr)}
-	}
+
 	if errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, ErrNoDocumentFound) {
 		return &Error{Title: "database_error", Err: ErrNoDocumentFound}
 	}
@@ -158,7 +165,6 @@ func formatValidationErrorsDocumentData(err *jsonschema.EvaluationResult) []map[
 		return reply[i]["location"].(string) < reply[j]["location"].(string)
 	})
 
-	fmt.Println("SORTTED!!!!! reply", reply)
 	return reply
 }
 
