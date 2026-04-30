@@ -118,11 +118,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
 	}
 
-	if !dpop.IsAccessTokenDPoP(req.HashAuthorizeToken()) {
+	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
+
+	if !dpop.IsAccessTokenDPoP(accessToken) {
 		return nil, errors.New("invalid DPoP token")
 	}
-
-	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
 
 	authContext, err := c.cacheService.AuthContext.GetWithAccessToken(ctx, accessToken)
 	if err != nil {
