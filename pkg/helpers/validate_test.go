@@ -33,7 +33,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 					{
 						"field":           "schema",
@@ -41,7 +40,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "ptr",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           (*model.IdentitySchema)(nil),
 					},
 					{
 						"field":           "family_name",
@@ -49,7 +47,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 					{
 						"field":           "given_name",
@@ -57,7 +54,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 					{
 						"field":           "birth_date",
@@ -65,7 +61,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 				},
 			},
@@ -150,7 +145,6 @@ func TestStruct(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 				},
 			},

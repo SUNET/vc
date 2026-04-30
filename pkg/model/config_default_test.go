@@ -40,7 +40,7 @@ func TestKafkaDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, cfg.Enable)
-	assert.Equal(t, []string{"kafka0:9092", "kafka1:9092"}, cfg.Brokers)
+	assert.Nil(t, cfg.Brokers)
 }
 
 func TestCredentialOfferQRConfigDefaults(t *testing.T) {

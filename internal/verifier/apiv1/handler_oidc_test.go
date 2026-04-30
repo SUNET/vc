@@ -2092,8 +2092,7 @@ func TestProcessDirectPost(t *testing.T) {
 				s.RedirectURI = "https://client.example.com/callback"
 				s.State = "client-state"
 			},
-			expectError:    false,
-			expectedStatus: cache.SessionStatusCodeIssued,
+			expectError:    true,
 		},
 		{ // #nosec G101
 			name:                   "direct post with presentation submission",

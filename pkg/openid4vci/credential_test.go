@@ -235,7 +235,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "fallback to dc+sd-jwt for unknown credential_identifier",
+			name: "error for unknown credential_identifier",
 			request: &CredentialRequest{
 				CredentialIdentifier: "unknown_identifier",
 			},
@@ -246,8 +246,8 @@ func TestResolveCredentialFormat(t *testing.T) {
 					},
 				},
 			},
-			wantFormat: "dc+sd-jwt",
-			wantErr:    false,
+			wantErr:     true,
+			errContains: "could not resolve credential_identifier",
 		},
 		{
 			name: "error when metadata is nil",
