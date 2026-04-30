@@ -223,7 +223,10 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 	token, err := jwtv5.ParseWithClaims(string(p), claims, func(token *jwtv5.Token) (any, error) {
 		// Check if algorithm is supported (runtime option, not covered by struct validation)
 		if opts != nil && len(opts.SupportedAlgorithms) > 0 {
-			alg := token.Header["alg"].(string)
+			alg, ok := token.Header["alg"].(string)
+			if !ok {
+				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
+			}
 			if !slices.Contains(opts.SupportedAlgorithms, alg) {
 				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
 			}

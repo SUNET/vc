@@ -1,5 +1,7 @@
 package eduapi
 
+import "strings"
+
 // Flatten converts a Person into a flat map suitable for claim transformation.
 func (p *Person) Flatten() map[string]any {
 	m := map[string]any{
@@ -37,7 +39,9 @@ func (p *Person) Flatten() map[string]any {
 	}
 	// Flatten identifiers by type
 	for _, id := range p.Identifiers {
-		m["identifier."+id.IdentifierType] = id.Identifier
+		// Replace dots in IdentifierType to avoid ambiguous nested key paths
+		safeType := strings.ReplaceAll(id.IdentifierType, ".", "_")
+		m["identifier."+safeType] = id.Identifier
 	}
 	return m
 }

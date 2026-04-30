@@ -140,7 +140,6 @@ func formatValidationErrors(err validator.ValidationErrors) []map[string]any {
 			"type":            e.Kind().String(),
 			"validation":      e.Tag(),
 			"validationParam": e.Param(),
-			"value":           e.Value(),
 		})
 	}
 	return v

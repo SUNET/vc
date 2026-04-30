@@ -16,13 +16,10 @@ import (
 // HashAuthorizeToken hashes the Authorization header using SHA-256 and encodes it in Base64 URL format.
 func (c *CredentialRequest) HashAuthorizeToken() string {
 	token := strings.TrimPrefix(c.Authorization, "DPoP ")
-	fmt.Println("Token: ", token)
 
 	tokenS256 := sha256.Sum256([]byte(token))
-	fmt.Printf("Token SHA256: %x\n", tokenS256)
 
 	b64 := base64.RawURLEncoding.EncodeToString(tokenS256[:])
-	fmt.Println("Base64 Raw Encoded Token SHA256: ", b64)
 	return b64
 }
 
@@ -261,9 +258,7 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialIdentifier]; ok {
 				return config.Format, nil
 			}
-			// If not found directly, we need the authorization context to resolve credential_identifier
-			// For now, default to dc+sd-jwt as a fallback
-			return "dc+sd-jwt", nil
+			return "", fmt.Errorf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)
 		}
 		return "", fmt.Errorf("unknown credential_identifier: %s", req.CredentialIdentifier)
 	}

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"regexp"
 
 	"github.com/SUNET/vc/pkg/logger"
 
@@ -84,10 +85,10 @@ func (c *CredentialSubjectsColl) Search(ctx context.Context, firstName, lastName
 
 	filter := bson.M{}
 	if firstName != "" {
-		filter["first_name"] = bson.M{"$regex": firstName, "$options": "i"} // Case-insensitive
+		filter["first_name"] = bson.M{"$regex": regexp.QuoteMeta(firstName), "$options": "i"} // Case-insensitive
 	}
 	if lastName != "" {
-		filter["last_name"] = bson.M{"$regex": lastName, "$options": "i"} // Case-insensitive
+		filter["last_name"] = bson.M{"$regex": regexp.QuoteMeta(lastName), "$options": "i"} // Case-insensitive
 	}
 	if dateOfBirth != "" {
 		filter["date_of_birth"] = dateOfBirth

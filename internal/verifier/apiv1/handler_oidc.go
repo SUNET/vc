@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -414,8 +413,15 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 		"nonce": authCtx.Nonce,
 	}
 
-	// Add verified claims
-	maps.Copy(claims, authCtx.VerifiedClaims)
+	// Add verified claims, but never overwrite reserved OIDC claims
+	for k, v := range authCtx.VerifiedClaims {
+		switch k {
+		case "iss", "sub", "aud", "exp", "iat", "nonce":
+			continue
+		default:
+			claims[k] = v
+		}
+	}
 
 	// Use jose.MakeJWT to sign with pki.Signer
 	header := jwt.MapClaims{
@@ -612,14 +618,13 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 	// Check if this is a DC API response (encrypted JWT) or standard form-encoded
 	if req.Response != "" {
-		// DC API response - decrypt and extract vp_token
+		// DC API response - should be an encrypted JWT (JWE)
 		c.log.Debug("Processing DC API encrypted response", "state", req.State)
 
-		// TODO: Implement JWT decryption using OIDC keys
-		// For now, treat response as the vp_token
-		vpToken = req.Response
-
-		c.log.Info("DC API response decryption not yet implemented, treating response as vp_token")
+		// TODO: Implement JWT decryption using session ephemeral keys
+		// The response parameter contains a JWE that must be decrypted before use.
+		c.log.Error(nil, "DC API response decryption not yet implemented")
+		return nil, fmt.Errorf("DC API encrypted response handling not yet implemented")
 	} else if req.VPToken != "" {
 		// Standard direct_post with form-encoded parameters
 		vpToken = req.VPToken
@@ -948,8 +953,13 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 		"sub": subject,
 	}
 
-	// Add verified claims from VP
-	maps.Copy(response, session.VerifiedClaims)
+	// Add verified claims from VP, but never overwrite sub
+	for k, v := range session.VerifiedClaims {
+		if k == "sub" {
+			continue
+		}
+		response[k] = v
+	}
 
 	return response, nil
 }

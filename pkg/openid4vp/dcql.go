@@ -169,7 +169,7 @@ func IsW3CVCFormatIdentifier(format string) bool {
 }
 
 // IsSDJWTFormatIdentifier returns true if the format identifier is SD-JWT VC format.
-// Note: This is different from IsSDJWTFormat in sdjwt_handler.go which checks the actual token format.
+// Note: This is different from sdjwtvc.IsSDJWTFormat which checks the actual token format.
 func IsSDJWTFormatIdentifier(format string) bool {
 	return format == FormatSDJWTVC
 }

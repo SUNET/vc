@@ -23,6 +23,7 @@ func TestFlattenPerson(t *testing.T) {
 		},
 		Identifiers: []IdentifierEntry{
 			{IdentifierType: "personnummer", Identifier: "199001011234"},
+			{IdentifierType: "org.eppn", Identifier: "lisa@uni.se"},
 		},
 		Demographics: &Demographics{
 			BirthDate: "1990-01-01",
@@ -40,6 +41,7 @@ func TestFlattenPerson(t *testing.T) {
 		"phone":                   "+46701234567",
 		"birthDate":               "1990-01-01",
 		"identifier.personnummer": "199001011234",
+		"identifier.org_eppn":     "lisa@uni.se",
 	}
 
 	for key, want := range expected {

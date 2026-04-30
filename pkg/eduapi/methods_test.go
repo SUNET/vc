@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 )
 
@@ -188,12 +190,16 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 		t.Fatal(err)
 	}
 
-	client := NewClient(ClientConfig{
+	client, err := NewClient(ClientConfig{
 		BaseURL:      srv.URL,
 		TokenURL:     srv.URL + "/oauth2/token",
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
+		TokenCache:   cache.NewMemoryCache[string](1 * time.Hour),
 	}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	return srv, client
 }

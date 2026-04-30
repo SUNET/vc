@@ -1,5 +1,4 @@
-// Package openid4vp provides OpenID4VP protocol support including mdoc credential handling.
-package openid4vp
+package mdoc
 
 import (
 	"context"
@@ -8,13 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/trust"
 )
 
 // MDocHandler handles mdoc format credentials in OpenID4VP flows.
 type MDocHandler struct {
-	verifier       *mdoc.Verifier
+	verifier       *Verifier
 	trustEvaluator trust.TrustEvaluator
 }
 
@@ -31,7 +29,7 @@ func WithMDocTrustEvaluator(te trust.TrustEvaluator) MDocHandlerOption {
 }
 
 // WithMDocVerifier sets a pre-configured verifier.
-func WithMDocVerifier(v *mdoc.Verifier) MDocHandlerOption {
+func WithMDocVerifier(v *Verifier) MDocHandlerOption {
 	return func(h *MDocHandler) {
 		h.verifier = v
 	}
@@ -52,7 +50,7 @@ func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 			return nil, errors.New("either TrustEvaluator or pre-configured Verifier is required")
 		}
 		var err error
-		h.verifier, err = mdoc.NewVerifier(mdoc.VerifierConfig{
+		h.verifier, err = NewVerifier(VerifierConfig{
 			TrustEvaluator: h.trustEvaluator,
 		})
 		if err != nil {
@@ -77,7 +75,7 @@ func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MD
 	}
 
 	// Parse the DeviceResponse
-	deviceResponse, err := mdoc.DecodeDeviceResponse(data)
+	deviceResponse, err := DecodeDeviceResponse(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
 	}
@@ -134,7 +132,7 @@ func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 			claims[qualifiedKey] = value
 
 			// Also add unqualified name for the primary namespace
-			if ns == mdoc.Namespace {
+			if ns == Namespace {
 				claims[key] = value
 			}
 		}
@@ -143,7 +141,7 @@ func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 }
 
 // extractDocumentClaims extracts claims from a verified document.
-func (h *MDocHandler) extractDocumentClaims(doc *mdoc.Document) (*MDocDocumentClaims, error) {
+func (h *MDocHandler) extractDocumentClaims(doc *Document) (*MDocDocumentClaims, error) {
 	claims := &MDocDocumentClaims{
 		DocType:    doc.DocType,
 		Namespaces: make(map[string]map[string]any),
@@ -201,7 +199,7 @@ func ExtractMDocClaims(vpToken string) (map[string]any, error) {
 	}
 
 	// Parse the DeviceResponse
-	deviceResponse, err := mdoc.DecodeDeviceResponse(data)
+	deviceResponse, err := DecodeDeviceResponse(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
 	}
@@ -220,7 +218,7 @@ func ExtractMDocClaims(vpToken string) (map[string]any, error) {
 				claims[qualifiedKey] = item.ElementValue
 
 				// Add unqualified for primary namespace
-				if ns == mdoc.Namespace {
+				if ns == Namespace {
 					claims[item.ElementIdentifier] = item.ElementValue
 				}
 			}

@@ -104,6 +104,11 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	}
 	c.log.Debug("Authorization", "state", authorizationContext.State)
 
+	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
+		c.log.Debug("Authorization context expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
+
 	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
@@ -153,6 +158,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
+	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
+		c.log.Debug("Authorization context expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
+
 	// Verify PKCE code_challenge (for all clients that provided one)
 	if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
 		c.log.Error(err, "PKCE validation failed")
@@ -200,24 +210,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
-	jti, err := oauth2.ExtractJTI(req.DPOP)
-	if err != nil {
-		c.log.Error(err, "failed to extract JTI from DPoP")
-		return nil, err
-	}
-
-	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
-		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
-		return nil, oauth2.ErrJTIReplay
-	}
-
+	// Validate DPoP JWT signature and claims first, before checking JTI replay.
+	// This prevents attackers from poisoning the JTI cache with forged tokens.
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
 	if err != nil {
 		c.log.Error(err, "dpop validation error")
 		return nil, err
 	}
 
-	c.cacheService.DPopJTI.Set(ctx, jti, true)
+	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+		return nil, oauth2.ErrJTIReplay
+	}
+
+	c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
 
 	// Validate HTU matches token endpoint
 	if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {

@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // ClaimsExtractor extracts and maps claims from VP tokens to OIDC claims
@@ -82,8 +85,8 @@ func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vp
 // extractClaimsFromSingleToken extracts claims from a single VP token (SD-JWT or mdoc).
 func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[string]any, error) {
 	// Check if this is an mdoc format token
-	if IsMDocFormat(vpToken) {
-		return ExtractMDocClaims(vpToken)
+	if isMDocFormatToken(vpToken) {
+		return extractMDocClaimsFromToken(vpToken)
 	}
 
 	// Default to SD-JWT format
@@ -93,6 +96,82 @@ func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[str
 	}
 
 	return parsed.Claims, nil
+}
+
+// isMDocFormatToken checks if the VP token appears to be in mdoc format.
+func isMDocFormatToken(vpToken string) bool {
+	if strings.Count(vpToken, ".") >= 2 {
+		return false
+	}
+	data, err := base64.RawURLEncoding.DecodeString(vpToken)
+	if err != nil {
+		data, err = base64.StdEncoding.DecodeString(vpToken)
+		if err != nil {
+			return false
+		}
+	}
+	if len(data) > 0 {
+		firstByte := data[0]
+		return (firstByte >= 0x80 && firstByte <= 0x9f) ||
+			(firstByte >= 0xa0 && firstByte <= 0xbf)
+	}
+	return false
+}
+
+// mdocDeviceResponse is a minimal struct for decoding mdoc DeviceResponse CBOR.
+type mdocDeviceResponse struct {
+	Documents []mdocDocument `cbor:"documents"`
+}
+
+type mdocDocument struct {
+	DocType      string           `cbor:"docType"`
+	IssuerSigned mdocIssuerSigned `cbor:"issuerSigned"`
+}
+
+type mdocIssuerSigned struct {
+	NameSpaces map[string][]mdocIssuerSignedItem `cbor:"nameSpaces"`
+}
+
+type mdocIssuerSignedItem struct {
+	ElementIdentifier string `cbor:"elementIdentifier"`
+	ElementValue      any    `cbor:"elementValue"`
+}
+
+const mdocNamespace = "org.iso.18013.5.1"
+
+// extractMDocClaimsFromToken extracts claims from an mdoc VP token without full verification.
+func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
+	data, err := base64.RawURLEncoding.DecodeString(vpToken)
+	if err != nil {
+		data, err = base64.StdEncoding.DecodeString(vpToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
+		}
+	}
+
+	var deviceResponse mdocDeviceResponse
+	if err := cbor.Unmarshal(data, &deviceResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
+	}
+
+	if len(deviceResponse.Documents) == 0 {
+		return nil, fmt.Errorf("no documents in DeviceResponse")
+	}
+
+	claims := make(map[string]any)
+	for _, doc := range deviceResponse.Documents {
+		for ns, items := range doc.IssuerSigned.NameSpaces {
+			for _, item := range items {
+				qualifiedKey := fmt.Sprintf("%s.%s", ns, item.ElementIdentifier)
+				claims[qualifiedKey] = item.ElementValue
+				if ns == mdocNamespace {
+					claims[item.ElementIdentifier] = item.ElementValue
+				}
+			}
+		}
+	}
+
+	return claims, nil
 }
 
 // MapClaimsToOIDC maps VP claims to OIDC claims using the template's claim mappings
@@ -291,18 +370,16 @@ func (ce *ClaimsExtractor) transformLowercase(value any) (any, error) {
 	return strings.ToLower(str), nil
 }
 
-// isInternalClaim checks if a claim is an internal SD-JWT claim that should be filtered
+// isInternalClaim checks if a claim is an internal SD-JWT structural claim that should
+// never be forwarded to relying parties. Only filters SD-JWT mechanics — standard JWT
+// claims (iss, iat, exp, nbf) are passed through since RPs may need them.
 func isInternalClaim(key string) bool {
 	internalClaims := []string{
-		"_sd",
-		"_sd_alg",
-		"iss",    // Issuer - usually not needed in OIDC claims
-		"iat",    // Issued at - usually not needed
-		"exp",    // Expiration - usually not needed
-		"nbf",    // Not before - usually not needed
-		"vct",    // Verifiable credential type - internal
-		"cnf",    // Confirmation - internal key binding
-		"status", // Status - internal
+		"_sd",     // Selective disclosure digests
+		"_sd_alg", // Selective disclosure hash algorithm
+		"cnf",     // Confirmation - internal key binding
+		"status",  // Token status list reference
+		"vct",     // Verifiable credential type - internal metadata
 	}
 
 	return slices.Contains(internalClaims, key)

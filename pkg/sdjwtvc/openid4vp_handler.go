@@ -1,4 +1,4 @@
-package openid4vp
+package sdjwtvc
 
 import (
 	"context"
@@ -8,15 +8,13 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 // SDJWTHandler handles SD-JWT format credentials in OpenID4VP flows.
 type SDJWTHandler struct {
-	client         *sdjwtvc.Client
+	client         *Client
 	keyResolver    KeyResolver
-	verifyOpts     *sdjwtvc.VerificationOptions
+	verifyOpts     *VerificationOptions
 	trustedIssuers []string
 }
 
@@ -58,7 +56,7 @@ func WithSDJWTStaticKey(key crypto.PublicKey) SDJWTHandlerOption {
 }
 
 // WithSDJWTVerificationOptions sets the verification options.
-func WithSDJWTVerificationOptions(opts *sdjwtvc.VerificationOptions) SDJWTHandlerOption {
+func WithSDJWTVerificationOptions(opts *VerificationOptions) SDJWTHandlerOption {
 	return func(h *SDJWTHandler) {
 		h.verifyOpts = opts
 	}
@@ -75,7 +73,7 @@ func WithSDJWTTrustedIssuers(issuers []string) SDJWTHandlerOption {
 func WithSDJWTRequireKeyBinding(nonce, audience string) SDJWTHandlerOption {
 	return func(h *SDJWTHandler) {
 		if h.verifyOpts == nil {
-			h.verifyOpts = &sdjwtvc.VerificationOptions{}
+			h.verifyOpts = &VerificationOptions{}
 		}
 		h.verifyOpts.RequireKeyBinding = true
 		h.verifyOpts.ExpectedNonce = nonce
@@ -86,8 +84,8 @@ func WithSDJWTRequireKeyBinding(nonce, audience string) SDJWTHandlerOption {
 // NewSDJWTHandler creates a new SD-JWT handler for OpenID4VP.
 func NewSDJWTHandler(opts ...SDJWTHandlerOption) (*SDJWTHandler, error) {
 	h := &SDJWTHandler{
-		client: sdjwtvc.New(),
-		verifyOpts: &sdjwtvc.VerificationOptions{
+		client: New(),
+		verifyOpts: &VerificationOptions{
 			ValidateTime:     true,
 			AllowedClockSkew: 5 * time.Minute,
 		},
@@ -107,7 +105,7 @@ func (h *SDJWTHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*S
 	}
 
 	// Parse the token first to extract issuer and key ID
-	parsed, err := sdjwtvc.Token(vpToken).Parse()
+	parsed, err := Token(vpToken).Parse()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse SD-JWT: %w", err)
 	}
@@ -189,7 +187,7 @@ type SDJWTVerificationResult struct {
 	KeyBindingValid bool
 	ExpiresAt       *time.Time
 	IssuedAt        *time.Time
-	VCTM            *sdjwtvc.VCTM
+	VCTM            *VCTM
 }
 
 // GetClaims returns all claims (both standard and disclosed).
@@ -224,7 +222,7 @@ func ExtractSDJWTClaims(vpToken string) (map[string]any, error) {
 		return nil, errors.New("VP token is empty")
 	}
 
-	parsed, err := sdjwtvc.Token(vpToken).Parse()
+	parsed, err := Token(vpToken).Parse()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse SD-JWT: %w", err)
 	}

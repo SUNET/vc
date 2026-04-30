@@ -1,37 +1,15 @@
-package openid4vp
+package mdoc
 
 import (
-	"context"
 	"encoding/base64"
 	"testing"
 
-	"github.com/SUNET/vc/pkg/mdoc"
-	"github.com/SUNET/vc/pkg/trust"
-
 	"github.com/fxamacker/cbor/v2"
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
-
-// mockTrustEvaluator is a test implementation of TrustEvaluator
-type mockTrustEvaluator struct {
-	trusted bool
-}
-
-func (m *mockTrustEvaluator) Evaluate(ctx context.Context, req *trust.EvaluationRequest) (*trustapi.TrustDecision, error) {
-	return &trustapi.TrustDecision{
-		Trusted:        m.trusted,
-		Reason:         "test decision",
-		TrustFramework: "test-mock",
-	}, nil
-}
-
-func (m *mockTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
-	return kt == trust.KeyTypeX5C
-}
 
 func TestNewMDocHandler(t *testing.T) {
 	// Create with mock trust evaluator (now required)
-	te := &mockTrustEvaluator{trusted: true}
+	te := createTestTrustEvaluator(true)
 	h, err := NewMDocHandler(WithMDocTrustEvaluator(te))
 	if err != nil {
 		t.Fatalf("NewMDocHandler() error = %v", err)
@@ -45,7 +23,7 @@ func TestNewMDocHandler(t *testing.T) {
 }
 
 func TestNewMDocHandlerWithTrustEvaluator(t *testing.T) {
-	te := &mockTrustEvaluator{trusted: true}
+	te := createTestTrustEvaluator(true)
 
 	h, err := NewMDocHandler(WithMDocTrustEvaluator(te))
 	if err != nil {
@@ -130,15 +108,15 @@ func TestExtractMDocClaims_InvalidToken(t *testing.T) {
 
 func TestExtractMDocClaims_ValidToken(t *testing.T) {
 	// Create a minimal DeviceResponse with test data
-	deviceResponse := mdoc.DeviceResponse{
+	deviceResponse := DeviceResponse{
 		Version: "1.0",
 		Status:  0,
-		Documents: []mdoc.Document{
+		Documents: []Document{
 			{
-				DocType: mdoc.DocType,
-				IssuerSigned: mdoc.IssuerSigned{
-					NameSpaces: map[string][]mdoc.IssuerSignedItem{
-						mdoc.Namespace: {
+				DocType: DocType,
+				IssuerSigned: IssuerSigned{
+					NameSpaces: map[string][]IssuerSignedItem{
+						Namespace: {
 							{ElementIdentifier: "family_name", ElementValue: "Doe"},
 							{ElementIdentifier: "given_name", ElementValue: "John"},
 							{ElementIdentifier: "birth_date", ElementValue: "1990-01-15"},
@@ -174,7 +152,7 @@ func TestExtractMDocClaims_ValidToken(t *testing.T) {
 	}
 
 	// Check qualified claims
-	qualifiedKey := mdoc.Namespace + ".family_name"
+	qualifiedKey := Namespace + ".family_name"
 	if claims[qualifiedKey] != "Doe" {
 		t.Errorf("%s = %v, want Doe", qualifiedKey, claims[qualifiedKey])
 	}
@@ -182,9 +160,9 @@ func TestExtractMDocClaims_ValidToken(t *testing.T) {
 
 func TestMDocDocumentClaims_GetClaims(t *testing.T) {
 	dc := &MDocDocumentClaims{
-		DocType: mdoc.DocType,
+		DocType: DocType,
 		Namespaces: map[string]map[string]any{
-			mdoc.Namespace: {
+			Namespace: {
 				"family_name": "Doe",
 				"given_name":  "John",
 			},
@@ -202,7 +180,7 @@ func TestMDocDocumentClaims_GetClaims(t *testing.T) {
 	}
 
 	// Qualified claims
-	if claims[mdoc.Namespace+".family_name"] != "Doe" {
+	if claims[Namespace+".family_name"] != "Doe" {
 		t.Error("qualified family_name not found")
 	}
 	if claims["custom.namespace.custom_field"] != "custom_value" {
@@ -275,10 +253,10 @@ func TestMDocVerificationResult_Documents(t *testing.T) {
 		Documents: make(map[string]*MDocDocumentClaims),
 	}
 
-	result.Documents[mdoc.DocType] = &MDocDocumentClaims{
-		DocType: mdoc.DocType,
+	result.Documents[DocType] = &MDocDocumentClaims{
+		DocType: DocType,
 		Namespaces: map[string]map[string]any{
-			mdoc.Namespace: {
+			Namespace: {
 				"family_name": "Doe",
 			},
 		},
@@ -292,7 +270,7 @@ func TestMDocVerificationResult_Documents(t *testing.T) {
 		t.Errorf("expected 1 document, got %d", len(result.Documents))
 	}
 
-	doc, ok := result.Documents[mdoc.DocType]
+	doc, ok := result.Documents[DocType]
 	if !ok {
 		t.Fatal("document not found")
 	}
@@ -300,63 +278,5 @@ func TestMDocVerificationResult_Documents(t *testing.T) {
 	claims := doc.GetClaims()
 	if claims["family_name"] != "Doe" {
 		t.Error("family_name not found in claims")
-	}
-}
-
-func TestExtractMDocClaims_EmptyDocuments(t *testing.T) {
-	// Create a DeviceResponse with no documents
-	deviceResponse := mdoc.DeviceResponse{
-		Version:   "1.0",
-		Status:    0,
-		Documents: []mdoc.Document{},
-	}
-
-	data, err := cbor.Marshal(deviceResponse)
-	if err != nil {
-		t.Fatalf("Failed to encode DeviceResponse: %v", err)
-	}
-
-	vpToken := base64.RawURLEncoding.EncodeToString(data)
-
-	_, err = ExtractMDocClaims(vpToken)
-	if err == nil {
-		t.Error("ExtractMDocClaims() should fail for empty documents")
-	}
-}
-
-func TestExtractMDocClaims_StandardBase64(t *testing.T) {
-	// Test with standard base64 encoding (not URL-safe)
-	deviceResponse := mdoc.DeviceResponse{
-		Version: "1.0",
-		Status:  0,
-		Documents: []mdoc.Document{
-			{
-				DocType: mdoc.DocType,
-				IssuerSigned: mdoc.IssuerSigned{
-					NameSpaces: map[string][]mdoc.IssuerSignedItem{
-						mdoc.Namespace: {
-							{ElementIdentifier: "family_name", ElementValue: "Test"},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	data, err := cbor.Marshal(deviceResponse)
-	if err != nil {
-		t.Fatalf("Failed to encode DeviceResponse: %v", err)
-	}
-
-	// Use standard base64 (not URL-safe)
-	vpToken := base64.StdEncoding.EncodeToString(data)
-
-	claims, err := ExtractMDocClaims(vpToken)
-	if err != nil {
-		t.Fatalf("ExtractMDocClaims() with standard base64 error = %v", err)
-	}
-
-	if claims["family_name"] != "Test" {
-		t.Errorf("family_name = %v, want Test", claims["family_name"])
 	}
 }

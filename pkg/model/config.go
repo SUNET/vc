@@ -95,7 +95,7 @@ type Kafka struct {
 	// Enable enables Kafka integration
 	Enable bool `yaml:"enable" default:"false"`
 	// Brokers is the list of Kafka broker addresses
-	Brokers []string `yaml:"brokers" validate:"required" default:"[\"kafka0:9092\", \"kafka1:9092\"]"`
+	Brokers []string `yaml:"brokers" validate:"required" doc_example:"[\"kafka0:9092\", \"kafka1:9092\"]"`
 }
 
 // Log holds the logging configuration

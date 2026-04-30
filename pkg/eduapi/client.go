@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
-	"github.com/jellydator/ttlcache/v3"
 )
 
 // Client is an HTTP client for 1EdTech Edu-API v1.0 endpoints.
@@ -28,7 +28,7 @@ type Client struct {
 	scopes       []string
 
 	// Token cache
-	tokenCache *ttlcache.Cache[string, string]
+	tokenCache cache.Cache[string]
 }
 
 // ClientConfig holds configuration for creating a new Edu-API client.
@@ -39,10 +39,15 @@ type ClientConfig struct {
 	ClientSecret string
 	Scopes       []string
 	Timeout      time.Duration
+	TokenCache   cache.Cache[string]
 }
 
 // NewClient creates a new Edu-API client.
-func NewClient(cfg ClientConfig, log *logger.Log) *Client {
+// cfg.TokenCache must be set; the caller is responsible for providing a cache instance.
+func NewClient(cfg ClientConfig, log *logger.Log) (*Client, error) {
+	if cfg.TokenCache == nil {
+		return nil, fmt.Errorf("eduapi: TokenCache is required")
+	}
 	client := &Client{
 		baseURL:      cfg.BaseURL,
 		httpClient:   &http.Client{Timeout: cfg.Timeout},
@@ -51,10 +56,10 @@ func NewClient(cfg ClientConfig, log *logger.Log) *Client {
 		clientID:     cfg.ClientID,
 		clientSecret: cfg.ClientSecret,
 		scopes:       cfg.Scopes,
-		tokenCache:   ttlcache.New(ttlcache.WithTTL[string, string](1 * time.Hour)),
+		tokenCache:   cfg.TokenCache,
 	}
 
-	return client
+	return client, nil
 }
 
 // tokenResponse is the OAuth 2.0 token endpoint response.
@@ -69,8 +74,8 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 	const cacheKey = "access_token"
 
 	// Return cached token if still valid.
-	if item := c.tokenCache.Get(cacheKey); item != nil {
-		return item.Value(), nil
+	if token, ok := c.tokenCache.Get(ctx, cacheKey); ok {
+		return token, nil
 	}
 
 	data := url.Values{
@@ -95,7 +100,11 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		// Limit error body to 2 MB to prevent OOM from malicious/misconfigured server
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		if err != nil {
+			return "", fmt.Errorf("eduapi: token request returned %d (failed to read body: %w)", resp.StatusCode, err)
+		}
 		return "", fmt.Errorf("eduapi: token request returned %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -104,16 +113,20 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("eduapi: decode token response: %w", err)
 	}
 
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("eduapi: token response contained empty access_token")
+	}
+
 	ttl := time.Duration(tokenResp.ExpiresIn) * time.Second
 	// Subtract 30s buffer so we refresh before actual expiry.
 	if ttl > 30*time.Second {
 		ttl -= 30 * time.Second
 	}
 	if ttl > 0 {
-		c.tokenCache.Set(cacheKey, tokenResp.AccessToken, ttl)
+		c.tokenCache.SetWithTTL(ctx, cacheKey, tokenResp.AccessToken, ttl)
 	} else {
 		// No expires_in: use the cache default (1 hour).
-		c.tokenCache.Set(cacheKey, tokenResp.AccessToken, ttlcache.DefaultTTL)
+		c.tokenCache.Set(ctx, cacheKey, tokenResp.AccessToken)
 	}
 
 	c.log.Info("OAuth 2.0 token obtained", "expires_in", tokenResp.ExpiresIn)
@@ -145,7 +158,7 @@ func (c *Client) doGet(ctx context.Context, path string, query url.Values) ([]by
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB
 	if err != nil {
 		return nil, fmt.Errorf("eduapi: read response: %w", err)
 	}

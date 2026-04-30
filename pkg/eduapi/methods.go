@@ -7,9 +7,15 @@ import (
 	"net/url"
 )
 
+const (
+	// OneRoster API base paths
+	rosteringBasePath = "/ims/oneroster/rostering/v1p2"
+	gradebookBasePath = "/ims/oneroster/gradebook/v1p2"
+)
+
 // GetPerson retrieves a person by their sourcedId.
 func (c *Client) GetPerson(ctx context.Context, personID string) (*Person, error) {
-	data, err := c.doGet(ctx, "/ims/oneroster/rostering/v1p2/persons/"+url.PathEscape(personID), nil)
+	data, err := c.doGet(ctx, rosteringBasePath+"/persons/"+url.PathEscape(personID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +29,7 @@ func (c *Client) GetPerson(ctx context.Context, personID string) (*Person, error
 // GetStudents retrieves all persons with a student role.
 func (c *Client) GetStudents(ctx context.Context, opts ...QueryOption) ([]Person, error) {
 	q := buildQuery(opts)
-	data, err := c.doGet(ctx, "/ims/oneroster/rostering/v1p2/students", q)
+	data, err := c.doGet(ctx, rosteringBasePath+"/students", q)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +43,7 @@ func (c *Client) GetStudents(ctx context.Context, opts ...QueryOption) ([]Person
 // GetEnrollmentsForPerson retrieves all enrollments for a person.
 func (c *Client) GetEnrollmentsForPerson(ctx context.Context, personID string, opts ...QueryOption) ([]Enrollment, error) {
 	q := buildQuery(opts)
-	data, err := c.doGet(ctx, "/ims/oneroster/rostering/v1p2/persons/"+url.PathEscape(personID)+"/enrollments", q)
+	data, err := c.doGet(ctx, rosteringBasePath+"/persons/"+url.PathEscape(personID)+"/enrollments", q)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +56,7 @@ func (c *Client) GetEnrollmentsForPerson(ctx context.Context, personID string, o
 
 // GetCourseOffering retrieves a single course offering by sourcedId.
 func (c *Client) GetCourseOffering(ctx context.Context, classID string) (*CourseOffering, error) {
-	data, err := c.doGet(ctx, "/ims/oneroster/rostering/v1p2/classes/"+url.PathEscape(classID), nil)
+	data, err := c.doGet(ctx, rosteringBasePath+"/classes/"+url.PathEscape(classID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +71,7 @@ func (c *Client) GetCourseOffering(ctx context.Context, classID string) (*Course
 
 // GetOrganization retrieves an organization (school) by sourcedId.
 func (c *Client) GetOrganization(ctx context.Context, orgID string) (*Organization, error) {
-	data, err := c.doGet(ctx, "/ims/oneroster/rostering/v1p2/orgs/"+url.PathEscape(orgID), nil)
+	data, err := c.doGet(ctx, rosteringBasePath+"/orgs/"+url.PathEscape(orgID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +86,7 @@ func (c *Client) GetOrganization(ctx context.Context, orgID string) (*Organizati
 
 // GetAcademicSession retrieves an academic session by sourcedId.
 func (c *Client) GetAcademicSession(ctx context.Context, sessionID string) (*AcademicSession, error) {
-	data, err := c.doGet(ctx, "/ims/oneroster/rostering/v1p2/academicSessions/"+url.PathEscape(sessionID), nil)
+	data, err := c.doGet(ctx, rosteringBasePath+"/academicSessions/"+url.PathEscape(sessionID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +102,7 @@ func (c *Client) GetAcademicSession(ctx context.Context, sessionID string) (*Aca
 // GetResultsForPerson retrieves all results (grades) for a person.
 func (c *Client) GetResultsForPerson(ctx context.Context, personID string, opts ...QueryOption) ([]Result, error) {
 	q := buildQuery(opts)
-	data, err := c.doGet(ctx, "/ims/oneroster/gradebook/v1p2/students/"+url.PathEscape(personID)+"/results", q)
+	data, err := c.doGet(ctx, gradebookBasePath+"/students/"+url.PathEscape(personID)+"/results", q)
 	if err != nil {
 		return nil, err
 	}

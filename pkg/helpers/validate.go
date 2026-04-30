@@ -72,6 +72,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register custom validation for httpsurl - validates URLs with https scheme and host.
 	// Used by OIDC dynamic client registration (RFC 7591 Section 2) for metadata URIs
 	// such as logo_uri, client_uri, policy_uri, and tos_uri.
+	// Also blocks private/loopback IPs to prevent SSRF since these URIs may be fetched server-side.
 	err = validate.RegisterValidation("httpsurl", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -95,6 +96,25 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
+		hostname := parsedURL.Hostname()
+
+		// Block localhost
+		if strings.ToLower(hostname) == "localhost" {
+			return false
+		}
+
+		// Resolve hostname and block private/loopback IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			return false
+		}
+
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return false
+			}
+		}
+
 		return true
 	})
 	if err != nil {
@@ -104,6 +124,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
+	// Also blocks private/loopback IPs to prevent SSRF if the URI is ever fetched server-side.
 	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -121,6 +142,30 @@ func NewValidator() (*validator.Validate, error) {
 
 		if parsedURL.Fragment != "" {
 			return false
+		}
+
+		hostname := parsedURL.Hostname()
+		if hostname == "" {
+			return false
+		}
+
+		// Block localhost
+		if strings.ToLower(hostname) == "localhost" {
+			return false
+		}
+
+		// Resolve hostname and block private/loopback IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			// If we can't resolve, allow — it may be a custom scheme (e.g. eudi-wallet://)
+			// Custom schemes won't have a resolvable hostname
+			return parsedURL.Scheme != "http" && parsedURL.Scheme != "https"
+		}
+
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return false
+			}
 		}
 
 		return true

@@ -1,4 +1,4 @@
-package openid4vp
+package sdjwtvc
 
 import (
 	"context"
@@ -6,14 +6,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/SUNET/vc/pkg/jose"
-	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 func TestNewSDJWTHandler(t *testing.T) {
@@ -298,7 +292,7 @@ func TestGetStringClaim(t *testing.T) {
 }
 
 func TestSDJWTHandler_WithVerificationOptions(t *testing.T) {
-	opts := &sdjwtvc.VerificationOptions{
+	opts := &VerificationOptions{
 		ValidateTime:     false,
 		AllowedClockSkew: 10 * time.Minute,
 	}
@@ -340,41 +334,6 @@ func TestSDJWTHandler_WithKeyResolver(t *testing.T) {
 	}
 }
 
-// testSigner implements sdjwtvc.Signer for unit tests.
-type testSigner struct {
-	key    any
-	algo   string
-	kid    string
-	pubKey any
-	method jwt.SigningMethod
-}
-
-func newTestSigner(key *ecdsa.PrivateKey, kid string) *testSigner {
-	method, algo := jose.GetSigningMethodFromKey(key)
-	return &testSigner{key: key, algo: algo, kid: kid, pubKey: &key.PublicKey, method: method}
-}
-
-func (s *testSigner) Sign(_ context.Context, data []byte) ([]byte, error) {
-	return s.method.Sign(string(data), s.key)
-}
-func (s *testSigner) Algorithm() string { return s.algo }
-func (s *testSigner) KeyID() string     { return s.kid }
-func (s *testSigner) PublicKey() any    { return s.pubKey }
-
-// marshalVCTM marshals a VCTM to JSON bytes and computes the SRI integrity hash.
-func marshalVCTM(t *testing.T, vctm *sdjwtvc.VCTM) (raw []byte, integrity string) {
-	t.Helper()
-	raw, err := json.Marshal(vctm)
-	if err != nil {
-		t.Fatalf("Failed to marshal VCTM: %v", err)
-	}
-	integrity, err = vctm.SRIIntegrity(raw)
-	if err != nil {
-		t.Fatalf("Failed to compute integrity: %v", err)
-	}
-	return raw, integrity
-}
-
 // createTestSDJWT creates a minimal test SD-JWT for testing
 func createTestSDJWT(t *testing.T) string {
 	t.Helper()
@@ -384,14 +343,14 @@ func createTestSDJWT(t *testing.T) string {
 		t.Fatalf("Failed to generate key: %v", err)
 	}
 
-	client := sdjwtvc.New()
+	client := New()
 
 	documentData := []byte(`{
 		"family_name": "Doe",
 		"given_name": "John"
 	}`)
 
-	vctm := &sdjwtvc.VCTM{
+	vctm := &VCTM{
 		VCT:  "https://example.com/credentials/test",
 		Name: "Test Credential",
 	}
@@ -406,7 +365,7 @@ func createTestSDJWT(t *testing.T) string {
 		vctmRaw,
 		documentData,
 		nil, // no holder binding
-		&sdjwtvc.CredentialOptions{Integrity: integrity},
+		&CredentialOptions{Integrity: integrity},
 	)
 	if err != nil {
 		t.Fatalf("Failed to build SD-JWT: %v", err)
@@ -431,14 +390,14 @@ func TestSDJWTHandler_VerifyAndExtract_Valid(t *testing.T) {
 	}
 
 	// Create a valid SD-JWT with the same private key
-	client := sdjwtvc.New()
+	client := New()
 
 	documentData := []byte(`{
 		"family_name": "Doe",
 		"given_name": "John"
 	}`)
 
-	vctm := &sdjwtvc.VCTM{
+	vctm := &VCTM{
 		VCT:  "https://example.com/credentials/test",
 		Name: "Test Credential",
 	}
@@ -453,7 +412,7 @@ func TestSDJWTHandler_VerifyAndExtract_Valid(t *testing.T) {
 		vctmRaw,
 		documentData,
 		nil, // no holder binding
-		&sdjwtvc.CredentialOptions{Integrity: integrity},
+		&CredentialOptions{Integrity: integrity},
 	)
 	if err != nil {
 		t.Fatalf("Failed to build SD-JWT: %v", err)

@@ -24,13 +24,19 @@ type Service struct {
 }
 
 // New creates a new Edu-API service.
-func New(ctx context.Context, cfg *eduapi.Config, docCache pkgcache.Cache[map[string]*model.CompleteDocument], log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *eduapi.Config, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*Service, error) {
 	if !cfg.Enable {
 		log.Info("Edu-API support disabled")
 		return nil, nil
 	}
 
-	client := eduapi.NewClient(cfg.ClientConfig(), log)
+	clientCfg := cfg.ClientConfig()
+	clientCfg.TokenCache = tokenCache
+
+	client, err := eduapi.NewClient(clientCfg, log)
+	if err != nil {
+		return nil, fmt.Errorf("eduapi: create client: %w", err)
+	}
 
 	transformers := make(map[string]*credential.ClaimTransformer, len(cfg.AttributeMappings))
 	for credType, mapping := range cfg.AttributeMappings {

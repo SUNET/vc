@@ -2,6 +2,7 @@ package datasources
 
 import (
 	"context"
+	"time"
 
 	"github.com/SUNET/vc/internal/apigw/data_sources/eduapi"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
@@ -32,7 +33,8 @@ func New(ctx context.Context, remotes map[string]model.Remote, docCache pkgcache
 				Timeout:      remote.Timeout,
 			}
 			var err error
-			s.eduapi, err = eduapi.New(ctx, &cfg, docCache, log)
+			tokenCache := pkgcache.NewMemoryCache[string](1 * time.Hour)
+			s.eduapi, err = eduapi.New(ctx, &cfg, docCache, tokenCache, log)
 			if err != nil {
 				return nil, err
 			}

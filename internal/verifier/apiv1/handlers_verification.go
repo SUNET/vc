@@ -15,6 +15,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/trust"
@@ -216,8 +217,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, fmt.Errorf("TrustEvaluator not configured for mDOC verification")
 			}
 
-			mdocHandler, err := openid4vp.NewMDocHandler(
-				openid4vp.WithMDocTrustEvaluator(c.trustEvaluator),
+			mdocHandler, err := mdoc.NewMDocHandler(
+				mdoc.WithMDocTrustEvaluator(c.trustEvaluator),
 			)
 			if err != nil {
 				c.log.Error(err, "failed to create mDOC handler", "scope", scope)

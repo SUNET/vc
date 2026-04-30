@@ -1702,7 +1702,9 @@ func TestGetUserInfo(t *testing.T) {
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				assert.Equal(t, "user-123", resp["sub"])
+				// sub should be the generated pairwise identifier, not the raw "user-123" from VerifiedClaims
+				assert.NotEmpty(t, resp["sub"])
+				assert.NotEqual(t, "user-123", resp["sub"], "sub must not be overwritten by VerifiedClaims")
 				assert.Equal(t, "John Doe", resp["name"])
 				assert.Equal(t, "john@example.com", resp["email"])
 			},

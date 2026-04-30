@@ -93,24 +93,20 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Router			/credential [post]
 func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("VCICredential request", "credential_identifier", req.CredentialIdentifier, "credential_configuration_id", req.CredentialConfigurationID)
-	jti, err := oauth2.ExtractJTI(req.DPoP)
-	if err != nil {
-		c.log.Error(err, "failed to extract JTI from DPoP")
-		return nil, err
-	}
-
-	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
-		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
-		return nil, oauth2.ErrJTIReplay
-	}
-
+	// Validate DPoP JWT signature and claims first, before checking JTI replay.
+	// This prevents attackers from poisoning the JTI cache with forged tokens.
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPoP)
 	if err != nil {
 		c.log.Error(err, "failed to validate DPoP JWT")
 		return nil, err
 	}
 
-	c.cacheService.DPopJTI.Set(ctx, jti, true)
+	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+		return nil, oauth2.ErrJTIReplay
+	}
+
+	c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
 
 	// Validate HTU matches credential endpoint
 	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
@@ -268,6 +264,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
+			return nil, fmt.Errorf("failed to save credential subject: %w", err)
 		}
 	}
 
@@ -324,6 +321,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
+			return nil, fmt.Errorf("failed to save credential subject: %w", err)
 		}
 	}
 
@@ -403,6 +401,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
+			return nil, fmt.Errorf("failed to save credential subject: %w", err)
 		}
 	}
 

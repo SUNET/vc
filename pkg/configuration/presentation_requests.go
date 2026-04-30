@@ -13,7 +13,10 @@ import (
 )
 
 // PresentationRequestTemplate defines a configurable presentation request
-// that maps OIDC scopes to DCQL queries and VP claims to OIDC claims
+// that maps OIDC scopes to DCQL queries and VP claims to OIDC claims.
+//
+// TODO(refactor): This type and its interface methods belong in pkg/openid4vp (or a dedicated package).
+// Only the YAML loading/parsing logic (LoadPresentationRequests, loadTemplateFile) is configuration concern.
 type PresentationRequestTemplate struct {
 	// ID uniquely identifies this template
 	ID string `yaml:"id" json:"id" validate:"required"`

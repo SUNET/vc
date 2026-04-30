@@ -172,12 +172,34 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 			template = base64.StdEncoding.EncodeToString([]byte(data))
 		}
 	} else {
+		// Validate URL scheme to prevent SSRF (only allow https)
+		parsedURL, err := url.Parse(svgTemplateURI)
+		if err != nil {
+			return nil, fmt.Errorf("invalid SVG template URI: %w", err)
+		}
+		if parsedURL.Scheme != "https" {
+			return nil, errors.New("SVG template URI must use https scheme")
+		}
+
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, svgTemplateURI, nil)
 		if err != nil {
 			return nil, err
 		}
 
-		response, err := http.DefaultClient.Do(httpReq)
+		svgClient := &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 3 {
+					return errors.New("too many redirects")
+				}
+				if req.URL.Scheme != "https" {
+					return errors.New("redirect to non-https scheme not allowed")
+				}
+				return nil
+			},
+		}
+
+		response, err := svgClient.Do(httpReq)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +210,13 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 			return nil, err
 		}
 
-		responseData, err := io.ReadAll(response.Body)
+		contentType := response.Header.Get("Content-Type")
+		if contentType != "" && !strings.HasPrefix(contentType, "image/svg+xml") {
+			return nil, fmt.Errorf("unexpected content type from SVG template origin: %s", contentType)
+		}
+
+		const maxSVGSize = 5 * 1024 * 1024 // 5MB
+		responseData, err := io.ReadAll(io.LimitReader(response.Body, maxSVGSize))
 		if err != nil {
 			return nil, err
 		}

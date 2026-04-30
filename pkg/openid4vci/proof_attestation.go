@@ -170,7 +170,10 @@ func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {
 
 	// Check if algorithm is supported (if supported algorithms are specified)
 	if opts != nil && len(opts.SupportedAlgorithms) > 0 {
-		alg := token.Header["alg"].(string)
+		alg, ok := token.Header["alg"].(string)
+		if !ok {
+			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
+		}
 		if !slices.Contains(opts.SupportedAlgorithms, alg) {
 			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
 		}
