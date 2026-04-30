@@ -150,11 +150,7 @@ Alpine.data("app", () => ({
     setRedirectUrl() {
         const raw = this.$el.dataset.redirectUrl || null;
         if (raw) {
-            try {
-                this.redirectUrl = decodeURIComponent(raw);
-            } catch (err) {
-                this.error = `Invalid redirect URL: ${err.message}`;
-            }
+            this.redirectUrl = raw;
         }
     },
 

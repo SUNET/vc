@@ -1,0 +1,169 @@
+package importer
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/vcclient"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+// RunUsers syncs basic auth users from the configured JSON file into the users collection.
+// It adds users that are in the config but missing from the DB, and removes users
+// that are in the DB but no longer in the config. Existing users are left unchanged.
+func RunUsers(ctx context.Context, cfg *model.BasicAuthImport, dbService *db.Service, log *logger.Log) error {
+	log = log.New("importer")
+
+	data, err := os.ReadFile(filepath.Clean(cfg.FilePath))
+	if err != nil {
+		return fmt.Errorf("read %s: %w", cfg.FilePath, err)
+	}
+
+	var allUsers map[string]*vcclient.AddPIDRequest
+	if err := json.Unmarshal(data, &allUsers); err != nil {
+		return fmt.Errorf("parse %s: %w", cfg.FilePath, err)
+	}
+
+	// Build the desired set of usernames from file, filtered by cfg.Users.
+	desired := make(map[string]*vcclient.AddPIDRequest)
+	for id, req := range allUsers {
+		if shouldImport(id, cfg.Users) {
+			desired[req.Username] = req
+		}
+	}
+
+	// Get existing usernames from DB.
+	existing, err := dbService.VCUsersColl.ListUsernames(ctx)
+	if err != nil {
+		return fmt.Errorf("list existing users: %w", err)
+	}
+	existingSet := make(map[string]bool, len(existing))
+	for _, u := range existing {
+		existingSet[u] = true
+	}
+
+	// Add missing users.
+	added := 0
+	for username, req := range desired {
+		if existingSet[username] {
+			continue
+		}
+
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash password for user %s: %w", username, err)
+		}
+
+		if err := dbService.VCUsersColl.Save(ctx, &model.OAuthUsers{
+			Username:        req.Username,
+			Password:        string(passwordHash),
+			Identity:        req.Identity,
+			AuthenticSource: req.Meta.AuthenticSource,
+		}); err != nil {
+			return fmt.Errorf("save user %s: %w", username, err)
+		}
+		added++
+	}
+
+	// Remove users no longer in config.
+	removed := 0
+	for _, username := range existing {
+		if _, ok := desired[username]; ok {
+			continue
+		}
+		if err := dbService.VCUsersColl.DeleteByUsername(ctx, username); err != nil {
+			return fmt.Errorf("delete user %s: %w", username, err)
+		}
+		removed++
+	}
+
+	log.Info("User import sync complete", "added", added, "removed", removed, "total", len(desired))
+	return nil
+}
+
+// RunDocuments imports JSON fixture data from the configured file paths into the datastore.
+// It skips import if the datastore already contains data.
+func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db.Service, log *logger.Log) error {
+	log = log.New("importer")
+
+	count, err := dbService.VCDatastoreColl.Coll.EstimatedDocumentCount(ctx)
+	if err != nil {
+		return fmt.Errorf("check datastore count: %w", err)
+	}
+	if count > 0 {
+		log.Info("Datastore already contains data, skipping import", "count", count)
+		return nil
+	}
+
+	for _, path := range cfg.FilePaths {
+		name := strings.TrimSuffix(filepath.Base(path), ".json")
+
+		if err := importDocuments(ctx, path, name, cfg.Users, dbService, log); err != nil {
+			return fmt.Errorf("import documents from %s: %w", filepath.Base(path), err)
+		}
+	}
+
+	log.Info("Document import complete")
+	return nil
+}
+
+func importDocuments(ctx context.Context, path, name string, filterUsers []string, dbService *db.Service, log *logger.Log) error {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+
+	var docs map[string]*model.CompleteDocument
+	if err := json.Unmarshal(data, &docs); err != nil {
+		// Some files use UploadRequest format (with document_data_version at top level)
+		var reqs map[string]*vcclient.UploadRequest
+		if err2 := json.Unmarshal(data, &reqs); err2 != nil {
+			return fmt.Errorf("parse: %w", err)
+		}
+		docs = make(map[string]*model.CompleteDocument, len(reqs))
+		for id, req := range reqs {
+			docs[id] = &model.CompleteDocument{
+				Meta:                req.Meta,
+				Identities:          req.Identities,
+				DocumentDisplay:     req.DocumentDisplay,
+				DocumentData:        req.DocumentData,
+				DocumentDataVersion: req.DocumentDataVersion,
+			}
+		}
+	}
+
+	imported := 0
+	for id, doc := range docs {
+		if !shouldImport(id, filterUsers) {
+			continue
+		}
+
+		if doc.Identities == nil {
+			doc.Identities = []model.Identity{}
+		}
+
+		if err := dbService.VCDatastoreColl.Save(ctx, doc); err != nil {
+			return fmt.Errorf("save document %s/%s: %w", name, id, err)
+		}
+		imported++
+	}
+
+	log.Info("Imported documents", "file", filepath.Base(path), "scope", name, "count", imported)
+	return nil
+}
+
+func shouldImport(id string, users []string) bool {
+	if len(users) == 0 {
+		return true
+	}
+	return slices.Contains(users, id)
+}

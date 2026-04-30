@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"

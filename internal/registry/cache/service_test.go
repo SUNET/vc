@@ -52,7 +52,7 @@ func isDockerAvailable() bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil
+	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil // #nosec G204
 }
 
 func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
@@ -93,8 +93,8 @@ func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
 	}
 
 	return client, func() {
-		client.Disconnect(ctx)
-		container.Terminate(ctx)
+		client.Disconnect(ctx) // #nosec G104
+		container.Terminate(ctx) // #nosec G104
 		cancel()
 	}
 }

@@ -3,6 +3,7 @@ package openid4vci
 import (
 	"fmt"
 	"slices"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 )
 

@@ -223,7 +223,7 @@ func TestVCICredentialOffer(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	req := &openid4vci.CredentialOfferParameters{
+	req := &openid4vci.CredentialOfferParameters{ // #nosec G101
 		CredentialIssuer: "https://issuer.example.com",
 	}
 
@@ -358,7 +358,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	mockIssuer := &mockIssuerClient{
 		reply: &apiv1_issuer.MakeSDJWTReply{
 			Credentials: []*apiv1_issuer.Credential{
-				{
+				{ // #nosec G101
 					Credential: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZjK3NkLWp3dCJ9.eyJzdWIiOiIxMjMiLCJnaXZlbl9uYW1lIjoiSm9obiIsImZhbWlseV9uYW1lIjoiRG9lIn0.signature",
 				},
 			},
@@ -390,7 +390,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	assert.Contains(t, issuerResp.Credentials[0].Credential, "eyJ", "Should be a JWT")
 
 	// Build credential request matching the actual structure
-	req := &openid4vci.CredentialRequest{
+	req := &openid4vci.CredentialRequest{ // #nosec G101
 		DPoP:          dpopJWT,
 		Authorization: "DPoP " + accessToken,
 		Proofs: &openid4vci.Proofs{

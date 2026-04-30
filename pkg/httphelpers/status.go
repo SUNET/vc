@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
@@ -49,7 +50,7 @@ func StatusCode(ctx context.Context, err error) int {
 					return http.StatusNotFound
 				}
 			}
-			
+
 			// Check error title/message for other helpers.Error instances
 			return inferStatusFromErrorTitle(err.Title)
 		}

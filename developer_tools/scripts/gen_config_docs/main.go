@@ -29,6 +29,7 @@ type TagInfo struct {
 	Validate   string
 	Default    string
 	DocExample string
+	DocKey     string
 }
 
 type StructDef struct {
@@ -267,6 +268,15 @@ func resolveTypeName(expr ast.Expr) string {
 	}
 }
 
+// mapKeyPlaceholder returns the doc_key tag value wrapped in angle brackets,
+// or the default "<key>" if no doc_key tag is set.
+func mapKeyPlaceholder(tag TagInfo) string {
+	if tag.DocKey != "" {
+		return "<" + tag.DocKey + ">"
+	}
+	return "<key>"
+}
+
 // ---- Tag parsing ----
 
 func parseStructTag(raw string) TagInfo {
@@ -279,7 +289,8 @@ func parseStructTag(raw string) TagInfo {
 	validate, _ := tag.Lookup("validate")
 	def, _ := tag.Lookup("default")
 	docExample, _ := tag.Lookup("doc_example")
-	return TagInfo{YAMLName: yamlName, Omitempty: omit, Validate: validate, Default: def, DocExample: docExample}
+	docKey, _ := tag.Lookup("doc_key")
+	return TagInfo{YAMLName: yamlName, Omitempty: omit, Validate: validate, Default: def, DocExample: docExample, DocKey: docKey}
 }
 
 // ---- Display helpers ----
@@ -643,7 +654,8 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 			if f.Tag.DocExample != "" {
 				buf.WriteString(fmt.Sprintf("%s  %s\n", prefix, f.Tag.DocExample))
 			} else {
-				buf.WriteString(fmt.Sprintf("%s  <key>: \"<value>\"\n", prefix))
+				keyPH := mapKeyPlaceholder(f.Tag)
+				buf.WriteString(fmt.Sprintf("%s  %s: \"<value>\"\n", prefix, keyPH))
 			}
 		} else {
 			placeholder := secretPlaceholder(f.Tag.YAMLName)
@@ -654,7 +666,9 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 }
 
 func secretPlaceholder(yamlName string) string {
-	placeholders := map[string]string{
+	// Placeholders for secrets file documentation examples.
+	// These are NOT real credentials — they are shown as fill-in templates.
+	placeholders := map[string]string{ //#nosec G101 -- documentation placeholders, not real credentials
 		"uri":                               "\"mongodb://user:password@mongo:27017/vc\"",
 		"client_secret":                     "\"your-oidc-client-secret\"",
 		"password":                          "\"change-me-in-production\"",
@@ -697,14 +711,15 @@ func buildTopLevel(reg *TypeRegistry, field *FieldDef) *DocSection {
 	}
 
 	if isMap && mapValDef != nil {
+		keyPH := mapKeyPlaceholder(field.Tag)
 		sec.Description = structDescription(mapValDef)
-		sub := buildStructSubSection(reg, mapValDef, fmt.Sprintf(".%s.<key>", yamlKey))
+		sub := buildStructSubSection(reg, mapValDef, fmt.Sprintf(".%s.%s", yamlKey, keyPH))
 		sub.Title = fmt.Sprintf("`%s`", yamlKey)
 		sec.Subs = append(sec.Subs, sub)
 		if mapValDef.Name != "" {
 			documented[mapValDef.Name] = true
 		}
-		expandChildren(reg, mapValDef, fmt.Sprintf(".%s.<key>", yamlKey), &sec.Subs)
+		expandChildren(reg, mapValDef, fmt.Sprintf(".%s.%s", yamlKey, keyPH), &sec.Subs)
 	} else if def != nil {
 		sec.Description = structDescription(def)
 		mainSub := buildStructSubSection(reg, def, "."+yamlKey)
@@ -797,15 +812,16 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 		// Named map type alias (e.g., type Clients map[string]*Client)
 		if !expanded && typeName != "" {
 			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
+				keyPH := mapKeyPlaceholder(f.Tag)
 				if !documented[valDef.Name] {
 					documented[valDef.Name] = true
-					sub := buildStructSubSection(reg, valDef, childPath+".<key>")
+					sub := buildStructSubSection(reg, valDef, childPath+"."+keyPH)
 					sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
 					*subs = append(*subs, sub)
-					expandChildren(reg, valDef, childPath+".<key>", subs)
+					expandChildren(reg, valDef, childPath+"."+keyPH, subs)
 				} else {
-					recordAdditionalPath(valDef.Name, childPath+".<key>")
-					recordChildPaths(reg, valDef, childPath+".<key>")
+					recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+					recordChildPaths(reg, valDef, childPath+"."+keyPH)
 				}
 				expanded = true
 			}
@@ -826,15 +842,16 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 				valName := resolveTypeName(mt.Value)
 				if valName != "" {
 					if valDef := reg.Lookup(valName); valDef != nil {
+						keyPH := mapKeyPlaceholder(f.Tag)
 						if !documented[valDef.Name] {
 							documented[valDef.Name] = true
-							sub := buildStructSubSection(reg, valDef, childPath+".<key>")
+							sub := buildStructSubSection(reg, valDef, childPath+"."+keyPH)
 							sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
 							*subs = append(*subs, sub)
-							expandChildren(reg, valDef, childPath+".<key>", subs)
+							expandChildren(reg, valDef, childPath+"."+keyPH, subs)
 						} else {
-							recordAdditionalPath(valDef.Name, childPath+".<key>")
-							recordChildPaths(reg, valDef, childPath+".<key>")
+							recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+							recordChildPaths(reg, valDef, childPath+"."+keyPH)
 						}
 					}
 				}
@@ -895,8 +912,9 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 		// Named map type alias
 		if !recorded && typeName != "" {
 			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
-				recordAdditionalPath(valDef.Name, childPath+".<key>")
-				recordChildPaths(reg, valDef, childPath+".<key>")
+				keyPH := mapKeyPlaceholder(f.Tag)
+				recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+				recordChildPaths(reg, valDef, childPath+"."+keyPH)
 				recorded = true
 			}
 		}
@@ -907,8 +925,9 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 				valName := resolveTypeName(mt.Value)
 				if valName != "" {
 					if valDef := reg.Lookup(valName); valDef != nil {
-						recordAdditionalPath(valDef.Name, childPath+".<key>")
-						recordChildPaths(reg, valDef, childPath+".<key>")
+						keyPH := mapKeyPlaceholder(f.Tag)
+						recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+						recordChildPaths(reg, valDef, childPath+"."+keyPH)
 					}
 				}
 			}
@@ -983,7 +1002,7 @@ func renderDocument(sections []*DocSection) string {
 }
 
 func sectionLabel(yamlKey string) string {
-	labels := map[string]string{
+	labels := map[string]string{ //#nosec G101 -- section labels, not credentials
 		"common":       "Common",
 		"apigw":        "API Gateway (APIGW)",
 		"issuer":       "Issuer",
@@ -1128,10 +1147,10 @@ func main() {
 	markdown := renderDocument(sections)
 
 	outPath := filepath.Join(root, *outFlag)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o750); err != nil {
 		log.Fatalf("creating output dir: %v", err)
 	}
-	if err := os.WriteFile(outPath, []byte(markdown), 0o644); err != nil {
+	if err := os.WriteFile(outPath, []byte(markdown), 0o600); err != nil {
 		log.Fatalf("writing %s: %v", outPath, err)
 	}
 	fmt.Printf("Generated %s (%d bytes)\n", outPath, len(markdown))

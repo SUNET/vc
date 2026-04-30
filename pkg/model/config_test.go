@@ -34,7 +34,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write RSA private key to file in PKCS8 format
 	rsaKeyPath = filepath.Join(tmpDir, "test_rsa_key.pem")
-	rsaKeyFile, err := os.Create(rsaKeyPath)
+	rsaKeyFile, err := os.Create(rsaKeyPath) // #nosec G304
 	assert.NoError(t, err)
 	defer rsaKeyFile.Close()
 
@@ -68,7 +68,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write RSA certificate to file
 	rsaCertPath = filepath.Join(tmpDir, "test_rsa_cert.pem")
-	rsaCertFile, err := os.Create(rsaCertPath)
+	rsaCertFile, err := os.Create(rsaCertPath) // #nosec G304
 	assert.NoError(t, err)
 	defer rsaCertFile.Close()
 
@@ -85,7 +85,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write EC private key to file in PKCS8 format
 	ecKeyPath = filepath.Join(tmpDir, "test_ec_key.pem")
-	ecKeyFile, err := os.Create(ecKeyPath)
+	ecKeyFile, err := os.Create(ecKeyPath) // #nosec G304
 	assert.NoError(t, err)
 	defer ecKeyFile.Close()
 
@@ -119,7 +119,7 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 
 	// Write EC certificate to file
 	ecCertPath = filepath.Join(tmpDir, "test_ec_cert.pem")
-	ecCertFile, err := os.Create(ecCertPath)
+	ecCertFile, err := os.Create(ecCertPath) // #nosec G304
 	assert.NoError(t, err)
 	defer ecCertFile.Close()
 
@@ -133,36 +133,33 @@ func setupTestPKI(t *testing.T) (rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath 
 	return rsaKeyPath, rsaCertPath, ecKeyPath, ecCertPath
 }
 
-func TestCredentialConstructor(t *testing.T) {
+func TestCredentialMetadata(t *testing.T) {
 	tests := []struct {
 		name        string
-		constructor *CredentialConstructor
+		constructor *CredentialMetadata
 		scope       string
 		expectedVCT string
 	}{
 		{
 			name: "Load PID VCTM",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/vctm_pid.json",
-				AuthMethod:   "basic",
 			},
 			scope:       "pid",
 			expectedVCT: "urn:eudi:pid:1",
 		},
 		{
 			name: "Load PDA1 VCTM",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/vctm_pda1.json",
-				AuthMethod:   "openid4vp",
 			},
 			scope:       "pda1",
 			expectedVCT: "urn:eudi:pda1:1",
 		},
 		{
 			name: "Load EHIC VCTM",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/vctm_ehic.json",
-				AuthMethod:   "openid4vp",
 			},
 			scope:       "ehic",
 			expectedVCT: "urn:eudi:ehic:1",
@@ -192,123 +189,172 @@ func TestCredentialConstructor(t *testing.T) {
 	}
 }
 
-func TestGetCredentialConstructorAuthMethod(t *testing.T) {
+func TestLookupCredentialSources(t *testing.T) {
+	cfg := &Cfg{
+		APIGW: &APIGW{
+			DataSources: DataSources{
+				Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
+					"pid": {AuthProvider: "basic"},
+					"ehic": {
+						AuthProvider: "openid4vp",
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+				Assertion: AssertionConfig{Scopes: map[string]AssertionScope{
+					"pid_saml": {AuthProvider: "saml"},
+				}},
+				ExternalAPI: ExternalAPIConfig{Scopes: map[string]ExternalAPIScope{
+					"diploma": {Remote: "ladok", AuthProvider: "saml"},
+				}},
+			},
+		},
+	}
+
+	t.Run("datastore", func(t *testing.T) {
+		srcs, err := cfg.LookupCredentialSources("pid")
+		assert.NoError(t, err)
+		assert.Equal(t, DataSourceDatastore, srcs[0].DataSource)
+		assert.Equal(t, "basic", srcs[0].AuthProvider)
+	})
+
+	t.Run("assertion", func(t *testing.T) {
+		srcs, err := cfg.LookupCredentialSources("pid_saml")
+		assert.NoError(t, err)
+		assert.Equal(t, DataSourceAssertion, srcs[0].DataSource)
+		assert.Equal(t, "saml", srcs[0].AuthProvider)
+	})
+
+	t.Run("external_api", func(t *testing.T) {
+		srcs, err := cfg.LookupCredentialSources("diploma")
+		assert.NoError(t, err)
+		assert.Equal(t, DataSourceExternalAPI, srcs[0].DataSource)
+		assert.Equal(t, "ladok", srcs[0].RemoteName)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := cfg.LookupCredentialSources("unknown")
+		assert.Error(t, err)
+	})
+
+	t.Run("nil apigw", func(t *testing.T) {
+		_, err := (&Cfg{}).LookupCredentialSources("pid")
+		assert.Error(t, err)
+	})
+}
+
+func TestResolveDataSource(t *testing.T) {
+	ds := &DataSources{
+		Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
+			"pid": {AuthProvider: AuthProviderBasic},
+		}},
+		Assertion: AssertionConfig{Scopes: map[string]AssertionScope{
+			"pid":     {AuthProvider: AuthProviderSAML},
+			"diploma": {AuthProvider: AuthProviderSAML},
+		}},
+		ExternalAPI: ExternalAPIConfig{Scopes: map[string]ExternalAPIScope{
+			"diploma": {Remote: "ladok", AuthProvider: AuthProviderOIDC},
+		}},
+	}
+
 	tests := []struct {
 		name           string
-		cfg            *Cfg
 		credentialType string
-		want           string
+		authProvider   string
+		wantSource     DataSourceType
+		wantRemote     string
+		wantErr        bool
 	}{
 		{
-			name: "Found by scope key - basic auth",
-			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
-					"pid": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-						AuthMethod: "basic",
-					},
-				}},
-			},
+			name:           "pid with basic -> datastore",
 			credentialType: "pid",
-			want:           "basic",
+			authProvider:   AuthProviderBasic,
+			wantSource:     DataSourceDatastore,
 		},
 		{
-			name: "Found by scope key - openid4vp",
-			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
-					"ehic": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-						AuthMethod: "openid4vp",
-					},
-				}},
-			},
-			credentialType: "ehic",
-			want:           "openid4vp",
+			name:           "pid with openid4vp -> error (datastore uses basic)",
+			credentialType: "pid",
+			authProvider:   AuthProviderOpenID4VP,
+			wantErr:        true,
 		},
 		{
-			name: "Not found - returns default basic",
-			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
-					"pid": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-						AuthMethod: "basic",
-					},
-				}},
-			},
+			name:           "pid with saml -> assertion",
+			credentialType: "pid",
+			authProvider:   AuthProviderSAML,
+			wantSource:     DataSourceAssertion,
+		},
+		{
+			name:           "diploma with saml -> assertion",
+			credentialType: "diploma",
+			authProvider:   AuthProviderSAML,
+			wantSource:     DataSourceAssertion,
+		},
+		{
+			name:           "diploma with oidc -> external_api with remote",
+			credentialType: "diploma",
+			authProvider:   AuthProviderOIDC,
+			wantSource:     DataSourceExternalAPI,
+			wantRemote:     "ladok",
+		},
+		{
+			name:           "unknown credential -> error",
 			credentialType: "unknown",
-			want:           "basic",
+			authProvider:   AuthProviderBasic,
+			wantErr:        true,
 		},
 		{
-			name: "Empty config - returns default basic",
-			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{}},
-			},
+			name:           "no matching auth provider -> error",
 			credentialType: "pid",
-			want:           "basic",
-		},
-		{
-			name: "Multiple constructors - finds correct one",
-			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
-					"pid": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-						AuthMethod: "basic",
-					},
-					"ehic": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-						AuthMethod: "openid4vp",
-					},
-					"diploma": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
-						AuthMethod: "openid4vp",
-					},
-				}},
-			},
-			credentialType: "ehic",
-			want:           "openid4vp",
+			authProvider:   "nonexistent",
+			wantErr:        true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.GetCredentialConstructorAuthMethod(tt.credentialType)
-			assert.Equal(t, tt.want, got)
+			src, err := ds.ResolveDataSource(tt.credentialType, tt.authProvider)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantSource, src.DataSource)
+			if tt.wantRemote != "" {
+				assert.Equal(t, tt.wantRemote, src.RemoteName)
+			}
 		})
 	}
 }
 
-func TestGetCredentialConstructor(t *testing.T) {
+func TestGetCredentialMetadata(t *testing.T) {
 	tests := []struct {
 		name  string
 		cfg   *Cfg
 		scope string
-		want  *CredentialConstructor
+		want  *CredentialMetadata
 	}{
 		{
 			name: "Found by scope key",
 			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
+				Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
 					"pid": {
 						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-						AuthMethod:   "basic",
 						VCTMFilePath: "/path/to/vctm_pid.json",
 					},
 				}},
 			},
 			scope: "pid",
-			want: &CredentialConstructor{
+			want: &CredentialMetadata{
 				VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				AuthMethod:   "basic",
 				VCTMFilePath: "/path/to/vctm_pid.json",
 			},
 		},
 		{
 			name: "Not found - returns nil",
 			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
+				Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
 					"pid": {
-						VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-						AuthMethod: "basic",
+						VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 					},
 				}},
 			},
@@ -318,7 +364,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 		{
 			name: "Empty config - returns nil",
 			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{}},
+				Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{}},
 			},
 			scope: "pid",
 			want:  nil,
@@ -326,23 +372,20 @@ func TestGetCredentialConstructor(t *testing.T) {
 		{
 			name: "Multiple constructors - scope key lookup",
 			cfg: &Cfg{
-				Common: &Common{CredentialConstructor: map[string]*CredentialConstructor{
+				Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
 					"pid": {
 						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-						AuthMethod:   "basic",
 						VCTMFilePath: "/path/to/vctm_pid.json",
 					},
 					"ehic": {
 						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-						AuthMethod:   "openid4vp",
 						VCTMFilePath: "/path/to/vctm_ehic.json",
 					},
 				}},
 			},
 			scope: "ehic",
-			want: &CredentialConstructor{
+			want: &CredentialMetadata{
 				VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-				AuthMethod:   "openid4vp",
 				VCTMFilePath: "/path/to/vctm_ehic.json",
 			},
 		},
@@ -350,7 +393,7 @@ func TestGetCredentialConstructor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.GetCredentialConstructor(tt.scope)
+			got := tt.cfg.GetCredentialMetadata(tt.scope)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -359,20 +402,20 @@ func TestGetCredentialConstructor(t *testing.T) {
 func TestLoadFile(t *testing.T) {
 	tests := []struct {
 		name        string
-		constructor *CredentialConstructor
+		constructor *CredentialMetadata
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "Valid file - success",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/vctm_pid.json",
 			},
 			wantErr: false,
 		},
 		{
 			name: "File does not exist - error",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/nonexistent.json",
 			},
 			wantErr:     true,
@@ -380,7 +423,7 @@ func TestLoadFile(t *testing.T) {
 		},
 		{
 			name: "Not JSON - error",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/vctm_not_json.yaml",
 			},
 			wantErr:     true,
@@ -388,7 +431,7 @@ func TestLoadFile(t *testing.T) {
 		},
 		{
 			name: "Missing vct field - ok",
-			constructor: &CredentialConstructor{
+			constructor: &CredentialMetadata{
 				VCTMFilePath: "./testdata/vctm_missing_vct.json",
 			},
 			wantErr: false,
@@ -414,16 +457,15 @@ func TestLoadFile(t *testing.T) {
 	}
 }
 
-func TestCredentialConstructor_MissingVCTURL(t *testing.T) {
+func TestCredentialMetadata_MissingVCTURL(t *testing.T) {
 	cfg := &Cfg{
 		Common: &Common{
-			CredentialConstructor: map[string]*CredentialConstructor{
+			CredentialMetadata: map[string]*CredentialMetadata{
 				"test_scope": {
 					// Neither VCTMFilePath nor VCTMUrl set,
 					// so VCTURL will remain empty after resolution.
-					Format:     "dc+sd-jwt",
-					AuthMethod: "basic",
-					VCTM:       &sdjwtvc.VCTM{},
+					Format: "dc+sd-jwt",
+					VCTM:   &sdjwtvc.VCTM{},
 				},
 			},
 		},
@@ -462,7 +504,7 @@ func TestOAuthServerLoadAndSignMetadata(t *testing.T) {
 	}{
 		{
 			name: "Runtime-generated metadata",
-			server: OAuthServer{
+			server: OAuthServer{ // #nosec G101
 				TokenEndpoint: "https://test.oauth.example.com/token",
 			},
 			issuerURL: "https://test.oauth.example.com",

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 829 504" width="829" height="504">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2c5f2d"/>
+      <stop offset="100%" style="stop-color:#1a3a1b"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3a7a3b"/>
+      <stop offset="100%" style="stop-color:#2c5f2d"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card background -->
+  <rect width="829" height="504" rx="24" ry="24" fill="url(#bg)"/>
+
+  <!-- Header band -->
+  <rect width="829" height="90" rx="24" ry="24" fill="url(#header)"/>
+  <rect y="60" width="829" height="30" fill="url(#header)"/>
+
+  <!-- EU stars -->
+  <g transform="translate(48, 28)" fill="#f0c040" opacity="0.9">
+    <circle cx="0" cy="0" r="3"/><circle cx="6" cy="-8" r="3"/><circle cx="15" cy="-11" r="3"/>
+    <circle cx="24" cy="-8" r="3"/><circle cx="30" cy="0" r="3"/><circle cx="24" cy="8" r="3"/>
+    <circle cx="15" cy="11" r="3"/><circle cx="6" cy="8" r="3"/>
+  </g>
+
+  <!-- Title -->
+  <text x="100" y="52" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="bold" letter-spacing="1">PORTABLE DOCUMENT A1</text>
+
+  <!-- Issuing country -->
+  <text x="100" y="78" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" opacity="0.75">Issuing country:</text>
+  <text x="235" y="78" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold">{{issuing_country}}</text>
+
+  <!-- Social Security PIN -->
+  <text x="48" y="140" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.65">Social Security PIN</text>
+  <text x="48" y="168" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="bold">{{personal_administrative_number}}</text>
+
+  <!-- Employer -->
+  <text x="48" y="215" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.65">Employer</text>
+  <text x="48" y="243" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="bold">{{employer_name}}</text>
+  <text x="48" y="268" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" opacity="0.8">ID: {{employer_id}}</text>
+  <text x="48" y="290" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" opacity="0.8">Country: {{employer_country}}</text>
+
+  <!-- Competent institution -->
+  <text x="480" y="140" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.65">Competent institution</text>
+  <text x="480" y="168" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="bold">{{authentic_source_name}}</text>
+  <text x="480" y="193" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" opacity="0.8">{{authentic_source_id}}</text>
+
+  <!-- Bottom bar -->
+  <rect y="400" width="829" height="104" rx="0" ry="0" fill="white" opacity="0.06"/>
+  <rect y="480" width="829" height="24" rx="24" ry="24" fill="white" opacity="0.06"/>
+
+  <!-- Document number -->
+  <text x="48" y="435" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="12" opacity="0.6">Document number</text>
+  <text x="48" y="460" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="bold">{{document_number}}</text>
+
+  <!-- Expiry date -->
+  <text x="680" y="435" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="12" opacity="0.6" text-anchor="end">Valid until</text>
+  <text x="680" y="460" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="18" text-anchor="end">{{date_of_expiry}}</text>
+
+  <!-- Decorative rings -->
+  <circle cx="770" cy="445" r="30" fill="none" stroke="white" stroke-width="2" opacity="0.15"/>
+  <circle cx="770" cy="445" r="20" fill="none" stroke="white" stroke-width="1.5" opacity="0.15"/>
+</svg>

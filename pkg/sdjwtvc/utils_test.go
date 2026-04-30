@@ -127,7 +127,7 @@ func TestToken_Parse(t *testing.T) {
 		expectedClaims    map[string]string // simplified for testing
 		expectedDiscCount int
 	}{
-		{
+		{ // #nosec G101
 			name: "valid SD-JWT with disclosures",
 			// This is a sample token - in real usage, this would be a valid SD-JWT
 			token:             "eyJhbGciOiJFUzI1NiIsInR5cCI6ImRjK3NkLWp3dCJ9.eyJfc2QiOlsiaGFzaDEiLCJoYXNoMiJdLCJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwidmN0IjoidXJuOmV4YW1wbGU6cGlkIn0.c2lnbmF0dXJl~disclosure1~disclosure2~",

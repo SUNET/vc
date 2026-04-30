@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/cache"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
@@ -53,6 +54,25 @@ func (m *mockUsersStore) GetHashedPassword(ctx context.Context, username string)
 		return user.Password, nil
 	}
 	return "", nil
+}
+
+func (m *mockUsersStore) ListUsernames(ctx context.Context) ([]string, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	usernames := make([]string, 0, len(m.users))
+	for u := range m.users {
+		usernames = append(usernames, u)
+	}
+	return usernames, nil
+}
+
+func (m *mockUsersStore) DeleteByUsername(ctx context.Context, username string) error {
+	if m.err != nil {
+		return m.err
+	}
+	delete(m.users, username)
+	return nil
 }
 
 // TestUserLookup_BasicAuth tests the UserLookup function with basic username/password authentication.
@@ -106,9 +126,9 @@ func TestUserLookup_BasicAuth(t *testing.T) {
 	}
 
 	req := &vcclient.UserLookupRequest{
-		RequestURI: "https://issuer.example.com/request/123",
-		Username:   "testuser",
-		AuthMethod: model.AuthMethodBasic,
+		RequestURI:   "https://issuer.example.com/request/123",
+		Username:     "testuser",
+		AuthProvider: model.AuthProviderBasic,
 	}
 
 	result, err := client.UserLookup(ctx, req)
@@ -195,7 +215,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 		log: log,
 		cacheService: &cache.Service{
 			AuthContext: authContextCache,
-			Document:   docCache,
+			Document:    docCache,
 		},
 	}
 
@@ -207,7 +227,7 @@ func TestUserLookup_PIDAuth(t *testing.T) {
 	req := &vcclient.UserLookupRequest{
 		RequestURI:   "https://issuer.example.com/request/456",
 		ResponseCode: "response-code-xyz",
-		AuthMethod:   model.AuthMethodOpenID4VP,
+		AuthProvider: model.AuthProviderOpenID4VP,
 		VCTM: &sdjwtvc.VCTM{
 			Claims: []sdjwtvc.Claim{
 				{
@@ -283,14 +303,14 @@ func TestUserLookup_PIDAuth_NoDocuments(t *testing.T) {
 		log: log,
 		cacheService: &cache.Service{
 			AuthContext: authContextCache,
-			Document:   docCache,
+			Document:    docCache,
 		},
 	}
 
 	req := &vcclient.UserLookupRequest{
 		RequestURI:   "https://issuer.example.com/request/789",
 		ResponseCode: "response-code-123",
-		AuthMethod:   model.AuthMethodOpenID4VP,
+		AuthProvider: model.AuthProviderOpenID4VP,
 		VCTM:         &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{}},
 	}
 
@@ -332,8 +352,8 @@ func TestUserLookup_UnsupportedAuthMethod(t *testing.T) {
 	}
 
 	req := &vcclient.UserLookupRequest{
-		RequestURI: "https://issuer.example.com/request/999",
-		AuthMethod: "unsupported_method",
+		RequestURI:   "https://issuer.example.com/request/999",
+		AuthProvider: "unsupported_method",
 	}
 
 	result, err := client.UserLookup(ctx, req)

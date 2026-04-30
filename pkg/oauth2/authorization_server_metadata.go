@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/pki"
 
@@ -42,7 +43,7 @@ type AuthorizationServerMetadata struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
 
 	// TokenEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms ("alg" values) supported by the token endpoint for the signature on the JWT [JWT] used to authenticate the client at the token endpoint for the "private_key_jwt" and "client_secret_jwt" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the "token_endpoint_auth_methods_supported" entry.  No default algorithms are implied if this entry is omitted.  Servers SHOULD support "RS256".  The value "none" MUST NOT be used.
-	TokenEndpointAuthSiningALGValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
+	TokenEndpointAuthSigningALGValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 
 	// ServiceDocumentation OPTIONAL.  URL of a page containing human-readable information that developers might want or need to know when using the authorization server.  In particular, if the authorization server does not support Dynamic Client Registration, then information on how to register clients needs to be provided in this documentation.
 	ServiceDocumentation string `json:"service_documentation,omitempty"`

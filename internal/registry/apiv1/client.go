@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/internal/registry/db"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -28,11 +29,11 @@ type CredentialSubjectsStore interface {
 
 // Client holds the public api object
 type Client struct {
-	cfg                     *model.Cfg
-	log                     *logger.Log
-	tokenStatusListIssuer   TokenStatusListIssuer
-	adminDB                 AdminDBStore
-	credentialSubjects      CredentialSubjectsStore
+	cfg                   *model.Cfg
+	log                   *logger.Log
+	tokenStatusListIssuer TokenStatusListIssuer
+	adminDB               AdminDBStore
+	credentialSubjects    CredentialSubjectsStore
 }
 
 //	@title		Registry API

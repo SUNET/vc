@@ -7,7 +7,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
     depends_on:
@@ -27,7 +27,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
     depends_on:
       #      apigw:
       #        condition: service_started
@@ -54,7 +54,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
     depends_on:
@@ -72,7 +72,7 @@ services:
     image: docker.sunet.se/iam_vc/verifier:local
     restart: always
     volumes:
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
       - ./developer_tools/pki/:/pki:ro
       - ./metadata/:/metadata/:ro
       - ./internal/verifier/static:/static:ro
@@ -93,7 +93,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
     depends_on:
       - mongo
     networks:
@@ -110,7 +110,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
     depends_on:
       apigw:
         condition: service_started

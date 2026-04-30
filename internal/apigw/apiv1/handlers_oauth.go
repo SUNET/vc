@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -20,7 +21,7 @@ import (
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
-	oauthClient, err := c.cfg.APIGW.OauthServer.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
+	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
 		return nil, errors.Join(oauth2.ErrInvalidClient, err)
 	}
@@ -103,6 +104,11 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	}
 	c.log.Debug("Authorization", "state", authorizationContext.State)
 
+	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
+		c.log.Debug("Authorization context expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
+
 	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
@@ -132,7 +138,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	c.log.Debug("OAuthToken", "req", req)
 
 	// Look up the client to enforce type-specific requirements
-	oauthClient, err := c.cfg.APIGW.OauthServer.Clients.Get(req.ClientID)
+	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(req.ClientID)
 	if err != nil {
 		c.log.Error(err, "client validation failed")
 		return nil, errors.Join(oauth2.ErrInvalidClient, err)
@@ -151,6 +157,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
+
+	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
+		c.log.Debug("Authorization context expired")
+		return nil, oauth2.ErrExpiredRequest
+	}
 
 	// Verify PKCE code_challenge (for all clients that provided one)
 	if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
@@ -199,28 +210,24 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
-	jti, err := oauth2.ExtractJTI(req.DPOP)
-	if err != nil {
-		c.log.Error(err, "failed to extract JTI from DPoP")
-		return nil, err
-	}
-
-	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
-		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
-		return nil, oauth2.ErrJTIReplay
-	}
-
+	// Validate DPoP JWT signature and claims first, before checking JTI replay.
+	// This prevents attackers from poisoning the JTI cache with forged tokens.
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
 	if err != nil {
 		c.log.Error(err, "dpop validation error")
 		return nil, err
 	}
 
-	c.cacheService.DPopJTI.Set(ctx, jti, true)
+	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+		return nil, oauth2.ErrJTIReplay
+	}
+
+	c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
 
 	// Validate HTU matches token endpoint
-	if dpop.HTU != c.cfg.APIGW.OauthServer.TokenEndpoint {
-		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.OauthServer.TokenEndpoint, dpop.HTU)
+	if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
+		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU)
 	}
 
 	// Validate HTM is POST (token endpoint only accepts POST)
@@ -239,7 +246,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 }
 
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
-	c.log.Debug("metadata request")
 
 	signedMetadata, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {

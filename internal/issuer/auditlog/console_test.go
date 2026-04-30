@@ -37,7 +37,7 @@ func TestConsole_SendToDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestConsole_DestinationParsing(t *testing.T) {
@@ -101,7 +101,7 @@ func TestConsole_MessageDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestConsole_InvalidJSON(t *testing.T) {
@@ -129,5 +129,5 @@ func TestConsole_InvalidJSON(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

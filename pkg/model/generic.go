@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"time"
+
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
@@ -291,8 +292,11 @@ func isLeapYear(year int) bool {
 	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
 }
 
-// ageThresholdDate calculates the date when someone reaches a certain age,
-// handling leap year birthdays (Feb 29) by treating Feb 28 as their birthday in non-leap years
+// ageThresholdDate calculates the date when someone reaches a certain age.
+// For leap year birthdays (Feb 29), the threshold falls on Feb 28 in non-leap years.
+// This is the convention used in most EU member states and is the safer default for
+// age-gating (treats the person as having reached the age one day earlier rather than later).
+// Without this, Go's AddDate normalizes Feb 29 → Mar 1, which would delay the threshold.
 func ageThresholdDate(birthDate time.Time, years int) time.Time {
 	targetYear := birthDate.Year() + years
 	month := birthDate.Month()
@@ -313,7 +317,7 @@ func (i *Identity) GetOver14() (bool, error) {
 		return false, err
 	}
 	threshold := ageThresholdDate(birthDay, 14)
-	return !time.Now().Before(threshold), nil
+	return !time.Now().UTC().Before(threshold), nil
 }
 
 func (i *Identity) GetOver16() (bool, error) {
@@ -322,7 +326,7 @@ func (i *Identity) GetOver16() (bool, error) {
 		return false, err
 	}
 	threshold := ageThresholdDate(birthDay, 16)
-	return !time.Now().Before(threshold), nil
+	return !time.Now().UTC().Before(threshold), nil
 }
 
 func (i *Identity) GetOver18() (bool, error) {
@@ -331,7 +335,7 @@ func (i *Identity) GetOver18() (bool, error) {
 		return false, err
 	}
 	threshold := ageThresholdDate(birthDay, 18)
-	return !time.Now().Before(threshold), nil
+	return !time.Now().UTC().Before(threshold), nil
 }
 
 func (i *Identity) GetOver21() (bool, error) {
@@ -340,7 +344,7 @@ func (i *Identity) GetOver21() (bool, error) {
 		return false, err
 	}
 	threshold := ageThresholdDate(birthDay, 21)
-	return !time.Now().Before(threshold), nil
+	return !time.Now().UTC().Before(threshold), nil
 }
 
 func (i *Identity) GetOver65() (bool, error) {
@@ -349,7 +353,7 @@ func (i *Identity) GetOver65() (bool, error) {
 		return false, err
 	}
 	threshold := ageThresholdDate(birthDay, 65)
-	return !time.Now().Before(threshold), nil
+	return !time.Now().UTC().Before(threshold), nil
 }
 
 func (i *Identity) GetAgeInYears() (int, error) {
@@ -357,9 +361,10 @@ func (i *Identity) GetAgeInYears() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	age := now.Year() - birthDay.Year()
-	if now.YearDay() < birthDay.YearDay() {
+	threshold := ageThresholdDate(birthDay, age)
+	if now.Before(threshold) {
 		age--
 	}
 	return age, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -82,16 +83,16 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
-	// Only services that depend on credential_constructor need VCTM loading
+	// Only services that depend on credentials need VCTM loading
 	// and the requirement check. Other services (ui, mockas, registry) share
 	// the same config file but do not use credential constructors at all.
 	if servicesRequiringVCTM[serviceName] {
-		if cfg.Common == nil || len(cfg.Common.CredentialConstructor) == 0 {
-			return nil, fmt.Errorf("common.credential_constructor is required for the %s service", serviceName)
+		if cfg.Common == nil || len(cfg.Common.CredentialMetadata) == 0 {
+			return nil, fmt.Errorf("common.credential_metadata is required for the %s service", serviceName)
 		}
 
 		// Load VCTM data and derive Attributes before validation.
-		for scope, constructor := range cfg.Common.CredentialConstructor {
+		for scope, constructor := range cfg.Common.CredentialMetadata {
 			if constructor == nil {
 				continue
 			}
@@ -108,6 +109,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 				return nil, fmt.Errorf("failed to resolve VCT URLs: %w", err)
 			}
 		}
+
 	}
 
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {

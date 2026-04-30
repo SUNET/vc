@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 )
 
@@ -78,6 +79,7 @@ func (probes Probes) Check(serviceName string) *apiv1_status.StatusReply {
 
 	if probes == nil {
 		log.Println("probe is nil")
+		health.Data.Status = fmt.Sprintf(StatusFail, serviceName)
 		return health
 	}
 

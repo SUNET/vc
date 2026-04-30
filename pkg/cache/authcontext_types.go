@@ -66,6 +66,10 @@ type AuthorizationContext struct {
 	AuthenticSource      string                                     `json:"authentic_source,omitempty" bson:"authentic_source,omitempty" validate:"omitempty,max=128,printascii"`
 	VCT                  string                                     `json:"vct,omitempty" bson:"vct,omitempty" validate:"omitempty,max=256,printascii"`
 	Identity             *model.Identity                            `json:"identity,omitempty" bson:"identity,omitempty"`
+	AuthProvider         string                                     `json:"auth_provider,omitempty" bson:"auth_provider,omitempty" validate:"omitempty,max=32,printascii"`
+	DataSource           string                                     `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
+	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
+	PersonID             string                                     `json:"person_id,omitempty" bson:"person_id,omitempty" validate:"omitempty,max=256,printascii"`
 
 	// Verifier-specific fields (presentation/RP flows)
 	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`

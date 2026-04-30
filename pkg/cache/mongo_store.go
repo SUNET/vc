@@ -33,35 +33,35 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys: bson.D{{Key: "request_uri", Value: 1}},
+			Keys:    bson.D{{Key: "request_uri", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "code", Value: 1}},
+			Keys:    bson.D{{Key: "code", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "state", Value: 1}},
+			Keys:    bson.D{{Key: "state", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "verifier_response_code", Value: 1}},
+			Keys:    bson.D{{Key: "verifier_response_code", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "ephemeral_encryption_key_id", Value: 1}},
+			Keys:    bson.D{{Key: "ephemeral_encryption_key_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "request_object_id", Value: 1}},
+			Keys:    bson.D{{Key: "request_object_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "token.access_token", Value: 1}},
+			Keys:    bson.D{{Key: "token.access_token", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "access_token", Value: 1}},
+			Keys:    bson.D{{Key: "access_token", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{

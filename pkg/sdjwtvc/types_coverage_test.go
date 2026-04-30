@@ -99,7 +99,7 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 		t.Run(tc.filename, func(t *testing.T) {
 			// Load the VCTM file
 			filePath := filepath.Join(metadataDir, tc.filename)
-			data, err := os.ReadFile(filePath)
+			data, err := os.ReadFile(filePath) // #nosec G304
 			require.NoError(t, err, "Failed to read %s", tc.filename)
 
 			var vctm VCTM

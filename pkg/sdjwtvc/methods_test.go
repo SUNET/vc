@@ -1558,7 +1558,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 				// Make a copy of data for this test
 				dataCopy := make(map[string]any)
 				b, _ := json.Marshal(data)
-				json.Unmarshal(b, &dataCopy)
+				json.Unmarshal(b, &dataCopy) // #nosec G104
 
 				disclosure, hash, err := client.processClaimPath(dataCopy, claim.Path, sha256.New())
 				require.NoError(t, err, "Failed to process claim path: %v", claim.Path)

@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -133,7 +133,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix(),
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -367,10 +367,10 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 
 	// Update session with tokens
 	authCtx.AccessToken = accessToken
-	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.AccessTokenDuration) * time.Second).Unix()
+	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second).Unix()
 	authCtx.IDToken = idToken
 	authCtx.RefreshToken = refreshToken
-	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.RefreshTokenDuration) * time.Second).Unix()
+	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
@@ -381,7 +381,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.Verifier.OIDCOP.AccessTokenDuration,
+		ExpiresIn:    c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration,
 		RefreshToken: refreshToken,
 		IDToken:      idToken,
 		Scope:        strings.Join(authCtx.Scopes, " "),
@@ -402,10 +402,10 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
-	idTokenTTL := time.Duration(c.cfg.Verifier.OIDCOP.IDTokenDuration) * time.Second
+	idTokenTTL := time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.Verifier.OIDCOP.Issuer,
+		"iss":   c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		"sub":   sub,
 		"aud":   client.ClientID,
 		"exp":   now.Add(idTokenTTL).Unix(),
@@ -413,8 +413,15 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 		"nonce": authCtx.Nonce,
 	}
 
-	// Add verified claims
-	maps.Copy(claims, authCtx.VerifiedClaims)
+	// Add verified claims, but never overwrite reserved OIDC claims
+	for k, v := range authCtx.VerifiedClaims {
+		switch k {
+		case "iss", "sub", "aud", "exp", "iat", "nonce":
+			continue
+		default:
+			claims[k] = v
+		}
+	}
 
 	// Use jose.MakeJWT to sign with pki.Signer
 	header := jwt.MapClaims{
@@ -492,7 +499,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	metadata := &DiscoveryMetadata{
-		Issuer:                           c.cfg.Verifier.OIDCOP.Issuer,
+		Issuer:                           c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		AuthorizationEndpoint:            authorizationEndpoint,
 		TokenEndpoint:                    tokenEndpoint,
 		UserInfoEndpoint:                 userInfoEndpoint,
@@ -512,7 +519,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	// Add configured credential scopes
-	for _, cred := range c.cfg.Verifier.OpenID4VP.GetSupportedCredentials() {
+	for _, cred := range c.cfg.Verifier.Inbound.OpenID4VP.GetSupportedCredentials() {
 		for _, scope := range cred.Scopes {
 			metadata.ScopesSupported = append(metadata.ScopesSupported, scope)
 		}
@@ -611,14 +618,13 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 	// Check if this is a DC API response (encrypted JWT) or standard form-encoded
 	if req.Response != "" {
-		// DC API response - decrypt and extract vp_token
+		// DC API response - should be an encrypted JWT (JWE)
 		c.log.Debug("Processing DC API encrypted response", "state", req.State)
 
-		// TODO: Implement JWT decryption using OIDC keys
-		// For now, treat response as the vp_token
-		vpToken = req.Response
-
-		c.log.Info("DC API response decryption not yet implemented, treating response as vp_token")
+		// TODO: Implement JWT decryption using session ephemeral keys
+		// The response parameter contains a JWE that must be decrypted before use.
+		c.log.Error(nil, "DC API response decryption not yet implemented")
+		return nil, fmt.Errorf("DC API encrypted response handling not yet implemented")
 	} else if req.VPToken != "" {
 		// Standard direct_post with form-encoded parameters
 		vpToken = req.VPToken
@@ -687,7 +693,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Error(err, "Failed to generate authorization code")
 		return nil, ErrServerError
 	}
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second)
 
 	session.Code = code
 	session.CodeExpiresAt = codeExpiry.Unix()
@@ -947,8 +953,13 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 		"sub": subject,
 	}
 
-	// Add verified claims from VP
-	maps.Copy(response, session.VerifiedClaims)
+	// Add verified claims from VP, but never overwrite sub
+	for k, v := range session.VerifiedClaims {
+		if k == "sub" {
+			continue
+		}
+		response[k] = v
+	}
 
 	return response, nil
 }

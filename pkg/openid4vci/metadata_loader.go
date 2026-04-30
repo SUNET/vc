@@ -2,6 +2,7 @@ package openid4vci
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/pkg/pki"
 )
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -41,7 +42,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	clientID := fmt.Sprintf("x509_san_dns:%s", host)
 
 	requestObject := &openid4vp.RequestObject{
-		ISS:          c.cfg.Verifier.OIDCOP.Issuer,
+		ISS:          c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		AUD:          "https://self-issued.me/v2",
 		IAT:          time.Now().Unix(),
 		ResponseType: "vp_token",
@@ -127,7 +128,7 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		return err
 	}
 	authCtx.Code = authCode
-	authCtx.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix()
+	authCtx.CodeExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second).Unix()
 	authCtx.Status = "code_issued"
 
 	// Update session

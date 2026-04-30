@@ -6,13 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"gopkg.in/yaml.v2"
 )
 
 // PresentationRequestTemplate defines a configurable presentation request
-// that maps OIDC scopes to DCQL queries and VP claims to OIDC claims
+// that maps OIDC scopes to DCQL queries and VP claims to OIDC claims.
+//
+// TODO(refactor): This type and its interface methods belong in pkg/openid4vp (or a dedicated package).
+// Only the YAML loading/parsing logic (LoadPresentationRequests, loadTemplateFile) is configuration concern.
 type PresentationRequestTemplate struct {
 	// ID uniquely identifies this template
 	ID string `yaml:"id" json:"id" validate:"required"`
@@ -169,7 +173,7 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 		return nil, fmt.Errorf("presentation requests file path is empty")
 	}
 
-	fileBytes, err := os.ReadFile(filePath)
+	fileBytes, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
@@ -194,7 +198,7 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 // Each file may contain a single template (top-level fields) or multiple
 // templates wrapped in a "templates:" list.
 func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
-	fileBytes, err := os.ReadFile(filePath)
+	fileBytes, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}

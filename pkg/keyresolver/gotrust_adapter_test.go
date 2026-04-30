@@ -71,7 +71,7 @@ func TestGoTrustResolver_ResolveEd25519(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{ // #nosec G104
 			Decision: true,
 			Context: &authzen.EvaluationResponseContext{
 				TrustMetadata: didDoc,
@@ -94,7 +94,7 @@ func TestGoTrustResolver_ResolveEd25519(t *testing.T) {
 func TestGoTrustResolver_ResolveEd25519_Denied(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{ // #nosec G104
 			Decision: false,
 			Context: &authzen.EvaluationResponseContext{
 				Reason: map[string]any{
@@ -118,7 +118,7 @@ func TestGoTrustResolver_ResolveEd25519_Denied(t *testing.T) {
 func TestGoTrustResolver_ResolveEd25519_NoMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{ // #nosec G104
 			Decision: true,
 			// No Context or TrustMetadata
 		})
@@ -161,7 +161,7 @@ func TestGoTrustResolver_ResolveECDSA(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{ // #nosec G104
 			Decision: true,
 			Context: &authzen.EvaluationResponseContext{
 				TrustMetadata: didDoc,
@@ -203,7 +203,7 @@ func TestGoTrustResolver_EvaluateTrustEd25519(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true})
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true}) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -236,7 +236,7 @@ func TestGoTrustResolver_EvaluateTrustECDSA(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true})
+		json.NewEncoder(w).Encode(authzen.EvaluationResponse{Decision: true}) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -397,7 +397,7 @@ func TestNewGoTrustResolverWithDiscovery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/authzen-configuration" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(authzen.PDPMetadata{
+			json.NewEncoder(w).Encode(authzen.PDPMetadata{ // #nosec G104
 				PolicyDecisionPoint:      "https://pdp.example.com",
 				AccessEvaluationEndpoint: "https://pdp.example.com/evaluation",
 			})

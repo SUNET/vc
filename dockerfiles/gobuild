@@ -1,5 +1,5 @@
 # Need to use latest since alpine is built with muscl and protoc is compiled with glibc, so it won't work.
-FROM golang:latest
+FROM golang:1.26.2
 
 WORKDIR /go/src/app
 

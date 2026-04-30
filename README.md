@@ -35,15 +35,9 @@ To access a service from the host, use its container IP directly (e.g. `http://1
 
 To stop everything: `make stop`
 
-### Minimal configuration
+### Configuration
 
-A minimal config file is provided at `config_minimal.yaml` for getting started with sensible defaults. To use it, set the environment variable before starting:
-
-```bash
-export VC_CONFIG_YAML=config_minimal.yaml
-```
-
-The full configuration with all options is in `config.yaml`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for details.
+The main configuration file is `config.yaml`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for details.
 
 ### Prerequisites
 

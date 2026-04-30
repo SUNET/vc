@@ -11,6 +11,9 @@ import (
 
 // TokenStatusListAdd adds a new status entry to the Token Status List
 func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_registry.TokenStatusListAddStatusRequest) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
+	if req.Status > 255 {
+		return nil, fmt.Errorf("status value %d exceeds uint8 range", req.Status)
+	}
 	section, index, err := s.tokenStatusListIssuer.AddStatus(ctx, uint8(req.Status))
 	if err != nil {
 		return nil, err
@@ -36,6 +39,9 @@ func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_regis
 
 // TokenStatusListUpdate updates an existing status entry in the Token Status List
 func (s *Service) TokenStatusListUpdateStatus(ctx context.Context, req *apiv1_registry.TokenStatusListUpdateStatusRequest) (*apiv1_registry.TokenStatusListUpdateStatusReply, error) {
+	if req.Status > 255 {
+		return nil, fmt.Errorf("status value %d exceeds uint8 range", req.Status)
+	}
 	err := s.tokenStatusListIssuer.UpdateStatus(ctx, req.Section, req.Index, uint8(req.Status))
 	if err != nil {
 		return nil, err

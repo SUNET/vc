@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/registry/apiv1"
 
 	"github.com/gin-gonic/gin"

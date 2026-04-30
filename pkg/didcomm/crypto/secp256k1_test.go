@@ -122,7 +122,7 @@ func TestSecp256k1SignJWS_DirectKey(t *testing.T) {
 	// Verify header
 	headerBytes, _ := base64.RawURLEncoding.DecodeString(string(parts[0]))
 	var header map[string]any
-	json.Unmarshal(headerBytes, &header)
+	json.Unmarshal(headerBytes, &header) // #nosec G104
 
 	if header["alg"] != "ES256K" {
 		t.Errorf("alg = %v, want ES256K", header["alg"])

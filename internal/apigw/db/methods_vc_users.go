@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -114,4 +115,53 @@ func (c *VCUsersColl) GetUser(ctx context.Context, username string) (*model.OAut
 	}
 
 	return res, nil
+}
+
+// DeleteByUsername deletes a user by username.
+func (c *VCUsersColl) DeleteByUsername(ctx context.Context, username string) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:users:deleteByUsername")
+	defer span.End()
+
+	filter := bson.M{
+		"username": bson.M{"$eq": username},
+	}
+
+	result, err := c.Coll.DeleteOne(ctx, filter)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	if result.DeletedCount == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}
+
+// ListUsernames returns all usernames in the users collection.
+func (c *VCUsersColl) ListUsernames(ctx context.Context) ([]string, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:users:listUsernames")
+	defer span.End()
+
+	cursor, err := c.Coll.Find(ctx, bson.M{}, options.Find().SetProjection(bson.M{"username": 1}))
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var results []struct {
+		Username string `bson:"username"`
+	}
+	if err := cursor.All(ctx, &results); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	usernames := make([]string, len(results))
+	for i, r := range results {
+		usernames[i] = r.Username
+	}
+	return usernames, nil
 }

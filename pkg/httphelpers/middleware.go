@@ -2,11 +2,12 @@ package httphelpers
 
 import (
 	"context"
-	"fmt"
+	"crypto/subtle"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -126,23 +127,9 @@ func (m *middlewareHandler) Crash(ctx context.Context) gin.HandlerFunc {
 			if r := recover(); r != nil {
 				status := c.Writer.Status()
 				log.Error(nil, "panic recovered", "error", r, "status", status, "url", c.Request.URL.Path, "method", c.Request.Method)
-				m.client.Rendering.Content(ctx, c, 500, gin.H{"data": nil, "error": helpers.NewErrorDetails("internal_server_error", r)})
+				m.client.Rendering.Content(ctx, c, 500, gin.H{"data": nil, "error": helpers.NewErrorDetails("internal_server_error", "an unexpected error occurred")})
 			}
 		}()
-		c.Next()
-	}
-}
-
-// ClientCertAuth middleware to authenticate the client certificate, this should compare client certificate SAH1 hash with some config value.
-func (m *middlewareHandler) ClientCertAuth(ctx context.Context) gin.HandlerFunc {
-	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:ClientCertAuth")
-	defer span.End()
-
-	log := m.log.New("http")
-	return func(c *gin.Context) {
-		clientCertSHA1 := c.Request.Header.Get("X-SSL-Client-SHA1")
-		log.Info("clientCertSHA1", "clientCertSHA1", clientCertSHA1)
-		fmt.Println("clientCertSHA1", clientCertSHA1)
 		c.Next()
 	}
 }
@@ -161,7 +148,7 @@ func (m *middlewareHandler) BasicAuth(ctx context.Context, users map[string]stri
 		}
 
 		password, found := users[user]
-		if !found || pass != password {
+		if !found || subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
 			c.Header("WWW-Authenticate", `Basic realm="restricted"`)
 			c.AbortWithStatus(401)
 			return
@@ -233,7 +220,9 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 			})
 			return false
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			log.Error(err, "failed to close file", "path", path)
+		}
 		c.File(path)
 		c.Abort()
 		return true

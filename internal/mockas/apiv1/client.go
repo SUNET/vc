@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"net/http"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"

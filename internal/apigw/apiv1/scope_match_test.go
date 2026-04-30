@@ -11,21 +11,21 @@ import (
 func TestMatchScope(t *testing.T) {
 	t.Parallel()
 
-	cc := &model.CredentialConstructor{Format: "vc+sd-jwt"}
+	cc := &model.CredentialMetadata{Format: "vc+sd-jwt"}
 
 	tests := []struct {
 		name      string
 		cfg       *model.Cfg
 		scopes    []string
 		wantScope string
-		wantCC    *model.CredentialConstructor
+		wantCC    *model.CredentialMetadata
 		wantErr   string
 	}{
 		{
 			name: "single scope matches",
 			cfg: &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: map[string]*model.CredentialConstructor{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
 						"diploma": cc,
 					},
 				},
@@ -38,7 +38,7 @@ func TestMatchScope(t *testing.T) {
 			name: "first matching scope wins",
 			cfg: &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: map[string]*model.CredentialConstructor{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
 						"ehic":    cc,
 						"diploma": cc,
 					},
@@ -52,7 +52,7 @@ func TestMatchScope(t *testing.T) {
 			name: "second scope matches when first does not",
 			cfg: &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: map[string]*model.CredentialConstructor{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
 						"ehic": cc,
 					},
 				},
@@ -65,7 +65,7 @@ func TestMatchScope(t *testing.T) {
 			name: "no scope matches returns error",
 			cfg: &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: map[string]*model.CredentialConstructor{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
 						"diploma": cc,
 					},
 				},
@@ -77,7 +77,7 @@ func TestMatchScope(t *testing.T) {
 			name: "empty scopes returns error",
 			cfg: &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: map[string]*model.CredentialConstructor{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
 						"diploma": cc,
 					},
 				},

@@ -30,11 +30,11 @@ type PresentationVerifier interface {
 
 // Handler handles present-proof protocol messages.
 type Handler struct {
-	holderDID    string
-	store        CredentialFinder
-	builder      PresentationBuilder
-	verifier     PresentationVerifier
-	onRequest    func(ctx context.Context, request *RequestPresentation, msg *message.Message) (*message.Message, error)
+	holderDID      string
+	store          CredentialFinder
+	builder        PresentationBuilder
+	verifier       PresentationVerifier
+	onRequest      func(ctx context.Context, request *RequestPresentation, msg *message.Message) (*message.Message, error)
 	onPresentation func(ctx context.Context, presentation *Presentation, msg *message.Message) (*message.Message, error)
 }
 

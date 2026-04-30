@@ -174,11 +174,11 @@ func TestRequestObjectCache_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			requestURI := "urn:ietf:params:oauth:request_uri:concurrent-" + string(rune('0'+id))
+			requestURI := "urn:ietf:params:oauth:request_uri:concurrent-" + string(rune('0'+id)) // #nosec G115
 			requestObject := &RequestObject{
 				ResponseType: "vp_token",
 				ClientID:     "https://verifier.example.com",
-				Nonce:        "nonce-" + string(rune('0'+id)),
+				Nonce:        "nonce-" + string(rune('0'+id)), // #nosec G115
 			}
 			cache.Set(requestURI, requestObject)
 		}(i)
@@ -192,7 +192,7 @@ func TestRequestObjectCache_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			requestURI := "urn:ietf:params:oauth:request_uri:concurrent-" + string(rune('0'+id))
+			requestURI := "urn:ietf:params:oauth:request_uri:concurrent-" + string(rune('0'+id)) // #nosec G115
 			retrieved, found := cache.Get(requestURI)
 			assert.True(t, found)
 			assert.NotNil(t, retrieved)

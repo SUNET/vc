@@ -25,8 +25,13 @@ type MongoSecrets struct {
 
 // APIGWSecrets holds API gateway secrets
 type APIGWSecrets struct {
-	APIServer APIServerSecrets `yaml:"api_server,omitempty"`
-	OIDCRP    OIDCRPSecrets    `yaml:"oidc_rp,omitempty"`
+	APIServer     APIServerSecrets     `yaml:"api_server,omitempty"`
+	AuthProviders AuthProvidersSecrets `yaml:"auth_providers,omitempty"`
+}
+
+// AuthProvidersSecrets holds secrets for auth providers
+type AuthProvidersSecrets struct {
+	OIDC OIDCRPSecrets `yaml:"oidc,omitempty"`
 }
 
 // APIServerSecrets holds API server secrets (basic auth passwords)
@@ -81,7 +86,12 @@ type AdminGUISecrets struct {
 
 // VerifierSecrets holds verifier secrets
 type VerifierSecrets struct {
-	OIDCOP OIDCOPSecrets `yaml:"oidc_op,omitempty"`
+	Outbound VerifierOutboundSecrets `yaml:"outbound,omitempty"`
+}
+
+// VerifierOutboundSecrets holds outbound OIDC provider secrets
+type VerifierOutboundSecrets struct {
+	OIDCProvider OIDCOPSecrets `yaml:"oidc_provider,omitempty"`
 }
 
 // OIDCOPSecrets holds OIDC OP configuration secrets
@@ -110,11 +120,11 @@ func (cfg *Cfg) ClearSecrets() {
 
 	if cfg.APIGW != nil {
 		cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = nil
-		if cfg.APIGW.OIDCRP.Registration != nil && cfg.APIGW.OIDCRP.Registration.Preconfigured != nil {
-			cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret = ""
+		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil {
+			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = ""
 		}
-		if cfg.APIGW.OIDCRP.Registration != nil && cfg.APIGW.OIDCRP.Registration.Dynamic != nil {
-			cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken = ""
+		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic != nil {
+			cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken = ""
 		}
 	}
 
@@ -122,10 +132,10 @@ func (cfg *Cfg) ClearSecrets() {
 		cfg.Registry.AdminGUI.Password = ""
 	}
 
-	if cfg.Verifier != nil && cfg.Verifier.OIDCOP != nil {
-		cfg.Verifier.OIDCOP.SubjectSalt = ""
-		for i := range cfg.Verifier.OIDCOP.StaticClients {
-			cfg.Verifier.OIDCOP.StaticClients[i].ClientSecret = ""
+	if cfg.Verifier != nil && cfg.Verifier.Outbound.OIDCProvider != nil {
+		cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = ""
+		for i := range cfg.Verifier.Outbound.OIDCProvider.StaticClients {
+			cfg.Verifier.Outbound.OIDCProvider.StaticClients[i].ClientSecret = ""
 		}
 	}
 
@@ -157,23 +167,23 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if len(secrets.APIGW.APIServer.APIAuth.BasicAuth.Users) > 0 {
 			cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = secrets.APIGW.APIServer.APIAuth.BasicAuth.Users
 		}
-		if secrets.APIGW.OIDCRP.Registration.Preconfigured != nil && secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret != "" {
-			if cfg.APIGW.OIDCRP.Registration == nil {
-				cfg.APIGW.OIDCRP.Registration = &OIDCRPRegistrationConfig{}
+		if secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil && secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret != "" {
+			if cfg.APIGW.AuthProviders.OIDC.Registration == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration = &OIDCRPRegistrationConfig{}
 			}
-			if cfg.APIGW.OIDCRP.Registration.Preconfigured == nil {
-				cfg.APIGW.OIDCRP.Registration.Preconfigured = &OIDCRPPreconfiguredConfig{}
+			if cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured = &OIDCRPPreconfiguredConfig{}
 			}
-			cfg.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret = secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret
+			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret
 		}
-		if secrets.APIGW.OIDCRP.Registration.Dynamic != nil && secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken != "" {
-			if cfg.APIGW.OIDCRP.Registration == nil {
-				cfg.APIGW.OIDCRP.Registration = &OIDCRPRegistrationConfig{}
+		if secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic != nil && secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken != "" {
+			if cfg.APIGW.AuthProviders.OIDC.Registration == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration = &OIDCRPRegistrationConfig{}
 			}
-			if cfg.APIGW.OIDCRP.Registration.Dynamic == nil {
-				cfg.APIGW.OIDCRP.Registration.Dynamic = &OIDCRPDynamicRegistrationConfig{}
+			if cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic == nil {
+				cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic = &OIDCRPDynamicRegistrationConfig{}
 			}
-			cfg.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken = secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken
+			cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken = secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken
 		}
 	}
 
@@ -190,16 +200,16 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.Verifier == nil {
 			cfg.Verifier = &Verifier{}
 		}
-		if secrets.Verifier.OIDCOP.SubjectSalt != "" || len(secrets.Verifier.OIDCOP.StaticClients) > 0 {
-			if cfg.Verifier.OIDCOP == nil {
-				cfg.Verifier.OIDCOP = &OIDCOPConfig{}
+		if secrets.Verifier.Outbound.OIDCProvider.SubjectSalt != "" || len(secrets.Verifier.Outbound.OIDCProvider.StaticClients) > 0 {
+			if cfg.Verifier.Outbound.OIDCProvider == nil {
+				cfg.Verifier.Outbound.OIDCProvider = &OIDCOP{}
 			}
-			if secrets.Verifier.OIDCOP.SubjectSalt != "" {
-				cfg.Verifier.OIDCOP.SubjectSalt = secrets.Verifier.OIDCOP.SubjectSalt
+			if secrets.Verifier.Outbound.OIDCProvider.SubjectSalt != "" {
+				cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = secrets.Verifier.Outbound.OIDCProvider.SubjectSalt
 			}
-			for i := range cfg.Verifier.OIDCOP.StaticClients {
-				if secret, ok := secrets.Verifier.OIDCOP.StaticClients[cfg.Verifier.OIDCOP.StaticClients[i].ClientID]; ok {
-					cfg.Verifier.OIDCOP.StaticClients[i].ClientSecret = secret
+			for i := range cfg.Verifier.Outbound.OIDCProvider.StaticClients {
+				if secret, ok := secrets.Verifier.Outbound.OIDCProvider.StaticClients[cfg.Verifier.Outbound.OIDCProvider.StaticClients[i].ClientID]; ok {
+					cfg.Verifier.Outbound.OIDCProvider.StaticClients[i].ClientSecret = secret
 				}
 			}
 		}

@@ -385,7 +385,7 @@ func TestMessageBodyGetSet(t *testing.T) {
 				"inner": "value",
 			},
 		}
-		m.SetBody(body)
+		m.SetBody(body) // #nosec G104
 
 		// Get body
 		var retrieved map[string]any
@@ -416,7 +416,7 @@ func TestMessageBodyGetSet(t *testing.T) {
 			message.WithID("typed-1"),
 			message.WithType("https://didcomm.org/trust-ping/2.0/ping"),
 		)
-		m.SetBody(CustomBody{
+		m.SetBody(CustomBody{ // #nosec G104
 			ResponseRequested: true,
 			Comment:           "ping!",
 		})

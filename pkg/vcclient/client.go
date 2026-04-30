@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 )
@@ -147,7 +149,11 @@ func (c *Client) newRequest(ctx context.Context, method, path, contentType strin
 
 // Do does the new request
 func (c *Client) do(ctx context.Context, req *http.Request, reply any, prefixReplyJSONWithData bool) (*http.Response, error) {
-	resp, err := c.httpClient.Do(req)
+	// Validate request URL scheme to prevent SSRF
+	if req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
+		return nil, fmt.Errorf("invalid URL scheme: %v", req.URL)
+	}
+	resp, err := c.httpClient.Do(req) //#nosec G704 -- URL from trusted config (baseURL)
 	if err != nil {
 		return nil, err
 	}

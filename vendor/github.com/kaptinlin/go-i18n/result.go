@@ -4,9 +4,12 @@ package i18n
 type TranslationSource string
 
 const (
-	TranslationSourceDirect   TranslationSource = "direct"
+	// TranslationSourceDirect indicates that the requested locale supplied the translation.
+	TranslationSourceDirect TranslationSource = "direct"
+	// TranslationSourceFallback indicates that a fallback locale supplied the translation.
 	TranslationSourceFallback TranslationSource = "fallback"
-	TranslationSourceMissing  TranslationSource = "missing"
+	// TranslationSourceMissing indicates that no loaded translation was found and the key was returned.
+	TranslationSourceMissing TranslationSource = "missing"
 )
 
 // TranslationResult holds detailed translation lookup information.

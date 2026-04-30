@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -25,9 +27,13 @@ func NewValidator() (*validator.Validate, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		// Prefer yaml tag (used by config structs), fall back to json tag
+		name := strings.SplitN(fld.Tag.Get("yaml"), ",", 2)[0]
+		if name == "" || name == "-" {
+			name = strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		}
 
-		if name == "-" {
+		if name == "" || name == "-" {
 			return ""
 		}
 
@@ -66,6 +72,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register custom validation for httpsurl - validates URLs with https scheme and host.
 	// Used by OIDC dynamic client registration (RFC 7591 Section 2) for metadata URIs
 	// such as logo_uri, client_uri, policy_uri, and tos_uri.
+	// Also blocks private/loopback IPs to prevent SSRF since these URIs may be fetched server-side.
 	err = validate.RegisterValidation("httpsurl", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -89,6 +96,25 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
+		hostname := parsedURL.Hostname()
+
+		// Block localhost
+		if strings.ToLower(hostname) == "localhost" {
+			return false
+		}
+
+		// Resolve hostname and block private/loopback IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			return false
+		}
+
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return false
+			}
+		}
+
 		return true
 	})
 	if err != nil {
@@ -98,6 +124,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
+	// Also blocks private/loopback IPs to prevent SSRF if the URI is ever fetched server-side.
 	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -115,6 +142,30 @@ func NewValidator() (*validator.Validate, error) {
 
 		if parsedURL.Fragment != "" {
 			return false
+		}
+
+		hostname := parsedURL.Hostname()
+		if hostname == "" {
+			return false
+		}
+
+		// Block localhost
+		if strings.ToLower(hostname) == "localhost" {
+			return false
+		}
+
+		// Resolve hostname and block private/loopback IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			// If we can't resolve, allow — it may be a custom scheme (e.g. eudi-wallet://)
+			// Custom schemes won't have a resolvable hostname
+			return parsedURL.Scheme != "http" && parsedURL.Scheme != "https"
+		}
+
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return false
+			}
 		}
 
 		return true
@@ -180,7 +231,7 @@ func NewValidator() (*validator.Validate, error) {
 		if path == "" {
 			return false
 		}
-		f, err := os.Open(path)
+		f, err := os.Open(filepath.Clean(path))
 		if err != nil {
 			return false
 		}
@@ -195,7 +246,7 @@ func NewValidator() (*validator.Validate, error) {
 
 	// Register struct-level validation for SAMLConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		cfg := sl.Current().Interface().(model.SAMLConfig)
+		cfg := sl.Current().Interface().(model.SAMLSP)
 		if !cfg.Enable {
 			return
 		}
@@ -209,11 +260,11 @@ func NewValidator() (*validator.Validate, error) {
 		if hasMDQ && hasStatic {
 			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_exclusive", "")
 		}
-	}, model.SAMLConfig{})
+	}, model.SAMLSP{})
 
 	// Register struct-level validation for OIDCRPConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		cfg := sl.Current().Interface().(model.OIDCRPConfig)
+		cfg := sl.Current().Interface().(model.OIDCRP)
 		if !cfg.Enable {
 			return
 		}
@@ -222,30 +273,75 @@ func NewValidator() (*validator.Validate, error) {
 		if !slices.Contains(cfg.Scopes, "openid") {
 			sl.ReportError(cfg.Scopes, "Scopes", "Scopes", "oidc_openid_scope_required", "")
 		}
-	}, model.OIDCRPConfig{})
+	}, model.OIDCRP{})
 
-	// Register struct-level validation for Common: credential constructor constraints
+	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		common := sl.Current().Interface().(model.Common)
-		for scope, cc := range common.CredentialConstructor {
-			if cc == nil {
-				continue
-			}
-			// auth_scopes must not reference self
-			if slices.Contains(cc.AuthScopes, scope) {
-				sl.ReportError(cc.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
-			}
-			// openid4vp requires non-empty auth_scopes and auth_claims
-			if cc.AuthMethod == "openid4vp" {
-				if len(cc.AuthScopes) == 0 {
-					sl.ReportError(cc.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
+		ds := sl.Current().Interface().(model.DataSources)
+		for scope, cred := range ds.Datastore.Scopes {
+			switch cred.AuthProvider {
+			case model.AuthProviderOpenID4VP:
+				if slices.Contains(cred.AuthScopes, scope) {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
 				}
-				if len(cc.AuthClaims) == 0 {
-					sl.ReportError(cc.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_openid4vp", scope)
+				if len(cred.AuthScopes) == 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
+				}
+				if len(cred.AuthClaims) == 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_identity_lookup", scope)
+				}
+			case model.AuthProviderSAML, model.AuthProviderOIDC:
+				if len(cred.AuthClaims) == 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_identity_lookup", scope)
+				}
+				if len(cred.AuthScopes) > 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_only_for_openid4vp", scope)
+				}
+			case model.AuthProviderBasic:
+				if len(cred.AuthClaims) > 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_for_basic", scope)
+				}
+				if len(cred.AuthScopes) > 0 {
+					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_not_for_basic", scope)
 				}
 			}
 		}
-	}, model.Common{})
+	}, model.DataSources{})
+
+	// Register struct-level validation for OpenID4VPConfig: supported_credentials scopes must cover all client scopes
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.OpenID4VPConfig)
+
+		// Collect the union of all scopes from supported_credentials
+		supportedScopes := make(map[string]bool)
+		for _, cred := range cfg.SupportedCredentials {
+			for _, scope := range cred.Scopes {
+				supportedScopes[scope] = true
+			}
+		}
+
+		// Collect the union of all client scopes
+		clientScopes := make(map[string]bool)
+		for _, client := range cfg.Clients {
+			for _, scope := range client.Scopes {
+				clientScopes[scope] = true
+			}
+		}
+
+		// Every client scope must exist in supported_credentials
+		for scope := range clientScopes {
+			if !supportedScopes[scope] {
+				sl.ReportError(cfg.Clients, "Clients", "Clients", "client_scope_not_in_supported_credentials", scope)
+			}
+		}
+
+		// Every supported_credentials scope must be used by at least one client
+		for scope := range supportedScopes {
+			if !clientScopes[scope] {
+				sl.ReportError(cfg.SupportedCredentials, "SupportedCredentials", "SupportedCredentials", "supported_credential_scope_unused", scope)
+			}
+		}
+	}, model.OpenID4VPConfig{})
 
 	return validate, nil
 }

@@ -2,9 +2,9 @@ package apiv1
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/oauth2"
-
 )
 
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -102,6 +103,10 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 	return nil, nil
 }
 
+// UserLookup resolves the authenticated user's displayable claims for the credential preview (SVG template).
+// It retrieves data differently depending on the auth provider: from the user store for basic auth,
+// from the verifier session cache for OpenID4VP, or from the VCI session cache for SAML/OIDC.
+// After collecting the claims it marks the authorization context as consented and returns the wallet redirect URL.
 func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error) {
 	c.log.Debug("UserLookup called")
 
@@ -124,8 +129,8 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 	svgTemplateClaims := map[string]vcclient.SVGClaim{}
 
-	switch req.AuthMethod {
-	case model.AuthMethodBasic:
+	switch req.AuthProvider {
+	case model.AuthProviderBasic:
 		user, err := c.usersStore.GetUser(ctx, strings.ToLower(req.Username))
 		if err != nil {
 			c.log.Error(err, "failed to get user", "username", strings.ToLower(req.Username))
@@ -151,7 +156,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			},
 		}
 
-	case model.AuthMethodOpenID4VP:
+	case model.AuthProviderOpenID4VP:
 		authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
 		if err != nil {
 			c.log.Error(err, "failed to get authorization context")
@@ -211,7 +216,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			}
 		}
 
-	case model.AuthMethodSAML, model.AuthMethodOIDC:
+	case model.AuthProviderSAML, model.AuthProviderOIDC:
 		// For SAML/OIDC, documents are stored in the VCI session cache by the
 		// ACS/callback handlers, keyed by the authorization context's session ID.
 		// No verifier response_code lookup is needed — we use the session ID directly.
@@ -246,7 +251,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		if len(claimValues) == 0 && len(jsonPaths.Displayable) > 0 {
 			// Log diagnostic info when JSONPath extraction finds nothing.
-			// This typically means the credential_mappings don't produce the
+			// This typically means the attribute_mappings don't produce the
 			// claim keys expected by the VCTM (check svg_id / path alignment).
 			docKeys := make([]string, 0, len(doc.DocumentData))
 			for k := range doc.DocumentData {
@@ -292,7 +297,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		}
 
 	default:
-		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthMethod)
+		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthProvider)
 	}
 
 	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims)

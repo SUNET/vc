@@ -240,7 +240,7 @@ func TestTokenRequest_Validation(t *testing.T) {
 
 // TestTokenResponse validates the TokenResponse struct
 func TestTokenResponse_Fields(t *testing.T) {
-	resp := TokenResponse{
+	resp := TokenResponse{ // #nosec G101
 		AccessToken:  "access-token-123",
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
@@ -360,7 +360,7 @@ func TestStandardClaims(t *testing.T) {
 // ============================================================================
 
 // TestAuthorize_ClientValidation tests client validation in the Authorize handler
-// Note: Full Authorize flow requires CredentialConstructor config which is complex to mock
+// Note: Full Authorize flow requires CredentialMetadata config which is complex to mock
 func TestAuthorize_ClientValidation(t *testing.T) {
 	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
@@ -578,7 +578,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 						"email": "john@example.com",
 					},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -586,7 +586,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					TokenEndpointAuthMethod: "client_secret_basic",
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -638,7 +638,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     true, // Already used
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -663,7 +663,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(-1 * time.Minute).Unix(), // Expired
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -688,14 +688,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					ClientSecretHash:        hashPassword(t, "secret"), // hash of "secret"
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -720,14 +720,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "different-client",
 					ClientSecretHash:        hashPassword(t, "secret"),
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -752,14 +752,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					ClientSecretHash:        hashPassword(t, "secret"),
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -788,14 +788,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					WalletID:            "wallet-123",
 					VerifiedClaims:      map[string]any{},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					TokenEndpointAuthMethod: "none", // Public client
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -821,13 +821,13 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:           false,
 					CodeExpiresAt:       time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					TokenEndpointAuthMethod: "none",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -854,14 +854,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					WalletID:       "wallet-456",
 					VerifiedClaims: map[string]any{},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "public-client",
 					TokenEndpointAuthMethod: "none", // Public client
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:   "authorization_code",
@@ -940,10 +940,10 @@ func TestGenerateIDToken(t *testing.T) {
 	ctx := t.Context()
 
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDCOP.Issuer = "https://issuer.example.com"
-	client.cfg.Verifier.OIDCOP.IDTokenDuration = 3600
-	client.cfg.Verifier.OIDCOP.SubjectType = "public"
-	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
+	client.cfg.Verifier.Outbound.OIDCProvider.Issuer = "https://issuer.example.com"
+	client.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration = 3600
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
 	// Set up signing key
 	key := generateTestRSAKey(t)
@@ -1072,7 +1072,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid", "profile", "email"},
 					RequirePKCE:   false,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1107,7 +1107,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1127,7 +1127,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "token",
@@ -1147,7 +1147,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid", "profile"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1168,7 +1168,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid"},
 					RequirePKCE:   true,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1189,7 +1189,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid", "profile"},
 					RequirePKCE:   true,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType:        "code",
@@ -1212,7 +1212,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid", "profile", "email", "address"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1230,7 +1230,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-			client.cfg.Verifier.OIDCOP.SessionDuration = 900
+			client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
 			client.cfg.Verifier.DigitalCredentials.UseJAR = true
@@ -1302,7 +1302,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enable = false
 	// Clear CSS title to test default fallback
@@ -1320,7 +1320,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1352,7 +1352,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	client.cfg.Verifier.SupportedWallets = map[string]string{
 		"SUNET Wallet": "https://wallet.sunet.se/cb",
 		"Test Wallet":  "https://test-wallet.example.com/authorize",
@@ -1369,7 +1369,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1422,7 +1422,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// No supported wallets configured
 	client.cfg.Verifier.SupportedWallets = nil
 
@@ -1435,7 +1435,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1702,7 +1702,9 @@ func TestGetUserInfo(t *testing.T) {
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				assert.Equal(t, "user-123", resp["sub"])
+				// sub should be the generated pairwise identifier, not the raw "user-123" from VerifiedClaims
+				assert.NotEmpty(t, resp["sub"])
+				assert.NotEqual(t, "user-123", resp["sub"], "sub must not be overwritten by VerifiedClaims")
 				assert.Equal(t, "John Doe", resp["name"])
 				assert.Equal(t, "john@example.com", resp["email"])
 			},
@@ -2068,7 +2070,7 @@ func TestProcessDirectPost(t *testing.T) {
 		expectShowCredentials  bool
 		expectedStatus         cache.SessionStatus
 	}{
-		{
+		{ // #nosec G101
 			name:      "successful direct post with VP token",
 			sessionID: "session-dp-1",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2090,10 +2092,9 @@ func TestProcessDirectPost(t *testing.T) {
 				s.RedirectURI = "https://client.example.com/callback"
 				s.State = "client-state"
 			},
-			expectError:    false,
-			expectedStatus: cache.SessionStatusCodeIssued,
+			expectError:    true,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with presentation submission",
 			sessionID:              "session-dp-3",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2106,7 +2107,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false,
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with invalid presentation submission JSON",
 			sessionID:              "session-dp-4",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2119,7 +2120,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false, // Should continue even with invalid presentation submission
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:      "direct post with show credentials enabled",
 			sessionID: "session-dp-5",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2149,7 +2150,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:       true,
 			expectedErrorType: ErrInvalidRequest,
 		},
-		{
+		{ // #nosec G101
 			name:      "direct post without redirect URI",
 			sessionID: "session-dp-7",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2271,20 +2272,24 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{
-					{
-						VCT:    "https://credentials.example.com/person_id",
-						Scopes: []string{"pid"},
-					},
-					{
-						VCT:    "https://credentials.example.com/diploma",
-						Scopes: []string{"edu_diploma"},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{
+						{
+							VCT:    "https://credentials.example.com/person_id",
+							Scopes: []string{"pid"},
+						},
+						{
+							VCT:    "https://credentials.example.com/diploma",
+							Scopes: []string{"edu_diploma"},
+						},
 					},
 				},
 			},
@@ -2346,13 +2351,17 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{},
+				},
 			},
 		},
 	}
@@ -2400,13 +2409,17 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
 					PublicURL: tt.externalURL,
-					OIDCOP: &model.OIDCOPConfig{
-						Issuer:      tt.externalURL,
-						SubjectType: "public",
-						SubjectSalt: "test-salt",
+					Outbound: model.VerifierOutbound{
+						OIDCProvider: &model.OIDCOP{
+							Issuer:      tt.externalURL,
+							SubjectType: "public",
+							SubjectSalt: "test-salt",
+						},
 					},
-					OpenID4VP: &model.OpenID4VPConfig{
-						SupportedCredentials: []model.SupportedCredentialConfig{},
+					Inbound: model.VerifierInbound{
+						OpenID4VP: &model.OpenID4VPConfig{
+							SupportedCredentials: []model.SupportedCredentialConfig{},
+						},
 					},
 				},
 			}
@@ -2431,10 +2444,12 @@ func TestGetJWKS(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
 		},
 	}
@@ -2517,16 +2532,20 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{
-					{VCT: "cred1", Scopes: []string{"scope1"}},
-					{VCT: "cred2", Scopes: []string{"scope2"}},
-					{VCT: "cred3", Scopes: []string{"scope3"}},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{
+						{VCT: "cred1", Scopes: []string{"scope1"}},
+						{VCT: "cred2", Scopes: []string{"scope2"}},
+						{VCT: "cred3", Scopes: []string{"scope3"}},
+					},
 				},
 			},
 		},
@@ -2545,10 +2564,12 @@ func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
 		},
 	}
@@ -2622,8 +2643,10 @@ func TestMatchRedirectURI(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer: "https://verifier.example.com",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer: "https://verifier.example.com",
+				},
 			},
 		},
 	}

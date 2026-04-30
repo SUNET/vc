@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/SUNET/vc/internal/apigw/oidcrp"
+	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
+	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
@@ -51,6 +52,8 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPInitiate")
 	defer span.End()
 
+	c.log.Debug("OIDCRPInitiate", "credential_type", req.CredentialType)
+
 	service, ok := oidcrpService.(*oidcrp.Service)
 	if !ok || service == nil {
 		return nil, fmt.Errorf("OIDC RP service not available")
@@ -73,11 +76,14 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPCallback")
 	defer span.End()
 
+	c.log.Debug("OIDCRPCallback", "state", req.State)
+
 	service, ok := oidcrpService.(*oidcrp.Service)
 	if !ok || service == nil {
 		return nil, fmt.Errorf("OIDC RP service not available")
 	}
 
+	c.log.Debug("OIDCRPCallback: processing callback via OIDC RP service")
 	// Process the callback via OIDC RP service
 	authResp, err := service.ProcessCallback(ctx, req.Code, req.State)
 	if err != nil {
@@ -119,67 +125,91 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 	}()
 
-	// Build transformer from config
-	transformer, err := service.BuildTransformer()
-	if err != nil {
-		span.SetStatus(codes.Error, "transformer creation failed")
-		return nil, fmt.Errorf("failed to create transformer: %w", err)
+	// Build transformer from config (nil means passthrough — OIDC claims already use standard names)
+	c.log.Debug("OIDCRPCallback: building claim transformer", "credential_type", session.CredentialType)
+	transformer := service.BuildTransformer()
+
+	var claims map[string]any
+	if transformer != nil {
+		c.log.Debug("OIDCRPCallback: transforming claims", "raw_claims_count", len(authResp.Claims))
+		// Transform OIDC claims to credential claims
+		claims, err = transformer.TransformClaims(authResp.Claims)
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			return nil, err
+		}
+	} else {
+		// No mapping configured — pass through raw claims
+		claims = authResp.Claims
 	}
 
-	// Get the mapping for this credential type
-	mapping, err := transformer.GetMapping(session.CredentialType)
-	if err != nil {
-		span.SetStatus(codes.Error, "no mapping found")
-		return nil, err
-	}
-
-	// Transform OIDC claims to credential claims
-	claims, err := transformer.TransformClaims(session.CredentialType, authResp.Claims)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	// Log the mapping attributes and resulting document data for diagnostics.
-	// This helps identify mismatches between credential_mappings and the VCTM claims.
+	// Log the resulting document data for diagnostics.
 	claimKeys := make([]string, 0, len(claims))
 	for k := range claims {
 		claimKeys = append(claimKeys, k)
-	}
-	mappingKeys := make([]string, 0, len(mapping.Attributes))
-	for k := range mapping.Attributes {
-		mappingKeys = append(mappingKeys, k)
 	}
 
 	c.log.Info("OIDC authentication successful",
 		"credential_type", session.CredentialType,
 		"claims_count", len(claims),
 		"claim_keys", claimKeys,
-		"mapping_attributes", mappingKeys,
 		"subject", authResp.IDToken.Subject)
 
 	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
 	// store the transformed claims as a document in the VCI session cache and signal
 	// the httpserver to redirect back to the consent page.
 	if session.VCISessionID != "" {
-		c.log.Info("OIDC callback: VCI mode detected, storing document in VCI cache",
+		c.log.Info("OIDC callback: VCI mode detected",
 			"vci_session_id", session.VCISessionID,
 			"credential_type", session.CredentialType)
 
-		doc := &model.CompleteDocument{
-			Meta: &model.MetaData{
-				AuthenticSource: session.IssuerURL,
-			},
-			DocumentData:        claims,
-			DocumentDataVersion: "1.0.0",
-		}
-		docs := map[string]*model.CompleteDocument{
-			session.IssuerURL: doc,
+		// Check if this credential's data source is external_api — if so,
+		// we only need the person identifier from the ID token, not the full claims.
+		authCtx, lookupErr := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: session.VCISessionID})
+		if lookupErr != nil {
+			span.SetStatus(codes.Error, "auth context lookup failed")
+			return nil, fmt.Errorf("failed to get auth context for VCI session %s: %w", session.VCISessionID, lookupErr)
 		}
 
-		if err := c.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
-			span.SetStatus(codes.Error, "VCI document storage failed")
-			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		if authCtx.DataSource == string(model.DataSourceExternalAPI) {
+			// External API: extract person identifier for later API lookup.
+			personID, _ := authResp.Claims["sub"].(string)
+			if personID == "" {
+				span.SetStatus(codes.Error, "person_id not found in OIDC claims")
+				return nil, fmt.Errorf("external API flow requires person identifier but sub claim is empty")
+			}
+
+			authCtx.PersonID = personID
+			if updateErr := c.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
+				span.SetStatus(codes.Error, "failed to store person_id")
+				return nil, fmt.Errorf("failed to update person_id on auth context: %w", updateErr)
+			}
+			c.log.Info("OIDC callback: stored person_id for external API flow",
+				"vci_session_id", session.VCISessionID, "person_id", personID)
+		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
+			// Datastore: use the authenticated identity to look up pre-loaded documents.
+			dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
+			if err := c.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, claims, &dsCred); err != nil {
+				span.SetStatus(codes.Error, "datastore lookup failed")
+				return nil, fmt.Errorf("OIDC datastore lookup failed: %w", err)
+			}
+		} else {
+			// Assertion: store the transformed claims directly as a document
+			doc := &model.CompleteDocument{
+				Meta: &model.MetaData{
+					AuthenticSource: session.IssuerURL,
+				},
+				DocumentData:        claims,
+				DocumentDataVersion: "1.0.0",
+			}
+			docs := map[string]*model.CompleteDocument{
+				session.IssuerURL: doc,
+			}
+
+			if err := c.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
+				span.SetStatus(codes.Error, "VCI document storage failed")
+				return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+			}
 		}
 
 		// Clean up OIDC session (clear err so defer doesn't double-delete)
@@ -210,7 +240,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	// Generate credential offer for wallet
-	credentialOffer, err := c.generateCredentialOfferOIDCRP(ctx, session.CredentialType, mapping.CredentialConfigID)
+	credentialOffer, err := c.generateCredentialOfferOIDCRP(ctx, session.CredentialType, session.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
@@ -248,8 +278,8 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 
 	client := apiv1_issuer.NewIssuerServiceClient(conn)
 
-	credentialConstructor := c.cfg.GetCredentialConstructor(credentialType)
-	if credentialConstructor == nil {
+	credMeta := c.cfg.GetCredentialMetadata(credentialType)
+	if credMeta == nil {
 		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
 
@@ -258,8 +288,8 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 		Scope:        credentialType,
 		DocumentData: documentData,
 		Jwk:          jwk,
-		Integrity:    credentialConstructor.GetIntegrity(),
-		Vctm:         credentialConstructor.GetVCTMRaw(),
+		Integrity:    credMeta.GetIntegrity(),
+		Vctm:         credMeta.GetVCTMRaw(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")
@@ -286,7 +316,7 @@ func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialTy
 
 	// Build credential offer parameters
 	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.CredentialOffers.IssuerURL,
+		CredentialIssuer:           c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{credentialConfigID},
 		Grants: map[string]any{
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{

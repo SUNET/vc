@@ -9,14 +9,14 @@
       "rendering": {
          "simple": {
           "logo": {
-            "uri": "https://demo-issuer.wwwallet.org/public/creds/pid/person-identification-data-svg-example-01.svg",
-            "uri#integrity": "sha256-037rNwIiS/qeKc16yxy3xJlAYYFGul1wJAcGjXjDVLw="
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/pid_v1.svg",
+            "uri#integrity": "sha256-8sf+BoRZNZTJXhdrhDUviKsOi0WHMeRDcWi7b9l3phw="
           }
         },
         "svg_templates": [
           {
-            "uri": "https://demo-issuer.wwwallet.org/public/creds/pid/person-identification-data-svg-example-01.svg",
-            "uri#integrity": "sha256-037rNwIiS/qeKc16yxy3xJlAYYFGul1wJAcGjXjDVLw=",
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/pid_v1.svg",
+            "uri#integrity": "sha256-8sf+BoRZNZTJXhdrhDUviKsOi0WHMeRDcWi7b9l3phw=",
             "properties": {
               "orientation": "landscape",
               "color_scheme": "light",

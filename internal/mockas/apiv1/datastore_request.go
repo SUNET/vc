@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 )
 
@@ -70,7 +71,11 @@ func (c *Client) do(ctx context.Context, req *http.Request, value any) (*http.Re
 	_, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	resp, err := c.httpClient.Do(req)
+	// Validate request URL scheme to prevent SSRF
+	if req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
+		return nil, fmt.Errorf("invalid URL scheme: %v", req.URL)
+	}
+	resp, err := c.httpClient.Do(req) //#nosec G704 -- URL from trusted config (DatastoreURL)
 	if err != nil {
 		c.log.Debug("httpClient do", "error", err)
 		return nil, err
