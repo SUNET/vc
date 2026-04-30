@@ -25,7 +25,7 @@ func NewSelector(samlEnabled, oidcEnabled bool) *Selector {
 // Select finds the best auth provider for a credential scope by walking the
 // data sources. It returns both the chosen auth provider and its credential
 // source in one step.
-//   - basic, openid4vp are always available (built-in)
+//   - openid4vp is always available (built-in)
 //   - saml requires the SAML SP service to be initialised
 //   - oidc requires the OIDC RP service to be initialised
 func (s *Selector) Select(scope string, ds *model.DataSources) (string, model.CredentialSource, error) {
@@ -45,7 +45,7 @@ func (s *Selector) Select(scope string, ds *model.DataSources) (string, model.Cr
 
 func (s *Selector) isEnabled(provider string) bool {
 	switch provider {
-	case model.AuthProviderBasic, model.AuthProviderOpenID4VP:
+	case model.AuthProviderOpenID4VP:
 		return true
 	case model.AuthProviderSAML:
 		return s.samlEnabled

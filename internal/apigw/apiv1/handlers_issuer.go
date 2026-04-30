@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/crypto"
@@ -148,18 +147,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID)
 	// Retrieve credential data based on the auth provider used during authorization
 	switch authContext.AuthProvider {
-	case model.AuthProviderBasic:
-		// Basic auth: retrieve from datastore using identity
-		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-			Meta: &model.MetaData{
-				AuthenticSource: authContext.AuthenticSource,
-				Scope:           scope,
-			},
-			Identity: authContext.Identity,
-		})
-		if err != nil {
-			return nil, err
-		}
 	case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC:
 		// Session-based auth providers: retrieve from session cache
 		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)

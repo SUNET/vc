@@ -20,18 +20,6 @@ func TestSelect(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name:     "basic always available",
-			selector: NewSelector(false, false),
-			scope:    "pid",
-			ds: &model.DataSources{
-				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"pid": {AuthProvider: model.AuthProviderBasic},
-				}},
-			},
-			wantAuth:   model.AuthProviderBasic,
-			wantSource: model.DataSourceDatastore,
-		},
-		{
 			name:     "openid4vp always available",
 			selector: NewSelector(false, false),
 			scope:    "ehic",
@@ -56,7 +44,7 @@ func TestSelect(t *testing.T) {
 			wantSource: model.DataSourceAssertion,
 		},
 		{
-			name:     "saml disabled - skipped, falls back to basic in datastore",
+			name:     "saml disabled - skipped, falls back to openid4vp in datastore",
 			selector: NewSelector(false, false),
 			scope:    "pid",
 			ds: &model.DataSources{
@@ -64,10 +52,10 @@ func TestSelect(t *testing.T) {
 					"pid": {AuthProvider: model.AuthProviderSAML},
 				}},
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"pid": {AuthProvider: model.AuthProviderBasic},
+					"pid": {AuthProvider: model.AuthProviderOpenID4VP},
 				}},
 			},
-			wantAuth:   model.AuthProviderBasic,
+			wantAuth:   model.AuthProviderOpenID4VP,
 			wantSource: model.DataSourceDatastore,
 		},
 		{
@@ -89,7 +77,7 @@ func TestSelect(t *testing.T) {
 			scope:    "unknown",
 			ds: &model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"pid": {AuthProvider: model.AuthProviderBasic},
+					"pid": {AuthProvider: model.AuthProviderOpenID4VP},
 				}},
 			},
 			wantErr: true,

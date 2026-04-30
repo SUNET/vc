@@ -109,7 +109,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIGWSecure, http.MethodPost, "notification", http.StatusOK, s.endpointNotification)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIGWSecure, http.MethodPost, "document/search", http.StatusOK, s.endpointSearchDocuments)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIGWSecure, http.MethodDelete, "document", http.StatusOK, s.endpointDeleteDocument)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIGWSecure, http.MethodPost, "piduser", http.StatusOK, s.endpointAddPIDUser)
 
 	// Run http server
 	go func() {

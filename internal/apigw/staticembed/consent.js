@@ -18,17 +18,6 @@ const SvgTemplateResponseSchema = v.required(v.object({
 }));
 
 /**
- * @typedef {v.InferOutput<typeof BasicAuthResponseSchema>} BasicAuthResponse
- */
-const BasicAuthResponseSchema = v.required(v.object({
-    grant: v.boolean(),
-    redirect_url: v.pipe(
-        v.string(),
-        v.url(),
-    )
-}));
-
-/**
  * @typedef {v.InferOutput<typeof UserDataSchema>} UserData
  */
 const UserDataSchema = v.required(v.object({
@@ -86,7 +75,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"basic" | "saml" | "oidc" | "openid4vp" | null} */
+    /** @type {"saml" | "oidc" | "openid4vp" | null} */
     authMethod: null,
 
     /** @type {number | null} */
@@ -131,11 +120,10 @@ Alpine.data("app", () => ({
 
     setAuthMethod() {
         const authMethod = this.$el.dataset.authMethod || null;
-        const validMethods = ["basic", "openid4vp", "saml", "oidc"];
+        const validMethods = ["openid4vp", "saml", "oidc"];
 
         if (
             !authMethod ||
-            authMethod !== "basic" &&
             authMethod !== "saml" &&
             authMethod !== "oidc" &&
             authMethod !== "openid4vp"
@@ -170,88 +158,36 @@ Alpine.data("app", () => ({
         });
     },
 
-    /** @param {SubmitEvent} event */
-    async handleLoginBasic(event) {
-        this.loading = true;
-        this.error = null;
-
-        if (!(this.$refs.loginForm instanceof HTMLFormElement)) {
-            this.error = "Login form not of type 'HtmlFormElement'";
-            return;
-        }
-
-        const formData = new FormData(this.$refs.loginForm);
-
-        const username = formData.get("username");
-        if (!username) {
-            this.error = "Username is required";
-            return;
-        }
-
-        const password = formData.get("password");
-        if (!password) {
-            this.error = "Password is required";
-            return;
-        }
-
-        console.info("Fetching credential offers for user:", username);
-
-        const url = new URL("/user/pid/login", baseUrl);
-
-        const options = {
-            method: "POST", 
-            headers: {
-                "Accept": "application/json", 
-                "Content-Type": "application/json; charset=utf-8",
-            }, 
-            body: JSON.stringify({
-                username: username,
-                password: password,
-            }),
-        };
-
-        try {
-            await this.fetchData(url.toString(), options);
-
-            window.location.hash = ROUTES.credentials;
-        } catch (err) {
-            if (err instanceof v.ValiError) {
-                this.error = err.message;
-            } else {
-                this.error = `Failed to login: ${err.message}`;
-            }
-            this.loggedIn = false;
-            this.loading = false;
-        }
-    },
-
     handleLoginSAML() {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "Missing SAML redirect URL";
             return;
         }
-        this.redirect(this.redirectUrl);
+        this.redirect(url);
     },
 
     handleLoginOIDC() {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "Missing OIDC redirect URL";
             return;
         }
-        this.redirect(this.redirectUrl);
+        this.redirect(url);
     },
 
     /**
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
     handleLoginOpenID4VP(immediate = false) {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "Missing OpenID4VP redirect URL";
             return;
         }
 
         if (immediate) {
-            this.redirect(this.redirectUrl);
+            this.redirect(url);
             return;
         }
 
@@ -269,7 +205,7 @@ Alpine.data("app", () => ({
 
             if (this.openid4vpRedirectCountUp >= this.openid4vpRedirectMaxCount) {
                 clearInterval(increment);
-                this.redirect(this.redirectUrl);
+                this.redirect(url);
                 return;
             }
         }, 1000);
@@ -322,8 +258,10 @@ Alpine.data("app", () => ({
         } catch (err) {
             if (err instanceof v.ValiError) {
                 this.error = err.message;
-            } else {
+            } else if (err instanceof Error) {
                 this.error = `Error: ${err.message}`;
+            } else {
+                this.error = `Error: ${err}`;
             }
             window.location.hash = ROUTES.login;
         } finally {
@@ -333,11 +271,12 @@ Alpine.data("app", () => ({
 
     /** @param {SubmitEvent} event */
     handleCredentialSelection(event) {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "'redirect_url' is null";
             return;
         }
-        this.redirect(this.redirectUrl);
+        this.redirect(url);
     },
 
     /**

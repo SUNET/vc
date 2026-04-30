@@ -98,7 +98,9 @@ apigw:
     datastore:
       scopes:
         pid_1_5:
-          auth_provider: basic
+          auth_provider: openid4vp
+          auth_scopes: ["pid_1_5"]
+          auth_claims: ["given_name", "family_name", "birthdate"]
         ehic:
           auth_provider: openid4vp
           auth_scopes: ["pid_1_5"]

@@ -7,15 +7,6 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
-// UsersStore defines the interface for user operations
-type UsersStore interface {
-	Save(ctx context.Context, doc *model.OAuthUsers) error
-	GetUser(ctx context.Context, username string) (*model.OAuthUsers, error)
-	GetHashedPassword(ctx context.Context, username string) (string, error)
-	ListUsernames(ctx context.Context) ([]string, error)
-	DeleteByUsername(ctx context.Context, username string) error
-}
-
 // CredentialOfferStore defines the interface for credential offer operations
 type CredentialOfferStore interface {
 	Save(ctx context.Context, doc *CredentialOfferDocument) error
@@ -45,6 +36,5 @@ type DatastoreStore interface {
 }
 
 // Ensure concrete types implement the interfaces
-var _ UsersStore = (*VCUsersColl)(nil)
 var _ CredentialOfferStore = (*VCCredentialOfferColl)(nil)
 var _ DatastoreStore = (*VCDatastoreColl)(nil)

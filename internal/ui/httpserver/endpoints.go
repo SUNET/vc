@@ -204,15 +204,3 @@ func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (a
 	return nil, nil
 }
 
-func (s *Service) endpointAddPIDUser(ctx context.Context, g *gin.Context) (any, error) {
-	request := &vcclient.AddPIDRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, g, request); err != nil {
-		return nil, err
-	}
-
-	if err := s.apiv1.AddPIDUser(ctx, request); err != nil {
-		return nil, err
-	}
-
-	return nil, nil
-}

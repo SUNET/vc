@@ -149,11 +149,3 @@ func (c *Client) DeleteDocument(ctx context.Context, req *vcclient.DocumentDelet
 	return nil
 }
 
-func (c *Client) AddPIDUser(ctx context.Context, req *vcclient.AddPIDRequest) error {
-	_, err := c.vcClient.APIGW.User.AddPID(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}

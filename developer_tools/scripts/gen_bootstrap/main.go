@@ -130,7 +130,6 @@ func main() {
 	// Sorted person IDs for deterministic output.
 	pids := sortedKeys(input.Persons)
 
-	writeJSON(outputDir, "basic_auth_users.json", genIDPUsers(pids, &input))
 	writeJSON(outputDir, "pid-1-5.json", genPID15(pids, &input))
 	writeJSON(outputDir, "pid-1-8.json", genPID18(pids, &input))
 	writeJSON(outputDir, "eduid.json", genEduID(pids, &input))
@@ -140,30 +139,7 @@ func main() {
 	writeJSON(outputDir, "diploma.json", genDiploma(pids, &input))
 	writeJSON(outputDir, "microcredential.json", genMicroCredential(pids, &input))
 
-	fmt.Printf("Generated %d credential files for %d persons in %s\n", 9, len(pids), outputDir)
-}
-
-// --- IDP Users ---
-
-func genIDPUsers(pids []string, input *InputFile) map[string]*vcclient.AddPIDRequest {
-	result := make(map[string]*vcclient.AddPIDRequest, len(pids))
-	for _, pid := range pids {
-		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
-		result[pid] = &vcclient.AddPIDRequest{
-			Username: toLower(p.FamilyName),
-			Password: toLower(p.FamilyName),
-			Identity: &identity,
-			Meta: &model.MetaData{
-				AuthenticSource: "PID_Provider:00001",
-				VCT:             "not_applicable",
-				Scope:           "basic_auth_users",
-				DocumentVersion: "1.0.0",
-				DocumentID:      fmt.Sprintf("basic_auth_users_%s", pid),
-			},
-		}
-	}
-	return result
+	fmt.Printf("Generated %d credential files for %d persons in %s\n", 8, len(pids), outputDir)
 }
 
 // --- PID ARF 1.5 ---

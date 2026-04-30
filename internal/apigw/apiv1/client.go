@@ -35,7 +35,6 @@ type Client struct {
 	tracer *trace.Tracer
 
 	// database collections
-	usersStore           db.UsersStore
 	credentialOfferStore db.CredentialOfferStore
 	datastoreStore       db.DatastoreStore
 
@@ -62,7 +61,6 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
-		usersStore:                    db.VCUsersColl,
 		credentialOfferStore:          db.VCCredentialOfferColl,
 		datastoreStore:                db.VCDatastoreColl,
 		log:                           log.New("apiv1"),

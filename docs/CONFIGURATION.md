@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-04-28
+**Generated:** 2026-04-30
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -83,10 +83,10 @@ Shared configuration used across all services.
 
 > **Path:** `.common.kafka`
 
-| Field     | Type       | Description                    | Example | Default                          | Required |
-| --------- | ---------- | ------------------------------ | ------- | -------------------------------- | -------- |
-| `enable`  | `bool`     | Kafka integration              | -       | `false`                          | No       |
-| `brokers` | `[]string` | List of Kafka broker addresses | -       | `["kafka0:9092", "kafka1:9092"]` | No       |
+| Field     | Type       | Description                    | Example                          | Default | Required |
+| --------- | ---------- | ------------------------------ | -------------------------------- | ------- | -------- |
+| `enable`  | `bool`     | Kafka integration              | -                                | `false` | No       |
+| `brokers` | `[]string` | List of Kafka broker addresses | `["kafka0:9092", "kafka1:9092"]` | -       | Yes      |
 
 ### `credential_offer_qr`
 
@@ -408,28 +408,10 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers`
 
-| Field   | Type     | Description                                 | Example | Default | Required |
-| ------- | -------- | ------------------------------------------- | ------- | ------- | -------- |
-| `basic` | `object` | The basic (username/password) auth provider | -       | -       | No       |
-| `saml`  | `object` | The SAML SP auth provider                   | -       | -       | No       |
-| `oidc`  | `object` | The OIDC RP auth provider                   | -       | -       | No       |
-
-### `basic`
-
-> **Path:** `.apigw.auth_providers.basic`
-
-| Field    | Type     | Description                                                                                                                                                                                      | Example | Default | Required |
-| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `import` | `object` | Automatic import of test users from a JSON file at startup. When configured, APIGW reads the file and imports users into the users collection on first startup (skipped if users already exist). | -       | -       | No       |
-
-### `import`
-
-> **Path:** `.apigw.auth_providers.basic.import`
-
-| Field       | Type       | Description                                                                                                                 | Example                                   | Default | Required |
-| ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
-| `file_path` | `string`   | Path to a JSON file containing user definitions to import. Import is skipped if the users collection already contains data. | `"./bootstrapping/basic_auth_users.json"` | -       | Yes      |
-| `users`     | `[]string` | Users limits which person IDs to import. If empty, all users are imported.                                                  | `["100", "102"]`                          | -       | No       |
+| Field  | Type     | Description               | Example | Default | Required |
+| ------ | -------- | ------------------------- | ------- | ------- | -------- |
+| `saml` | `object` | The SAML SP auth provider | -       | -       | No       |
+| `oidc` | `object` | The OIDC RP auth provider | -       | -       | No       |
 
 ### `saml`
 
