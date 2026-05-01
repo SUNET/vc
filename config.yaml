@@ -103,7 +103,7 @@ apigw:
         ehic:
           auth_provider: openid4vp
           auth_scopes: ["pid_1_5"]
-          auth_claims: ["given_name", "family_name", "birthdate"]
+          auth_claims: ["given_name", "family_name", "birth_date"]
   auth_providers:
     oidc:
       enable: true

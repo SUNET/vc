@@ -1080,7 +1080,7 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
 		"given_name":  givenName,
 		"family_name": familyName,
-		"birthdate":   birthDate,
+		"birth_date":  birthDate,
 	})
 	require.NotEmpty(t, authCode, "VCI auth code")
 
