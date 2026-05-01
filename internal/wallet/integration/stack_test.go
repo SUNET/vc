@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -51,20 +52,20 @@ var (
 	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")    // NOSONAR
 	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080") // NOSONAR
 	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "https://172.16.50.13:8080")  // NOSONAR
+	mockOIDCURL = envOrDefault("STACK_MOCK_OIDC_URL", "http://172.16.50.30:8080") // NOSONAR
 
 	// The public URLs the services use for self-referencing
 	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "https://apigw.vc.docker:8080")       // NOSONAR
 	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "https://verifier.vc.docker:8080") // NOSONAR
+	mockOIDCPublicURL = envOrDefault("STACK_MOCK_OIDC_PUBLIC_URL", "http://mock-oauth2.vc.docker:8080") // NOSONAR
 
 	// tlsTransport is a shared TLS transport that trusts the dev rootCA.
 	// Initialised by TestMain before any tests run.
 	tlsTransport *http.Transport
 
 	// OAuth client config matching config.yaml
-	oauthClientID = "1003"                        // NOSONAR
+	oauthClientID = "1003"                  // NOSONAR
 	oauthRedirect = "http://localhost:3000" // NOSONAR — must match apigw oauth_server in config.yaml
-	testUsername  = "wallet_test_user"            // NOSONAR
-	testPassword  = "wallet_test_pass_42"         // NOSONAR
 
 	// Shared VP client (registered once via sync.Once to avoid rate limiting)
 	sharedVPClient     *verifierClient
@@ -110,12 +111,14 @@ func TestMain(m *testing.M) {
 func rewritePublicToInternal(rawURL string) string {
 	rawURL = strings.ReplaceAll(rawURL, apigwPublicURL, apigwURL)
 	rawURL = strings.ReplaceAll(rawURL, verifierPublicURL, verifierURL)
+	rawURL = strings.ReplaceAll(rawURL, mockOIDCPublicURL, mockOIDCURL)
 	return rawURL
 }
 
 func rewriteInternalToPublic(rawURL string) string {
 	rawURL = strings.ReplaceAll(rawURL, apigwURL, apigwPublicURL)
 	rawURL = strings.ReplaceAll(rawURL, verifierURL, verifierPublicURL)
+	rawURL = strings.ReplaceAll(rawURL, mockOIDCURL, mockOIDCPublicURL)
 	return rawURL
 }
 
@@ -428,45 +431,12 @@ func TestStack_VCI_PAR(t *testing.T) {
 
 // ---------- VCI: Full Authorization Code Flow ----------
 
-// createTestUser creates a test user for the basic auth consent flow.
-func createTestUser(t *testing.T, personID, givenName, familyName, birthDate string) {
-	t.Helper()
-	body, _ := json.Marshal(map[string]any{
-		"username": testUsername,
-		"password": testPassword,
-		"identity": map[string]any{
-			"authentic_source_person_id": personID,
-			"given_name":                 givenName,
-			"family_name":                familyName,
-			"birth_date":                 birthDate,
-			"schema": map[string]any{
-				"name":    "SE",
-				"version": "1.0.0",
-			},
-		},
-		"meta": map[string]any{
-			"authentic_source": "test_as",
-			"document_version": "1.0.0",
-			"vct":              "urn:eudi:pid:arf-1.5:1",
-			"scope":            "pid_1_5",
-			"document_id":      "meta-" + uuid.New().String()[:8],
-		},
-	})
-
-	resp, err := http.Post(apigwURL+"/api/v1/user/pid", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	// 200 = created, or may fail if user exists — both OK
-	t.Logf("create user: status=%d body=%s", resp.StatusCode, string(respBody))
-}
-
 func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 	// This test exercises the complete OpenID4VCI authorization_code flow:
 	// 1. Seed mock data via mockas
 	// 2. Get credential offer via notification
 	// 3. PAR request
-	// 4. Authorize → consent → login → user lookup → get auth code
+	// 4. Authorize → OpenID4VP consent → user lookup → get auth code
 	// 5. Token request with DPoP
 	// 6. Credential request with DPoP
 
@@ -474,9 +444,6 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 	givenName := "TestVCI"
 	familyName := "FullFlow"
 	birthDate := "1990-05-20"
-
-	// Step 0: Create a test user for login
-	createTestUser(t, personID, givenName, familyName, birthDate)
 
 	// Step 1: Seed data
 	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
@@ -523,7 +490,11 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 	t.Logf("PAR: request_uri=%s", parResp.RequestURI)
 
 	// Step 5: Authorization + consent flow (session-based)
-	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name": givenName,
+		"family_name": familyName,
+		"birth_date": birthDate,
+	})
 	require.NotEmpty(t, authCode, "authorization code must not be empty")
 	t.Logf("authorization_code=%s", authCode)
 
@@ -556,7 +527,6 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 	familyName := "Client"
 	birthDate := "1985-03-12"
 
-	createTestUser(t, personID, givenName, familyName, birthDate)
 	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
 	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
 
@@ -593,7 +563,11 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 	}
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
-	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name": givenName,
+		"family_name": familyName,
+		"birth_date": birthDate,
+	})
 	require.NotEmpty(t, authCode)
 
 	// Now use the wallet apiv1.Client for token + credential
@@ -633,7 +607,6 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 func getAuthCodeForNegativeTests(t *testing.T) (authCode, codeVerifier string, signingKey *ecdsa.PrivateKey) {
 	t.Helper()
 	personID := "neg-" + uuid.New().String()[:8]
-	createTestUser(t, personID, "NegTest", "Security", "1985-03-15")
 	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, "NegTest", "Security", "1985-03-15")
 	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
 
@@ -665,7 +638,11 @@ func getAuthCodeForNegativeTests(t *testing.T) (authCode, codeVerifier string, s
 	}
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
-	code := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	code := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name": "NegTest",
+		"family_name": "Security",
+		"birth_date": "1985-03-15",
+	})
 	require.NotEmpty(t, code, "auth code for negative tests")
 
 	signingKey, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -1068,7 +1045,6 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	birthDate := "1992-07-04"
 
 	// VCI: Seed + offer + PAR + consent + token + credential
-	createTestUser(t, personID, givenName, familyName, birthDate)
 	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
 	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
 
@@ -1101,7 +1077,11 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	}
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
-	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name":  givenName,
+		"family_name": familyName,
+		"birthdate":   birthDate,
+	})
 	require.NotEmpty(t, authCode, "VCI auth code")
 
 	signingKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -1204,9 +1184,11 @@ func doPAR(t *testing.T, parEndpoint string, data url.Values) openid4vci.ParResp
 	return parResp
 }
 
-// doConsentFlow drives the full authorize → consent → login → userLookup flow
+// doConsentFlow drives the full authorize → consent → OIDC login → userLookup flow
 // using a session cookie jar, and returns the authorization code.
-func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string) string {
+// It programmatically drives the OIDC flow through mock-oauth2-server.
+// The oidcClaims map is sent to mock-oauth2-server as the user's identity claims.
+func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string, oidcClaims map[string]string) string {
 	t.Helper()
 
 	jar, _ := cookiejar.New(nil)
@@ -1228,33 +1210,18 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 	t.Logf("authorize: status=%d url=%s", resp.StatusCode, resp.Request.URL.String())
 
 	// We should have been redirected to the consent page (200 after following redirect)
-	// or are on the consent page directly
-	assert.True(t, resp.StatusCode == 200 || resp.StatusCode == 302,
-		"authorize expected 200 or 302, got %d: %s", resp.StatusCode, string(body))
+	require.Equal(t, 200, resp.StatusCode, "authorize expected 200, got %d: %s", resp.StatusCode, string(body))
 
-	// Step 2: POST /user/pid/login
-	// The session now has the request_uri, scope, etc.
-	loginURL := rewritePublicToInternal(apigwURL + "/user/pid/login")
-	loginData := url.Values{
-		"username": {testUsername},
-		"password": {testPassword},
-	}
+	// Step 2: Extract the OIDC authorization URL from consent HTML
+	// The consent page embeds it as data-redirect-url="..."
+	oidcAuthURL := extractDataRedirectURL(t, string(body))
+	require.NotEmpty(t, oidcAuthURL, "consent page must contain data-redirect-url for OIDC")
+	t.Logf("consent: oidc_auth_url=%s", oidcAuthURL)
 
-	resp, err = client.Post(loginURL, "application/x-www-form-urlencoded", strings.NewReader(loginData.Encode()))
-	require.NoError(t, err)
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
+	// Rewrite the OIDC URL from Docker-internal hostname to bridge IP
+	oidcAuthURL = rewritePublicToInternal(oidcAuthURL)
 
-	t.Logf("login: status=%d body=%s", resp.StatusCode, string(body)[:min(len(body), 200)])
-	// Login should succeed (200)
-	require.True(t, resp.StatusCode == 200 || resp.StatusCode == 302,
-		"login failed with %d: %s", resp.StatusCode, string(body))
-
-	// Step 3: GET /user/lookup
-	// This grants consent and returns the redirect URL with the authorization code
-	lookupURL := rewritePublicToInternal(apigwURL + "/user/lookup")
-
-	// Use no-redirect client to capture the response with the code
+	// Use no-redirect client for all OIDC steps to control redirects manually
 	noRedirectClient := &http.Client{
 		Transport: tlsTransport,
 		Jar:       jar,
@@ -1264,18 +1231,59 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 		},
 	}
 
+	// Step 3: GET the mock-oauth2-server authorize endpoint
+	// With interactiveLogin:false it auto-completes and redirects to callback
+	oidcResp, err := noRedirectClient.Get(oidcAuthURL)
+	require.NoError(t, err)
+	oidcResp.Body.Close()
+	t.Logf("oidc authorize: status=%d location=%s", oidcResp.StatusCode, oidcResp.Header.Get("Location"))
+
+	// mock-oauth2-server with interactiveLogin:false redirects directly to callback
+	callbackURL := oidcResp.Header.Get("Location")
+	if oidcResp.StatusCode == 302 && callbackURL != "" {
+		// Auto-login mode: mock-oauth2-server redirected directly to callback
+		callbackURL = rewritePublicToInternal(callbackURL)
+		t.Logf("oidc auto-login: callback=%s", callbackURL)
+	} else {
+		// Interactive mode: mock-oauth2-server returned a login form
+		require.Equal(t, 200, oidcResp.StatusCode, "oidc authorize expected 200 or 302")
+		oidcBody, _ := io.ReadAll(oidcResp.Body)
+
+		// POST the login form with the identity claims
+		claimsJSON, _ := json.Marshal(oidcClaims)
+		loginData := url.Values{
+			"username": {"testuser"},
+			"claims":   {string(claimsJSON)},
+		}
+		loginResp, loginErr := noRedirectClient.Post(oidcAuthURL, "application/x-www-form-urlencoded", strings.NewReader(loginData.Encode()))
+		require.NoError(t, loginErr)
+		loginResp.Body.Close()
+		t.Logf("oidc login: status=%d location=%s", loginResp.StatusCode, loginResp.Header.Get("Location"))
+		require.Equal(t, 302, loginResp.StatusCode, "oidc login expected 302, body=%s", string(oidcBody))
+		callbackURL = rewritePublicToInternal(loginResp.Header.Get("Location"))
+	}
+
+	require.NotEmpty(t, callbackURL, "oidc flow must produce a callback redirect")
+
+	// Step 4: Follow the redirect to apigw /oidcrp/callback
+	callbackResp, err := noRedirectClient.Get(callbackURL)
+	require.NoError(t, err)
+	callbackResp.Body.Close()
+	t.Logf("oidc callback: status=%d location=%s", callbackResp.StatusCode, callbackResp.Header.Get("Location"))
+	require.Equal(t, 302, callbackResp.StatusCode, "oidc callback expected 302")
+
+	// Step 6: GET /user/lookup
+	// The OIDC callback has stored documents in the VCI cache; now we finalize
+	lookupURL := rewritePublicToInternal(apigwURL + "/user/lookup")
+
 	resp, err = noRedirectClient.Get(lookupURL)
 	require.NoError(t, err)
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-
 	t.Logf("user/lookup: status=%d body=%s", resp.StatusCode, string(body)[:min(len(body), 300)])
 
-	// The response should contain a redirect_url with the authorization code.
-	// It could be in JSON response or as a redirect.
+	// Parse the redirect_url containing the authorization code
 	var code string
-
-	// Try parsing as JSON (UserLookupReply)
 	var lookupReply struct {
 		SVGTemplateClaims map[string]any `json:"svg_template_claims,omitempty"`
 		RedirectURL       string         `json:"redirect_url,omitempty"`
@@ -1298,6 +1306,22 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 	}
 
 	return code
+}
+
+// extractDataRedirectURL parses the OIDC redirect URL from the consent page HTML.
+func extractDataRedirectURL(t *testing.T, htmlBody string) string {
+	t.Helper()
+	const marker = `data-redirect-url="`
+	idx := strings.Index(htmlBody, marker)
+	if idx == -1 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := strings.Index(htmlBody[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return html.UnescapeString(htmlBody[start : start+end])
 }
 
 func doTokenRequest(t *testing.T, tokenEndpoint, code, codeVerifier string, signingKey *ecdsa.PrivateKey) openid4vci.TokenResponse {

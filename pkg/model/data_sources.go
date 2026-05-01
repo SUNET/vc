@@ -44,7 +44,7 @@ type DatastoreImport struct {
 
 // DatastoreScope configures a credential type backed by the datastore.
 type DatastoreScope struct {
-	// AuthProvider is the auth provider for this credential type (basic, openid4vp, saml, or oidc)
+	// AuthProvider is the auth provider for this credential type (openid4vp, saml, or oidc)
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc"`
 
 	// AuthClaims lists the normalized claim names used for datastore identity lookup.
