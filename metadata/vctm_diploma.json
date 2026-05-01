@@ -11,15 +11,16 @@
       "rendering": {
          "simple": {
           "logo": {
-            "uri": "https://raw.githubusercontent.com/dc4eu/vc/d5bcc09ad66fb8491d0694f48d60371fc6ac9e04/images/generic-diploma-card-svg-dc4eu-01.svg",
-            "uri#integrity": "sha256-wLet7Ra2LR80J8oXFR9aoB902q8va1eSRhO0JA6apG8"
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/diploma_v1.svg",
+            "uri#integrity": "sha256-+BSgZ2uy9I+58cbFSyJKwuUerqp7WbU231zHKA5uDGw="
           }
         },
         "svg_templates": [
           {
-            "uri": "https://raw.githubusercontent.com/dc4eu/vc/d5bcc09ad66fb8491d0694f48d60371fc6ac9e04/images/generic-diploma-card-svg-dc4eu-01.svg",
-            "uri#integrity": "sha256-wLet7Ra2LR80J8oXFR9aoB902q8va1eSRhO0JA6apG8=",
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/diploma_v1.svg",
+            "uri#integrity": "sha256-+BSgZ2uy9I+58cbFSyJKwuUerqp7WbU231zHKA5uDGw=",
             "properties": {
+              "orientation": "landscape"
             }
           }
         ]

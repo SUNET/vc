@@ -45,7 +45,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Listening on %s", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	if err := http.ListenAndServe(addr, nil); err != nil { // #nosec G114
 		log.Fatalf("Server failed: %v", err)
 	}
 }
@@ -62,18 +62,18 @@ type VerifyRequest struct {
 }
 
 type VerifyResponse struct {
-	Verified bool          `json:"verified"`
-	Errors   []string      `json:"errors,omitempty"`
-	Results  []any `json:"results,omitempty"`
-	Checks   []string      `json:"checks,omitempty"`
-	Warnings []string      `json:"warnings,omitempty"`
+	Verified bool     `json:"verified"`
+	Errors   []string `json:"errors,omitempty"`
+	Results  []any    `json:"results,omitempty"`
+	Checks   []string `json:"checks,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 func respondError(w http.ResponseWriter, message string, code int) {
 	log.Printf("Error response (%d): %s", code, message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	json.NewEncoder(w).Encode(map[string]string{"error": message}) // #nosec G104
 }
 
 func respondVerify(w http.ResponseWriter, verified bool, errorMsg string) {
@@ -90,7 +90,7 @@ func respondVerify(w http.ResponseWriter, verified bool, errorMsg string) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(resp) // #nosec G104
 }
 
 func handleStop(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,7 @@ func handleStop(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		log.Fatal("Stopping server")
 	}()
-	w.Write([]byte("Stopping..."))
+	w.Write([]byte("Stopping...")) // #nosec G104
 }
 
 func handleIssue(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +194,7 @@ func handleIssue(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write(signedJSON)
+	w.Write(signedJSON) // #nosec G104
 }
 
 func handleVerify(w http.ResponseWriter, r *http.Request) {

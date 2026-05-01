@@ -103,8 +103,8 @@ func TestParseJWKToPublicKey(t *testing.T) {
 	ecJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   "WbbNmyzJRUEXswvo9hJlLPBOl2v0PMAG9dKdHaJgz0U",
-		"y":   "f6pSW-KtJsmMPlKbPV3sL1zPPLQCf6D3MT0DW-jIEjI",
+		"x":   "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+		"y":   "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
 	}
 
 	// RSA key JWK

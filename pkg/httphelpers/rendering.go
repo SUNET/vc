@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 

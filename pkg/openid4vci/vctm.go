@@ -65,8 +65,8 @@ type VCTMDisplayRenderingSimpleBackgroundImage struct {
 // "svg_templates" rendering method.
 // See draft-ietf-oauth-sd-jwt-vc-15, Section 7.1.2.
 type VCTMDisplayRenderingSVGTemplate struct {
-	URI          string                            `json:"uri" bson:"uri" validate:"required,url"`
-	URIIntegrity string                            `json:"uri#integrity,omitempty" bson:"uri_integrity,omitempty" validate:"omitempty"`
+	URI          string                             `json:"uri" bson:"uri" validate:"required,url"`
+	URIIntegrity string                             `json:"uri#integrity,omitempty" bson:"uri_integrity,omitempty" validate:"omitempty"`
 	Properties   *VCTMDisplayRenderingSVGProperties `json:"properties,omitempty" bson:"properties,omitempty" validate:"omitempty"`
 }
 

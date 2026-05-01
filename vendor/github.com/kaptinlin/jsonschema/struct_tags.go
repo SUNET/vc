@@ -3,7 +3,7 @@ package jsonschema
 import (
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -356,14 +356,15 @@ func (g *structTagGenerator) generateSchemaWithDependencyAnalysis(structType ref
 		return nil, fmt.Errorf("%w: %w", ErrStructTagParsing, err)
 	}
 
-	for _, fieldInfo := range fieldInfos {
+	for i := range fieldInfos {
+		fieldInfo := &fieldInfos[i]
 		// Skip fields without tags unless explicitly allowed or promoted from embedding
 		if !g.options.AllowUntaggedFields && fieldInfo.Tag == "" && !fieldInfo.IsPromoted {
 			continue
 		}
 
 		// Generate schema for this field using reused schemagen logic
-		fieldSchema, err := g.generateFieldSchemaWithValidators(structType, &fieldInfo)
+		fieldSchema, err := g.generateFieldSchemaWithValidators(structType, fieldInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -381,7 +382,7 @@ func (g *structTagGenerator) generateSchemaWithDependencyAnalysis(structType ref
 	// Sort required fields based on RequiredSort option
 	if len(required) > 0 {
 		if g.options.RequiredSort == RequiredSortAlphabetical {
-			sort.Strings(required)
+			slices.Sort(required)
 		}
 		// For RequiredSortNone, keep the order as-is from struct field iteration
 	}

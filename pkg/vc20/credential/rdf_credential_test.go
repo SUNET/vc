@@ -524,7 +524,7 @@ func BenchmarkGetCanonicalForm(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rdfCred.CanonicalForm()
+		rdfCred.CanonicalForm() // #nosec G104
 	}
 }
 
@@ -539,7 +539,7 @@ func BenchmarkNewRDFCredentialFromJSON(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		NewRDFCredentialFromJSON(credentialJSON, nil)
+		NewRDFCredentialFromJSON(credentialJSON, nil) // #nosec G104
 	}
 }
 

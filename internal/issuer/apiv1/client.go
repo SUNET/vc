@@ -7,6 +7,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"path/filepath"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
@@ -158,7 +160,7 @@ func (c *Client) initMDocIssuer(ctx context.Context) error {
 
 // loadCertificateChain loads X.509 certificates from a PEM file
 func (c *Client) loadCertificateChain(path string) ([]*x509.Certificate, error) {
-	certPEM, err := os.ReadFile(path)
+	certPEM, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate file: %w", err)
 	}

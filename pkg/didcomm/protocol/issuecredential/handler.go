@@ -58,7 +58,7 @@ type Handler struct {
 	autoAccept bool
 
 	// Thread state tracking
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	conversations map[string]*ConversationState
 }
 
@@ -83,8 +83,8 @@ const (
 	StateOfferReceived      State = "offer-received"
 	StateRequestSent        State = "request-sent"
 	StateRequestReceived    State = "request-received"
-	StateCredentialIssued   State = "credential-issued"
-	StateCredentialReceived State = "credential-received"
+	StateCredentialIssued   State = "credential-issued"   //#nosec G101 -- DIDComm protocol state, not a credential
+	StateCredentialReceived State = "credential-received" //#nosec G101 -- DIDComm protocol state, not a credential
 	StateAckReceived        State = "ack-received"
 	StateDone               State = "done"
 	StateAbandoned          State = "abandoned"

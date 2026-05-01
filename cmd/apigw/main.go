@@ -9,9 +9,12 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/apigw/apiv2"
+	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
 	"github.com/SUNET/vc/internal/apigw/cache"
+	datasources "github.com/SUNET/vc/internal/apigw/data_sources"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/apigw/httpserver"
+	"github.com/SUNET/vc/internal/apigw/importer"
 	"github.com/SUNET/vc/internal/apigw/inbound"
 	"github.com/SUNET/vc/internal/apigw/outbound"
 	"github.com/SUNET/vc/pkg/configuration"
@@ -60,6 +63,18 @@ func main() {
 		panic(err)
 	}
 
+	if cfg.APIGW.AuthProviders.Basic.Import != nil {
+		if err := importer.RunUsers(ctx, cfg.APIGW.AuthProviders.Basic.Import, dbService, log); err != nil {
+			mainLog.Error(err, "User import failed")
+		}
+	}
+
+	if cfg.APIGW.DataSources.Datastore.Import != nil {
+		if err := importer.RunDocuments(ctx, cfg.APIGW.DataSources.Datastore.Import, dbService, log); err != nil {
+			mainLog.Error(err, "Document import failed")
+		}
+	}
+
 	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
 	if err != nil {
 		panic(err)
@@ -87,21 +102,19 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize SAML service if enabled
-	samlSPService, err := initSAMLSPService(ctx, cfg, cacheService, mainLog)
+	// Initialize auth providers (SAML, OIDC)
+	authProvidersSvc, err := authproviders.New(ctx, &cfg.APIGW.AuthProviders, cacheService.SAMLSession, cacheService.OIDCRPSession, dbService, mainLog)
 	if err != nil {
-		mainLog.Error(err, "Failed to initialize SAML service")
 		panic(err)
 	}
 
-	// Initialize OIDC RP service if enabled
-	oidcrpService, err := initOIDCRPService(ctx, cfg, cacheService, dbService, mainLog)
+	// Initialize data sources (Edu-API, etc.)
+	dataSourcesSvc, err := datasources.New(ctx, cfg.APIGW.Remotes, cacheService.Document, mainLog)
 	if err != nil {
-		mainLog.Error(err, "Failed to initialize OIDC RP service")
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiv1Client, apiv2Client, tracer, eventPublisher, samlSPService, oidcrpService, cacheService, log)
+	httpService, err := httpserver.New(ctx, cfg, apiv1Client, apiv2Client, tracer, eventPublisher, authProvidersSvc, dataSourcesSvc, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)

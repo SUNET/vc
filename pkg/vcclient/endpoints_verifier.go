@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 )
 

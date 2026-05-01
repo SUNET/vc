@@ -19,7 +19,7 @@ func TestVPBuilder_BuildVC20Presentation_EdDSA(t *testing.T) {
 
 	// Create a properly formatted test credential JSON
 	// Note: The credential must be a valid JSON-LD document
-	testCredentialJSON := `{
+	testCredentialJSON := /* #nosec G101 */ `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
 		"type": ["VerifiableCredential"],
 		"issuer": "did:example:issuer",
@@ -117,7 +117,7 @@ func TestVPBuilder_BuildVC20Presentation_ECDSA(t *testing.T) {
 	}
 
 	// Create a properly formatted test credential JSON
-	testCredentialJSON := `{
+	testCredentialJSON := /* #nosec G101 */ `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
 		"type": ["VerifiableCredential"],
 		"issuer": "did:example:issuer",
@@ -161,13 +161,13 @@ func TestVPBuilder_BuildVC20Presentation_ECDSA(t *testing.T) {
 func TestVPBuilder_BuildVC20Presentation_MultipleCredentials(t *testing.T) {
 	_, privKey, _ := ed25519.GenerateKey(rand.Reader)
 
-	cred1JSON := `{
+	cred1JSON := /* #nosec G101 */ `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
 		"type": ["VerifiableCredential"],
 		"issuer": "did:example:issuer1",
 		"credentialSubject": {"id": "did:example:subject1"}
 	}`
-	cred2JSON := `{
+	cred2JSON := /* #nosec G101 */ `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
 		"type": ["VerifiableCredential"],
 		"issuer": "did:example:issuer2",

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -32,7 +33,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 					{
 						"field":           "schema",
@@ -40,7 +40,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "ptr",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           (*model.IdentitySchema)(nil),
 					},
 					{
 						"field":           "family_name",
@@ -48,7 +47,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 					{
 						"field":           "given_name",
@@ -56,7 +54,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 					{
 						"field":           "birth_date",
@@ -64,7 +61,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 				},
 			},
@@ -103,7 +99,6 @@ func TestValidationIdentity(t *testing.T) {
 						"type":            "string",
 						"validation":      "datetime",
 						"validationParam": "2006-01-02",
-						"value":           "1972-10-27 10:15:31.432635902 +0000 UTC",
 					},
 				},
 			},
@@ -150,7 +145,6 @@ func TestStruct(t *testing.T) {
 						"type":            "string",
 						"validation":      "required",
 						"validationParam": "",
-						"value":           "",
 					},
 				},
 			},
@@ -213,7 +207,6 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 					"type":            "string",
 					"validation":      "datetime",
 					"validationParam": "2006-01-02",
-					"value":           "1972-10-27 10:15:31.432635902 +0000 UTC",
 				},
 				},
 			},
@@ -312,95 +305,178 @@ func TestAuthScopesSelfReference(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		common        model.Common
+		ds            model.DataSources
 		shouldError   bool
 		errorContains string
 	}{
 		{
 			name: "self-reference in auth_scopes is rejected",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
-						AuthMethod: "openid4vp",
-						AuthScopes: []string{"pid", "eduid"},
-						AuthClaims: []string{"given_name"},
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid", "eduid"},
+						AuthClaims:   []string{"given_name"},
 					},
-				},
+				}},
 			},
 			shouldError:   true,
 			errorContains: "auth_scopes_self_reference",
 		},
 		{
 			name: "no self-reference passes",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
-						AuthMethod: "openid4vp",
-						AuthScopes: []string{"pid"},
-						AuthClaims: []string{"given_name"},
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name"},
 					},
-				},
+				}},
 			},
 			shouldError:   false,
 			errorContains: "",
 		},
 		{
-			name: "empty auth_scopes passes for basic auth",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"pid": {
-						AuthMethod: "basic",
-					},
-				},
+			name: "empty datastore passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{}},
 			},
 			shouldError:   false,
 			errorContains: "",
+		},
+		{
+			name: "multiple credentials with no self-reference passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"diploma": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name", "family_name"},
+					},
+				}},
+			},
+			shouldError:   false,
+			errorContains: "",
+		},
+		{
+			name: "basic with auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderBasic,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_not_for_basic",
+		},
+		{
+			name: "basic with auth_scopes is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderBasic,
+						AuthScopes:   []string{"pid"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_not_for_basic",
+		},
+		{
+			name: "basic without auth_claims or auth_scopes passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderBasic,
+					},
+				}},
+			},
+			shouldError: false,
+		},
+		{
+			name: "openid4vp without auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes:   []string{"pid"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_required_for_identity_lookup",
 		},
 		{
 			name: "openid4vp without auth_scopes is rejected",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"diploma": {
-						AuthMethod: "openid4vp",
-						AuthClaims: []string{"given_name"},
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthClaims:   []string{"given_name"},
 					},
-				},
+				}},
 			},
 			shouldError:   true,
 			errorContains: "auth_scopes_required_for_openid4vp",
 		},
 		{
-			name: "openid4vp without auth_claims is rejected",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"diploma": {
-						AuthMethod: "openid4vp",
-						AuthScopes: []string{"pid"},
+			name: "saml without auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
 					},
-				},
+				}},
 			},
 			shouldError:   true,
-			errorContains: "auth_claims_required_for_openid4vp",
+			errorContains: "auth_claims_required_for_identity_lookup",
 		},
 		{
-			name: "openid4vp with both auth_scopes and auth_claims passes",
-			common: model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"diploma": {
-						AuthMethod: "openid4vp",
-						AuthScopes: []string{"pid"},
-						AuthClaims: []string{"given_name", "family_name"},
+			name: "saml with auth_scopes is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
+						AuthClaims:   []string{"given_name"},
+						AuthScopes:   []string{"pid"},
 					},
-				},
+				}},
 			},
-			shouldError:   false,
-			errorContains: "",
+			shouldError:   true,
+			errorContains: "auth_scopes_only_for_openid4vp",
+		},
+		{
+			name: "saml with auth_claims passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
+						AuthClaims:   []string{"given_name", "family_name"},
+					},
+				}},
+			},
+			shouldError: false,
+		},
+		{
+			name: "oidc with auth_claims passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderOIDC,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validate.StructPartial(tt.common)
+			err := validate.StructPartial(tt.ds)
 			if tt.shouldError {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorContains)
@@ -427,7 +503,7 @@ func TestImagePNGValidator(t *testing.T) {
 		var buf bytes.Buffer
 		require.NoError(t, png.Encode(&buf, img))
 		p := filepath.Join(t.TempDir(), "img.png")
-		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0644))
+		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0644)) // #nosec G306
 		return p
 	}
 
@@ -445,14 +521,14 @@ func TestImagePNGValidator(t *testing.T) {
 
 	t.Run("not a PNG", func(t *testing.T) {
 		p := filepath.Join(t.TempDir(), "text.png")
-		require.NoError(t, os.WriteFile(p, []byte("hello"), 0644))
+		require.NoError(t, os.WriteFile(p, []byte("hello"), 0644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 
 	t.Run("JPEG is rejected", func(t *testing.T) {
 		// JPEG magic bytes
 		p := filepath.Join(t.TempDir(), "fake.png")
-		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644))
+		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 }

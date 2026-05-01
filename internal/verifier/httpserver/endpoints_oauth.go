@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/gin-gonic/gin"

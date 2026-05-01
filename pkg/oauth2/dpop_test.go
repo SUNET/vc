@@ -1,6 +1,8 @@
 package oauth2
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -25,6 +27,11 @@ var mockJWK_2 = `{
   }`
 
 func TestIsAccessTokenDPoP(t *testing.T) {
+	// Compute ATH as base64url(SHA-256(token)) per RFC 9449 §4.2
+	tokenValue := "my_access_token"
+	ath := sha256.Sum256([]byte(tokenValue))
+	athB64 := base64.RawURLEncoding.EncodeToString(ath[:])
+
 	tests := []struct {
 		name  string
 		dpop  *DPoP
@@ -34,15 +41,15 @@ func TestIsAccessTokenDPoP(t *testing.T) {
 		{
 			name: "matching token",
 			dpop: &DPoP{
-				ATH: "test_token_hash",
+				ATH: athB64,
 			},
-			token: "test_token_hash",
+			token: tokenValue,
 			want:  true,
 		},
 		{
 			name: "non-matching token",
 			dpop: &DPoP{
-				ATH: "test_token_hash",
+				ATH: athB64,
 			},
 			token: "different_token",
 			want:  false,

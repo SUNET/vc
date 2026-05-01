@@ -11,9 +11,21 @@
       "rendering": {
         "simple": {
           "logo": {
-            "uri": "https://raw.githubusercontent.com/dc4eu/vc/0e825e08b94818845bbe91dcc7b1a1f319ba3585/images/emrex.png"
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/elm_v1.svg",
+            "uri#integrity": "sha256-fbstM2Hi/k0G1lMlJjYYwJQqeNaDa5UR2DCEIA47VA8="
           }
-        }
+        },
+        "svg_templates": [
+          {
+            "uri": "https://raw.githubusercontent.com/SUNET/vc/main/images/elm_v1.svg",
+            "uri#integrity": "sha256-fbstM2Hi/k0G1lMlJjYYwJQqeNaDa5UR2DCEIA47VA8=",
+            "properties": {
+              "orientation": "landscape",
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          }
+        ]
       }
     }
   ],

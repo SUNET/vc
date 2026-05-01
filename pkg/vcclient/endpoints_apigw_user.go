@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -72,7 +73,7 @@ type GetPIDReply struct {
 
 type UserLookupRequest struct {
 	Username     string        `json:"-"`
-	AuthMethod   string        `json:"-"`
+	AuthProvider string        `json:"-"`
 	ResponseCode string        `json:"-"`
 	RequestURI   string        `json:"-" validate:"omitempty,max=128,printascii"`
 	VCTM         *sdjwtvc.VCTM `json:"-"`
@@ -89,7 +90,7 @@ type SVGTemplateReply struct {
 }
 
 type UserLookupReply struct {
-	SVGTemplateClaims map[string]SVGClaim `json:"svg_template_claims,omitempty"`
+	SVGTemplateClaims map[string]SVGClaim `json:"svg_template_claims"`
 	RedirectURL       string              `json:"redirect_url,omitempty"`
 }
 

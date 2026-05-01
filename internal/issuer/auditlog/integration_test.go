@@ -100,7 +100,7 @@ func TestIntegration_WebhookDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 // TestIntegration_MultipleWebhooks tests sending to multiple webhook endpoints
@@ -118,7 +118,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var payload map[string]any
-		json.Unmarshal(body, &payload)
+		json.Unmarshal(body, &payload) // #nosec G104
 
 		server1Data.mu.Lock()
 		server1Data.payloads = append(server1Data.payloads, payload)
@@ -132,7 +132,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var payload map[string]any
-		json.Unmarshal(body, &payload)
+		json.Unmarshal(body, &payload) // #nosec G104
 
 		server2Data.mu.Lock()
 		server2Data.payloads = append(server2Data.payloads, payload)
@@ -185,7 +185,7 @@ func TestIntegration_MultipleWebhooks(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 // TestIntegration_HighVolumeWebhooks tests sending many webhooks rapidly
@@ -245,7 +245,7 @@ func TestIntegration_HighVolumeWebhooks(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 // TestIntegration_WebhookRetryOnFailure tests behavior when webhook fails
@@ -308,7 +308,7 @@ func TestIntegration_WebhookRetryOnFailure(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 // TestIntegration_WebhookPayloadStructure verifies the exact webhook payload format
@@ -317,7 +317,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedPayload)
+		json.Unmarshal(body, &receivedPayload) // #nosec G104
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -371,7 +371,7 @@ func TestIntegration_WebhookPayloadStructure(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 // TestIntegration_MixedDestinations tests console, file, and webhook together
@@ -423,7 +423,7 @@ func TestIntegration_MixedDestinations(t *testing.T) {
 	mu.Unlock()
 
 	// Verify file written
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "mixed_destinations")
 	assert.Contains(t, string(content), "all_destinations")
@@ -433,5 +433,5 @@ func TestIntegration_MixedDestinations(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

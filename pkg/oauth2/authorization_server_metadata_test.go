@@ -13,7 +13,7 @@ import (
 	"gotest.tools/v3/golden"
 )
 
-var mockAuthorizationServerMetadata = &AuthorizationServerMetadata{
+var mockAuthorizationServerMetadata = &AuthorizationServerMetadata{ // #nosec G101
 	Issuer:                                     "http://vc_dev_apigw:8080",
 	AuthorizationEndpoint:                      "http://vc_dev_apigw:8080/authorize",
 	TokenEndpoint:                              "http://vc_dev_apigw:8080/token",
@@ -66,7 +66,7 @@ func TestAuthorizationServerMetadata_Marshal(t *testing.T) {
 		},
 		{
 			name: "minimal metadata",
-			metadata: &AuthorizationServerMetadata{
+			metadata: &AuthorizationServerMetadata{ // #nosec G101
 				Issuer: "https://issuer.example.com",
 				TokenEndpoint: "https://issuer.example.com/token",
 			},
@@ -74,7 +74,7 @@ func TestAuthorizationServerMetadata_Marshal(t *testing.T) {
 		},
 		{
 			name: "with all optional fields",
-			metadata: &AuthorizationServerMetadata{
+			metadata: &AuthorizationServerMetadata{ // #nosec G101
 				Issuer: "https://full.example.com",
 				AuthorizationEndpoint: "https://full.example.com/authorize",
 				TokenEndpoint: "https://full.example.com/token",

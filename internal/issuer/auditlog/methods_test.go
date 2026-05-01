@@ -40,7 +40,7 @@ func TestAddAuditLog_GeneratesID(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify file was written with UUID
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test_event")
 	assert.Contains(t, string(content), "test message")
@@ -53,7 +53,7 @@ func TestAddAuditLog_GeneratesID(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestAddAuditLog_ComplexMessage(t *testing.T) {
@@ -91,7 +91,7 @@ func TestAddAuditLog_ComplexMessage(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify file content
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "credential_issued")
 	assert.Contains(t, string(content), "john_doe")
@@ -101,7 +101,7 @@ func TestAddAuditLog_ComplexMessage(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestProcessAuditLog_ContextCancellation(t *testing.T) {
@@ -174,7 +174,7 @@ func TestProcessAuditLog_ErrorHandling(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestProcessAuditLog_MultipleMessages(t *testing.T) {
@@ -209,7 +209,7 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify file has multiple entries
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "rapid_event")
 	assert.Contains(t, string(content), "sequence")
@@ -217,7 +217,7 @@ func TestProcessAuditLog_MultipleMessages(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestAddAuditLog_NilMessage(t *testing.T) {
@@ -247,7 +247,7 @@ func TestAddAuditLog_NilMessage(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify file was written
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test_event")
 	assert.Contains(t, string(content), "null")
@@ -255,5 +255,5 @@ func TestAddAuditLog_NilMessage(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/pki"
 

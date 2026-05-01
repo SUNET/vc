@@ -15,7 +15,7 @@ func TestGenerateMetadata(t *testing.T) {
 	}{
 		{
 			name: "basic metadata generation",
-			cfg: &MetadataConfig{
+			cfg: &MetadataConfig{ // #nosec G101
 				IssuerURL:     "https://issuer.example.com",
 				TokenEndpoint: "https://issuer.example.com/token",
 			},
@@ -34,7 +34,7 @@ func TestGenerateMetadata(t *testing.T) {
 		},
 		{
 			name: "different issuer URL",
-			cfg: &MetadataConfig{
+			cfg: &MetadataConfig{ // #nosec G101
 				IssuerURL:     "https://auth.company.com",
 				TokenEndpoint: "https://auth.company.com/oauth/token",
 			},

@@ -14,7 +14,7 @@ import (
 // Maximum byte size is 96, which produces a 128-character encoded token.
 // Returns an error if stringLength exceeds 128 or byteSize exceeds 96.
 func GenerateSecureToken(byteSize int, stringLength int) (string, error) {
-	const maxBytes = 96  // base64.RawURLEncoding.EncodedLen(96) == 128
+	const maxBytes = 96   // base64.RawURLEncoding.EncodedLen(96) == 128
 	const maxStrLen = 128 // maximum supported output character length
 
 	if stringLength > maxStrLen {

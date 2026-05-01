@@ -431,6 +431,10 @@ proto: proto-status proto-registry proto-issuer ## Generate all protobuf files
 
 PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=vc --go-grpc_out=. --go_opt=module=vc --go_out=.
 
+# Catch-all for services without explicit proto targets (e.g. apigw, mockas)
+proto-%:
+	@echo "No protobuf for $*"
+
 proto-registry: ## Generate registry protobuf
 	protoc $(PROTO_OPTS) ./proto/v1-registry.proto
 
@@ -449,7 +453,12 @@ swagger: swagger-registry swagger-verifier swagger-apigw swagger-issuer swagger-
 swagger-fmt: ## Format Swagger annotations
 	swag fmt
 
-SWAGGER_OPTS := --parseDependency --packageName docs
+SWAGGER_OPTS := --parseGoList=false --packageName docs
+
+# Catch-all for services without explicit swagger targets (e.g. mockas)
+swagger-%:
+	@echo "No swagger docs for $*"
+	@mkdir -p docs
 
 swagger-registry: ## Generate registry Swagger docs
 	swag init -d internal/registry/apiv1/ -g client.go --output docs/registry $(SWAGGER_OPTS)
@@ -458,7 +467,7 @@ swagger-verifier: ## Generate verifier Swagger docs
 	swag init -d internal/verifier/apiv1/ -g client.go --output docs/verifier $(SWAGGER_OPTS)
 
 swagger-apigw: ## Generate apigw Swagger docs
-	swag init -d internal/apigw/apiv1/ -g client.go --output docs/apigw $(SWAGGER_OPTS)
+	swag init -d internal/apigw/apiv1/,pkg/helpers,pkg/model,pkg/vcclient,pkg/openid4vci,internal/gen/issuer/apiv1_issuer -g client.go --output docs/apigw $(SWAGGER_OPTS)
 
 swagger-issuer: ## Generate issuer Swagger docs
 	swag init -d internal/issuer/apiv1/ -g client.go --output docs/issuer $(SWAGGER_OPTS)
@@ -616,6 +625,14 @@ build-gen-config-docs: ## Build gen_config_docs tool
 gen-config-docs: build-gen-config-docs ## Generate configuration reference documentation
 	$(info Generating docs/CONFIGURATION.md)
 	./bin/gen_config_docs
+
+build-gen-bootstrap: ## Build gen_bootstrap tool
+	$(info Building gen_bootstrap)
+	$(CGO_ENABLED_STATIC) go build $(BUILD_FLAGS) -o ./bin/gen_bootstrap ./developer_tools/scripts/gen_bootstrap/
+
+gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAML source
+	$(info Generating bootstrapping/*.json from developer_tools/scripts/gen_bootstrap/users_paris.yaml)
+	./bin/gen_bootstrap developer_tools/scripts/gen_bootstrap/users_paris.yaml bootstrapping
 
 install-tools: ## Install required development tools
 	$(info Installing from apt)

@@ -2,6 +2,7 @@ package httphelpers
 
 import (
 	"reflect"
+
 	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/gin-gonic/gin/binding"

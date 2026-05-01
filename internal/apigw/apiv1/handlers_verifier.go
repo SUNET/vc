@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-	"github.com/SUNET/vc/internal/apigw/db"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -34,48 +33,50 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	// Match a scope from the authorization context to a known credential constructor
-	scope, credentialConstructor, err := c.matchScope(authorizationContext.Scopes)
+	scope, _, err := c.matchScope(authorizationContext.Scopes)
 	if err != nil {
 		c.log.Error(err, "no matching scope in authorization context")
 		return "", err
 	}
 
-	// Get format from the first auth scope (all scopes share the same format).
-	// AuthScopes is guaranteed non-empty here because startup validation
-	// requires auth_scopes when auth_method is "openid4vp".
-	authScope := credentialConstructor.AuthScopes[0]
-	format := c.cfg.GetFormatForScope(authScope)
+	// Get OpenID4VP auth config for this credential type
+	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
+	if vpAuth == nil {
+		return "", fmt.Errorf("scope %q is not configured for openid4vp authentication", scope)
+	}
 
-	// Build DCQL claims from credential constructor configuration
-	claimQueries := make([]openid4vp.ClaimQuery, 0, len(credentialConstructor.AuthClaims))
-	for _, claim := range credentialConstructor.AuthClaims {
+	// Build DCQL claims from OpenID4VP auth configuration
+	claimQueries := make([]openid4vp.ClaimQuery, 0, len(vpAuth.AuthClaims))
+	for _, claim := range vpAuth.AuthClaims {
 		claimQueries = append(claimQueries, openid4vp.ClaimQuery{
 			Path: []string{claim},
 		})
 	}
 
-	// Use the first auth scope as the credential query ID, not the issuing scope.
-	// The credential query ID tells the wallet what type of credential we're
-	// requesting for authentication. Using the issuing scope (e.g. "ehic")
-	// would mislead wallets into selecting the wrong credential.
-	dcql := &openid4vp.DCQL{
-		Credentials: []openid4vp.CredentialQuery{
-			{
-				ID:       authScope,
-				Format:   format,
-				Multiple: false,
-				Meta: openid4vp.MetaQuery{
-					VCTValues: c.cfg.VCTIdentifiersForScopes(credentialConstructor.AuthScopes),
-				},
-				RequireCryptographicHolderBinding: false,
-				Claims:                            claimQueries,
+	// Build one CredentialQuery per auth scope so the wallet can authenticate
+	// with any of the acceptable credential types (e.g. pid OR eduid).
+	// Each scope may have a different format and VCT.
+	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
+	options := make([][]string, 0, len(vpAuth.AuthScopes))
+	for _, authScope := range vpAuth.AuthScopes {
+		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
+			ID:       authScope,
+			Format:   c.cfg.GetFormatForScope(authScope),
+			Multiple: false,
+			Meta: openid4vp.MetaQuery{
+				VCTValues: c.cfg.VCTIdentifiersForScopes([]string{authScope}),
 			},
-		},
+			RequireCryptographicHolderBinding: false,
+			Claims:                            claimQueries,
+		})
+		options = append(options, []string{authScope})
+	}
+
+	dcql := &openid4vp.DCQL{
+		Credentials: credentialQueries,
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
-				Options: [][]string{
-					{authScope},
-				},
+				Options:  options,
 				Required: false,
 				Purpose:  "authenticate for " + scope,
 			},
@@ -192,7 +193,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
 
 	// Match a scope from the authorization context to a known credential constructor
-	scope, credentialConstructorCfg, err := c.matchScope(authCtx.Scopes)
+	scope, credMetaCfg, err := c.matchScope(authCtx.Scopes)
 	if err != nil {
 		c.log.Error(err, "no matching scope in authorization context")
 		return nil, err
@@ -200,21 +201,22 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Extract the credential query ID from the persisted DCQL query.
 	// The VP Token map is keyed by credential query ID (the auth scope),
-	// not by the issuing scope.
-	var credQueryID string
-	if authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) > 0 {
-		credQueryID = authCtx.DCQLQuery.Credentials[0].ID
+	// not by the issuing scope. The wallet may have responded with any of
+	// the acceptable credential types, so try all DCQL credential query IDs.
+	var vpToken string
+	if authCtx.DCQLQuery == nil || len(authCtx.DCQLQuery.Credentials) == 0 {
+		c.log.Error(nil, "DCQL query has no credential queries", "scope", scope)
+		return nil, errors.New("DCQL query has no credential queries")
 	}
-	if credQueryID == "" {
-		c.log.Error(nil, "DCQL credential query ID is empty", "scope", scope)
-		return nil, errors.New("DCQL credential query ID is empty")
+	for _, cq := range authCtx.DCQLQuery.Credentials {
+		if token, ok := vpResponse.VPToken[cq.ID]; ok {
+			vpToken = token
+			break
+		}
 	}
-
-	// Extract VP Token from the map using the credential query ID
-	vpToken, ok := vpResponse.VPToken[credQueryID]
-	if !ok {
-		c.log.Error(nil, "VP Token not found for credential query", "query_id", credQueryID, "available_keys", vpResponse.VPToken)
-		return nil, fmt.Errorf("VP Token not found for credential query: %s", credQueryID)
+	if vpToken == "" {
+		c.log.Error(nil, "VP Token not found for any credential query", "available_keys", vpResponse.VPToken)
+		return nil, errors.New("VP Token not found for any configured credential query")
 	}
 
 	// Prepare response parameters
@@ -254,28 +256,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
-	c.log.Debug("Found credential constructor", "scope", scope, "vct", credentialConstructorCfg.GetVCTURL())
+	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
 
-	// Extract identity from validated credential
-	identity := &model.Identity{}
-	if givenName, ok := credential["given_name"].(string); ok {
-		identity.GivenName = givenName
-	}
-	if familyName, ok := credential["family_name"].(string); ok {
-		identity.FamilyName = familyName
-	}
-	if birthdate, ok := credential["birthdate"].(string); ok {
-		identity.BirthDate = birthdate
-	}
+	// Extract identity from validated credential using configured claim keys
+	dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
+	identityClaims := dsCred.ExtractIdentityClaims(credential)
 
 	// Retrieve documents matching the identity by scope
-	c.log.Debug("Querying documents", "scope", scope, "identity", identity)
-	documents, err := c.datastoreStore.GetDocumentsWithIdentity(ctx, &db.GetDocumentQuery{
-		Meta: &model.MetaData{
-			Scope: scope,
-		},
-		Identity: identity,
-	})
+	c.log.Debug("Querying documents", "scope", scope, "identity_claims", identityClaims)
+	documents, err := c.datastoreStore.GetDocumentsByClaims(ctx, scope, identityClaims)
 	if err != nil {
 		c.log.Debug("failed to get document", "error", err)
 		return nil, err
@@ -284,7 +273,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.log.Debug("Retrieved documents", "count", len(documents))
 
 	if len(documents) == 0 {
-		c.log.Error(nil, "no documents found for identity", "identity", identity)
+		c.log.Error(nil, "no documents found for identity", "identity_claims", identityClaims)
 		return nil, errors.New("no documents found for the provided identity")
 	}
 

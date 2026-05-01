@@ -8,13 +8,14 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	"github.com/SUNET/vc/internal/ui/apiv1"
 	"github.com/SUNET/vc/internal/ui/cache"
 	"github.com/SUNET/vc/internal/ui/httpserver"
 	"github.com/SUNET/vc/internal/ui/outbound"
 	"github.com/SUNET/vc/pkg/configuration"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
 )
 

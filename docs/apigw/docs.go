@@ -106,7 +106,7 @@ const docTemplate = `{
                 "tags": [
                     "vc-platform"
                 ],
-                "summary": "OIDCCredential",
+                "summary": "VCICredential",
                 "operationId": "create-credential",
                 "parameters": [
                     {
@@ -124,36 +124,6 @@ const docTemplate = `{
                         "description": "Success",
                         "schema": {
                             "$ref": "#/definitions/apiv1_issuer.MakeSDJWTReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/credential/.well-known/jwks": {
-            "get": {
-                "description": "JWKS endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "JWKS",
-                "operationId": "issuer-JWKS",
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/apiv1_issuer.JwksReply"
                         }
                     },
                     "400": {
@@ -498,7 +468,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/apiv1.NotificationRequest"
+                            "$ref": "#/definitions/vcclient.NotificationRequest"
                         }
                     }
                 ],
@@ -506,48 +476,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "$ref": "#/definitions/apiv1.NotificationReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/revoke": {
-            "post": {
-                "description": "Revoke endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "Revoke",
-                "operationId": "generic-revoke",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.RevokeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.RevokeReply"
+                            "$ref": "#/definitions/vcclient.NotificationReply"
                         }
                     },
                     "400": {
@@ -603,20 +532,26 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "authentic_source",
-                "authentic_source_person_id"
+                "authentic_source_person_id",
+                "consent_to",
+                "session_id"
             ],
             "properties": {
                 "authentic_source": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "authentic_source_person_id": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "consent_to": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "session_id": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -740,10 +675,12 @@ const docTemplate = `{
             ],
             "properties": {
                 "authentic_source": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "authentic_source_person_id": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -822,37 +759,11 @@ const docTemplate = `{
             "properties": {
                 "authentic_source": {
                     "description": "required: true\nexample: SUNET",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "identity": {
                     "$ref": "#/definitions/model.Identity"
-                }
-            }
-        },
-        "apiv1.NotificationReply": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/openid4vci.QR"
-                }
-            }
-        },
-        "apiv1.NotificationRequest": {
-            "type": "object",
-            "required": [
-                "authentic_source",
-                "document_id",
-                "vct"
-            ],
-            "properties": {
-                "authentic_source": {
-                    "type": "string"
-                },
-                "document_id": {
-                    "type": "string"
-                },
-                "vct": {
-                    "type": "string"
                 }
             }
         },
@@ -875,95 +786,11 @@ const docTemplate = `{
                 }
             }
         },
-        "apiv1.RevokeReply": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "properties": {
-                        "status": {
-                            "type": "boolean"
-                        }
-                    }
-                }
-            }
-        },
-        "apiv1.RevokeRequest": {
-            "type": "object",
-            "properties": {
-                "authentic_source": {
-                    "type": "string"
-                },
-                "document_id": {
-                    "type": "string"
-                },
-                "revocation_id": {
-                    "type": "string"
-                },
-                "vct": {
-                    "type": "string"
-                }
-            }
-        },
         "apiv1_issuer.Credential": {
             "type": "object",
             "properties": {
                 "credential": {
                     "type": "string"
-                }
-            }
-        },
-        "apiv1_issuer.Jwk": {
-            "type": "object",
-            "properties": {
-                "crv": {
-                    "type": "string"
-                },
-                "d": {
-                    "type": "string"
-                },
-                "ext": {
-                    "type": "boolean"
-                },
-                "key_ops": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "kid": {
-                    "type": "string"
-                },
-                "kty": {
-                    "type": "string"
-                },
-                "x": {
-                    "type": "string"
-                },
-                "y": {
-                    "type": "string"
-                }
-            }
-        },
-        "apiv1_issuer.JwksReply": {
-            "type": "object",
-            "properties": {
-                "issuer": {
-                    "type": "string"
-                },
-                "jwks": {
-                    "$ref": "#/definitions/apiv1_issuer.Keys"
-                }
-            }
-        },
-        "apiv1_issuer.Keys": {
-            "type": "object",
-            "properties": {
-                "keys": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/apiv1_issuer.Jwk"
-                    }
                 }
             }
         },
@@ -975,6 +802,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/apiv1_issuer.Credential"
                     }
+                },
+                "token_status_list_index": {
+                    "description": "Token Status List index",
+                    "type": "integer"
+                },
+                "token_status_list_section": {
+                    "description": "Token Status List section",
+                    "type": "integer"
                 }
             }
         },
@@ -1000,7 +835,8 @@ const docTemplate = `{
             "properties": {
                 "id": {
                     "description": "required: false\nexample: 98fe67fc-c03f-11ee-bbee-4345224d414f",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "valid_until": {
                     "description": "required: false\nexample: 509567558\nformat: int64",
@@ -1018,7 +854,8 @@ const docTemplate = `{
             "properties": {
                 "consent_to": {
                     "description": "required: true\nexample: \"Using my data for research\"",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "created_at": {
                     "description": "required: true\nexample: 509567558\nformat: int64",
@@ -1026,7 +863,8 @@ const docTemplate = `{
                 },
                 "session_id": {
                     "description": "required: true\nexample: \"sess-123\"",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -1088,13 +926,15 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "authentic_source_person_id": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
         "model.Identity": {
             "type": "object",
             "required": [
+                "authentic_source_person_id",
                 "birth_date",
                 "family_name",
                 "given_name",
@@ -1124,7 +964,8 @@ const docTemplate = `{
                 },
                 "authentic_source_person_id": {
                     "description": "required: true\nexample: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "birth_date": {
                     "description": "required: true\nexample: 1970-01-01 TODO: Day, month, and year?",
@@ -1148,7 +989,8 @@ const docTemplate = `{
                 },
                 "document_number": {
                     "description": "required: false\nexample:",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "email_address": {
                     "description": "required: false\nexample: \u003cemail-address\u003e",
@@ -1183,7 +1025,8 @@ const docTemplate = `{
                 },
                 "issuing_jurisdiction": {
                     "description": "required: false\nexample:",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "mobile_phone_number": {
                     "description": "required: false\nexample: \u003c+mobile-phone-number\u003e",
@@ -1256,7 +1099,8 @@ const docTemplate = `{
                     ]
                 },
                 "trust_anchor": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -1268,7 +1112,8 @@ const docTemplate = `{
             "properties": {
                 "name": {
                     "description": "required: true\nexample: \"SE\"",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "version": {
                     "description": "required: false\nexample: \"1.0.0\"",
@@ -1282,12 +1127,14 @@ const docTemplate = `{
                 "authentic_source",
                 "document_id",
                 "document_version",
+                "scope",
                 "vct"
             ],
             "properties": {
                 "authentic_source": {
                     "description": "required: true\nexample: SUNET",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "collect": {
                     "$ref": "#/definitions/model.Collect"
@@ -1302,11 +1149,13 @@ const docTemplate = `{
                 },
                 "document_data_validation": {
                     "description": "required: false\nexample: file://path/to/schema.json or http://example.com/schema.json\nformat: string",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "document_id": {
                     "description": "required: true\nexample: 5e7a981c-c03f-11ee-b116-9b12c59362b9",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "document_version": {
                     "description": "required: true\nexample: \"1.0.0\"",
@@ -1324,9 +1173,15 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "scope": {
+                    "description": "Scope is the credential configuration ID scope\nrequired: false\nexample: \"ehic\", \"pda1\"",
+                    "type": "string",
+                    "maxLength": 128
+                },
                 "vct": {
                     "description": "VCT is the Verifiable Credential Type\nrequired: true\nexample: \"urn:eudi:pid:1\"",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -1335,11 +1190,13 @@ const docTemplate = `{
             "properties": {
                 "id": {
                     "description": "ID is the ID of the revocation\nrequired: false\nexample: 8dbd2680-c03f-11ee-a21b-034aafe41222",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "reason": {
                     "description": "Reason is the reason for revocation\nrequired: false\nexample: lost or stolen",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "reference": {
                     "$ref": "#/definitions/model.RevocationReference"
@@ -1358,49 +1215,20 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "authentic_source": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "document_id": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "vct": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
         "openid4vci.CredentialRequest": {
-            "type": "object",
-            "properties": {
-                "credential_identifier": {
-                    "description": "REQUIRED when credential_identifiers parameter was returned from the Token Response. It MUST NOT be used otherwise. It is a String that identifies a Credential that is being requested to be issued. When this parameter is used, the format parameter and any other Credential format specific parameters such as those defined in Appendix A MUST NOT be present.",
-                    "type": "string"
-                },
-                "credential_response_encryption": {
-                    "description": "CredentialIdentifier REQUIRED when credential_identifiers parameter was returned from the Token Response. It MUST NOT be used otherwise. It is a String that identifies a Credential that is being requested to be issued. When this parameter is used, the format parameter and any other Credential format specific parameters such as those defined in Appendix A MUST NOT be present.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/openid4vci.CredentialResponseEncryption"
-                        }
-                    ]
-                },
-                "format": {
-                    "description": "Format REQUIRED when the credential_identifiers parameter was not returned from the Token Response. It MUST NOT be used otherwise. It is a String that determines the format of the Credential to be issued, which may determine the type and any other information related to the Credential to be issued. Credential Format Profiles consist of the Credential format specific parameters that are defined in Appendix A. When this parameter is used, the credential_identifier Credential Request parameter MUST NOT be present.",
-                    "type": "string"
-                },
-                "headers": {
-                    "$ref": "#/definitions/openid4vci.CredentialRequestHeader"
-                },
-                "proof": {
-                    "description": "Proof OPTIONAL. Object containing the proof of possession of the cryptographic key material the issued Credential would be bound to. The proof object is REQUIRED if the proof_types_supported parameter is non-empty and present in the credential_configurations_supported parameter of the Issuer metadata for the requested Credential. The proof object MUST contain the following:",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/openid4vci.Proof"
-                        }
-                    ]
-                }
-            }
-        },
-        "openid4vci.CredentialRequestHeader": {
             "type": "object",
             "required": [
                 "authorization",
@@ -1410,27 +1238,118 @@ const docTemplate = `{
                 "authorization": {
                     "type": "string"
                 },
-                "dpoP": {
+                "credential_configuration_id": {
+                    "description": "CredentialConfigurationID REQUIRED if a credential_identifiers parameter was not returned from\nthe Token Response as part of the authorization_details parameter. It MUST NOT be used otherwise.\nString that uniquely identifies one of the keys in the name/value pairs stored in the\ncredential_configurations_supported Credential Issuer metadata. When this parameter is used,\nthe credential_identifier MUST NOT be present.",
                     "type": "string"
+                },
+                "credential_identifier": {
+                    "description": "CredentialIdentifier REQUIRED when an Authorization Details of type openid_credential was returned\nfrom the Token Response. It MUST NOT be used otherwise. A string that identifies a Credential Dataset\nthat is requested for issuance. When this parameter is used, the credential_configuration_id MUST NOT be present.",
+                    "type": "string"
+                },
+                "credential_response_encryption": {
+                    "description": "CredentialResponseEncryption OPTIONAL. Object containing information for encrypting the Credential Response.\nIf this request element is not present, the corresponding credential response returned is not encrypted.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.CredentialResponseEncryption"
+                        }
+                    ]
+                },
+                "dpoP": {
+                    "description": "Header fields",
+                    "type": "string"
+                },
+                "proof": {
+                    "description": "Proof OPTIONAL. Single proof object for non-batch requests.\nDeprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.Proof"
+                        }
+                    ]
+                },
+                "proofs": {
+                    "description": "Proofs OPTIONAL. Object providing one or more proof of possessions of the cryptographic key material\nto which the issued Credential instances will be bound to. The proofs parameter contains exactly one\nparameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array\ncontaining parameters as defined by the corresponding proof type.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.Proofs"
+                        }
+                    ]
                 }
             }
         },
         "openid4vci.CredentialResponseEncryption": {
             "type": "object",
             "required": [
-                "alg",
                 "enc",
                 "jwk"
             ],
             "properties": {
-                "alg": {
-                    "type": "string"
-                },
                 "enc": {
+                    "description": "Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.",
                     "type": "string"
                 },
                 "jwk": {
-                    "$ref": "#/definitions/openid4vci.JWK"
+                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for encrypting the Credential Response.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.JWK"
+                        }
+                    ]
+                },
+                "zip": {
+                    "description": "Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.\nIf absent then compression MUST not be used.",
+                    "type": "string"
+                }
+            }
+        },
+        "openid4vci.DIVPProof": {
+            "type": "object",
+            "required": [
+                "cryptosuite",
+                "domain",
+                "proofPurpose",
+                "proofValue",
+                "type",
+                "verificationMethod"
+            ],
+            "properties": {
+                "challenge": {
+                    "description": "Challenge MUST be the c_nonce value provided by the Credential Issuer (when provided)",
+                    "type": "string"
+                },
+                "created": {
+                    "description": "Created is the creation time of the proof",
+                    "type": "string"
+                },
+                "cryptosuite": {
+                    "description": "Cryptosuite identifies the cryptographic suite used\nSupported: eddsa-rdfc-2022, ecdsa-rdfc-2019, ecdsa-sd-2023, eddsa-jcs-2022, ecdsa-jcs-2019",
+                    "type": "string",
+                    "enum": [
+                        "eddsa-rdfc-2022",
+                        "ecdsa-rdfc-2019",
+                        "ecdsa-sd-2023",
+                        "eddsa-jcs-2022",
+                        "ecdsa-jcs-2019"
+                    ]
+                },
+                "domain": {
+                    "description": "Domain MUST be the Credential Issuer Identifier",
+                    "type": "string"
+                },
+                "proofPurpose": {
+                    "description": "ProofPurpose MUST be \"authentication\" for OpenID4VCI",
+                    "type": "string"
+                },
+                "proofValue": {
+                    "description": "ProofValue is the actual proof signature value",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the proof type, e.g., \"DataIntegrityProof\"",
+                    "type": "string"
+                },
+                "verificationMethod": {
+                    "description": "VerificationMethod is a URL that identifies the public key to use for verification",
+                    "type": "string"
                 }
             }
         },
@@ -1438,7 +1357,6 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "crv",
-                "d",
                 "kid",
                 "kty",
                 "x",
@@ -1446,9 +1364,6 @@ const docTemplate = `{
             ],
             "properties": {
                 "crv": {
-                    "type": "string"
-                },
-                "d": {
                     "type": "string"
                 },
                 "kid": {
@@ -1471,23 +1386,96 @@ const docTemplate = `{
                 "proof_type"
             ],
             "properties": {
-                "attestation": {
+                "cwt": {
+                    "description": "CWT The CWT proof, when proof_type is \"cwt\"",
                     "type": "string"
                 },
                 "jwt": {
+                    "description": "JWT The JWT proof, when proof_type is \"jwt\"",
                     "type": "string"
                 },
                 "ldp_vp": {
-                    "type": "string"
+                    "description": "LDPVp The Linked Data Proof VP, when proof_type is \"ldp_vp\""
                 },
                 "proof_type": {
-                    "description": "ProofType REQUIRED. String denoting the key proof type. The value of this parameter determines other parameters in the key proof object and its respective processing rules. Key proof types defined in this specification can be found in Section 7.2.1.",
-                    "type": "string",
-                    "enum": [
-                        "jwt",
-                        "ldp_vp",
-                        "cwt"
+                    "description": "ProofType REQUIRED. String denoting the key proof type.",
+                    "type": "string"
+                }
+            }
+        },
+        "openid4vci.ProofDIVP": {
+            "type": "object",
+            "required": [
+                "@context",
+                "type"
+            ],
+            "properties": {
+                "@context": {
+                    "description": "Context is the JSON-LD context, REQUIRED per W3C VC Data Model",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "holder": {
+                    "description": "Holder is the DID of the holder",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is an optional identifier for the presentation",
+                    "type": "string"
+                },
+                "proof": {
+                    "description": "Proof contains the Data Integrity Proof(s), one of Proof or Proofs REQUIRED",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.DIVPProof"
+                        }
                     ]
+                },
+                "proofs": {
+                    "description": "Proofs contains multiple Data Integrity Proofs if more than one is present",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/openid4vci.DIVPProof"
+                    }
+                },
+                "type": {
+                    "description": "Type is the type of the presentation, REQUIRED, must include \"VerifiablePresentation\"",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "verifiableCredential": {
+                    "description": "VerifiableCredential contains the credentials being presented",
+                    "type": "array",
+                    "items": {}
+                }
+            }
+        },
+        "openid4vci.Proofs": {
+            "type": "object",
+            "properties": {
+                "attestation": {
+                    "description": "Attestation contains a single JWT representing a key attestation\nas defined in Appendix D.1",
+                    "type": "string"
+                },
+                "di_vp": {
+                    "description": "DIVP contains an array of W3C Verifiable Presentations\nsigned using Data Integrity Proof as defined in Appendix F.2",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/openid4vci.ProofDIVP"
+                    }
+                },
+                "jwt": {
+                    "description": "JWT contains an array of JWTs as defined in Appendix F.1",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -1498,6 +1486,33 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "qr_base64": {
+                    "type": "string"
+                }
+            }
+        },
+        "vcclient.NotificationReply": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/openid4vci.QR"
+                }
+            }
+        },
+        "vcclient.NotificationRequest": {
+            "type": "object",
+            "required": [
+                "authentic_source",
+                "document_id",
+                "vct"
+            ],
+            "properties": {
+                "authentic_source": {
+                    "type": "string"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "vct": {
                     "type": "string"
                 }
             }

@@ -10,6 +10,7 @@ import (
 	"hash"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -286,7 +287,7 @@ func (v *Validator) validateTypeMappings(obj map[string]any, types []string) err
 			return fmt.Errorf("type %q is not mapped to an IRI in @context", typ)
 		}
 		if vocab != "" {
-			// @vocab is set; the term would resolve to vocab + typ
+			//	@vocab	is set; the term would resolve to vocab + typ
 			resolved := vocab + typ
 			if !isAbsoluteURL(resolved) {
 				return fmt.Errorf("type %q resolves to an invalid IRI via @vocab: %s", typ, resolved)
@@ -853,6 +854,9 @@ func (v *Validator) validateRelatedResource(cred map[string]any) error {
 				return nil
 			}
 
+			if length > math.MaxInt {
+				return fmt.Errorf("multihash length overflow")
+			}
 			if len(decoded) != headerLen+int(length) {
 				if sriVerified {
 					v.log.Info("WARN: validateRelatedResource ignoring invalid multihash length because SRI verified")

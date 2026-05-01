@@ -2,6 +2,7 @@ package pid
 
 import (
 	"encoding/json"
+
 	"github.com/SUNET/vc/pkg/model"
 )
 

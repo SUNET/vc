@@ -9,10 +9,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// testCache returns a WithStatusCache option with an in-memory cache for testing.
+func testCache() StatusCheckerOption {
+	return WithStatusCache(cache.NewMemoryCache[[]uint8](5 * time.Minute))
+}
+
+// newTestStatusChecker creates a StatusChecker with an in-memory cache for testing.
+func newTestStatusChecker(t *testing.T, opts ...StatusCheckerOption) *StatusChecker {
+	t.Helper()
+	sc, err := NewStatusChecker(append([]StatusCheckerOption{testCache()}, opts...)...)
+	if err != nil {
+		t.Fatalf("NewStatusChecker() error = %v", err)
+	}
+	return sc
+}
 
 func TestCredentialStatus_String(t *testing.T) {
 	tests := []struct {
@@ -35,7 +51,10 @@ func TestCredentialStatus_String(t *testing.T) {
 }
 
 func TestNewStatusChecker(t *testing.T) {
-	sc := NewStatusChecker()
+	sc, err := NewStatusChecker(testCache())
+	if err != nil {
+		t.Fatalf("NewStatusChecker() error = %v", err)
+	}
 
 	if sc == nil {
 		t.Fatal("NewStatusChecker() returned nil")
@@ -50,10 +69,17 @@ func TestNewStatusChecker(t *testing.T) {
 	}
 }
 
+func TestNewStatusChecker_NilCache(t *testing.T) {
+	_, err := NewStatusChecker()
+	if err == nil {
+		t.Error("NewStatusChecker() without cache should fail")
+	}
+}
+
 func TestNewStatusChecker_WithOptions(t *testing.T) {
 	customClient := &http.Client{Timeout: 10 * time.Second}
 
-	sc := NewStatusChecker(
+	sc := newTestStatusChecker(t,
 		WithHTTPClient(customClient),
 		WithCacheExpiry(10*time.Minute),
 	)
@@ -68,7 +94,7 @@ func TestNewStatusChecker_WithOptions(t *testing.T) {
 }
 
 func TestStatusChecker_CheckStatus_NilRef(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	_, err := sc.CheckStatus(t.Context(), nil)
 	if err == nil {
@@ -77,7 +103,7 @@ func TestStatusChecker_CheckStatus_NilRef(t *testing.T) {
 }
 
 func TestStatusChecker_CheckStatus_EmptyURI(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	_, err := sc.CheckStatus(t.Context(), &StatusReference{URI: "", Index: 0})
 	if err == nil {
@@ -86,7 +112,7 @@ func TestStatusChecker_CheckStatus_EmptyURI(t *testing.T) {
 }
 
 func TestStatusChecker_CheckStatus_NegativeIndex(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	_, err := sc.CheckStatus(t.Context(), &StatusReference{URI: "https://example.com/status", Index: -1})
 	if err == nil {
@@ -125,11 +151,11 @@ func TestStatusChecker_CheckStatus_WithServer(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker(WithKeyFunc(func(token *jwt.Token) (any, error) {
+	sc := newTestStatusChecker(t, WithKeyFunc(func(token *jwt.Token) (any, error) {
 		return publicKey, nil
 	}))
 
@@ -180,11 +206,11 @@ func TestStatusChecker_CheckStatus_IndexOutOfRange(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker(WithKeyFunc(func(token *jwt.Token) (any, error) {
+	sc := newTestStatusChecker(t, WithKeyFunc(func(token *jwt.Token) (any, error) {
 		return publicKey, nil
 	}))
 
@@ -194,23 +220,23 @@ func TestStatusChecker_CheckStatus_IndexOutOfRange(t *testing.T) {
 	}
 }
 
-func TestStatusChecker_ClearCache(t *testing.T) {
-	sc := NewStatusChecker()
+func TestStatusChecker_CacheSetGet(t *testing.T) {
+	sc := newTestStatusChecker(t)
 
 	// Add something to cache
-	sc.cache.entries["test"] = &statusCacheEntry{
-		statuses:  []uint8{0, 1, 2},
-		expiresAt: time.Now().Add(time.Hour),
-	}
+	sc.cache.Set(t.Context(), "test", []uint8{0, 1, 2})
 
-	if len(sc.cache.entries) != 1 {
+	if sc.cache.Len() != 1 {
 		t.Fatal("cache should have 1 entry")
 	}
 
-	sc.ClearCache()
-
-	if len(sc.cache.entries) != 0 {
-		t.Error("cache should be empty after ClearCache()")
+	// Verify it can be retrieved
+	statuses, ok := sc.cache.Get(t.Context(), "test")
+	if !ok {
+		t.Fatal("cache entry should exist")
+	}
+	if len(statuses) != 3 {
+		t.Errorf("expected 3 statuses, got %d", len(statuses))
 	}
 }
 
@@ -304,7 +330,7 @@ func TestStatusManager_Reinstate(t *testing.T) {
 	sm := NewStatusManager("https://example.com/status", 100)
 
 	// Suspend first
-	sm.Suspend(5)
+	sm.Suspend(5) // #nosec G104
 
 	// Then reinstate
 	err := sm.Reinstate(5)
@@ -350,7 +376,7 @@ func TestStatusManager_StatusList(t *testing.T) {
 }
 
 func TestNewVerifierStatusCheck(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 	vsc := NewVerifierStatusCheck(sc)
 
 	if vsc == nil {
@@ -363,7 +389,7 @@ func TestNewVerifierStatusCheck(t *testing.T) {
 }
 
 func TestVerifierStatusCheck_SetEnabled(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 	vsc := NewVerifierStatusCheck(sc)
 
 	vsc.SetEnabled(false)
@@ -517,11 +543,11 @@ func TestStatusChecker_CacheExpiry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker(
+	sc := newTestStatusChecker(t,
 		WithCacheExpiry(time.Hour),
 		WithKeyFunc(func(token *jwt.Token) (any, error) {
 			return publicKey, nil
@@ -548,7 +574,7 @@ func TestStatusChecker_CacheExpiry(t *testing.T) {
 }
 
 func TestVerifierStatusCheck_CheckDocumentStatus_Disabled(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 	vsc := NewVerifierStatusCheck(sc)
 	vsc.SetEnabled(false)
 
@@ -572,7 +598,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Disabled(t *testing.T) {
 }
 
 func TestVerifierStatusCheck_CheckDocumentStatus_NoStatusReference(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 	vsc := NewVerifierStatusCheck(sc)
 
 	// Document without status element
@@ -614,11 +640,11 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Valid(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker(WithKeyFunc(func(token *jwt.Token) (any, error) {
+	sc := newTestStatusChecker(t, WithKeyFunc(func(token *jwt.Token) (any, error) {
 		return &privateKey.PublicKey, nil
 	}))
 	vsc := NewVerifierStatusCheck(sc)
@@ -672,11 +698,11 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Revoked(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker(WithKeyFunc(func(token *jwt.Token) (any, error) {
+	sc := newTestStatusChecker(t, WithKeyFunc(func(token *jwt.Token) (any, error) {
 		return &privateKey.PublicKey, nil
 	}))
 	vsc := NewVerifierStatusCheck(sc)
@@ -725,11 +751,11 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Suspended(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker(WithKeyFunc(func(token *jwt.Token) (any, error) {
+	sc := newTestStatusChecker(t, WithKeyFunc(func(token *jwt.Token) (any, error) {
 		return &privateKey.PublicKey, nil
 	}))
 	vsc := NewVerifierStatusCheck(sc)
@@ -819,7 +845,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 	// 7. Verifier fetches status list from server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		w.Write([]byte(jwtToken))
+		w.Write([]byte(jwtToken)) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -832,7 +858,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 	}
 
 	// 8. Verifier checks document status
-	sc := NewStatusChecker(WithKeyFunc(func(token *jwt.Token) (any, error) {
+	sc := newTestStatusChecker(t, WithKeyFunc(func(token *jwt.Token) (any, error) {
 		return &privateKey.PublicKey, nil
 	}))
 	vsc := NewVerifierStatusCheck(sc)
@@ -876,11 +902,11 @@ func TestStatusChecker_CheckStatus_CWTFormat(t *testing.T) {
 	// Create test server that returns CWT
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeCWT)
-		w.Write(cwtToken)
+		w.Write(cwtToken) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	// Test valid status (index 0)
 	result, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 0})
@@ -931,11 +957,11 @@ func TestStatusChecker_CheckStatus_CWTAutoDetect(t *testing.T) {
 	// Server returns CWT without proper content-type (auto-detect via 0xD2 tag)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(cwtToken)
+		w.Write(cwtToken) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	// Should auto-detect CWT format from CBOR tag 18 (0xD2)
 	result, err := sc.CheckStatus(t.Context(), &StatusReference{URI: server.URL, Index: 10})
@@ -948,7 +974,7 @@ func TestStatusChecker_CheckStatus_CWTAutoDetect(t *testing.T) {
 }
 
 func TestStatusChecker_parseCWTStatusList_InvalidCBOR(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	// Invalid CBOR data
 	_, err := sc.parseCWTStatusList([]byte{0x01, 0x02, 0x03})
@@ -958,7 +984,7 @@ func TestStatusChecker_parseCWTStatusList_InvalidCBOR(t *testing.T) {
 }
 
 func TestStatusChecker_parseCWTStatusList_MissingStatusListClaim(t *testing.T) {
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	// Create a valid COSE_Sign1 but without status_list claim
 	// This is a manually crafted minimal COSE_Sign1 with empty payload
@@ -1003,7 +1029,7 @@ func TestStatusChecker_parseCWTStatusList_ValidToken(t *testing.T) {
 		t.Fatalf("Failed to generate CWT: %v", err)
 	}
 
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 
 	// Parse the CWT directly
 	statuses, err = sc.parseCWTStatusList(cwtToken)
@@ -1044,11 +1070,11 @@ func TestVerifierStatusCheck_CheckDocumentStatus_CWT(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeCWT)
-		w.Write(cwtToken)
+		w.Write(cwtToken) // #nosec G104
 	}))
 	defer server.Close()
 
-	sc := NewStatusChecker()
+	sc := newTestStatusChecker(t)
 	vsc := NewVerifierStatusCheck(sc)
 
 	statusValue := map[string]any{

@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/issuer/apiv1"

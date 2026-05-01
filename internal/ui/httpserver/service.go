@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/ui/apiv1"
 	"github.com/SUNET/vc/internal/ui/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
@@ -43,12 +44,12 @@ type sessionConfig struct {
 // New creates a new httpserver service
 func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	s := &Service{
-		cfg:    cfg,
-		log:    log.New("httpserver"),
-		tracer: tracer,
-		apiv1:  apiv1,
-		gin:    gin.New(),
-		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		cfg:          cfg,
+		log:          log.New("httpserver"),
+		tracer:       tracer,
+		apiv1:        apiv1,
+		gin:          gin.New(),
+		server:       &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 		cacheService: cacheService,
 		sessionConfig: &sessionConfig{
 			name:                       "vc_ui_auth_session",

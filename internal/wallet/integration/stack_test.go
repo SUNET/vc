@@ -62,7 +62,7 @@ var (
 
 	// OAuth client config matching config.yaml
 	oauthClientID = "1003"                        // NOSONAR
-	oauthRedirect = "http://localhost:3000" // NOSONAR — must match apigw oauth_server in config_minimal.yaml
+	oauthRedirect = "http://localhost:3000" // NOSONAR — must match apigw oauth_server in config.yaml
 	testUsername  = "wallet_test_user"            // NOSONAR
 	testPassword  = "wallet_test_pass_42"         // NOSONAR
 

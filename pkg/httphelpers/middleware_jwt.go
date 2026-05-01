@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"unicode"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
@@ -112,7 +114,7 @@ func buildSPOCPEngine(cfg model.APIAuthJWT) (*SafeEngine, error) {
 // loadRulesFromFile reads human-readable SPOCP rules (one per line) from a file
 // and adds them to the engine using parseAdvancedSExp.
 func loadRulesFromFile(engine *spocp.AdaptiveEngine, path string) error {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return err
 	}

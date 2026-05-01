@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/messagebroker"

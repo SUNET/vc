@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -63,7 +64,9 @@ func New(ctx context.Context, tokenStatusListIssuer TokenStatusListIssuer, apiv1
 
 // Close closes the service
 func (s *Service) Close(ctx context.Context) error {
-	s.listener.Close()
+	if err := s.listener.Close(); err != nil {
+		return fmt.Errorf("close listener: %w", err)
+	}
 	s.grpcServer.Stop()
 	s.log.Info("Stopped")
 	return nil

@@ -80,16 +80,16 @@ func (s *Schema) Unmarshal(dst, src any) error {
 // validateDestination validates the destination parameter
 func (s *Schema) validateDestination(dst any) error {
 	if dst == nil {
-		return &UnmarshalError{Type: "destination", Reason: ErrNilDestination.Error()}
+		return &UnmarshalError{Type: "destination", Reason: ErrNilDestination.Error(), Err: ErrNilDestination}
 	}
 
 	dstVal := reflect.ValueOf(dst)
 	if dstVal.Kind() != reflect.Pointer {
-		return &UnmarshalError{Type: "destination", Reason: ErrNotPointer.Error()}
+		return &UnmarshalError{Type: "destination", Reason: ErrNotPointer.Error(), Err: ErrNotPointer}
 	}
 
 	if dstVal.IsNil() {
-		return &UnmarshalError{Type: "destination", Reason: ErrNilPointer.Error()}
+		return &UnmarshalError{Type: "destination", Reason: ErrNilPointer.Error(), Err: ErrNilPointer}
 	}
 
 	return nil
@@ -264,11 +264,7 @@ func (s *Schema) evaluateDefaultValue(defaultValue any) (any, error) {
 	}
 
 	// Try to parse as function call
-	call, err := parseFunctionCall(defaultStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrFunctionCallParsing, err)
-	}
-
+	call := parseFunctionCall(defaultStr)
 	if call == nil {
 		// Not a function call, use literal value
 		return defaultStr, nil

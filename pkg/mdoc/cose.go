@@ -10,8 +10,10 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
+	"encoding/asn1"
 	"fmt"
 	"hash"
+	"math"
 	"math/big"
 
 	"github.com/fxamacker/cbor/v2"
@@ -369,17 +371,10 @@ func signPayload(data []byte, signer crypto.Signer, algorithm int64) ([]byte, er
 }
 
 func convertECDSASignatureToRaw(asn1Sig []byte, algorithm int64) ([]byte, error) {
-	// Parse ASN.1 signature
-	var sig struct {
-		R, S *big.Int
-	}
-	// Simple ASN.1 parsing for ECDSA signature
 	r, s, err := parseASN1Signature(asn1Sig)
 	if err != nil {
 		return nil, err
 	}
-	sig.R = r
-	sig.S = s
 
 	var byteLen int
 	switch algorithm {
@@ -391,8 +386,8 @@ func convertECDSASignatureToRaw(asn1Sig []byte, algorithm int64) ([]byte, error)
 		byteLen = 66
 	}
 
-	rBytes := sig.R.Bytes()
-	sBytes := sig.S.Bytes()
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
 
 	// Pad to correct length
 	rawSig := make([]byte, byteLen*2)
@@ -403,36 +398,13 @@ func convertECDSASignatureToRaw(asn1Sig []byte, algorithm int64) ([]byte, error)
 }
 
 func parseASN1Signature(data []byte) (*big.Int, *big.Int, error) {
-	// Basic ASN.1 SEQUENCE parsing
-	if len(data) < 6 || data[0] != 0x30 {
-		return nil, nil, fmt.Errorf("invalid ASN.1 signature")
+	// Parse DER-encoded ECDSA signature (SEQUENCE { INTEGER r, INTEGER s })
+	// using encoding/asn1 for correct handling of all DER length encodings.
+	var sig struct{ R, S *big.Int }
+	if _, err := asn1.Unmarshal(data, &sig); err != nil {
+		return nil, nil, fmt.Errorf("invalid ASN.1 ECDSA signature: %w", err)
 	}
-
-	pos := 2
-	if data[1] > 0x80 {
-		pos = 2 + int(data[1]&0x7f)
-	}
-
-	// Parse R
-	if data[pos] != 0x02 {
-		return nil, nil, fmt.Errorf("expected INTEGER for R")
-	}
-	pos++
-	rLen := int(data[pos])
-	pos++
-	r := new(big.Int).SetBytes(data[pos : pos+rLen])
-	pos += rLen
-
-	// Parse S
-	if data[pos] != 0x02 {
-		return nil, nil, fmt.Errorf("expected INTEGER for S")
-	}
-	pos++
-	sLen := int(data[pos])
-	pos++
-	s := new(big.Int).SetBytes(data[pos : pos+sLen])
-
-	return r, s, nil
+	return sig.R, sig.S, nil
 }
 
 // Verify1 verifies a COSE_Sign1 signature.
@@ -453,6 +425,9 @@ func Verify1(sign1 *COSESign1, payload []byte, pubKey crypto.PublicKey, external
 		case int:
 			algorithm = int64(v)
 		case uint64:
+			if v > math.MaxInt64 {
+				return fmt.Errorf("algorithm value overflow")
+			}
 			algorithm = int64(v)
 		default:
 			return fmt.Errorf("invalid algorithm type")
@@ -663,6 +638,9 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 	case int:
 		algorithm = int64(v)
 	case uint64:
+		if v > math.MaxInt64 {
+			return fmt.Errorf("algorithm value overflow: %T", algRaw)
+		}
 		algorithm = int64(v)
 	default:
 		return fmt.Errorf("invalid algorithm type: %T", algRaw)

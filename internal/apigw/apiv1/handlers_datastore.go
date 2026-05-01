@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -45,7 +46,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	}
 
 	credentialOfferParameter := openid4vci.CredentialOfferParameters{
-		CredentialIssuer: c.cfg.APIGW.CredentialOffers.IssuerURL,
+		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{
 			req.Meta.Scope,
 		},
@@ -77,7 +78,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 		}
 
 		// Empty string defaults to "openid-credential-offer://" protocol handler
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.CredentialOffers.IssuerURL)
+		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 		if err != nil {
 			return err
 		}
@@ -150,8 +151,8 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	vcclient.NotificationReply		"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		vcclient.NotificationRequest		true	" "
+//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
+//	@Param			req	body		vcclient.NotificationRequest	true	" "
 //	@Router			/notification [post]
 func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{

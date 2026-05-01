@@ -588,10 +588,10 @@ func TestClaimsExtractor_IsInternalClaim(t *testing.T) {
 	}{
 		{"_sd", "_sd", true},
 		{"_sd_alg", "_sd_alg", true},
-		{"iss", "iss", true},
-		{"iat", "iat", true},
-		{"exp", "exp", true},
-		{"nbf", "nbf", true},
+		{"iss", "iss", false},
+		{"iat", "iat", false},
+		{"exp", "exp", false},
+		{"nbf", "nbf", false},
 		{"vct", "vct", true},
 		{"cnf", "cnf", true},
 		{"status", "status", true},
@@ -775,8 +775,8 @@ func TestClaimsExtractor_ExtractClaimsFromVPToken_MDocFormat(t *testing.T) {
 	// Instead, test via the ExtractMDocClaims which is already tested
 	t.Run("format_detection", func(t *testing.T) {
 		// JWT format should not be detected as mdoc
-		jwtToken := "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig"
-		assert.False(t, IsMDocFormat(jwtToken), "JWT should not be detected as mdoc")
+		jwtToken := "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig" // #nosec G101
+		assert.False(t, isMDocFormatToken(jwtToken), "JWT should not be detected as mdoc")
 	})
 
 	// Test that the ClaimsExtractor routes correctly

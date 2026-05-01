@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 
 	"github.com/gin-gonic/gin"

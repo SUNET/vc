@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 
 	// swagger complains if this is not imported

@@ -86,7 +86,7 @@ func (sc *SignerConfig) SignJWT(claims jwt.Claims) (string, error) {
 
 	// Create and sign token
 	token := jwt.NewWithClaims(method, claims)
-	
+
 	// Set key ID if certificate is available
 	if sc.keyMaterial.Cert != nil {
 		token.Header["kid"] = getCertificateKeyID(sc.keyMaterial.Cert)

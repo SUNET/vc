@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/internal/verifier/notify"
@@ -89,7 +90,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
-	c.oauth2Metadata = c.cfg.Verifier.OAuthServer.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
+	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
@@ -101,7 +102,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 
 	// Override Attributes with filtered variant (excludes nested object claims)
 	// since verifier only exposes leaf-level attributes to the UI.
-	for _, credentialInfo := range cfg.Common.CredentialConstructor {
+	for _, credentialInfo := range cfg.Common.CredentialMetadata {
 		credentialInfo.Attributes = credentialInfo.VCTM.AttributesWithoutObjects()
 	}
 
@@ -126,7 +127,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 // loadPresentationTemplates loads presentation request templates from configured directory
 func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Check if templates directory is configured
-	templatesDir := c.cfg.Verifier.OpenID4VP.GetPresentationRequestsDir()
+	templatesDir := c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationRequestsDir()
 	if templatesDir == "" {
 		c.log.Info("Presentation requests directory not configured, using credential config scope mapping")
 		return nil
@@ -155,19 +156,19 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 // generateSubjectIdentifier creates a subject identifier for the user
 // This can be either public (same across all RPs) or pairwise (different per RP)
 func (c *Client) generateSubjectIdentifier(walletID string, clientID string) string {
-	subjectType := c.cfg.Verifier.OIDCOP.SubjectType
+	subjectType := c.cfg.Verifier.Outbound.OIDCProvider.SubjectType
 
 	switch subjectType {
 	case "pairwise":
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(clientID))
-		hash.Write([]byte(c.cfg.Verifier.OIDCOP.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	default:
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
-		hash.Write([]byte(c.cfg.Verifier.OIDCOP.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	}
 }
@@ -195,8 +196,8 @@ func (c *Client) getClientByID(ctx context.Context, clientID string) (*db.Client
 	}
 
 	// If not found in database, check static clients from configuration
-	if c.cfg.Verifier.OIDCOP != nil {
-		for _, staticClient := range c.cfg.Verifier.OIDCOP.StaticClients {
+	if c.cfg.Verifier.Outbound.OIDCProvider != nil {
+		for _, staticClient := range c.cfg.Verifier.Outbound.OIDCProvider.StaticClients {
 			if staticClient.ClientID == clientID {
 				// Determine allowed scopes: empty means all scopes allowed
 				allowedScopes := staticClient.AllowedScopes
@@ -298,9 +299,9 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 	var credentials []openid4vp.CredentialQuery
 
 	for _, scope := range scopes {
-		credInfo, ok := c.cfg.Common.CredentialConstructor[scope]
+		credInfo, ok := c.cfg.Common.CredentialMetadata[scope]
 		if !ok {
-			c.log.Debug("Scope has no credential constructor, skipping", "scope", scope)
+			c.log.Debug("Scope has no credential config, skipping", "scope", scope)
 			continue
 		}
 

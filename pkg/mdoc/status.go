@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -71,19 +73,9 @@ type StatusReference struct {
 // StatusChecker checks the revocation status of mDL credentials.
 type StatusChecker struct {
 	httpClient  *http.Client
-	cache       *statusCache
+	cache       cache.Cache[[]uint8]
 	cacheExpiry time.Duration
 	keyFunc     jwt.Keyfunc
-}
-
-// statusCache provides simple in-memory caching for status lists.
-type statusCache struct {
-	entries map[string]*statusCacheEntry
-}
-
-type statusCacheEntry struct {
-	statuses  []uint8
-	expiresAt time.Time
 }
 
 // StatusCheckerOption configures the StatusChecker.
@@ -103,6 +95,13 @@ func WithCacheExpiry(expiry time.Duration) StatusCheckerOption {
 	}
 }
 
+// WithStatusCache sets an external cache implementation (e.g. MongoCache for HA).
+func WithStatusCache(c cache.Cache[[]uint8]) StatusCheckerOption {
+	return func(sc *StatusChecker) {
+		sc.cache = c
+	}
+}
+
 // WithKeyFunc sets the key function for JWT verification.
 func WithKeyFunc(keyFunc jwt.Keyfunc) StatusCheckerOption {
 	return func(sc *StatusChecker) {
@@ -111,13 +110,12 @@ func WithKeyFunc(keyFunc jwt.Keyfunc) StatusCheckerOption {
 }
 
 // NewStatusChecker creates a new StatusChecker.
-func NewStatusChecker(opts ...StatusCheckerOption) *StatusChecker {
+// A cache must be provided via WithStatusCache.
+// TODO(masv): wire into the verifier so status checking is actually performed at presentation time.
+func NewStatusChecker(opts ...StatusCheckerOption) (*StatusChecker, error) {
 	sc := &StatusChecker{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
-		},
-		cache: &statusCache{
-			entries: make(map[string]*statusCacheEntry),
 		},
 		cacheExpiry: 5 * time.Minute,
 	}
@@ -126,7 +124,11 @@ func NewStatusChecker(opts ...StatusCheckerOption) *StatusChecker {
 		opt(sc)
 	}
 
-	return sc
+	if sc.cache == nil {
+		return nil, errors.New("cache is required: use WithStatusCache")
+	}
+
+	return sc, nil
 }
 
 // CheckStatus checks the status of a credential using its status reference.
@@ -166,13 +168,8 @@ func (sc *StatusChecker) CheckStatus(ctx context.Context, ref *StatusReference) 
 
 // getStatusList retrieves the status list, using cache if available.
 func (sc *StatusChecker) getStatusList(ctx context.Context, uri string) ([]uint8, error) {
-	// Check cache
-	if entry, ok := sc.cache.entries[uri]; ok {
-		if time.Now().Before(entry.expiresAt) {
-			return entry.statuses, nil
-		}
-		// Cache expired, remove it
-		delete(sc.cache.entries, uri)
+	if statuses, ok := sc.cache.Get(ctx, uri); ok {
+		return statuses, nil
 	}
 
 	// Fetch from URI
@@ -182,10 +179,7 @@ func (sc *StatusChecker) getStatusList(ctx context.Context, uri string) ([]uint8
 	}
 
 	// Cache the result
-	sc.cache.entries[uri] = &statusCacheEntry{
-		statuses:  statuses,
-		expiresAt: time.Now().Add(sc.cacheExpiry),
-	}
+	sc.cache.Set(ctx, uri, statuses)
 
 	return statuses, nil
 }
@@ -369,11 +363,6 @@ func mapStatusCode(code uint8) CredentialStatus {
 	default:
 		return CredentialStatusUnknown
 	}
-}
-
-// ClearCache clears the status list cache.
-func (sc *StatusChecker) ClearCache() {
-	sc.cache.entries = make(map[string]*statusCacheEntry)
 }
 
 // StatusManager manages credential status for an issuer.
@@ -563,6 +552,9 @@ func parseStatusElement(value any) (*StatusReference, bool) {
 	case int:
 		index = int64(idx)
 	case uint64:
+		if idx > math.MaxInt64 {
+			return nil, false
+		}
 		index = int64(idx)
 	case float64:
 		index = int64(idx)

@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/model"
 )

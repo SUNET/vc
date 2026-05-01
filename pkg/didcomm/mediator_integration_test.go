@@ -125,7 +125,7 @@ func (m *mockMediatorServer) handleMessage(w http.ResponseWriter, r *http.Reques
 		}
 		if resp != nil {
 			w.Header().Set("Content-Type", didcomm.MediaTypeEncrypted)
-			w.Write(resp)
+			w.Write(resp) // #nosec G104
 			return
 		}
 	}
@@ -139,7 +139,7 @@ func (m *mockMediatorServer) DIDDocument() map[string]any {
 	pubKey, _ := m.routingKeyJWK.PublicKey()
 	pubKeyBytes, _ := json.Marshal(pubKey)
 	pubKeyMap := make(map[string]any)
-	json.Unmarshal(pubKeyBytes, &pubKeyMap)
+	json.Unmarshal(pubKeyBytes, &pubKeyMap) // #nosec G104
 
 	return map[string]any{
 		"@context": []string{
