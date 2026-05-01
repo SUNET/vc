@@ -120,7 +120,7 @@ type ResolveDocumentsRequest struct {
 
 // ResolveDocumentsReply is the response for the resolve+fetch operation.
 type ResolveDocumentsReply struct {
-	Identifier string            `json:"identifier"`
+	Identifier string              `json:"identifier"`
 	Documents  []*model.V2Document `json:"documents"`
 }
 
