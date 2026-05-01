@@ -12,6 +12,7 @@ services:
       - /var/log/sunet:/var/log/sunet
     depends_on:
       - mongo
+      - mock-oauth2-server
     networks:
       vc-dev-net:
         ipv4_address: 172.16.50.2
@@ -121,6 +122,20 @@ services:
       - "VC_CONFIG_YAML=config.yaml"
       - "SSL_CERT_FILE=/pki/rootCA.crt"
 
+
+  mock-oauth2-server:
+    container_name: "vc_dev_mock_oauth2"
+    hostname: "mock-oauth2.vc.docker"
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    restart: always
+    expose:
+      - 8080
+    networks:
+      vc-dev-net:
+        ipv4_address: 172.16.50.30
+    environment:
+      - "SERVER_PORT=8080"
+      - 'JSON_CONFIG={"interactiveLogin":true,"httpServer":"NettyWrapper","tokenCallbacks":[]}'
 
   mongo:
     image: mongo:7.0

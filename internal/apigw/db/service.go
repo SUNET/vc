@@ -30,7 +30,6 @@ type Service struct {
 	VCDatastoreColl           *VCDatastoreColl
 	VCDatastoreV2Coll         *VCDatastoreV2Coll
 	VCConsentColl             *VCConsentColl
-	VCUsersColl               *VCUsersColl
 	VCCredentialOfferColl     *VCCredentialOfferColl
 	VCDynamicRegistrationColl *VCDynamicRegistrationColl
 }
@@ -80,12 +79,6 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	}
 
 	var err error
-
-	service.VCUsersColl, err = NewUserColl(ctx, "users", service, log.New("VCUsersColl"))
-	if err != nil {
-		service.log.Error(err, "failed to create user collection")
-		return nil, err
-	}
 
 	service.VCCredentialOfferColl, err = NewCredentialOfferColl(ctx, "credential_offer", service, log.New("VCCredentialOfferColl"))
 	if err != nil {

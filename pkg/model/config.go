@@ -846,28 +846,8 @@ type APIGWDelivery struct {
 	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
 }
 
-// BasicAuth holds the configuration for the basic (username/password) auth provider.
-type BasicAuth struct {
-	// Import configures automatic import of test users from a JSON file at startup.
-	// When configured, APIGW reads the file and imports users into the users collection
-	// on first startup (skipped if users already exist).
-	Import *BasicAuthImport `yaml:"import,omitempty"`
-}
-
-// BasicAuthImport configures automatic import of basic auth users from a JSON file.
-type BasicAuthImport struct {
-	// FilePath is the path to a JSON file containing user definitions to import.
-	// Import is skipped if the users collection already contains data.
-	FilePath string `yaml:"file_path" validate:"required" doc_example:"\"./bootstrapping/basic_auth_users.json\""`
-
-	// Users limits which person IDs to import. If empty, all users are imported.
-	Users []string `yaml:"users,omitempty" doc_example:"[\"100\", \"102\"]"`
-}
-
 // APIGWAuthProviders groups the authentication provider configurations.
 type APIGWAuthProviders struct {
-	// Basic configures the basic (username/password) auth provider
-	Basic BasicAuth `yaml:"basic,omitempty" validate:"omitempty"`
 	// SAML configures the SAML SP auth provider
 	SAML SAMLSP `yaml:"saml,omitempty" validate:"omitempty"`
 	// OIDC configures the OIDC RP auth provider

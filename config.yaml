@@ -98,21 +98,40 @@ apigw:
     datastore:
       scopes:
         pid_1_5:
-          auth_provider: basic
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birth_date"]
         ehic:
           auth_provider: openid4vp
           auth_scopes: ["pid_1_5"]
-          auth_claims: ["given_name", "family_name", "birthdate"]
+          auth_claims: ["given_name", "family_name", "birth_date"]
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "http://mock-oauth2.vc.docker:8080/default"
+      redirect_uri: "http://apigw.vc.docker:8080/oidcrp/callback"
+      scopes: ["openid", "profile"]
+      session_duration: 300
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "vc-apigw"
+          client_secret: "vc-apigw-secret"
   delivery:
     openid4vci:
       token_endpoint: "http://apigw.vc.docker:8080/token"
       clients:
         "1003":
           type: "public"
-          redirect_uri: "https://dev.wallet.sunet.se"
+          redirect_uri: "http://localhost:3000"
           scopes:
             - "pid_1_5"
             - "ehic"
+    credential_offers:
+      issuer_url: "http://apigw.vc.docker:8080"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
 
 mock_as:
   api_server:

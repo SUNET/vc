@@ -24,7 +24,6 @@ type Apiv1 interface {
 	Notification(ctx context.Context, reguest *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
 	SearchDocuments(ctx context.Context, request *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error)
 	DeleteDocument(ctx context.Context, request *vcclient.DocumentDeleteQuery) error
-	AddPIDUser(ctx context.Context, request *vcclient.AddPIDRequest) error
 
 	// mockas
 	HealthMockAS(ctx context.Context, request *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)

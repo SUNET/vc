@@ -63,12 +63,6 @@ func main() {
 		panic(err)
 	}
 
-	if cfg.APIGW.AuthProviders.Basic.Import != nil {
-		if err := importer.RunUsers(ctx, cfg.APIGW.AuthProviders.Basic.Import, dbService, log); err != nil {
-			mainLog.Error(err, "User import failed")
-		}
-	}
-
 	if cfg.APIGW.DataSources.Datastore.Import != nil {
 		if err := importer.RunDocuments(ctx, cfg.APIGW.DataSources.Datastore.Import, dbService, log); err != nil {
 			mainLog.Error(err, "Document import failed")

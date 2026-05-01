@@ -206,8 +206,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, apiv2Client *
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/consent/get", http.StatusOK, s.endpointGetConsent)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/document/revoke", http.StatusOK, s.endpointRevokeDocument)
 
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/user/pid", http.StatusOK, s.endpointAddPIDUser)
-
 	// API v2 routes
 	rgAPIv2 := rgRoot.Group("api/v2")
 	rgAPIv2.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
@@ -224,7 +222,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, apiv2Client *
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/document/list", http.StatusOK, s.endpointV2ListDocuments)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/document/resolve", http.StatusOK, s.endpointV2ResolveDocuments)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodDelete, "/document", http.StatusOK, s.endpointV2DeleteDocument)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/pid/login", http.StatusOK, s.endpointLoginPIDUser)
+
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/authentic_source/lookup", http.StatusOK, s.endpointUserAuthenticSourceLookup)
