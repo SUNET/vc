@@ -80,24 +80,6 @@
                     <span class="loader text-primary dark:text-primary-light"></span>
                 </div>
             </template>
-            <template x-if="!loading && !loggedIn && authMethod === 'basic'">
-                <div class="space-y-4 md:space-y-6">
-                    <p class="pd-2">Authenticate with username and password to continue.</p>
-                    <form x-ref="loginForm" @submit.prevent="handleLoginBasic">
-                        <div>
-                            <div class="mb-2">
-                                <label for="username" class="block text-s font-semibold mb-1">Username</label>
-                                <input id="username" name="username" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:inputDarkModeOverride" type="text" placeholder="johndoe" required>
-                            </div>
-                            <div class="mb-2">
-                                <label for="password" class="block text-s font-semibold mb-1">Password</label>
-                                <input id="password" name="password" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:inputDarkModeOverride" type="password" placeholder="mysecret123" required>
-                            </div>
-                            <input type="submit" class="rounded-lg shadow-sm text-sm w-full px-4 py-2 mt-6 text-center text-white bg-primary hover:bg-primary-hover dark:text-white dark:hover:bg-primary-light-hover dark:bg-primary-light focus-visible:outline-2 focus-visible:outline-offset-2 cursor-pointer" value="Log in" />
-                        </div>
-                    </form>
-                </div>
-            </template>
             <template x-if="!loading && !loggedIn && authMethod === 'openid4vp' && !openid4vpRedirectCountUp">
                 <div class="space-y-4 md:space-y-6">
                     <p class="text-center">Authenticate using your PID to continue. To begin, click the button below. You will be redirected to your wallet and prompted to present your PID.</p>

@@ -1,12 +1,7 @@
 package vcclient
 
 import (
-	"context"
-	"net/http"
-	"net/url"
-
 	"github.com/SUNET/vc/pkg/logger"
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -18,61 +13,7 @@ type userHandler struct {
 	defaultContentType string
 }
 
-type AddPIDRequest struct {
-	Username string          `json:"username" validate:"required,max=128,printascii"`
-	Password string          `json:"password" validate:"required,max=128,printascii"`
-	Identity *model.Identity `json:"identity,omitempty" validate:"required"`
-	Meta     *model.MetaData `json:"meta,omitempty" validate:"required"`
-}
-
-func (s *userHandler) AddPID(ctx context.Context, body *AddPIDRequest) (*http.Response, error) {
-	fullURL, err := url.JoinPath(s.serviceBaseURL, "/pid")
-	if err != nil {
-		s.log.Error(err, "failed to construct URL")
-		return nil, err
-	}
-	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, body, nil, false, s.baseURL)
-	if err != nil {
-		s.log.Error(err, "AddPID call failed")
-		return resp, err
-	}
-
-	return resp, nil
-}
-
-type LoginPIDUserRequest struct {
-	Username string `json:"username" form:"username" validate:"required,max=128,printascii"`
-	Password string `json:"password" form:"password" validate:"required,max=128,printascii"`
-
-	// RequestURI comes from session cookie
-	RequestURI string `json:"-" validate:"omitempty,max=128,printascii"`
-}
-
-func (s *userHandler) LoginPIDUser(ctx context.Context, body *LoginPIDUserRequest) (*http.Response, error) {
-	fullURL, err := url.JoinPath(s.serviceBaseURL, "/pid/login")
-	if err != nil {
-		s.log.Error(err, "failed to construct URL")
-		return nil, err
-	}
-	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, body, nil, false, s.baseURL)
-	if err != nil {
-		s.log.Error(err, "LoginPIDUser call failed")
-		return resp, err
-	}
-
-	return resp, nil
-}
-
-type GetPIDRequest struct {
-	Username string `json:"username" form:"username" validate:"required,max=128,printascii"`
-}
-
-type GetPIDReply struct {
-	Identity *model.Identity `json:"identity,omitempty"`
-}
-
 type UserLookupRequest struct {
-	Username     string        `json:"-"`
 	AuthProvider string        `json:"-"`
 	ResponseCode string        `json:"-"`
 	RequestURI   string        `json:"-" validate:"omitempty,max=128,printascii"`

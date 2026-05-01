@@ -194,7 +194,11 @@ func TestLookupCredentialSources(t *testing.T) {
 		APIGW: &APIGW{
 			DataSources: DataSources{
 				Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
-					"pid": {AuthProvider: "basic"},
+					"pid": {
+						AuthProvider: "openid4vp",
+						AuthScopes:   []string{"pid"},
+						AuthClaims:   []string{"given_name"},
+					},
 					"ehic": {
 						AuthProvider: "openid4vp",
 						AuthScopes:   []string{"pid"},
@@ -215,7 +219,7 @@ func TestLookupCredentialSources(t *testing.T) {
 		srcs, err := cfg.LookupCredentialSources("pid")
 		assert.NoError(t, err)
 		assert.Equal(t, DataSourceDatastore, srcs[0].DataSource)
-		assert.Equal(t, "basic", srcs[0].AuthProvider)
+		assert.Equal(t, "openid4vp", srcs[0].AuthProvider)
 	})
 
 	t.Run("assertion", func(t *testing.T) {
@@ -246,7 +250,7 @@ func TestLookupCredentialSources(t *testing.T) {
 func TestResolveDataSource(t *testing.T) {
 	ds := &DataSources{
 		Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
-			"pid": {AuthProvider: AuthProviderBasic},
+			"pid": {AuthProvider: AuthProviderOpenID4VP},
 		}},
 		Assertion: AssertionConfig{Scopes: map[string]AssertionScope{
 			"pid":     {AuthProvider: AuthProviderSAML},
@@ -266,16 +270,10 @@ func TestResolveDataSource(t *testing.T) {
 		wantErr        bool
 	}{
 		{
-			name:           "pid with basic -> datastore",
-			credentialType: "pid",
-			authProvider:   AuthProviderBasic,
-			wantSource:     DataSourceDatastore,
-		},
-		{
-			name:           "pid with openid4vp -> error (datastore uses basic)",
+			name:           "pid with openid4vp -> datastore",
 			credentialType: "pid",
 			authProvider:   AuthProviderOpenID4VP,
-			wantErr:        true,
+			wantSource:     DataSourceDatastore,
 		},
 		{
 			name:           "pid with saml -> assertion",
@@ -299,7 +297,7 @@ func TestResolveDataSource(t *testing.T) {
 		{
 			name:           "unknown credential -> error",
 			credentialType: "unknown",
-			authProvider:   AuthProviderBasic,
+			authProvider:   AuthProviderOpenID4VP,
 			wantErr:        true,
 		},
 		{

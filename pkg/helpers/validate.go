@@ -297,13 +297,6 @@ func NewValidator() (*validator.Validate, error) {
 				if len(cred.AuthScopes) > 0 {
 					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_only_for_openid4vp", scope)
 				}
-			case model.AuthProviderBasic:
-				if len(cred.AuthClaims) > 0 {
-					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_for_basic", scope)
-				}
-				if len(cred.AuthScopes) > 0 {
-					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_not_for_basic", scope)
-				}
 			}
 		}
 	}, model.DataSources{})

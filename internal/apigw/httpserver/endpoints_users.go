@@ -14,63 +14,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-func (s *Service) endpointAddPIDUser(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointAddPIDUser")
-	defer span.End()
-
-	request := &vcclient.AddPIDRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	err := s.apiv1.AddPIDUser(ctx, request)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	return gin.H{}, nil
-}
-
-func (s *Service) endpointLoginPIDUser(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointLoginPIDUser")
-	defer span.End()
-	session := sessions.Default(c)
-
-	s.log.Debug("endpointLoginPIDUser", "method", c.Request.Method, "path", c.Request.URL.Path, "headers", c.Request.Header)
-
-	request := &vcclient.LoginPIDUserRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	var ok bool
-	request.RequestURI, ok = session.Get("request_uri").(string)
-	if !ok {
-		err := errors.New("request_uri not found in session")
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "endpointLoginPIDUser: request_uri not found in session")
-		return nil, err
-	}
-
-	err := s.apiv1.LoginPIDUser(ctx, request)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	session.Set("username", request.Username)
-	if err := session.Save(); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "session save error")
-		return nil, err
-	}
-
-	return gin.H{}, nil
-}
-
 func (s *Service) endpointUserAuthenticSourceLookup(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointUserAuthenticSourceLookup")
 	defer span.End()
@@ -120,11 +63,11 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 	if !ok {
 		err := errors.New("request_uri not found in session")
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "endpointLoginPIDUser: request_uri not found in session")
+		s.log.Error(err, "endpointUserLookup: request_uri not found in session")
 		return nil, err
 	}
 
-	s.log.Debug("endpointLoginPIDUser", "requestURI", requestURI)
+	s.log.Debug("endpointUserLookup", "requestURI", requestURI)
 
 	request := &vcclient.UserLookupRequest{
 		RequestURI: requestURI,
@@ -142,16 +85,6 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 	request.VCTM = vctm
 
 	switch authProvider {
-	case model.AuthProviderBasic:
-		username, ok := session.Get("username").(string)
-		if !ok {
-			err := errors.New("username not found in session")
-			span.SetStatus(codes.Error, err.Error())
-			s.log.Error(err, "endpointUserLookup: username not found in session")
-			return nil, err
-		}
-
-		request.Username = username
 	case model.AuthProviderOpenID4VP:
 		responseCode, ok := session.Get("response_code").(string)
 		if !ok {

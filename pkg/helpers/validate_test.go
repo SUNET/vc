@@ -360,43 +360,6 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			errorContains: "",
 		},
 		{
-			name: "basic with auth_claims is rejected",
-			ds: model.DataSources{
-				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"pid": {
-						AuthProvider: model.AuthProviderBasic,
-						AuthClaims:   []string{"given_name"},
-					},
-				}},
-			},
-			shouldError:   true,
-			errorContains: "auth_claims_not_for_basic",
-		},
-		{
-			name: "basic with auth_scopes is rejected",
-			ds: model.DataSources{
-				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"pid": {
-						AuthProvider: model.AuthProviderBasic,
-						AuthScopes:   []string{"pid"},
-					},
-				}},
-			},
-			shouldError:   true,
-			errorContains: "auth_scopes_not_for_basic",
-		},
-		{
-			name: "basic without auth_claims or auth_scopes passes",
-			ds: model.DataSources{
-				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
-					"pid": {
-						AuthProvider: model.AuthProviderBasic,
-					},
-				}},
-			},
-			shouldError: false,
-		},
-		{
 			name: "openid4vp without auth_claims is rejected",
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
