@@ -125,12 +125,24 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	document := &model.CompleteDocument{}
 
 	// Determine retrieval strategy based on auth method
-	// - "basic": Identity-based authentication → retrieve from datastore
+	// - "basic": Identity-based authentication → retrieve from datastore (v2 first, v1 fallback)
 	// - Other methods (e.g., "openid4vp"): Session-based → retrieve from cache
 	authMethod := credentialConstructor.AuthMethod
 	switch authMethod {
 	case model.AuthMethodBasic:
-		// Basic auth: retrieve from datastore using identity
+		// Try v2 datastore first: resolve identity attributes → identifier → document
+		if c.datastoreV2Store != nil && authContext.Identity != nil {
+			attrs := identityToV2Attributes(authContext.Identity)
+			if len(attrs) > 0 {
+				v2Docs, v2Err := c.datastoreV2Store.ResolveAndGetDocuments(ctx, authContext.AuthenticSource, scope, attrs)
+				if v2Err == nil && len(v2Docs) > 0 {
+					document = v2DocumentToCompleteDocument(v2Docs[0])
+					break
+				}
+			}
+		}
+
+		// Fallback to v1 datastore
 		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
 			Meta: &model.MetaData{
 				AuthenticSource: authContext.AuthenticSource,
@@ -468,4 +480,49 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	}
 
 	return c.issuerMetadata, nil
+}
+
+// identityToV2Attributes converts a v1 Identity object to v2 mapping attributes.
+func identityToV2Attributes(identity *model.Identity) map[string]string {
+	if identity == nil {
+		return nil
+	}
+
+	attrs := make(map[string]string)
+	if identity.FamilyName != "" {
+		attrs["family_name"] = identity.FamilyName
+	}
+	if identity.GivenName != "" {
+		attrs["given_name"] = identity.GivenName
+	}
+	if identity.BirthDate != "" {
+		attrs["birth_date"] = identity.BirthDate
+	}
+	if identity.PersonalAdministrativeNumber != "" {
+		attrs["personal_administrative_number"] = identity.PersonalAdministrativeNumber
+	}
+
+	return attrs
+}
+
+// v2DocumentToCompleteDocument converts a V2Document to a CompleteDocument for issuance compatibility.
+func v2DocumentToCompleteDocument(doc *model.V2Document) *model.CompleteDocument {
+	meta := &model.MetaData{
+		AuthenticSource: doc.Meta.AuthenticSource,
+		Scope:           doc.Meta.Scope,
+		DocumentID:      doc.Meta.DocumentID,
+		Revocation:      doc.Meta.Revocation,
+	}
+	if doc.Meta.CredentialValidFrom != nil {
+		meta.CredentialValidFrom = *doc.Meta.CredentialValidFrom
+	}
+	if doc.Meta.CredentialValidTo != nil {
+		meta.CredentialValidTo = *doc.Meta.CredentialValidTo
+	}
+
+	return &model.CompleteDocument{
+		Meta:         meta,
+		Identities:   nil, // v2 uses string identifiers, not structured Identity objects
+		DocumentData: doc.DocumentData,
+	}
 }
