@@ -144,9 +144,8 @@ func newTestClient(store *mockDatastoreV2Store) *Client {
 }
 
 func TestCreateIdentityMapping(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
 
 	t.Run("with explicit identifier", func(t *testing.T) {
 		reply, err := client.CreateIdentityMapping(ctx, &CreateIdentityMappingRequest{
@@ -169,9 +168,8 @@ func TestCreateIdentityMapping(t *testing.T) {
 }
 
 func TestResolveIdentityMapping(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
 
 	// Create a mapping first
 	_, err := client.CreateIdentityMapping(ctx, &CreateIdentityMappingRequest{
@@ -200,9 +198,8 @@ func TestResolveIdentityMapping(t *testing.T) {
 }
 
 func TestUpdateIdentityMapping(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
 
 	// Create first
 	_, err := client.CreateIdentityMapping(ctx, &CreateIdentityMappingRequest{
@@ -240,9 +237,8 @@ func TestUpdateIdentityMapping(t *testing.T) {
 }
 
 func TestDeleteIdentityMapping(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
 
 	// Create first
 	_, err := client.CreateIdentityMapping(ctx, &CreateIdentityMappingRequest{
@@ -270,9 +266,8 @@ func TestDeleteIdentityMapping(t *testing.T) {
 }
 
 func TestUploadDocument(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
 
 	t.Run("with explicit document_id", func(t *testing.T) {
 		reply, err := client.UploadDocument(ctx, &UploadDocumentRequest{
@@ -303,21 +298,9 @@ func TestUploadDocument(t *testing.T) {
 }
 
 func TestGetDocument(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
-
-	// Upload first
-	_, err := client.UploadDocument(ctx, &UploadDocumentRequest{
-		Meta: &model.V2MetaData{
-			AuthenticSource: "EHIC_DB_0001",
-			Scope:           "ehic",
-			DocumentID:      "doc-001",
-		},
-		Identities:   []string{"person-001"},
-		DocumentData: map[string]any{"document_number": "123456"},
-	})
-	require.NoError(t, err)
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
+	env.uploadDoc(t, "EHIC_DB_0001", "ehic", "doc-001", []string{"person-001"}, map[string]any{"document_number": "123456"})
 
 	t.Run("existing document", func(t *testing.T) {
 		reply, err := client.GetDocument(ctx, &GetDocumentRequest{
@@ -341,32 +324,10 @@ func TestGetDocument(t *testing.T) {
 }
 
 func TestListDocuments(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
-
-	// Upload two documents for same identifier
-	_, err := client.UploadDocument(ctx, &UploadDocumentRequest{
-		Meta: &model.V2MetaData{
-			AuthenticSource: "SUNET",
-			Scope:           "ehic",
-			DocumentID:      "doc-001",
-		},
-		Identities:   []string{"person-001"},
-		DocumentData: map[string]any{"type": "ehic"},
-	})
-	require.NoError(t, err)
-
-	_, err = client.UploadDocument(ctx, &UploadDocumentRequest{
-		Meta: &model.V2MetaData{
-			AuthenticSource: "SUNET",
-			Scope:           "pda1",
-			DocumentID:      "doc-002",
-		},
-		Identities:   []string{"person-001"},
-		DocumentData: map[string]any{"type": "pda1"},
-	})
-	require.NoError(t, err)
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
+	env.uploadDoc(t, "SUNET", "ehic", "doc-001", []string{"person-001"}, map[string]any{"type": "ehic"})
+	env.uploadDoc(t, "SUNET", "pda1", "doc-002", []string{"person-001"}, map[string]any{"type": "pda1"})
 
 	t.Run("list all scopes", func(t *testing.T) {
 		reply, err := client.ListDocuments(ctx, &ListDocumentsRequest{
@@ -390,21 +351,9 @@ func TestListDocuments(t *testing.T) {
 }
 
 func TestDeleteDocument(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
-
-	// Upload first
-	_, err := client.UploadDocument(ctx, &UploadDocumentRequest{
-		Meta: &model.V2MetaData{
-			AuthenticSource: "SUNET",
-			Scope:           "ehic",
-			DocumentID:      "doc-001",
-		},
-		Identities:   []string{"person-001"},
-		DocumentData: map[string]any{"type": "ehic"},
-	})
-	require.NoError(t, err)
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
+	env.uploadDoc(t, "SUNET", "ehic", "doc-001", []string{"person-001"}, map[string]any{"type": "ehic"})
 
 	t.Run("delete existing", func(t *testing.T) {
 		err := client.DeleteDocument(ctx, &DeleteDocumentRequest{
@@ -426,9 +375,8 @@ func TestDeleteDocument(t *testing.T) {
 }
 
 func TestResolveDocuments(t *testing.T) {
-	store := newMockStore()
-	client := newTestClient(store)
-	ctx := context.Background()
+	env := setupTestEnv()
+	client, ctx := env.client, env.ctx
 
 	// Create mapping
 	_, err := client.CreateIdentityMapping(ctx, &CreateIdentityMappingRequest{
@@ -439,16 +387,7 @@ func TestResolveDocuments(t *testing.T) {
 	require.NoError(t, err)
 
 	// Upload document for that identifier
-	_, err = client.UploadDocument(ctx, &UploadDocumentRequest{
-		Meta: &model.V2MetaData{
-			AuthenticSource: "SUNET",
-			Scope:           "ehic",
-			DocumentID:      "doc-001",
-		},
-		Identities:   []string{"person-001"},
-		DocumentData: map[string]any{"document_number": "123"},
-	})
-	require.NoError(t, err)
+	env.uploadDoc(t, "SUNET", "ehic", "doc-001", []string{"person-001"}, map[string]any{"document_number": "123"})
 
 	t.Run("resolve and get", func(t *testing.T) {
 		reply, err := client.ResolveDocuments(ctx, &ResolveDocumentsRequest{
