@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/internal/apigw/apiv2"
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/staticembed"
 	"github.com/SUNET/vc/pkg/httphelpers"
@@ -31,6 +32,7 @@ type Service struct {
 	log             *logger.Log
 	server          *http.Server
 	apiv1           Apiv1
+	apiv2           *apiv2.Client
 	gin             *gin.Engine
 	tracer          *trace.Tracer
 	eventPublisher  apiv1.EventPublisher
@@ -44,11 +46,12 @@ type Service struct {
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlSPService SAMLSPService, oidcrpService OIDCRPService, cacheService *cache.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, apiv2Client *apiv2.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, samlSPService SAMLSPService, oidcrpService OIDCRPService, cacheService *cache.Service, log *logger.Log) (*Service, error) {
 	s := &Service{
 		cfg:    cfg,
 		log:    log.New("httpserver"),
 		apiv1:  apiv1,
+		apiv2:  apiv2Client,
 		gin:    gin.New(),
 		tracer: tracer,
 		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
@@ -189,6 +192,23 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/document/revoke", http.StatusOK, s.endpointRevokeDocument)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/user/pid", http.StatusOK, s.endpointAddPIDUser)
+
+	// API v2 routes
+	rgAPIv2 := rgRoot.Group("api/v2")
+	rgAPIv2.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
+
+	// Identity mapping endpoints
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/identity/mapping", http.StatusOK, s.endpointV2CreateIdentityMapping)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/identity/mapping/resolve", http.StatusOK, s.endpointV2ResolveIdentityMapping)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPut, "/identity/mapping", http.StatusOK, s.endpointV2UpdateIdentityMapping)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodDelete, "/identity/mapping", http.StatusOK, s.endpointV2DeleteIdentityMapping)
+
+	// Document endpoints
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/document", http.StatusOK, s.endpointV2UploadDocument)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/document/get", http.StatusOK, s.endpointV2GetDocument)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/document/list", http.StatusOK, s.endpointV2ListDocuments)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodPost, "/document/resolve", http.StatusOK, s.endpointV2ResolveDocuments)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv2, http.MethodDelete, "/document", http.StatusOK, s.endpointV2DeleteDocument)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/pid/login", http.StatusOK, s.endpointLoginPIDUser)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)

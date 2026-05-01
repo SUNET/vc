@@ -28,6 +28,7 @@ type Service struct {
 	probeStore  *apiv1_status.StatusProbeStore
 
 	VCDatastoreColl           *VCDatastoreColl
+	VCDatastoreV2Coll         *VCDatastoreV2Coll
 	VCConsentColl             *VCConsentColl
 	VCUsersColl               *VCUsersColl
 	VCCredentialOfferColl     *VCCredentialOfferColl
@@ -56,6 +57,16 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:     log.New("VCDatastoreColl"),
 	}
 	if err := service.VCDatastoreColl.createIndex(ctx); err != nil {
+		return nil, err
+	}
+
+	service.VCDatastoreV2Coll = &VCDatastoreV2Coll{
+		Service:     service,
+		DocColl:     service.MongoClient.Database("vc").Collection("datastore_v2"),
+		MappingColl: service.MongoClient.Database("vc").Collection("identity_mappings"),
+		log:         log.New("VCDatastoreV2Coll"),
+	}
+	if err := service.VCDatastoreV2Coll.createIndexes(ctx); err != nil {
 		return nil, err
 	}
 

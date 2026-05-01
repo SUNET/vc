@@ -7,6 +7,7 @@ import (
 	"sync"
 	"syscall"
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/internal/apigw/apiv2"
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/apigw/httpserver"
@@ -80,6 +81,11 @@ func main() {
 		panic(err)
 	}
 
+	apiv2Client, err := apiv2.New(ctx, dbService, tracer, cfg, log)
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialize SAML service if enabled
 	samlSPService, err := initSAMLSPService(ctx, cfg, cacheService, mainLog)
 	if err != nil {
@@ -94,7 +100,7 @@ func main() {
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, eventPublisher, samlSPService, oidcrpService, cacheService, log)
+	httpService, err := httpserver.New(ctx, cfg, apiv1Client, apiv2Client, tracer, eventPublisher, samlSPService, oidcrpService, cacheService, log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)
