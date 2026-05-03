@@ -9,19 +9,11 @@ import (
 
 // CompleteDocument is a generic type for upload
 type CompleteDocument struct {
-	Meta            *MetaData        `json:"meta,omitempty" bson:"meta" validate:"required"`
-	Identities      []Identity       `json:"identities,omitempty" bson:"identities" validate:"required"`
-	DocumentDisplay *DocumentDisplay `json:"document_display,omitempty" bson:"document_display" validate:"required"`
-	DocumentData    map[string]any   `json:"document_data,omitempty" bson:"document_data" validate:"required"`
-
-	// required: true
-	// example: "1.0.0"
-	DocumentDataVersion string         `json:"document_data_version,omitempty" bson:"document_data_version" validate:"required,semver"`
-	QR                  *openid4vci.QR `json:"qr,omitempty" bson:"qr"`
+	Meta         *MetaData        `json:"meta,omitempty" bson:"meta" validate:"required"`
+	Identities   []string         `json:"identities,omitempty" bson:"identities" validate:"required,min=1"`
+	DocumentData map[string]any   `json:"document_data,omitempty" bson:"document_data" validate:"required"`
+	QR           *openid4vci.QR   `json:"qr,omitempty" bson:"qr"`
 }
-
-// CompleteDocuments is a array of CompleteDocument
-type CompleteDocuments []CompleteDocument
 
 // DocumentList is a generic type for document list
 type DocumentList struct {
@@ -41,55 +33,11 @@ type IDMapping struct {
 	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
 }
 
-// CredentialOffer https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html 4.1.1 Credential Offer Parameters
-type CredentialOffer struct {
-	CredentialIssuer           string                       `json:"credential_issuer" validate:"omitempty,max=128,printascii"`
-	CredentialConfigurationIDs []string                     `json:"credential_configuration_ids"`
-	Grants                     map[string]map[string]string `json:"grants"`
-}
-
-// Consent is a generic type for consent
-type Consent struct {
-	// required: true
-	// example: "Using my data for research"
-	ConsentTo string `json:"consent_to,omitempty" bson:"consent_to" validate:"required,max=128,printascii"`
-
-	// required: true
-	// example: "sess-123"
-	SessionID string `json:"session_id,omitempty" bson:"session_id" validate:"required,max=128,printascii"`
-
-	// required: true
-	// example: 509567558
-	// format: int64
-	CreatedAt int64 `json:"created_at,omitempty" bson:"created_at" validate:"required"`
-}
-
-// Collect is a generic type for collect
-type Collect struct {
-	// required: false
-	// example: 98fe67fc-c03f-11ee-bbee-4345224d414f
-	ID string `json:"id,omitempty" bson:"id" validate:"omitempty,max=128,printascii"`
-
-	// required: false
-	// example: 509567558
-	// format: int64
-	ValidUntil int64 `json:"valid_until,omitempty" bson:"valid_until"`
-}
-
 // MetaData is a generic type for metadata
 type MetaData struct {
 	// required: true
 	// example: SUNET
 	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"required,max=128,printascii"`
-
-	// required: true
-	// example: "1.0.0"
-	DocumentVersion string `json:"document_version,omitempty" bson:"document_version" validate:"required,semver"`
-
-	// VCT is the Verifiable Credential Type
-	// required: true
-	// example: "urn:eudi:pid:1"
-	VCT string `json:"vct,omitempty" bson:"vct" validate:"required,max=128,printascii"`
 
 	// Scope is the credential configuration ID scope
 	// required: false
@@ -100,75 +48,10 @@ type MetaData struct {
 	// example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
 	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"required,max=128,printascii"`
 
-	// RealData is a flag to indicate if the document contains real data
-	// required: true
-	// example: true
-	RealData bool `json:"real_data" bson:"real_data"`
-
-	Collect *Collect `json:"collect,omitempty" bson:"collect"`
-
-	// Revocation is a collection of fields representing a revocation
-	Revocation *Revocation `json:"revocation,omitempty" bson:"revocation"`
-
-	// required: false
-	// example: 509567558
-	// format: int64
-	CredentialValidFrom int64 `json:"credential_valid_from,omitempty" bson:"valid_from"`
-
-	// required: false
-	// example: 509567558
-	// format: int64
-	CredentialValidTo int64 `json:"credential_valid_to,omitempty" bson:"valid_to"`
-
 	// required: false
 	// example: file://path/to/schema.json or http://example.com/schema.json
 	// format: string
 	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation" validate:"omitempty,max=128,printascii"`
-}
-
-// RevocationReference refer to a document
-type RevocationReference struct {
-	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source" validate:"omitempty,max=128,printascii"`
-	VCT             string `json:"vct,omitempty" bson:"vct" validate:"omitempty,max=128,printascii"`
-	DocumentID      string `json:"document_id,omitempty" bson:"document_id" validate:"omitempty,max=128,printascii"`
-}
-
-// Revocation is a collection of fields representing a revocation
-type Revocation struct {
-
-	// ID is the ID of the revocation
-	// required: false
-	// example: 8dbd2680-c03f-11ee-a21b-034aafe41222
-	ID string `json:"id,omitempty" bson:"id" validate:"omitempty,max=128,printascii"`
-
-	// Revoked is a flag to indicate if the document has been revoked
-	// required: false
-	// example: false
-	Revoked bool `json:"revoked,omitempty" bson:"revoked"`
-
-	Reference RevocationReference `json:"reference" bson:"reference"`
-
-	// RevokedAt is the time the document was revoked or going to be revoked
-	// required: false
-	// example: 509567558
-	// format: int64
-	RevokedAt int64 `json:"revoked_at,omitempty" bson:"revoked_at"`
-
-	// Reason is the reason for revocation
-	// required: false
-	// example: lost or stolen
-	Reason string `json:"reason,omitempty" bson:"reason" validate:"omitempty,max=128,printascii"`
-}
-
-// IdentitySchema is a collection of fields representing an identity schema
-type IdentitySchema struct {
-	// required: true
-	// example: "SE"
-	Name string `json:"name" bson:"name" validate:"required,max=128,printascii"`
-
-	// required: false
-	// example: "1.0.0"
-	Version string `json:"version,omitempty" bson:"version,omitempty" validate:"omitempty,semver"`
 }
 
 // Identity identifies a person
@@ -176,8 +59,6 @@ type Identity struct {
 	// required: true
 	// example: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a
 	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" bson:"authentic_source_person_id" validate:"required,max=128,printascii"`
-
-	Schema *IdentitySchema `json:"schema,omitempty" bson:"schema" validate:"required"`
 
 	// required: true
 	// example: Svensson
@@ -285,6 +166,24 @@ type Identity struct {
 	IssuingJurisdiction string `json:"issuing_jurisdiction,omitempty" bson:"issuing_jurisdiction,omitempty" validate:"omitempty,max=128,printascii"`
 
 	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty" validate:"omitempty,max=128,printascii"`
+}
+
+// ToMap returns the non-empty identity fields relevant for resolution as a map.
+func (i *Identity) ToMap() map[string]any {
+	m := make(map[string]any)
+	if i.FamilyName != "" {
+		m["family_name"] = i.FamilyName
+	}
+	if i.GivenName != "" {
+		m["given_name"] = i.GivenName
+	}
+	if i.BirthDate != "" {
+		m["birth_date"] = i.BirthDate
+	}
+	if i.PersonalAdministrativeNumber != "" {
+		m["personal_administrative_number"] = i.PersonalAdministrativeNumber
+	}
+	return m
 }
 
 // isLeapYear checks if a year is a leap year
@@ -411,7 +310,7 @@ type SearchDocumentsReply struct {
 // SearchDocumentsRequest the request to search for documents
 type SearchDocumentsRequest struct {
 	AuthenticSource string `json:"authentic_source,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
-	VCT             string `json:"vct,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
+	Scope           string `json:"scope,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 	DocumentID      string `json:"document_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 	CollectID       string `json:"collect_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 

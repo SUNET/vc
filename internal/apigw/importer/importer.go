@@ -57,11 +57,9 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 		docs = make(map[string]*model.CompleteDocument, len(reqs))
 		for id, req := range reqs {
 			docs[id] = &model.CompleteDocument{
-				Meta:                req.Meta,
-				Identities:          req.Identities,
-				DocumentDisplay:     req.DocumentDisplay,
-				DocumentData:        req.DocumentData,
-				DocumentDataVersion: req.DocumentDataVersion,
+				Meta:         req.Meta,
+				Identities:   req.Identities,
+				DocumentData: req.DocumentData,
 			}
 		}
 	}
@@ -70,10 +68,6 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 	for id, doc := range docs {
 		if !shouldImport(id, filterUsers) {
 			continue
-		}
-
-		if doc.Identities == nil {
-			doc.Identities = []model.Identity{}
 		}
 
 		if err := dbService.VCDatastoreColl.Save(ctx, doc); err != nil {

@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"regexp"
 
 	"github.com/SUNET/vc/pkg/logger"
 
@@ -19,13 +18,11 @@ type CredentialSubjectsColl struct {
 	log     *logger.Log
 }
 
-// CredentialSubjectDoc represents a person with their token status list reference
+// CredentialSubjectDoc represents a credential subject with their token status list reference
 type CredentialSubjectDoc struct {
-	FirstName   string `bson:"first_name"`
-	LastName    string `bson:"last_name"`
-	DateOfBirth string `bson:"date_of_birth"` // Format: YYYY-MM-DD
-	Section     int64  `bson:"section"`
-	Index       int64  `bson:"index"`
+	Identifier string `bson:"identifier"`
+	Section    int64  `bson:"section"`
+	Index      int64  `bson:"index"`
 }
 
 // NewCredentialSubjectsColl creates a new credential subjects collection
@@ -50,16 +47,14 @@ func (c *CredentialSubjectsColl) createIndexes(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:credential_subjects:createIndexes")
 	defer span.End()
 
-	// Index for searching by name and date of birth
-	nameIndex := mongo.IndexModel{
+	// Index for searching by identifier
+	identifierIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "last_name", Value: 1},
-			{Key: "first_name", Value: 1},
-			{Key: "date_of_birth", Value: 1},
+			{Key: "identifier", Value: 1},
 		},
 	}
 
-	// Unique index for section+index (one person per Token Status List entry)
+	// Unique index for section+index (one subject per Token Status List entry)
 	tokenStatusListIndex := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "section", Value: 1},
@@ -68,7 +63,7 @@ func (c *CredentialSubjectsColl) createIndexes(ctx context.Context) error {
 		Options: options.Index().SetUnique(true),
 	}
 
-	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{nameIndex, tokenStatusListIndex})
+	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{identifierIndex, tokenStatusListIndex})
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
@@ -77,21 +72,14 @@ func (c *CredentialSubjectsColl) createIndexes(ctx context.Context) error {
 	return nil
 }
 
-// Search searches for credential subjects by name and/or date of birth
-// All parameters are optional - empty strings are ignored
-func (c *CredentialSubjectsColl) Search(ctx context.Context, firstName, lastName, dateOfBirth string) ([]*CredentialSubjectDoc, error) {
+// Search searches for credential subjects by identifier
+func (c *CredentialSubjectsColl) Search(ctx context.Context, identifier string) ([]*CredentialSubjectDoc, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:credential_subjects:search")
 	defer span.End()
 
 	filter := bson.M{}
-	if firstName != "" {
-		filter["first_name"] = bson.M{"$regex": regexp.QuoteMeta(firstName), "$options": "i"} // Case-insensitive
-	}
-	if lastName != "" {
-		filter["last_name"] = bson.M{"$regex": regexp.QuoteMeta(lastName), "$options": "i"} // Case-insensitive
-	}
-	if dateOfBirth != "" {
-		filter["date_of_birth"] = dateOfBirth
+	if identifier != "" {
+		filter["identifier"] = identifier
 	}
 
 	cursor, err := c.Coll.Find(ctx, filter)
@@ -122,6 +110,6 @@ func (c *CredentialSubjectsColl) Add(ctx context.Context, doc *CredentialSubject
 		return err
 	}
 
-	c.log.Debug("Added credential subject", "first_name", doc.FirstName, "last_name", doc.LastName, "section", doc.Section, "index", doc.Index)
+	c.log.Debug("Added credential subject", "identifier", doc.Identifier, "section", doc.Section, "index", doc.Index)
 	return nil
 }

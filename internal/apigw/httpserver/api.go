@@ -24,15 +24,24 @@ type Apiv1 interface {
 	GetDocument(ctx context.Context, req *apiv1.GetDocumentRequest) (*apiv1.GetDocumentReply, error)
 	DocumentList(ctx context.Context, req *apiv1.DocumentListRequest) (*apiv1.DocumentListReply, error)
 	DeleteDocument(ctx context.Context, req *apiv1.DeleteDocumentRequest) error
-	GetDocumentCollectID(ctx context.Context, req *apiv1.GetDocumentCollectIDRequest) (*apiv1.GetDocumentCollectIDReply, error)
-	RevokeDocument(ctx context.Context, req *apiv1.RevokeDocumentRequest) error
-	AddConsent(ctx context.Context, req *apiv1.AddConsentRequest) error
-	GetConsent(ctx context.Context, req *apiv1.GetConsentRequest) (*model.Consent, error)
 
 	// datastore endpoints - disabled in production
 	SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error)
 	UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error)
 	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
+
+	// Streamlined identity mapping endpoints
+	CreateIdentityMapping(ctx context.Context, req *apiv1.CreateIdentityMappingRequest) (*apiv1.CreateIdentityMappingReply, error)
+	ResolveIdentityMapping(ctx context.Context, req *apiv1.ResolveIdentityMappingRequest) (*apiv1.ResolveIdentityMappingReply, error)
+	UpdateIdentityMapping(ctx context.Context, req *apiv1.UpdateIdentityMappingRequest) error
+	DeleteIdentityMapping(ctx context.Context, req *apiv1.DeleteIdentityMappingRequest) error
+
+	// Streamlined document endpoints
+	UploadDocument(ctx context.Context, req *apiv1.UploadDocumentRequest) (*apiv1.UploadDocumentReply, error)
+	GetDocumentByKey(ctx context.Context, req *apiv1.GetDocumentByKeyRequest) (*apiv1.GetDocumentByKeyReply, error)
+	ListDocumentsByIdentifier(ctx context.Context, req *apiv1.ListDocumentsRequest) (*apiv1.ListDocumentsReply, error)
+	ResolveDocument(ctx context.Context, req *apiv1.ResolveDocumentRequest) (*apiv1.ResolveDocumentReply, error)
+	DeleteDocumentByKey(ctx context.Context, req *apiv1.DeleteDocumentByKeyRequest) error
 
 	// OpenID4VCI endpoints
 	VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error)
@@ -72,6 +81,7 @@ type Apiv1 interface {
 	StoreVCIDocuments(ctx context.Context, sessionID string, docs map[string]*model.CompleteDocument) error
 	HasVCIDocuments(ctx context.Context, sessionID string) bool
 	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope string, claims map[string]any, dsCred *model.DatastoreScope) error
+	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
 
 	// misc endpoints
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)

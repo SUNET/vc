@@ -308,13 +308,13 @@ func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *Authorizati
 	return nil
 }
 
-// AddIdentity adds identity information to an authorization context
-func (c *MemoryStore) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
+// SetIdentifier sets the resolved identifier, scope, and authentic source on an authorization context
+func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, set *IdentifierSet) error {
 	if query == nil {
 		return errors.New("query cannot be nil")
 	}
-	if input == nil || input.Identity == nil {
-		return errors.New("identity cannot be nil")
+	if set == nil || set.Identifier == "" {
+		return errors.New("identifier cannot be empty")
 	}
 
 	c.mu.Lock()
@@ -346,9 +346,9 @@ func (c *MemoryStore) AddIdentity(ctx context.Context, query *AuthorizationConte
 	}
 
 	doc := item.Value()
-	doc.Identity = input.Identity
-	doc.VCT = input.VCT
-	doc.AuthenticSource = input.AuthenticSource
+	doc.Identifier = set.Identifier
+	doc.Scope = set.Scope
+	doc.AuthenticSource = set.AuthenticSource
 
 	// Update the primary cache entry
 	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)

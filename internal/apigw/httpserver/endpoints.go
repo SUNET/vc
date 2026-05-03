@@ -125,21 +125,6 @@ func (s *Service) endpointSearchDocuments(ctx context.Context, c *gin.Context) (
 	return reply, nil
 }
 
-func (s *Service) endpointRevokeDocument(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointRevokeDocument")
-	defer span.End()
-
-	request := &apiv1.RevokeDocumentRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	if err := s.apiv1.RevokeDocument(ctx, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	return nil, nil
-}
 
 func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDeleteDocument")
@@ -156,23 +141,6 @@ func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (a
 		return nil, err
 	}
 	return nil, nil
-}
-
-func (s *Service) endpointGetDocumentCollectID(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointGetDocumentAttestation")
-	defer span.End()
-
-	request := &apiv1.GetDocumentCollectIDRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	reply, err := s.apiv1.GetDocumentCollectID(ctx, request)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	return reply, nil
 }
 
 func (s *Service) endpointIdentityMapping(ctx context.Context, c *gin.Context) (any, error) {
@@ -202,39 +170,6 @@ func (s *Service) endpointDocumentList(ctx context.Context, c *gin.Context) (any
 		return nil, err
 	}
 	reply, err := s.apiv1.DocumentList(ctx, request)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	return reply, nil
-}
-
-func (s *Service) endpointAddConsent(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPortal")
-	defer span.End()
-
-	request := &apiv1.AddConsentRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	if err := s.apiv1.AddConsent(ctx, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (s *Service) endpointGetConsent(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPortal")
-	defer span.End()
-
-	request := &apiv1.GetConsentRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	reply, err := s.apiv1.GetConsent(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err

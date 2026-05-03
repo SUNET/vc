@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SUNET/vc/pkg/model"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -217,8 +215,8 @@ func TestMongoStore_SetAuthenticSourceNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoDocuments)
 }
 
-// TestMongoStore_AddIdentity runs the full AddIdentity flow.
-func TestMongoStore_AddIdentity(t *testing.T) {
+// TestMongoStore_SetIdentifier runs the full SetIdentifier flow.
+func TestMongoStore_SetIdentifier(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
@@ -228,34 +226,24 @@ func TestMongoStore_AddIdentity(t *testing.T) {
 	doc := &AuthorizationContext{SessionID: "id-1", RequestURI: "https://example.com/r"}
 	require.NoError(t, store.Save(ctx, doc))
 
-	input := &AuthorizationContext{
-		Identity:        &model.Identity{GivenName: "Alice", FamilyName: "Smith"},
-		VCT:             "urn:vct:pid",
-		AuthenticSource: "test-as",
-	}
-
 	// Lookup by RequestURI
-	require.NoError(t, store.AddIdentity(ctx, &AuthorizationContext{RequestURI: "https://example.com/r"}, input))
+	require.NoError(t, store.SetIdentifier(ctx, &AuthorizationContext{RequestURI: "https://example.com/r"}, &IdentifierSet{Identifier: "alice-id", Scope: "pid", AuthenticSource: "test-as"}))
 
 	result, err := store.GetByID(ctx, "id-1")
 	require.NoError(t, err)
-	assert.Equal(t, "Alice", result.Identity.GivenName)
-	assert.Equal(t, "urn:vct:pid", result.VCT)
+	assert.Equal(t, "alice-id", result.Identifier)
 	assert.Equal(t, "test-as", result.AuthenticSource)
 }
 
-// TestMongoStore_AddIdentityNotFound verifies AddIdentity on missing doc.
-func TestMongoStore_AddIdentityNotFound(t *testing.T) {
+// TestMongoStore_SetIdentifierNotFound verifies SetIdentifier on missing doc.
+func TestMongoStore_SetIdentifierNotFound(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
 	store := newMongoTestStore(t, client, "identity_nf")
 	ctx := t.Context()
 
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Ghost"},
-	}
-	err := store.AddIdentity(ctx, &AuthorizationContext{SessionID: "nope"}, input)
+	err := store.SetIdentifier(ctx, &AuthorizationContext{SessionID: "nope"}, &IdentifierSet{Identifier: "ghost-id"})
 	assert.ErrorIs(t, err, ErrNoDocuments)
 }
 

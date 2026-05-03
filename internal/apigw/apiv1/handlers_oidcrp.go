@@ -179,13 +179,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				return nil, fmt.Errorf("external API flow requires person identifier but sub claim is empty")
 			}
 
-			authCtx.PersonID = personID
+			authCtx.Identifier = personID
 			if updateErr := c.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
-				span.SetStatus(codes.Error, "failed to store person_id")
-				return nil, fmt.Errorf("failed to update person_id on auth context: %w", updateErr)
+				span.SetStatus(codes.Error, "failed to store identifier")
+				return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
 			}
-			c.log.Info("OIDC callback: stored person_id for external API flow",
-				"vci_session_id", session.VCISessionID, "person_id", personID)
+			c.log.Info("OIDC callback: stored identifier for external API flow",
+				"vci_session_id", session.VCISessionID, "identifier", personID)
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
@@ -199,8 +199,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				Meta: &model.MetaData{
 					AuthenticSource: session.IssuerURL,
 				},
-				DocumentData:        claims,
-				DocumentDataVersion: "1.0.0",
+				DocumentData: claims,
 			}
 			docs := map[string]*model.CompleteDocument{
 				session.IssuerURL: doc,
@@ -211,6 +210,24 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				return nil, fmt.Errorf("failed to store VCI documents: %w", err)
 			}
 		}
+
+		// Resolve the authenticated identifier for registry (applies to all flows).
+		// External API flow already set Identifier; otherwise resolve from claims
+		// (either a direct identifier claim or via identity mapping).
+		if authCtx.Identifier == "" {
+			identifier, resolveErr := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+			if resolveErr != nil {
+				span.SetStatus(codes.Error, "identifier resolution failed")
+				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
+			}
+			authCtx.Identifier = identifier
+		}
+		if updateErr := c.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
+			span.SetStatus(codes.Error, "failed to store identifier")
+			return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
+		}
+		c.log.Info("OIDC callback: identifier resolved",
+			"vci_session_id", session.VCISessionID, "identifier", authCtx.Identifier)
 
 		// Clean up OIDC session (clear err so defer doesn't double-delete)
 		err = nil

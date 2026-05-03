@@ -50,8 +50,8 @@ type AuthContextStore interface {
 	// SetAuthenticSource sets the authentic source for an authorization context.
 	SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error
 
-	// AddIdentity adds identity information to an authorization context.
-	AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error
+	// SetIdentifier sets the resolved identifier, scope, and authentic source on an authorization context.
+	SetIdentifier(ctx context.Context, query *AuthorizationContext, set *IdentifierSet) error
 }
 
 // Compile-time checks that backends implement the interface.

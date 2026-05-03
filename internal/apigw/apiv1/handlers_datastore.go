@@ -3,15 +3,12 @@ package apiv1
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/vcclient"
-
-	"go.opentelemetry.io/otel/codes"
 )
 
 // Upload uploads a document with a set of attributes
@@ -27,24 +24,6 @@ import (
 //	@Param			req	body		vcclient.UploadRequest	true	" "
 //	@Router			/upload [post]
 func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error {
-	if req.Meta.Collect == nil || req.Meta.Collect.ID == "" {
-		collect := &model.Collect{
-			ID: req.Meta.DocumentID,
-		}
-
-		req.Meta.Collect = collect
-	}
-
-	if req.Meta.Revocation == nil {
-		req.Meta.Revocation = &model.Revocation{
-			ID: req.Meta.DocumentID,
-		}
-	} else {
-		if req.Meta.Revocation.ID == "" {
-			req.Meta.Revocation.ID = req.Meta.DocumentID
-		}
-	}
-
 	credentialOfferParameter := openid4vci.CredentialOfferParameters{
 		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{
@@ -52,7 +31,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 		},
 		Grants: map[string]any{
 			"authorization_code": openid4vci.GrantAuthorizationCode{
-				IssuerState: fmt.Sprintf("collect_id=%s&vct=%s&authentic_source=%s", req.Meta.Collect.ID, req.Meta.VCT, req.Meta.AuthenticSource),
+				IssuerState: fmt.Sprintf("document_id=%s&authentic_source=%s", req.Meta.DocumentID, req.Meta.AuthenticSource),
 			},
 		},
 	}
@@ -98,40 +77,16 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 		}
 	}
 
-	if req.Meta.Collect == nil || req.Meta.Collect.ID == "" {
-		collect := &model.Collect{
-			ID: req.Meta.DocumentID,
-		}
-
-		req.Meta.Collect = collect
-	}
-
-	if req.Meta.Revocation == nil {
-		req.Meta.Revocation = &model.Revocation{
-			ID: req.Meta.DocumentID,
-		}
-	} else {
-		if req.Meta.Revocation.ID == "" {
-			req.Meta.Revocation.ID = req.Meta.DocumentID
-		}
-	}
-
 	upload := &model.CompleteDocument{
-		Meta:                req.Meta,
-		DocumentDisplay:     req.DocumentDisplay,
-		DocumentData:        req.DocumentData,
-		DocumentDataVersion: req.DocumentDataVersion,
-		Identities:          req.Identities,
-		QR:                  qr,
+		Meta:         req.Meta,
+		DocumentData: req.DocumentData,
+		Identities:   req.Identities,
+		QR:           qr,
 	}
 
 	if err := helpers.ValidateDocumentData(ctx, upload, c.log); err != nil {
 		c.log.Error(err, "failed to validate document data")
 		return err
-	}
-
-	if upload.Identities == nil {
-		upload.Identities = []model.Identity{}
 	}
 
 	if err := c.datastoreStore.Save(ctx, upload); err != nil {
@@ -157,7 +112,6 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
 		DocumentID:      req.DocumentID,
 	})
 	if err != nil {
@@ -220,8 +174,8 @@ type AddDocumentIdentityRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
 
 	// required: true
-	// example: urn:eudi:pid:1
-	VCT string `json:"vct" validate:"required"`
+	// example: pid
+	Scope string `json:"scope" validate:"required"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
@@ -245,7 +199,7 @@ type AddDocumentIdentityRequest struct {
 func (c *Client) AddDocumentIdentity(ctx context.Context, req *AddDocumentIdentityRequest) error {
 	err := c.datastoreStore.AddDocumentIdentity(ctx, &db.AddDocumentIdentityQuery{
 		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
+		Scope:           req.Scope,
 		DocumentID:      req.DocumentID,
 		Identities:      req.Identities,
 	})
@@ -263,8 +217,8 @@ type DeleteDocumentIdentityRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
 
 	// required: true
-	// example: urn:eudi:pid:1
-	VCT string `json:"vct" validate:"required"`
+	// example: pid
+	Scope string `json:"scope" validate:"required"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
@@ -290,7 +244,6 @@ type DeleteDocumentIdentityRequest struct {
 func (c *Client) DeleteDocumentIdentity(ctx context.Context, req *DeleteDocumentIdentityRequest) error {
 	err := c.datastoreStore.DeleteDocumentIdentity(ctx, &db.DeleteDocumentIdentityQuery{
 		AuthenticSource:         req.AuthenticSource,
-		VCT:                     req.VCT,
 		DocumentID:              req.DocumentID,
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
 	})
@@ -312,8 +265,8 @@ type DeleteDocumentRequest struct {
 	DocumentID string `json:"document_id" validate:"required"`
 
 	// required: true
-	// example: urn:eudi:pid:1
-	VCT string `json:"vct" validate:"required"`
+	// example: pid
+	Scope string `json:"scope" validate:"required"`
 }
 
 // DeleteDocument deletes a specific document
@@ -331,7 +284,6 @@ type DeleteDocumentRequest struct {
 func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest) error {
 	err := c.datastoreStore.Delete(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
 		DocumentID:      req.DocumentID,
 	})
 	if err != nil {
@@ -344,7 +296,7 @@ func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest)
 // GetDocumentRequest is the request for GetDocument
 type GetDocumentRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
+	Scope           string `json:"scope" validate:"required"`
 	DocumentID      string `json:"document_id" validate:"required"`
 }
 
@@ -369,7 +321,6 @@ func (c *Client) GetDocument(ctx context.Context, req *GetDocumentRequest) (*Get
 	query := &db.GetDocumentQuery{
 		Meta: &model.MetaData{
 			AuthenticSource: req.AuthenticSource,
-			VCT:             req.VCT,
 			DocumentID:      req.DocumentID,
 		},
 	}
@@ -388,7 +339,7 @@ func (c *Client) GetDocument(ctx context.Context, req *GetDocumentRequest) (*Get
 type DocumentListRequest struct {
 	AuthenticSource string          `json:"authentic_source"`
 	Identity        *model.Identity `json:"identity" validate:"required"`
-	VCT             string          `json:"vct"`
+	Scope           string          `json:"scope"`
 	ValidFrom       int64           `json:"valid_from"`
 	ValidTo         int64           `json:"valid_to"`
 }
@@ -414,7 +365,7 @@ func (c *Client) DocumentList(ctx context.Context, req *DocumentListRequest) (*D
 	docs, err := c.datastoreStore.DocumentList(ctx, &db.DocumentListQuery{
 		AuthenticSource: req.AuthenticSource,
 		Identity:        req.Identity,
-		VCT:             req.VCT,
+		Scope:           req.Scope,
 		ValidFrom:       req.ValidFrom,
 		ValidTo:         req.ValidTo,
 	})
@@ -427,114 +378,11 @@ func (c *Client) DocumentList(ctx context.Context, req *DocumentListRequest) (*D
 	return resp, nil
 }
 
-// GetDocumentCollectIDRequest is the request for GetDocumentAttestation
-type GetDocumentCollectIDRequest struct {
-	AuthenticSource string          `json:"authentic_source" validate:"required"`
-	VCT             string          `json:"vct" validate:"required"`
-	CollectID       string          `json:"collect_id" validate:"required"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
-}
-
-// GetDocumentCollectIDReply is the reply for a generic document
-type GetDocumentCollectIDReply struct {
-	Data *model.Document `json:"data"`
-}
-
-// GetDocumentCollectID return a specific document ??
-//
-//	@Summary		GetDocumentByCollectID
-//	@ID				get-document-collect-id
-//	@Description	Get one document with collect id
-//	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
-//	@Success		200	{object}	GetDocumentCollectIDReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
-//	@Param			req	body		GetDocumentCollectIDRequest	true	" "
-//	@Router			/document/collect_id [post]
-func (c *Client) GetDocumentCollectID(ctx context.Context, req *GetDocumentCollectIDRequest) (*GetDocumentCollectIDReply, error) {
-	query := &db.GetDocumentCollectIDQuery{
-		Identity: req.Identity,
-		Meta: &model.MetaData{
-			AuthenticSource: req.AuthenticSource,
-			VCT:             req.VCT,
-			Collect: &model.Collect{
-				ID: req.CollectID,
-			},
-		},
-	}
-
-	doc, err := c.datastoreStore.GetDocumentCollectID(ctx, query)
-	if err != nil {
-		c.log.Error(err, "failed to get document")
-		return nil, err
-	}
-
-	reply := &GetDocumentCollectIDReply{
-		Data: doc,
-	}
-	return reply, nil
-}
-
-// RevokeDocumentRequest is the request for RevokeDocument
-type RevokeDocumentRequest struct {
-	AuthenticSource string            `json:"authentic_source" validate:"required"`
-	VCT             string            `json:"vct" validate:"required"`
-	Revocation      *model.Revocation `json:"revocation" validate:"required"`
-}
-
-// RevokeDocument revokes a specific document
-//
-//	@Summary		RevokeDocument
-//	@ID				revoke-document
-//	@Description	Revoke one document
-//	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
-//	@Success		200	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		RevokeDocumentRequest	true	" "
-//	@Router			/document/revoke [post]
-func (c *Client) RevokeDocument(ctx context.Context, req *RevokeDocumentRequest) error {
-	ctx, span := c.tracer.Start(ctx, "db:apigw:datastore:revoke")
-	defer span.End()
-
-	if req.Revocation.ID == "" {
-		return helpers.ErrNoRevocationID
-	}
-
-	doc, err := c.datastoreStore.GetByRevocationID(ctx, &model.MetaData{
-		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
-		Revocation:      &model.Revocation{ID: req.Revocation.ID},
-	})
-	if err != nil {
-		return err
-	}
-	c.log.Debug("Document found", "document_id", doc.Meta.DocumentID)
-
-	doc.Meta.Revocation = req.Revocation
-
-	if req.Revocation.RevokedAt == 0 {
-		doc.Meta.Revocation.RevokedAt = time.Now().Unix()
-		doc.Meta.Revocation.Revoked = true
-	}
-
-	if err := c.datastoreStore.Replace(ctx, doc); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Error(err, "replace failed")
-		return err
-	}
-	c.log.Debug("Document enqueued for update", "document_id", doc.Meta.DocumentID)
-
-	return nil
-}
-
 // SearchDocuments search for documents
 func (c *Client) SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error) {
 	docs, hasMore, err := c.datastoreStore.SearchDocuments(ctx, &db.SearchDocumentsQuery{
 		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
+		Scope:           req.Scope,
 		DocumentID:      req.DocumentID,
 		CollectID:       req.CollectID,
 

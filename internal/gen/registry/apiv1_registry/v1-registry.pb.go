@@ -7,12 +7,11 @@
 package apiv1_registry
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -226,11 +225,9 @@ func (*TokenStatusListUpdateStatusReply) Descriptor() ([]byte, []int) {
 // Credential subject messages
 type SaveCredentialSubjectRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	FirstName     string                 `protobuf:"bytes,1,opt,name=FirstName,proto3" json:"FirstName,omitempty"`     // Subject's first name
-	LastName      string                 `protobuf:"bytes,2,opt,name=LastName,proto3" json:"LastName,omitempty"`       // Subject's last name
-	DateOfBirth   string                 `protobuf:"bytes,3,opt,name=DateOfBirth,proto3" json:"DateOfBirth,omitempty"` // Subject's date of birth (YYYY-MM-DD)
-	Section       int64                  `protobuf:"varint,4,opt,name=Section,proto3" json:"Section,omitempty"`        // Token Status List section
-	Index         int64                  `protobuf:"varint,5,opt,name=Index,proto3" json:"Index,omitempty"`            // Token Status List index
+	Identifier    string                 `protobuf:"bytes,1,opt,name=Identifier,proto3" json:"Identifier,omitempty"` // Subject identifier (authentic_source_person_id)
+	Section       int64                  `protobuf:"varint,2,opt,name=Section,proto3" json:"Section,omitempty"`      // Token Status List section
+	Index         int64                  `protobuf:"varint,3,opt,name=Index,proto3" json:"Index,omitempty"`          // Token Status List index
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -265,23 +262,9 @@ func (*SaveCredentialSubjectRequest) Descriptor() ([]byte, []int) {
 	return file_v1_registry_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *SaveCredentialSubjectRequest) GetFirstName() string {
+func (x *SaveCredentialSubjectRequest) GetIdentifier() string {
 	if x != nil {
-		return x.FirstName
-	}
-	return ""
-}
-
-func (x *SaveCredentialSubjectRequest) GetLastName() string {
-	if x != nil {
-		return x.LastName
-	}
-	return ""
-}
-
-func (x *SaveCredentialSubjectRequest) GetDateOfBirth() string {
-	if x != nil {
-		return x.DateOfBirth
+		return x.Identifier
 	}
 	return ""
 }
@@ -351,13 +334,13 @@ const file_v1_registry_proto_rawDesc = "" +
 	"\aSection\x18\x01 \x01(\x03R\aSection\x12\x14\n" +
 	"\x05Index\x18\x02 \x01(\x03R\x05Index\x12\x16\n" +
 	"\x06Status\x18\x03 \x01(\rR\x06Status\"\"\n" +
-	" TokenStatusListUpdateStatusReply\"\xaa\x01\n" +
-	"\x1cSaveCredentialSubjectRequest\x12\x1c\n" +
-	"\tFirstName\x18\x01 \x01(\tR\tFirstName\x12\x1a\n" +
-	"\bLastName\x18\x02 \x01(\tR\bLastName\x12 \n" +
-	"\vDateOfBirth\x18\x03 \x01(\tR\vDateOfBirth\x12\x18\n" +
-	"\aSection\x18\x04 \x01(\x03R\aSection\x12\x14\n" +
-	"\x05Index\x18\x05 \x01(\x03R\x05Index\"\x1c\n" +
+	" TokenStatusListUpdateStatusReply\"n\n" +
+	"\x1cSaveCredentialSubjectRequest\x12\x1e\n" +
+	"\n" +
+	"Identifier\x18\x01 \x01(\tR\n" +
+	"Identifier\x12\x18\n" +
+	"\aSection\x18\x02 \x01(\x03R\aSection\x12\x14\n" +
+	"\x05Index\x18\x03 \x01(\x03R\x05Index\"\x1c\n" +
 	"\x1aSaveCredentialSubjectReply2\xf9\x02\n" +
 	"\x0fRegistryService\x12v\n" +
 	"\x18TokenStatusListAddStatus\x12,.v1.registry.TokenStatusListAddStatusRequest\x1a*.v1.registry.TokenStatusListAddStatusReply\"\x00\x12\x7f\n" +

@@ -20,19 +20,13 @@ type rootHandler struct {
 }
 
 type UploadRequest struct {
-	Meta                *model.MetaData        `json:"meta" validate:"required"`
-	Identities          []model.Identity       `json:"identities,omitempty" validate:"dive"`
-	DocumentDisplay     *model.DocumentDisplay `json:"document_display,omitempty"`
-	DocumentData        map[string]any         `json:"document_data" validate:"required"`
-	DocumentDataVersion string                 `json:"document_data_version,omitempty" validate:"required,semver"`
+	Meta         *model.MetaData `json:"meta" validate:"required"`
+	Identities   []string        `json:"identities,omitempty"`
+	DocumentData map[string]any  `json:"document_data" validate:"required"`
 }
 
 func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Response, error) {
 	s.log.Info("Upload")
-
-	if body.Meta.VCT == model.CredentialTypeUrnEudiPid1 {
-		s.log.Info("Uploading PID document", "body", body)
-	}
 
 	fullURL, err := url.JoinPath(s.serviceBaseURL, "upload")
 	if err != nil {

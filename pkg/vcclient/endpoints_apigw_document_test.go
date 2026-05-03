@@ -90,28 +90,8 @@ func TestGet(t *testing.T) {
 			expected: &model.Document{
 				Meta: &model.MetaData{
 					AuthenticSource: "SUNET",
-					DocumentVersion: "1.0.0",
-					VCT:             model.CredentialTypeUrnEudiEhic1,
+					Scope:           "ehic",
 					DocumentID:      "test_document_id",
-					RealData:        false,
-					Collect: &model.Collect{
-						ID:         "test_collect_id",
-						ValidUntil: 1731767173,
-					},
-					Revocation: &model.Revocation{
-						ID:      "test_revocation_id",
-						Revoked: false,
-						Reference: model.RevocationReference{
-							AuthenticSource: "SUNET",
-							VCT:             model.CredentialTypeUrnEudiEhic1,
-							DocumentID:      "test_document_id",
-						},
-						RevokedAt: 0,
-						Reason:    "",
-					},
-					CredentialValidFrom:       695706629,
-					CredentialValidTo:         -1730367911,
-					DocumentDataValidationRef: "",
 				},
 			},
 			expectedDocumentData: map[string]any{

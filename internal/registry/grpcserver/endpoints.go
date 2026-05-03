@@ -53,11 +53,9 @@ func (s *Service) TokenStatusListUpdateStatus(ctx context.Context, req *apiv1_re
 // SaveCredentialSubject saves credential subject info linked to a Token Status List entry
 func (s *Service) SaveCredentialSubject(ctx context.Context, req *apiv1_registry.SaveCredentialSubjectRequest) (*apiv1_registry.SaveCredentialSubjectReply, error) {
 	err := s.apiv1.SaveCredentialSubject(ctx, &apiv1.SaveCredentialSubjectRequest{
-		FirstName:   req.FirstName,
-		LastName:    req.LastName,
-		DateOfBirth: req.DateOfBirth,
-		Section:     req.Section,
-		Index:       req.Index,
+		Identifier: req.Identifier,
+		Section:    req.Section,
+		Index:      req.Index,
 	})
 	if err != nil {
 		return nil, err

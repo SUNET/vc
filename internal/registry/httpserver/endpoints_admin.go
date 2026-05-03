@@ -153,9 +153,7 @@ func (s *Service) endpointAdminUpdateStatus(ctx context.Context, c *gin.Context)
 		c.Header("Content-Type", "text/html")
 		// Preserve search params on error
 		searchParams := &apiv1.SearchPersonRequest{
-			FirstName:   request.SearchFirstName,
-			LastName:    request.SearchLastName,
-			DateOfBirth: request.SearchDateOfBirth,
+			Identifier: request.SearchIdentifier,
 		}
 		return HTMLResponse(searchPageHTML("Failed to update status: "+err.Error(), nil, "", searchParams)), nil
 	}
@@ -164,9 +162,7 @@ func (s *Service) endpointAdminUpdateStatus(ctx context.Context, c *gin.Context)
 
 	// Re-run the search to show updated results
 	searchParams := &apiv1.SearchPersonRequest{
-		FirstName:   request.SearchFirstName,
-		LastName:    request.SearchLastName,
-		DateOfBirth: request.SearchDateOfBirth,
+		Identifier: request.SearchIdentifier,
 	}
 
 	reply, err := s.apiv1.SearchPerson(ctx, searchParams)

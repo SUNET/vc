@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -64,12 +63,11 @@ type AuthorizationContext struct {
 	WalletURI            string                                     `json:"redirect_url,omitempty" bson:"redirect_url,omitempty" validate:"omitempty,max=2048,printascii"`
 	Consent              bool                                       `json:"consent,omitempty" bson:"consent,omitempty"`
 	AuthenticSource      string                                     `json:"authentic_source,omitempty" bson:"authentic_source,omitempty" validate:"omitempty,max=128,printascii"`
-	VCT                  string                                     `json:"vct,omitempty" bson:"vct,omitempty" validate:"omitempty,max=256,printascii"`
-	Identity             *model.Identity                            `json:"identity,omitempty" bson:"identity,omitempty"`
+	Scope                string                                     `json:"scope,omitempty" bson:"scope,omitempty" validate:"omitempty,max=128,printascii"`
+	Identifier           string                                     `json:"identifier,omitempty" bson:"identifier,omitempty" validate:"omitempty,max=256,printascii"`
 	AuthProvider         string                                     `json:"auth_provider,omitempty" bson:"auth_provider,omitempty" validate:"omitempty,max=32,printascii"`
 	DataSource           string                                     `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
 	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
-	PersonID             string                                     `json:"person_id,omitempty" bson:"person_id,omitempty" validate:"omitempty,max=256,printascii"`
 
 	// Verifier-specific fields (presentation/RP flows)
 	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
@@ -91,6 +89,13 @@ type AuthorizationContext struct {
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
 	WalletID                 string          `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
+}
+
+// IdentifierSet holds the fields to set when resolving an identity on an authorization context.
+type IdentifierSet struct {
+	Identifier      string `json:"identifier" bson:"identifier"`
+	Scope           string `json:"scope,omitempty" bson:"scope,omitempty"`
+	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source,omitempty"`
 }
 
 // Validate checks the AuthorizationContext against its struct validation tags.

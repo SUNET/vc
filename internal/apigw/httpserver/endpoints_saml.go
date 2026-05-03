@@ -221,13 +221,13 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				return nil, fmt.Errorf("external API flow requires person identifier but none found in SAML assertion")
 			}
 
-			authCtx.PersonID = personID
+			authCtx.Identifier = personID
 			if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
-				span.SetStatus(codes.Error, "failed to store person_id")
-				return nil, fmt.Errorf("failed to update person_id on auth context: %w", updateErr)
+				span.SetStatus(codes.Error, "failed to store identifier")
+				return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
 			}
-			s.log.Info("SAML ACS: stored person_id for external API flow",
-				"vci_session_id", session.VCISessionID, "person_id", personID)
+			s.log.Info("SAML ACS: stored identifier for external API flow",
+				"vci_session_id", session.VCISessionID, "identifier", personID)
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
@@ -241,8 +241,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				Meta: &model.MetaData{
 					AuthenticSource: session.IDPEntityID,
 				},
-				DocumentData:        claims,
-				DocumentDataVersion: "1.0.0",
+				DocumentData: claims,
 			}
 			docs := map[string]*model.CompleteDocument{
 				session.IDPEntityID: doc,
@@ -253,6 +252,24 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				return nil, fmt.Errorf("failed to store VCI documents: %w", err)
 			}
 		}
+
+		// Resolve the authenticated identifier for registry (applies to all flows).
+		// External API flow already set Identifier; otherwise resolve from claims
+		// (either a direct identifier claim or via identity mapping).
+		if authCtx.Identifier == "" {
+			identifier, resolveErr := s.apiv1.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+			if resolveErr != nil {
+				span.SetStatus(codes.Error, "identifier resolution failed")
+				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
+			}
+			authCtx.Identifier = identifier
+		}
+		if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
+			span.SetStatus(codes.Error, "failed to store identifier")
+			return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
+		}
+		s.log.Info("SAML ACS: identifier resolved",
+			"vci_session_id", session.VCISessionID, "identifier", authCtx.Identifier)
 
 		// Clean up SAML session (clear err so defer doesn't double-delete)
 		err = nil

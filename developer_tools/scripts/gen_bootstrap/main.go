@@ -148,32 +148,19 @@ func genPID15(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	for _, pid := range pids {
 		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
-		dd := makePIDDocumentData(p, &identity, &input.Defaults)
+
+		aspid := fmt.Sprintf("authentic_source_person_id_%s", pid)
+		dd := makePIDDocumentData(p, aspid, &input.Defaults)
 		dd["arf"] = "1.5"
 
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        dd,
+			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "PID_Provider:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiPidARF151,
 				Scope:           "pid_1_5",
 				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_5_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_pid_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "Personal Identification Document"},
-					"sv": map[string]any{"beskrivning": "Personligt identifikationsdokument"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -186,7 +173,7 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 	now := time.Now()
 	for _, pid := range pids {
 		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
+
 		age := calcAge(p.BirthDate)
 
 		pidExt := p.PID
@@ -242,27 +229,13 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 		}
 
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        dd,
+			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "PID_Provider:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiPidARG181,
 				Scope:           "pid_1_8",
 				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_8_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_pid_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "Personal Identification Document"},
-					"sv": map[string]any{"beskrivning": "Personligt identifikationsdokument"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -275,7 +248,7 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 	now := time.Now()
 	for _, pid := range pids {
 		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
+
 		age := calcAge(p.BirthDate)
 
 		pidExt := p.PID
@@ -330,27 +303,13 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 		}
 
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        dd,
+			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "eduID_Provider:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEduID1,
 				Scope:           "eduid",
 				DocumentID:      fmt.Sprintf("document_id_eduid_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_eduid_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "eduID Credential"},
-					"sv": map[string]any{"beskrivning": "eduID-legitimation"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -363,10 +322,10 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 	now := time.Now()
 	for _, pid := range pids {
 		p := input.Persons[pid]
+
 		if p.EHIC == nil {
 			continue
 		}
-		identity := makeIdentity(pid, p, &input.Defaults)
 		e := p.EHIC
 
 		doc := &socialsecurity.EHICDocument{
@@ -393,27 +352,13 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		}
 
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        dd,
+			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "EHIC:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiEhic1,
 				Scope:           "ehic",
 				DocumentID:      fmt.Sprintf("document_id_ehic_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_ehic_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "European Health Insurance Card"},
-					"sv": map[string]any{"beskrivning": "Europeiskt sjukförsäkringskort"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -426,10 +371,10 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 	now := time.Now()
 	for _, pid := range pids {
 		p := input.Persons[pid]
+
 		if p.PDA1 == nil {
 			continue
 		}
-		identity := makeIdentity(pid, p, &input.Defaults)
 		d := p.PDA1
 
 		employer := socialsecurity.Employer{ID: "01", Name: "SUNET", Country: "SE"}
@@ -486,27 +431,13 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		}
 
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        dd,
+			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "PDA1:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiPda11,
 				Scope:           "pda1",
 				DocumentID:      fmt.Sprintf("document_id_pda1_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_pda1_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "PDA1 Document"},
-					"sv": map[string]any{"beskrivning": "PDA1 Dokument"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -518,30 +449,15 @@ func genELM(pids []string, input *InputFile) map[string]*model.CompleteDocument 
 	exampleData := loadExampleJSON("standards/elm_3_2.json")
 	result := make(map[string]*model.CompleteDocument, len(pids))
 	for _, pid := range pids {
-		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
+
 		result[pid] = &model.CompleteDocument{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        exampleData,
+			DocumentData: exampleData,
 			Meta: &model.MetaData{
 				AuthenticSource: "ELM:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiElm1,
 				Scope:           "elm",
 				DocumentID:      fmt.Sprintf("document_id_elm_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_elm_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "European Learning Model"},
-					"sv": map[string]any{"beskrivning": "European Learning Model"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -553,30 +469,15 @@ func genDiploma(pids []string, input *InputFile) map[string]*vcclient.UploadRequ
 	exampleData := loadExampleJSON("standards/education_credential/diploma/HE-diploma-9ad88a95-2f9a-4a1d-9e08-a61e213a3eac-degreeHBO-M.xml.json")
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	for _, pid := range pids {
-		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
+
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        exampleData,
+			DocumentData: exampleData,
 			Meta: &model.MetaData{
 				AuthenticSource: "DIPLOMA:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiDiploma1,
 				Scope:           "diploma",
 				DocumentID:      fmt.Sprintf("document_id_diploma_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_diploma_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "Diploma"},
-					"sv": map[string]any{"beskrivning": "Diploma"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -588,30 +489,15 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 	exampleData := loadExampleJSON("standards/education_credential/micro_credential/uvh_fvhz_microcredential_full.json")
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	for _, pid := range pids {
-		p := input.Persons[pid]
-		identity := makeIdentity(pid, p, &input.Defaults)
+
 		result[pid] = &vcclient.UploadRequest{
-			DocumentDataVersion: "1.0.0",
-			DocumentData:        exampleData,
+			DocumentData: exampleData,
 			Meta: &model.MetaData{
 				AuthenticSource: "MICROCREDENTIAL:00001",
-				DocumentVersion: "1.0.0",
-				VCT:             model.CredentialTypeUrnEudiMicroCredential1,
 				Scope:           "microcredential",
 				DocumentID:      fmt.Sprintf("document_id_microcredential_%s", pid),
-				RealData:        false,
-				Collect:         &model.Collect{ID: fmt.Sprintf("collect_id_microcredential_%s", pid)},
-				Revocation:      &model.Revocation{},
 			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": map[string]any{"description": "MicroCredential"},
-					"sv": map[string]any{"beskrivning": "MicroCredential"},
-				},
-			},
-			Identities: []model.Identity{identity},
+			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -621,22 +507,7 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 
 const minPNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVQYV2P8z8DwHwYGBgZGMAEADigBCCGZkB0AAAAASUVORK5CYII="
 
-func makeIdentity(pid string, p *Person, defaults *PersonDefaults) model.Identity {
-	return model.Identity{
-		AuthenticSourcePersonID: fmt.Sprintf("authentic_source_person_id_%s", pid),
-		Schema:                  &model.IdentitySchema{Name: "DefaultSchema"},
-		FamilyName:              p.FamilyName,
-		GivenName:               p.GivenName,
-		BirthDate:               p.BirthDate,
-		BirthPlace:              defaults.BirthPlace,
-		Nationality:             defaults.Nationality,
-		ExpiryDate:              defaults.ExpiryDate,
-		IssuingAuthority:        defaults.IssuingAuthority,
-		IssuingCountry:          defaults.IssuingCountry,
-	}
-}
-
-func makePIDDocumentData(p *Person, identity *model.Identity, defaults *PersonDefaults) map[string]any {
+func makePIDDocumentData(p *Person, authenticSourcePersonID string, defaults *PersonDefaults) map[string]any {
 	age := calcAge(p.BirthDate)
 
 	pidExt := p.PID
@@ -663,8 +534,8 @@ func makePIDDocumentData(p *Person, identity *model.Identity, defaults *PersonDe
 		"issuing_country":                defaults.IssuingCountry,
 		"issuing_authority":              defaults.IssuingAuthority,
 		"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "Stockholm"),
-		"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid15-%s-%s", toLower(p.FamilyName), identity.AuthenticSourcePersonID)),
-		"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", identity.AuthenticSourcePersonID)),
+		"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid15-%s-%s", toLower(p.FamilyName), authenticSourcePersonID)),
+		"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", authenticSourcePersonID)),
 		"issuance_date":                  or_(pidExt.IssuanceDate, "2024-01-01"),
 		"expiry_date":                    defaults.ExpiryDate,
 		"picture":                        minPNG,
@@ -677,7 +548,7 @@ func makePIDDocumentData(p *Person, identity *model.Identity, defaults *PersonDe
 		"resident_city":                  or_(pidExt.ResidentCity, "Stockholm"),
 		"resident_state":                 or_(pidExt.ResidentState, "Stockholm"),
 		"resident_country":               or_(pidExt.ResidentCountry, "SE"),
-		"authentic_source_person_id":     identity.AuthenticSourcePersonID,
+		"authentic_source_person_id":     authenticSourcePersonID,
 		"trust_anchor":                   or_(pidExt.TrustAnchor, "https://ta.oidf.sunet.se"),
 	}
 }

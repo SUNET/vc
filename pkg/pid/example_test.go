@@ -11,10 +11,6 @@ func ExampleDocument_Marshal() {
 	doc := &pid.Document{
 		Identity: &model.Identity{
 			AuthenticSourcePersonID: "person-001",
-			Schema: &model.IdentitySchema{
-				Name:    "SE",
-				Version: "1.0.0",
-			},
 			FamilyName:     "Andersson",
 			GivenName:      "Erik",
 			BirthDate:      "1985-03-15",

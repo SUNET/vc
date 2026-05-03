@@ -364,13 +364,13 @@ func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *Authorizatio
 	return nil
 }
 
-// AddIdentity adds identity information to an authorization context.
-func (s *MongoStore) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
+// SetIdentifier sets the resolved identifier, scope, and authentic source on an authorization context.
+func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, set *IdentifierSet) error {
 	if query == nil {
 		return errors.New("query cannot be nil")
 	}
-	if input == nil || input.Identity == nil {
-		return errors.New("identity cannot be nil")
+	if set == nil || set.Identifier == "" {
+		return errors.New("identifier cannot be empty")
 	}
 
 	filter := s.buildFilter(query)
@@ -379,14 +379,14 @@ func (s *MongoStore) AddIdentity(ctx context.Context, query *AuthorizationContex
 	}
 
 	update := bson.M{"$set": bson.M{
-		"identity":         input.Identity,
-		"vct":              input.VCT,
-		"authentic_source": input.AuthenticSource,
+		"identifier":       set.Identifier,
+		"scope":            set.Scope,
+		"authentic_source": set.AuthenticSource,
 	}}
 
 	result, err := s.coll.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return fmt.Errorf("failed to add identity: %w", err)
+		return fmt.Errorf("failed to set identifier: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNoDocuments

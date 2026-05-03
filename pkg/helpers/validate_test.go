@@ -69,10 +69,6 @@ func TestValidationIdentity(t *testing.T) {
 			name: "ok",
 			have: &model.Identity{
 				AuthenticSourcePersonID: "person-123",
-				Schema: &model.IdentitySchema{
-					Name:    "SE",
-					Version: "1.0.0",
-				},
 				FamilyName: "Doe",
 				GivenName:  "John",
 				BirthDate:  "1970-01-01",
@@ -82,13 +78,10 @@ func TestValidationIdentity(t *testing.T) {
 		{
 			name: "wrong datetime format",
 			have: &model.Identity{
-				AuthenticSourcePersonID: "person-123",
-				Schema: &model.IdentitySchema{
-					Name: "SE",
-				},
-				FamilyName: "Doe",
-				GivenName:  "John",
-				BirthDate:  "1972-10-27 10:15:31.432635902 +0000 UTC",
+					AuthenticSourcePersonID: "person-123",
+					FamilyName: "Doe",
+					GivenName:  "John",
+					BirthDate:  "1972-10-27 10:15:31.432635902 +0000 UTC",
 			},
 			want: &Error{
 				Title: "validation_error",
@@ -173,9 +166,6 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 				ID: []model.Identity{
 					{
 						AuthenticSourcePersonID: "person-123",
-						Schema: &model.IdentitySchema{
-							Name: "SE",
-						},
 						FamilyName: "Doe",
 						GivenName:  "John",
 						BirthDate:  "1972-10-27",
@@ -190,9 +180,6 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 				ID: []model.Identity{
 					{
 						AuthenticSourcePersonID: "person-123",
-						Schema: &model.IdentitySchema{
-							Name: "SE",
-						},
 						FamilyName: "Doe",
 						GivenName:  "John",
 						BirthDate:  "1972-10-27 10:15:31.432635902 +0000 UTC",

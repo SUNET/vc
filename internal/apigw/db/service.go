@@ -28,7 +28,7 @@ type Service struct {
 	probeStore  *apiv1_status.StatusProbeStore
 
 	VCDatastoreColl           *VCDatastoreColl
-	VCConsentColl             *VCConsentColl
+	VCIdentitiesColl          *VCIdentitiesColl
 	VCCredentialOfferColl     *VCCredentialOfferColl
 	VCDynamicRegistrationColl *VCDynamicRegistrationColl
 }
@@ -58,12 +58,12 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		return nil, err
 	}
 
-	service.VCConsentColl = &VCConsentColl{
+	service.VCIdentitiesColl = &VCIdentitiesColl{
 		Service: service,
-		Coll:    service.MongoClient.Database("vc").Collection("consent"),
-		log:     log.New("VCConsentColl"),
+		Coll:    service.MongoClient.Database("vc").Collection("identities"),
+		log:     log.New("VCIdentitiesColl"),
 	}
-	if err := service.VCConsentColl.createIndex(ctx); err != nil {
+	if err := service.VCIdentitiesColl.createIndex(ctx); err != nil {
 		return nil, err
 	}
 
