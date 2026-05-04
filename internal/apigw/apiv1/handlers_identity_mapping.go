@@ -13,7 +13,7 @@ import (
 type IdentityMappingCreateRequest struct {
 	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
 	AuthenticSourcePersonID string         `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
-	Attributes              map[string]any `json:"attributes,omitempty"`
+	Attributes              map[string]any `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
 
 // IdentityMappingCreateReply is the reply containing the identifier
@@ -59,7 +59,7 @@ func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMapping
 // IdentityMappingResolveRequest is the request for resolving attributes to an identifier
 type IdentityMappingResolveRequest struct {
 	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
-	Attributes      map[string]any `json:"attributes" validate:"required"`
+	Attributes      map[string]any `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
 // IdentityMappingResolveReply is the reply with the resolved identifier
@@ -97,7 +97,7 @@ func (c *Client) IdentityMappingResolve(ctx context.Context, req *IdentityMappin
 type IdentityMappingUpdateRequest struct {
 	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
 	AuthenticSourcePersonID string         `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
-	Attributes              map[string]any `json:"attributes,omitempty"`
+	Attributes              map[string]any `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
 
 // IdentityMappingUpdate updates an existing identity mapping

@@ -10,5 +10,5 @@ type IdentityMapping struct {
 	AuthenticSource string `json:"authentic_source" bson:"authentic_source" validate:"required,max=128,printascii"`
 
 	// Attributes holds identity attributes used for resolution (e.g. family_name, given_name, birth_date)
-	Attributes map[string]any `json:"attributes,omitempty" bson:"attributes"`
+	Attributes map[string]any `json:"attributes,omitempty" bson:"attributes" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
