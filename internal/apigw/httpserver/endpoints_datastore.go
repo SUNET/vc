@@ -137,5 +137,7 @@ func (s *Service) endpointDatastoreDeleteIdentity(ctx context.Context, c *gin.Co
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	c.Status(http.StatusNoContent)
 	return nil, nil
 }
