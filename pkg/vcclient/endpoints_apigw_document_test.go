@@ -84,7 +84,7 @@ func TestGet(t *testing.T) {
 			name: "success",
 			query: &DocumentGetQuery{
 				AuthenticSource: "test_authentic_source",
-				VCT:             model.CredentialTypeUrnEudiEhic1,
+				Scope:           "ehic",
 				DocumentID:      "test_document_id",
 			},
 			expected: &model.Document{

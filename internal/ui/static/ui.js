@@ -245,11 +245,9 @@ const postDocumentList = () => {
     const identitySchemaName = getElementById("identity-schema-name");
 
     const documentListRequest = {
-        authentic_source: authenticSourceElement.value, identity: {
-            authentic_source_person_id: authenticSourcePersonIdElement.value, schema: {
-                name: identitySchemaName.value
-            }
-        }, vct: vctElement.value
+        authentic_source: authenticSourceElement.value,
+        identity_mapping_id: authenticSourcePersonIdElement.value,
+        scope: vctElement.value
     };
 
     postAndDisplayInArticleContainerFor(path, documentListRequest, articleHeaderText);
@@ -584,7 +582,7 @@ const addViewDocumentFormArticleToContainer = () => {
     const buildFormElements = () => {
 
         const documentIDElement = createInputElement('document id');
-        const vctElement = createInputElement('document type');
+        const scopeElement = createInputElement('scope');
         const authenticSourceElement = createInputElement('authentic source');
 
         const viewButton = document.createElement('button');
@@ -597,15 +595,15 @@ const addViewDocumentFormArticleToContainer = () => {
             const requestBody = {
                 document_id: documentIDElement.value,
                 authentic_source: authenticSourceElement.value,
-                vct: vctElement.value,
+                scope: scopeElement.value,
             };
 
-            disableElements([documentIDElement, vctElement, authenticSourceElement]);
+            disableElements([documentIDElement, scopeElement, authenticSourceElement]);
 
             postAndDisplayInArticleContainerFor("/secure/apigw/document", requestBody, "Document");
         };
 
-        return [documentIDElement, vctElement, authenticSourceElement, viewButton];
+        return [documentIDElement, scopeElement, authenticSourceElement, viewButton];
     };
 
     const articleIdBasis = generateArticleIDBasis();
@@ -627,15 +625,9 @@ function buildDocumentsTableWithoutContent() {
     const headers = [
         {title: 'Action', abbr: null},
         {title: 'Document ID', abbr: null},
-        {title: 'Collect ID', abbr: null},
-        {title: 'Document type', abbr: null},
+        {title: 'Scope', abbr: null},
         {title: 'Authentic source', abbr: null},
-        {title: 'Authentic source person ID', abbr: null},
-        {title: 'Family name', abbr: null},
-        {title: 'Given name', abbr: null},
-        {title: 'Birthdate', abbr: null},
-        {title: 'Birthplace', abbr: null},
-        {title: 'Nationality', abbr: null},
+        {title: 'Identity Mapping IDs', abbr: null},
         {title: 'Credential offer url', abbr: null}
     ];
 
@@ -791,7 +783,7 @@ function displayCompleteDocumentInModal(rowData) {
         body: JSON.stringify({
             document_id: rowData.documentId,
             authentic_source: rowData.authenticSource,
-            vct: rowData.vct,
+            scope: rowData.scope,
             limit: parseInt(1, 10),
             fields: [],
         }),
@@ -848,7 +840,7 @@ function displayQRInModal(rowData) {
         body: JSON.stringify({
             document_id: rowData.documentId,
             authentic_source: rowData.authenticSource,
-            vct: rowData.vct,
+            scope: rowData.scope,
             limit: parseInt(1, 10),
             fields: ["qr"],
         }),
@@ -922,60 +914,6 @@ function safeReplace(input, toReplace, replacement) {
     return input.replace(toReplace, replacement);
 }
 
-function displayCreateCredentialInModal(rowData) {
-    const modalParts = buildAndDisplayModal("Credential as json");
-    const modalBodyDiv = modalParts.modalBodyDiv;
-
-    fetchData(new URL("/secure/apigw/credential", baseUrl), {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json; charset=utf-8',
-        },
-        body: JSON.stringify({
-            authentic_source: rowData.authenticSource,
-            identity: {
-                authentic_source_person_id: rowData.firstIdentityAuthenticSourcePersonId,
-                schema: {
-                    name: rowData.firstIdentitySchemaName,
-                },
-                family_name: rowData.family_name,
-                given_name: rowData.given_name,
-                birth_date: rowData.birth_date,
-            },
-            vct: rowData.vct,
-            credential_type: "vc+sd-jwt",
-            collect_id: rowData.collectId,
-        }),
-    }).then(data => {
-        modalBodyDiv.innerText = JSON.stringify(data, null, 2);
-
-        const copyButton = document.createElement("button");
-        copyButton.id = generateUUID();
-        copyButton.classList.add("button");
-        copyButton.textContent = "Copy json";
-        copyButton.addEventListener('click', () => copyContentWithinDivToClipboard(modalParts.modalBodyDiv.id, true));
-        modalParts.footer.appendChild(copyButton);
-
-        const verifyCredentialButton = document.createElement("button");
-        verifyCredentialButton.id = generateUUID();
-        verifyCredentialButton.classList.add("button");
-        verifyCredentialButton.textContent = "Verify";
-        verifyCredentialButton.disabled = true;
-        modalParts.footer.appendChild(verifyCredentialButton);
-
-        const decodeCredentialButton = document.createElement("button");
-        decodeCredentialButton.id = generateUUID();
-        decodeCredentialButton.classList.add("button");
-        decodeCredentialButton.textContent = "Decode";
-        decodeCredentialButton.disabled = true;
-        modalParts.footer.appendChild(decodeCredentialButton);
-    }).catch(err => {
-        console.error("Unexpected error:", err);
-        displayErrorTag("Failed to create credential: ", modalBodyDiv, err);
-    });
-}
-
 function displayDeleteDocumentInModal(rowData) {
     const modalParts = buildAndDisplayModal("Document deleted");
     const modalBodyDiv = modalParts.modalBodyDiv;
@@ -988,7 +926,7 @@ function displayDeleteDocumentInModal(rowData) {
         },
         body: JSON.stringify({
             authentic_source: rowData.authenticSource,
-            vct: rowData.vct,
+            scope: rowData.scope,
             document_id: rowData.documentId,
         }),
     }).then(data => {
@@ -1026,11 +964,6 @@ function buildDocumentTableRow(doc) {
     optionViewQR.textContent = 'View QR';
     select.appendChild(optionViewQR);
 
-    const optionCreateCredential = document.createElement('option');
-    optionCreateCredential.value = 'CREATE_CREDENTIAL';
-    optionCreateCredential.textContent = 'Create credential';
-    select.appendChild(optionCreateCredential);
-
     select.appendChild(document.createElement('hr'));
 
     const optionDeleteDocument = document.createElement('option');
@@ -1048,72 +981,20 @@ function buildDocumentTableRow(doc) {
     tdDocumentId.textContent = documentId;
     row.appendChild(tdDocumentId);
 
-    const tdCollectId = document.createElement('td');
-    const collectId = doc.meta?.collect?.id || "";
-    tdCollectId.textContent = collectId;
-    row.appendChild(tdCollectId);
-
-    const tdVCT = document.createElement('td');
-    const vct = doc.meta?.vct || "";
-    tdVCT.textContent = vct;
-    row.appendChild(tdVCT);
+    const tdScope = document.createElement('td');
+    const scope = doc.meta?.scope || "";
+    tdScope.textContent = scope;
+    row.appendChild(tdScope);
 
     const tdAuthenticSource = document.createElement('td');
     const authenticSource = doc.meta?.authentic_source || "";
     tdAuthenticSource.textContent = authenticSource;
     row.appendChild(tdAuthenticSource);
 
-    const tdASPersonId = document.createElement('td');
-    const aspidStringBuilder = [];
-    doc.identity_mapping_ids.forEach(identity => {
-        aspidStringBuilder.push(identity.authentic_source_person_id || "");
-    });
-    tdASPersonId.innerHTML = aspidStringBuilder.join("<br>");
-    row.appendChild(tdASPersonId);
-
-    const tdFamilyName = document.createElement('td');
-    const fnStringBuilder = [];
-    doc.identity_mapping_ids.forEach(identity => {
-        fnStringBuilder.push(identity.family_name || "");
-    });
-    tdFamilyName.innerHTML = fnStringBuilder.join("<br>");
-    row.appendChild(tdFamilyName);
-
-    const tdGivenName = document.createElement('td');
-    const gnStringBuilder = [];
-    doc.identity_mapping_ids.forEach(identity => {
-        gnStringBuilder.push(identity.given_name || "");
-    });
-    tdGivenName.innerHTML = gnStringBuilder.join("<br>");
-    row.appendChild(tdGivenName);
-
-    const tdBirthDate = document.createElement('td');
-    const bdStringBuilder = [];
-    doc.identity_mapping_ids.forEach(identity => {
-        bdStringBuilder.push(identity.birth_date || "");
-    });
-    tdBirthDate.innerHTML = bdStringBuilder.join("<br>");
-    row.appendChild(tdBirthDate);
-
-    const tdBirthplace = document.createElement('td');
-    const bpStringBuilder = [];
-    doc.identity_mapping_ids.forEach(identity => {
-        bpStringBuilder.push(identity.birth_place || "");
-    });
-    tdBirthplace.innerHTML = bpStringBuilder.join("<br>");
-    row.appendChild(tdBirthplace);
-
-    const tdNationality = document.createElement('td');
-    const natStringBuilder = [];
-    doc.identity_mapping_ids.forEach(identity => {
-        if (identity.nationality != null) {
-            identity.nationality.forEach(countryCode => {
-                natStringBuilder.push(countryCode || "");
-            });
-        }
-    });
-    tdNationality.innerHTML = natStringBuilder.join("<br>");
-    row.appendChild(tdNationality);
+    const tdIdentityMappingIds = document.createElement('td');
+    const ids = (doc.identity_mapping_ids || []).map(id => String(id));
+    tdIdentityMappingIds.innerHTML = ids.join("<br>");
+    row.appendChild(tdIdentityMappingIds);
 
     const tdQRCredentialOfferUrl = document.createElement('td');
     const credentialOfferUrl = doc.qr?.credential_offer_url || "";
@@ -1123,13 +1004,8 @@ function buildDocumentTableRow(doc) {
     const rowData = {
         documentId: documentId,
         authenticSource: authenticSource,
-        vct: vct,
-        collectId: collectId,
-        firstIdentityAuthenticSourcePersonId: doc.identity_mapping_ids[0].authentic_source_person_id,
-        firstIdentitySchemaName: doc.identity_mapping_ids[0].schema.name,
-        family_name: doc.identity_mapping_ids[0].family_name,
-        given_name: doc.identity_mapping_ids[0].given_name,
-        birth_date: doc.identity_mapping_ids[0].birth_date,
+        scope: scope,
+        firstIdentityMappingId: (doc.identity_mapping_ids && doc.identity_mapping_ids.length > 0) ? doc.identity_mapping_ids[0] : "",
     };
 
     select.addEventListener('change', function () {
@@ -1140,9 +1016,6 @@ function buildDocumentTableRow(doc) {
                 break;
             case 'VIEW_QR':
                 displayQRInModal(rowData);
-                break;
-            case 'CREATE_CREDENTIAL':
-                displayCreateCredentialInModal(rowData);
                 break;
             case 'DELETE_DOCUMENT':
                 displayDeleteDocumentInModal(rowData);
@@ -1227,22 +1100,9 @@ const addSearchDocumentsFormArticleToContainer = () => {
     const buildFormElements = () => {
         const documentIDInput = createInputElement('Document id (optional)');
         const authenticSourceInput = createInputElement('Authentic source (optional)');
-        const vctSelectWithinDivElement = createSelectElement([{
-            value: '',
-            label: 'Document type (optional)'
-        }, {value: 'urn:eudi:diploma:1', label: 'Diploma (urn:eudi:diploma:1)'},
-            {value: 'urn:eudi:ehic:1', label: 'EHIC (urn:eudi:ehic:1)'},
-            {value: 'urn:eudi:elm:1', label: 'ELM (urn:eudi:elm:1)'},
-            {value: 'urn:eudi:micro_credential:1', label: 'Micro credential (urn:eudi:micro_credential:1)'},
-            {value: 'urn:eudi:pda1:1', label: 'PDA1 (urn:eudi:pda1:1)'},
-            {value: 'urn:eudi:pid:1', label: 'PID (urn:eudi:pid:1)'}]);
-        const vctDiv = vctSelectWithinDivElement[0];
-        const vctSelect = vctSelectWithinDivElement[1];
+        const scopeInput = createInputElement('Scope (optional, e.g. ehic, pda1, pid_1_8)');
         const collectIdInput = createInputElement('Collect ID (optional)');
         const authenticSourcePersonIdInput = createInputElement('Authentic source person id (optional)');
-        const familyNameInput = createInputElement('Family name (optional)');
-        const givenNameInput = createInputElement('Given name (optional)');
-        const birthdateInput = createInputElement('Birth date (YYYY-MM-DD, optional)');
         const {
             label: checkboxShowCompleteDocsAsRawJsonLabel,
             input: checkboxShowCompleteDocsAsRawJson
@@ -1266,17 +1126,14 @@ const addSearchDocumentsFormArticleToContainer = () => {
             const requestBody = {
                 document_id: documentIDInput.value,
                 authentic_source: authenticSourceInput.value,
-                vct: vctSelect.value,
+                scope: scopeInput.value,
                 collect_id: collectIdInput.value,
 
                 authentic_source_person_id: authenticSourcePersonIdInput.value,
-                family_name: familyNameInput.value,
-                given_name: givenNameInput.value,
-                birth_date: birthdateInput.value,
 
                 limit: parseInt(limitInput.value, 10),
 
-                fields: ["meta.document_id", "meta.authentic_source", "meta.vct", "meta.collect.id", "identities", "qr.credential_offer_url"],
+                fields: ["meta.document_id", "meta.authentic_source", "meta.scope", "identity_mapping_ids", "qr.credential_offer_url"],
             };
 
             if (checkboxShowCompleteDocsAsRawJson.checked) {
@@ -1284,12 +1141,9 @@ const addSearchDocumentsFormArticleToContainer = () => {
                 disableElements([
                     documentIDInput,
                     authenticSourceInput,
-                    vctSelect,
+                    scopeInput,
                     collectIdInput,
                     authenticSourcePersonIdInput,
-                    familyNameInput,
-                    givenNameInput,
-                    birthdateInput,
                     checkboxShowCompleteDocsAsRawJson,
                     limitInput
                 ]);
@@ -1314,17 +1168,14 @@ const addSearchDocumentsFormArticleToContainer = () => {
 
         let brElement = document.createElement('br');
 
-        triggerButtonOnEnter([documentIDInput, authenticSourceInput, vctSelect, collectIdInput, authenticSourcePersonIdInput, familyNameInput, givenNameInput, birthdateInput, checkboxShowCompleteDocsAsRawJson, limitInput], searchButton);
+        triggerButtonOnEnter([documentIDInput, authenticSourceInput, scopeInput, collectIdInput, authenticSourcePersonIdInput, checkboxShowCompleteDocsAsRawJson, limitInput], searchButton);
 
         return [
             documentIDInput,
             authenticSourceInput,
-            vctDiv,
+            scopeInput,
             collectIdInput,
             authenticSourcePersonIdInput,
-            familyNameInput,
-            givenNameInput,
-            birthdateInput,
             searchButton,
             brElement,
             checkboxShowCompleteDocsAsRawJsonLabel,
@@ -1338,294 +1189,6 @@ const addSearchDocumentsFormArticleToContainer = () => {
     articleContainer.prepend(articleDiv);
 
     document.getElementById(articleIdBasis.articleID).querySelector('input').focus();
-};
-
-const addUploadDocumentsUsingCsvFormArticleToContainer = () => {
-    const buildFormElements = () => {
-        const vctSelectWithinDivElement = createSelectElement([{
-            value: 'urn:eudi:ehic:1',
-            label: 'urn:eudi:ehic:1'
-        }], false);
-
-        const fileDiv = document.createElement('div');
-        fileDiv.className = 'file has-name is-fullwidth';
-
-        const label = document.createElement('label');
-        label.className = 'file-label';
-
-        const input = document.createElement('input');
-        input.className = 'file-input';
-        input.type = 'file';
-        input.name = 'resume';
-        input.id = generateUUID();
-        input.accept = '.csv';
-
-        const fileCta = document.createElement('span');
-        fileCta.className = 'file-cta';
-
-        const fileIcon = document.createElement('span');
-        fileIcon.className = 'file-icon';
-        const icon = document.createElement('i');
-        icon.className = 'fas fa-upload';
-        fileIcon.appendChild(icon);
-
-        const fileLabel = document.createElement('span');
-        fileLabel.className = 'file-label';
-        fileLabel.textContent = 'Choose a *.csv file…';
-
-        fileCta.appendChild(fileIcon);
-        fileCta.appendChild(fileLabel);
-
-        const fileName = document.createElement('span');
-        fileName.className = 'file-name';
-        fileName.id = generateUUID();
-        fileName.textContent = 'No file selected';
-
-        const uploadButton = document.createElement('button');
-        uploadButton.id = generateUUID();
-        uploadButton.classList.add('button', 'is-link');
-        uploadButton.textContent = 'Upload';
-
-        const tableContainer = document.createElement('div');
-        tableContainer.className = 'table-container';
-        tableContainer.style.marginTop = '20px';
-
-        let selectedFile = null;
-        input.addEventListener('change', function (event) {
-            const file = event.target.files[0];
-            if (!file) {
-                alert('Please select a csv file.');
-                return;
-            }
-            selectedFile = file;
-            fileName.textContent = file.name;
-        });
-
-        uploadButton.onclick = () => {
-            if (!selectedFile) {
-                alert('Please select a csv file.');
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = async function (e) {
-                tableContainer.innerHTML = "";
-
-                const csvData = e.target.result;
-                //displayCSV(csvData, table);
-                const jsonData = csvToJson(csvData);
-
-                console.debug("csvData", csvData);
-                console.debug("jsonData", jsonData);
-
-                const table = document.createElement('table');
-                table.className = 'table is-striped is-hoverable is-fullwidth';
-                table.id = generateUUID();
-                tableContainer.appendChild(table);
-
-                const headers = ["Upload status", "Upload data", "More information"];
-                const thead = document.createElement("thead");
-                const headerRow = document.createElement("tr");
-                headers.forEach(headerText => {
-                    const th = document.createElement("th");
-                    th.textContent = headerText;
-                    headerRow.appendChild(th);
-                });
-                thead.appendChild(headerRow);
-                table.appendChild(thead);
-                const tbody = document.createElement("tbody");
-                table.appendChild(tbody);
-
-                jsonData.forEach((row) => {
-                    try {
-                        const uploadRequest = buildUploadRequestFrom(row, vctSelectWithinDivElement[1].value);
-
-                        console.debug("row", row);
-                        console.debug("bodyData", uploadRequest);
-
-                        fetchData(new URL("/secure/apigw/upload", baseUrl), {
-                            method: 'POST',
-                            headers: {
-                                'Accept': 'application/json',
-                                'Content-Type': 'application/json; charset=utf-8',
-                            },
-                            body: JSON.stringify(uploadRequest),
-                        }).then(data => {
-                            let dataOutput;
-                            if (data && typeof data === 'object') {
-                                try {
-                                    dataOutput = JSON.stringify(data, null, 2);
-                                } catch (e) {
-                                    console.error("Failed to stringify data:", e);
-                                    dataOutput = "[Unserializable Object]";
-                                }
-                            } else if (data != null) {
-                                dataOutput = String(data);
-                            } else {
-                                dataOutput = "";
-                            }
-                            addTableRow(tbody, ["SUCCESS", JSON.stringify(uploadRequest), dataOutput]);
-                        }).catch(err => {
-                            console.error("Unexpected error while uploading credential from csv:", err);
-                            addTableRow(tbody, ["FAILED", JSON.stringify(uploadRequest), err]);
-                        });
-                    } catch (error) {
-                        console.error(`Error preparing uploadRequest data from csv: ${JSON.stringify(row)}, Error: ${error}`);
-                        addTableRow(tbody, ["FAILED", JSON.stringify(row), error]);
-                    }
-                });
-            };
-            reader.readAsText(selectedFile);
-        };
-
-        label.appendChild(input);
-        label.appendChild(fileCta);
-        label.appendChild(fileName);
-
-        fileDiv.appendChild(label);
-
-        let brElement = document.createElement('br');
-
-        return {
-            formElements: [vctSelectWithinDivElement[0], fileDiv, uploadButton, brElement, tableContainer],
-            csvFileElement: input,
-            csvFileName: fileName,
-        };
-    };
-
-    const articleIdBasis = generateArticleIDBasis();
-    const elements = buildFormElements();
-    const articleDiv = buildArticle(articleIdBasis.articleID, "Upload documents using csv", elements.formElements);
-    const articleContainer = document.getElementById('article-container');
-    articleContainer.prepend(articleDiv);
-
-    function buildUploadRequestFrom(row, vct) {
-        const generatedDocumentId = generateUUID();
-
-        function asString(value) {
-            return value != null ? String(value) : null;
-        }
-
-        function asDate(value) {
-            if (!value) return null;
-            const date = new Date(value);
-            return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0]; // Return as YYYY-MM-DD or null
-        }
-
-        function asBoolean(value) {
-            return value === true || value === "true";
-        }
-
-        function asNumber(value) {
-            const num = parseFloat(value);
-            return isNaN(num) ? null : num;
-        }
-
-        return {
-            meta: {
-                authentic_source: asString(row.authentic_source),
-                document_version: asString(row.document_version) || "1.0.0",
-                vct: asString(vct),
-                document_id: asString(row.document_id || generatedDocumentId),
-                real_data: asBoolean(row.real_data) || false,
-                credential_valid_from: convertToUnixTimestampOrNull(asDate(row.ehic_start_date)),
-                credential_valid_to: convertToUnixTimestampOrNull(asDate(row.ehic_end_date)),
-                document_data_validation: null,
-                collect: {
-                    id: asString(row.document_id || generatedDocumentId),
-                    valid_until: convertToUnixTimestampOrNull(asDate(row.ehic_expiry_date)),
-                },
-            },
-            identities: [
-                {
-                    authentic_source_person_id: asString(row.authentic_source_person_id),
-                    schema: {
-                        name: asString(row.identity_schema_name) || "DefaultSchema",
-                        version: asString(row.identity_schema_version) || "1.0.0",
-                    },
-                    family_name: asString(row.family_name),
-                    given_name: asString(row.given_name),
-                    birth_date: asDate(row.birth_date),
-                },
-            ],
-            document_display: null,
-            document_data: {
-                subject: {
-                    forename: asString(row.given_name),
-                    family_name: asString(row.family_name),
-                    date_of_birth: asDate(row.birth_date),
-                },
-                social_security_pin: asString(row.social_security_pin),
-                period_entitlement: {
-                    starting_date: asDate(row.ehic_start_date),
-                    ending_date: asDate(row.ehic_end_date),
-                },
-                document_id: asString(row.ehic_card_identification_number),
-                competent_institution: {
-                    institution_id: asString(row.ehic_institution_id),
-                    institution_name: asString(row.ehic_institution_name),
-                    institution_country: asString(row.ehic_institution_country_code),
-                },
-            },
-            document_data_version: asString(row.document_data_version) || "1.0.0",
-        };
-    }
-
-    function addTableRow(tbody, cellTexts) {
-        const tr = document.createElement("tr");
-        cellTexts.forEach(text => {
-            const td = document.createElement("td");
-            td.textContent = text;
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-    }
-
-    function displayCSV(data, table) {
-        const rows = data.split('\n');
-        table.innerHTML = ''; // Clear previous content
-
-        rows.forEach((row, rowIndex) => {
-            const cols = row.split(',');
-            const tr = document.createElement('tr');
-            cols.forEach((col) => {
-                const cell = rowIndex === 0 ? document.createElement('th') : document.createElement('td');
-                cell.textContent = col.trim();
-                tr.appendChild(cell);
-            });
-            table.appendChild(tr);
-        });
-    }
-
-    function prefixWithAuthenticSourcePersonIdOrNull(pid_id) {
-        return pid_id ? `authentic_source_person_id_${pid_id}` : null;
-    }
-
-    /**
-     * @param dateString YYYY-MM-DD
-     */
-    function convertToUnixTimestampOrNull(dateString) {
-        if (dateString == null) return null;
-        const date = new Date(dateString);
-        return Math.floor(date.getTime() / 1000);
-    }
-
-    function csvToJson(csv) {
-        const lines = csv.split('\n');
-        const headers = lines[0].split(',').map((header) => header.trim());
-        const rows = lines.slice(1);
-
-        return rows
-            .filter((row) => row.trim() !== '')// ignore empty lines
-            .map((row) => {
-                const values = row.split(',').map((value) => value.trim());
-                const obj = {};
-                headers.forEach((header, index) => {
-                    obj[header] = values[index];
-                });
-                return obj;
-            });
-    }
 };
 
 async function fetchData(url, options) {
@@ -1663,7 +1226,7 @@ const addViewNotificationFormArticleToContainer = () => {
     const buildFormElements = () => {
 
         const documentIDElement = createInputElement('document id');
-        const vctElement = createInputElement('document type', 'urn:eudi:ehic:1');
+        const scopeElement = createInputElement('scope', 'ehic');
         const authenticSourceElement = createInputElement('authentic source', 'SUNET');
 
         const viewButton = document.createElement('button');
@@ -1676,75 +1239,19 @@ const addViewNotificationFormArticleToContainer = () => {
             const requestBody = {
                 document_id: documentIDElement.value,
                 authentic_source: authenticSourceElement.value,
-                vct: vctElement.value,
+                scope: scopeElement.value,
             };
 
-            disableElements([documentIDElement, vctElement, authenticSourceElement]);
+            disableElements([documentIDElement, scopeElement, authenticSourceElement]);
 
             postAndDisplayInArticleContainerFor("/secure/apigw/notification", requestBody, "Notification");
         };
 
-        return [documentIDElement, vctElement, authenticSourceElement, viewButton];
+        return [documentIDElement, scopeElement, authenticSourceElement, viewButton];
     };
 
     const articleIdBasis = generateArticleIDBasis();
     const articleDiv = buildArticle(articleIdBasis.articleID, "View notification", buildFormElements());
-    const articleContainer = document.getElementById('article-container');
-    articleContainer.prepend(articleDiv);
-
-    document.getElementById(articleIdBasis.articleID).querySelector('input').focus();
-};
-
-const addCredentialFormArticleToContainer = () => {
-    const buildFormElements = () => {
-
-        const authenticSourcePersonIdElement = createInputElement('authentic source person id');
-        const familyNameElement = createInputElement('family name', '', 'text');
-        const givenNameElement = createInputElement('given name', '', 'text');
-        const birthdateElement = createInputElement('birth date', '', 'text');
-        const schemaNameElement = createInputElement('identity schema name', 'FR');
-        const vctElement = createInputElement('document type', 'urn:eudi:ehic:1');
-        const credentialTypeElement = createInputElement('credential type', 'vc+sd-jwt');
-        const authenticSourceElement = createInputElement('authentic source', 'SUNET');
-        const collectIdElement = createInputElement('collect id');
-
-        const createButton = document.createElement('button');
-        createButton.id = generateUUID();
-        createButton.classList.add('button', 'is-link');
-        createButton.textContent = 'Create';
-        createButton.onclick = () => {
-            createButton.disabled = true;
-
-            const requestBody = {
-                authentic_source: authenticSourceElement.value,
-                identity: {
-                    authentic_source_person_id: authenticSourcePersonIdElement.value, //required if not EIDAS attributes is set (family_name, given_name and birth_date)
-                    schema: {
-                        name: schemaNameElement.value
-                    },
-                    family_name: familyNameElement.value,
-                    given_name: givenNameElement.value,
-                    birth_date: birthdateElement.value,
-                },
-                vct: vctElement.value,
-                credential_type: credentialTypeElement.value,
-                collect_id: collectIdElement.value,
-            };
-
-            disableElements([authenticSourcePersonIdElement, familyNameElement, givenNameElement, birthdateElement, schemaNameElement, vctElement, credentialTypeElement, authenticSourceElement, collectIdElement]);
-
-            postAndDisplayInArticleContainerFor("/secure/apigw/credential", requestBody, "Credential");
-        };
-
-        const lineElement = document.createElement('hr');
-        const orTextElement = document.createElement('p');
-        orTextElement.textContent = 'or';
-
-        return [authenticSourcePersonIdElement, orTextElement, familyNameElement, givenNameElement, birthdateElement, lineElement, collectIdElement, schemaNameElement, vctElement, credentialTypeElement, authenticSourceElement, createButton];
-    };
-
-    const articleIdBasis = generateArticleIDBasis();
-    const articleDiv = buildArticle(articleIdBasis.articleID, "Create credential", buildFormElements());
     const articleContainer = document.getElementById('article-container');
     articleContainer.prepend(articleDiv);
 
