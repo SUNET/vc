@@ -48,6 +48,17 @@ type OIDCRPCallbackResponse struct {
 }
 
 // OIDCRPInitiate initiates OIDC authentication flow
+//
+//	@Summary		Initiate OIDC Authentication
+//	@ID				oidcrp-initiate
+//	@Description	Initiates OIDC authentication by generating an OAuth2 authorization URL with PKCE
+//	@Tags			OIDCRP
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		OIDCRPInitiateRequest	true	"OIDC RP initiate request"
+//	@Success		200		{object}	OIDCRPInitiateResponse
+//	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
+//	@Router			/oidcrp/initiate [post]
 func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest, oidcrpService any) (*OIDCRPInitiateResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPInitiate")
 	defer span.End()
@@ -72,6 +83,18 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 }
 
 // OIDCRPCallback processes OIDC callback and issues credential
+//
+//	@Summary		OIDC Provider Callback
+//	@ID				oidcrp-callback
+//	@Description	Receives and processes the authorization code from the OIDC Provider
+//	@Tags			OIDCRP
+//	@Accept			json
+//	@Produce		json
+//	@Param			code	query		string	true	"Authorization code"
+//	@Param			state	query		string	true	"OAuth2 state parameter"
+//	@Success		200		{object}	OIDCRPCallbackResponse
+//	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
+//	@Router			/oidcrp/callback [get]
 func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (*OIDCRPCallbackResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPCallback")
 	defer span.End()

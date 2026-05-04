@@ -25,7 +25,7 @@ import (
 //	@Produce		xml
 //	@Success		200	{string}	string			"SAML metadata XML"
 //	@Failure		500	{object}	map[string]any	"Internal server error"
-//	@Router			/saml/metadata [get]
+//	@Router			/samlsp/metadata [get]
 func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLMetadata")
 	defer span.End()
@@ -70,7 +70,7 @@ type SAMLInitiateResponse struct {
 //	@Success		200		{object}	SAMLInitiateResponse
 //	@Failure		400		{object}	map[string]any	"Bad request"
 //	@Failure		500		{object}	map[string]any	"Internal server error"
-//	@Router			/saml/initiate [post]
+//	@Router			/samlsp/initiate [post]
 func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLInitiate")
 	defer span.End()
@@ -111,7 +111,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 //	@Success		200				{object}	map[string]any	"Success with credential claims or offer"
 //	@Failure		400				{object}	map[string]any	"Bad request"
 //	@Failure		500				{object}	map[string]any	"Internal server error"
-//	@Router			/saml/acs [post]
+//	@Router			/samlsp/acs [post]
 func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLACS")
 	defer span.End()

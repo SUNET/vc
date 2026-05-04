@@ -19,6 +19,17 @@ import (
 
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
+//
+//	@Summary		Pushed Authorization Request
+//	@ID				oauth-par
+//	@Description	Handle OAuth2 Pushed Authorization Request (PAR)
+//	@Tags			OAuth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	openid4vci.PARRequest	true	"PAR request"
+//	@Success		201	{object}	openid4vci.ParResponse	"Created"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Router			/op/par [post]
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
@@ -85,6 +96,18 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	return response, nil
 }
 
+// OAuthAuthorize handles the OAuth2 authorization endpoint
+//
+//	@Summary		OAuth2 Authorize
+//	@ID				oauth-authorize
+//	@Description	Handle OAuth2 authorization request and redirect to consent
+//	@Tags			OAuth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request_uri	query	string	true	"PAR request URI"
+//	@Success		302	"Redirect to consent"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Router			/authorize [get]
 func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error) {
 	c.log.Debug("Authorize", "req", req)
 	host, err := helpers.HostFromURL(c.cfg.APIGW.PublicURL)
@@ -134,6 +157,17 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 
 // OAuthToken implements OAuth 2.0 token endpoint for credential issuance
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-token-endpoint
+//
+//	@Summary		OAuth2 Token
+//	@ID				oauth-token
+//	@Description	Exchange authorization code for tokens
+//	@Tags			OAuth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	openid4vci.TokenRequest	true	"Token request"
+//	@Success		200	{object}	openid4vci.TokenResponse	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
+//	@Router			/token [post]
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	c.log.Debug("OAuthToken", "req", req)
 
@@ -245,6 +279,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	return reply, nil
 }
 
+// OAuthMetadata returns the OAuth2 authorization server metadata
+//
+//	@Summary		OAuth2 Server Metadata
+//	@ID				oauth-metadata
+//	@Description	Returns the OAuth2 authorization server metadata (RFC 8414)
+//	@Tags			OAuth
+//	@Produce		json
+//	@Success		200	{object}	oauth2.AuthorizationServerMetadata	"Success"
+//	@Router			/.well-known/oauth-authorization-server [get]
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
 
 	signedMetadata, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
@@ -266,6 +309,14 @@ type JWKSResponse = apiv1_issuer.Keys
 // JWKS returns the issuer's public signing keys as a JWK Set.
 // The keys are fetched from the issuer via gRPC and stripped of any private
 // key material before being served.
+//
+//	@Summary		JWKS
+//	@ID				jwks
+//	@Description	Returns the JSON Web Key Set for signature verification
+//	@Tags			OAuth
+//	@Produce		json
+//	@Success		200	{object}	JWKSResponse	"Success"
+//	@Router			/jwks [get]
 func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
 	c.log.Debug("JWKS request")
 
@@ -298,6 +349,14 @@ type SDJWTVCIssuerMetadataResponse struct {
 // SDJWTVCIssuerMetadata returns the JWT VC Issuer Metadata per draft-ietf-oauth-sd-jwt-vc §5.3.
 // This metadata is served at /.well-known/jwt-vc-issuer and allows verifiers to discover
 // the issuer's JWKS endpoint.
+//
+//	@Summary		SD-JWT VC Issuer Metadata
+//	@ID				sdjwtvc-issuer-metadata
+//	@Description	Returns the SD-JWT VC issuer metadata
+//	@Tags			OAuth
+//	@Produce		json
+//	@Success		200	{object}	SDJWTVCIssuerMetadataResponse	"Success"
+//	@Router			/.well-known/jwt-vc-issuer [get]
 func (c *Client) SDJWTVCIssuerMetadata(ctx context.Context) (*SDJWTVCIssuerMetadataResponse, error) {
 	c.log.Debug("sd-jwt-vc issuer metadata request")
 
@@ -317,6 +376,16 @@ type OAuthAuthorizationConsentResponse struct {
 	VerifierContextID string `json:"-"`
 }
 
+// OAuthAuthorizationConsent handles the authorization consent flow
+//
+//	@Summary		Authorization Consent
+//	@ID				oauth-authorization-consent
+//	@Description	Handles the authorization consent flow for credential issuance
+//	@Tags			OAuth
+//	@Produce		json
+//	@Success		200	{object}	OAuthAuthorizationConsentResponse	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse				"Bad Request"
+//	@Router			/authorization/consent [get]
 func (c *Client) OAuthAuthorizationConsent(ctx context.Context, req *OauthAuthorizationConsentRequest) (*OAuthAuthorizationConsentResponse, error) {
 	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: req.SessionID})
 	if err != nil {
@@ -375,6 +444,16 @@ type OAuthAuthorizationConsentCallbackResponse struct {
 	//RedirectURL string `json:"-"`
 }
 
+// OAuthAuthorizationConsentCallback handles the consent callback
+//
+//	@Summary		Authorization Consent Callback
+//	@ID				oauth-authorization-consent-callback
+//	@Description	Handles the callback after user consents to credential issuance
+//	@Tags			OAuth
+//	@Produce		json
+//	@Success		302	"Redirect"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Router			/authorization/consent/callback [get]
 func (c *Client) OAuthAuthorizationConsentCallback(ctx context.Context, req *OauthAuthorizationConsentCallbackRequest) (*OAuthAuthorizationConsentCallbackResponse, error) {
 	c.log.Debug("OAuthAuthorizationConsentCallback request", "req", req)
 	reply := &OAuthAuthorizationConsentCallbackResponse{}

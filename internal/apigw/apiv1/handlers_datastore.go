@@ -22,7 +22,7 @@ import (
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
-//	@Router			/upload [post]
+//	@Router			/api/v1/datastore/ [post]
 func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error {
 	credentialOfferParameter := openid4vci.CredentialOfferParameters{
 		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
@@ -108,7 +108,7 @@ func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadReques
 //	@Success		200	{object}	vcclient.NotificationReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		vcclient.NotificationRequest	true	" "
-//	@Router			/notification [post]
+//	@Router			/api/v1/datastore/notification [post]
 func (c *Client) DatastoreNotification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
@@ -153,7 +153,7 @@ type DatastoreAddIdentityRequest struct {
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
 //	@Param			req	body		DatastoreAddIdentityRequest	true	" "
-//	@Router			/document/identity [put]
+//	@Router			/api/v1/datastore/identity [put]
 func (c *Client) DatastoreAddIdentity(ctx context.Context, req *DatastoreAddIdentityRequest) error {
 	err := c.datastoreStore.AddIdentity(ctx, &db.AddIdentityQuery{
 		AuthenticSource:    req.AuthenticSource,
@@ -198,7 +198,7 @@ type DatastoreDeleteIdentityRequest struct {
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse				"Bad Request"
 //	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
-//	@Router			/document/identity [delete]
+//	@Router			/api/v1/datastore/identity [delete]
 func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
 	err := c.datastoreStore.DeleteIdentity(ctx, &db.DeleteIdentityQuery{
 		AuthenticSource:         req.AuthenticSource,
@@ -239,7 +239,7 @@ type DatastoreDeleteRequest struct {
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreDeleteRequest	true	" "
-//	@Router			/document [delete]
+//	@Router			/api/v1/datastore [delete]
 func (c *Client) DatastoreDelete(ctx context.Context, req *DatastoreDeleteRequest) error {
 	err := c.datastoreStore.Delete(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
@@ -276,7 +276,7 @@ type DatastoreGetReply struct {
 //	@Success		200	{object}	DatastoreGetReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreGetRequest		true	" "
-//	@Router			/document [post]
+//	@Router			/api/v1/datastore [post]
 func (c *Client) DatastoreGet(ctx context.Context, req *DatastoreGetRequest) (*DatastoreGetReply, error) {
 	doc, err := c.datastoreStore.Get(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
@@ -318,7 +318,7 @@ type DatastoreListReply struct {
 //	@Success		200	{object}	DatastoreListReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreListRequest	true	" "
-//	@Router			/document/list [post]
+//	@Router			/api/v1/datastore/list [post]
 func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
 	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
 		AuthenticSource:   req.AuthenticSource,
@@ -349,6 +349,19 @@ type DatastoreGetByKeyReply struct {
 }
 
 // DatastoreGetByKey retrieves a document by its natural key
+//
+//	@Summary		DatastoreGetByKey
+//	@ID				get-document-by-key
+//	@Description	Get a document by authentic_source, scope, and document_id
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	DatastoreGetByKeyReply	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Param			authentic_source	query	string	true	"Authentic source"
+//	@Param			scope				query	string	true	"Scope"
+//	@Param			document_id			query	string	true	"Document ID"
+//	@Router			/api/v1/datastore/ [get]
 func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
@@ -375,6 +388,17 @@ type DatastoreResolveReply struct {
 // DatastoreResolve resolves identity attributes (e.g. from an OIDC/SAML session) to an
 // internal identifier via the identity mapping store, then returns all documents
 // associated with that identifier, filtered by authentic source and scope.
+//
+//	@Summary		DatastoreResolve
+//	@ID				resolve-document
+//	@Description	Resolve identity attributes to documents
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	DatastoreResolveReply	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Param			req	body		DatastoreResolveRequest	true	" "
+//	@Router			/api/v1/datastore/resolve [post]
 func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequest) (*DatastoreResolveReply, error) {
 	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
 		AuthenticSource: req.AuthenticSource,
@@ -406,6 +430,17 @@ type DatastoreDeleteByKeyRequest struct {
 }
 
 // DatastoreDeleteByKey deletes a document by its natural key
+//
+//	@Summary		DatastoreDeleteByKey
+//	@ID				delete-document-by-key
+//	@Description	Delete a document by authentic_source, scope, and document_id
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		204	"No Content"
+//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
+//	@Param			req	body		DatastoreDeleteByKeyRequest	true	" "
+//	@Router			/api/v1/datastore/ [delete]
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
 	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 }

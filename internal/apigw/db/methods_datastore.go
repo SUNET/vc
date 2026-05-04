@@ -129,6 +129,7 @@ func (c *DatastoreColl) Delete(ctx context.Context, doc *model.MetaData) error {
 	filter := bson.M{
 		"meta.document_id":      bson.M{"$eq": doc.DocumentID},
 		"meta.authentic_source": bson.M{"$eq": doc.AuthenticSource},
+		"meta.scope":            bson.M{"$eq": doc.Scope},
 	}
 	_, err := c.Coll.DeleteOne(ctx, filter)
 	if err != nil {
