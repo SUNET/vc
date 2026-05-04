@@ -189,24 +189,22 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	rgAPIv1.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
 
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/upload", http.StatusOK, s.endpointUpload)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/notification", http.StatusOK, s.endpointNotification)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPut, "/document/identity", http.StatusOK, s.endpointAddDocumentIdentity)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodDelete, "/document/identity", http.StatusOK, s.endpointDeleteDocumentIdentity)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/document/search", http.StatusOK, s.endpointSearchDocuments)
+	// Identity mapping endpoints
+	rgIdentity := rgAPIv1.Group("/identity")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping", http.StatusOK, s.endpointIdentityMappingCreate)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/resolve", http.StatusOK, s.endpointIdentityMappingResolve)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPut, "/mapping", http.StatusOK, s.endpointIdentityMappingUpdate)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodDelete, "/mapping", http.StatusOK, s.endpointIdentityMappingDelete)
 
-	// Streamlined identity mapping endpoints
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/identity/mapping", http.StatusOK, s.endpointCreateIdentityMapping)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/identity/mapping/resolve", http.StatusOK, s.endpointResolveIdentityMapping)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPut, "/identity/mapping", http.StatusOK, s.endpointUpdateIdentityMapping)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodDelete, "/identity/mapping", http.StatusOK, s.endpointDeleteIdentityMapping)
-
-	// Streamlined document endpoints
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/document", http.StatusOK, s.endpointUploadDocument)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodGet, "/document", http.StatusOK, s.endpointGetDocumentByKey)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/document/list", http.StatusOK, s.endpointListDocumentsByIdentifier)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/document/resolve", http.StatusOK, s.endpointResolveDocument)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodDelete, "/document", http.StatusNoContent, s.endpointDeleteDocumentByKey)
+	// Datastore endpoints
+	rgDatastore := rgAPIv1.Group("/datastore")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/", http.StatusOK, s.endpointDatastoreUpload)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "/", http.StatusOK, s.endpointDatastoreGet)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "/", http.StatusNoContent, s.endpointDatastoreDelete)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/notification", http.StatusOK, s.endpointDatastoreNotification)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/resolve", http.StatusOK, s.endpointDatastoreResolve)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPut, "/identity", http.StatusOK, s.endpointDatastoreAddIdentity)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "/identity", http.StatusOK, s.endpointDatastoreDeleteIdentity)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)

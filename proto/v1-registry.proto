@@ -35,11 +35,9 @@ message TokenStatusListUpdateStatusReply {
 
 // Credential subject messages
 message SaveCredentialSubjectRequest {
-    string FirstName = 1;   // Subject's first name
-    string LastName = 2;    // Subject's last name
-    string DateOfBirth = 3; // Subject's date of birth (YYYY-MM-DD)
-    int64 Section = 4;      // Token Status List section
-    int64 Index = 5;        // Token Status List index
+    string Identifier = 1; // Subject identifier (authentic_source_person_id)
+    int64 Section = 2;     // Token Status List section
+    int64 Index = 3;       // Token Status List index
 }
 
 message SaveCredentialSubjectReply {

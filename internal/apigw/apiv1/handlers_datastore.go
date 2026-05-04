@@ -11,9 +11,9 @@ import (
 	"github.com/SUNET/vc/pkg/vcclient"
 )
 
-// Upload uploads a document with a set of attributes
+// DatastoreUpload uploads a document with a set of attributes
 //
-//	@Summary		Upload
+//	@Summary		DatastoreUpload
 //	@ID				generic-upload
 //	@Description	Upload endpoint
 //	@Tags			vc-platform
@@ -23,7 +23,7 @@ import (
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
 //	@Router			/upload [post]
-func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error {
+func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error {
 	credentialOfferParameter := openid4vci.CredentialOfferParameters{
 		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{
@@ -97,9 +97,9 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	return nil
 }
 
-// Notification return QR code and DeepLink for a document
+// DatastoreNotification return QR code and DeepLink for a document
 //
-//	@Summary		Notification
+//	@Summary		DatastoreNotification
 //	@ID				generic-notification
 //	@Description	notification endpoint
 //	@Tags			vc-platform
@@ -109,7 +109,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		vcclient.NotificationRequest	true	" "
 //	@Router			/notification [post]
-func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
+func (c *Client) DatastoreNotification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
 		Scope:           req.Scope,
@@ -125,9 +125,8 @@ func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationReq
 	return reply, nil
 }
 
-
-// AddDocumentIdentityRequest is the request for DocumentIdentity
-type AddDocumentIdentityRequest struct {
+// DatastoreAddIdentityRequest is the request for adding identity to a document
+type DatastoreAddIdentityRequest struct {
 	// required: true
 	// example: SUNET
 	AuthenticSource string `json:"authentic_source" validate:"required"`
@@ -140,22 +139,22 @@ type AddDocumentIdentityRequest struct {
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
 	DocumentID string `json:"document_id" validate:"required"`
 
-	IdentityMappingIDs []*model.Identity `json:"identity_mapping_ids" validate:"required"`
+	IdentityMappingIDs []string `json:"identity_mapping_ids" validate:"required"`
 }
 
-// AddDocumentIdentity adds an identity to a document
+// DatastoreAddIdentity adds an identity to a document
 //
-//	@Summary		AddDocumentIdentity
-//	@ID				add-document-identity
+//	@Summary		DatastoreAddIdentity
+//	@ID				add-identity
 //	@Description	Adding array of identity mapping IDs to one document
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
-//	@Param			req	body		AddDocumentIdentityRequest	true	" "
+//	@Param			req	body		DatastoreAddIdentityRequest	true	" "
 //	@Router			/document/identity [put]
-func (c *Client) AddDocumentIdentity(ctx context.Context, req *AddDocumentIdentityRequest) error {
+func (c *Client) DatastoreAddIdentity(ctx context.Context, req *DatastoreAddIdentityRequest) error {
 	err := c.datastoreStore.AddDocumentIdentity(ctx, &db.AddDocumentIdentityQuery{
 		AuthenticSource:    req.AuthenticSource,
 		Scope:              req.Scope,
@@ -169,8 +168,8 @@ func (c *Client) AddDocumentIdentity(ctx context.Context, req *AddDocumentIdenti
 	return nil
 }
 
-// DeleteDocumentIdentityRequest is the request for DeleteDocumentIdentity
-type DeleteDocumentIdentityRequest struct {
+// DatastoreDeleteIdentityRequest is the request for DatastoreDeleteIdentity
+type DatastoreDeleteIdentityRequest struct {
 	// required: true
 	// example: SUNET
 	AuthenticSource string `json:"authentic_source" validate:"required"`
@@ -188,19 +187,19 @@ type DeleteDocumentIdentityRequest struct {
 	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"required"`
 }
 
-// DeleteDocumentIdentity deletes an identity from a document
+// DatastoreDeleteIdentity deletes an identity from a document
 //
-//	@Summary		DeleteDocumentIdentity
-//	@ID				delete-document-identity
+//	@Summary		DatastoreDeleteIdentity
+//	@ID				delete-identity
 //	@Description	Delete identity to document endpoint
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
-//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
-//	@Param			req	body		DeleteDocumentIdentityRequest	true	" "
+//	@Failure		400	{object}	helpers.ErrorResponse				"Bad Request"
+//	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
 //	@Router			/document/identity [delete]
-func (c *Client) DeleteDocumentIdentity(ctx context.Context, req *DeleteDocumentIdentityRequest) error {
+func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
 	err := c.datastoreStore.DeleteDocumentIdentity(ctx, &db.DeleteDocumentIdentityQuery{
 		AuthenticSource:         req.AuthenticSource,
 		Scope:                   req.Scope,
@@ -214,8 +213,8 @@ func (c *Client) DeleteDocumentIdentity(ctx context.Context, req *DeleteDocument
 	return nil
 }
 
-// DeleteDocumentRequest is the request for DeleteDocument
-type DeleteDocumentRequest struct {
+// DatastoreDeleteRequest is the request for DatastoreDelete
+type DatastoreDeleteRequest struct {
 	// required: true
 	// example: skatteverket
 	AuthenticSource string `json:"authentic_source" validate:"required"`
@@ -229,9 +228,9 @@ type DeleteDocumentRequest struct {
 	Scope string `json:"scope" validate:"required"`
 }
 
-// DeleteDocument deletes a specific document
+// DatastoreDelete deletes a specific document
 //
-//	@Summary		DeleteDocument
+//	@Summary		DatastoreDelete
 //	@ID				delete-document
 //	@Description	delete one document endpoint
 //	@Tags			vc-platform
@@ -239,9 +238,9 @@ type DeleteDocumentRequest struct {
 //	@Produce		json
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		DeleteDocumentRequest	true	" "
+//	@Param			req	body		DatastoreDeleteRequest	true	" "
 //	@Router			/document [delete]
-func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest) error {
+func (c *Client) DatastoreDelete(ctx context.Context, req *DatastoreDeleteRequest) error {
 	err := c.datastoreStore.Delete(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
 		Scope:           req.Scope,
@@ -254,31 +253,31 @@ func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest)
 	return nil
 }
 
-// GetDocumentRequest is the request for GetDocument
-type GetDocumentRequest struct {
+// DatastoreGetRequest is the request for DatastoreGet
+type DatastoreGetRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
 	Scope           string `json:"scope" validate:"required"`
 	DocumentID      string `json:"document_id" validate:"required"`
 }
 
-// GetDocumentReply is the reply for a generic document
-type GetDocumentReply struct {
+// DatastoreGetReply is the reply for a generic document
+type DatastoreGetReply struct {
 	Data *model.Document `json:"data"`
 }
 
-// GetDocument return a specific document
+// DatastoreGet return a specific document
 //
-//	@Summary		GetDocument
+//	@Summary		DatastoreGet
 //	@ID				get-document
 //	@Description	Get document endpoint
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	GetDocumentReply		"Success"
+//	@Success		200	{object}	DatastoreGetReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		GetDocumentRequest		true	" "
+//	@Param			req	body		DatastoreGetRequest		true	" "
 //	@Router			/document [post]
-func (c *Client) GetDocument(ctx context.Context, req *GetDocumentRequest) (*GetDocumentReply, error) {
+func (c *Client) DatastoreGet(ctx context.Context, req *DatastoreGetRequest) (*DatastoreGetReply, error) {
 	query := &db.GetDocumentQuery{
 		Meta: &model.MetaData{
 			AuthenticSource: req.AuthenticSource,
@@ -290,78 +289,126 @@ func (c *Client) GetDocument(ctx context.Context, req *GetDocumentRequest) (*Get
 	if err != nil {
 		return nil, err
 	}
-	reply := &GetDocumentReply{
+	reply := &DatastoreGetReply{
 		Data: doc,
 	}
 
 	return reply, nil
 }
 
-// DocumentListRequest is the request for DocumentList
-type DocumentListRequest struct {
-	AuthenticSource string          `json:"authentic_source"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
-	Scope           string          `json:"scope"`
-	ValidFrom       int64           `json:"valid_from"`
-	ValidTo         int64           `json:"valid_to"`
+// DatastoreListRequest is the request for DatastoreList
+type DatastoreListRequest struct {
+	AuthenticSource   string `json:"authentic_source"`
+	IdentityMappingID string `json:"identity_mapping_id" validate:"required"`
+	Scope             string `json:"scope"`
+	ValidFrom         int64  `json:"valid_from"`
+	ValidTo           int64  `json:"valid_to"`
 }
 
-// DocumentListReply is the reply for a list of documents
-type DocumentListReply struct {
+// DatastoreListReply is the reply for a list of documents
+type DatastoreListReply struct {
 	Data []*model.DocumentList `json:"data"`
 }
 
-// DocumentList return a list of metadata for a specific identity
+// DatastoreList return a list of metadata for a specific identity
 //
-//	@Summary		DocumentList
+//	@Summary		DatastoreList
 //	@ID				document-list
 //	@Description	List documents for an identity
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	DocumentListReply		"Success"
+//	@Success		200	{object}	DatastoreListReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		DocumentListRequest		true	" "
+//	@Param			req	body		DatastoreListRequest	true	" "
 //	@Router			/document/list [post]
-func (c *Client) DocumentList(ctx context.Context, req *DocumentListRequest) (*DocumentListReply, error) {
+func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
 	docs, err := c.datastoreStore.DocumentList(ctx, &db.DocumentListQuery{
-		AuthenticSource: req.AuthenticSource,
-		Identity:        req.Identity,
-		Scope:           req.Scope,
-		ValidFrom:       req.ValidFrom,
-		ValidTo:         req.ValidTo,
+		AuthenticSource:   req.AuthenticSource,
+		IdentityMappingID: req.IdentityMappingID,
+		Scope:             req.Scope,
+		ValidFrom:         req.ValidFrom,
+		ValidTo:           req.ValidTo,
 	})
 	if err != nil {
 		return nil, err
 	}
-	resp := &DocumentListReply{
+	resp := &DatastoreListReply{
 		Data: docs,
 	}
 	return resp, nil
 }
 
-// SearchDocuments search for documents
-func (c *Client) SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error) {
-	docs, hasMore, err := c.datastoreStore.SearchDocuments(ctx, &db.SearchDocumentsQuery{
-		AuthenticSource: req.AuthenticSource,
-		Scope:           req.Scope,
-		DocumentID:      req.DocumentID,
-		CollectID:       req.CollectID,
+// DatastoreGetByKeyRequest is the request for getting a document by its key
+type DatastoreGetByKeyRequest struct {
+	AuthenticSource string `json:"authentic_source" form:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string `json:"scope" form:"scope" validate:"required,max=128,printascii"`
+	DocumentID      string `json:"document_id" form:"document_id" validate:"required,max=128,printascii"`
+}
 
-		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
+// DatastoreGetByKeyReply is the reply for a document retrieval
+type DatastoreGetByKeyReply struct {
+	Data *model.CompleteDocument `json:"data"`
+}
 
-		FamilyName: req.FamilyName,
-		GivenName:  req.GivenName,
-		BirthDate:  req.BirthDate,
-		BirthPlace: req.BirthPlace,
-	}, req.Limit, req.Fields, req.SortFields)
-
+// DatastoreGetByKey retrieves a document by its natural key
+func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
+	doc, err := c.datastoreStore.GetDocumentByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
 		return nil, err
 	}
-	resp := &model.SearchDocumentsReply{
-		Documents:      docs,
-		HasMoreResults: hasMore,
+
+	return &DatastoreGetByKeyReply{
+		Data: doc,
+	}, nil
+}
+
+// DatastoreResolveRequest is the request for resolving identity attributes to documents
+type DatastoreResolveRequest struct {
+	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string         `json:"scope" validate:"required,max=128,printascii"`
+	Attributes      map[string]any `json:"attributes" validate:"required"`
+}
+
+// DatastoreResolveReply is the reply for resolved documents
+type DatastoreResolveReply struct {
+	Data []*model.DocumentList `json:"data"`
+}
+
+// DatastoreResolve resolves identity attributes (e.g. from an OIDC/SAML session) to an
+// internal identifier via the identity mapping store, then returns all documents
+// associated with that identifier, filtered by authentic source and scope.
+func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequest) (*DatastoreResolveReply, error) {
+	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
+		AuthenticSource: req.AuthenticSource,
+		Attributes:      req.Attributes,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return resp, nil
+
+	docs, err := c.datastoreStore.DocumentList(ctx, &db.DocumentListQuery{
+		AuthenticSource:   req.AuthenticSource,
+		Scope:             req.Scope,
+		IdentityMappingID: personID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &DatastoreResolveReply{
+		Data: docs,
+	}, nil
+}
+
+// DatastoreDeleteByKeyRequest is the request for deleting a document
+type DatastoreDeleteByKeyRequest struct {
+	AuthenticSource string `json:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string `json:"scope" validate:"required,max=128,printascii"`
+	DocumentID      string `json:"document_id" validate:"required,max=128,printascii"`
+}
+
+// DatastoreDeleteByKey deletes a document by its natural key
+func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
+	return c.datastoreStore.DeleteDocumentByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 }

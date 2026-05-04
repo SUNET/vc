@@ -30,7 +30,6 @@ type DatastoreStore interface {
 	// Simplified document operations (new API)
 	GetDocumentByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
 	DeleteDocumentByKey(ctx context.Context, authenticSource, scope, documentID string) error
-	ListDocumentsByIdentifier(ctx context.Context, identifier string) ([]*model.CompleteDocument, error)
 }
 
 // IdentityMappingStore defines the interface for identity mapping operations

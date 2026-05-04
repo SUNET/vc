@@ -68,13 +68,12 @@ func (c *VCDatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument)
 	return nil
 }
 
-
 // AddDocumentIdentityQuery is the query to add document identity
 type AddDocumentIdentityQuery struct {
-	AuthenticSource    string            `json:"authentic_source" bson:"authentic_source"`
-	Scope              string            `json:"scope" bson:"scope"`
-	DocumentID         string            `json:"document_id" bson:"document_id"`
-	IdentityMappingIDs []*model.Identity `json:"identity_mapping_ids" bson:"identity_mapping_ids"`
+	AuthenticSource    string   `json:"authentic_source" bson:"authentic_source"`
+	Scope              string   `json:"scope" bson:"scope"`
+	DocumentID         string   `json:"document_id" bson:"document_id"`
+	IdentityMappingIDs []string `json:"identity_mapping_ids" bson:"identity_mapping_ids"`
 }
 
 // AddDocumentIdentity adds document identity
@@ -142,8 +141,7 @@ func (c *VCDatastoreColl) Delete(ctx context.Context, doc *model.MetaData) error
 
 // GetDocumentQuery is the query to get document attestation
 type GetDocumentQuery struct {
-	Meta     *model.MetaData
-	Identity *model.Identity
+	Meta *model.MetaData
 }
 
 // GetDocument return matching document if any, or error
@@ -169,15 +167,15 @@ func (c *VCDatastoreColl) GetDocument(ctx context.Context, query *GetDocumentQue
 	return reply, nil
 }
 
-// GetDocumentsByClaims returns matching documents for a scope using a dynamic set
-// of identity claims. The identityClaims map keys are BSON field names under
-// "identities." and values are the expected field values.
+// GetDocumentsByClaims returns matching documents for a scope where any of the
+// document's identity_mapping_ids match the provided identifier.
 func (c *VCDatastoreColl) GetDocumentsByClaims(ctx context.Context, scope string, identityClaims map[string]string) (map[string]*model.CompleteDocument, error) {
 	filter := bson.M{
 		"meta.scope": bson.M{"$eq": scope},
 	}
-	for bsonField, value := range identityClaims {
-		filter["identities."+bsonField] = bson.M{"$eq": value}
+	// identity_mapping_ids is []string — match by authentic_source_person_id if present
+	if aspID, ok := identityClaims["authentic_source_person_id"]; ok {
+		filter["identity_mapping_ids"] = bson.M{"$eq": aspID}
 	}
 
 	c.log.Debug("GetDocumentsByClaims", "filter", filter)
@@ -202,11 +200,11 @@ func (c *VCDatastoreColl) GetDocumentsByClaims(ctx context.Context, scope string
 
 // DocumentListQuery is the query to get document list
 type DocumentListQuery struct {
-	AuthenticSource string          `json:"authentic_source" bson:"authentic_source"`
-	Identity        *model.Identity `json:"identity" bson:"identity" validate:"required"`
-	Scope           string          `json:"scope" bson:"scope"`
-	ValidFrom       int64           `json:"valid_from" bson:"valid_from"`
-	ValidTo         int64           `json:"valid_to" bson:"valid_to"`
+	AuthenticSource   string `json:"authentic_source" bson:"authentic_source"`
+	IdentityMappingID string `json:"identity_mapping_id" bson:"identity_mapping_id" validate:"required"`
+	Scope             string `json:"scope" bson:"scope"`
+	ValidFrom         int64  `json:"valid_from" bson:"valid_from"`
+	ValidTo           int64  `json:"valid_to" bson:"valid_to"`
 }
 
 // DocumentList return matching documents if any, or error
@@ -225,13 +223,7 @@ func (c *VCDatastoreColl) DocumentList(ctx context.Context, query *DocumentListQ
 		filter["meta.scope"] = bson.M{"$eq": query.Scope}
 	}
 
-	if query.Identity.AuthenticSourcePersonID != "" {
-		filter["identity_mapping_ids.authentic_source_person_id"] = bson.M{"$eq": query.Identity.AuthenticSourcePersonID}
-	} else {
-		filter["identity_mapping_ids.family_name"] = bson.M{"$eq": query.Identity.FamilyName}
-		filter["identity_mapping_ids.given_name"] = bson.M{"$eq": query.Identity.GivenName}
-		filter["identity_mapping_ids.birth_date"] = bson.M{"$eq": query.Identity.BirthDate}
-	}
+	filter["identity_mapping_ids"] = bson.M{"$eq": query.IdentityMappingID}
 
 	cursor, err := c.Coll.Find(ctx, filter)
 	if err != nil {
@@ -284,18 +276,10 @@ func (c *VCDatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocume
 
 // SearchDocumentsQuery the query to search for documents
 type SearchDocumentsQuery struct {
-	AuthenticSource string `json:"authentic_source,omitempty" validate:"omitempty,max=1000"`
-	Scope           string `json:"scope,omitempty" validate:"omitempty,max=1000"`
-	DocumentID      string `json:"document_id,omitempty" validate:"omitempty,max=1000"`
-	CollectID       string `json:"collect_id,omitempty" validate:"omitempty,max=1000"`
-
-	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty"`
-
-	FamilyName string `json:"family_name,omitempty" validate:"omitempty,max=597"`
-	GivenName  string `json:"given_name,omitempty" validate:"omitempty,max=1019"`
-	BirthDate  string `json:"birth_date,omitempty" validate:"omitempty,datetime=2006-01-02"`
-	BirthPlace string `json:"birth_place,omitempty"`
-	//TODO: add Nationality []string `json:"nationality,omitempty" validate:"omitempty,dive,iso3166_1_alpha2"` - men vad betyder det i sökning om man bara angivit ex. en som matchar och man även är medborgare i ett till land???
+	AuthenticSource   string `json:"authentic_source,omitempty" validate:"omitempty,max=1000"`
+	Scope             string `json:"scope,omitempty" validate:"omitempty,max=1000"`
+	DocumentID        string `json:"document_id,omitempty" validate:"omitempty,max=1000"`
+	IdentityMappingID string `json:"identity_mapping_id,omitempty"`
 }
 
 // SearchDocuments search documents in datastore
@@ -367,8 +351,6 @@ func (c *VCDatastoreColl) SearchDocuments(ctx context.Context, query *SearchDocu
 func buildSearchDocumentsFilter(query *SearchDocumentsQuery) bson.M {
 	filter := bson.M{}
 
-	//TODO(mk): check explain to see if any indexes are needed
-
 	if query.AuthenticSource != "" {
 		filter["meta.authentic_source"] = bson.M{"$eq": query.AuthenticSource}
 	}
@@ -378,33 +360,10 @@ func buildSearchDocumentsFilter(query *SearchDocumentsQuery) bson.M {
 	if query.DocumentID != "" {
 		filter["meta.document_id"] = bson.M{"$eq": query.DocumentID}
 	}
-	if query.CollectID != "" {
-		filter["meta.collect.id"] = bson.M{"$eq": query.CollectID}
-	}
 
-	identityConditions := bson.M{}
-	if query.AuthenticSourcePersonID != "" {
-		identityConditions["authentic_source_person_id"] = query.AuthenticSourcePersonID
+	if query.IdentityMappingID != "" {
+		filter["identity_mapping_ids"] = bson.M{"$eq": query.IdentityMappingID}
 	}
-	if query.FamilyName != "" {
-		identityConditions["family_name"] = query.FamilyName
-	}
-	if query.GivenName != "" {
-		identityConditions["given_name"] = query.GivenName
-	}
-	if query.BirthDate != "" {
-		identityConditions["birth_date"] = query.BirthDate
-	}
-	if query.BirthPlace != "" {
-		identityConditions["birth_place"] = query.BirthPlace
-	}
-	if len(identityConditions) > 0 {
-		filter["identity_mapping_ids"] = bson.M{
-			"$elemMatch": identityConditions,
-		}
-	}
-
-	//TODO(mk): add more filters?
 
 	return filter
 }
@@ -452,26 +411,4 @@ func (c *VCDatastoreColl) DeleteDocumentByKey(ctx context.Context, authenticSour
 	return nil
 }
 
-// ListDocumentsByIdentifier lists all documents that reference a given identifier
-func (c *VCDatastoreColl) ListDocumentsByIdentifier(ctx context.Context, identifier string) ([]*model.CompleteDocument, error) {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:listDocumentsByIdentifier")
-	defer span.End()
 
-	filter := bson.M{
-		"identity_refs": bson.M{"$eq": identifier},
-	}
-
-	cursor, err := c.Coll.Find(ctx, filter)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	var res []*model.CompleteDocument
-	if err := cursor.All(ctx, &res); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	return res, nil
-}

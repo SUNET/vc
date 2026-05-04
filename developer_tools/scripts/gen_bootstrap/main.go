@@ -61,7 +61,6 @@ type PIDFields struct {
 	PersonalAdministrativeNumber string `yaml:"personal_administrative_number"`
 	IssuanceDate                 string `yaml:"issuance_date"`
 	IssuingJurisdiction          string `yaml:"issuing_jurisdiction"`
-	TrustAnchor                  string `yaml:"trust_anchor"`
 }
 
 // EHICFields are the per-person fields for EHIC credentials.
@@ -160,7 +159,7 @@ func genPID15(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 				Scope:           "pid_1_5",
 				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_5_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -194,11 +193,9 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 			"issuing_country":                input.Defaults.IssuingCountry,
 			"nationalities":                  input.Defaults.Nationality,
 			"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "SUNET"),
-			"trust_anchor":                   or_(pidExt.TrustAnchor, "https://ta.oidf.sunet.se"),
 			"date_of_expiry":                 now.Add(365 * 24 * time.Hour).Format(time.RFC3339),
 			"expiry_date":                    now.Add(365 * 24 * time.Hour).Format("2006-01-02"),
 			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"authentic_source_person_id":     fmt.Sprintf("authentic_source_person_id_%s", pid),
 			"arf":                            "1.8",
 			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid18-%s", pid)),
 			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
@@ -235,7 +232,7 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 				Scope:           "pid_1_8",
 				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_8_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -269,11 +266,9 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 			"issuing_country":                input.Defaults.IssuingCountry,
 			"nationalities":                  input.Defaults.Nationality,
 			"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "SUNET"),
-			"trust_anchor":                   or_(pidExt.TrustAnchor, "https://ta.oidf.sunet.se"),
 			"date_of_expiry":                 now.Add(365 * 24 * time.Hour).Format(time.RFC3339),
 			"expiry_date":                    now.Add(365 * 24 * time.Hour).Format("2006-01-02"),
 			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"authentic_source_person_id":     fmt.Sprintf("authentic_source_person_id_%s", pid),
 			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-eduid-%s", pid)),
 			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
 			"picture":                        minPNG,
@@ -309,7 +304,7 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 				Scope:           "eduid",
 				DocumentID:      fmt.Sprintf("document_id_eduid_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -358,7 +353,7 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 				Scope:           "ehic",
 				DocumentID:      fmt.Sprintf("document_id_ehic_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -437,7 +432,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 				Scope:           "pda1",
 				DocumentID:      fmt.Sprintf("document_id_pda1_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -457,7 +452,7 @@ func genELM(pids []string, input *InputFile) map[string]*model.CompleteDocument 
 				Scope:           "elm",
 				DocumentID:      fmt.Sprintf("document_id_elm_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -477,7 +472,7 @@ func genDiploma(pids []string, input *InputFile) map[string]*vcclient.UploadRequ
 				Scope:           "diploma",
 				DocumentID:      fmt.Sprintf("document_id_diploma_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -497,7 +492,7 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 				Scope:           "microcredential",
 				DocumentID:      fmt.Sprintf("document_id_microcredential_%s", pid),
 			},
-			Identities: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
 	}
 	return result
@@ -548,8 +543,6 @@ func makePIDDocumentData(p *Person, authenticSourcePersonID string, defaults *Pe
 		"resident_city":                  or_(pidExt.ResidentCity, "Stockholm"),
 		"resident_state":                 or_(pidExt.ResidentState, "Stockholm"),
 		"resident_country":               or_(pidExt.ResidentCountry, "SE"),
-		"authentic_source_person_id":     authenticSourcePersonID,
-		"trust_anchor":                   or_(pidExt.TrustAnchor, "https://ta.oidf.sunet.se"),
 	}
 }
 

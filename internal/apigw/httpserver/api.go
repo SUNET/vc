@@ -16,31 +16,26 @@ import (
 // Apiv1 interface
 type Apiv1 interface {
 	// datastore endpoints
-	Upload(ctx context.Context, req *vcclient.UploadRequest) error
-	Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
-	AddDocumentIdentity(ctx context.Context, req *apiv1.AddDocumentIdentityRequest) error
-	DeleteDocumentIdentity(ctx context.Context, req *apiv1.DeleteDocumentIdentityRequest) error
-	GetDocument(ctx context.Context, req *apiv1.GetDocumentRequest) (*apiv1.GetDocumentReply, error)
-	DocumentList(ctx context.Context, req *apiv1.DocumentListRequest) (*apiv1.DocumentListReply, error)
-	DeleteDocument(ctx context.Context, req *apiv1.DeleteDocumentRequest) error
+	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error
+	DatastoreNotification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
+	DatastoreAddIdentity(ctx context.Context, req *apiv1.DatastoreAddIdentityRequest) error
+	DatastoreDeleteIdentity(ctx context.Context, req *apiv1.DatastoreDeleteIdentityRequest) error
+	DatastoreGet(ctx context.Context, req *apiv1.DatastoreGetRequest) (*apiv1.DatastoreGetReply, error)
+	DatastoreList(ctx context.Context, req *apiv1.DatastoreListRequest) (*apiv1.DatastoreListReply, error)
+	DatastoreDelete(ctx context.Context, req *apiv1.DatastoreDeleteRequest) error
+	DatastoreGetByKey(ctx context.Context, req *apiv1.DatastoreGetByKeyRequest) (*apiv1.DatastoreGetByKeyReply, error)
+	DatastoreResolve(ctx context.Context, req *apiv1.DatastoreResolveRequest) (*apiv1.DatastoreResolveReply, error)
+	DatastoreDeleteByKey(ctx context.Context, req *apiv1.DatastoreDeleteByKeyRequest) error
 
-	// datastore endpoints - disabled in production
-	SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error)
+	// user endpoints
 	UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error)
 	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
 
-	// Streamlined identity mapping endpoints
-	CreateIdentityMapping(ctx context.Context, req *apiv1.CreateIdentityMappingRequest) (*apiv1.CreateIdentityMappingReply, error)
-	ResolveIdentityMapping(ctx context.Context, req *apiv1.ResolveIdentityMappingRequest) (*apiv1.ResolveIdentityMappingReply, error)
-	UpdateIdentityMapping(ctx context.Context, req *apiv1.UpdateIdentityMappingRequest) error
-	DeleteIdentityMapping(ctx context.Context, req *apiv1.DeleteIdentityMappingRequest) error
-
-	// Streamlined document endpoints
-	UploadDocument(ctx context.Context, req *apiv1.UploadDocumentRequest) (*apiv1.UploadDocumentReply, error)
-	GetDocumentByKey(ctx context.Context, req *apiv1.GetDocumentByKeyRequest) (*apiv1.GetDocumentByKeyReply, error)
-	ListDocumentsByIdentifier(ctx context.Context, req *apiv1.ListDocumentsRequest) (*apiv1.ListDocumentsReply, error)
-	ResolveDocument(ctx context.Context, req *apiv1.ResolveDocumentRequest) (*apiv1.ResolveDocumentReply, error)
-	DeleteDocumentByKey(ctx context.Context, req *apiv1.DeleteDocumentByKeyRequest) error
+	// identity mapping endpoints
+	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
+	IdentityMappingResolve(ctx context.Context, req *apiv1.IdentityMappingResolveRequest) (*apiv1.IdentityMappingResolveReply, error)
+	IdentityMappingUpdate(ctx context.Context, req *apiv1.IdentityMappingUpdateRequest) error
+	IdentityMappingDelete(ctx context.Context, req *apiv1.IdentityMappingDeleteRequest) error
 
 	// OpenID4VCI endpoints
 	VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error)

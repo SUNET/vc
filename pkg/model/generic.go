@@ -17,20 +17,14 @@ type CompleteDocument struct {
 
 // DocumentList is a generic type for document list
 type DocumentList struct {
-	Meta            *MetaData        `json:"meta,omitempty" bson:"meta" validate:"required"`
-	DocumentDisplay *DocumentDisplay `json:"document_display,omitempty" bson:"document_display"`
-	QR              *openid4vci.QR   `json:"qr,omitempty" bson:"qr" validate:"required"`
+	Meta *MetaData      `json:"meta,omitempty" bson:"meta" validate:"required"`
+	QR   *openid4vci.QR `json:"qr,omitempty" bson:"qr" validate:"required"`
 }
 
 // Document is a generic type for get document
 type Document struct {
 	Meta         *MetaData `json:"meta,omitempty" bson:"meta" validate:"required"`
 	DocumentData any       `json:"document_data" bson:"document_data" validate:"required"`
-}
-
-// IDMapping is a generic type for ID mapping
-type IDMapping struct {
-	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
 }
 
 // MetaData is a generic type for metadata
@@ -265,22 +259,6 @@ func (i *Identity) Marshal() (map[string]any, error) {
 	return doc, nil
 }
 
-// DocumentDisplay is a collection of fields representing display of document
-type DocumentDisplay struct {
-	// required: true
-	// example: "1.0.0"
-	Version string `json:"version,omitempty" bson:"version" validate:"required,semver"`
-
-	// required: true
-	// example: secure
-	Type string `json:"type,omitempty" bson:"type" validate:"required"`
-
-	// DescriptionStructured is a map of structured descriptions
-	// required: true
-	// example: {"en": "European Health Insurance Card", "sv": "Europeiskt sjukförsäkringskortet"}
-	DescriptionStructured map[string]any `json:"description_structured,omitempty" bson:"description_structured" validate:"required"`
-}
-
 // SearchDocumentsReply the reply from search documents
 type SearchDocumentsReply struct {
 	Documents      []*CompleteDocument `json:"documents"`
@@ -295,11 +273,6 @@ type SearchDocumentsRequest struct {
 	CollectID       string `json:"collect_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 
 	AuthenticSourcePersonID string `json:"authentic_source_person_id,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
-
-	FamilyName string `json:"family_name,omitempty" validate:"omitempty,max=597,excludesall=${}[]"`
-	GivenName  string `json:"given_name,omitempty" validate:"omitempty,max=1019,excludesall=${}[]"`
-	BirthDate  string `json:"birth_date,omitempty" validate:"omitempty,datetime=2006-01-02"`
-	BirthPlace string `json:"birth_place,omitempty" validate:"omitempty,max=1000,excludesall=${}[]"`
 
 	Limit      int64          `json:"limit,omitempty" validate:"omitempty,min=0,max=1000"`
 	Fields     []string       `json:"fields,omitempty" validate:"omitempty,dive,max=100,excludesall=${}[]"`
