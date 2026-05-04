@@ -37,7 +37,7 @@ func (c *VCDatastoreColl) createIndex(ctx context.Context) error {
 	indexIdentityLookup := mongo.IndexModel{
 		Keys: bson.D{
 			bson.E{Key: "meta.scope", Value: 1},
-			bson.E{Key: "identities", Value: 1},
+			bson.E{Key: "identity_mapping_ids", Value: 1},
 			bson.E{Key: "meta.authentic_source", Value: 1},
 		},
 		Options: options.Index().SetName("identity_lookup"),
@@ -68,41 +68,13 @@ func (c *VCDatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument)
 	return nil
 }
 
-// IDMappingQuery is the query to get authentic source person id
-type IDMappingQuery struct {
-	AuthenticSource string
-	Identity        *model.Identity
-}
-
-// IDMapping return authentic source person id if any
-func (c *VCDatastoreColl) IDMapping(ctx context.Context, query *IDMappingQuery) (string, error) {
-	filter := bson.M{
-		"meta.authentic_source":  bson.M{"$eq": query.AuthenticSource},
-		"identities.family_name": bson.M{"$eq": query.Identity.FamilyName},
-		"identities.given_name":  bson.M{"$eq": query.Identity.GivenName},
-		"identities.birth_date":  bson.M{"$eq": query.Identity.BirthDate},
-	}
-
-	opts := options.FindOne().SetProjection(bson.M{
-		"identities": 1,
-	})
-	res := &model.CompleteDocument{}
-	if err := c.Coll.FindOne(ctx, filter, opts).Decode(&res); err != nil {
-		return "", err
-	}
-	if len(res.Identities) == 0 {
-		return "", helpers.ErrNoIdentityFound
-	}
-
-	return res.Identities[0], nil
-}
 
 // AddDocumentIdentityQuery is the query to add document identity
 type AddDocumentIdentityQuery struct {
-	AuthenticSource string            `json:"authentic_source" bson:"authentic_source"`
-	Scope           string            `json:"scope" bson:"scope"`
-	DocumentID      string            `json:"document_id" bson:"document_id"`
-	Identities      []*model.Identity `json:"identities" bson:"identities"`
+	AuthenticSource    string            `json:"authentic_source" bson:"authentic_source"`
+	Scope              string            `json:"scope" bson:"scope"`
+	DocumentID         string            `json:"document_id" bson:"document_id"`
+	IdentityMappingIDs []*model.Identity `json:"identity_mapping_ids" bson:"identity_mapping_ids"`
 }
 
 // AddDocumentIdentity adds document identity
@@ -114,7 +86,7 @@ func (c *VCDatastoreColl) AddDocumentIdentity(ctx context.Context, query *AddDoc
 	}
 
 	// This needs to make sure no duplicate authentic_source_person_id is added in the future
-	update := bson.M{"$addToSet": bson.M{"identities": bson.M{"$each": query.Identities}}}
+	update := bson.M{"$addToSet": bson.M{"identity_mapping_ids": bson.M{"$each": query.IdentityMappingIDs}}}
 
 	result, err := c.Coll.UpdateOne(ctx, filter, update)
 	if err != nil {
@@ -142,7 +114,7 @@ func (c *VCDatastoreColl) DeleteDocumentIdentity(ctx context.Context, query *Del
 		"meta.document_id":      bson.M{"$eq": query.DocumentID},
 	}
 
-	update := bson.M{"$pull": bson.M{"identities": query.AuthenticSourcePersonID}}
+	update := bson.M{"$pull": bson.M{"identity_mapping_ids": query.AuthenticSourcePersonID}}
 	_, err := c.Coll.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err
@@ -254,11 +226,11 @@ func (c *VCDatastoreColl) DocumentList(ctx context.Context, query *DocumentListQ
 	}
 
 	if query.Identity.AuthenticSourcePersonID != "" {
-		filter["identities.authentic_source_person_id"] = bson.M{"$eq": query.Identity.AuthenticSourcePersonID}
+		filter["identity_mapping_ids.authentic_source_person_id"] = bson.M{"$eq": query.Identity.AuthenticSourcePersonID}
 	} else {
-		filter["identities.family_name"] = bson.M{"$eq": query.Identity.FamilyName}
-		filter["identities.given_name"] = bson.M{"$eq": query.Identity.GivenName}
-		filter["identities.birth_date"] = bson.M{"$eq": query.Identity.BirthDate}
+		filter["identity_mapping_ids.family_name"] = bson.M{"$eq": query.Identity.FamilyName}
+		filter["identity_mapping_ids.given_name"] = bson.M{"$eq": query.Identity.GivenName}
+		filter["identity_mapping_ids.birth_date"] = bson.M{"$eq": query.Identity.BirthDate}
 	}
 
 	cursor, err := c.Coll.Find(ctx, filter)
@@ -427,7 +399,7 @@ func buildSearchDocumentsFilter(query *SearchDocumentsQuery) bson.M {
 		identityConditions["birth_place"] = query.BirthPlace
 	}
 	if len(identityConditions) > 0 {
-		filter["identities"] = bson.M{
+		filter["identity_mapping_ids"] = bson.M{
 			"$elemMatch": identityConditions,
 		}
 	}
@@ -503,4 +475,3 @@ func (c *VCDatastoreColl) ListDocumentsByIdentifier(ctx context.Context, identif
 
 	return res, nil
 }
-

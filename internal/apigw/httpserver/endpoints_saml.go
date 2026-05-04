@@ -204,30 +204,8 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 
 		if authCtx.DataSource == string(model.DataSourceExternalAPI) {
-			// External API: extract person identifier from claims for later API lookup.
-			// The actual credential data will be fetched from the remote in the consent endpoint.
-			personID, _ := claims["person_id"].(string)
-			if personID == "" {
-				// Fall back to subject identifier from assertion attributes
-				for _, key := range []string{"subject", "uid", "eppn", "eduPersonPrincipalName"} {
-					if v, ok := assertion.Attributes[key]; ok && len(v) > 0 {
-						personID = v[0]
-						break
-					}
-				}
-			}
-			if personID == "" {
-				span.SetStatus(codes.Error, "person_id not found in SAML assertion")
-				return nil, fmt.Errorf("external API flow requires person identifier but none found in SAML assertion")
-			}
-
-			authCtx.Identifier = personID
-			if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
-				span.SetStatus(codes.Error, "failed to store identifier")
-				return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
-			}
-			s.log.Info("SAML ACS: stored identifier for external API flow",
-				"vci_session_id", session.VCISessionID, "identifier", personID)
+			// External API: identifier will be resolved by the common
+			// ResolveIdentifier call below (authentic_source_person_id or identity mapping).
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
@@ -254,15 +232,13 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 
 		// Resolve the authenticated identifier for registry (applies to all flows).
-		// External API flow already set Identifier; otherwise resolve from claims
-		// (either a direct identifier claim or via identity mapping).
 		if authCtx.Identifier == "" {
-			identifier, resolveErr := s.apiv1.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+			var resolveErr error
+			authCtx.Identifier, resolveErr = s.apiv1.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
 			if resolveErr != nil {
 				span.SetStatus(codes.Error, "identifier resolution failed")
 				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
 			}
-			authCtx.Identifier = identifier
 		}
 		if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
 			span.SetStatus(codes.Error, "failed to store identifier")

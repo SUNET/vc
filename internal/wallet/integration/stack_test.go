@@ -39,7 +39,9 @@ import (
 	"github.com/SUNET/vc/internal/wallet/apiv1"
 	"github.com/SUNET/vc/internal/wallet/config"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -49,14 +51,14 @@ import (
 
 // Stack service addresses (Docker bridge IPs on vc-dev-net)
 var (
-	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")    // NOSONAR
-	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080") // NOSONAR
-	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "https://172.16.50.13:8080")  // NOSONAR
+	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")     // NOSONAR
+	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080")  // NOSONAR
+	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "https://172.16.50.13:8080")   // NOSONAR
 	mockOIDCURL = envOrDefault("STACK_MOCK_OIDC_URL", "http://172.16.50.30:8080") // NOSONAR
 
 	// The public URLs the services use for self-referencing
-	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "https://apigw.vc.docker:8080")       // NOSONAR
-	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "https://verifier.vc.docker:8080") // NOSONAR
+	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "https://apigw.vc.docker:8080")          // NOSONAR
+	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "https://verifier.vc.docker:8080")    // NOSONAR
 	mockOIDCPublicURL = envOrDefault("STACK_MOCK_OIDC_PUBLIC_URL", "http://mock-oauth2.vc.docker:8080") // NOSONAR
 
 	// tlsTransport is a shared TLS transport that trusts the dev rootCA.
@@ -302,43 +304,28 @@ func TestStack_VCI_Nonce(t *testing.T) {
 // ---------- VCI: Upload + Credential Offer ----------
 
 // seedDocument uploads a document directly to apigw and returns identifiers.
-func seedDocument(t *testing.T, vct, scope, personID, givenName, familyName, birthDate string) (documentID, collectID, authenticSource string) {
+func seedDocument(t *testing.T, scope, identityMappingID, givenName, familyName, birthDate string) (documentID, authenticSource string) {
 	t.Helper()
 	docID := "doc-" + uuid.New().String()[:8]
-	colID := "col-" + uuid.New().String()[:8]
 
-	body, _ := json.Marshal(map[string]any{
-		"meta": map[string]any{
-			"authentic_source": "test_as",
-			"document_version": "1.0.0",
-			"vct":              vct,
-			"scope":            scope,
-			"document_id":      docID,
-			"collect": map[string]any{
-				"id": colID,
-			},
+	req := &vcclient.UploadRequest{
+		Meta: &model.MetaData{
+			AuthenticSource: "test_as",
+			Scope:           scope,
+			DocumentID:      docID,
 		},
-		"identities": []map[string]any{
-			{
-				"authentic_source_person_id": personID,
-				"given_name":                 givenName,
-				"family_name":                familyName,
-				"birth_date":                 birthDate,
-				"schema": map[string]any{
-					"name":    "SE",
-					"version": "1.0.0",
-				},
-			},
-		},
-		"document_data": map[string]any{
+		IdentityMappingIDs: []string{identityMappingID},
+		DocumentData: map[string]any{
 			"given_name":        givenName,
 			"family_name":       familyName,
 			"birth_date":        birthDate,
 			"issuing_country":   "SE",
 			"issuing_authority": "Test Authority",
 		},
-		"document_data_version": "1.0.0",
-	})
+	}
+
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
 
 	resp, err := http.Post(apigwURL+"/api/v1/upload", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
@@ -346,18 +333,20 @@ func seedDocument(t *testing.T, vct, scope, personID, givenName, familyName, bir
 	respBody, _ := io.ReadAll(resp.Body)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "upload failed: %s", string(respBody))
 
-	t.Logf("upload OK: document_id=%s collect_id=%s vct=%s scope=%s", docID, colID, vct, scope)
-	return docID, colID, "test_as"
+	t.Logf("upload OK: document_id=%s scope=%s", docID, scope)
+	return docID, "test_as"
 }
 
 // getCredentialOfferURL retrieves the credential_offer_url for a document via the notification endpoint.
-func getCredentialOfferURL(t *testing.T, authenticSource, vct, documentID string) string {
+func getCredentialOfferURL(t *testing.T, authenticSource, scope, documentID string) string {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{
-		"authentic_source": authenticSource,
-		"vct":              vct,
-		"document_id":      documentID,
-	})
+	req := &vcclient.NotificationRequest{
+		AuthenticSource: authenticSource,
+		Scope:           scope,
+		DocumentID:      documentID,
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
 
 	resp, err := http.Post(apigwURL+"/api/v1/notification", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
@@ -378,11 +367,11 @@ func getCredentialOfferURL(t *testing.T, authenticSource, vct, documentID string
 }
 
 func TestStack_VCI_MockNextAndOffer(t *testing.T) {
-	docID, _, authSource := seedDocument(t,
-		"urn:eudi:pid:arf-1.5:1", "pid_1_5", "person-"+uuid.New().String()[:8],
+	docID, authSource := seedDocument(t,
+		"pid_1_5", "im-"+uuid.New().String()[:8],
 		"Test", "Walker", "1990-01-15")
 
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
+	offerURL := getCredentialOfferURL(t, authSource, "pid_1_5", docID)
 
 	// Parse the credential_offer from the URL
 	parsed, err := url.Parse(offerURL)
@@ -440,16 +429,16 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 	// 5. Token request with DPoP
 	// 6. Credential request with DPoP
 
-	personID := "person-" + uuid.New().String()[:8]
+	identityMappingID := "im-" + uuid.New().String()[:8]
 	givenName := "TestVCI"
 	familyName := "FullFlow"
 	birthDate := "1990-05-20"
 
 	// Step 1: Seed data
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
+	docID, authSource := seedDocument(t, "pid_1_5", identityMappingID, givenName, familyName, birthDate)
 
 	// Step 2: Get credential offer
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
+	offerURL := getCredentialOfferURL(t, authSource, "pid_1_5", docID)
 	parsed, err := url.Parse(offerURL)
 	require.NoError(t, err)
 	offerJSON := parsed.Query().Get("credential_offer")
@@ -491,9 +480,9 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 
 	// Step 5: Authorization + consent flow (session-based)
 	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
-		"given_name": givenName,
+		"given_name":  givenName,
 		"family_name": familyName,
-		"birth_date": birthDate,
+		"birth_date":  birthDate,
 	})
 	require.NotEmpty(t, authCode, "authorization code must not be empty")
 	t.Logf("authorization_code=%s", authCode)
@@ -522,13 +511,13 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 func TestStack_VCI_WalletClient(t *testing.T) {
 	// Tests the wallet apiv1.Client against the real stack.
 	// Uses the same seed + consent flow but drives through the wallet's Client.
-	personID := "person-" + uuid.New().String()[:8]
+	identityMappingID := "im-" + uuid.New().String()[:8]
 	givenName := "TestWallet"
 	familyName := "Client"
 	birthDate := "1985-03-12"
 
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
+	docID, authSource := seedDocument(t, "pid_1_5", identityMappingID, givenName, familyName, birthDate)
+	offerURL := getCredentialOfferURL(t, authSource, "pid_1_5", docID)
 
 	// Parse offer to get issuer_state
 	parsed, err := url.Parse(offerURL)
@@ -564,9 +553,9 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
 	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
-		"given_name": givenName,
+		"given_name":  givenName,
 		"family_name": familyName,
-		"birth_date": birthDate,
+		"birth_date":  birthDate,
 	})
 	require.NotEmpty(t, authCode)
 
@@ -606,9 +595,9 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 // and returns the code, the code verifier, and the signing key used.
 func getAuthCodeForNegativeTests(t *testing.T) (authCode, codeVerifier string, signingKey *ecdsa.PrivateKey) {
 	t.Helper()
-	personID := "neg-" + uuid.New().String()[:8]
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, "NegTest", "Security", "1985-03-15")
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
+	identityMappingID := "neg-" + uuid.New().String()[:8]
+	docID, authSource := seedDocument(t, "pid_1_5", identityMappingID, "NegTest", "Security", "1985-03-15")
+	offerURL := getCredentialOfferURL(t, authSource, "pid_1_5", docID)
 
 	parsed, err := url.Parse(offerURL)
 	require.NoError(t, err)
@@ -639,9 +628,9 @@ func getAuthCodeForNegativeTests(t *testing.T) (authCode, codeVerifier string, s
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
 	code := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
-		"given_name": "NegTest",
+		"given_name":  "NegTest",
 		"family_name": "Security",
-		"birth_date": "1985-03-15",
+		"birth_date":  "1985-03-15",
 	})
 	require.NotEmpty(t, code, "auth code for negative tests")
 
@@ -1039,14 +1028,14 @@ func TestStack_VP_DirectPost(t *testing.T) {
 
 func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	// Full end-to-end: Issue a real credential via VCI, then present it via VP.
-	personID := "person-" + uuid.New().String()[:8]
+	identityMappingID := "im-" + uuid.New().String()[:8]
 	givenName := "TestE2E"
 	familyName := "Runner"
 	birthDate := "1992-07-04"
 
 	// VCI: Seed + offer + PAR + consent + token + credential
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
+	docID, authSource := seedDocument(t, "pid_1_5", identityMappingID, givenName, familyName, birthDate)
+	offerURL := getCredentialOfferURL(t, authSource, "pid_1_5", docID)
 
 	parsed, err := url.Parse(offerURL)
 	require.NoError(t, err)

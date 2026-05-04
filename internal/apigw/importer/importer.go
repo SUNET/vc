@@ -57,9 +57,9 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 		docs = make(map[string]*model.CompleteDocument, len(reqs))
 		for id, req := range reqs {
 			docs[id] = &model.CompleteDocument{
-				Meta:         req.Meta,
-				Identities:   req.Identities,
-				DocumentData: req.DocumentData,
+				Meta:               req.Meta,
+				IdentityMappingIDs: req.IdentityMappingIDs,
+				DocumentData:       req.DocumentData,
 			}
 		}
 	}

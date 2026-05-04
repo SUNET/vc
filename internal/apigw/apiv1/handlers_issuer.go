@@ -19,20 +19,15 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
-// identifierClaims is the ordered list of claim names checked for a direct identifier.
-var identifierClaims = []string{"sub", "person_id", "authentic_source_person_id", "personal_administrative_number"}
-
 // ResolveIdentifier resolves an identifier string from authentication claims.
-// It first checks for a direct identifier claim (sub, person_id, etc.).
+// It first checks for an explicit authentic_source_person_id claim.
 // If none is found, it attempts an identity mapping lookup using the available
 // attributes against the configured authentic source.
 func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error) {
-	// Path 1: direct identifier from claims
-	for _, key := range identifierClaims {
-		if v, ok := claims[key].(string); ok && v != "" {
-			c.log.Debug("ResolveIdentifier: direct identifier found", "claim", key, "value", v)
-			return v, nil
-		}
+	// Path 1: explicit identifier from claims
+	if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
+		c.log.Debug("ResolveIdentifier: direct identifier found", "value", v)
+		return v, nil
 	}
 
 	// Path 2: resolve from attributes via identity mapping
@@ -46,7 +41,7 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 		return "", errors.New("no identifier claim or identity attributes found in claims")
 	}
 
-	personID, err := c.identityStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
+	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
 		AuthenticSource: authenticSource,
 		Attributes:      attrs,
 	})

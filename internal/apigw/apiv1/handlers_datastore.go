@@ -78,10 +78,10 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	}
 
 	upload := &model.CompleteDocument{
-		Meta:         req.Meta,
-		DocumentData: req.DocumentData,
-		Identities:   req.Identities,
-		QR:           qr,
+		Meta:               req.Meta,
+		DocumentData:       req.DocumentData,
+		IdentityMappingIDs: req.IdentityMappingIDs,
+		QR:                 qr,
 	}
 
 	if err := helpers.ValidateDocumentData(ctx, upload, c.log); err != nil {
@@ -112,6 +112,7 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
 	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
 		DocumentID:      req.DocumentID,
 	})
 	if err != nil {
@@ -124,48 +125,6 @@ func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationReq
 	return reply, nil
 }
 
-// IdentityMappingRequest is the request for IDMapping
-type IdentityMappingRequest struct {
-	// required: true
-	// example: SUNET
-	AuthenticSource string          `json:"authentic_source" validate:"required,max=128,printascii"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
-}
-
-// IdentityMappingReply is the reply for a IDMapping
-type IdentityMappingReply struct {
-	Data *model.IDMapping `json:"data"`
-}
-
-// IdentityMapping return a mapping between PID and AuthenticSource
-//
-//	@Summary		IdentityMapping
-//	@ID				identity-mapping
-//	@Description	Identity mapping endpoint
-//	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
-//	@Success		200	{object}	IdentityMappingReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		IdentityMappingRequest	true	" "
-//	@Router			/identity/mapping [post]
-func (c *Client) IdentityMapping(ctx context.Context, reg *IdentityMappingRequest) (*IdentityMappingReply, error) {
-	authenticSourcePersonID, err := c.datastoreStore.IDMapping(ctx, &db.IDMappingQuery{
-		AuthenticSource: reg.AuthenticSource,
-		Identity:        reg.Identity,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &IdentityMappingReply{
-		Data: &model.IDMapping{
-			AuthenticSourcePersonID: authenticSourcePersonID,
-		},
-	}
-
-	return reply, nil
-}
 
 // AddDocumentIdentityRequest is the request for DocumentIdentity
 type AddDocumentIdentityRequest struct {
@@ -181,14 +140,14 @@ type AddDocumentIdentityRequest struct {
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
 	DocumentID string `json:"document_id" validate:"required"`
 
-	Identities []*model.Identity `json:"identities" validate:"required"`
+	IdentityMappingIDs []*model.Identity `json:"identity_mapping_ids" validate:"required"`
 }
 
 // AddDocumentIdentity adds an identity to a document
 //
 //	@Summary		AddDocumentIdentity
 //	@ID				add-document-identity
-//	@Description	Adding array of identities to one document
+//	@Description	Adding array of identity mapping IDs to one document
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
@@ -198,10 +157,10 @@ type AddDocumentIdentityRequest struct {
 //	@Router			/document/identity [put]
 func (c *Client) AddDocumentIdentity(ctx context.Context, req *AddDocumentIdentityRequest) error {
 	err := c.datastoreStore.AddDocumentIdentity(ctx, &db.AddDocumentIdentityQuery{
-		AuthenticSource: req.AuthenticSource,
-		Scope:           req.Scope,
-		DocumentID:      req.DocumentID,
-		Identities:      req.Identities,
+		AuthenticSource:    req.AuthenticSource,
+		Scope:              req.Scope,
+		DocumentID:         req.DocumentID,
+		IdentityMappingIDs: req.IdentityMappingIDs,
 	})
 	if err != nil {
 		return err
@@ -244,6 +203,7 @@ type DeleteDocumentIdentityRequest struct {
 func (c *Client) DeleteDocumentIdentity(ctx context.Context, req *DeleteDocumentIdentityRequest) error {
 	err := c.datastoreStore.DeleteDocumentIdentity(ctx, &db.DeleteDocumentIdentityQuery{
 		AuthenticSource:         req.AuthenticSource,
+		Scope:                   req.Scope,
 		DocumentID:              req.DocumentID,
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
 	})
@@ -284,6 +244,7 @@ type DeleteDocumentRequest struct {
 func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest) error {
 	err := c.datastoreStore.Delete(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
 		DocumentID:      req.DocumentID,
 	})
 	if err != nil {
@@ -321,6 +282,7 @@ func (c *Client) GetDocument(ctx context.Context, req *GetDocumentRequest) (*Get
 	query := &db.GetDocumentQuery{
 		Meta: &model.MetaData{
 			AuthenticSource: req.AuthenticSource,
+			Scope:           req.Scope,
 			DocumentID:      req.DocumentID,
 		},
 	}

@@ -172,20 +172,8 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 
 		if authCtx.DataSource == string(model.DataSourceExternalAPI) {
-			// External API: extract person identifier for later API lookup.
-			personID, _ := authResp.Claims["sub"].(string)
-			if personID == "" {
-				span.SetStatus(codes.Error, "person_id not found in OIDC claims")
-				return nil, fmt.Errorf("external API flow requires person identifier but sub claim is empty")
-			}
-
-			authCtx.Identifier = personID
-			if updateErr := c.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
-				span.SetStatus(codes.Error, "failed to store identifier")
-				return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
-			}
-			c.log.Info("OIDC callback: stored identifier for external API flow",
-				"vci_session_id", session.VCISessionID, "identifier", personID)
+			// External API: identifier will be resolved by the common
+			// ResolveIdentifier call below (authentic_source_person_id or identity mapping).
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
@@ -212,15 +200,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 
 		// Resolve the authenticated identifier for registry (applies to all flows).
-		// External API flow already set Identifier; otherwise resolve from claims
-		// (either a direct identifier claim or via identity mapping).
 		if authCtx.Identifier == "" {
-			identifier, resolveErr := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+			var resolveErr error
+			authCtx.Identifier, resolveErr = c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
 			if resolveErr != nil {
 				span.SetStatus(codes.Error, "identifier resolution failed")
 				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
 			}
-			authCtx.Identifier = identifier
 		}
 		if updateErr := c.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
 			span.SetStatus(codes.Error, "failed to store identifier")

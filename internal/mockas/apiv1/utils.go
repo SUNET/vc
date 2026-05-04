@@ -21,9 +21,9 @@ func (p *person) new() {
 }
 
 type uploadMock struct {
-	Meta         *model.MetaData `json:"meta" validate:"required"`
-	Identities   []string        `json:"identities,omitempty"`
-	DocumentData map[string]any  `json:"document_data" validate:"required"`
+	Meta               *model.MetaData `json:"meta" validate:"required"`
+	IdentityMappingIDs []string        `json:"identity_mapping_ids,omitempty"`
+	DocumentData       map[string]any  `json:"document_data" validate:"required"`
 }
 
 func (c *Client) mockOne(ctx context.Context, data *vcclient.MockNextRequest) (*uploadMock, error) {
@@ -65,6 +65,7 @@ func (c *Client) mockOne(ctx context.Context, data *vcclient.MockNextRequest) (*
 
 	meta := &model.MetaData{
 		AuthenticSource: data.AuthenticSource,
+		Scope:           data.Scope,
 		DocumentID:      data.DocumentID,
 	}
 
@@ -73,35 +74,30 @@ func (c *Client) mockOne(ctx context.Context, data *vcclient.MockNextRequest) (*
 	}
 
 	mockUpload := &uploadMock{
-		Meta:       meta,
-		Identities: identities,
+		Meta:               meta,
+		IdentityMappingIDs: identities,
 	}
 
 	var err error
-	switch data.VCT {
-	case model.CredentialTypeUrnEudiPda11:
-		mockUpload.Meta.Scope = "pda1"
+	switch data.Scope {
+	case "pda1":
 		mockUpload.DocumentData, err = c.PDA1.random(ctx, person)
 		if err != nil {
 			return nil, err
 		}
 		mockUpload.Meta.DocumentDataValidationRef = "file://../../standards/schema_pda1.json"
-	case model.CredentialTypeUrnEudiEhic1:
-		mockUpload.Meta.Scope = "ehic"
+	case "ehic":
 		mockUpload.DocumentData, err = c.EHIC.random(ctx, person)
 		if err != nil {
 			return nil, err
 		}
 		mockUpload.Meta.DocumentDataValidationRef = "file://../../standards/schema_ehic.json"
-	case model.CredentialTypeUrnEudiPid1:
-		mockUpload.Meta.Scope = "pid"
+	case "pid", "pid_1_5", "pid_1_8":
 		mockUpload.DocumentData, err = c.PID.random(ctx, person)
 		if err != nil {
 			return nil, err
 		}
-
-	case model.CredentialTypeUrnEudiElm1:
-		mockUpload.Meta.Scope = "elm"
+	case "elm":
 		mockUpload.DocumentData, err = c.ELM.random(ctx, person)
 		if err != nil {
 			return nil, err

@@ -20,7 +20,6 @@ type Apiv1 interface {
 	Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
 	AddDocumentIdentity(ctx context.Context, req *apiv1.AddDocumentIdentityRequest) error
 	DeleteDocumentIdentity(ctx context.Context, req *apiv1.DeleteDocumentIdentityRequest) error
-	IdentityMapping(ctx context.Context, reg *apiv1.IdentityMappingRequest) (*apiv1.IdentityMappingReply, error)
 	GetDocument(ctx context.Context, req *apiv1.GetDocumentRequest) (*apiv1.GetDocumentReply, error)
 	DocumentList(ctx context.Context, req *apiv1.DocumentListRequest) (*apiv1.DocumentListReply, error)
 	DeleteDocument(ctx context.Context, req *apiv1.DeleteDocumentRequest) error

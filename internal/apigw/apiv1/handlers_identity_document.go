@@ -11,10 +11,9 @@ import (
 
 // CreateIdentityMappingRequest is the request for creating an identity mapping
 type CreateIdentityMappingRequest struct {
-	AuthenticSource         string          `json:"authentic_source" validate:"required,max=128,printascii"`
-	AuthenticSourcePersonID string          `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
-	Identity                *model.Identity `json:"identity,omitempty"`
-	Attributes              map[string]any  `json:"attributes,omitempty"`
+	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSourcePersonID string         `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
+	Attributes              map[string]any `json:"attributes,omitempty"`
 }
 
 // CreateIdentityMappingReply is the reply containing the identifier
@@ -32,11 +31,10 @@ func (c *Client) CreateIdentityMapping(ctx context.Context, req *CreateIdentityM
 	mapping := &model.IdentityMapping{
 		AuthenticSourcePersonID: identifier,
 		AuthenticSource:         req.AuthenticSource,
-		Identity:                req.Identity,
 		Attributes:              req.Attributes,
 	}
 
-	if err := c.identityStore.CreateMapping(ctx, mapping); err != nil {
+	if err := c.identityMappingStore.CreateMapping(ctx, mapping); err != nil {
 		return nil, err
 	}
 
@@ -60,7 +58,7 @@ type ResolveIdentityMappingReply struct {
 
 // ResolveIdentityMapping resolves attributes to an authentic_source_person_id
 func (c *Client) ResolveIdentityMapping(ctx context.Context, req *ResolveIdentityMappingRequest) (*ResolveIdentityMappingReply, error) {
-	personID, err := c.identityStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
+	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
 		AuthenticSource: req.AuthenticSource,
 		Attributes:      req.Attributes,
 	})
@@ -75,10 +73,9 @@ func (c *Client) ResolveIdentityMapping(ctx context.Context, req *ResolveIdentit
 
 // UpdateIdentityMappingRequest is the request for updating an identity mapping
 type UpdateIdentityMappingRequest struct {
-	AuthenticSource         string          `json:"authentic_source" validate:"required,max=128,printascii"`
-	AuthenticSourcePersonID string          `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
-	Identity                *model.Identity `json:"identity,omitempty"`
-	Attributes              map[string]any  `json:"attributes,omitempty"`
+	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSourcePersonID string         `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
+	Attributes              map[string]any `json:"attributes,omitempty"`
 }
 
 // UpdateIdentityMapping updates an existing identity mapping
@@ -86,11 +83,10 @@ func (c *Client) UpdateIdentityMapping(ctx context.Context, req *UpdateIdentityM
 	mapping := &model.IdentityMapping{
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
 		AuthenticSource:         req.AuthenticSource,
-		Identity:                req.Identity,
 		Attributes:              req.Attributes,
 	}
 
-	return c.identityStore.UpdateMapping(ctx, mapping)
+	return c.identityMappingStore.UpdateMapping(ctx, mapping)
 }
 
 // DeleteIdentityMappingRequest is the request for deleting an identity mapping
@@ -101,7 +97,7 @@ type DeleteIdentityMappingRequest struct {
 
 // DeleteIdentityMapping deletes an identity mapping
 func (c *Client) DeleteIdentityMapping(ctx context.Context, req *DeleteIdentityMappingRequest) error {
-	return c.identityStore.DeleteMapping(ctx, &db.DeleteMappingQuery{
+	return c.identityMappingStore.DeleteMapping(ctx, &db.DeleteMappingQuery{
 		AuthenticSource:         req.AuthenticSource,
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
 	})
@@ -109,9 +105,9 @@ func (c *Client) DeleteIdentityMapping(ctx context.Context, req *DeleteIdentityM
 
 // UploadDocumentRequest is the request for uploading a document (new simplified API)
 type UploadDocumentRequest struct {
-	Meta         *model.MetaData `json:"meta" validate:"required"`
-	Identities   []string        `json:"identities"`
-	DocumentData map[string]any  `json:"document_data" validate:"required"`
+	Meta               *model.MetaData `json:"meta" validate:"required"`
+	IdentityMappingIDs []string        `json:"identity_mapping_ids"`
+	DocumentData       map[string]any  `json:"document_data" validate:"required"`
 }
 
 // UploadDocumentReply is the reply after uploading a document
@@ -125,14 +121,14 @@ func (c *Client) UploadDocument(ctx context.Context, req *UploadDocumentRequest)
 		req.Meta.DocumentID = uuid.New().String()
 	}
 
-	if req.Identities == nil {
-		req.Identities = []string{}
+	if req.IdentityMappingIDs == nil {
+		req.IdentityMappingIDs = []string{}
 	}
 
 	doc := &model.CompleteDocument{
-		Meta:         req.Meta,
-		Identities:   req.Identities,
-		DocumentData: req.DocumentData,
+		Meta:               req.Meta,
+		IdentityMappingIDs: req.IdentityMappingIDs,
+		DocumentData:       req.DocumentData,
 	}
 
 	if err := c.datastoreStore.Save(ctx, doc); err != nil {
@@ -205,7 +201,7 @@ type ResolveDocumentReply struct {
 // ResolveDocument resolves identity attributes and returns matching documents
 func (c *Client) ResolveDocument(ctx context.Context, req *ResolveDocumentRequest) (*ResolveDocumentReply, error) {
 	// Step 1: Resolve attributes to an identifier
-	personID, err := c.identityStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
+	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
 		AuthenticSource: req.AuthenticSource,
 		Attributes:      req.Attributes,
 	})

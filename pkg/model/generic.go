@@ -9,10 +9,10 @@ import (
 
 // CompleteDocument is a generic type for upload
 type CompleteDocument struct {
-	Meta         *MetaData        `json:"meta,omitempty" bson:"meta" validate:"required"`
-	Identities   []string         `json:"identities,omitempty" bson:"identities" validate:"required,min=1"`
-	DocumentData map[string]any   `json:"document_data,omitempty" bson:"document_data" validate:"required"`
-	QR           *openid4vci.QR   `json:"qr,omitempty" bson:"qr"`
+	Meta               *MetaData      `json:"meta,omitempty" bson:"meta" validate:"required"`
+	IdentityMappingIDs []string       `json:"identity_mapping_ids,omitempty" bson:"identity_mapping_ids" validate:"required,min=1"`
+	DocumentData       map[string]any `json:"document_data,omitempty" bson:"document_data" validate:"required"`
+	QR                 *openid4vci.QR `json:"qr,omitempty" bson:"qr"`
 }
 
 // DocumentList is a generic type for document list
@@ -164,26 +164,6 @@ type Identity struct {
 	// required: false
 	// example:
 	IssuingJurisdiction string `json:"issuing_jurisdiction,omitempty" bson:"issuing_jurisdiction,omitempty" validate:"omitempty,max=128,printascii"`
-
-	TrustAnchor string `json:"trust_anchor,omitempty" bson:"trust_anchor,omitempty" validate:"omitempty,max=128,printascii"`
-}
-
-// ToMap returns the non-empty identity fields relevant for resolution as a map.
-func (i *Identity) ToMap() map[string]any {
-	m := make(map[string]any)
-	if i.FamilyName != "" {
-		m["family_name"] = i.FamilyName
-	}
-	if i.GivenName != "" {
-		m["given_name"] = i.GivenName
-	}
-	if i.BirthDate != "" {
-		m["birth_date"] = i.BirthDate
-	}
-	if i.PersonalAdministrativeNumber != "" {
-		m["personal_administrative_number"] = i.PersonalAdministrativeNumber
-	}
-	return m
 }
 
 // isLeapYear checks if a year is a leap year

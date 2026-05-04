@@ -1065,7 +1065,7 @@ function buildDocumentTableRow(doc) {
 
     const tdASPersonId = document.createElement('td');
     const aspidStringBuilder = [];
-    doc.identities.forEach(identity => {
+    doc.identity_mapping_ids.forEach(identity => {
         aspidStringBuilder.push(identity.authentic_source_person_id || "");
     });
     tdASPersonId.innerHTML = aspidStringBuilder.join("<br>");
@@ -1073,7 +1073,7 @@ function buildDocumentTableRow(doc) {
 
     const tdFamilyName = document.createElement('td');
     const fnStringBuilder = [];
-    doc.identities.forEach(identity => {
+    doc.identity_mapping_ids.forEach(identity => {
         fnStringBuilder.push(identity.family_name || "");
     });
     tdFamilyName.innerHTML = fnStringBuilder.join("<br>");
@@ -1081,7 +1081,7 @@ function buildDocumentTableRow(doc) {
 
     const tdGivenName = document.createElement('td');
     const gnStringBuilder = [];
-    doc.identities.forEach(identity => {
+    doc.identity_mapping_ids.forEach(identity => {
         gnStringBuilder.push(identity.given_name || "");
     });
     tdGivenName.innerHTML = gnStringBuilder.join("<br>");
@@ -1089,7 +1089,7 @@ function buildDocumentTableRow(doc) {
 
     const tdBirthDate = document.createElement('td');
     const bdStringBuilder = [];
-    doc.identities.forEach(identity => {
+    doc.identity_mapping_ids.forEach(identity => {
         bdStringBuilder.push(identity.birth_date || "");
     });
     tdBirthDate.innerHTML = bdStringBuilder.join("<br>");
@@ -1097,7 +1097,7 @@ function buildDocumentTableRow(doc) {
 
     const tdBirthplace = document.createElement('td');
     const bpStringBuilder = [];
-    doc.identities.forEach(identity => {
+    doc.identity_mapping_ids.forEach(identity => {
         bpStringBuilder.push(identity.birth_place || "");
     });
     tdBirthplace.innerHTML = bpStringBuilder.join("<br>");
@@ -1105,7 +1105,7 @@ function buildDocumentTableRow(doc) {
 
     const tdNationality = document.createElement('td');
     const natStringBuilder = [];
-    doc.identities.forEach(identity => {
+    doc.identity_mapping_ids.forEach(identity => {
         if (identity.nationality != null) {
             identity.nationality.forEach(countryCode => {
                 natStringBuilder.push(countryCode || "");
@@ -1125,11 +1125,11 @@ function buildDocumentTableRow(doc) {
         authenticSource: authenticSource,
         vct: vct,
         collectId: collectId,
-        firstIdentityAuthenticSourcePersonId: doc.identities[0].authentic_source_person_id,
-        firstIdentitySchemaName: doc.identities[0].schema.name,
-        family_name: doc.identities[0].family_name,
-        given_name: doc.identities[0].given_name,
-        birth_date: doc.identities[0].birth_date,
+        firstIdentityAuthenticSourcePersonId: doc.identity_mapping_ids[0].authentic_source_person_id,
+        firstIdentitySchemaName: doc.identity_mapping_ids[0].schema.name,
+        family_name: doc.identity_mapping_ids[0].family_name,
+        given_name: doc.identity_mapping_ids[0].given_name,
+        birth_date: doc.identity_mapping_ids[0].birth_date,
     };
 
     select.addEventListener('change', function () {

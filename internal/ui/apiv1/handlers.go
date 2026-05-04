@@ -148,4 +148,3 @@ func (c *Client) DeleteDocument(ctx context.Context, req *vcclient.DocumentDelet
 	}
 	return nil
 }
-

@@ -20,9 +20,9 @@ type rootHandler struct {
 }
 
 type UploadRequest struct {
-	Meta         *model.MetaData `json:"meta" validate:"required"`
-	Identities   []string        `json:"identities,omitempty"`
-	DocumentData map[string]any  `json:"document_data" validate:"required"`
+	Meta               *model.MetaData `json:"meta" validate:"required"`
+	IdentityMappingIDs []string        `json:"identity_mapping_ids,omitempty"`
+	DocumentData       map[string]any  `json:"document_data" validate:"required"`
 }
 
 func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Response, error) {
@@ -45,7 +45,7 @@ func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Re
 // NotificationRequest is the request for Notification
 type NotificationRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
+	Scope           string `json:"scope" validate:"required"`
 	DocumentID      string `json:"document_id" validate:"required"`
 }
 

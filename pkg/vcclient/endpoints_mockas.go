@@ -44,7 +44,7 @@ func (s *mockasRootHandler) Health(ctx context.Context) (*apiv1_status.StatusRep
 
 // MockNextRequest is the request for MockNext
 type MockNextRequest struct {
-	VCT                     string `json:"vct"`
+	Scope                   string `json:"scope"`
 	DocumentID              string `json:"document_id"`
 	AuthenticSource         string `json:"authentic_source"`
 	AuthenticSourcePersonID string `json:"authentic_source_person_id"`

@@ -314,7 +314,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 				"given_name":  "John",
 				"family_name": "Doe",
 			},
-			Identities: []string{"test-identity-123"},
+			IdentityMappingIDs: []string{"test-identity-123"},
 		},
 	}
 

@@ -13,14 +13,14 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-// VCIdentitiesColl is the collection for identity mappings
-type VCIdentitiesColl struct {
+// VCIdentityMappingsColl is the collection for identity mappings
+type VCIdentityMappingsColl struct {
 	Service *Service
 	Coll    *mongo.Collection
 	log     *logger.Log
 }
 
-func (c *VCIdentitiesColl) createIndex(ctx context.Context) error {
+func (c *VCIdentityMappingsColl) createIndex(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createIndex")
 	defer span.End()
 
@@ -40,7 +40,7 @@ func (c *VCIdentitiesColl) createIndex(ctx context.Context) error {
 }
 
 // CreateMapping creates a new identity mapping
-func (c *VCIdentitiesColl) CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
+func (c *VCIdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createMapping")
 	defer span.End()
 
@@ -53,10 +53,14 @@ func (c *VCIdentitiesColl) CreateMapping(ctx context.Context, mapping *model.Ide
 	return nil
 }
 
+// ResolveMappingQuery is the query for resolving attributes to an authentic_source_person_id
+type ResolveMappingQuery struct {
+	AuthenticSource string         `json:"authentic_source"`
+	Attributes      map[string]any `json:"attributes"`
+}
+
 // ResolveMapping resolves identity attributes to an authentic_source_person_id.
-// It queries both typed identity fields (identity.family_name, etc.) and the
-// generic attributes map, using $or to match either location.
-func (c *VCIdentitiesColl) ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error) {
+func (c *VCIdentityMappingsColl) ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:resolveMapping")
 	defer span.End()
 
@@ -65,12 +69,8 @@ func (c *VCIdentitiesColl) ResolveMapping(ctx context.Context, query *ResolveMap
 	}
 
 	for key, value := range query.Attributes {
-		// Match if the value is in the typed identity field OR in the attributes map
 		conditions = append(conditions, bson.M{
-			"$or": []bson.M{
-				{"identity." + key: bson.M{"$eq": value}},
-				{"attributes." + key: bson.M{"$eq": value}},
-			},
+			"attributes." + key: bson.M{"$eq": value},
 		})
 	}
 
@@ -90,21 +90,16 @@ func (c *VCIdentitiesColl) ResolveMapping(ctx context.Context, query *ResolveMap
 }
 
 // UpdateMapping updates the attributes of an existing identity mapping
-func (c *VCIdentitiesColl) UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
+func (c *VCIdentityMappingsColl) UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:updateMapping")
 	defer span.End()
 
 	filter := bson.M{
-		"authentic_source":          bson.M{"$eq": mapping.AuthenticSource},
+		"authentic_source":           bson.M{"$eq": mapping.AuthenticSource},
 		"authentic_source_person_id": bson.M{"$eq": mapping.AuthenticSourcePersonID},
 	}
 
-	setFields := bson.M{"attributes": mapping.Attributes}
-	if mapping.Identity != nil {
-		setFields["identity"] = mapping.Identity
-	}
-
-	update := bson.M{"$set": setFields}
+	update := bson.M{"$set": bson.M{"attributes": mapping.Attributes}}
 
 	result, err := c.Coll.UpdateOne(ctx, filter, update)
 	if err != nil {
@@ -118,13 +113,19 @@ func (c *VCIdentitiesColl) UpdateMapping(ctx context.Context, mapping *model.Ide
 	return nil
 }
 
+// DeleteMappingQuery is the query for deleting an identity mapping
+type DeleteMappingQuery struct {
+	AuthenticSource         string `json:"authentic_source"`
+	AuthenticSourcePersonID string `json:"authentic_source_person_id"`
+}
+
 // DeleteMapping deletes an identity mapping
-func (c *VCIdentitiesColl) DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error {
+func (c *VCIdentityMappingsColl) DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:deleteMapping")
 	defer span.End()
 
 	filter := bson.M{
-		"authentic_source":          bson.M{"$eq": query.AuthenticSource},
+		"authentic_source":           bson.M{"$eq": query.AuthenticSource},
 		"authentic_source_person_id": bson.M{"$eq": query.AuthenticSourcePersonID},
 	}
 

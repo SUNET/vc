@@ -125,7 +125,6 @@ func (s *Service) endpointSearchDocuments(ctx context.Context, c *gin.Context) (
 	return reply, nil
 }
 
-
 func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDeleteDocument")
 	defer span.End()
@@ -141,23 +140,6 @@ func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (a
 		return nil, err
 	}
 	return nil, nil
-}
-
-func (s *Service) endpointIdentityMapping(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIdentityMapping")
-	defer span.End()
-
-	request := &apiv1.IdentityMappingRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	reply, err := s.apiv1.IdentityMapping(ctx, request)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	return reply, nil
 }
 
 func (s *Service) endpointDocumentList(ctx context.Context, c *gin.Context) (any, error) {

@@ -31,9 +31,9 @@ func (c *Client) MockNext(ctx context.Context, inData *vcclient.MockNextRequest)
 
 	reply := &vcclient.MockNextReply{
 		Upload: map[string]any{
-			"meta":          mockUpload.Meta,
-			"identities":    mockUpload.Identities,
-			"document_data": mockUpload.DocumentData,
+			"meta":                 mockUpload.Meta,
+			"identity_mapping_ids": mockUpload.IdentityMappingIDs,
+			"document_data":        mockUpload.DocumentData,
 		},
 	}
 

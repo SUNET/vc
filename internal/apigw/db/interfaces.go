@@ -17,7 +17,6 @@ type CredentialOfferStore interface {
 // DatastoreStore defines the interface for datastore operations
 type DatastoreStore interface {
 	Save(ctx context.Context, doc *model.CompleteDocument) error
-	IDMapping(ctx context.Context, query *IDMappingQuery) (string, error)
 	AddDocumentIdentity(ctx context.Context, query *AddDocumentIdentityQuery) error
 	DeleteDocumentIdentity(ctx context.Context, query *DeleteDocumentIdentityQuery) error
 	Delete(ctx context.Context, doc *model.MetaData) error
@@ -34,6 +33,15 @@ type DatastoreStore interface {
 	ListDocumentsByIdentifier(ctx context.Context, identifier string) ([]*model.CompleteDocument, error)
 }
 
+// IdentityMappingStore defines the interface for identity mapping operations
+type IdentityMappingStore interface {
+	CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error)
+	UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error
+}
+
 // Ensure concrete types implement the interfaces
 var _ CredentialOfferStore = (*VCCredentialOfferColl)(nil)
 var _ DatastoreStore = (*VCDatastoreColl)(nil)
+var _ IdentityMappingStore = (*VCIdentityMappingsColl)(nil)

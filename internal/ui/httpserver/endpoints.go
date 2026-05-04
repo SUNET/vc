@@ -203,4 +203,3 @@ func (s *Service) endpointDeleteDocument(ctx context.Context, c *gin.Context) (a
 	}
 	return nil, nil
 }
-
