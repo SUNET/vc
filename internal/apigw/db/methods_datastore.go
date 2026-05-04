@@ -114,9 +114,12 @@ func (c *DatastoreColl) DeleteIdentity(ctx context.Context, query *DeleteIdentit
 	}
 
 	update := bson.M{"$pull": bson.M{"identity_mapping_ids": query.AuthenticSourcePersonID}}
-	_, err := c.Coll.UpdateOne(ctx, filter, update)
+	result, err := c.Coll.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err
+	}
+	if result.MatchedCount == 0 {
+		return helpers.ErrNoDocumentFound
 	}
 	return nil
 }
@@ -257,6 +260,7 @@ func (c *DatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument
 	filter := bson.M{
 		"meta.document_id":      bson.M{"$eq": doc.Meta.DocumentID},
 		"meta.authentic_source": bson.M{"$eq": doc.Meta.AuthenticSource},
+		"meta.scope":            bson.M{"$eq": doc.Meta.Scope},
 	}
 
 	_, err := c.Coll.ReplaceOne(ctx, filter, doc)

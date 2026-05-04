@@ -1005,7 +1005,6 @@ function buildDocumentTableRow(doc) {
         documentId: documentId,
         authenticSource: authenticSource,
         scope: scope,
-        firstIdentityMappingId: (doc.identity_mapping_ids && doc.identity_mapping_ids.length > 0) ? doc.identity_mapping_ids[0] : "",
     };
 
     select.addEventListener('change', function () {

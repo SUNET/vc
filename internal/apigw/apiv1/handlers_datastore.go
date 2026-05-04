@@ -14,8 +14,8 @@ import (
 // DatastoreUpload uploads a document with a set of attributes
 //
 //	@Summary		DatastoreUpload
-//	@ID				generic-upload
-//	@Description	Upload endpoint
+//	@ID				datastore-upload
+//	@Description	Upload a document to the datastore
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json

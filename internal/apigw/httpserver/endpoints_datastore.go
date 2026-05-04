@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/vcclient"
@@ -86,6 +87,7 @@ func (s *Service) endpointDatastoreDelete(ctx context.Context, c *gin.Context) (
 		return nil, err
 	}
 
+	c.Status(http.StatusNoContent)
 	return nil, nil
 }
 
