@@ -91,13 +91,6 @@ type AuthorizationContext struct {
 	WalletID                 string          `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
-// IdentifierSet holds the fields to set when resolving an identity on an authorization context.
-type IdentifierSet struct {
-	Identifier      string `json:"identifier" bson:"identifier"`
-	Scope           string `json:"scope,omitempty" bson:"scope,omitempty"`
-	AuthenticSource string `json:"authentic_source,omitempty" bson:"authentic_source,omitempty"`
-}
-
 // Validate checks the AuthorizationContext against its struct validation tags.
 func (a *AuthorizationContext) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())

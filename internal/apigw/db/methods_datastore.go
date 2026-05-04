@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"errors"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -15,14 +14,14 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-// VCDatastoreColl is the generic collection
-type VCDatastoreColl struct {
+// DatastoreColl is the generic collection
+type DatastoreColl struct {
 	Service *Service
 	Coll    *mongo.Collection
 	log     *logger.Log
 }
 
-func (c *VCDatastoreColl) createIndex(ctx context.Context) error {
+func (c *DatastoreColl) createIndex(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:createIndex")
 	defer span.End()
 
@@ -50,7 +49,7 @@ func (c *VCDatastoreColl) createIndex(ctx context.Context) error {
 }
 
 // Save saves one document to the generic collection
-func (c *VCDatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument) error {
+func (c *DatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:save")
 	defer span.End()
 
@@ -68,16 +67,16 @@ func (c *VCDatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument)
 	return nil
 }
 
-// AddDocumentIdentityQuery is the query to add document identity
-type AddDocumentIdentityQuery struct {
+// AddIdentityQuery is the query to add document identity
+type AddIdentityQuery struct {
 	AuthenticSource    string   `json:"authentic_source" bson:"authentic_source"`
 	Scope              string   `json:"scope" bson:"scope"`
 	DocumentID         string   `json:"document_id" bson:"document_id"`
 	IdentityMappingIDs []string `json:"identity_mapping_ids" bson:"identity_mapping_ids"`
 }
 
-// AddDocumentIdentity adds document identity
-func (c *VCDatastoreColl) AddDocumentIdentity(ctx context.Context, query *AddDocumentIdentityQuery) error {
+// AddIdentity adds document identity
+func (c *DatastoreColl) AddIdentity(ctx context.Context, query *AddIdentityQuery) error {
 	filter := bson.M{
 		"meta.authentic_source": bson.M{"$eq": query.AuthenticSource},
 		"meta.scope":            bson.M{"$eq": query.Scope},
@@ -98,18 +97,19 @@ func (c *VCDatastoreColl) AddDocumentIdentity(ctx context.Context, query *AddDoc
 	return nil
 }
 
-// DeleteDocumentIdentityQuery is the query to delete identity in document
-type DeleteDocumentIdentityQuery struct {
+// DeleteIdentityQuery is the query to delete identity in document
+type DeleteIdentityQuery struct {
 	AuthenticSource         string `json:"authentic_source" bson:"authentic_source"`
 	Scope                   string `json:"scope" bson:"scope"`
 	DocumentID              string `json:"document_id" bson:"document_id"`
 	AuthenticSourcePersonID string `json:"authentic_source_person_id" bson:"authentic_source_person_id"`
 }
 
-// DeleteDocumentIdentity deletes identity in document
-func (c *VCDatastoreColl) DeleteDocumentIdentity(ctx context.Context, query *DeleteDocumentIdentityQuery) error {
+// DeleteIdentity deletes identity in document
+func (c *DatastoreColl) DeleteIdentity(ctx context.Context, query *DeleteIdentityQuery) error {
 	filter := bson.M{
 		"meta.authentic_source": bson.M{"$eq": query.AuthenticSource},
+		"meta.scope":            bson.M{"$eq": query.Scope},
 		"meta.document_id":      bson.M{"$eq": query.DocumentID},
 	}
 
@@ -122,7 +122,7 @@ func (c *VCDatastoreColl) DeleteDocumentIdentity(ctx context.Context, query *Del
 }
 
 // Delete deletes a document
-func (c *VCDatastoreColl) Delete(ctx context.Context, doc *model.MetaData) error {
+func (c *DatastoreColl) Delete(ctx context.Context, doc *model.MetaData) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:delete")
 	defer span.End()
 
@@ -139,16 +139,12 @@ func (c *VCDatastoreColl) Delete(ctx context.Context, doc *model.MetaData) error
 
 }
 
-// GetDocumentQuery is the query to get document attestation
-type GetDocumentQuery struct {
-	Meta *model.MetaData
-}
-
-// GetDocument return matching document if any, or error
-func (c *VCDatastoreColl) GetDocument(ctx context.Context, query *GetDocumentQuery) (*model.Document, error) {
+// Get return matching document if any, or error
+func (c *DatastoreColl) Get(ctx context.Context, meta *model.MetaData) (*model.Document, error) {
 	filter := bson.M{
-		"meta.authentic_source": bson.M{"$eq": query.Meta.AuthenticSource},
-		"meta.document_id":      bson.M{"$eq": query.Meta.DocumentID},
+		"meta.authentic_source": bson.M{"$eq": meta.AuthenticSource},
+		"meta.scope":            bson.M{"$eq": meta.Scope},
+		"meta.document_id":      bson.M{"$eq": meta.DocumentID},
 	}
 	opt := options.FindOne().SetProjection(bson.M{
 		"meta":          1,
@@ -167,18 +163,14 @@ func (c *VCDatastoreColl) GetDocument(ctx context.Context, query *GetDocumentQue
 	return reply, nil
 }
 
-// GetDocumentsByClaims returns matching documents for a scope where any of the
-// document's identity_mapping_ids match the provided identifier.
-func (c *VCDatastoreColl) GetDocumentsByClaims(ctx context.Context, scope string, identityClaims map[string]string) (map[string]*model.CompleteDocument, error) {
+// GetByIdentity returns matching documents for a scope where any of the document's identity_mapping_ids match the provided identifier.
+func (c *DatastoreColl) GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error) {
 	filter := bson.M{
-		"meta.scope": bson.M{"$eq": scope},
-	}
-	// identity_mapping_ids is []string — match by authentic_source_person_id if present
-	if aspID, ok := identityClaims["authentic_source_person_id"]; ok {
-		filter["identity_mapping_ids"] = bson.M{"$eq": aspID}
+		"meta.scope":            bson.M{"$eq": scope},
+		"identity_mapping_ids": bson.M{"$eq": identityMappingID},
 	}
 
-	c.log.Debug("GetDocumentsByClaims", "filter", filter)
+	c.log.Debug("GetByIdentity", "filter", filter)
 
 	cursor, err := c.Coll.Find(ctx, filter)
 	if err != nil {
@@ -198,8 +190,8 @@ func (c *VCDatastoreColl) GetDocumentsByClaims(ctx context.Context, scope string
 	return docs, nil
 }
 
-// DocumentListQuery is the query to get document list
-type DocumentListQuery struct {
+// ListQuery is the query to get document list
+type ListQuery struct {
 	AuthenticSource   string `json:"authentic_source" bson:"authentic_source"`
 	IdentityMappingID string `json:"identity_mapping_id" bson:"identity_mapping_id" validate:"required"`
 	Scope             string `json:"scope" bson:"scope"`
@@ -207,8 +199,8 @@ type DocumentListQuery struct {
 	ValidTo           int64  `json:"valid_to" bson:"valid_to"`
 }
 
-// DocumentList return matching documents if any, or error
-func (c *VCDatastoreColl) DocumentList(ctx context.Context, query *DocumentListQuery) ([]*model.DocumentList, error) {
+// List return matching documents if any, or error
+func (c *DatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error) {
 	if err := helpers.Check(ctx, c.Service.cfg, query, c.Service.log); err != nil {
 		return nil, err
 	}
@@ -239,9 +231,10 @@ func (c *VCDatastoreColl) DocumentList(ctx context.Context, query *DocumentListQ
 }
 
 // GetQR return matching document and return its QR code, else error
-func (c *VCDatastoreColl) GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error) {
+func (c *DatastoreColl) GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error) {
 	filter := bson.M{
 		"meta.authentic_source": bson.M{"$eq": attr.AuthenticSource},
+		"meta.scope":            bson.M{"$eq": attr.Scope},
 		"meta.document_id":      bson.M{"$eq": attr.DocumentID},
 	}
 	opt := options.FindOne().SetProjection(bson.M{
@@ -256,7 +249,7 @@ func (c *VCDatastoreColl) GetQR(ctx context.Context, attr *model.MetaData) (*ope
 }
 
 // Replace replaces one document
-func (c *VCDatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument) error {
+func (c *DatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:replace")
 	defer span.End()
 
@@ -274,102 +267,8 @@ func (c *VCDatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocume
 	return nil
 }
 
-// SearchDocumentsQuery the query to search for documents
-type SearchDocumentsQuery struct {
-	AuthenticSource   string `json:"authentic_source,omitempty" validate:"omitempty,max=1000"`
-	Scope             string `json:"scope,omitempty" validate:"omitempty,max=1000"`
-	DocumentID        string `json:"document_id,omitempty" validate:"omitempty,max=1000"`
-	IdentityMappingID string `json:"identity_mapping_id,omitempty"`
-}
-
-// SearchDocuments search documents in datastore
-//
-//	@return			return matching documents, has more results (refine query), or error
-//	@Description	not supported in production mode
-//	@Deprecated
-func (c *VCDatastoreColl) SearchDocuments(ctx context.Context, query *SearchDocumentsQuery, limit int64, fields []string, sortFields map[string]int) ([]*model.CompleteDocument, bool, error) {
-	if model.BoolVal(c.Service.cfg.Common.Production, true) {
-		return nil, false, errors.New("not supported in production mode")
-	}
-
-	if err := helpers.Check(ctx, c.Service.cfg, query, c.Service.log); err != nil {
-		return nil, false, err
-	}
-
-	filter := buildSearchDocumentsFilter(query)
-
-	findOptions := options.Find()
-	const maxLimit = 500
-	if limit == 0 {
-		limit = 50
-	} else if limit > maxLimit {
-		limit = maxLimit
-	}
-	// Set one more than wanted to see if there are more results i db
-	findOptions.SetLimit(limit + 1)
-
-	if len(fields) > 0 {
-		projection := bson.M{}
-		for _, field := range fields {
-			projection[field] = 1
-		}
-		findOptions.SetProjection(projection)
-	}
-
-	sort := bson.D{}
-	if len(sortFields) > 0 {
-		for field, order := range sortFields {
-			// 1 for ascending, -1 for descending
-			sort = append(sort, bson.E{Key: field, Value: order})
-		}
-	} else {
-		sort = append(sort, bson.E{Key: "meta.document_id", Value: 1})
-	}
-	findOptions.SetSort(sort)
-
-	c.log.Debug("Searching documents using", "filter", filter, "findOptions", findOptions)
-
-	cursor, err := c.Coll.Find(ctx, filter, findOptions)
-	if err != nil {
-		return nil, false, err
-	}
-
-	res := []*model.CompleteDocument{}
-	if err := cursor.All(ctx, &res); err != nil {
-		return nil, false, err
-	}
-
-	hasMoreResults := len(res) > int(limit)
-	if hasMoreResults {
-		// Remove the last entry from the result to fit limit value
-		res = res[:limit]
-	}
-
-	return res, hasMoreResults, nil
-}
-
-func buildSearchDocumentsFilter(query *SearchDocumentsQuery) bson.M {
-	filter := bson.M{}
-
-	if query.AuthenticSource != "" {
-		filter["meta.authentic_source"] = bson.M{"$eq": query.AuthenticSource}
-	}
-	if query.Scope != "" {
-		filter["meta.scope"] = bson.M{"$eq": query.Scope}
-	}
-	if query.DocumentID != "" {
-		filter["meta.document_id"] = bson.M{"$eq": query.DocumentID}
-	}
-
-	if query.IdentityMappingID != "" {
-		filter["identity_mapping_ids"] = bson.M{"$eq": query.IdentityMappingID}
-	}
-
-	return filter
-}
-
-// GetDocumentByKey retrieves a document by its natural key (authentic_source, scope, document_id)
-func (c *VCDatastoreColl) GetDocumentByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error) {
+// GetByKey retrieves a document by its natural key (authentic_source, scope, document_id)
+func (c *DatastoreColl) GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:getDocumentByKey")
 	defer span.End()
 
@@ -388,8 +287,8 @@ func (c *VCDatastoreColl) GetDocumentByKey(ctx context.Context, authenticSource,
 	return res, nil
 }
 
-// DeleteDocumentByKey deletes a document by its natural key (authentic_source, scope, document_id)
-func (c *VCDatastoreColl) DeleteDocumentByKey(ctx context.Context, authenticSource, scope, documentID string) error {
+// DeleteByKey deletes a document by its natural key (authentic_source, scope, document_id)
+func (c *DatastoreColl) DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:deleteDocumentByKey")
 	defer span.End()
 

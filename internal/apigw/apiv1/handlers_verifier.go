@@ -261,10 +261,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// Extract identity from validated credential using configured claim keys
 	dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
 	identityClaims := dsCred.ExtractIdentityClaims(credential)
+	identityMappingID, ok := identityClaims["authentic_source_person_id"]
+	if !ok {
+		return nil, errors.New("no authentic_source_person_id in identity claims")
+	}
 
 	// Retrieve documents matching the identity by scope
-	c.log.Debug("Querying documents", "scope", scope, "identity_claims", identityClaims)
-	documents, err := c.datastoreStore.GetDocumentsByClaims(ctx, scope, identityClaims)
+	c.log.Debug("Querying documents", "scope", scope, "identity_mapping_id", identityMappingID)
+	documents, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
 	if err != nil {
 		c.log.Debug("failed to get document", "error", err)
 		return nil, err

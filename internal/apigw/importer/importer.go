@@ -20,7 +20,7 @@ import (
 func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
 
-	count, err := dbService.VCDatastoreColl.Coll.EstimatedDocumentCount(ctx)
+	count, err := dbService.DatastoreColl.Coll.EstimatedDocumentCount(ctx)
 	if err != nil {
 		return fmt.Errorf("check datastore count: %w", err)
 	}
@@ -70,7 +70,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			continue
 		}
 
-		if err := dbService.VCDatastoreColl.Save(ctx, doc); err != nil {
+		if err := dbService.DatastoreColl.Save(ctx, doc); err != nil {
 			return fmt.Errorf("save document %s/%s: %w", name, id, err)
 		}
 		imported++

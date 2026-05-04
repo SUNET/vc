@@ -61,7 +61,7 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 		log.Info("Dynamic client registration enabled, attempting registration")
 
 		// Check if we have stored credentials
-		storedCreds, err := s.dbService.VCDynamicRegistrationColl.Get(ctx)
+		storedCreds, err := s.dbService.DynamicRegistrationColl.Get(ctx)
 		if err != nil {
 			log.Info("Failed to load dynamic registration credentials", "error", err)
 		}
@@ -98,7 +98,7 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 				"registration_access_token_present", regResp.RegistrationAccessToken != "")
 
 			// Persist credentials
-			if err := s.dbService.VCDynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
+			if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
 				ClientID:                regResp.ClientID,
 				ClientSecret:            regResp.ClientSecret,
 				RegistrationAccessToken: regResp.RegistrationAccessToken,

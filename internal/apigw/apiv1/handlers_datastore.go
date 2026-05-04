@@ -155,7 +155,7 @@ type DatastoreAddIdentityRequest struct {
 //	@Param			req	body		DatastoreAddIdentityRequest	true	" "
 //	@Router			/document/identity [put]
 func (c *Client) DatastoreAddIdentity(ctx context.Context, req *DatastoreAddIdentityRequest) error {
-	err := c.datastoreStore.AddDocumentIdentity(ctx, &db.AddDocumentIdentityQuery{
+	err := c.datastoreStore.AddIdentity(ctx, &db.AddIdentityQuery{
 		AuthenticSource:    req.AuthenticSource,
 		Scope:              req.Scope,
 		DocumentID:         req.DocumentID,
@@ -200,7 +200,7 @@ type DatastoreDeleteIdentityRequest struct {
 //	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
 //	@Router			/document/identity [delete]
 func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
-	err := c.datastoreStore.DeleteDocumentIdentity(ctx, &db.DeleteDocumentIdentityQuery{
+	err := c.datastoreStore.DeleteIdentity(ctx, &db.DeleteIdentityQuery{
 		AuthenticSource:         req.AuthenticSource,
 		Scope:                   req.Scope,
 		DocumentID:              req.DocumentID,
@@ -278,14 +278,11 @@ type DatastoreGetReply struct {
 //	@Param			req	body		DatastoreGetRequest		true	" "
 //	@Router			/document [post]
 func (c *Client) DatastoreGet(ctx context.Context, req *DatastoreGetRequest) (*DatastoreGetReply, error) {
-	query := &db.GetDocumentQuery{
-		Meta: &model.MetaData{
-			AuthenticSource: req.AuthenticSource,
-			Scope:           req.Scope,
-			DocumentID:      req.DocumentID,
-		},
-	}
-	doc, err := c.datastoreStore.GetDocument(ctx, query)
+	doc, err := c.datastoreStore.Get(ctx, &model.MetaData{
+		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
+		DocumentID:      req.DocumentID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +320,7 @@ type DatastoreListReply struct {
 //	@Param			req	body		DatastoreListRequest	true	" "
 //	@Router			/document/list [post]
 func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
-	docs, err := c.datastoreStore.DocumentList(ctx, &db.DocumentListQuery{
+	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
 		AuthenticSource:   req.AuthenticSource,
 		IdentityMappingID: req.IdentityMappingID,
 		Scope:             req.Scope,
@@ -353,7 +350,7 @@ type DatastoreGetByKeyReply struct {
 
 // DatastoreGetByKey retrieves a document by its natural key
 func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
-	doc, err := c.datastoreStore.GetDocumentByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
+	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +384,7 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		return nil, err
 	}
 
-	docs, err := c.datastoreStore.DocumentList(ctx, &db.DocumentListQuery{
+	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
 		AuthenticSource:   req.AuthenticSource,
 		Scope:             req.Scope,
 		IdentityMappingID: personID,
@@ -410,5 +407,5 @@ type DatastoreDeleteByKeyRequest struct {
 
 // DatastoreDeleteByKey deletes a document by its natural key
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
-	return c.datastoreStore.DeleteDocumentByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
+	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 }

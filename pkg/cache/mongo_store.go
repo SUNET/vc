@@ -364,27 +364,19 @@ func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *Authorizatio
 	return nil
 }
 
-// SetIdentifier sets the resolved identifier, scope, and authentic source on an authorization context.
-func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, set *IdentifierSet) error {
-	if query == nil {
-		return errors.New("query cannot be nil")
-	}
-	if set == nil || set.Identifier == "" {
+// SetIdentifier sets the resolved identifier on an authorization context.
+func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error {
+	if identifier == "" {
 		return errors.New("identifier cannot be empty")
 	}
-
-	filter := s.buildFilter(query)
-	if filter == nil {
-		return errors.New("query must have sessionID, requestURI, or ephemeralEncryptionKeyID")
+	if query == nil || query.SessionID == "" {
+		return errors.New("session_id cannot be empty")
 	}
 
-	update := bson.M{"$set": bson.M{
-		"identifier":       set.Identifier,
-		"scope":            set.Scope,
-		"authentic_source": set.AuthenticSource,
-	}}
-
-	result, err := s.coll.UpdateOne(ctx, filter, update)
+	result, err := s.coll.UpdateOne(ctx,
+		bson.M{"session_id": query.SessionID},
+		bson.M{"$set": bson.M{"identifier": identifier}},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to set identifier: %w", err)
 	}

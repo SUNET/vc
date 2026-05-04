@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -13,14 +14,14 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-// VCIdentityMappingsColl is the collection for identity mappings
-type VCIdentityMappingsColl struct {
+// IdentityMappingsColl is the collection for identity mappings
+type IdentityMappingsColl struct {
 	Service *Service
 	Coll    *mongo.Collection
 	log     *logger.Log
 }
 
-func (c *VCIdentityMappingsColl) createIndex(ctx context.Context) error {
+func (c *IdentityMappingsColl) createIndex(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createIndex")
 	defer span.End()
 
@@ -40,7 +41,7 @@ func (c *VCIdentityMappingsColl) createIndex(ctx context.Context) error {
 }
 
 // CreateMapping creates a new identity mapping
-func (c *VCIdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
+func (c *IdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createMapping")
 	defer span.End()
 
@@ -60,7 +61,7 @@ type ResolveMappingQuery struct {
 }
 
 // ResolveMapping resolves identity attributes to an authentic_source_person_id.
-func (c *VCIdentityMappingsColl) ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error) {
+func (c *IdentityMappingsColl) ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:resolveMapping")
 	defer span.End()
 
@@ -83,14 +84,17 @@ func (c *VCIdentityMappingsColl) ResolveMapping(ctx context.Context, query *Reso
 	res := &model.IdentityMapping{}
 	if err := c.Coll.FindOne(ctx, filter, opts).Decode(res); err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		return "", helpers.ErrNoIdentityFound
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return "", helpers.ErrNoIdentityFound
+		}
+		return "", err
 	}
 
 	return res.AuthenticSourcePersonID, nil
 }
 
 // UpdateMapping updates the attributes of an existing identity mapping
-func (c *VCIdentityMappingsColl) UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
+func (c *IdentityMappingsColl) UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:updateMapping")
 	defer span.End()
 
@@ -120,7 +124,7 @@ type DeleteMappingQuery struct {
 }
 
 // DeleteMapping deletes an identity mapping
-func (c *VCIdentityMappingsColl) DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error {
+func (c *IdentityMappingsColl) DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:deleteMapping")
 	defer span.End()
 

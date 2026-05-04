@@ -17,19 +17,16 @@ type CredentialOfferStore interface {
 // DatastoreStore defines the interface for datastore operations
 type DatastoreStore interface {
 	Save(ctx context.Context, doc *model.CompleteDocument) error
-	AddDocumentIdentity(ctx context.Context, query *AddDocumentIdentityQuery) error
-	DeleteDocumentIdentity(ctx context.Context, query *DeleteDocumentIdentityQuery) error
+	AddIdentity(ctx context.Context, query *AddIdentityQuery) error
+	DeleteIdentity(ctx context.Context, query *DeleteIdentityQuery) error
 	Delete(ctx context.Context, doc *model.MetaData) error
-	GetDocument(ctx context.Context, query *GetDocumentQuery) (*model.Document, error)
-	GetDocumentsByClaims(ctx context.Context, scope string, identityClaims map[string]string) (map[string]*model.CompleteDocument, error)
-	DocumentList(ctx context.Context, query *DocumentListQuery) ([]*model.DocumentList, error)
+	Get(ctx context.Context, meta *model.MetaData) (*model.Document, error)
+	GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error)
+	List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error)
 	GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error)
 	Replace(ctx context.Context, doc *model.CompleteDocument) error
-	SearchDocuments(ctx context.Context, query *SearchDocumentsQuery, limit int64, fields []string, sortFields map[string]int) ([]*model.CompleteDocument, bool, error)
-
-	// Simplified document operations (new API)
-	GetDocumentByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
-	DeleteDocumentByKey(ctx context.Context, authenticSource, scope, documentID string) error
+	GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
+	DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error
 }
 
 // IdentityMappingStore defines the interface for identity mapping operations
@@ -41,6 +38,6 @@ type IdentityMappingStore interface {
 }
 
 // Ensure concrete types implement the interfaces
-var _ CredentialOfferStore = (*VCCredentialOfferColl)(nil)
-var _ DatastoreStore = (*VCDatastoreColl)(nil)
-var _ IdentityMappingStore = (*VCIdentityMappingsColl)(nil)
+var _ CredentialOfferStore = (*CredentialOfferColl)(nil)
+var _ DatastoreStore = (*DatastoreColl)(nil)
+var _ IdentityMappingStore = (*IdentityMappingsColl)(nil)

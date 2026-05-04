@@ -226,13 +226,11 @@ func TestMongoStore_SetIdentifier(t *testing.T) {
 	doc := &AuthorizationContext{SessionID: "id-1", RequestURI: "https://example.com/r"}
 	require.NoError(t, store.Save(ctx, doc))
 
-	// Lookup by RequestURI
-	require.NoError(t, store.SetIdentifier(ctx, &AuthorizationContext{RequestURI: "https://example.com/r"}, &IdentifierSet{Identifier: "alice-id", Scope: "pid", AuthenticSource: "test-as"}))
+	require.NoError(t, store.SetIdentifier(ctx, &AuthorizationContext{SessionID: "id-1"}, "alice-id"))
 
 	result, err := store.GetByID(ctx, "id-1")
 	require.NoError(t, err)
 	assert.Equal(t, "alice-id", result.Identifier)
-	assert.Equal(t, "test-as", result.AuthenticSource)
 }
 
 // TestMongoStore_SetIdentifierNotFound verifies SetIdentifier on missing doc.
@@ -243,7 +241,7 @@ func TestMongoStore_SetIdentifierNotFound(t *testing.T) {
 	store := newMongoTestStore(t, client, "identity_nf")
 	ctx := t.Context()
 
-	err := store.SetIdentifier(ctx, &AuthorizationContext{SessionID: "nope"}, &IdentifierSet{Identifier: "ghost-id"})
+	err := store.SetIdentifier(ctx, &AuthorizationContext{SessionID: "nope"}, "ghost-id")
 	assert.ErrorIs(t, err, ErrNoDocuments)
 }
 

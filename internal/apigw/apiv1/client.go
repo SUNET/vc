@@ -62,9 +62,9 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
-		credentialOfferStore:          db.VCCredentialOfferColl,
-		datastoreStore:                db.VCDatastoreColl,
-		identityMappingStore:          db.VCIdentityMappingsColl,
+		credentialOfferStore:          db.CredentialOfferColl,
+		datastoreStore:                db.DatastoreColl,
+		identityMappingStore:          db.IdentityMappingsColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},

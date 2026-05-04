@@ -68,10 +68,14 @@ func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs m
 // identity extracted from the assertion is used to find the pre-loaded document.
 func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope string, claims map[string]any, dsCred *model.DatastoreScope) error {
 	identityClaims := dsCred.ExtractIdentityClaims(claims)
+	identityMappingID, ok := identityClaims["authentic_source_person_id"]
+	if !ok {
+		return fmt.Errorf("no authentic_source_person_id in identity claims for scope %q", scope)
+	}
 
-	c.log.Debug("LookupDatastoreByIdentity", "scope", scope, "identity_claims", identityClaims)
+	c.log.Debug("LookupDatastoreByIdentity", "scope", scope, "identity_mapping_id", identityMappingID)
 
-	docs, err := c.datastoreStore.GetDocumentsByClaims(ctx, scope, identityClaims)
+	docs, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
 	if err != nil {
 		return fmt.Errorf("datastore lookup failed for scope %q: %w", scope, err)
 	}
