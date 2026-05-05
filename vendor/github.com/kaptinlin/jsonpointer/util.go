@@ -7,20 +7,15 @@ import (
 	"strings"
 )
 
-// fastAtoi converts a string to an integer quickly without allocations.
-// Returns -1 if the string is not a valid non-negative integer.
-// This is optimized for JSON Pointer array index parsing.
 func fastAtoi(s string) int {
 	if len(s) == 0 {
 		return -1
 	}
 
-	// Special case: "0" is valid
 	if s == "0" {
 		return 0
 	}
 
-	// Leading zeros are invalid per RFC 6901
 	if s[0] == '0' {
 		return -1
 	}
@@ -29,20 +24,17 @@ func fastAtoi(s string) int {
 	for i := range len(s) {
 		c := s[i]
 		if c < '0' || c > '9' {
-			return -1 // Non-digit character
+			return -1
 		}
 		next := n*10 + int(c-'0')
 		if next < n {
-			return -1 // Integer overflow detected
+			return -1
 		}
 		n = next
 	}
 	return n
 }
 
-// derefValue dereferences pointer values until reaching a non-pointer value.
-// Returns an error if any pointer in the chain is nil.
-// This is a helper function to eliminate duplicated pointer dereferencing logic.
 func derefValue(v reflect.Value) (reflect.Value, error) {
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -290,8 +282,6 @@ func IsInteger(str string) bool {
 	return true
 }
 
-// validateArrayIndex validates and parses array index from string key.
-// Preserves RFC 6901 semantics for array end marker and bounds checking.
 func validateArrayIndex(key string, length int) (int, error) {
 	if key == "-" {
 		return -1, ErrIndexOutOfBounds
@@ -306,8 +296,6 @@ func validateArrayIndex(key string, length int) (int, error) {
 	return index, nil
 }
 
-// validateAndAccessArray validates array index and checks for array end marker.
-// Returns ErrIndexOutOfBounds if index equals array length per RFC 6901.
 func validateAndAccessArray(key string, length int) (int, error) {
 	index, err := validateArrayIndex(key, length)
 	if err != nil {

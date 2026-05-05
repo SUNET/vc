@@ -52,9 +52,6 @@ func fastGet(val any, step string) (any, bool) {
 	}
 }
 
-// tryArrayAccess attempts array access using type assertions for performance.
-// Enhanced to handle all slice types efficiently.
-// Returns (value, handled, error) where handled indicates if this was an array access attempt.
 func tryArrayAccess(current any, key string) (any, bool, error) {
 	switch arr := current.(type) {
 	case []any:
@@ -92,9 +89,6 @@ func tryArrayAccess(current any, key string) (any, bool, error) {
 	}
 }
 
-// tryObjectAccess attempts object access using type assertions for performance.
-// Enhanced with proper struct field handling.
-// Returns (value, handled, error) where handled indicates if this was an object access attempt.
 func tryObjectAccess(current any, key string) (any, bool, error) {
 	switch obj := current.(type) {
 	case map[string]any:
@@ -140,8 +134,6 @@ func tryObjectAccess(current any, key string) (any, bool, error) {
 	}
 }
 
-// get retrieves value at JSON pointer path, returns error if path cannot be traversed.
-// Optimized for zero-allocation paths with layered fallback strategy.
 func get(val any, path Path) (any, error) {
 	pathLength := len(path)
 	if pathLength == 0 {

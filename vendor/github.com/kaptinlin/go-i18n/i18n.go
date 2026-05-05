@@ -44,8 +44,6 @@ type I18n struct {
 	mfOptions                 *mf.MessageFormatOptions
 }
 
-// parsedTranslation holds a pre-compiled translation with its locale, name,
-// original text, and an optional compiled MessageFormat function.
 type parsedTranslation struct {
 	locale string
 	name   string
@@ -231,8 +229,6 @@ func (i *I18n) resolveLocalizedLocale(locale string) (string, bool) {
 	return i.resolveLocaleForTable(locale, i.parsedTranslations, true)
 }
 
-// ensureDefaultLanguageFirst ensures the default language is the first element
-// in the languages slice, adding it if absent or moving it to the front.
 func (i *I18n) ensureDefaultLanguageFirst() {
 	if len(i.languages) == 0 {
 		i.languages = []language.Tag{i.defaultLanguage}
@@ -256,8 +252,6 @@ func messageFormatBase(locale string) (string, error) {
 	return base.String(), nil
 }
 
-// matchExactLocale returns the string form of the supported locale that
-// exactly matches the given locale, or an empty string if none matches.
 func (i *I18n) matchExactLocale(locale string) string {
 	_, idx, conf := i.languageMatcher.Match(language.Make(locale))
 	if conf == language.Exact {
@@ -293,8 +287,9 @@ func (i *I18n) NewLocalizer(locales ...string) *Localizer {
 // trimContext removes the trailing context suffix (e.g., " <verb>") from a
 // translation key, returning the base key.
 func trimContext(v string) string {
-	if idx := strings.LastIndex(v, " <"); idx != -1 && strings.HasSuffix(v, ">") {
-		return v[:idx]
+	trimmed, ok := strings.CutSuffix(v, ">")
+	if idx := strings.LastIndex(trimmed, " <"); ok && idx != -1 {
+		return trimmed[:idx]
 	}
 	return v
 }
@@ -385,11 +380,7 @@ func (i *I18n) lookupFallback(locale, name string, visited map[string]struct{}) 
 	}
 	visited[locale] = struct{}{}
 
-	chain, ok := i.fallbacks[locale]
-	if !ok {
-		return i.parsedTranslations[i.defaultLocale][name]
-	}
-	for _, fb := range chain {
+	for _, fb := range i.fallbacks[locale] {
 		if v, ok := i.parsedTranslations[fb][name]; ok {
 			return v
 		}

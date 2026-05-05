@@ -36,8 +36,6 @@ func structField(field string, value *reflect.Value) bool {
 	return true
 }
 
-// getStructFields retrieves field mapping for struct type with caching.
-// Uses sync.Map for thread-safe caching of struct field metadata.
 func getStructFields(t reflect.Type) structFields {
 	if cached, ok := structFieldsCache.Load(t); ok {
 		return cached.(structFields)
@@ -61,8 +59,6 @@ func getStructFields(t reflect.Type) structFields {
 	return fields
 }
 
-// getFieldName extracts the JSON name from a struct field.
-// Supports basic JSON tags and falls back to the field name.
 func getFieldName(field *reflect.StructField) string {
 	tag := field.Tag.Get("json")
 	if tag == "" {

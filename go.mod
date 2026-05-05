@@ -19,7 +19,7 @@ require (
 	github.com/gin-contrib/sessions v1.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433
+	github.com/go-json-experiment/json v0.0.0-20260430182902-b6187a392ed4
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/go-playground/validator/v10 v10.30.2
@@ -28,7 +28,7 @@ require (
 	github.com/gorilla/sessions v1.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jellydator/ttlcache/v3 v3.4.0
-	github.com/kaptinlin/jsonschema v0.7.11
+	github.com/kaptinlin/jsonschema v0.7.13
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lestrrat-go/jwx/v3 v3.1.0
 	github.com/lithammer/shortuuid/v4 v4.2.0
@@ -127,8 +127,8 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kaptinlin/go-i18n v0.4.4 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.19 // indirect
+	github.com/kaptinlin/go-i18n v0.4.5 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.20 // indirect
 	github.com/kaptinlin/messageformat-go v0.6.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
