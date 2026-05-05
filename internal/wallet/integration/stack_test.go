@@ -327,7 +327,7 @@ func seedDocument(t *testing.T, scope, identityMappingID, givenName, familyName,
 	body, err := json.Marshal(req)
 	require.NoError(t, err)
 
-	resp, err := http.Post(apigwURL+"/api/v1/upload", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(apigwURL+"/api/v1/datastore/", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
