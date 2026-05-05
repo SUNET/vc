@@ -200,7 +200,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
-			if err := c.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, claims, &dsCred); err != nil {
+			if err := c.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, authCtx.AuthenticSource, claims, &dsCred); err != nil {
 				span.SetStatus(codes.Error, "datastore lookup failed")
 				return nil, fmt.Errorf("OIDC datastore lookup failed: %w", err)
 			}

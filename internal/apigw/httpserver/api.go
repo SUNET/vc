@@ -74,7 +74,7 @@ type Apiv1 interface {
 	// VCI integration for external auth (SAML/OIDC)
 	StoreVCIDocuments(ctx context.Context, sessionID string, docs map[string]*model.CompleteDocument) error
 	HasVCIDocuments(ctx context.Context, sessionID string) bool
-	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope string, claims map[string]any, dsCred *model.DatastoreScope) error
+	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error
 	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
 
 	// misc endpoints

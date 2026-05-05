@@ -65,8 +65,11 @@ func (c *IdentityMappingsColl) ResolveMapping(ctx context.Context, query *Resolv
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:resolveMapping")
 	defer span.End()
 
-	conditions := []bson.M{
-		{"authentic_source": bson.M{"$eq": query.AuthenticSource}},
+	conditions := []bson.M{}
+	if query.AuthenticSource != "" {
+		conditions = append(conditions, bson.M{
+			"authentic_source": bson.M{"$eq": query.AuthenticSource},
+		})
 	}
 
 	for key, value := range query.Attributes {

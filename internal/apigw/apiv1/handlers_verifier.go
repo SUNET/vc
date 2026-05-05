@@ -261,9 +261,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// Extract identity from validated credential using configured claim keys
 	dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
 	identityClaims := dsCred.ExtractIdentityClaims(credential)
-	identityMappingID, ok := identityClaims["authentic_source_person_id"]
-	if !ok {
-		return nil, errors.New("no authentic_source_person_id in identity claims")
+
+	// Resolve the person identifier — uses authentic_source_person_id directly
+	// when present in the extracted claims, otherwise falls back to identity
+	// mapping (given_name, family_name, birth_date → authentic_source_person_id).
+	claimsAny := make(map[string]any, len(identityClaims))
+	for k, v := range identityClaims {
+		claimsAny[k] = v
+	}
+	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
 	}
 
 	// Retrieve documents matching the identity by scope

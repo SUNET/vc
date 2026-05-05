@@ -66,11 +66,19 @@ func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs m
 // given identity claims and scope, then stores them in the VCI session cache.
 // Used when a datastore credential is authenticated via SAML/OIDC — the
 // identity extracted from the assertion is used to find the pre-loaded document.
-func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope string, claims map[string]any, dsCred *model.DatastoreScope) error {
+func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error {
 	identityClaims := dsCred.ExtractIdentityClaims(claims)
-	identityMappingID, ok := identityClaims["authentic_source_person_id"]
-	if !ok {
-		return fmt.Errorf("no authentic_source_person_id in identity claims for scope %q", scope)
+
+	// Resolve the person identifier — uses authentic_source_person_id directly
+	// when present in the extracted claims, otherwise falls back to identity
+	// mapping (given_name, family_name, birth_date → authentic_source_person_id).
+	claimsAny := make(map[string]any, len(identityClaims))
+	for k, v := range identityClaims {
+		claimsAny[k] = v
+	}
+	identityMappingID, err := c.ResolveIdentifier(ctx, authenticSource, claimsAny)
+	if err != nil {
+		return fmt.Errorf("failed to resolve identity for scope %q: %w", scope, err)
 	}
 
 	c.log.Debug("LookupDatastoreByIdentity", "scope", scope, "identity_mapping_id", identityMappingID)

@@ -209,7 +209,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
-			if err := s.apiv1.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, claims, &dsCred); err != nil {
+			if err := s.apiv1.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, authCtx.AuthenticSource, claims, &dsCred); err != nil {
 				span.SetStatus(codes.Error, "datastore lookup failed")
 				return nil, fmt.Errorf("SAML datastore lookup failed: %w", err)
 			}
