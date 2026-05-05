@@ -54,6 +54,36 @@ func (c *IdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model
 	return nil
 }
 
+// EnsureMapping creates an identity mapping only if it does not already exist.
+// If a record with the same (authentic_source, authentic_source_person_id) already exists, it is left unchanged.
+func (c *IdentityMappingsColl) EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:ensureMapping")
+	defer span.End()
+
+	filter := bson.M{
+		"authentic_source":           mapping.AuthenticSource,
+		"authentic_source_person_id": mapping.AuthenticSourcePersonID,
+	}
+
+	update := bson.M{
+		"$setOnInsert": bson.M{
+			"authentic_source":           mapping.AuthenticSource,
+			"authentic_source_person_id": mapping.AuthenticSourcePersonID,
+			"attributes":                 mapping.Attributes,
+		},
+	}
+
+	opts := options.UpdateOne().SetUpsert(true)
+
+	_, err := c.Coll.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 // ResolveMappingQuery is the query for resolving attributes to an authentic_source_person_id
 type ResolveMappingQuery struct {
 	AuthenticSource string         `json:"authentic_source"`

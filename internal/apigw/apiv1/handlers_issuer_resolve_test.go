@@ -23,6 +23,9 @@ type mockIdentityMappingStore struct {
 func (m *mockIdentityMappingStore) CreateMapping(_ context.Context, _ *model.IdentityMapping) error {
 	return nil
 }
+func (m *mockIdentityMappingStore) EnsureMapping(_ context.Context, _ *model.IdentityMapping) error {
+	return nil
+}
 func (m *mockIdentityMappingStore) ResolveMapping(_ context.Context, query *db.ResolveMappingQuery) (string, error) {
 	m.resolveQuery = query
 	return m.resolveResult, m.resolveErr

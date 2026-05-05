@@ -29,8 +29,8 @@ type IdentityMappingCreateReply struct {
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	IdentityMappingCreateReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
+//	@Success		200	{object}	IdentityMappingCreateReply		"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		IdentityMappingCreateRequest	true	" "
 //	@Router			/api/v1/identity/mapping [post]
 func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMappingCreateRequest) (*IdentityMappingCreateReply, error) {

@@ -32,6 +32,7 @@ type DatastoreStore interface {
 // IdentityMappingStore defines the interface for identity mapping operations
 type IdentityMappingStore interface {
 	CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error
 	ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error)
 	UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error
 	DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error

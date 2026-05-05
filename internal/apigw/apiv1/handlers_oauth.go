@@ -26,9 +26,9 @@ import (
 //	@Tags			OAuth
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	openid4vci.PARRequest	true	"PAR request"
-//	@Success		201	{object}	openid4vci.ParResponse	"Created"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Param			request	body		openid4vci.PARRequest	true	"PAR request"
+//	@Success		201		{object}	openid4vci.ParResponse	"Created"
+//	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
 //	@Router			/op/par [post]
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "req", req)
@@ -105,8 +105,8 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 //	@Accept			json
 //	@Produce		json
 //	@Param			request_uri	query	string	true	"PAR request URI"
-//	@Success		302	"Redirect to consent"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Success		302			"Redirect to consent"
+//	@Failure		400			{object}	helpers.ErrorResponse	"Bad Request"
 //	@Router			/authorize [get]
 func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error) {
 	c.log.Debug("Authorize", "req", req)
@@ -164,9 +164,9 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 //	@Tags			OAuth
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	openid4vci.TokenRequest	true	"Token request"
-//	@Success		200	{object}	openid4vci.TokenResponse	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
+//	@Param			request	body		openid4vci.TokenRequest		true	"Token request"
+//	@Success		200		{object}	openid4vci.TokenResponse	"Success"
+//	@Failure		400		{object}	helpers.ErrorResponse		"Bad Request"
 //	@Router			/token [post]
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	c.log.Debug("OAuthToken", "req", req)

@@ -170,7 +170,7 @@ func (c *DatastoreColl) Get(ctx context.Context, meta *model.MetaData) (*model.D
 // GetByIdentity returns matching documents for a scope where any of the document's identity_mapping_ids match the provided identifier.
 func (c *DatastoreColl) GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error) {
 	filter := bson.M{
-		"meta.scope":            bson.M{"$eq": scope},
+		"meta.scope":           bson.M{"$eq": scope},
 		"identity_mapping_ids": bson.M{"$eq": identityMappingID},
 	}
 
@@ -314,5 +314,3 @@ func (c *DatastoreColl) DeleteByKey(ctx context.Context, authenticSource, scope,
 
 	return nil
 }
-
-

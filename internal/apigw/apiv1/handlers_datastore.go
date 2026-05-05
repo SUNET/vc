@@ -89,6 +89,20 @@ func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadReques
 		return err
 	}
 
+	// Ensure identity mapping records exist for each referenced identity_mapping_id.
+	// This creates records with empty attributes if they don't already exist,
+	// allowing the authentic source to later add identity attributes for resolution.
+	for _, id := range req.IdentityMappingIDs {
+		mapping := &model.IdentityMapping{
+			AuthenticSourcePersonID: id,
+			AuthenticSource:         req.Meta.AuthenticSource,
+		}
+		if err := c.identityMappingStore.EnsureMapping(ctx, mapping); err != nil {
+			c.log.Error(err, "failed to ensure identity mapping", "identity_mapping_id", id)
+			return err
+		}
+	}
+
 	if err := c.datastoreStore.Save(ctx, upload); err != nil {
 		c.log.Error(err, "failed to save document")
 		return err
@@ -196,7 +210,7 @@ type DatastoreDeleteIdentityRequest struct {
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
-//	@Failure		400	{object}	helpers.ErrorResponse				"Bad Request"
+//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
 //	@Router			/api/v1/datastore/identity [delete]
 func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
@@ -356,11 +370,11 @@ type DatastoreGetByKeyReply struct {
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	DatastoreGetByKeyReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			authentic_source	query	string	true	"Authentic source"
-//	@Param			scope				query	string	true	"Scope"
-//	@Param			document_id			query	string	true	"Document ID"
+//	@Success		200					{object}	DatastoreGetByKeyReply	"Success"
+//	@Failure		400					{object}	helpers.ErrorResponse	"Bad Request"
+//	@Param			authentic_source	query		string					true	"Authentic source"
+//	@Param			scope				query		string					true	"Scope"
+//	@Param			document_id			query		string					true	"Document ID"
 //	@Router			/api/v1/datastore/ [get]
 func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
