@@ -574,7 +574,7 @@ func TestSetIdentifier_BySessionID(t *testing.T) {
 	assert.Equal(t, "john-doe-id", retrieved.Identifier)
 }
 
-func TestSetIdentifier_BySessionID_FromURI(t *testing.T) {
+func TestSetIdentifier_BySessionID_WithRequestURI(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -593,27 +593,6 @@ func TestSetIdentifier_BySessionID_FromURI(t *testing.T) {
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-uri"})
 	require.NoError(t, err)
 	assert.Equal(t, "jane-id", retrieved.Identifier)
-}
-
-func TestSetIdentifier_BySessionID_FromKey(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMemoryStore(5 * time.Minute)
-
-	doc := &AuthorizationContext{
-		SessionID:                "session-identity-key",
-		EphemeralEncryptionKeyID: "ephemeral-key-456",
-	}
-	require.NoError(t, cache.Save(ctx, doc))
-
-	query := &AuthorizationContext{SessionID: "session-identity-key"}
-
-	err := cache.SetIdentifier(ctx, query, "bob-id")
-	require.NoError(t, err)
-
-	// Verify the identifier was set
-	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-key"})
-	require.NoError(t, err)
-	assert.Equal(t, "bob-id", retrieved.Identifier)
 }
 
 func TestSetIdentifier_NilQuery(t *testing.T) {

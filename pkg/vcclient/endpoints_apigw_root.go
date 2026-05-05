@@ -58,7 +58,7 @@ type NotificationReply struct {
 func (s *rootHandler) Notification(ctx context.Context, body *NotificationRequest) (*NotificationReply, *http.Response, error) {
 	s.log.Info("Notification")
 
-	fullURL, err := url.JoinPath(s.serviceBaseURL, "notification")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "datastore", "notification")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, nil, err

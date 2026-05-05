@@ -274,6 +274,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
 	}
 
+	// Persist the resolved identifier on the authorization context so that
+	// downstream credential issuance (VCICredential) can find it.
+	if err := c.cacheService.AuthContext.SetIdentifier(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, identityMappingID); err != nil {
+		c.log.Error(err, "failed to persist identifier on auth context")
+		return nil, fmt.Errorf("failed to persist identifier: %w", err)
+	}
+
 	// Retrieve documents matching the identity by scope
 	c.log.Debug("Querying documents", "scope", scope, "identity_mapping_id", identityMappingID)
 	documents, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
