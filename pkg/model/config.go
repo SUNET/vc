@@ -876,6 +876,10 @@ type APIGW struct {
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry
 	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
+	// IdentityMappingImport configures automatic import of identity mappings from JSON files at startup.
+	// When configured, APIGW reads JSON files and imports them into the
+	// identity mappings collection on first startup (skipped if data already exists).
+	IdentityMappingImport *IdentityMappingImport `yaml:"identity_mapping_import,omitempty"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list

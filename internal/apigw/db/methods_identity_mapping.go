@@ -108,6 +108,11 @@ func (c *IdentityMappingsColl) ResolveMapping(ctx context.Context, query *Resolv
 		})
 	}
 
+	if len(conditions) == 0 {
+		span.SetStatus(codes.Error, helpers.ErrNoIdentityFound.Error())
+		return "", helpers.ErrNoIdentityFound
+	}
+
 	filter := bson.M{"$and": conditions}
 
 	opts := options.FindOne().SetProjection(bson.M{

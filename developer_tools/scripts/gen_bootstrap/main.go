@@ -137,8 +137,9 @@ func main() {
 	writeJSON(outputDir, "elm.json", genELM(pids, &input))
 	writeJSON(outputDir, "diploma.json", genDiploma(pids, &input))
 	writeJSON(outputDir, "microcredential.json", genMicroCredential(pids, &input))
+	writeJSON(outputDir, "identity_mappings.json", genIdentityMappings(pids, &input))
 
-	fmt.Printf("Generated %d credential files for %d persons in %s\n", 8, len(pids), outputDir)
+	fmt.Printf("Generated %d credential files for %d persons in %s\n", 9, len(pids), outputDir)
 }
 
 // --- PID ARF 1.5 ---
@@ -155,7 +156,7 @@ func genPID15(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: dd,
 			Meta: &model.MetaData{
-				AuthenticSource: "PID_Provider:00001",
+				AuthenticSource: "Skatteverket",
 				Scope:           "pid_1_5",
 				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_5_%s", pid),
 			},
@@ -228,7 +229,7 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: dd,
 			Meta: &model.MetaData{
-				AuthenticSource: "PID_Provider:00001",
+				AuthenticSource: "Skatteverket",
 				Scope:           "pid_1_8",
 				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_8_%s", pid),
 			},
@@ -300,7 +301,7 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: dd,
 			Meta: &model.MetaData{
-				AuthenticSource: "eduID_Provider:00001",
+				AuthenticSource: "SUNET",
 				Scope:           "eduid",
 				DocumentID:      fmt.Sprintf("document_id_eduid_%s", pid),
 			},
@@ -349,7 +350,7 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: dd,
 			Meta: &model.MetaData{
-				AuthenticSource: "EHIC:00001",
+				AuthenticSource: "Skatteverket",
 				Scope:           "ehic",
 				DocumentID:      fmt.Sprintf("document_id_ehic_%s", pid),
 			},
@@ -428,7 +429,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: dd,
 			Meta: &model.MetaData{
-				AuthenticSource: "PDA1:00001",
+				AuthenticSource: "Skatteverket",
 				Scope:           "pda1",
 				DocumentID:      fmt.Sprintf("document_id_pda1_%s", pid),
 			},
@@ -448,7 +449,7 @@ func genELM(pids []string, input *InputFile) map[string]*model.CompleteDocument 
 		result[pid] = &model.CompleteDocument{
 			DocumentData: exampleData,
 			Meta: &model.MetaData{
-				AuthenticSource: "ELM:00001",
+				AuthenticSource: "Ladok",
 				Scope:           "elm",
 				DocumentID:      fmt.Sprintf("document_id_elm_%s", pid),
 			},
@@ -468,7 +469,7 @@ func genDiploma(pids []string, input *InputFile) map[string]*vcclient.UploadRequ
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: exampleData,
 			Meta: &model.MetaData{
-				AuthenticSource: "DIPLOMA:00001",
+				AuthenticSource: "Ladok",
 				Scope:           "diploma",
 				DocumentID:      fmt.Sprintf("document_id_diploma_%s", pid),
 			},
@@ -488,11 +489,45 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: exampleData,
 			Meta: &model.MetaData{
-				AuthenticSource: "MICROCREDENTIAL:00001",
+				AuthenticSource: "Ladok",
 				Scope:           "microcredential",
 				DocumentID:      fmt.Sprintf("document_id_microcredential_%s", pid),
 			},
 			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
+		}
+	}
+	return result
+}
+
+// --- Identity Mappings ---
+
+func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.IdentityMapping {
+	result := make(map[string][]*model.IdentityMapping, len(pids))
+	for _, pid := range pids {
+		p := input.Persons[pid]
+		aspid := fmt.Sprintf("authentic_source_person_id_%s", pid)
+		attrs := map[string]any{
+			"family_name": p.FamilyName,
+			"given_name":  p.GivenName,
+			"birth_date":  p.BirthDate,
+		}
+
+		result[pid] = []*model.IdentityMapping{
+			{
+				AuthenticSourcePersonID: aspid,
+				AuthenticSource:         "Skatteverket",
+				Attributes:              attrs,
+			},
+			{
+				AuthenticSourcePersonID: aspid,
+				AuthenticSource:         "SUNET",
+				Attributes:              attrs,
+			},
+			{
+				AuthenticSourcePersonID: aspid,
+				AuthenticSource:         "Ladok",
+				Attributes:              attrs,
+			},
 		}
 	}
 	return result

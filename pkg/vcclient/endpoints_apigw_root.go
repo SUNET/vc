@@ -21,14 +21,14 @@ type rootHandler struct {
 
 type UploadRequest struct {
 	Meta               *model.MetaData `json:"meta" validate:"required"`
-	IdentityMappingIDs []string        `json:"identity_mapping_ids,omitempty"`
+	IdentityMappingIDs []string        `json:"identity_mapping_ids" validate:"required,min=1"`
 	DocumentData       map[string]any  `json:"document_data" validate:"required"`
 }
 
 func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Response, error) {
 	s.log.Info("Upload")
 
-	fullURL, err := url.JoinPath(s.serviceBaseURL, "upload")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "datastore")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, err

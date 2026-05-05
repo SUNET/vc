@@ -27,7 +27,7 @@ type DocumentGetQuery struct {
 // Get gets a document
 func (s *documentHandler) Get(ctx context.Context, query *DocumentGetQuery) (*model.Document, *http.Response, error) {
 	reply := &model.Document{}
-	resp, err := s.client.call(ctx, http.MethodPost, s.serviceBaseURL, s.defaultContentType, nil, reply, true, s.baseURL)
+	resp, err := s.client.call(ctx, http.MethodPost, s.serviceBaseURL, s.defaultContentType, query, reply, true, s.baseURL)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -52,7 +52,7 @@ func (s *documentHandler) List(ctx context.Context, query *DocumentListQuery) ([
 		return nil, nil, err
 	}
 	reply := []model.DocumentList{}
-	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, nil, reply, true, s.baseURL)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, query, reply, true, s.baseURL)
 	if err != nil {
 		return nil, resp, err
 	}

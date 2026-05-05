@@ -219,13 +219,13 @@ async function postAndDisplayInArticleContainerFor(path, requestBody, articleHea
 const createMock = () => {
     //console.debug("createMock");
 
-    const vctElement = getElementById("vct-select");
+    const scopeElement = getElementById("scope-select");
     const authenticSourceElement = getElementById("authentic-source-input");
     const authenticSourcePersonIdElement = getElementById("authentic_source_person_id-input");
     const identitySchemaNameElement = getElementById("identity-schema-name");
 
     const postBody = {
-        vct: vctElement.value,
+        scope: scopeElement.value,
         authentic_source: authenticSourceElement.value,
         authentic_source_person_id: authenticSourcePersonIdElement.value,
         identity_schema_name: identitySchemaNameElement.value,
@@ -239,7 +239,6 @@ const postDocumentList = () => {
     const path = "/secure/apigw/document/list";
     const articleHeaderText = "List documents result";
 
-    const vctElement = getElementById("vct-select");
     const authenticSourceElement = getElementById("authentic-source-input");
     const authenticSourcePersonIdElement = getElementById("authentic_source_person_id-input");
     const identitySchemaName = getElementById("identity-schema-name");
@@ -247,7 +246,7 @@ const postDocumentList = () => {
     const documentListRequest = {
         authentic_source: authenticSourceElement.value,
         identity_mapping_id: authenticSourcePersonIdElement.value,
-        scope: vctElement.value
+        scope: getElementById("scope-select").value
     };
 
     postAndDisplayInArticleContainerFor(path, documentListRequest, articleHeaderText);

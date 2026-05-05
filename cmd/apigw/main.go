@@ -68,6 +68,12 @@ func main() {
 		}
 	}
 
+	if cfg.APIGW.IdentityMappingImport != nil {
+		if err := importer.RunIdentityMappings(ctx, cfg.APIGW.IdentityMappingImport, dbService, log); err != nil {
+			mainLog.Error(err, "Identity mapping import failed")
+		}
+	}
+
 	cacheService, err := cache.New(ctx, cfg, dbService, tracer, log)
 	if err != nil {
 		panic(err)

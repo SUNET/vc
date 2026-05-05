@@ -2,6 +2,8 @@ package vcclient
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,14 +21,33 @@ func mockHappyHttServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/api/v1/document", func(rw http.ResponseWriter, req *http.Request) {
 		assert.Equal(t, req.URL.Path, "/api/v1/document")
 		assert.Equal(t, req.Method, http.MethodPost)
-		_, err := rw.Write(golden.Get(t, "documentGetReplyOK.golden"))
+
+		body, err := io.ReadAll(req.Body)
+		assert.NoError(t, err)
+		defer req.Body.Close()
+
+		var got DocumentGetQuery
+		assert.NoError(t, json.Unmarshal(body, &got))
+		assert.NotEmpty(t, got.AuthenticSource, "authentic_source should be sent in request body")
+		assert.NotEmpty(t, got.DocumentID, "document_id should be sent in request body")
+
+		_, err = rw.Write(golden.Get(t, "documentGetReplyOK.golden"))
 		assert.NoError(t, err)
 	})
 
 	mux.HandleFunc("/api/v1/document/list", func(rw http.ResponseWriter, req *http.Request) {
 		assert.Equal(t, req.URL.Path, "/api/v1/document/list")
 		assert.Equal(t, req.Method, http.MethodPost)
-		_, err := rw.Write(golden.Get(t, "documentListReplyOK.golden"))
+
+		body, err := io.ReadAll(req.Body)
+		assert.NoError(t, err)
+		defer req.Body.Close()
+
+		var got DocumentListQuery
+		assert.NoError(t, json.Unmarshal(body, &got))
+		assert.NotEmpty(t, got.AuthenticSource, "authentic_source should be sent in request body")
+
+		_, err = rw.Write(golden.Get(t, "documentListReplyOK.golden"))
 		assert.NoError(t, err)
 	})
 

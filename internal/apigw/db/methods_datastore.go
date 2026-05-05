@@ -90,7 +90,7 @@ func (c *DatastoreColl) AddIdentity(ctx context.Context, query *AddIdentityQuery
 	if err != nil {
 		return err
 	}
-	if result.ModifiedCount == 0 {
+	if result.MatchedCount == 0 {
 		return helpers.ErrNoDocumentFound
 	}
 

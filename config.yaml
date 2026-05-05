@@ -94,8 +94,26 @@ apigw:
     addr: issuer.vc.docker:8090
   registry_client:
     addr: registry.vc.docker:8090
+  identity_mapping_import:
+    file_paths:
+      - "bootstrapping/identity_mappings.json"
+    users:
+      - "100"
+      - "102"
   data_sources:
     datastore:
+      import:
+        file_paths:
+          - "bootstrapping/diploma.json"
+          - "bootstrapping/eduid.json"
+          - "bootstrapping/ehic.json"
+          - "bootstrapping/elm.json"
+          - "bootstrapping/pda1.json"
+          - "bootstrapping/pid-1-5.json"
+          - "bootstrapping/pid-1-8.json"
+        users:
+          - "100"
+          - "102"
       scopes:
         pid_1_5:
           auth_provider: oidc
