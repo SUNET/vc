@@ -141,3 +141,20 @@ func (s *Service) endpointDatastoreDeleteIdentity(ctx context.Context, c *gin.Co
 	c.Status(http.StatusNoContent)
 	return nil, nil
 }
+
+func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreList")
+	defer span.End()
+
+	request := &apiv1.DatastoreListRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	reply, err := s.apiv1.DatastoreList(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}

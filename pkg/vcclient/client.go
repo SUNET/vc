@@ -79,7 +79,7 @@ func New(config *Config, log *logger.Log) (*Client, error) {
 			baseURL: config.ApigwURL,
 			log:     c.log.New("apigw"),
 		}
-		c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/document", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
+		c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/datastore", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
 		c.APIGW.Identity = &identityHandler{client: c, serviceBaseURL: "api/v1/identity", defaultContentType: defaultContentType, log: c.log.New("apigw.identity"), baseURL: config.ApigwURL}
 		c.APIGW.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("apigw.root"), baseURL: config.ApigwURL}
 		c.APIGW.OAuth = &oauthHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("apigw.oauth"), baseURL: config.ApigwURL}

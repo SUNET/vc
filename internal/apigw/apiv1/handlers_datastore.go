@@ -153,7 +153,7 @@ type DatastoreAddIdentityRequest struct {
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
 	DocumentID string `json:"document_id" validate:"required"`
 
-	IdentityMappingIDs []string `json:"identity_mapping_ids" validate:"required"`
+	IdentityMappingIDs []string `json:"identity_mapping_ids" validate:"required,min=1,dive,required,max=128,printascii"`
 }
 
 // DatastoreAddIdentity adds an identity to a document
@@ -250,7 +250,7 @@ type DatastoreDeleteRequest struct {
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	"Success"
+//	@Success		204	"No Content"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreDeleteRequest	true	" "
 //	@Router			/api/v1/datastore [delete]

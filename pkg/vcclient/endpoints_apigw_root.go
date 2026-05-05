@@ -21,7 +21,7 @@ type rootHandler struct {
 
 type UploadRequest struct {
 	Meta               *model.MetaData `json:"meta" validate:"required"`
-	IdentityMappingIDs []string        `json:"identity_mapping_ids" validate:"required,min=1"`
+	IdentityMappingIDs []string        `json:"identity_mapping_ids" validate:"required,min=1,dive,required,max=128,printascii"`
 	DocumentData       map[string]any  `json:"document_data" validate:"required"`
 }
 

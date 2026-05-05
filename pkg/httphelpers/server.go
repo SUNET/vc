@@ -54,8 +54,8 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 			return
 		}
 
-		// Skip rendering if response is nil (e.g., redirect was already handled)
 		if res == nil {
+			c.Status(defaultStatus)
 			return
 		}
 

@@ -18,8 +18,8 @@ import (
 func mockHappyHttServer(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/api/v1/document", func(rw http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, req.URL.Path, "/api/v1/document")
+	mux.HandleFunc("/api/v1/datastore", func(rw http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, req.URL.Path, "/api/v1/datastore")
 		assert.Equal(t, req.Method, http.MethodPost)
 
 		body, err := io.ReadAll(req.Body)
@@ -35,8 +35,8 @@ func mockHappyHttServer(t *testing.T) *httptest.Server {
 		assert.NoError(t, err)
 	})
 
-	mux.HandleFunc("/api/v1/document/list", func(rw http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, req.URL.Path, "/api/v1/document/list")
+	mux.HandleFunc("/api/v1/datastore/list", func(rw http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, req.URL.Path, "/api/v1/datastore/list")
 		assert.Equal(t, req.Method, http.MethodPost)
 
 		body, err := io.ReadAll(req.Body)
