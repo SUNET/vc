@@ -916,6 +916,69 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 	}
 }
 
+// TestToken_EnableUserInfoTrue tests token response when EnableUserInfo is true
+func TestToken_EnableUserInfoTrue(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = true
+	client.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration = 3600
+	client.cfg.Verifier.Outbound.OIDCProvider.RefreshTokenDuration = 86400
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID:      "session-userinfo",
+		Status:         cache.SessionStatusCodeIssued,
+		ClientID:       "test-client",
+		RedirectURI:    "https://example.com/callback",
+		Scopes:         []string{"openid", "profile"},
+		Nonce:          "test-nonce",
+		Code:           "userinfo-code",
+		Forfeited:      false,
+		CodeExpiresAt:  time.Now().Add(10 * time.Minute).Unix(),
+		WalletID:       "wallet-789",
+		VerifiedClaims: map[string]any{"name": "Jane Doe"},
+	}
+	client.cacheService.AuthContext.Create(ctx, authCtx) // #nosec G104
+
+	testClient := &db.Client{
+		ClientID:                "test-client",
+		ClientSecretHash:        hashPassword(t, "secret"),
+		TokenEndpointAuthMethod: "client_secret_basic",
+		RedirectURIs:            []string{"https://example.com/callback"},
+	}
+	mockDB.Clients.Create(ctx, testClient) // #nosec G104
+
+	key := generateTestRSAKey(t)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	resp, err := client.Token(ctx, &TokenRequest{
+		GrantType:    "authorization_code",
+		Code:         "userinfo-code",
+		ClientID:     "test-client",
+		ClientSecret: "secret",
+		RedirectURI:  "https://example.com/callback",
+	})
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "Bearer", resp.TokenType)
+	assert.NotEmpty(t, resp.IDToken)
+	assert.NotEmpty(t, resp.AccessToken)
+	assert.NotEmpty(t, resp.RefreshToken)
+	assert.Greater(t, resp.ExpiresIn, 0)
+
+	// Verify session stores the tokens
+	updatedCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, "userinfo-code")
+	require.NotNil(t, updatedCtx)
+	assert.True(t, updatedCtx.Forfeited)
+	assert.Equal(t, cache.SessionStatusTokenIssued, updatedCtx.Status)
+	assert.Equal(t, resp.AccessToken, updatedCtx.AccessToken)
+	assert.Equal(t, resp.IDToken, updatedCtx.IDToken)
+	assert.Equal(t, resp.RefreshToken, updatedCtx.RefreshToken)
+	assert.Greater(t, updatedCtx.AccessTokenExpiresAt, int64(0))
+	assert.Greater(t, updatedCtx.RefreshTokenExpiresAt, int64(0))
+}
+
 // TestToken_RefreshTokenGrant tests the refresh token grant (currently unimplemented)
 func TestToken_RefreshTokenGrant(t *testing.T) {
 	ctx := t.Context()
@@ -2334,7 +2397,9 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 
 	// Verify grant types
 	assert.Contains(t, metadata.GrantTypesSupported, "authorization_code")
-	assert.Contains(t, metadata.GrantTypesSupported, "refresh_token")
+	// refresh_token and implicit are only advertised when EnableUserInfo is true
+	assert.NotContains(t, metadata.GrantTypesSupported, "refresh_token")
+	assert.NotContains(t, metadata.GrantTypesSupported, "implicit")
 
 	// Verify PKCE support
 	assert.Contains(t, metadata.CodeChallengeMethodsSupported, "S256")

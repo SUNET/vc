@@ -524,9 +524,14 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 			"sub", "name", "given_name", "family_name", "email",
 			"email_verified", "birthdate", "address",
 		},
-		GrantTypesSupported:               []string{"authorization_code", "implicit", "refresh_token"},
+		GrantTypesSupported:               []string{"authorization_code"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
+	}
+
+	// Add grant types that require UserInfo/token support
+	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		metadata.GrantTypesSupported = append(metadata.GrantTypesSupported, "implicit", "refresh_token")
 	}
 
 	// Add configured credential scopes
