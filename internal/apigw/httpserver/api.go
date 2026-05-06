@@ -17,7 +17,6 @@ import (
 type Apiv1 interface {
 	// datastore endpoints
 	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error
-	DatastoreNotification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
 	DatastoreAddIdentity(ctx context.Context, req *apiv1.DatastoreAddIdentityRequest) error
 	DatastoreDeleteIdentity(ctx context.Context, req *apiv1.DatastoreDeleteIdentityRequest) error
 	DatastoreGet(ctx context.Context, req *apiv1.DatastoreGetRequest) (*apiv1.DatastoreGetReply, error)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -210,4 +212,70 @@ func TestResolveIdentifier_Error(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestLookupDatastoreByIdentity_SkipsExpiredDocuments(t *testing.T) {
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	datastore := newMemoryDatastoreStore()
+	identityStore := newMemoryIdentityMappingStore()
+	docCache := cache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute)
+
+	client := &Client{
+		log:                  log,
+		datastoreStore:       datastore,
+		identityMappingStore: identityStore,
+		cacheService:         &cache.Service{Document: docCache},
+	}
+
+	dsCred := &model.DatastoreScope{
+		AuthClaims: []string{"authentic_source_person_id"},
+	}
+
+	// Seed identity mapping
+	seedMapping(t, identityStore, "SUNET", "person-001", map[string]string{"ssn": "123"})
+
+	t.Run("expired document is skipped", func(t *testing.T) {
+		expired := time.Now().UTC().Add(-1 * time.Hour)
+		seedDoc(t, datastore, "SUNET", "ehic", "expired-doc", []string{"person-001"}, map[string]any{"card": "old"})
+		datastore.mu.Lock()
+		datastore.docs[docKey("SUNET", "ehic", "expired-doc")].Meta.ValidNotAfter = &expired
+		datastore.mu.Unlock()
+
+		err := client.LookupDatastoreByIdentity(t.Context(), "sess-1", "ehic", "SUNET",
+			map[string]any{"authentic_source_person_id": "person-001"}, dsCred)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "all documents expired")
+	})
+
+	t.Run("valid document is kept", func(t *testing.T) {
+		future := time.Now().UTC().Add(24 * time.Hour)
+		seedDoc(t, datastore, "SUNET", "pda1", "valid-doc", []string{"person-001"}, map[string]any{"card": "new"})
+		datastore.mu.Lock()
+		datastore.docs[docKey("SUNET", "pda1", "valid-doc")].Meta.ValidNotAfter = &future
+		datastore.mu.Unlock()
+
+		err := client.LookupDatastoreByIdentity(t.Context(), "sess-2", "pda1", "SUNET",
+			map[string]any{"authentic_source_person_id": "person-001"}, dsCred)
+		require.NoError(t, err)
+
+		cached, ok := docCache.Get(t.Context(), "sess-2")
+		require.True(t, ok)
+		require.Len(t, cached, 1)
+		assert.Equal(t, "valid-doc", cached["SUNET"].Meta.DocumentID)
+	})
+
+	t.Run("nil valid_not_after means no expiry", func(t *testing.T) {
+		seedDoc(t, datastore, "SUNET", "diploma", "forever-doc", []string{"person-001"}, map[string]any{"title": "PhD"})
+
+		err := client.LookupDatastoreByIdentity(t.Context(), "sess-3", "diploma", "SUNET",
+			map[string]any{"authentic_source_person_id": "person-001"}, dsCred)
+		require.NoError(t, err)
+
+		cached, ok := docCache.Get(t.Context(), "sess-3")
+		require.True(t, ok)
+		require.Len(t, cached, 1)
+		assert.Equal(t, "forever-doc", cached["SUNET"].Meta.DocumentID)
+	})
 }

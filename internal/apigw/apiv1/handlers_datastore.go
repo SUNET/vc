@@ -2,12 +2,10 @@ package apiv1
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/vcclient"
 )
 
@@ -24,64 +22,10 @@ import (
 //	@Param			req	body		vcclient.UploadRequest	true	" "
 //	@Router			/api/v1/datastore/ [post]
 func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error {
-	credentialOfferParameter := openid4vci.CredentialOfferParameters{
-		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
-		CredentialConfigurationIDs: []string{
-			req.Meta.Scope,
-		},
-		Grants: map[string]any{
-			"authorization_code": openid4vci.GrantAuthorizationCode{
-				IssuerState: fmt.Sprintf("document_id=%s&authentic_source=%s", req.Meta.DocumentID, req.Meta.AuthenticSource),
-			},
-		},
-	}
-
-	var qr *openid4vci.QR
-	switch c.cfg.Common.CredentialOfferQR.Type {
-	case "credential_offer":
-		credentialOffer, err := credentialOfferParameter.CredentialOffer()
-		if err != nil {
-			return err
-		}
-
-		// Empty string defaults to "openid-credential-offer://" protocol handler
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "")
-		if err != nil {
-			return err
-		}
-
-	case "credential_offer_uri":
-		credentialOffer, err := credentialOfferParameter.CredentialOfferURI()
-		if err != nil {
-			return err
-		}
-
-		// Empty string defaults to "openid-credential-offer://" protocol handler
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
-		if err != nil {
-			return err
-		}
-
-		uuid, err := credentialOffer.UUID()
-		if err != nil {
-			return err
-		}
-
-		doc := &db.CredentialOfferDocument{
-			UUID:                      uuid,
-			CredentialOfferParameters: credentialOfferParameter,
-		}
-
-		if err := c.credentialOfferStore.Save(ctx, doc); err != nil {
-			return err
-		}
-	}
-
 	upload := &model.CompleteDocument{
 		Meta:               req.Meta,
 		DocumentData:       req.DocumentData,
 		IdentityMappingIDs: req.IdentityMappingIDs,
-		QR:                 qr,
 	}
 
 	if err := helpers.ValidateDocumentData(ctx, upload, c.log); err != nil {
@@ -109,34 +53,6 @@ func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadReques
 	}
 
 	return nil
-}
-
-// DatastoreNotification return QR code and DeepLink for a document
-//
-//	@Summary		DatastoreNotification
-//	@ID				generic-notification
-//	@Description	notification endpoint
-//	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
-//	@Success		200	{object}	vcclient.NotificationReply		"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
-//	@Param			req	body		vcclient.NotificationRequest	true	" "
-//	@Router			/api/v1/datastore/notification [post]
-func (c *Client) DatastoreNotification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
-	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
-		AuthenticSource: req.AuthenticSource,
-		Scope:           req.Scope,
-		DocumentID:      req.DocumentID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &vcclient.NotificationReply{
-		Data: qrCode,
-	}
-	return reply, nil
 }
 
 // DatastoreAddIdentityRequest is the request for adding identity to a document
@@ -396,7 +312,8 @@ type DatastoreResolveRequest struct {
 
 // DatastoreResolveReply is the reply for resolved documents
 type DatastoreResolveReply struct {
-	Data []*model.DocumentList `json:"data"`
+	AuthenticSourcePersonID string                `json:"authentic_source_person_id"`
+	Data                    []*model.DocumentList `json:"data"`
 }
 
 // DatastoreResolve resolves identity attributes (e.g. from an OIDC/SAML session) to an
@@ -432,7 +349,8 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 	}
 
 	return &DatastoreResolveReply{
-		Data: docs,
+		AuthenticSourcePersonID: personID,
+		Data:                    docs,
 	}, nil
 }
 

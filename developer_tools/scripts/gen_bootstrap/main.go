@@ -149,8 +149,8 @@ func genPID15(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 	for _, pid := range pids {
 		p := input.Persons[pid]
 
-		aspid := fmt.Sprintf("authentic_source_person_id_%s", pid)
-		dd := makePIDDocumentData(p, aspid, &input.Defaults)
+		authenticSourcePersonID := fmt.Sprintf("authentic_source_person_id_%s", pid)
+		dd := makePIDDocumentData(p, authenticSourcePersonID, &input.Defaults)
 		dd["arf"] = "1.5"
 
 		result[pid] = &vcclient.UploadRequest{
@@ -505,7 +505,7 @@ func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.Id
 	result := make(map[string][]*model.IdentityMapping, len(pids))
 	for _, pid := range pids {
 		p := input.Persons[pid]
-		aspid := fmt.Sprintf("authentic_source_person_id_%s", pid)
+		authenticSourcePersonID := fmt.Sprintf("authentic_source_person_id_%s", pid)
 		attrs := map[string]string{
 			"family_name": p.FamilyName,
 			"given_name":  p.GivenName,
@@ -514,17 +514,17 @@ func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.Id
 
 		result[pid] = []*model.IdentityMapping{
 			{
-				AuthenticSourcePersonID: aspid,
+				AuthenticSourcePersonID: authenticSourcePersonID,
 				AuthenticSource:         "Skatteverket",
 				Attributes:              attrs,
 			},
 			{
-				AuthenticSourcePersonID: aspid,
+				AuthenticSourcePersonID: authenticSourcePersonID,
 				AuthenticSource:         "SUNET",
 				Attributes:              attrs,
 			},
 			{
-				AuthenticSourcePersonID: aspid,
+				AuthenticSourcePersonID: authenticSourcePersonID,
 				AuthenticSource:         "Ladok",
 				Attributes:              attrs,
 			},

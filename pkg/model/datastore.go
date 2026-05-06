@@ -3,8 +3,6 @@ package model
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // CompleteDocument is a generic type for upload
@@ -12,13 +10,11 @@ type CompleteDocument struct {
 	Meta               *MetaData      `json:"meta,omitempty" bson:"meta" validate:"required"`
 	IdentityMappingIDs []string       `json:"identity_mapping_ids,omitempty" bson:"identity_mapping_ids" validate:"required,min=1"`
 	DocumentData       map[string]any `json:"document_data,omitempty" bson:"document_data" validate:"required"`
-	QR                 *openid4vci.QR `json:"qr,omitempty" bson:"qr"`
 }
 
 // DocumentList is a generic type for document list
 type DocumentList struct {
-	Meta *MetaData      `json:"meta,omitempty" bson:"meta" validate:"required"`
-	QR   *openid4vci.QR `json:"qr,omitempty" bson:"qr" validate:"required"`
+	Meta *MetaData `json:"meta,omitempty" bson:"meta" validate:"required"`
 }
 
 // Document is a generic type for get document
@@ -49,6 +45,10 @@ type MetaData struct {
 
 	// CreatedAt is the timestamp when the document was created
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+
+	// ValidNotAfter is an optional expiration timestamp for administrative purposes.
+	// Documents past this time should not be used.
+	ValidNotAfter *time.Time `json:"valid_not_after,omitempty" bson:"valid_not_after,omitempty"`
 }
 
 // Identity identifies a person

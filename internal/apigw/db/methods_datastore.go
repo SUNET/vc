@@ -7,7 +7,6 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -235,24 +234,6 @@ func (c *DatastoreColl) List(ctx context.Context, query *ListQuery) ([]*model.Do
 	}
 
 	return res, nil
-}
-
-// GetQR return matching document and return its QR code, else error
-func (c *DatastoreColl) GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error) {
-	filter := bson.M{
-		"meta.authentic_source": bson.M{"$eq": attr.AuthenticSource},
-		"meta.scope":            bson.M{"$eq": attr.Scope},
-		"meta.document_id":      bson.M{"$eq": attr.DocumentID},
-	}
-	opt := options.FindOne().SetProjection(bson.M{
-		"qr": 1,
-	})
-
-	res := &model.CompleteDocument{}
-	if err := c.Coll.FindOne(ctx, filter, opt).Decode(res); err != nil {
-		return nil, err
-	}
-	return res.QR, nil
 }
 
 // Replace replaces one document

@@ -201,7 +201,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "", http.StatusOK, s.endpointDatastoreGet)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "", http.StatusNoContent, s.endpointDatastoreDelete)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/notification", http.StatusOK, s.endpointDatastoreNotification)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/resolve", http.StatusOK, s.endpointDatastoreResolve)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/list", http.StatusOK, s.endpointDatastoreList)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPut, "/identity", http.StatusOK, s.endpointDatastoreAddIdentity)

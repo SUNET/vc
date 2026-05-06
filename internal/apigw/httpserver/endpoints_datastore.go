@@ -91,23 +91,6 @@ func (s *Service) endpointDatastoreDelete(ctx context.Context, c *gin.Context) (
 	return nil, nil
 }
 
-func (s *Service) endpointDatastoreNotification(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreNotification")
-	defer span.End()
-
-	request := &vcclient.NotificationRequest{}
-	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	reply, err := s.apiv1.DatastoreNotification(ctx, request)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-	return reply, nil
-}
-
 func (s *Service) endpointDatastoreAddIdentity(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreAddIdentity")
 	defer span.End()

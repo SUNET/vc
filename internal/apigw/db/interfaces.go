@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // CredentialOfferStore defines the interface for credential offer operations
@@ -23,7 +22,6 @@ type DatastoreStore interface {
 	Get(ctx context.Context, meta *model.MetaData) (*model.Document, error)
 	GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error)
 	List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error)
-	GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error)
 	Replace(ctx context.Context, doc *model.CompleteDocument) error
 	GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
 	DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error

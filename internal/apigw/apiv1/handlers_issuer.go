@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
@@ -89,6 +90,20 @@ func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope
 	}
 	if len(docs) == 0 {
 		return fmt.Errorf("no documents found in datastore for scope %q with the provided identity", scope)
+	}
+
+	// Filter out expired documents
+	now := time.Now().UTC()
+	for key, doc := range docs {
+		if doc.Meta.ValidNotAfter != nil && now.After(*doc.Meta.ValidNotAfter) {
+			c.log.Info("Skipping expired document", "document_id", doc.Meta.DocumentID, "valid_not_after", doc.Meta.ValidNotAfter)
+			delete(docs, key)
+		}
+	}
+
+	// If all documents are expired, return an error to avoid caching and issuing from expired data
+	if len(docs) == 0 {
+		return fmt.Errorf("all documents expired for scope %q", scope)
 	}
 
 	c.cacheService.Document.Set(ctx, sessionID, docs)

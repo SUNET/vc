@@ -43,7 +43,6 @@ Shared configuration used across all services.
 | `mongo`               | `object` | MongoDB configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
 | `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `kafka`               | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                      | -                        | -       | No       |
-| `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                                                                                                                                                                       | -                        | -       | No       |
 | `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                        | `"/etc/vc/secrets.yaml"` | -       | No       |
 | `ha`                  | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                    | -                        | -       | No       |
 | `branding`            | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                  | -                        | -       | No       |
@@ -87,24 +86,6 @@ Shared configuration used across all services.
 | --------- | ---------- | ------------------------------ | -------------------------------- | ------- | -------- |
 | `enable`  | `bool`     | Kafka integration              | -                                | `false` | No       |
 | `brokers` | `[]string` | List of Kafka broker addresses | `["kafka0:9092", "kafka1:9092"]` | -       | Yes      |
-
-### `credential_offer_qr`
-
-> **Path:** `.common.credential_offer_qr`
-
-| Field  | Type     | Description                                                         | Example | Default            | Required |
-| ------ | -------- | ------------------------------------------------------------------- | ------- | ------------------ | -------- |
-| `type` | `string` | Credential offer type: "credential_offer" or "credential_offer_uri" | -       | `credential_offer` | No       |
-| `qr`   | `object` | QR code generation settings                                         | -       | -                  | No       |
-
-### `qr`
-
-> **Path:** `.common.credential_offer_qr.qr`
-
-| Field            | Type  | Description                  | Example | Default | Required |
-| ---------------- | ----- | ---------------------------- | ------- | ------- | -------- |
-| `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
-| `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
 
 ### `ha`
 
