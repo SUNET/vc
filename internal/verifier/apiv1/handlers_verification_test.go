@@ -16,7 +16,6 @@ import (
 	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -185,65 +184,6 @@ func TestVerificationCallback(t *testing.T) {
 	}
 }
 
-// TestBuildAllowedAlgorithmSet tests algorithm allowlist construction
-func TestBuildAllowedAlgorithmSet(t *testing.T) {
-	tests := []struct {
-		name        string
-		input       []string
-		expectAlg   string
-		expectAllow bool
-	}{
-		{
-			name:        "ES256 allowed by default",
-			input:       nil,
-			expectAlg:   "ES256",
-			expectAllow: true,
-		},
-		{
-			name:        "ES256 explicitly allowed",
-			input:       []string{"ES256", "ES384"},
-			expectAlg:   "ES256",
-			expectAllow: true,
-		},
-		{
-			name:        "RS256 not in custom list",
-			input:       []string{"ES256"},
-			expectAlg:   "RS256",
-			expectAllow: false,
-		},
-		{
-			name:        "none algorithm stripped even if in list",
-			input:       []string{"none", "ES256"},
-			expectAlg:   "none",
-			expectAllow: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			allowed := trust.BuildAllowedAlgorithmSet(tt.input)
-			assert.Equal(t, tt.expectAllow, allowed[tt.expectAlg])
-		})
-	}
-}
-
-// TestValidateSigningMethodForKey tests signing method / key type compatibility
-func TestValidateSigningMethodForKey(t *testing.T) {
-	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	// ECDSA key with ECDSA method - should pass
-	ecToken := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{})
-	err = trust.ValidateSigningMethodForKey(ecToken, &ecKey.PublicKey)
-	assert.NoError(t, err)
-
-	// ECDSA key with RSA method - should fail
-	rsaToken := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{})
-	err = trust.ValidateSigningMethodForKey(rsaToken, &ecKey.PublicKey)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected signing method")
-}
-
 // TestVerifyJWTSignatureInvalidSignature tests that invalid signatures are rejected via JWTTrustVerifier
 func TestVerifyJWTSignatureInvalidSignature(t *testing.T) {
 	// Generate two different keys
@@ -266,89 +206,16 @@ func TestVerifyJWTSignatureInvalidSignature(t *testing.T) {
 	signedJWT, err := token.SignedString(key1)
 	require.NoError(t, err)
 
-	verifier := newTestJWTTrustVerifier(&mockTrustEvaluator{trustDecision: true})
-
-	ctx := context.Background()
-	err = verifier.EvaluateIssuerTrust(ctx, signedJWT+"~", testScope)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "JWT signature verification failed")
-}
-
-// newTestJWTTrustVerifier creates a JWTTrustVerifier for testing.
-func newTestJWTTrustVerifier(evaluator trust.TrustEvaluator) *trust.JWTTrustVerifier {
-	return trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
-		TrustEvaluator: evaluator,
+	verifier := trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator: trust.NewAllowAllEvaluator(),
 		JWKSResolver:   trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
 		ParseX5C:       func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
 		ParseJWK:       jose.ParseJWKToPublicKey,
 		Log:            logger.NewSimple("test"),
 	})
-}
-
-// mockTrustEvaluator is a mock implementation for testing
-type mockTrustEvaluator struct {
-	trustDecision bool
-	trustReason   string
-	shouldError   bool
-}
-
-func (m *mockTrustEvaluator) Evaluate(ctx context.Context, req *trust.EvaluationRequest) (*trustapi.TrustDecision, error) {
-	if m.shouldError {
-		return nil, assert.AnError
-	}
-	return &trustapi.TrustDecision{
-		Trusted:        m.trustDecision,
-		Reason:         m.trustReason,
-		TrustFramework: "test-framework",
-	}, nil
-}
-
-func (m *mockTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
-	return true
-}
-
-// TestEvaluateIssuerTrust_NilEvaluator tests that nil trust evaluator returns error
-func TestEvaluateIssuerTrustNilEvaluator(t *testing.T) {
-	verifier := trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
-		Log: logger.NewSimple("test"),
-	})
 
 	ctx := context.Background()
-	err := verifier.EvaluateIssuerTrust(ctx, "dummy.jwt.token", testScope)
-
+	err = verifier.EvaluateIssuerTrust(ctx, signedJWT+"~", testScope)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "trust evaluator not initialized")
-}
-
-// TestEvaluateIssuerTrust_EmptyJWT tests that empty JWT returns error
-func TestEvaluateIssuerTrustEmptyJWT(t *testing.T) {
-	verifier := newTestJWTTrustVerifier(&mockTrustEvaluator{trustDecision: true})
-
-	ctx := context.Background()
-	err := verifier.EvaluateIssuerTrust(ctx, "", testScope)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "empty issuer JWT")
-}
-
-// TestEvaluateIssuerTrust_MissingKeyMaterial tests that missing key material returns error
-func TestEvaluateIssuerTrustMissingKeyMaterial(t *testing.T) {
-	verifier := newTestJWTTrustVerifier(&mockTrustEvaluator{trustDecision: true})
-
-	// Create a JWT without x5c or jwk header and non-DID issuer
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss": "https://issuer.example.com", // Not a DID
-		"vct": "urn:credential:test",
-	})
-	signedJWT, err := token.SignedString(privateKey)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	err = verifier.EvaluateIssuerTrust(ctx, signedJWT+"~disclosure1~disclosure2~", testScope)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing x5c, jwk, or kid header")
+	assert.Contains(t, err.Error(), "JWT signature verification failed")
 }

@@ -24,7 +24,7 @@ type testLogger struct{}
 
 func (l *testLogger) Debug(_ string, _ ...any) {}
 func (l *testLogger) Warn(_ string, _ ...any)  {}
-func (l *testLogger) Info(_ string, _ ...any)   {}
+func (l *testLogger) Info(_ string, _ ...any)  {}
 
 // mockEvaluator is a mock TrustEvaluator for testing.
 type mockEvaluator struct {

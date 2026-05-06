@@ -126,8 +126,8 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	}
 
 	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
-		TrustEvaluator:             trustEvaluator,
-		JWKSResolver:               trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+		TrustEvaluator: trustEvaluator,
+		JWKSResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
 			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
 			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
 		}),

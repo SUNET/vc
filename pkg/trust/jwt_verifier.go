@@ -37,12 +37,12 @@ type Logger interface {
 
 // JWTTrustVerifierConfig configures a JWTTrustVerifier.
 type JWTTrustVerifierConfig struct {
-	TrustEvaluator            TrustEvaluator
-	JWKSResolver              *JWKSKeyResolver
+	TrustEvaluator             TrustEvaluator
+	JWKSResolver               *JWKSKeyResolver
 	AllowedSignatureAlgorithms []string
-	ParseX5C                  ParseX5CFunc
-	ParseJWK                  ParseJWKFunc
-	Log                       Logger
+	ParseX5C                   ParseX5CFunc
+	ParseJWK                   ParseJWKFunc
+	Log                        Logger
 }
 
 // JWTTrustVerifier verifies JWT credential signatures and evaluates issuer trust.
@@ -276,7 +276,7 @@ var DefaultAllowedAlgorithms = []string{
 	"ES256", "ES384", "ES512", // ECDSA
 	"RS256", "RS384", "RS512", // RSA PKCS#1 v1.5
 	"PS256", "PS384", "PS512", // RSA-PSS
-	"EdDSA",                   // Ed25519
+	"EdDSA", // Ed25519
 }
 
 // BuildAllowedAlgorithmSet creates a set of allowed algorithms for O(1) lookup.
