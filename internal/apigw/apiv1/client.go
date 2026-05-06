@@ -61,8 +61,7 @@ type Client struct {
 	cacheService *cache.Service
 
 	// Trust evaluation
-	trustEvaluator trust.TrustEvaluator
-	jwksResolver   *trust.JWKSKeyResolver
+	jwtTrustVerifier *trust.JWTTrustVerifier
 }
 
 // New creates a new instance of the public api
@@ -118,17 +117,25 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	}
 
 	// Initialize trust evaluator for VP credential validation
-	c.jwksResolver = trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
-		HTTPClient:          &http.Client{Timeout: 30 * time.Second},
-		ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
-	})
 	pdpURL := cfg.APIGW.Trust.PDPURL
-	c.trustEvaluator = trust.NewTrustEvaluatorFromConfig(pdpURL)
+	trustEvaluator := trust.NewTrustEvaluatorFromConfig(pdpURL)
 	if pdpURL == "" {
 		c.log.Warn("Trust evaluation is DISABLED - no pdp_url configured. All credential issuers will be trusted.")
 	} else {
 		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
 	}
+
+	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator:             trustEvaluator,
+		JWKSResolver:               trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
+			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
+		}),
+		AllowedSignatureAlgorithms: cfg.APIGW.Trust.AllowedSignatureAlgorithms,
+		ParseX5C:                   func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:                   jose.ParseJWKToPublicKey,
+		Log:                        c.log,
+	})
 
 	c.log.Info("Started")
 
