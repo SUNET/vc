@@ -1,10 +1,12 @@
 package oidcrp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
@@ -232,8 +234,10 @@ type AuthRequest struct {
 	State            string
 }
 
-// InitiateAuth initiates an OIDC authentication flow
-func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*AuthRequest, error) {
+// InitiateAuth initiates an OIDC authentication flow.
+// oidcParams and dynamicParams are optional: when non-nil, they customize the
+// authorization request (e.g., acr_values, claims parameter, extra scopes).
+func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcParams *model.OIDCRequestParams, dynamicParams map[string]string) (*AuthRequest, error) {
 	if err := s.ensureReady(ctx); err != nil {
 		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
 	}
@@ -247,16 +251,47 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
+	// Store dynamic params in session for later retrieval during policy evaluation
+	if len(dynamicParams) > 0 {
+		session.DynamicParams = dynamicParams
+		s.sessionCache.Set(ctx, session.ID, session)
+	}
+
 	// Generate PKCE code_challenge from code_verifier
 	codeChallenge := pkgoauth2.CreateCodeChallenge(pkgoauth2.CodeChallengeMethodS256, session.CodeVerifier)
 
 	// Build authorization URL with PKCE
-	authURL := s.oauth2Config.AuthCodeURL(
-		session.State,
+	authOpts := []oauth2.AuthCodeOption{
 		oauth2.SetAuthURLParam("nonce", session.Nonce),
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	)
+	}
+
+	// Apply per-scope OIDC request parameters
+	if oidcParams != nil {
+		extraOpts, err := resolveOIDCRequestParams(oidcParams, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve OIDC request params: %w", err)
+		}
+		authOpts = append(authOpts, extraOpts...)
+	}
+
+	// If extra scopes are configured, create a temporary config with merged scopes
+	oauthCfg := s.oauth2Config
+	if oidcParams != nil && len(oidcParams.ExtraScopes) > 0 {
+		mergedScopes := make([]string, len(s.oauth2Config.Scopes))
+		copy(mergedScopes, s.oauth2Config.Scopes)
+		mergedScopes = append(mergedScopes, oidcParams.ExtraScopes...)
+		oauthCfg = &oauth2.Config{
+			ClientID:     s.oauth2Config.ClientID,
+			ClientSecret: s.oauth2Config.ClientSecret,
+			RedirectURL:  s.oauth2Config.RedirectURL,
+			Endpoint:     s.oauth2Config.Endpoint,
+			Scopes:       mergedScopes,
+		}
+	}
+
+	authURL := oauthCfg.AuthCodeURL(session.State, authOpts...)
 
 	s.log.Debug("OIDC authorization URL generated",
 		"credential_type", credentialType,
@@ -272,8 +307,8 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 // an OpenID4VCI credential issuance session. The VCI session ID is stored in
 // the OIDC session so that the callback handler can route the result back into
 // the VCI pipeline.
-func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSessionID string) (*AuthRequest, error) {
-	authReq, err := s.InitiateAuth(ctx, credentialType)
+func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSessionID string, oidcParams *model.OIDCRequestParams, dynamicParams map[string]string) (*AuthRequest, error) {
+	authReq, err := s.InitiateAuth(ctx, credentialType, oidcParams, dynamicParams)
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +328,56 @@ func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSes
 		"credential_type", credentialType)
 
 	return authReq, nil
+}
+
+// resolveOIDCRequestParams resolves template variables in OIDC request params
+// and returns oauth2.AuthCodeOption values to append to the authorization URL.
+func resolveOIDCRequestParams(params *model.OIDCRequestParams, dynamicParams map[string]string) ([]oauth2.AuthCodeOption, error) {
+	var opts []oauth2.AuthCodeOption
+
+	if params.ACRValues != "" {
+		resolved, err := resolveTemplate(params.ACRValues, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("acr_values template: %w", err)
+		}
+		opts = append(opts, oauth2.SetAuthURLParam("acr_values", resolved))
+	}
+
+	if params.Claims != "" {
+		resolved, err := resolveTemplate(params.Claims, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("claims template: %w", err)
+		}
+		opts = append(opts, oauth2.SetAuthURLParam("claims", resolved))
+	}
+
+	for key, value := range params.CustomParams {
+		resolvedValue, err := resolveTemplate(value, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("custom param %q template: %w", key, err)
+		}
+		opts = append(opts, oauth2.SetAuthURLParam(key, resolvedValue))
+	}
+
+	return opts, nil
+}
+
+// resolveTemplate resolves Go template syntax in a string using dynamic params as data.
+func resolveTemplate(tmplStr string, data map[string]string) (string, error) {
+	if len(data) == 0 {
+		return tmplStr, nil
+	}
+
+	tmpl, err := template.New("param").Option("missingkey=error").Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid template %q: %w", tmplStr, err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("template execution failed for %q: %w", tmplStr, err)
+	}
+	return buf.String(), nil
 }
 
 // AuthResponse represents the result of OIDC authentication

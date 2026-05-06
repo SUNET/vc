@@ -300,7 +300,19 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			}
 
 			s.log.Debug("consent: initiating OIDC auth for VCI", "scope", scope, "session_id", sessionID)
-			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID)
+
+			// Look up per-scope OIDC request params and dynamic params from auth context
+			var oidcParams *model.OIDCRequestParams
+			var dynamicParams map[string]string
+			if scopeCfg := s.cfg.APIGW.DataSources.LookupScopePolicyConfig(scope); scopeCfg != nil {
+				oidcParams = scopeCfg.OIDCRequestParams
+			}
+			authCtx, authCtxErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
+			if authCtxErr == nil && len(authCtx.DynamicParams) > 0 {
+				dynamicParams = authCtx.DynamicParams
+			}
+
+			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID, oidcParams, dynamicParams)
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
