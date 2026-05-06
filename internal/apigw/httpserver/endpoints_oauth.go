@@ -322,14 +322,14 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 				span.SetStatus(codes.Error, "auth context lookup failed")
 				return nil, fmt.Errorf("failed to get auth context for session %s: %w", sessionID, lookupErr)
 			}
-			if authCtx.PersonID == "" {
-				err := errors.New("person_id not found in auth context for external API flow")
+			if authCtx.Identifier == "" {
+				err := errors.New("identifier not found in auth context for external API flow")
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
 			}
 
 			scope, _ := session.Get("scope").(string)
-			if err := s.dataSources.EduAPI().FetchAndStoreForVCI(ctx, authCtx.PersonID, scope, sessionID); err != nil {
+			if err := s.dataSources.EduAPI().FetchAndStoreForVCI(ctx, authCtx.Identifier, scope, sessionID); err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
 			}

@@ -2,6 +2,8 @@ package vcclient
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,17 +18,36 @@ import (
 func mockHappyHttServer(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/api/v1/document", func(rw http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, req.URL.Path, "/api/v1/document")
+	mux.HandleFunc("/api/v1/datastore", func(rw http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, req.URL.Path, "/api/v1/datastore")
 		assert.Equal(t, req.Method, http.MethodPost)
-		_, err := rw.Write(golden.Get(t, "documentGetReplyOK.golden"))
+
+		body, err := io.ReadAll(req.Body)
+		assert.NoError(t, err)
+		defer req.Body.Close()
+
+		var got DocumentGetQuery
+		assert.NoError(t, json.Unmarshal(body, &got))
+		assert.NotEmpty(t, got.AuthenticSource, "authentic_source should be sent in request body")
+		assert.NotEmpty(t, got.DocumentID, "document_id should be sent in request body")
+
+		_, err = rw.Write(golden.Get(t, "documentGetReplyOK.golden"))
 		assert.NoError(t, err)
 	})
 
-	mux.HandleFunc("/api/v1/document/list", func(rw http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, req.URL.Path, "/api/v1/document/list")
+	mux.HandleFunc("/api/v1/datastore/list", func(rw http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, req.URL.Path, "/api/v1/datastore/list")
 		assert.Equal(t, req.Method, http.MethodPost)
-		_, err := rw.Write(golden.Get(t, "documentListReplyOK.golden"))
+
+		body, err := io.ReadAll(req.Body)
+		assert.NoError(t, err)
+		defer req.Body.Close()
+
+		var got DocumentListQuery
+		assert.NoError(t, json.Unmarshal(body, &got))
+		assert.NotEmpty(t, got.AuthenticSource, "authentic_source should be sent in request body")
+
+		_, err = rw.Write(golden.Get(t, "documentListReplyOK.golden"))
 		assert.NoError(t, err)
 	})
 
@@ -84,34 +105,14 @@ func TestGet(t *testing.T) {
 			name: "success",
 			query: &DocumentGetQuery{
 				AuthenticSource: "test_authentic_source",
-				VCT:             model.CredentialTypeUrnEudiEhic1,
+				Scope:           "ehic",
 				DocumentID:      "test_document_id",
 			},
 			expected: &model.Document{
 				Meta: &model.MetaData{
 					AuthenticSource: "SUNET",
-					DocumentVersion: "1.0.0",
-					VCT:             model.CredentialTypeUrnEudiEhic1,
+					Scope:           "ehic",
 					DocumentID:      "test_document_id",
-					RealData:        false,
-					Collect: &model.Collect{
-						ID:         "test_collect_id",
-						ValidUntil: 1731767173,
-					},
-					Revocation: &model.Revocation{
-						ID:      "test_revocation_id",
-						Revoked: false,
-						Reference: model.RevocationReference{
-							AuthenticSource: "SUNET",
-							VCT:             model.CredentialTypeUrnEudiEhic1,
-							DocumentID:      "test_document_id",
-						},
-						RevokedAt: 0,
-						Reason:    "",
-					},
-					CredentialValidFrom:       695706629,
-					CredentialValidTo:         -1730367911,
-					DocumentDataValidationRef: "",
 				},
 			},
 			expectedDocumentData: map[string]any{

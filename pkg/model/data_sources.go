@@ -42,6 +42,17 @@ type DatastoreImport struct {
 	Users []string `yaml:"users,omitempty" doc_example:"[\"100\", \"102\"]"`
 }
 
+// IdentityMappingImport configures automatic import of identity mappings at startup.
+type IdentityMappingImport struct {
+	// FilePaths lists JSON files containing identity mappings to import.
+	// Each JSON file should contain a map of person IDs to arrays of IdentityMapping objects.
+	// Import is skipped if the identity mappings collection already contains data.
+	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/identity_mappings.json\"]"`
+
+	// Users limits which person IDs to import. If empty, all persons are imported.
+	Users []string `yaml:"users,omitempty" doc_example:"[\"100\", \"102\"]"`
+}
+
 // DatastoreScope configures a credential type backed by the datastore.
 type DatastoreScope struct {
 	// AuthProvider is the auth provider for this credential type (openid4vp, saml, or oidc)

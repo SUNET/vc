@@ -23,7 +23,7 @@ type AdminDBStore interface {
 
 // CredentialSubjectsStore defines the interface for credential subjects database operations
 type CredentialSubjectsStore interface {
-	Search(ctx context.Context, firstName, lastName, dateOfBirth string) ([]*db.CredentialSubjectDoc, error)
+	Search(ctx context.Context, identifier string) ([]*db.CredentialSubjectDoc, error)
 	Add(ctx context.Context, doc *db.CredentialSubjectDoc) error
 }
 

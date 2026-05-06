@@ -262,9 +262,28 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
 	identityClaims := dsCred.ExtractIdentityClaims(credential)
 
+	// Resolve the person identifier — uses authentic_source_person_id directly
+	// when present in the extracted claims, otherwise falls back to identity
+	// mapping (given_name, family_name, birth_date → authentic_source_person_id).
+	claimsAny := make(map[string]any, len(identityClaims))
+	for k, v := range identityClaims {
+		claimsAny[k] = v
+	}
+	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+	}
+
+	// Persist the resolved identifier on the authorization context so that
+	// downstream credential issuance (VCICredential) can find it.
+	if err := c.cacheService.AuthContext.SetIdentifier(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, identityMappingID); err != nil {
+		c.log.Error(err, "failed to persist identifier on auth context")
+		return nil, fmt.Errorf("failed to persist identifier: %w", err)
+	}
+
 	// Retrieve documents matching the identity by scope
-	c.log.Debug("Querying documents", "scope", scope, "identity_claims", identityClaims)
-	documents, err := c.datastoreStore.GetDocumentsByClaims(ctx, scope, identityClaims)
+	c.log.Debug("Querying documents", "scope", scope, "identity_mapping_id", identityMappingID)
+	documents, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
 	if err != nil {
 		c.log.Debug("failed to get document", "error", err)
 		return nil, err

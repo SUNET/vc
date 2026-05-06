@@ -22,16 +22,16 @@ type DynamicRegistrationCredentials struct {
 	RegisteredAt            time.Time `bson:"registered_at"`
 }
 
-// VCDynamicRegistrationColl handles persistence of dynamic client registration credentials.
-type VCDynamicRegistrationColl struct {
+// DynamicRegistrationColl handles persistence of dynamic client registration credentials.
+type DynamicRegistrationColl struct {
 	Service *Service
 	Coll    *mongo.Collection
 	log     *logger.Log
 }
 
 // NewDynamicRegistrationColl creates a new collection for dynamic registration credentials.
-func NewDynamicRegistrationColl(ctx context.Context, collName string, service *Service, log *logger.Log) (*VCDynamicRegistrationColl, error) {
-	c := &VCDynamicRegistrationColl{
+func NewDynamicRegistrationColl(ctx context.Context, collName string, service *Service, log *logger.Log) (*DynamicRegistrationColl, error) {
+	c := &DynamicRegistrationColl{
 		log:     log,
 		Service: service,
 	}
@@ -45,7 +45,7 @@ func NewDynamicRegistrationColl(ctx context.Context, collName string, service *S
 	return c, nil
 }
 
-func (c *VCDynamicRegistrationColl) createIndex(ctx context.Context) error {
+func (c *DynamicRegistrationColl) createIndex(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:createIndex")
 	defer span.End()
 
@@ -63,7 +63,7 @@ func (c *VCDynamicRegistrationColl) createIndex(ctx context.Context) error {
 }
 
 // Save stores or replaces dynamic registration credentials.
-func (c *VCDynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegistrationCredentials) error {
+func (c *DynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegistrationCredentials) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:save")
 	defer span.End()
 
@@ -81,7 +81,7 @@ func (c *VCDynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegi
 }
 
 // Get returns the stored credentials, or nil if none exist.
-func (c *VCDynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrationCredentials, error) {
+func (c *DynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrationCredentials, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get")
 	defer span.End()
 

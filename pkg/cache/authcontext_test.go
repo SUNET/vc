@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -555,7 +554,7 @@ func TestSetAuthenticSource_NotFound(t *testing.T) {
 	assert.Equal(t, ErrNoDocuments, err)
 }
 
-func TestAddIdentity_BySessionID(t *testing.T) {
+func TestSetIdentifier_BySessionID(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -565,28 +564,17 @@ func TestAddIdentity_BySessionID(t *testing.T) {
 	require.NoError(t, cache.Save(ctx, doc))
 
 	query := &AuthorizationContext{SessionID: "session-add-identity"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{
-			GivenName:  "John",
-			FamilyName: "Doe",
-		},
-		VCT:             "urn:eudi:pid:1",
-		AuthenticSource: "test-source",
-	}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "john-doe-id")
 	require.NoError(t, err)
 
-	// Verify the identity was added
+	// Verify the identifier was set
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-add-identity"})
 	require.NoError(t, err)
-	assert.Equal(t, "John", retrieved.Identity.GivenName)
-	assert.Equal(t, "Doe", retrieved.Identity.FamilyName)
-	assert.Equal(t, "urn:eudi:pid:1", retrieved.VCT)
-	assert.Equal(t, "test-source", retrieved.AuthenticSource)
+	assert.Equal(t, "john-doe-id", retrieved.Identifier)
 }
 
-func TestAddIdentity_ByRequestURI(t *testing.T) {
+func TestSetIdentifier_BySessionID_WithRequestURI(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -596,109 +584,54 @@ func TestAddIdentity_ByRequestURI(t *testing.T) {
 	}
 	require.NoError(t, cache.Save(ctx, doc))
 
-	query := &AuthorizationContext{RequestURI: "https://example.com/identity-request"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{
-			GivenName: "Jane",
-		},
-	}
+	query := &AuthorizationContext{SessionID: "session-identity-uri"}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "jane-id")
 	require.NoError(t, err)
 
-	// Verify the identity was added
+	// Verify the identifier was set
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-uri"})
 	require.NoError(t, err)
-	assert.Equal(t, "Jane", retrieved.Identity.GivenName)
+	assert.Equal(t, "jane-id", retrieved.Identifier)
 }
 
-func TestAddIdentity_ByEphemeralKeyID(t *testing.T) {
+func TestSetIdentifier_NilQuery(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
-	doc := &AuthorizationContext{
-		SessionID:                "session-identity-key",
-		EphemeralEncryptionKeyID: "ephemeral-key-456",
-	}
-	require.NoError(t, cache.Save(ctx, doc))
-
-	query := &AuthorizationContext{EphemeralEncryptionKeyID: "ephemeral-key-456"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{
-			GivenName: "Bob",
-		},
-	}
-
-	err := cache.AddIdentity(ctx, query, input)
-	require.NoError(t, err)
-
-	// Verify the identity was added
-	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-key"})
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", retrieved.Identity.GivenName)
-}
-
-func TestAddIdentity_NilQuery(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMemoryStore(5 * time.Minute)
-
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Test"},
-	}
-
-	err := cache.AddIdentity(ctx, nil, input)
+	err := cache.SetIdentifier(ctx, nil, "test-id")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "query cannot be nil")
 }
 
-func TestAddIdentity_NilInput(t *testing.T) {
+func TestSetIdentifier_EmptyIdentifier(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
-	err := cache.AddIdentity(ctx, query, nil)
+	err := cache.SetIdentifier(ctx, query, "")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "identity cannot be nil")
+	assert.Contains(t, err.Error(), "identifier cannot be empty")
 }
 
-func TestAddIdentity_NilIdentity(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMemoryStore(5 * time.Minute)
-
-	query := &AuthorizationContext{SessionID: "session-123"}
-	input := &AuthorizationContext{
-		VCT: "urn:eudi:pid:1",
-	}
-
-	err := cache.AddIdentity(ctx, query, input)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "identity cannot be nil")
-}
-
-func TestAddIdentity_NoQueryFields(t *testing.T) {
+func TestSetIdentifier_NoSessionID(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Test"},
-	}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "test-id")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query must have sessionID, requestURI, or ephemeralEncryptionKeyID")
+	assert.Contains(t, err.Error(), "session_id cannot be empty")
 }
 
-func TestAddIdentity_NotFound(t *testing.T) {
+func TestSetIdentifier_NotFound(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "non-existent"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Test"},
-	}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "test-id")
 	assert.Error(t, err)
 	assert.Equal(t, ErrNoDocuments, err)
 }

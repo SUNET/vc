@@ -37,6 +37,7 @@ type Client struct {
 	// database collections
 	credentialOfferStore db.CredentialOfferStore
 	datastoreStore       db.DatastoreStore
+	identityMappingStore db.IdentityMappingStore
 
 	// gRPC clients
 	issuerClient   apiv1_issuer.IssuerServiceClient
@@ -61,8 +62,9 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
-		credentialOfferStore:          db.VCCredentialOfferColl,
-		datastoreStore:                db.VCDatastoreColl,
+		credentialOfferStore:          db.CredentialOfferColl,
+		datastoreStore:                db.DatastoreColl,
+		identityMappingStore:          db.IdentityMappingsColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},

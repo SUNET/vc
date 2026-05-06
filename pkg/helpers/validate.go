@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -239,6 +240,17 @@ func NewValidator() (*validator.Validate, error) {
 		header := make([]byte, 512)
 		n, _ := f.Read(header)
 		return http.DetectContentType(header[:n]) == "image/png"
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for safe_key - validates map keys used in MongoDB field paths.
+	// Only allows simple alphanumeric/underscore keys starting with a letter (max 64 chars).
+	// Prevents field-path injection via dots or MongoDB operator prefixes ($).
+	safeKeyRe := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
+	err = validate.RegisterValidation("safe_key", func(fl validator.FieldLevel) bool {
+		return safeKeyRe.MatchString(fl.Field().String())
 	})
 	if err != nil {
 		return nil, err

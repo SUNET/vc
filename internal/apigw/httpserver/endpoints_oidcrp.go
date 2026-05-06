@@ -12,17 +12,6 @@ import (
 )
 
 // endpointOIDCRPInitiate initiates OIDC authentication flow
-//
-//	@Summary		Initiate OIDC Authentication
-//	@Description	Initiates OIDC authentication by generating an OAuth2 authorization URL with PKCE
-//	@Tags			OIDCRP
-//	@Accept			json
-//	@Produce		json
-//	@Param			request	body		apiv1.OIDCRPInitiateRequest	true	"OIDC RP initiate request"
-//	@Success		200		{object}	apiv1.OIDCRPInitiateResponse
-//	@Failure		400		{object}	map[string]any	"Bad request"
-//	@Failure		500		{object}	map[string]any	"Internal server error"
-//	@Router			/oidcrp/initiate [post]
 func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCRPInitiate")
 	defer span.End()
@@ -46,18 +35,6 @@ func (s *Service) endpointOIDCRPInitiate(ctx context.Context, c *gin.Context) (a
 
 // endpointOIDCRPCallback handles the OIDC Provider callback
 // This is where the OIDC Provider redirects after authentication
-//
-//	@Summary		OIDC Provider Callback
-//	@Description	Receives and processes the authorization code from the OIDC Provider
-//	@Tags			OIDCRP
-//	@Accept			application/x-www-form-urlencoded
-//	@Produce		json
-//	@Param			code	query		string	true	"Authorization code"
-//	@Param			state	query		string	true	"OAuth2 state parameter"
-//	@Success		200		{object}	apiv1.OIDCRPCallbackResponse
-//	@Failure		400		{object}	map[string]any	"Bad request"
-//	@Failure		500		{object}	map[string]any	"Internal server error"
-//	@Router			/oidcrp/callback [get]
 func (s *Service) endpointOIDCRPCallback(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOIDCRPCallback")
 	defer span.End()

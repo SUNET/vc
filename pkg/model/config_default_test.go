@@ -43,23 +43,6 @@ func TestKafkaDefaults(t *testing.T) {
 	assert.Nil(t, cfg.Brokers)
 }
 
-func TestCredentialOfferQRConfigDefaults(t *testing.T) {
-	var cfg CredentialOfferQRConfig
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.Equal(t, "credential_offer", cfg.Type)
-}
-
-func TestQRCfgDefaults(t *testing.T) {
-	var cfg QRCfg
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.Equal(t, 2, cfg.RecoveryLevel)
-	assert.Equal(t, 256, cfg.Size)
-}
-
 func TestGRPCServerDefaults(t *testing.T) {
 	var cfg GRPCServer
 	err := defaults.Set(&cfg)

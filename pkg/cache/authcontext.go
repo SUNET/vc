@@ -308,50 +308,31 @@ func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *Authorizati
 	return nil
 }
 
-// AddIdentity adds identity information to an authorization context
-func (c *MemoryStore) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
+// SetIdentifier sets the resolved identifier on an authorization context.
+func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error {
 	if query == nil {
 		return errors.New("query cannot be nil")
 	}
-	if input == nil || input.Identity == nil {
-		return errors.New("identity cannot be nil")
+	if identifier == "" {
+		return errors.New("identifier cannot be empty")
+	}
+	if query.SessionID == "" {
+		return errors.New("session_id cannot be empty")
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var sessionID string
-	var ok bool
-
-	if query.SessionID != "" {
-		sessionID = query.SessionID
-		ok = true
-	} else if query.RequestURI != "" {
-		indexKey := fmt.Sprintf("request_uri:%s", query.RequestURI)
-		sessionID, ok = c.indices[indexKey]
-	} else if query.EphemeralEncryptionKeyID != "" {
-		indexKey := fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
-		sessionID, ok = c.indices[indexKey]
-	} else {
-		return errors.New("query must have sessionID, requestURI, or ephemeralEncryptionKeyID")
-	}
-
-	if !ok {
-		return ErrNoDocuments
-	}
-
-	item := c.cache.Get(sessionID)
+	item := c.cache.Get(query.SessionID)
 	if item == nil {
 		return ErrNoDocuments
 	}
 
 	doc := item.Value()
-	doc.Identity = input.Identity
-	doc.VCT = input.VCT
-	doc.AuthenticSource = input.AuthenticSource
+	doc.Identifier = identifier
 
 	// Update the primary cache entry
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.cache.Set(query.SessionID, doc, ttlcache.DefaultTTL)
 
 	return nil
 }

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-04-30
+**Generated:** 2026-05-06
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -43,7 +43,6 @@ Shared configuration used across all services.
 | `mongo`               | `object` | MongoDB configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
 | `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `kafka`               | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                      | -                        | -       | No       |
-| `credential_offer_qr` | `object` | Credential offer QR code settings                                                                                                                                                                                                                                                       | -                        | -       | No       |
 | `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                        | `"/etc/vc/secrets.yaml"` | -       | No       |
 | `ha`                  | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                    | -                        | -       | No       |
 | `branding`            | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                  | -                        | -       | No       |
@@ -87,24 +86,6 @@ Shared configuration used across all services.
 | --------- | ---------- | ------------------------------ | -------------------------------- | ------- | -------- |
 | `enable`  | `bool`     | Kafka integration              | -                                | `false` | No       |
 | `brokers` | `[]string` | List of Kafka broker addresses | `["kafka0:9092", "kafka1:9092"]` | -       | Yes      |
-
-### `credential_offer_qr`
-
-> **Path:** `.common.credential_offer_qr`
-
-| Field  | Type     | Description                                                         | Example | Default            | Required |
-| ------ | -------- | ------------------------------------------------------------------- | ------- | ------------------ | -------- |
-| `type` | `string` | Credential offer type: "credential_offer" or "credential_offer_uri" | -       | `credential_offer` | No       |
-| `qr`   | `object` | QR code generation settings                                         | -       | -                  | No       |
-
-### `qr`
-
-> **Path:** `.common.credential_offer_qr.qr`
-
-| Field            | Type  | Description                  | Example | Default | Required |
-| ---------------- | ----- | ---------------------------- | ------- | ------- | -------- |
-| `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
-| `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
 
 ### `ha`
 
@@ -195,18 +176,19 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw`
 
-| Field             | Type     | Description                                                                    | Example                     | Default | Required |
-| ----------------- | -------- | ------------------------------------------------------------------------------ | --------------------------- | ------- | -------- |
-| `api_server`      | `object` | HTTP API server configuration                                                  | -                           | -       | Yes      |
-| `key_config`      | `object` | Signing key configuration                                                      | -                           | -       | Yes      |
-| `data_sources`    | `object` | Credential types to their data sources                                         | -                           | -       | Yes      |
-| `auth_providers`  | `object` | How users authenticate (SAML, OIDC)                                            | -                           | -       | No       |
-| `remotes`         | `object` | Named external API connections referenced by DataSources.ExternalAPI           | `"ladok"`                   | -       | No       |
-| `delivery`        | `object` | Delivery groups credential delivery to wallets (OpenID4VCI, credential offers) | -                           | -       | Yes      |
-| `issuer_metadata` | `object` | OpenID4VCI issuer metadata                                                     | -                           | -       | No       |
-| `public_url`      | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                      | `"https://issuer.sunet.se"` | -       | Yes      |
-| `issuer_client`   | `object` | GRPC client config for issuer                                                  | -                           | -       | Yes      |
-| `registry_client` | `object` | GRPC client config for registry                                                | -                           | -       | Yes      |
+| Field                     | Type     | Description                                                                                                                                                                                                         | Example                     | Default | Required |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
+| `api_server`              | `object` | HTTP API server configuration                                                                                                                                                                                       | -                           | -       | Yes      |
+| `key_config`              | `object` | Signing key configuration                                                                                                                                                                                           | -                           | -       | Yes      |
+| `data_sources`            | `object` | Credential types to their data sources                                                                                                                                                                              | -                           | -       | Yes      |
+| `auth_providers`          | `object` | How users authenticate (SAML, OIDC)                                                                                                                                                                                 | -                           | -       | No       |
+| `remotes`                 | `object` | Named external API connections referenced by DataSources.ExternalAPI                                                                                                                                                | `"ladok"`                   | -       | No       |
+| `delivery`                | `object` | Delivery groups credential delivery to wallets (OpenID4VCI, credential offers)                                                                                                                                      | -                           | -       | Yes      |
+| `issuer_metadata`         | `object` | OpenID4VCI issuer metadata                                                                                                                                                                                          | -                           | -       | No       |
+| `public_url`              | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                                                                                                                                                           | `"https://issuer.sunet.se"` | -       | Yes      |
+| `issuer_client`           | `object` | GRPC client config for issuer                                                                                                                                                                                       | -                           | -       | Yes      |
+| `registry_client`         | `object` | GRPC client config for registry                                                                                                                                                                                     | -                           | -       | Yes      |
+| `identity_mapping_import` | `object` | Automatic import of identity mappings from JSON files at startup. When configured, APIGW reads JSON files and imports them into the identity mappings collection on first startup (skipped if data already exists). | -                           | -       | No       |
 
 ### `api_server`
 
@@ -342,7 +324,7 @@ Each key under a data source is a credential type.
 
 | Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example                                 | Default | Required |
 | --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
-| `auth_provider` | `string`   | Auth provider for this credential type (basic, openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                        | -                                       | -       | Yes      |
+| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                               | -                                       | -       | Yes      |
 | `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup. These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
 | `auth_scopes`   | `[]string` | Credential keys whose VCTs are acceptable for wallet authentication (for OpenID4VP)                                                                                                                                                                                                                                                                                                                                                                             | `[pid]`                                 | -       | No       |
 
@@ -611,6 +593,15 @@ persisted in the database.
 | `key_file_path`  | `string` | Client private key for mTLS                 | -               | -       | No       |
 | `ca_file_path`   | `string` | CA certificate to verify the server         | -               | -       | No       |
 | `server_name`    | `string` | Server name for TLS verification (optional) | -               | -       | No       |
+
+### `identity_mapping_import`
+
+> **Path:** `.apigw.identity_mapping_import`
+
+| Field        | Type       | Description                                                                                                                                                                                                             | Example                                      | Default | Required |
+| ------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------- | -------- |
+| `file_paths` | `[]string` | JSON files containing identity mappings to import. Each JSON file should contain a map of person IDs to arrays of IdentityMapping objects. Import is skipped if the identity mappings collection already contains data. | `["./bootstrapping/identity_mappings.json"]` | -       | Yes      |
+| `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                                                            | `["100", "102"]`                             | -       | No       |
 
 ## `issuer` (Top-level)
 

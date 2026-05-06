@@ -35,11 +35,6 @@
                             Search documents
                         </a>
 
-                        <a id="display-upload-documents-csv-form-btn"
-                           onclick="addUploadDocumentsUsingCsvFormArticleToContainer()"
-                           class="navbar-item">
-                            Upload documents using csv file
-                        </a>
                         <a id="display-upload-form-btn"
                            onclick="addUploadFormArticleToContainer()"
                            class="navbar-item">
@@ -59,12 +54,6 @@
                            onclick="addViewNotificationFormArticleToContainer()"
                            class="navbar-item">
                             View notification
-                        </a>
-                        <hr class="navbar-divider">
-                        <a id="display-credential-form-btn"
-                           onclick="addCredentialFormArticleToContainer()"
-                           class="navbar-item">
-                            Create credential
                         </a>
                         <hr class="navbar-divider">
                         <a id="fetch-ui-health-btn"
@@ -114,13 +103,13 @@
                                placeholder="authentic source person id">
                     </div>
                     <div class="select">
-                        <select id="document-type-select">
-                            <option value="urn:eudi:ehic:1">urn:eudi:ehic:1</option>
-                            <option value="urn:eudi:pda1:1">urn:eudi:pda1:1</option>
-                            <option value="urn:eudi:diploma:1">urn:eudi:diploma:1</option>
-                            <option value="urn:eudi:elm:1">urn:eudi:elm:1</option>
-                            <option value="urn:eudi:micro_credential:1">urn:eudi:micro_credential:1</option>
-                            <option value="urn:eudi:pid:1">urn:eudi:pid:1</option>
+                        <select id="scope-select">
+                            <option value="ehic">ehic</option>
+                            <option value="pda1">pda1</option>
+                            <option value="diploma">diploma</option>
+                            <option value="elm">elm</option>
+                            <option value="microcredential">microcredential</option>
+                            <option value="pid">pid</option>
                         </select>
                     </div>
                     <div class="control">

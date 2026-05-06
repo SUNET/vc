@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
 // CredentialOfferStore defines the interface for credential offer operations
@@ -17,24 +16,27 @@ type CredentialOfferStore interface {
 // DatastoreStore defines the interface for datastore operations
 type DatastoreStore interface {
 	Save(ctx context.Context, doc *model.CompleteDocument) error
-	IDMapping(ctx context.Context, query *IDMappingQuery) (string, error)
-	AddDocumentIdentity(ctx context.Context, query *AddDocumentIdentityQuery) error
-	DeleteDocumentIdentity(ctx context.Context, query *DeleteDocumentIdentityQuery) error
+	AddIdentity(ctx context.Context, query *AddIdentityQuery) error
+	DeleteIdentity(ctx context.Context, query *DeleteIdentityQuery) error
 	Delete(ctx context.Context, doc *model.MetaData) error
-	GetDocumentForCredential(ctx context.Context, query *GetDocumentForCredential) (*model.Document, error)
-	GetDocument(ctx context.Context, query *GetDocumentQuery) (*model.Document, error)
-	GetDocumentWithIdentity(ctx context.Context, query *GetDocumentQuery) (*model.CompleteDocument, error)
-	GetDocumentsWithIdentity(ctx context.Context, query *GetDocumentQuery) (map[string]*model.CompleteDocument, error)
-	GetDocumentsByClaims(ctx context.Context, scope string, identityClaims map[string]string) (map[string]*model.CompleteDocument, error)
-	DocumentList(ctx context.Context, query *DocumentListQuery) ([]*model.DocumentList, error)
-	GetQR(ctx context.Context, attr *model.MetaData) (*openid4vci.QR, error)
-	GetQRForUser(ctx context.Context, query *GetQRForUserFilter) (*openid4vci.QR, error)
-	GetDocumentCollectID(ctx context.Context, query *GetDocumentCollectIDQuery) (*model.Document, error)
-	GetByRevocationID(ctx context.Context, q *model.MetaData) (*model.CompleteDocument, error)
+	Get(ctx context.Context, meta *model.MetaData) (*model.Document, error)
+	GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error)
+	List(ctx context.Context, query *ListQuery) ([]*model.DocumentList, error)
 	Replace(ctx context.Context, doc *model.CompleteDocument) error
-	SearchDocuments(ctx context.Context, query *SearchDocumentsQuery, limit int64, fields []string, sortFields map[string]int) ([]*model.CompleteDocument, bool, error)
+	GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
+	DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error
+}
+
+// IdentityMappingStore defines the interface for identity mapping operations
+type IdentityMappingStore interface {
+	CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error)
+	UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error
 }
 
 // Ensure concrete types implement the interfaces
-var _ CredentialOfferStore = (*VCCredentialOfferColl)(nil)
-var _ DatastoreStore = (*VCDatastoreColl)(nil)
+var _ CredentialOfferStore = (*CredentialOfferColl)(nil)
+var _ DatastoreStore = (*DatastoreColl)(nil)
+var _ IdentityMappingStore = (*IdentityMappingsColl)(nil)

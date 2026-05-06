@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-files=("diploma" "eduid" "ehic" "elm" "microcredential" "pda1" "pid-1-5" "pid-1-8")
+files=("diploma" "eduid" "ehic" "elm" "microcredential" "pda1" "pid-1-5" "pid-1-8" "identity_mappings")
 
 remote_dir="../vc-ops/global/overlay/etc/puppet/modules/vc/templates/bootstrapping"
 

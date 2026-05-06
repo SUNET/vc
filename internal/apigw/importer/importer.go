@@ -20,7 +20,7 @@ import (
 func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
 
-	count, err := dbService.VCDatastoreColl.Coll.EstimatedDocumentCount(ctx)
+	count, err := dbService.DatastoreColl.Coll.EstimatedDocumentCount(ctx)
 	if err != nil {
 		return fmt.Errorf("check datastore count: %w", err)
 	}
@@ -57,11 +57,9 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 		docs = make(map[string]*model.CompleteDocument, len(reqs))
 		for id, req := range reqs {
 			docs[id] = &model.CompleteDocument{
-				Meta:                req.Meta,
-				Identities:          req.Identities,
-				DocumentDisplay:     req.DocumentDisplay,
-				DocumentData:        req.DocumentData,
-				DocumentDataVersion: req.DocumentDataVersion,
+				Meta:               req.Meta,
+				IdentityMappingIDs: req.IdentityMappingIDs,
+				DocumentData:       req.DocumentData,
 			}
 		}
 	}
@@ -72,11 +70,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			continue
 		}
 
-		if doc.Identities == nil {
-			doc.Identities = []model.Identity{}
-		}
-
-		if err := dbService.VCDatastoreColl.Save(ctx, doc); err != nil {
+		if err := dbService.DatastoreColl.Save(ctx, doc); err != nil {
 			return fmt.Errorf("save document %s/%s: %w", name, id, err)
 		}
 		imported++
@@ -91,4 +85,56 @@ func shouldImport(id string, users []string) bool {
 		return true
 	}
 	return slices.Contains(users, id)
+}
+
+// RunIdentityMappings imports identity mapping data from the configured file paths.
+// It skips import if the identity mappings collection already contains data.
+func RunIdentityMappings(ctx context.Context, cfg *model.IdentityMappingImport, dbService *db.Service, log *logger.Log) error {
+	log = log.New("importer")
+
+	count, err := dbService.IdentityMappingsColl.Coll.EstimatedDocumentCount(ctx)
+	if err != nil {
+		return fmt.Errorf("check identity mappings count: %w", err)
+	}
+	if count > 0 {
+		log.Info("Identity mappings already contain data, skipping import", "count", count)
+		return nil
+	}
+
+	for _, path := range cfg.FilePaths {
+		if err := importIdentityMappings(ctx, path, cfg.Users, dbService, log); err != nil {
+			return fmt.Errorf("import identity mappings from %s: %w", filepath.Base(path), err)
+		}
+	}
+
+	log.Info("Identity mapping import complete")
+	return nil
+}
+
+func importIdentityMappings(ctx context.Context, path string, filterUsers []string, dbService *db.Service, log *logger.Log) error {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+
+	var mappings map[string][]*model.IdentityMapping
+	if err := json.Unmarshal(data, &mappings); err != nil {
+		return fmt.Errorf("parse: %w", err)
+	}
+
+	imported := 0
+	for id, personMappings := range mappings {
+		if !shouldImport(id, filterUsers) {
+			continue
+		}
+		for _, mapping := range personMappings {
+			if err := dbService.IdentityMappingsColl.EnsureMapping(ctx, mapping); err != nil {
+				return fmt.Errorf("ensure identity mapping %s/%s: %w", id, mapping.AuthenticSource, err)
+			}
+			imported++
+		}
+	}
+
+	log.Info("Imported identity mappings", "file", filepath.Base(path), "count", imported)
+	return nil
 }

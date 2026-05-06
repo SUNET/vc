@@ -64,16 +64,6 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	return nil
 }
 
-// CredentialRequest is the request for the Credential endpoint
-type CredentialRequest struct {
-	AuthenticSource string          `json:"authentic_source" validate:"required"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
-	VCT             string          `json:"vct" validate:"required"`
-	CredentialType  string          `json:"credential_type" validate:"required"`
-	CollectID       string          `json:"collect_id" validate:"required"`
-	JWK             map[string]any  `json:"jwk"`
-}
-
 func (c *Client) GetDocument(ctx context.Context, req *vcclient.DocumentGetQuery) (*model.Document, error) {
 	document, _, err := c.vcClient.APIGW.Document.Get(ctx, req)
 	if err != nil {
@@ -148,4 +138,3 @@ func (c *Client) DeleteDocument(ctx context.Context, req *vcclient.DocumentDelet
 	}
 	return nil
 }
-

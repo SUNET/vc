@@ -12,14 +12,14 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-type VCCredentialOfferColl struct {
+type CredentialOfferColl struct {
 	Service *Service
 	Coll    *mongo.Collection
 	log     *logger.Log
 }
 
-func NewCredentialOfferColl(ctx context.Context, collName string, service *Service, log *logger.Log) (*VCCredentialOfferColl, error) {
-	c := &VCCredentialOfferColl{
+func NewCredentialOfferColl(ctx context.Context, collName string, service *Service, log *logger.Log) (*CredentialOfferColl, error) {
+	c := &CredentialOfferColl{
 		log:     log,
 		Service: service,
 	}
@@ -33,7 +33,7 @@ func NewCredentialOfferColl(ctx context.Context, collName string, service *Servi
 	return c, nil
 }
 
-func (c *VCCredentialOfferColl) createIndex(ctx context.Context) error {
+func (c *CredentialOfferColl) createIndex(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_offer:createIndex")
 	defer span.End()
 
@@ -55,7 +55,7 @@ type CredentialOfferDocument struct {
 	CredentialOfferParameters openid4vci.CredentialOfferParameters `bson:"credential_offer_parameters"`
 }
 
-func (c *VCCredentialOfferColl) Save(ctx context.Context, doc *CredentialOfferDocument) error {
+func (c *CredentialOfferColl) Save(ctx context.Context, doc *CredentialOfferDocument) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_offer:save")
 	defer span.End()
 
@@ -70,7 +70,7 @@ func (c *VCCredentialOfferColl) Save(ctx context.Context, doc *CredentialOfferDo
 }
 
 // Delete deletes one code_challenge
-func (c *VCCredentialOfferColl) Delete(ctx context.Context, uuid string) error {
+func (c *CredentialOfferColl) Delete(ctx context.Context, uuid string) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_offer:delete")
 	defer span.End()
 
@@ -87,7 +87,7 @@ func (c *VCCredentialOfferColl) Delete(ctx context.Context, uuid string) error {
 	return nil
 }
 
-func (c *VCCredentialOfferColl) Get(ctx context.Context, uuid string) (*CredentialOfferDocument, error) {
+func (c *CredentialOfferColl) Get(ctx context.Context, uuid string) (*CredentialOfferDocument, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_offer:get")
 	defer span.End()
 

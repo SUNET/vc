@@ -16,23 +16,25 @@ import (
 // Apiv1 interface
 type Apiv1 interface {
 	// datastore endpoints
-	Upload(ctx context.Context, req *vcclient.UploadRequest) error
-	Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
-	AddDocumentIdentity(ctx context.Context, req *apiv1.AddDocumentIdentityRequest) error
-	DeleteDocumentIdentity(ctx context.Context, req *apiv1.DeleteDocumentIdentityRequest) error
-	IdentityMapping(ctx context.Context, reg *apiv1.IdentityMappingRequest) (*apiv1.IdentityMappingReply, error)
-	GetDocument(ctx context.Context, req *apiv1.GetDocumentRequest) (*apiv1.GetDocumentReply, error)
-	DocumentList(ctx context.Context, req *apiv1.DocumentListRequest) (*apiv1.DocumentListReply, error)
-	DeleteDocument(ctx context.Context, req *apiv1.DeleteDocumentRequest) error
-	GetDocumentCollectID(ctx context.Context, req *apiv1.GetDocumentCollectIDRequest) (*apiv1.GetDocumentCollectIDReply, error)
-	RevokeDocument(ctx context.Context, req *apiv1.RevokeDocumentRequest) error
-	AddConsent(ctx context.Context, req *apiv1.AddConsentRequest) error
-	GetConsent(ctx context.Context, req *apiv1.GetConsentRequest) (*model.Consent, error)
+	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error
+	DatastoreAddIdentity(ctx context.Context, req *apiv1.DatastoreAddIdentityRequest) error
+	DatastoreDeleteIdentity(ctx context.Context, req *apiv1.DatastoreDeleteIdentityRequest) error
+	DatastoreGet(ctx context.Context, req *apiv1.DatastoreGetRequest) (*apiv1.DatastoreGetReply, error)
+	DatastoreList(ctx context.Context, req *apiv1.DatastoreListRequest) (*apiv1.DatastoreListReply, error)
+	DatastoreDelete(ctx context.Context, req *apiv1.DatastoreDeleteRequest) error
+	DatastoreGetByKey(ctx context.Context, req *apiv1.DatastoreGetByKeyRequest) (*apiv1.DatastoreGetByKeyReply, error)
+	DatastoreResolve(ctx context.Context, req *apiv1.DatastoreResolveRequest) (*apiv1.DatastoreResolveReply, error)
+	DatastoreDeleteByKey(ctx context.Context, req *apiv1.DatastoreDeleteByKeyRequest) error
 
-	// datastore endpoints - disabled in production
-	SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error)
+	// user endpoints
 	UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error)
 	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
+
+	// identity mapping endpoints
+	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
+	IdentityMappingResolve(ctx context.Context, req *apiv1.IdentityMappingResolveRequest) (*apiv1.IdentityMappingResolveReply, error)
+	IdentityMappingUpdate(ctx context.Context, req *apiv1.IdentityMappingUpdateRequest) error
+	IdentityMappingDelete(ctx context.Context, req *apiv1.IdentityMappingDeleteRequest) error
 
 	// OpenID4VCI endpoints
 	VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error)
@@ -71,7 +73,8 @@ type Apiv1 interface {
 	// VCI integration for external auth (SAML/OIDC)
 	StoreVCIDocuments(ctx context.Context, sessionID string, docs map[string]*model.CompleteDocument) error
 	HasVCIDocuments(ctx context.Context, sessionID string) bool
-	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope string, claims map[string]any, dsCred *model.DatastoreScope) error
+	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error
+	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
 
 	// misc endpoints
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)

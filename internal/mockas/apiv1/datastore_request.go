@@ -15,7 +15,7 @@ import (
 )
 
 func (c *Client) uploader(ctx context.Context, upload *uploadMock) (*http.Response, error) {
-	c.log.Debug("uploading bootstrap mock", "authentic_source_person_id", upload.Identities[0].AuthenticSourcePersonID)
+	c.log.Debug("uploading bootstrap mock")
 	c.log.Debug("upload", "upload", upload)
 	resp, err := c.call(
 		ctx,

@@ -27,10 +27,10 @@ type Service struct {
 	tracer      *trace.Tracer
 	probeStore  *apiv1_status.StatusProbeStore
 
-	VCDatastoreColl           *VCDatastoreColl
-	VCConsentColl             *VCConsentColl
-	VCCredentialOfferColl     *VCCredentialOfferColl
-	VCDynamicRegistrationColl *VCDynamicRegistrationColl
+	DatastoreColl           *DatastoreColl
+	IdentityMappingsColl    *IdentityMappingsColl
+	CredentialOfferColl     *CredentialOfferColl
+	DynamicRegistrationColl *DynamicRegistrationColl
 }
 
 // New creates a new database service
@@ -49,33 +49,33 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		return nil, err
 	}
 
-	service.VCDatastoreColl = &VCDatastoreColl{
+	service.DatastoreColl = &DatastoreColl{
 		Service: service,
 		Coll:    service.MongoClient.Database("vc").Collection("datastore"),
 		log:     log.New("VCDatastoreColl"),
 	}
-	if err := service.VCDatastoreColl.createIndex(ctx); err != nil {
+	if err := service.DatastoreColl.createIndex(ctx); err != nil {
 		return nil, err
 	}
 
-	service.VCConsentColl = &VCConsentColl{
+	service.IdentityMappingsColl = &IdentityMappingsColl{
 		Service: service,
-		Coll:    service.MongoClient.Database("vc").Collection("consent"),
-		log:     log.New("VCConsentColl"),
+		Coll:    service.MongoClient.Database("vc").Collection("identity_mappings"),
+		log:     log.New("VCIdentityMappingsColl"),
 	}
-	if err := service.VCConsentColl.createIndex(ctx); err != nil {
+	if err := service.IdentityMappingsColl.createIndex(ctx); err != nil {
 		return nil, err
 	}
 
 	var err error
 
-	service.VCCredentialOfferColl, err = NewCredentialOfferColl(ctx, "credential_offer", service, log.New("VCCredentialOfferColl"))
+	service.CredentialOfferColl, err = NewCredentialOfferColl(ctx, "credential_offer", service, log.New("VCCredentialOfferColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create credential offer collection")
 		return nil, err
 	}
 
-	service.VCDynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
+	service.DynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create dynamic registration collection")
 		return nil, err

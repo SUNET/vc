@@ -2,127 +2,30 @@ package apiv1
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/vcclient"
-
-	"go.opentelemetry.io/otel/codes"
 )
 
-// Upload uploads a document with a set of attributes
+// DatastoreUpload uploads a document with a set of attributes
 //
-//	@Summary		Upload
-//	@ID				generic-upload
-//	@Description	Upload endpoint
+//	@Summary		DatastoreUpload
+//	@ID				datastore-upload
+//	@Description	Upload a document to the datastore
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
-//	@Router			/upload [post]
-func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error {
-	if req.Meta.Collect == nil || req.Meta.Collect.ID == "" {
-		collect := &model.Collect{
-			ID: req.Meta.DocumentID,
-		}
-
-		req.Meta.Collect = collect
-	}
-
-	if req.Meta.Revocation == nil {
-		req.Meta.Revocation = &model.Revocation{
-			ID: req.Meta.DocumentID,
-		}
-	} else {
-		if req.Meta.Revocation.ID == "" {
-			req.Meta.Revocation.ID = req.Meta.DocumentID
-		}
-	}
-
-	credentialOfferParameter := openid4vci.CredentialOfferParameters{
-		CredentialIssuer: c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
-		CredentialConfigurationIDs: []string{
-			req.Meta.Scope,
-		},
-		Grants: map[string]any{
-			"authorization_code": openid4vci.GrantAuthorizationCode{
-				IssuerState: fmt.Sprintf("collect_id=%s&vct=%s&authentic_source=%s", req.Meta.Collect.ID, req.Meta.VCT, req.Meta.AuthenticSource),
-			},
-		},
-	}
-
-	var qr *openid4vci.QR
-	switch c.cfg.Common.CredentialOfferQR.Type {
-	case "credential_offer":
-		credentialOffer, err := credentialOfferParameter.CredentialOffer()
-		if err != nil {
-			return err
-		}
-
-		// Empty string defaults to "openid-credential-offer://" protocol handler
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "")
-		if err != nil {
-			return err
-		}
-
-	case "credential_offer_uri":
-		credentialOffer, err := credentialOfferParameter.CredentialOfferURI()
-		if err != nil {
-			return err
-		}
-
-		// Empty string defaults to "openid-credential-offer://" protocol handler
-		qr, err = credentialOffer.QR(c.cfg.Common.CredentialOfferQR.QR.RecoveryLevel, c.cfg.Common.CredentialOfferQR.QR.Size, "", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
-		if err != nil {
-			return err
-		}
-
-		uuid, err := credentialOffer.UUID()
-		if err != nil {
-			return err
-		}
-
-		doc := &db.CredentialOfferDocument{
-			UUID:                      uuid,
-			CredentialOfferParameters: credentialOfferParameter,
-		}
-
-		if err := c.credentialOfferStore.Save(ctx, doc); err != nil {
-			return err
-		}
-	}
-
-	if req.Meta.Collect == nil || req.Meta.Collect.ID == "" {
-		collect := &model.Collect{
-			ID: req.Meta.DocumentID,
-		}
-
-		req.Meta.Collect = collect
-	}
-
-	if req.Meta.Revocation == nil {
-		req.Meta.Revocation = &model.Revocation{
-			ID: req.Meta.DocumentID,
-		}
-	} else {
-		if req.Meta.Revocation.ID == "" {
-			req.Meta.Revocation.ID = req.Meta.DocumentID
-		}
-	}
-
+//	@Router			/api/v1/datastore/ [post]
+func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error {
 	upload := &model.CompleteDocument{
-		Meta:                req.Meta,
-		DocumentDisplay:     req.DocumentDisplay,
-		DocumentData:        req.DocumentData,
-		DocumentDataVersion: req.DocumentDataVersion,
-		Identities:          req.Identities,
-		QR:                  qr,
+		Meta:               req.Meta,
+		DocumentData:       req.DocumentData,
+		IdentityMappingIDs: req.IdentityMappingIDs,
 	}
 
 	if err := helpers.ValidateDocumentData(ctx, upload, c.log); err != nil {
@@ -130,8 +33,18 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 		return err
 	}
 
-	if upload.Identities == nil {
-		upload.Identities = []model.Identity{}
+	// Ensure identity mapping records exist for each referenced identity_mapping_id.
+	// This creates records with empty attributes if they don't already exist,
+	// allowing the authentic source to later add identity attributes for resolution.
+	for _, id := range req.IdentityMappingIDs {
+		mapping := &model.IdentityMapping{
+			AuthenticSourcePersonID: id,
+			AuthenticSource:         req.Meta.AuthenticSource,
+		}
+		if err := c.identityMappingStore.EnsureMapping(ctx, mapping); err != nil {
+			c.log.Error(err, "failed to ensure identity mapping", "identity_mapping_id", id)
+			return err
+		}
 	}
 
 	if err := c.datastoreStore.Save(ctx, upload); err != nil {
@@ -142,112 +55,41 @@ func (c *Client) Upload(ctx context.Context, req *vcclient.UploadRequest) error 
 	return nil
 }
 
-// Notification return QR code and DeepLink for a document
-//
-//	@Summary		Notification
-//	@ID				generic-notification
-//	@Description	notification endpoint
-//	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
-//	@Success		200	{object}	vcclient.NotificationReply		"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
-//	@Param			req	body		vcclient.NotificationRequest	true	" "
-//	@Router			/notification [post]
-func (c *Client) Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error) {
-	qrCode, err := c.datastoreStore.GetQR(ctx, &model.MetaData{
-		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
-		DocumentID:      req.DocumentID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &vcclient.NotificationReply{
-		Data: qrCode,
-	}
-	return reply, nil
-}
-
-// IdentityMappingRequest is the request for IDMapping
-type IdentityMappingRequest struct {
-	// required: true
-	// example: SUNET
-	AuthenticSource string          `json:"authentic_source" validate:"required,max=128,printascii"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
-}
-
-// IdentityMappingReply is the reply for a IDMapping
-type IdentityMappingReply struct {
-	Data *model.IDMapping `json:"data"`
-}
-
-// IdentityMapping return a mapping between PID and AuthenticSource
-//
-//	@Summary		IdentityMapping
-//	@ID				identity-mapping
-//	@Description	Identity mapping endpoint
-//	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
-//	@Success		200	{object}	IdentityMappingReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		IdentityMappingRequest	true	" "
-//	@Router			/identity/mapping [post]
-func (c *Client) IdentityMapping(ctx context.Context, reg *IdentityMappingRequest) (*IdentityMappingReply, error) {
-	authenticSourcePersonID, err := c.datastoreStore.IDMapping(ctx, &db.IDMappingQuery{
-		AuthenticSource: reg.AuthenticSource,
-		Identity:        reg.Identity,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &IdentityMappingReply{
-		Data: &model.IDMapping{
-			AuthenticSourcePersonID: authenticSourcePersonID,
-		},
-	}
-
-	return reply, nil
-}
-
-// AddDocumentIdentityRequest is the request for DocumentIdentity
-type AddDocumentIdentityRequest struct {
+// DatastoreAddIdentityRequest is the request for adding identity to a document
+type DatastoreAddIdentityRequest struct {
 	// required: true
 	// example: SUNET
 	AuthenticSource string `json:"authentic_source" validate:"required"`
 
 	// required: true
-	// example: urn:eudi:pid:1
-	VCT string `json:"vct" validate:"required"`
+	// example: pid
+	Scope string `json:"scope" validate:"required"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
 	DocumentID string `json:"document_id" validate:"required"`
 
-	Identities []*model.Identity `json:"identities" validate:"required"`
+	IdentityMappingIDs []string `json:"identity_mapping_ids" validate:"required,min=1,dive,required,max=128,printascii"`
 }
 
-// AddDocumentIdentity adds an identity to a document
+// DatastoreAddIdentity adds an identity to a document
 //
-//	@Summary		AddDocumentIdentity
-//	@ID				add-document-identity
-//	@Description	Adding array of identities to one document
+//	@Summary		DatastoreAddIdentity
+//	@ID				add-identity
+//	@Description	Adding array of identity mapping IDs to one document
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
-//	@Param			req	body		AddDocumentIdentityRequest	true	" "
-//	@Router			/document/identity [put]
-func (c *Client) AddDocumentIdentity(ctx context.Context, req *AddDocumentIdentityRequest) error {
-	err := c.datastoreStore.AddDocumentIdentity(ctx, &db.AddDocumentIdentityQuery{
-		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
-		DocumentID:      req.DocumentID,
-		Identities:      req.Identities,
+//	@Param			req	body		DatastoreAddIdentityRequest	true	" "
+//	@Router			/api/v1/datastore/identity [put]
+func (c *Client) DatastoreAddIdentity(ctx context.Context, req *DatastoreAddIdentityRequest) error {
+	err := c.datastoreStore.AddIdentity(ctx, &db.AddIdentityQuery{
+		AuthenticSource:    req.AuthenticSource,
+		Scope:              req.Scope,
+		DocumentID:         req.DocumentID,
+		IdentityMappingIDs: req.IdentityMappingIDs,
 	})
 	if err != nil {
 		return err
@@ -256,15 +98,15 @@ func (c *Client) AddDocumentIdentity(ctx context.Context, req *AddDocumentIdenti
 	return nil
 }
 
-// DeleteDocumentIdentityRequest is the request for DeleteDocumentIdentity
-type DeleteDocumentIdentityRequest struct {
+// DatastoreDeleteIdentityRequest is the request for DatastoreDeleteIdentity
+type DatastoreDeleteIdentityRequest struct {
 	// required: true
 	// example: SUNET
 	AuthenticSource string `json:"authentic_source" validate:"required"`
 
 	// required: true
-	// example: urn:eudi:pid:1
-	VCT string `json:"vct" validate:"required"`
+	// example: pid
+	Scope string `json:"scope" validate:"required"`
 
 	// required: true
 	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
@@ -275,22 +117,22 @@ type DeleteDocumentIdentityRequest struct {
 	AuthenticSourcePersonID string `json:"authentic_source_person_id" validate:"required"`
 }
 
-// DeleteDocumentIdentity deletes an identity from a document
+// DatastoreDeleteIdentity deletes an identity from a document
 //
-//	@Summary		DeleteDocumentIdentity
-//	@ID				delete-document-identity
+//	@Summary		DatastoreDeleteIdentity
+//	@ID				delete-identity
 //	@Description	Delete identity to document endpoint
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
-//	@Param			req	body		DeleteDocumentIdentityRequest	true	" "
-//	@Router			/document/identity [delete]
-func (c *Client) DeleteDocumentIdentity(ctx context.Context, req *DeleteDocumentIdentityRequest) error {
-	err := c.datastoreStore.DeleteDocumentIdentity(ctx, &db.DeleteDocumentIdentityQuery{
+//	@Param			req	body		DatastoreDeleteIdentityRequest	true	" "
+//	@Router			/api/v1/datastore/identity [delete]
+func (c *Client) DatastoreDeleteIdentity(ctx context.Context, req *DatastoreDeleteIdentityRequest) error {
+	err := c.datastoreStore.DeleteIdentity(ctx, &db.DeleteIdentityQuery{
 		AuthenticSource:         req.AuthenticSource,
-		VCT:                     req.VCT,
+		Scope:                   req.Scope,
 		DocumentID:              req.DocumentID,
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
 	})
@@ -301,8 +143,8 @@ func (c *Client) DeleteDocumentIdentity(ctx context.Context, req *DeleteDocument
 	return nil
 }
 
-// DeleteDocumentRequest is the request for DeleteDocument
-type DeleteDocumentRequest struct {
+// DatastoreDeleteRequest is the request for DatastoreDelete
+type DatastoreDeleteRequest struct {
 	// required: true
 	// example: skatteverket
 	AuthenticSource string `json:"authentic_source" validate:"required"`
@@ -312,26 +154,26 @@ type DeleteDocumentRequest struct {
 	DocumentID string `json:"document_id" validate:"required"`
 
 	// required: true
-	// example: urn:eudi:pid:1
-	VCT string `json:"vct" validate:"required"`
+	// example: pid
+	Scope string `json:"scope" validate:"required"`
 }
 
-// DeleteDocument deletes a specific document
+// DatastoreDelete deletes a specific document
 //
-//	@Summary		DeleteDocument
+//	@Summary		DatastoreDelete
 //	@ID				delete-document
 //	@Description	delete one document endpoint
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	"Success"
+//	@Success		204	"No Content"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		DeleteDocumentRequest	true	" "
-//	@Router			/document [delete]
-func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest) error {
+//	@Param			req	body		DatastoreDeleteRequest	true	" "
+//	@Router			/api/v1/datastore [delete]
+func (c *Client) DatastoreDelete(ctx context.Context, req *DatastoreDeleteRequest) error {
 	err := c.datastoreStore.Delete(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
+		Scope:           req.Scope,
 		DocumentID:      req.DocumentID,
 	})
 	if err != nil {
@@ -341,217 +183,196 @@ func (c *Client) DeleteDocument(ctx context.Context, req *DeleteDocumentRequest)
 	return nil
 }
 
-// GetDocumentRequest is the request for GetDocument
-type GetDocumentRequest struct {
+// DatastoreGetRequest is the request for DatastoreGet
+type DatastoreGetRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
+	Scope           string `json:"scope" validate:"required"`
 	DocumentID      string `json:"document_id" validate:"required"`
 }
 
-// GetDocumentReply is the reply for a generic document
-type GetDocumentReply struct {
+// DatastoreGetReply is the reply for a generic document
+type DatastoreGetReply struct {
 	Data *model.Document `json:"data"`
 }
 
-// GetDocument return a specific document
+// DatastoreGet return a specific document
 //
-//	@Summary		GetDocument
+//	@Summary		DatastoreGet
 //	@ID				get-document
 //	@Description	Get document endpoint
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	GetDocumentReply		"Success"
+//	@Success		200	{object}	DatastoreGetReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		GetDocumentRequest		true	" "
-//	@Router			/document [post]
-func (c *Client) GetDocument(ctx context.Context, req *GetDocumentRequest) (*GetDocumentReply, error) {
-	query := &db.GetDocumentQuery{
-		Meta: &model.MetaData{
-			AuthenticSource: req.AuthenticSource,
-			VCT:             req.VCT,
-			DocumentID:      req.DocumentID,
-		},
-	}
-	doc, err := c.datastoreStore.GetDocument(ctx, query)
+//	@Param			req	body		DatastoreGetRequest		true	" "
+//	@Router			/api/v1/datastore [post]
+func (c *Client) DatastoreGet(ctx context.Context, req *DatastoreGetRequest) (*DatastoreGetReply, error) {
+	doc, err := c.datastoreStore.Get(ctx, &model.MetaData{
+		AuthenticSource: req.AuthenticSource,
+		Scope:           req.Scope,
+		DocumentID:      req.DocumentID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	reply := &GetDocumentReply{
+	reply := &DatastoreGetReply{
 		Data: doc,
 	}
 
 	return reply, nil
 }
 
-// DocumentListRequest is the request for DocumentList
-type DocumentListRequest struct {
-	AuthenticSource string          `json:"authentic_source"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
-	VCT             string          `json:"vct"`
-	ValidFrom       int64           `json:"valid_from"`
-	ValidTo         int64           `json:"valid_to"`
+// DatastoreListRequest is the request for DatastoreList
+type DatastoreListRequest struct {
+	AuthenticSource   string `json:"authentic_source"`
+	IdentityMappingID string `json:"identity_mapping_id" validate:"required"`
+	Scope             string `json:"scope"`
+	ValidFrom         int64  `json:"valid_from"`
+	ValidTo           int64  `json:"valid_to"`
 }
 
-// DocumentListReply is the reply for a list of documents
-type DocumentListReply struct {
+// DatastoreListReply is the reply for a list of documents
+type DatastoreListReply struct {
 	Data []*model.DocumentList `json:"data"`
 }
 
-// DocumentList return a list of metadata for a specific identity
+// DatastoreList return a list of metadata for a specific identity
 //
-//	@Summary		DocumentList
+//	@Summary		DatastoreList
 //	@ID				document-list
 //	@Description	List documents for an identity
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	DocumentListReply		"Success"
+//	@Success		200	{object}	DatastoreListReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		DocumentListRequest		true	" "
-//	@Router			/document/list [post]
-func (c *Client) DocumentList(ctx context.Context, req *DocumentListRequest) (*DocumentListReply, error) {
-	docs, err := c.datastoreStore.DocumentList(ctx, &db.DocumentListQuery{
-		AuthenticSource: req.AuthenticSource,
-		Identity:        req.Identity,
-		VCT:             req.VCT,
-		ValidFrom:       req.ValidFrom,
-		ValidTo:         req.ValidTo,
+//	@Param			req	body		DatastoreListRequest	true	" "
+//	@Router			/api/v1/datastore/list [post]
+func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (*DatastoreListReply, error) {
+	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
+		AuthenticSource:   req.AuthenticSource,
+		IdentityMappingID: req.IdentityMappingID,
+		Scope:             req.Scope,
+		ValidFrom:         req.ValidFrom,
+		ValidTo:           req.ValidTo,
 	})
 	if err != nil {
 		return nil, err
 	}
-	resp := &DocumentListReply{
+	resp := &DatastoreListReply{
 		Data: docs,
 	}
 	return resp, nil
 }
 
-// GetDocumentCollectIDRequest is the request for GetDocumentAttestation
-type GetDocumentCollectIDRequest struct {
-	AuthenticSource string          `json:"authentic_source" validate:"required"`
-	VCT             string          `json:"vct" validate:"required"`
-	CollectID       string          `json:"collect_id" validate:"required"`
-	Identity        *model.Identity `json:"identity" validate:"required"`
+// DatastoreGetByKeyRequest is the request for getting a document by its key
+type DatastoreGetByKeyRequest struct {
+	AuthenticSource string `json:"authentic_source" form:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string `json:"scope" form:"scope" validate:"required,max=128,printascii"`
+	DocumentID      string `json:"document_id" form:"document_id" validate:"required,max=128,printascii"`
 }
 
-// GetDocumentCollectIDReply is the reply for a generic document
-type GetDocumentCollectIDReply struct {
-	Data *model.Document `json:"data"`
+// DatastoreGetByKeyReply is the reply for a document retrieval
+type DatastoreGetByKeyReply struct {
+	Data *model.CompleteDocument `json:"data"`
 }
 
-// GetDocumentCollectID return a specific document ??
+// DatastoreGetByKey retrieves a document by its natural key
 //
-//	@Summary		GetDocumentByCollectID
-//	@ID				get-document-collect-id
-//	@Description	Get one document with collect id
+//	@Summary		DatastoreGetByKey
+//	@ID				get-document-by-key
+//	@Description	Get a document by authentic_source, scope, and document_id
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	GetDocumentCollectIDReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
-//	@Param			req	body		GetDocumentCollectIDRequest	true	" "
-//	@Router			/document/collect_id [post]
-func (c *Client) GetDocumentCollectID(ctx context.Context, req *GetDocumentCollectIDRequest) (*GetDocumentCollectIDReply, error) {
-	query := &db.GetDocumentCollectIDQuery{
-		Identity: req.Identity,
-		Meta: &model.MetaData{
-			AuthenticSource: req.AuthenticSource,
-			VCT:             req.VCT,
-			Collect: &model.Collect{
-				ID: req.CollectID,
-			},
-		},
-	}
-
-	doc, err := c.datastoreStore.GetDocumentCollectID(ctx, query)
+//	@Success		200					{object}	DatastoreGetByKeyReply	"Success"
+//	@Failure		400					{object}	helpers.ErrorResponse	"Bad Request"
+//	@Param			authentic_source	query		string					true	"Authentic source"
+//	@Param			scope				query		string					true	"Scope"
+//	@Param			document_id			query		string					true	"Document ID"
+//	@Router			/api/v1/datastore/ [get]
+func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
+	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
-		c.log.Error(err, "failed to get document")
 		return nil, err
 	}
 
-	reply := &GetDocumentCollectIDReply{
+	return &DatastoreGetByKeyReply{
 		Data: doc,
-	}
-	return reply, nil
+	}, nil
 }
 
-// RevokeDocumentRequest is the request for RevokeDocument
-type RevokeDocumentRequest struct {
-	AuthenticSource string            `json:"authentic_source" validate:"required"`
-	VCT             string            `json:"vct" validate:"required"`
-	Revocation      *model.Revocation `json:"revocation" validate:"required"`
+// DatastoreResolveRequest is the request for resolving identity attributes to documents
+type DatastoreResolveRequest struct {
+	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string         `json:"scope" validate:"required,max=128,printascii"`
+	Attributes      map[string]string `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
-// RevokeDocument revokes a specific document
+// DatastoreResolveReply is the reply for resolved documents
+type DatastoreResolveReply struct {
+	AuthenticSourcePersonID string                `json:"authentic_source_person_id"`
+	Data                    []*model.DocumentList `json:"data"`
+}
+
+// DatastoreResolve resolves identity attributes (e.g. from an OIDC/SAML session) to an
+// internal identifier via the identity mapping store, then returns all documents
+// associated with that identifier, filtered by authentic source and scope.
 //
-//	@Summary		RevokeDocument
-//	@ID				revoke-document
-//	@Description	Revoke one document
+//	@Summary		DatastoreResolve
+//	@ID				resolve-document
+//	@Description	Resolve identity attributes to documents
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	"Success"
+//	@Success		200	{object}	DatastoreResolveReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
-//	@Param			req	body		RevokeDocumentRequest	true	" "
-//	@Router			/document/revoke [post]
-func (c *Client) RevokeDocument(ctx context.Context, req *RevokeDocumentRequest) error {
-	ctx, span := c.tracer.Start(ctx, "db:apigw:datastore:revoke")
-	defer span.End()
-
-	if req.Revocation.ID == "" {
-		return helpers.ErrNoRevocationID
-	}
-
-	doc, err := c.datastoreStore.GetByRevocationID(ctx, &model.MetaData{
+//	@Param			req	body		DatastoreResolveRequest	true	" "
+//	@Router			/api/v1/datastore/resolve [post]
+func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequest) (*DatastoreResolveReply, error) {
+	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
 		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
-		Revocation:      &model.Revocation{ID: req.Revocation.ID},
+		Attributes:      req.Attributes,
 	})
 	if err != nil {
-		return err
-	}
-	c.log.Debug("Document found", "document_id", doc.Meta.DocumentID)
-
-	doc.Meta.Revocation = req.Revocation
-
-	if req.Revocation.RevokedAt == 0 {
-		doc.Meta.Revocation.RevokedAt = time.Now().Unix()
-		doc.Meta.Revocation.Revoked = true
+		return nil, err
 	}
 
-	if err := c.datastoreStore.Replace(ctx, doc); err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Error(err, "replace failed")
-		return err
-	}
-	c.log.Debug("Document enqueued for update", "document_id", doc.Meta.DocumentID)
-
-	return nil
-}
-
-// SearchDocuments search for documents
-func (c *Client) SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error) {
-	docs, hasMore, err := c.datastoreStore.SearchDocuments(ctx, &db.SearchDocumentsQuery{
-		AuthenticSource: req.AuthenticSource,
-		VCT:             req.VCT,
-		DocumentID:      req.DocumentID,
-		CollectID:       req.CollectID,
-
-		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
-
-		FamilyName: req.FamilyName,
-		GivenName:  req.GivenName,
-		BirthDate:  req.BirthDate,
-		BirthPlace: req.BirthPlace,
-	}, req.Limit, req.Fields, req.SortFields)
-
+	docs, err := c.datastoreStore.List(ctx, &db.ListQuery{
+		AuthenticSource:   req.AuthenticSource,
+		Scope:             req.Scope,
+		IdentityMappingID: personID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	resp := &model.SearchDocumentsReply{
-		Documents:      docs,
-		HasMoreResults: hasMore,
-	}
-	return resp, nil
+
+	return &DatastoreResolveReply{
+		AuthenticSourcePersonID: personID,
+		Data:                    docs,
+	}, nil
+}
+
+// DatastoreDeleteByKeyRequest is the request for deleting a document
+type DatastoreDeleteByKeyRequest struct {
+	AuthenticSource string `json:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string `json:"scope" validate:"required,max=128,printascii"`
+	DocumentID      string `json:"document_id" validate:"required,max=128,printascii"`
+}
+
+// DatastoreDeleteByKey deletes a document by its natural key
+//
+//	@Summary		DatastoreDeleteByKey
+//	@ID				delete-document-by-key
+//	@Description	Delete a document by authentic_source, scope, and document_id
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		204	"No Content"
+//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
+//	@Param			req	body		DatastoreDeleteByKeyRequest	true	" "
+//	@Router			/api/v1/datastore/ [delete]
+func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
+	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 }

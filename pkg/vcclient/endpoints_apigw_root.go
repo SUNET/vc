@@ -20,21 +20,15 @@ type rootHandler struct {
 }
 
 type UploadRequest struct {
-	Meta                *model.MetaData        `json:"meta" validate:"required"`
-	Identities          []model.Identity       `json:"identities,omitempty" validate:"dive"`
-	DocumentDisplay     *model.DocumentDisplay `json:"document_display,omitempty"`
-	DocumentData        map[string]any         `json:"document_data" validate:"required"`
-	DocumentDataVersion string                 `json:"document_data_version,omitempty" validate:"required,semver"`
+	Meta               *model.MetaData `json:"meta" validate:"required"`
+	IdentityMappingIDs []string        `json:"identity_mapping_ids" validate:"required,min=1,dive,required,max=128,printascii"`
+	DocumentData       map[string]any  `json:"document_data" validate:"required"`
 }
 
 func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Response, error) {
 	s.log.Info("Upload")
 
-	if body.Meta.VCT == model.CredentialTypeUrnEudiPid1 {
-		s.log.Info("Uploading PID document", "body", body)
-	}
-
-	fullURL, err := url.JoinPath(s.serviceBaseURL, "upload")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "datastore")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, err
@@ -51,7 +45,7 @@ func (s *rootHandler) Upload(ctx context.Context, body *UploadRequest) (*http.Re
 // NotificationRequest is the request for Notification
 type NotificationRequest struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
+	Scope           string `json:"scope" validate:"required"`
 	DocumentID      string `json:"document_id" validate:"required"`
 }
 
@@ -64,7 +58,7 @@ type NotificationReply struct {
 func (s *rootHandler) Notification(ctx context.Context, body *NotificationRequest) (*NotificationReply, *http.Response, error) {
 	s.log.Info("Notification")
 
-	fullURL, err := url.JoinPath(s.serviceBaseURL, "notification")
+	fullURL, err := url.JoinPath(s.serviceBaseURL, "datastore", "notification")
 	if err != nil {
 		s.log.Error(err, "failed to construct URL")
 		return nil, nil, err

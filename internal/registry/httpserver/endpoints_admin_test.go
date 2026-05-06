@@ -249,12 +249,10 @@ func TestEndpointAdminSearch(t *testing.T) {
 			searchResult: &apiv1.SearchPersonReply{
 				Results: []*apiv1.PersonResult{
 					{
-						FirstName:   "John",
-						LastName:    "Doe",
-						DateOfBirth: "1990-01-15",
-						Section:     0,
-						Index:       42,
-						Status:      0,
+						Identifier: "john-doe-1990",
+						Section:    0,
+						Index:      42,
+						Status:     0,
 					},
 				},
 			},
@@ -264,9 +262,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "John")
-		form.Add("last_name", "Doe")
-		form.Add("date_of_birth", "1990-01-15")
+		form.Add("identifier", "john-doe-1990")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -274,8 +270,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
-		assert.Contains(t, string(html), "John")
-		assert.Contains(t, string(html), "Doe")
+		assert.Contains(t, string(html), "john-doe-1990")
 		assert.Contains(t, string(html), "VALID")
 	})
 
@@ -289,9 +284,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "Unknown")
-		form.Add("last_name", "Person")
-		form.Add("date_of_birth", "1990-01-01")
+		form.Add("identifier", "unknown-person")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -311,12 +304,10 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 			searchResult: &apiv1.SearchPersonReply{
 				Results: []*apiv1.PersonResult{
 					{
-						FirstName:   "John",
-						LastName:    "Doe",
-						DateOfBirth: "1990-01-15",
-						Section:     0,
-						Index:       42,
-						Status:      1,
+						Identifier: "john-doe-1990",
+						Section:    0,
+						Index:      42,
+						Status:     1,
 					},
 				},
 			},
@@ -326,9 +317,7 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "John")
-		form.Add("last_name", "Doe")
-		form.Add("date_of_birth", "1990-01-15")
+		form.Add("identifier", "john-doe-1990")
 		form.Add("status", "1")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/update-status", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -350,9 +339,7 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "John")
-		form.Add("last_name", "Doe")
-		form.Add("date_of_birth", "1990-01-15")
+		form.Add("identifier", "john-doe-1990")
 		form.Add("status", "1")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/update-status", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

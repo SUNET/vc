@@ -25,7 +25,7 @@ import (
 //	@Produce		xml
 //	@Success		200	{string}	string			"SAML metadata XML"
 //	@Failure		500	{object}	map[string]any	"Internal server error"
-//	@Router			/saml/metadata [get]
+//	@Router			/samlsp/metadata [get]
 func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLMetadata")
 	defer span.End()
@@ -70,7 +70,7 @@ type SAMLInitiateResponse struct {
 //	@Success		200		{object}	SAMLInitiateResponse
 //	@Failure		400		{object}	map[string]any	"Bad request"
 //	@Failure		500		{object}	map[string]any	"Internal server error"
-//	@Router			/saml/initiate [post]
+//	@Router			/samlsp/initiate [post]
 func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLInitiate")
 	defer span.End()
@@ -111,7 +111,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 //	@Success		200				{object}	map[string]any	"Success with credential claims or offer"
 //	@Failure		400				{object}	map[string]any	"Bad request"
 //	@Failure		500				{object}	map[string]any	"Internal server error"
-//	@Router			/saml/acs [post]
+//	@Router			/samlsp/acs [post]
 func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLACS")
 	defer span.End()
@@ -204,34 +204,12 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 
 		if authCtx.DataSource == string(model.DataSourceExternalAPI) {
-			// External API: extract person identifier from claims for later API lookup.
-			// The actual credential data will be fetched from the remote in the consent endpoint.
-			personID, _ := claims["person_id"].(string)
-			if personID == "" {
-				// Fall back to subject identifier from assertion attributes
-				for _, key := range []string{"subject", "uid", "eppn", "eduPersonPrincipalName"} {
-					if v, ok := assertion.Attributes[key]; ok && len(v) > 0 {
-						personID = v[0]
-						break
-					}
-				}
-			}
-			if personID == "" {
-				span.SetStatus(codes.Error, "person_id not found in SAML assertion")
-				return nil, fmt.Errorf("external API flow requires person identifier but none found in SAML assertion")
-			}
-
-			authCtx.PersonID = personID
-			if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
-				span.SetStatus(codes.Error, "failed to store person_id")
-				return nil, fmt.Errorf("failed to update person_id on auth context: %w", updateErr)
-			}
-			s.log.Info("SAML ACS: stored person_id for external API flow",
-				"vci_session_id", session.VCISessionID, "person_id", personID)
+			// External API: identifier will be resolved by the common
+			// ResolveIdentifier call below (authentic_source_person_id or identity mapping).
 		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
 			// Datastore: use the authenticated identity to look up pre-loaded documents.
 			dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
-			if err := s.apiv1.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, claims, &dsCred); err != nil {
+			if err := s.apiv1.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, authCtx.AuthenticSource, claims, &dsCred); err != nil {
 				span.SetStatus(codes.Error, "datastore lookup failed")
 				return nil, fmt.Errorf("SAML datastore lookup failed: %w", err)
 			}
@@ -241,8 +219,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				Meta: &model.MetaData{
 					AuthenticSource: session.IDPEntityID,
 				},
-				DocumentData:        claims,
-				DocumentDataVersion: "1.0.0",
+				DocumentData: claims,
 			}
 			docs := map[string]*model.CompleteDocument{
 				session.IDPEntityID: doc,
@@ -253,6 +230,22 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				return nil, fmt.Errorf("failed to store VCI documents: %w", err)
 			}
 		}
+
+		// Resolve the authenticated identifier for registry (applies to all flows).
+		if authCtx.Identifier == "" {
+			var resolveErr error
+			authCtx.Identifier, resolveErr = s.apiv1.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+			if resolveErr != nil {
+				span.SetStatus(codes.Error, "identifier resolution failed")
+				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
+			}
+		}
+		if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
+			span.SetStatus(codes.Error, "failed to store identifier")
+			return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
+		}
+		s.log.Info("SAML ACS: identifier resolved",
+			"vci_session_id", session.VCISessionID, "identifier", authCtx.Identifier)
 
 		// Clean up SAML session (clear err so defer doesn't double-delete)
 		err = nil

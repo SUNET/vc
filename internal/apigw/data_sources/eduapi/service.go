@@ -136,8 +136,7 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 		Meta: &model.MetaData{
 			AuthenticSource: s.cfg.BaseURL,
 		},
-		DocumentData:        transformedClaims,
-		DocumentDataVersion: "1.0.0",
+		DocumentData: transformedClaims,
 	}
 	docs := map[string]*model.CompleteDocument{
 		s.cfg.BaseURL: doc,

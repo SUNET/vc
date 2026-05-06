@@ -116,8 +116,6 @@ type Common struct {
 	Tracing OTEL `yaml:"tracing" validate:"omitempty"`
 	// Kafka is the Kafka message broker configuration
 	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
-	// CredentialOfferQR holds credential offer QR code settings
-	CredentialOfferQR CredentialOfferQRConfig `yaml:"credential_offer_qr" validate:"omitempty"`
 	// SecretFilePath is the path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.
 	SecretFilePath string `yaml:"secret_file_path,omitempty" doc_example:"\"/etc/vc/secrets.yaml\""`
 	// HA configures high-availability mode. When Enable is true, caches use MongoDB
@@ -139,22 +137,6 @@ type Branding struct {
 	LogoPath string `yaml:"logo_path,omitempty" validate:"omitempty,image_png"`
 	// FaviconPath is the file path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used
 	FaviconPath string `yaml:"favicon_path,omitempty" validate:"omitempty,image_png"`
-}
-
-// CredentialOfferQRConfig holds credential offer QR code settings
-type CredentialOfferQRConfig struct {
-	// Type is the credential offer type: "credential_offer" or "credential_offer_uri"
-	Type string `yaml:"type" validate:"required,oneof=credential_offer_uri credential_offer" default:"credential_offer"`
-	// QR holds QR code generation settings
-	QR QRCfg `yaml:"qr" validate:"omitempty"`
-}
-
-// QRCfg holds the QR code generation settings
-type QRCfg struct {
-	// RecoveryLevel is the error correction level (0-3)
-	RecoveryLevel int `yaml:"recovery_level" validate:"required,min=0,max=3" default:"2"`
-	// Size is the QR code size in pixels
-	Size int `yaml:"size" validate:"required" default:"256"`
 }
 
 // GRPCServer holds the gRPC server configuration
@@ -876,6 +858,10 @@ type APIGW struct {
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
 	// RegistryClient is the gRPC client config for registry
 	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
+	// IdentityMappingImport configures automatic import of identity mappings from JSON files at startup.
+	// When configured, APIGW reads JSON files and imports them into the
+	// identity mappings collection on first startup (skipped if data already exists).
+	IdentityMappingImport *IdentityMappingImport `yaml:"identity_mapping_import,omitempty"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
