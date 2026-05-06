@@ -87,6 +87,11 @@ type AuthorizationContext struct {
 	DataSource           string                                     `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
 	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
 
+	// DynamicParams holds key-value parameters provided by the authentic source business system
+	// at flow initiation time. These values are used for template substitution in OIDC request
+	// parameters (e.g., acr_values, claims) and are available during issuance policy evaluation.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty"`
+
 	// Verifier-specific fields (presentation/RP flows)
 	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
 	ResponseType           string         `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`

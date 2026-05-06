@@ -17,4 +17,8 @@ type Session struct {
 
 	// VCI flow integration fields (set when initiated from OpenID4VCI consent)
 	VCISessionID string `json:"vci_session_id" bson:"vci_session_id"` // Links back to the VCI AuthorizationContext session
+
+	// DynamicParams holds key-value parameters from the authentic source for template substitution
+	// in OIDC request parameters. Propagated from AuthorizationContext.DynamicParams.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty"`
 }

@@ -56,6 +56,11 @@ type PARRequest struct {
 	ClientAttestationPoP string `json:"-" form:"-" header:"OAuth-Client-Attestation-PoP"`
 	ClientAssertion      string `json:"client_assertion" form:"client_assertion" validate:"omitempty,max=8192,printascii"`
 	ClientAssertionType  string `json:"client_assertion_type" form:"client_assertion_type" validate:"omitempty,max=256,printascii"`
+
+	// DynamicParams holds key-value parameters from the authentic source business system.
+	// These are used for template substitution in OIDC request parameters and for
+	// issuance policy evaluation.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" form:"dynamic_params"`
 }
 
 type ParResponse struct {
