@@ -46,6 +46,9 @@ type MetaData struct {
 	// example: file://path/to/schema.json or http://example.com/schema.json
 	// format: string
 	DocumentDataValidationRef string `json:"document_data_validation,omitempty" bson:"document_data_validation" validate:"omitempty,max=128,printascii"`
+
+	// CreatedAt is the timestamp when the document was created
+	CreatedAt time.Time `json:"created_at" bson:"created_at"`
 }
 
 // Identity identifies a person

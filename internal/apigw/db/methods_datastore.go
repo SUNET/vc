@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -56,6 +57,8 @@ func (c *DatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument) e
 	if err := helpers.Check(ctx, c.Service.cfg, doc, c.Service.log); err != nil {
 		return err
 	}
+
+	doc.Meta.CreatedAt = time.Now().UTC()
 
 	_, err := c.Coll.InsertOne(ctx, doc)
 	if err != nil {

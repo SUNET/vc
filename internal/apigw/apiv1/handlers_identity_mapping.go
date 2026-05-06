@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/model"
@@ -12,8 +13,8 @@ import (
 // IdentityMappingCreateRequest is the request for creating an identity mapping
 type IdentityMappingCreateRequest struct {
 	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
-	AuthenticSourcePersonID string         `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
-	Attributes              map[string]any `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
+	AuthenticSourcePersonID string            `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
+	Attributes              map[string]string `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
 
 // IdentityMappingCreateReply is the reply containing the identifier
@@ -36,7 +37,11 @@ type IdentityMappingCreateReply struct {
 func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMappingCreateRequest) (*IdentityMappingCreateReply, error) {
 	identifier := req.AuthenticSourcePersonID
 	if identifier == "" {
-		identifier = uuid.New().String()
+		id, err := uuid.NewV7()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate UUIDv7: %w", err)
+		}
+		identifier = id.String()
 	}
 
 	mapping := &model.IdentityMapping{
@@ -59,7 +64,7 @@ func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMapping
 // IdentityMappingResolveRequest is the request for resolving attributes to an identifier
 type IdentityMappingResolveRequest struct {
 	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
-	Attributes      map[string]any `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
+	Attributes      map[string]string `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
 // IdentityMappingResolveReply is the reply with the resolved identifier
@@ -96,8 +101,8 @@ func (c *Client) IdentityMappingResolve(ctx context.Context, req *IdentityMappin
 // IdentityMappingUpdateRequest is the request for updating an identity mapping
 type IdentityMappingUpdateRequest struct {
 	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
-	AuthenticSourcePersonID string         `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
-	Attributes              map[string]any `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
+	AuthenticSourcePersonID string            `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
+	Attributes              map[string]string `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
 
 // IdentityMappingUpdate updates an existing identity mapping

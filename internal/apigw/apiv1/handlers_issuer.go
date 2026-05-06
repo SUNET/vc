@@ -31,9 +31,9 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 	}
 
 	// Path 2: resolve from attributes via identity mapping
-	attrs := make(map[string]any)
+	attrs := make(map[string]string)
 	for _, key := range []string{"family_name", "given_name", "birth_date"} {
-		if v, ok := claims[key]; ok {
+		if v, ok := claims[key].(string); ok && v != "" {
 			attrs[key] = v
 		}
 	}

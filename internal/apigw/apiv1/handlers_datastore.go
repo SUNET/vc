@@ -391,7 +391,7 @@ func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRe
 type DatastoreResolveRequest struct {
 	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
 	Scope           string         `json:"scope" validate:"required,max=128,printascii"`
-	Attributes      map[string]any `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
+	Attributes      map[string]string `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
 // DatastoreResolveReply is the reply for resolved documents

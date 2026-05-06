@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -45,6 +46,8 @@ func (c *IdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createMapping")
 	defer span.End()
 
+	mapping.CreatedAt = time.Now().UTC()
+
 	_, err := c.Coll.InsertOne(ctx, mapping)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -70,6 +73,7 @@ func (c *IdentityMappingsColl) EnsureMapping(ctx context.Context, mapping *model
 			"authentic_source":           mapping.AuthenticSource,
 			"authentic_source_person_id": mapping.AuthenticSourcePersonID,
 			"attributes":                 mapping.Attributes,
+			"created_at":                 time.Now().UTC(),
 		},
 	}
 
@@ -86,8 +90,8 @@ func (c *IdentityMappingsColl) EnsureMapping(ctx context.Context, mapping *model
 
 // ResolveMappingQuery is the query for resolving attributes to an authentic_source_person_id
 type ResolveMappingQuery struct {
-	AuthenticSource string         `json:"authentic_source"`
-	Attributes      map[string]any `json:"attributes"`
+	AuthenticSource string            `json:"authentic_source"`
+	Attributes      map[string]string `json:"attributes"`
 }
 
 // ResolveMapping resolves identity attributes to an authentic_source_person_id.

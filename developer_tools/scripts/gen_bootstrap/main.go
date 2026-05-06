@@ -506,7 +506,7 @@ func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.Id
 	for _, pid := range pids {
 		p := input.Persons[pid]
 		aspid := fmt.Sprintf("authentic_source_person_id_%s", pid)
-		attrs := map[string]any{
+		attrs := map[string]string{
 			"family_name": p.FamilyName,
 			"given_name":  p.GivenName,
 			"birth_date":  p.BirthDate,
