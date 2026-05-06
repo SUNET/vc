@@ -261,9 +261,9 @@ type TokenRequest struct {
 
 // TokenResponse represents an OIDC token response
 type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken  string `json:"access_token,omitempty"`
 	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
+	ExpiresIn    int    `json:"expires_in,omitempty"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	IDToken      string `json:"id_token"`
 	Scope        string `json:"scope,omitempty"`
@@ -346,18 +346,6 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 	authCtx.Forfeited = true
 
-	// Generate tokens
-	accessToken, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate access token")
-		return nil, ErrServerError
-	}
-	refreshToken, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate refresh token")
-		return nil, ErrServerError
-	}
-
 	// Generate ID token
 	idToken, err := c.generateIDToken(ctx, authCtx, client)
 	if err != nil {
@@ -365,27 +353,47 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		return nil, ErrServerError
 	}
 
-	// Update session with tokens
-	authCtx.AccessToken = accessToken
-	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second).Unix()
 	authCtx.IDToken = idToken
-	authCtx.RefreshToken = refreshToken
-	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
+
+	resp := &TokenResponse{
+		TokenType: "Bearer",
+		IDToken:   idToken,
+		Scope:     strings.Join(authCtx.Scopes, " "),
+	}
+
+	// Only generate access/refresh tokens when UserInfo is enabled.
+	// When disabled, the verifier-OP is not a traditional IdP and the
+	// access token would not be usable at any endpoint, confusing
+	// standard RP libraries.
+	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		accessToken, err := crypto.GenerateSecureToken(0, 32)
+		if err != nil {
+			c.log.Error(err, "Failed to generate access token")
+			return nil, ErrServerError
+		}
+		refreshToken, err := crypto.GenerateSecureToken(0, 32)
+		if err != nil {
+			c.log.Error(err, "Failed to generate refresh token")
+			return nil, ErrServerError
+		}
+
+		authCtx.AccessToken = accessToken
+		authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second).Unix()
+		authCtx.RefreshToken = refreshToken
+		authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.RefreshTokenDuration) * time.Second).Unix()
+
+		resp.AccessToken = accessToken
+		resp.ExpiresIn = c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration
+		resp.RefreshToken = refreshToken
+	}
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}
 
-	return &TokenResponse{
-		AccessToken:  accessToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration,
-		RefreshToken: refreshToken,
-		IDToken:      idToken,
-		Scope:        strings.Join(authCtx.Scopes, " "),
-	}, nil
+	return resp, nil
 }
 
 func (c *Client) handleRefreshTokenGrant(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
@@ -453,7 +461,7 @@ type DiscoveryMetadata struct {
 	Issuer                            string   `json:"issuer"`
 	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
 	TokenEndpoint                     string   `json:"token_endpoint"`
-	UserInfoEndpoint                  string   `json:"userinfo_endpoint"`
+	UserInfoEndpoint                  string   `json:"userinfo_endpoint,omitempty"`
 	JwksURI                           string   `json:"jwks_uri"`
 	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"` // RFC 7591
 	ResponseTypesSupported            []string `json:"response_types_supported"`
@@ -485,9 +493,12 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	if err != nil {
 		return nil, err
 	}
-	userInfoEndpoint, err := join("/userinfo")
-	if err != nil {
-		return nil, err
+	var userInfoEndpoint string
+	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		userInfoEndpoint, err = join("/userinfo")
+		if err != nil {
+			return nil, err
+		}
 	}
 	jwksURI, err := join("/jwks")
 	if err != nil {

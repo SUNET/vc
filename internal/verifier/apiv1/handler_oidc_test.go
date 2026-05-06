@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+
 	internalcache "github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
@@ -895,20 +896,20 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, resp)
-				assert.NotEmpty(t, resp.AccessToken)
 				assert.Equal(t, "Bearer", resp.TokenType)
 				assert.NotEmpty(t, resp.IDToken)
-				assert.NotEmpty(t, resp.RefreshToken)
-				assert.Greater(t, resp.ExpiresIn, 0)
+
+				// With EnableUserInfo=false (default), access/refresh tokens are not issued
+				assert.Empty(t, resp.AccessToken)
+				assert.Empty(t, resp.RefreshToken)
+				assert.Equal(t, 0, resp.ExpiresIn)
 
 				// Verify session was updated
 				authCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, tt.request.Code)
 				if authCtx != nil {
 					assert.True(t, authCtx.Forfeited)
 					assert.Equal(t, cache.SessionStatusTokenIssued, authCtx.Status)
-					assert.Equal(t, resp.AccessToken, authCtx.AccessToken)
 					assert.Equal(t, resp.IDToken, authCtx.IDToken)
-					assert.Equal(t, resp.RefreshToken, authCtx.RefreshToken)
 				}
 			}
 		})
@@ -2307,7 +2308,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	assert.Equal(t, "https://verifier.example.com", metadata.Issuer)
 	assert.Equal(t, "https://verifier.example.com/authorize", metadata.AuthorizationEndpoint)
 	assert.Equal(t, "https://verifier.example.com/token", metadata.TokenEndpoint)
-	assert.Equal(t, "https://verifier.example.com/userinfo", metadata.UserInfoEndpoint)
+	assert.Empty(t, metadata.UserInfoEndpoint, "userinfo_endpoint should be omitted when EnableUserInfo is false")
 	assert.Equal(t, "https://verifier.example.com/jwks", metadata.JwksURI)
 
 	// Verify supported features
@@ -2411,9 +2412,10 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 					PublicURL: tt.externalURL,
 					Outbound: model.VerifierOutbound{
 						OIDCProvider: &model.OIDCOP{
-							Issuer:      tt.externalURL,
-							SubjectType: "public",
-							SubjectSalt: "test-salt",
+							Issuer:         tt.externalURL,
+							SubjectType:    "public",
+							SubjectSalt:    "test-salt",
+							EnableUserInfo: true,
 						},
 					},
 					Inbound: model.VerifierInbound{
