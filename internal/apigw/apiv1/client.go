@@ -8,17 +8,21 @@ import (
 	"fmt"
 	"time"
 
+	"net/http"
+
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
@@ -55,6 +59,10 @@ type Client struct {
 
 	// Caches
 	cacheService *cache.Service
+
+	// Trust evaluation
+	trustEvaluator trust.TrustEvaluator
+	jwksResolver   *trust.JWKSKeyResolver
 }
 
 // New creates a new instance of the public api
@@ -107,6 +115,19 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	if err := c.CreateCredentialOfferLookupMetadata(ctx); err != nil {
 		return nil, err
+	}
+
+	// Initialize trust evaluator for VP credential validation
+	c.jwksResolver = trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+		HTTPClient:          &http.Client{Timeout: 30 * time.Second},
+		ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
+	})
+	pdpURL := cfg.APIGW.Trust.PDPURL
+	c.trustEvaluator = trust.NewTrustEvaluatorFromConfig(pdpURL)
+	if pdpURL == "" {
+		c.log.Warn("Trust evaluation is DISABLED - no pdp_url configured. All credential issuers will be trusted.")
+	} else {
+		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
 	}
 
 	c.log.Info("Started")
