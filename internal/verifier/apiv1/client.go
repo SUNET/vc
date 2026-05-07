@@ -45,10 +45,11 @@ type Client struct {
 	pkiSignerChain []string
 
 	// Clients and services
-	openid4vp      *openid4vp.Client
-	trustService   *openid4vp.TrustService
-	trustEvaluator trust.TrustEvaluator
-	jwksResolver   *trust.JWKSKeyResolver
+	openid4vp        *openid4vp.Client
+	trustService     *openid4vp.TrustService
+	trustEvaluator   trust.TrustEvaluator
+	jwksResolver     *trust.JWKSKeyResolver
+	jwtTrustVerifier *trust.JWTTrustVerifier
 
 	// Cache
 	cacheService *cache.Service
@@ -118,6 +119,15 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	} else {
 		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
 	}
+
+	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator:             c.trustEvaluator,
+		JWKSResolver:               c.jwksResolver,
+		AllowedSignatureAlgorithms: cfg.Verifier.Trust.AllowedSignatureAlgorithms,
+		ParseX5C:                   func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:                   jose.ParseJWKToPublicKey,
+		Log:                        c.log,
+	})
 
 	c.log.Info("Started")
 
