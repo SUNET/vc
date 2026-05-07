@@ -57,15 +57,26 @@ type JWTTrustVerifier struct {
 	log            Logger
 }
 
+// noopLogger is a Logger that discards all log messages.
+type noopLogger struct{}
+
+func (noopLogger) Debug(string, ...any) {}
+func (noopLogger) Warn(string, ...any)  {}
+func (noopLogger) Info(string, ...any)  {}
+
 // NewJWTTrustVerifier creates a new JWT trust verifier with the given configuration.
 func NewJWTTrustVerifier(cfg JWTTrustVerifierConfig) *JWTTrustVerifier {
+	log := cfg.Log
+	if log == nil {
+		log = noopLogger{}
+	}
 	return &JWTTrustVerifier{
 		trustEvaluator: cfg.TrustEvaluator,
 		jwksResolver:   cfg.JWKSResolver,
 		allowedAlgs:    cfg.AllowedSignatureAlgorithms,
 		parseX5C:       cfg.ParseX5C,
 		parseJWK:       cfg.ParseJWK,
-		log:            cfg.Log,
+		log:            log,
 	}
 }
 
@@ -168,6 +179,9 @@ func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken stri
 // It supports x5c certificate chains, embedded JWKs, DID-based key resolution, and kid/JWKS resolution.
 func (v *JWTTrustVerifier) extractJWTKeyMaterial(ctx context.Context, token *jwt.Token, issuerID, scope, credentialType string) (*JWTKeyMaterial, error) {
 	if x5cRaw, ok := token.Header["x5c"]; ok {
+		if v.parseX5C == nil {
+			return nil, fmt.Errorf("x5c header present but ParseX5C is not configured")
+		}
 		certChain, err := v.parseX5C(x5cRaw)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse x5c header: %w", err)
@@ -189,6 +203,9 @@ func (v *JWTTrustVerifier) extractJWTKeyMaterial(ctx context.Context, token *jwt
 		jwkMap, ok := jwkRaw.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("invalid jwk header format: expected map, got %T", jwkRaw)
+		}
+		if v.parseJWK == nil {
+			return nil, fmt.Errorf("jwk header present but ParseJWK is not configured")
 		}
 		publicKey, err := v.parseJWK(jwkMap)
 		if err != nil {

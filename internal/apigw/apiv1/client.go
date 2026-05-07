@@ -6,9 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
-	"time"
-
 	"net/http"
+	"time"
 
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
