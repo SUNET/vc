@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin UI</title>
+    <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "alpinejs": "/static/alpinejs.esm.min.js"
+        }
+    }
+    </script>
+    <script src="/static/admin.js" type="module"></script>
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+    <style>
+        .admin-layout { display: flex; min-height: 100vh; }
+        .admin-sidebar {
+            width: 220px; background: #363636; color: #fff;
+            display: flex; flex-direction: column; padding: 1.5rem 0;
+        }
+        .admin-sidebar .logo { text-align: center; margin-bottom: 2rem; padding: 0 1rem; }
+        .admin-sidebar .logo img { height: 36px; }
+        .admin-sidebar .menu-item {
+            display: block; padding: 0.75rem 1.5rem; color: #ccc;
+            text-decoration: none; font-weight: 500; cursor: pointer;
+        }
+        .admin-sidebar .menu-item:hover { background: #4a4a4a; color: #fff; }
+        .admin-sidebar .menu-item.active { background: #00d1b2; color: #fff; }
+        .admin-sidebar .menu-item.logout {
+            margin-top: auto; border-top: 1px solid #4a4a4a; color: #f14668;
+        }
+        .admin-content { flex: 1; padding: 2rem; background: #f5f5f5; overflow-y: auto; }
+        .doc-json { max-height: 300px; overflow: auto; background: #1a1a1a; color: #0f0; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+        .tag-scope { font-size: 0.7rem; }
+    </style>
+</head>
+<body>
+
+<!-- Login view -->
+<div x-data="adminApp()" x-cloak>
+
+<template x-if="!authenticated">
+    <section class="section">
+        <div class="container" style="max-width: 380px; margin-top: 10vh;">
+            <div class="has-text-centered mb-5">
+                <img src="/static/logo.png" alt="Logo" style="height: 48px;">
+            </div>
+            <div class="box has-text-centered">
+                <h2 class="title is-4">Admin Login</h2>
+                <a class="button is-primary is-fullwidth" href="/ui/login">Login with OIDC</a>
+            </div>
+        </div>
+    </section>
+</template>
+
+<template x-if="authenticated">
+    <div class="admin-layout">
+        <aside class="admin-sidebar">
+            <div class="logo">
+                <img src="/static/logo.png" alt="Logo">
+                <template x-if="givenName">
+                    <div style="margin-top: 0.5rem; font-size: 0.85rem; color: #aaa;">logged in as: <span x-text="givenName"></span></div>
+                </template>
+            </div>
+            <a class="menu-item" :class="{'active': view === 'datastore'}" @click="switchView('datastore')">Datastore</a>
+            <a class="menu-item" :class="{'active': view === 'identity'}" @click="switchView('identity')">Identity Mapping</a>
+            <a class="menu-item logout" @click="logout()">Logout</a>
+        </aside>
+        <main class="admin-content">
+
+            <!-- Datastore View -->
+            <template x-if="view === 'datastore'">
+                <div>
+                    <h2 class="title is-4">Datastore</h2>
+
+                    <!-- Search bar -->
+                    <div class="field is-grouped mb-5">
+                        <div class="control is-expanded">
+                            <input class="input" type="text" placeholder="Search documents..." x-model="ds.search" @keyup.enter="searchDocuments()">
+                        </div>
+                        <div class="control">
+                            <button class="button is-primary" @click="searchDocuments()" :class="{'is-loading': ds.loading}">Search</button>
+                        </div>
+                        <div class="control">
+                            <button class="button is-success" @click="ds.showCreate = !ds.showCreate">+ New</button>
+                        </div>
+                    </div>
+
+                    <!-- Create form -->
+                    <template x-if="ds.showCreate">
+                        <div class="box mb-5">
+                            <h4 class="title is-5">Create Document</h4>
+                            <template x-if="ds.createError">
+                                <div class="notification is-danger is-light" x-text="ds.createError"></div>
+                            </template>
+                            <div class="columns">
+                                <div class="column">
+                                    <div class="field">
+                                        <label class="label is-small">Authentic Source</label>
+                                        <input class="input is-small" x-model="ds.create.authentic_source">
+                                    </div>
+                                </div>
+                                <div class="column">
+                                    <div class="field">
+                                        <label class="label is-small">Scope</label>
+                                        <input class="input is-small" x-model="ds.create.scope">
+                                    </div>
+                                </div>
+                                <div class="column">
+                                    <div class="field">
+                                        <label class="label is-small">Document ID</label>
+                                        <input class="input is-small" x-model="ds.create.document_id">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">Identity Mapping IDs (comma-separated)</label>
+                                <input class="input is-small" x-model="ds.create.identity_mapping_ids_str">
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">Document Data (JSON)</label>
+                                <textarea class="textarea is-small" rows="4" x-model="ds.create.document_data_str" placeholder='{"key": "value"}'></textarea>
+                            </div>
+                            <div class="field is-grouped">
+                                <div class="control">
+                                    <button class="button is-primary is-small" @click="createDocument()" :class="{'is-loading': ds.creating}">Save</button>
+                                </div>
+                                <div class="control">
+                                    <button class="button is-small" @click="ds.showCreate = false">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Results table -->
+                    <template x-if="ds.docs.length === 0 && !ds.loading">
+                        <div class="notification is-light">No documents found. Try a search or create one.</div>
+                    </template>
+                    <template x-if="ds.docs.length > 0">
+                        <div class="table-container">
+                            <table class="table is-fullwidth is-striped is-hoverable">
+                                <thead>
+                                    <tr>
+                                        <th>Document ID</th>
+                                        <th>Source</th>
+                                        <th>Scope</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(doc, idx) in ds.docs" :key="idx">
+                                        <tr>
+                                            <td x-text="doc.meta?.document_id || '-'" style="font-family:monospace;font-size:0.85rem;"></td>
+                                            <td x-text="doc.meta?.authentic_source || '-'"></td>
+                                            <td><span class="tag is-info tag-scope" x-text="doc.meta?.scope || '-'"></span></td>
+                                            <td x-text="formatDate(doc.meta?.created_at)"></td>
+                                            <td>
+                                                <button class="button is-small is-info is-outlined" @click="toggleDocDetail(idx)">View</button>
+                                                <button class="button is-small is-danger is-outlined" @click="deleteDocument(doc)">Delete</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+
+                    <!-- Detail modal -->
+                    <template x-if="ds.detailIdx !== null">
+                        <div class="modal is-active">
+                            <div class="modal-background" @click="ds.detailIdx = null"></div>
+                            <div class="modal-card" style="max-width:700px;width:90vw;">
+                                <header class="modal-card-head">
+                                    <p class="modal-card-title" x-text="'Document: ' + (ds.docs[ds.detailIdx]?.meta?.document_id || '')"></p>
+                                    <button class="delete" @click="ds.detailIdx = null"></button>
+                                </header>
+                                <section class="modal-card-body">
+                                    <h6 class="title is-6">Metadata</h6>
+                                    <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.meta, null, 2)"></pre>
+                                    <h6 class="title is-6 mt-4">Identity Mapping IDs</h6>
+                                    <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.identity_mapping_ids, null, 2)"></pre>
+                                    <h6 class="title is-6 mt-4">Document Data</h6>
+                                    <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.document_data, null, 2)"></pre>
+                                </section>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Identity Mapping View -->
+            <template x-if="view === 'identity'">
+                <div>
+                    <h2 class="title is-4">Identity Mapping</h2>
+
+                    <!-- Search bar -->
+                    <div class="field is-grouped mb-5">
+                        <div class="control is-expanded">
+                            <input class="input" type="text" placeholder="Search identity mappings..." x-model="im.search" @keyup.enter="searchMappings()">
+                        </div>
+                        <div class="control">
+                            <button class="button is-primary" @click="searchMappings()" :class="{'is-loading': im.loading}">Search</button>
+                        </div>
+                        <div class="control">
+                            <button class="button is-success" @click="im.showCreate = !im.showCreate">+ New</button>
+                        </div>
+                    </div>
+
+                    <!-- Create form -->
+                    <template x-if="im.showCreate">
+                        <div class="box mb-5">
+                            <h4 class="title is-5">Create Identity Mapping</h4>
+                            <template x-if="im.createError">
+                                <div class="notification is-danger is-light" x-text="im.createError"></div>
+                            </template>
+                            <div class="columns">
+                                <div class="column">
+                                    <div class="field">
+                                        <label class="label is-small">Authentic Source</label>
+                                        <input class="input is-small" x-model="im.create.authentic_source">
+                                    </div>
+                                </div>
+                                <div class="column">
+                                    <div class="field">
+                                        <label class="label is-small">Person ID (optional, auto-generated if empty)</label>
+                                        <input class="input is-small" x-model="im.create.authentic_source_person_id">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">Attributes (JSON object)</label>
+                                <textarea class="textarea is-small" rows="3" x-model="im.create.attributes_str" placeholder='{"family_name": "Doe", "given_name": "John", "birth_date": "1990-01-01"}'></textarea>
+                            </div>
+                            <div class="field is-grouped">
+                                <div class="control">
+                                    <button class="button is-primary is-small" @click="createMapping()" :class="{'is-loading': im.creating}">Save</button>
+                                </div>
+                                <div class="control">
+                                    <button class="button is-small" @click="im.showCreate = false">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Results table -->
+                    <template x-if="im.mappings.length === 0 && !im.loading">
+                        <div class="notification is-light">No identity mappings found. Try a search or create one.</div>
+                    </template>
+                    <template x-if="im.mappings.length > 0">
+                        <div class="table-container">
+                            <table class="table is-fullwidth is-striped is-hoverable">
+                                <thead>
+                                    <tr>
+                                        <th>Person ID</th>
+                                        <th>Authentic Source</th>
+                                        <th>Attributes</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(m, idx) in im.mappings" :key="idx">
+                                        <tr>
+                                            <td x-text="m.authentic_source_person_id || '-'" style="font-family:monospace;font-size:0.85rem;"></td>
+                                            <td x-text="m.authentic_source || '-'"></td>
+                                            <td>
+                                                <template x-if="m.attributes">
+                                                    <div>
+                                                        <template x-for="(val, key) in m.attributes" :key="key">
+                                                            <span class="tag is-light is-small mr-1 mb-1" x-text="key + ': ' + val"></span>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </td>
+                                            <td x-text="formatDate(m.created_at)"></td>
+                                            <td>
+                                                <button class="button is-small is-warning is-outlined" @click="startEditMapping(idx)">Edit</button>
+                                                <button class="button is-small is-danger is-outlined" @click="deleteMapping(m)">Delete</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+
+                    <!-- Edit modal -->
+                    <template x-if="im.editIdx !== null">
+                        <div class="modal is-active">
+                            <div class="modal-background" @click="im.editIdx = null"></div>
+                            <div class="modal-card" style="max-width:600px;width:90vw;">
+                                <header class="modal-card-head">
+                                    <p class="modal-card-title">Edit Identity Mapping</p>
+                                    <button class="delete" @click="im.editIdx = null"></button>
+                                </header>
+                                <section class="modal-card-body">
+                                    <template x-if="im.editError">
+                                        <div class="notification is-danger is-light" x-text="im.editError"></div>
+                                    </template>
+                                    <div class="field">
+                                        <label class="label is-small">Authentic Source</label>
+                                        <input class="input is-small" x-model="im.edit.authentic_source" disabled>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Person ID</label>
+                                        <input class="input is-small" x-model="im.edit.authentic_source_person_id" disabled>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Attributes (JSON)</label>
+                                        <textarea class="textarea is-small" rows="4" x-model="im.edit.attributes_str"></textarea>
+                                    </div>
+                                </section>
+                                <footer class="modal-card-foot">
+                                    <button class="button is-primary is-small" @click="updateMapping()" :class="{'is-loading': im.updating}">Update</button>
+                                    <button class="button is-small" @click="im.editIdx = null">Cancel</button>
+                                </footer>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+        </main>
+    </div>
+</template>
+
+</div>
+
+</body>
+</html>

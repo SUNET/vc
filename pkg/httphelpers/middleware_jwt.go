@@ -82,9 +82,9 @@ func (s *SafeEngine) RuleCount() int {
 	return s.engine.RuleCount()
 }
 
-// buildSPOCPEngine creates a SPOCP engine from the JWT config rules.
+// buildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
-func buildSPOCPEngine(cfg model.APIAuthJWT) (*SafeEngine, error) {
+func buildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
 	hasInline := len(cfg.Rules) > 0
 	hasFile := cfg.RulesFile != ""
 
@@ -339,7 +339,7 @@ func buildSPOCPQuery(service, method, path, subject string) sexp.Element {
 	)
 }
 
-// JWTAuth returns a Gin middleware that validates Bearer JWT tokens and
+// JWKSAuth returns a Gin middleware that validates Bearer JWT tokens and
 // optionally checks SPOCP authorization rules.
 //
 // The middleware extracts the token from the Authorization header, validates
@@ -351,11 +351,11 @@ func buildSPOCPQuery(service, method, path, subject string) sexp.Element {
 //
 // On success the parsed claims are stored in the Gin context under the key
 // "jwt_claims" and the "sub" claim is stored under "jwt_subject".
-func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg model.APIAuthJWT, jwksCache JWKSCache, engine *SafeEngine) gin.HandlerFunc {
-	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:JWTAuth")
+func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg model.APIAuthJWKS, jwksCache JWKSCache, engine *SafeEngine) gin.HandlerFunc {
+	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:JWKSAuth")
 	defer span.End()
 
-	log := m.log.New("jwt_auth")
+	log := m.log.New("jwks_auth")
 
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -415,46 +415,87 @@ func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg mod
 // APIAuth returns a Gin middleware that applies the authentication method
 // configured in APIAuth:
 //
-//   - If JWT.Enable is true  – Bearer JWT authentication + optional SPOCP authz
-//   - If BasicAuth.Enable is true – HTTP Basic authentication (allow/deny)
-//   - If neither is enabled – no authentication (open access)
+//   - If JWKS.Enable is true – Bearer JWT authentication against a static JWKS URL
+//   - If OIDC.Enable is true – Bearer JWT authentication via auto-discovered JWKS
+//   - If neither is enabled  – no authentication (open access)
 //
-// Only one of JWT.Enable and BasicAuth.Enable may be true.
+// JWKS and OIDC are mutually exclusive.
+// SPOCP rules (if configured) apply to whichever mode is active.
 //
 // The service parameter identifies the logical service (e.g. "apigw", "issuer")
 // and is included in SPOCP queries so that rules written for one service
 // do not accidentally grant access to another.
-func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth model.APIAuth, jwksCache JWKSCache) gin.HandlerFunc {
-	if apiAuth.JWT.Enable && apiAuth.BasicAuth.Enable {
-		panic("api_auth: both jwt.enable and basic_auth.enable are true; only one may be enabled")
+func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth model.APIAuth, jwksCache JWKSCache) (gin.HandlerFunc, error) {
+	// Build SPOCP engine from top-level rules (applies to either auth mode).
+	engine, err := buildSPOCPEngine(apiAuth)
+	if err != nil {
+		return nil, fmt.Errorf("api_auth: failed to build SPOCP engine: %w", err)
 	}
 
 	switch {
-	case apiAuth.JWT.Enable:
+	case apiAuth.JWKS.Enable:
 		if jwksCache == nil {
-			panic("api_auth: jwt.enable is true but no JWKS cache was provided")
+			return nil, fmt.Errorf("api_auth: jwks.enable is true but no JWKS cache was provided")
 		}
-
-		engine, err := buildSPOCPEngine(apiAuth.JWT)
-		if err != nil {
-			panic(fmt.Sprintf("api_auth: failed to build SPOCP engine: %v", err))
-		}
-
 		if engine != nil {
-			m.log.Info("api_auth_mode", "mode", "jwt+spocp", "jwks_url", apiAuth.JWT.JWKSURL, "rules", engine.RuleCount())
+			m.log.Info("api_auth_mode", "mode", "jwks+spocp", "jwks_url", apiAuth.JWKS.JWKSURL, "rules", engine.RuleCount())
 		} else {
-			m.log.Info("api_auth_mode", "mode", "jwt", "jwks_url", apiAuth.JWT.JWKSURL)
+			m.log.Info("api_auth_mode", "mode", "jwks", "jwks_url", apiAuth.JWKS.JWKSURL)
 		}
-		return m.JWTAuth(ctx, service, apiAuth.JWT, jwksCache, engine)
+		return m.JWKSAuth(ctx, service, apiAuth.JWKS, jwksCache, engine), nil
 
-	case apiAuth.BasicAuth.Enable:
-		m.log.Info("api_auth_mode", "mode", "basic")
-		return m.BasicAuth(ctx, apiAuth.BasicAuth.Users)
+	case apiAuth.OIDC.Enable:
+		jwksURL, err := discoverJWKSURL(ctx, apiAuth.OIDC.IssuerURL)
+		if err != nil {
+			return nil, fmt.Errorf("api_auth: oidc discovery failed for %s: %w", apiAuth.OIDC.IssuerURL, err)
+		}
+		if jwksCache == nil {
+			return nil, fmt.Errorf("api_auth: oidc.enable is true but no JWKS cache was provided")
+		}
+		if engine != nil {
+			m.log.Info("api_auth_mode", "mode", "oidc+spocp", "issuer", apiAuth.OIDC.IssuerURL, "jwks_uri", jwksURL, "rules", engine.RuleCount())
+		} else {
+			m.log.Info("api_auth_mode", "mode", "oidc", "issuer", apiAuth.OIDC.IssuerURL, "jwks_uri", jwksURL)
+		}
+		oidcCfg := model.APIAuthJWKS{
+			Enable:   true,
+			JWKSURL:  jwksURL,
+			Issuer:   apiAuth.OIDC.IssuerURL,
+			Audience: apiAuth.OIDC.Audience,
+		}
+		return m.JWKSAuth(ctx, service, oidcCfg, jwksCache, engine), nil
 
 	default:
 		m.log.Info("api_auth_mode", "mode", "none")
 		return func(c *gin.Context) {
 			c.Next()
-		}
+		}, nil
 	}
+}
+
+// discoverJWKSURL fetches the OIDC discovery document and returns the jwks_uri.
+func discoverJWKSURL(ctx context.Context, issuerURL string) (string, error) {
+	wellKnown := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wellKnown, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create discovery request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch discovery document: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("discovery endpoint returned %d", resp.StatusCode)
+	}
+	var doc struct {
+		JWKSURI string `json:"jwks_uri"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return "", fmt.Errorf("failed to decode discovery document: %w", err)
+	}
+	if doc.JWKSURI == "" {
+		return "", fmt.Errorf("discovery document has no jwks_uri")
+	}
+	return doc.JWKSURI, nil
 }

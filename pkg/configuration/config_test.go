@@ -22,9 +22,8 @@ common:
 apigw:
   api_server:
     api_auth:
-      basic_auth:
-        users:
-          admin: "secret-admin-pass"
+      oidc:
+        client_secret: "secret-oidc-client"
   auth_providers:
     oidc:
         registration:
@@ -55,7 +54,7 @@ ui:
 
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)
-	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
+	assert.Equal(t, "secret-oidc-client", secrets.APIGW.APIServer.APIAuth.OIDC.ClientSecret)
 	require.NotNil(t, secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured)
 	assert.Equal(t, "secret-client-secret", secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret)
 	require.NotNil(t, secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic)

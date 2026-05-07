@@ -75,3 +75,22 @@ func (s *Service) endpointIdentityMappingDelete(ctx context.Context, c *gin.Cont
 	}
 	return nil, nil
 }
+
+func (s *Service) endpointIdentityMappingSearch(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIdentityMappingSearch")
+	defer span.End()
+
+	request := &apiv1.IdentityMappingSearchRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	request.AllowedAuthenticSources = sessionOrgIDs(c)
+
+	reply, err := s.apiv1.IdentityMappingSearch(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}

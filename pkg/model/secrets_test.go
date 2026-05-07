@@ -15,8 +15,8 @@ func TestClearSecrets(t *testing.T) {
 		APIGW: &APIGW{
 			APIServer: APIServer{
 				APIAuth: APIAuth{
-					BasicAuth: APIAuthBasic{
-						Users: map[string]string{"admin": "secret123"}, //NOSONAR
+					OIDC: APIAuthOIDC{
+						ClientSecret: "oidc-client-secret", //NOSONAR
 					},
 				},
 			},
@@ -58,7 +58,7 @@ func TestClearSecrets(t *testing.T) {
 	cfg.ClearSecrets()
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "Common.Mongo.URI should be cleared")                                                                                                 //NOSONAR
-	assert.Nil(t, cfg.APIGW.APIServer.APIAuth.BasicAuth.Users, "APIGW.APIServer.APIAuth.BasicAuth.Users should be nil")                                                         //NOSONAR
+	assert.Empty(t, cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret, "APIGW.APIServer.APIAuth.OIDC.ClientSecret should be cleared") //NOSONAR
 	assert.Empty(t, cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret, "APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret should be cleared") //NOSONAR
 	assert.Empty(t, cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken, "APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken should be cleared") //NOSONAR
 	assert.Empty(t, cfg.Registry.AdminGUI.Password, "Registry.AdminGUI.Password should be cleared")                                                                             //NOSONAR
@@ -101,8 +101,8 @@ func TestApplySecrets(t *testing.T) {
 		APIGW: &APIGWSecrets{
 			APIServer: APIServerSecrets{
 				APIAuth: APIAuthSecrets{
-					BasicAuth: BasicAuthSecrets{
-						Users: map[string]string{"admin": "from-secrets-file"}, //NOSONAR
+					OIDC: OIDCAuthSecrets{
+						ClientSecret: "from-secrets-file", //NOSONAR
 					},
 				},
 			},
@@ -143,7 +143,7 @@ func TestApplySecrets(t *testing.T) {
 	cfg.ApplySecrets(secrets)
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)                               //NOSONAR
-	assert.Equal(t, "from-secrets-file", cfg.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])                          //NOSONAR
+	assert.Equal(t, "from-secrets-file", cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret)                          //NOSONAR
 	assert.Equal(t, "secret-client-secret", cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret)       //NOSONAR
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken)       //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                                                //NOSONAR
@@ -210,8 +210,8 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		APIGW: &APIGW{
 			APIServer: APIServer{
 				APIAuth: APIAuth{
-					BasicAuth: APIAuthBasic{
-						Users: map[string]string{"admin": "config-password"}, //NOSONAR
+					OIDC: APIAuthOIDC{
+						ClientSecret: "config-client-secret", //NOSONAR
 					},
 				},
 			},
@@ -264,8 +264,8 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 		APIGW: &APIGWSecrets{
 			APIServer: APIServerSecrets{
 				APIAuth: APIAuthSecrets{
-					BasicAuth: BasicAuthSecrets{
-						Users: map[string]string{"admin": "secret-password"}, //NOSONAR
+					OIDC: OIDCAuthSecrets{
+						ClientSecret: "secret-password", //NOSONAR
 					},
 				},
 			},
@@ -304,7 +304,7 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 	cfg.ApplySecrets(secrets)
 
 	assert.Equal(t, "mongodb://secret-user:secret-pass@host:27017", cfg.Common.Mongo.URI)                         //NOSONAR
-	assert.Equal(t, "secret-password", cfg.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])                      //NOSONAR
+	assert.Equal(t, "secret-password", cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret)                      //NOSONAR
 	assert.Equal(t, "secret-client-secret", cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret) //NOSONAR
 	assert.Equal(t, "secret-initial-token", cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken) //NOSONAR
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                                          //NOSONAR

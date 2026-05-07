@@ -88,12 +88,12 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, err
 	}
 
-	response := &openid4vci.ParResponse{
+	reply := &openid4vci.ParResponse{
 		RequestURI: requestURI,
 		ExpiresIn:  60,
 	}
 
-	return response, nil
+	return reply, nil
 }
 
 // OAuthAuthorize handles the OAuth2 authorization endpoint
@@ -142,7 +142,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 		redirectURL = "/authorization/consent"
 	}
 
-	response := &openid4vci.AuthorizationResponse{
+	reply := &openid4vci.AuthorizationResponse{
 		RedirectURL:    redirectURL,
 		Scope:          authorizationContext.Scopes[0],
 		SessionID:      authorizationContext.SessionID,
@@ -152,7 +152,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 
 	c.log.Debug("Authorize", "authorization", authorizationContext)
 
-	return response, nil
+	return reply, nil
 }
 
 // OAuthToken implements OAuth 2.0 token endpoint for credential issuance
@@ -289,18 +289,17 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 //	@Success		200	{object}	oauth2.AuthorizationServerMetadata	"Success"
 //	@Router			/.well-known/oauth-authorization-server [get]
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
-
-	signedMetadata, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+	reply, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := helpers.Check(ctx, c.cfg, signedMetadata, c.log); err != nil {
+	if err := helpers.Check(ctx, c.cfg, reply, c.log); err != nil {
 		c.log.Error(err, "metadata check error")
 		return nil, err
 	}
 
-	return signedMetadata, nil
+	return reply, nil
 }
 
 // JWKSResponse represents a JSON Web Key Set (RFC 7517 §5).
@@ -320,24 +319,24 @@ type JWKSResponse = apiv1_issuer.Keys
 func (c *Client) JWKS(ctx context.Context) (*JWKSResponse, error) {
 	c.log.Debug("JWKS request")
 
-	reply, err := c.issuerClient.JWKS(ctx, &apiv1_issuer.Empty{})
+	issuerReply, err := c.issuerClient.JWKS(ctx, &apiv1_issuer.Empty{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS from issuer: %w", err)
 	}
 
-	jwks := reply.GetJwks()
-	if jwks == nil {
-		return &apiv1_issuer.Keys{}, nil
+	reply := issuerReply.GetJwks()
+	if reply == nil {
+		reply = &apiv1_issuer.Keys{}
 	}
 
 	// Strip private key material — only public keys are served
-	for _, key := range jwks.GetKeys() {
+	for _, key := range reply.GetKeys() {
 		key.D = ""
 		key.KeyOps = nil
 		key.Ext = false
 	}
 
-	return jwks, nil
+	return reply, nil
 }
 
 // SDJWTVCIssuerMetadataResponse represents JWT VC Issuer Metadata per SD-JWT VC §5.3.
@@ -360,10 +359,11 @@ type SDJWTVCIssuerMetadataResponse struct {
 func (c *Client) SDJWTVCIssuerMetadata(ctx context.Context) (*SDJWTVCIssuerMetadataResponse, error) {
 	c.log.Debug("sd-jwt-vc issuer metadata request")
 
-	return &SDJWTVCIssuerMetadataResponse{
+	reply := &SDJWTVCIssuerMetadataResponse{
 		Issuer:  c.cfg.APIGW.PublicURL,
 		JWKSURI: c.cfg.APIGW.PublicURL + "/jwks",
-	}, nil
+	}
+	return reply, nil
 }
 
 type OauthAuthorizationConsentRequest struct {

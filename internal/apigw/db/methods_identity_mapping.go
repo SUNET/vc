@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
@@ -185,4 +186,56 @@ func (c *IdentityMappingsColl) DeleteMapping(ctx context.Context, query *DeleteM
 	}
 
 	return nil
+}
+
+// SearchMappingsQuery is the query for searching identity mappings
+type SearchMappingsQuery struct {
+	Search                  string   `json:"search"`
+	AuthenticSource         string   `json:"authentic_source"`
+	Limit                   int64    `json:"limit"`
+	AllowedAuthenticSources []string `json:"-"`
+}
+
+// SearchMappings returns identity mappings matching a text search or filters, with a limit
+func (c *IdentityMappingsColl) SearchMappings(ctx context.Context, query *SearchMappingsQuery) ([]*model.IdentityMapping, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:searchMappings")
+	defer span.End()
+
+	filter := bson.M{}
+	if query.AuthenticSource != "" {
+		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
+			return []*model.IdentityMapping{}, nil
+		}
+		filter["authentic_source"] = bson.M{"$eq": query.AuthenticSource}
+	} else if len(query.AllowedAuthenticSources) > 0 {
+		filter["authentic_source"] = bson.M{"$in": query.AllowedAuthenticSources}
+	}
+	if query.Search != "" {
+		searchRegex := bson.M{"$regex": query.Search, "$options": "i"}
+		filter["$or"] = bson.A{
+			bson.M{"authentic_source_person_id": searchRegex},
+			bson.M{"authentic_source": searchRegex},
+		}
+	}
+
+	limit := int64(50)
+	if query.Limit > 0 && query.Limit <= 200 {
+		limit = query.Limit
+	}
+
+	opts := options.Find().SetLimit(limit).SetSort(bson.D{{Key: "created_at", Value: -1}})
+
+	cursor, err := c.Coll.Find(ctx, filter, opts)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	var res []*model.IdentityMapping
+	if err := cursor.All(ctx, &res); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return res, nil
 }

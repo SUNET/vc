@@ -171,6 +171,19 @@ func (m *middlewareHandler) UserSession(name, authKey, encKey string, opts sessi
 	return sessions.Sessions(name, store)
 }
 
+// SessionOrAPIAuth returns middleware that accepts either a valid session (identified by sessionKey)
+// or falls through to the provided API auth middleware.
+func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		if auth := session.Get(sessionKey); auth == true {
+			c.Next()
+			return
+		}
+		apiAuth(c)
+	}
+}
+
 // RateLimiter implements a token bucket rate limiter using gin-ratelimit
 type RateLimiter struct {
 	tokenBucket *ginratelimit.TokenBucket

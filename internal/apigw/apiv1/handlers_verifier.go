@@ -126,15 +126,15 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 
 	c.log.Debug("Authorization request", "request", authorizationRequest)
 
-	signedJWT, err := authorizationRequest.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+	reply, err := authorizationRequest.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
 		return "", err
 	}
 
-	c.log.Debug("Signed JWT", "jwt", signedJWT)
+	c.log.Debug("Signed JWT", "jwt", reply)
 
-	return signedJWT, nil
+	return reply, nil
 }
 
 type VerificationDirectPostRequest struct {

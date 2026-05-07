@@ -140,13 +140,13 @@ func performRequest(r *gin.Engine, method, path string, headers map[string]strin
 // ---------- buildSPOCPEngine tests ----------
 
 func TestBuildSPOCPEngine_NoRules(t *testing.T) {
-	engine, err := buildSPOCPEngine(model.APIAuthJWT{})
+	engine, err := buildSPOCPEngine(model.APIAuth{})
 	assert.NoError(t, err)
 	assert.Nil(t, engine, "should return nil when no rules configured")
 }
 
 func TestBuildSPOCPEngine_InlineRules(t *testing.T) {
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuth{
 		Rules: []string{
 			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
 			"(api (service test-svc)(method)(path /api/v1/document)(subject))",
@@ -160,7 +160,7 @@ func TestBuildSPOCPEngine_InlineRules(t *testing.T) {
 }
 
 func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuth{
 		Rules: []string{"not a valid s-expression"},
 	}
 
@@ -175,7 +175,7 @@ func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	content := "(api (service test-svc)(method GET)(path /health)(subject))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuth{
 		RulesFile: path,
 	}
 
@@ -186,7 +186,7 @@ func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 }
 
 func TestBuildSPOCPEngine_RulesFileMissing(t *testing.T) {
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuth{
 		RulesFile: "/nonexistent/rules.spocp",
 	}
 
@@ -201,7 +201,7 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 	content := "(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuth{
 		Rules:     []string{"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
 		RulesFile: path,
 	}
@@ -237,21 +237,23 @@ func TestJWTAuth_SPOCPAllowed(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			// Allow alice to POST /api/v1/upload
 			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -272,21 +274,23 @@ func TestJWTAuth_SPOCPDenied(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			// Only alice can POST /api/v1/upload
 			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -309,21 +313,23 @@ func TestJWTAuth_SPOCPWildcardSubject(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			// Any authenticated subject can POST /api/v1/document
 			"(api (service test-svc)(method POST)(path /api/v1/document)(subject))",
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/document", handler, func(c *gin.Context) {
@@ -346,21 +352,23 @@ func TestJWTAuth_SPOCPWildcardMethod(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			// alice can use any method on /api/v1/upload
 			"(api (service test-svc)(method)(path /api/v1/upload)(subject alice))",
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -389,21 +397,23 @@ func TestJWTAuth_SPOCPPrefixPath(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			// alice can access anything under /api/v1/
 			`(api (service test-svc)(method)(path (* prefix /api/v1/))(subject alice))`,
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -439,21 +449,23 @@ func TestJWTAuth_SPOCPMultipleRules(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
 			"(api (service test-svc)(method POST)(path /api/v1/document)(subject bob))",
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -494,7 +506,7 @@ func TestJWTAuth_NoSPOCPRules_AnyValidJWTPasses(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
@@ -502,7 +514,7 @@ func TestJWTAuth_NoSPOCPRules_AnyValidJWTPasses(t *testing.T) {
 		// No rules → authn only, no authz
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	r := gin.New()
 	r.POST("/api/v1/anything", handler, func(c *gin.Context) {
@@ -522,14 +534,14 @@ func TestJWTAuth_MissingAuthHeader(t *testing.T) {
 	_, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -547,14 +559,14 @@ func TestJWTAuth_InvalidBearerFormat(t *testing.T) {
 	_, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -574,14 +586,14 @@ func TestJWTAuth_InvalidToken(t *testing.T) {
 	_, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -601,14 +613,14 @@ func TestJWTAuth_WrongIssuer(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "expected-issuer",
 		Audience: "test-aud",
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -629,14 +641,14 @@ func TestJWTAuth_WrongAudience(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "expected-aud",
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -657,14 +669,14 @@ func TestJWTAuth_SetsContextValues(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	cfg := model.APIAuthJWT{
+	cfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
 	}
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, nil)
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
 
 	var capturedSubject string
 	var capturedClaims any
@@ -694,7 +706,8 @@ func TestAPIAuth_NoneMode(t *testing.T) {
 
 	apiAuth := model.APIAuth{} // both disabled
 
-	handler := m.APIAuth(context.Background(), "test-svc", apiAuth, nil)
+	handler, err := m.APIAuth(context.Background(), "test-svc", apiAuth, nil)
+	require.NoError(t, err)
 
 	r := gin.New()
 	r.POST("/api/v1/test", handler, func(c *gin.Context) {
@@ -705,57 +718,18 @@ func TestAPIAuth_NoneMode(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "no auth = open access")
 }
 
-func TestAPIAuth_BasicAuthMode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func TestAPIAuth_JWTWithoutCacheReturnsError(t *testing.T) {
 	m := newTestMiddleware(t)
 
 	apiAuth := model.APIAuth{
-		BasicAuth: model.APIAuthBasic{
-			Enable: true,
-			Users:  map[string]string{"admin": "secret"},
-		},
-	}
-
-	handler := m.APIAuth(context.Background(), "test-svc", apiAuth, nil)
-
-	r := gin.New()
-	r.POST("/api/v1/test", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	// No credentials → should be rejected (BasicAuth middleware rejects invalid creds)
-	w := performRequest(r, "POST", "/api/v1/test", map[string]string{
-		"Authorization": "Basic YWRtaW46d3Jvbmc=", // admin:wrong
-	})
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestAPIAuth_BothEnabledPanics(t *testing.T) {
-	m := newTestMiddleware(t)
-
-	apiAuth := model.APIAuth{
-		BasicAuth: model.APIAuthBasic{Enable: true},
-		JWT:       model.APIAuthJWT{Enable: true},
-	}
-
-	assert.Panics(t, func() {
-		m.APIAuth(context.Background(), "test-svc", apiAuth, nil)
-	}, "should panic when both modes enabled")
-}
-
-func TestAPIAuth_JWTWithoutCachePanics(t *testing.T) {
-	m := newTestMiddleware(t)
-
-	apiAuth := model.APIAuth{
-		JWT: model.APIAuthJWT{
+		JWKS: model.APIAuthJWKS{
 			Enable:  true,
 			JWKSURL: "https://example.com/.well-known/jwks.json",
 		},
 	}
 
-	assert.Panics(t, func() {
-		m.APIAuth(context.Background(), "test-svc", apiAuth, nil)
-	}, "should panic when JWT enabled but no cache provided")
+	_, err := m.APIAuth(context.Background(), "test-svc", apiAuth, nil)
+	assert.Error(t, err, "should return error when JWKS enabled but no cache provided")
 }
 
 // ---------- SPOCP rules file via APIAuth ----------
@@ -773,16 +747,17 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	apiAuth := model.APIAuth{
-		JWT: model.APIAuthJWT{
-			Enable:    true,
-			JWKSURL:   srv.URL,
-			Issuer:    "test-issuer",
-			Audience:  "test-aud",
-			RulesFile: rulesPath,
+		JWKS: model.APIAuthJWKS{
+			Enable:   true,
+			JWKSURL:  srv.URL,
+			Issuer:   "test-issuer",
+			Audience: "test-aud",
 		},
+		RulesFile: rulesPath,
 	}
 
-	handler := m.APIAuth(context.Background(), "test-svc", apiAuth, cache)
+	handler, err := m.APIAuth(context.Background(), "test-svc", apiAuth, cache)
+	require.NoError(t, err)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
@@ -813,7 +788,7 @@ func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{RulesFile: path}
+	cfg := model.APIAuth{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
@@ -834,7 +809,7 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{RulesFile: path}
+	cfg := model.APIAuth{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
@@ -846,7 +821,7 @@ func TestLoadRulesFromFile_EmptyFile(t *testing.T) {
 	path := filepath.Join(dir, "rules.spocp")
 	require.NoError(t, os.WriteFile(path, []byte(""), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{RulesFile: path}
+	cfg := model.APIAuth{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	// Engine is created (file path was configured) but has no rules.
@@ -862,7 +837,7 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{RulesFile: path}
+	cfg := model.APIAuth{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
@@ -878,7 +853,7 @@ this is not valid
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{RulesFile: path}
+	cfg := model.APIAuth{RulesFile: path}
 	_, err := buildSPOCPEngine(cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "line 2")
@@ -898,7 +873,7 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{RulesFile: path}
+	cfg := model.APIAuth{RulesFile: path}
 	engine, err := buildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
@@ -922,17 +897,17 @@ func TestRulesFile_E2E_MultipleUsersAndPaths(t *testing.T) {
 `
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
-		Enable:    true,
-		JWKSURL:   srv.URL,
-		Issuer:    "test-issuer",
-		Audience:  "test-aud",
-		RulesFile: rulesPath,
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
 	}
-	engine, err := buildSPOCPEngine(cfg)
+	authCfg := model.APIAuth{RulesFile: rulesPath}
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, okHandler)
@@ -977,17 +952,17 @@ func TestRulesFile_E2E_WildcardSubject(t *testing.T) {
 	rules := "# Any authenticated user can GET /api/v1/public\n(api (service test-svc)(method GET)(path /api/v1/public)(subject (*)))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
-		Enable:    true,
-		JWKSURL:   srv.URL,
-		Issuer:    "test-issuer",
-		Audience:  "test-aud",
-		RulesFile: rulesPath,
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
 	}
-	engine, err := buildSPOCPEngine(cfg)
+	authCfg := model.APIAuth{RulesFile: rulesPath}
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.GET("/api/v1/public", handler, okHandler)
@@ -1022,17 +997,17 @@ func TestRulesFile_E2E_SuffixPath(t *testing.T) {
 	rules := "# alice can GET any .json path\n(api (service test-svc)(method GET)(path (* suffix .json))(subject alice))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
-		Enable:    true,
-		JWKSURL:   srv.URL,
-		Issuer:    "test-issuer",
-		Audience:  "test-aud",
-		RulesFile: rulesPath,
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
 	}
-	engine, err := buildSPOCPEngine(cfg)
+	authCfg := model.APIAuth{RulesFile: rulesPath}
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.GET("/api/v1/config.json", handler, okHandler)
@@ -1063,17 +1038,17 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 	rules := "# alice may GET or POST but not DELETE on /api/v1/items\n(api (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject alice))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
-		Enable:    true,
-		JWKSURL:   srv.URL,
-		Issuer:    "test-issuer",
-		Audience:  "test-aud",
-		RulesFile: rulesPath,
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
 	}
-	engine, err := buildSPOCPEngine(cfg)
+	authCfg := model.APIAuth{RulesFile: rulesPath}
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.GET("/api/v1/items", handler, okHandler)
@@ -1111,21 +1086,23 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 	fileRules := "(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(fileRules), 0644)) // #nosec G306
 
-	cfg := model.APIAuthJWT{
+	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
 		JWKSURL:  srv.URL,
 		Issuer:   "test-issuer",
 		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
 		Rules: []string{
 			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
 		},
 		RulesFile: rulesPath,
 	}
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := buildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 	require.Equal(t, 2, engine.RuleCount())
 
-	handler := m.JWTAuth(context.Background(), "test-svc", cfg, cache, engine)
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
 	r.POST("/api/v1/upload", handler, okHandler)

@@ -76,10 +76,12 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 		return nil, err
 	}
 
-	return &OIDCRPInitiateResponse{
+	reply := &OIDCRPInitiateResponse{
 		AuthorizationURL: authReq.AuthorizationURL,
 		State:            authReq.State,
-	}, nil
+	}
+
+	return reply, nil
 }
 
 // OIDCRPCallback processes OIDC callback and issues credential
@@ -242,12 +244,14 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		err = nil
 		service.DeleteSession(ctx, req.State)
 
-		return &OIDCRPCallbackResponse{
+		reply := &OIDCRPCallbackResponse{
 			Status:         "success",
 			CredentialType: session.CredentialType,
 			VCIRedirectURL: "/authorization/consent/#/credentials",
 			Message:        "OIDC authentication successful, continuing VCI flow",
-		}, nil
+		}
+
+		return reply, nil
 	}
 
 	// Standalone mode: create credential directly via issuer gRPC
@@ -280,13 +284,15 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		"credential_type", session.CredentialType,
 		"offer_id", credentialOffer["id"])
 
-	return &OIDCRPCallbackResponse{
+	reply := &OIDCRPCallbackResponse{
 		Status:          "success",
 		CredentialType:  session.CredentialType,
 		Credential:      credential,
 		CredentialOffer: credentialOffer,
 		Message:         "OIDC authentication and credential issuance successful",
-	}, nil
+	}
+
+	return reply, nil
 }
 
 // createCredentialViaOIDCRP calls the issuer gRPC service to create a credential

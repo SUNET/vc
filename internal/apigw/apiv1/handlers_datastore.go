@@ -260,10 +260,10 @@ func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (
 	if err != nil {
 		return nil, err
 	}
-	resp := &DatastoreListReply{
+	reply := &DatastoreListReply{
 		Data: docs,
 	}
-	return resp, nil
+	return reply, nil
 }
 
 // DatastoreGetByKeyRequest is the request for getting a document by its key
@@ -298,15 +298,16 @@ func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRe
 		return nil, err
 	}
 
-	return &DatastoreGetByKeyReply{
+	reply := &DatastoreGetByKeyReply{
 		Data: doc,
-	}, nil
+	}
+	return reply, nil
 }
 
 // DatastoreResolveRequest is the request for resolving identity attributes to documents
 type DatastoreResolveRequest struct {
-	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
-	Scope           string         `json:"scope" validate:"required,max=128,printascii"`
+	AuthenticSource string            `json:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string            `json:"scope" validate:"required,max=128,printascii"`
 	Attributes      map[string]string `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
@@ -348,10 +349,11 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		return nil, err
 	}
 
-	return &DatastoreResolveReply{
+	reply := &DatastoreResolveReply{
 		AuthenticSourcePersonID: personID,
 		Data:                    docs,
-	}, nil
+	}
+	return reply, nil
 }
 
 // DatastoreDeleteByKeyRequest is the request for deleting a document
@@ -375,4 +377,57 @@ type DatastoreDeleteByKeyRequest struct {
 //	@Router			/api/v1/datastore/ [delete]
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
 	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
+}
+
+// DatastoreSearchRequest is the request for searching documents
+type DatastoreSearchRequest struct {
+	Search                  string   `json:"search" form:"search"`
+	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
+	Scope                   string   `json:"scope" form:"scope"`
+	Limit                   int64    `json:"limit" form:"limit"`
+	AllowedAuthenticSources []string `json:"-" form:"-"`
+}
+
+// DatastoreSearchReply is the reply for searching documents
+type DatastoreSearchReply struct {
+	Data []*model.CompleteDocument `json:"data"`
+}
+
+// DatastoreSearch searches documents
+//
+//	@Summary		DatastoreSearch
+//	@ID				search-documents
+//	@Description	Search documents in the datastore
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	DatastoreSearchReply	"Success"
+//	@Param			search			query	string	false	"Search term"
+//	@Param			authentic_source	query	string	false	"Filter by authentic source"
+//	@Param			scope			query	string	false	"Filter by scope"
+//	@Param			limit			query	int		false	"Max results (default 50, max 200)"
+//	@Router			/api/v1/datastore/search [get]
+func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchRequest) (*DatastoreSearchReply, error) {
+	limit := req.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	docs, err := c.datastoreStore.Search(ctx, &db.SearchDocumentsQuery{
+		Search:                  req.Search,
+		AuthenticSource:         req.AuthenticSource,
+		Scope:                   req.Scope,
+		Limit:                   limit,
+		AllowedAuthenticSources: req.AllowedAuthenticSources,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if docs == nil {
+		docs = []*model.CompleteDocument{}
+	}
+	reply := &DatastoreSearchReply{
+		Data: docs,
+	}
+
+	return reply, nil
 }

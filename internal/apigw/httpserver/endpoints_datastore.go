@@ -141,3 +141,24 @@ func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (an
 	}
 	return reply, nil
 }
+
+func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreSearch")
+	defer span.End()
+
+	request := &apiv1.DatastoreSearchRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	request.AllowedAuthenticSources = sessionOrgIDs(c)
+	s.log.Info("datastore search", "allowed_authentic_sources", request.AllowedAuthenticSources,
+		"search", request.Search, "authentic_source", request.AuthenticSource)
+
+	reply, err := s.apiv1.DatastoreSearch(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}

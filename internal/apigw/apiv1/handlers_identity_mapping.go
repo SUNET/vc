@@ -12,7 +12,7 @@ import (
 
 // IdentityMappingCreateRequest is the request for creating an identity mapping
 type IdentityMappingCreateRequest struct {
-	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSource         string            `json:"authentic_source" validate:"required,max=128,printascii"`
 	AuthenticSourcePersonID string            `json:"authentic_source_person_id" validate:"omitempty,max=128,printascii"`
 	Attributes              map[string]string `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
@@ -63,7 +63,7 @@ func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMapping
 
 // IdentityMappingResolveRequest is the request for resolving attributes to an identifier
 type IdentityMappingResolveRequest struct {
-	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSource string            `json:"authentic_source" validate:"required,max=128,printascii"`
 	Attributes      map[string]string `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
@@ -93,14 +93,16 @@ func (c *Client) IdentityMappingResolve(ctx context.Context, req *IdentityMappin
 		return nil, err
 	}
 
-	return &IdentityMappingResolveReply{
+	reply := &IdentityMappingResolveReply{
 		AuthenticSourcePersonID: personID,
-	}, nil
+	}
+	
+	return reply, nil
 }
 
 // IdentityMappingUpdateRequest is the request for updating an identity mapping
 type IdentityMappingUpdateRequest struct {
-	AuthenticSource         string         `json:"authentic_source" validate:"required,max=128,printascii"`
+	AuthenticSource         string            `json:"authentic_source" validate:"required,max=128,printascii"`
 	AuthenticSourcePersonID string            `json:"authentic_source_person_id" validate:"required,max=128,printascii"`
 	Attributes              map[string]string `json:"attributes,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys"`
 }
@@ -150,4 +152,53 @@ func (c *Client) IdentityMappingDelete(ctx context.Context, req *IdentityMapping
 		AuthenticSource:         req.AuthenticSource,
 		AuthenticSourcePersonID: req.AuthenticSourcePersonID,
 	})
+}
+
+// IdentityMappingSearchRequest is the request for searching identity mappings
+type IdentityMappingSearchRequest struct {
+	Search                  string   `json:"search" form:"search"`
+	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
+	Limit                   int64    `json:"limit" form:"limit"`
+	AllowedAuthenticSources []string `json:"-" form:"-"`
+}
+
+// IdentityMappingSearchReply is the reply for searching identity mappings
+type IdentityMappingSearchReply struct {
+	Data []*model.IdentityMapping `json:"data"`
+}
+
+// IdentityMappingSearch searches identity mappings
+//
+//	@Summary		IdentityMappingSearch
+//	@ID				search-identity-mappings
+//	@Description	Search identity mappings
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	IdentityMappingSearchReply	"Success"
+//	@Param			search			query	string	false	"Search term"
+//	@Param			authentic_source	query	string	false	"Filter by authentic source"
+//	@Param			limit			query	int		false	"Max results (default 50, max 200)"
+//	@Router			/api/v1/identity/mapping/search [get]
+func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMappingSearchRequest) (*IdentityMappingSearchReply, error) {
+	limit := req.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	mappings, err := c.identityMappingStore.SearchMappings(ctx, &db.SearchMappingsQuery{
+		Search:                  req.Search,
+		AuthenticSource:         req.AuthenticSource,
+		Limit:                   limit,
+		AllowedAuthenticSources: req.AllowedAuthenticSources,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if mappings == nil {
+		mappings = []*model.IdentityMapping{}
+	}
+
+	reply := &IdentityMappingSearchReply{Data: mappings}
+
+	return reply, nil
 }

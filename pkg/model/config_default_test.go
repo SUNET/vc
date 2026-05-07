@@ -226,8 +226,8 @@ func TestAPIAuthDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.BasicAuth.Enable)
-	assert.False(t, cfg.JWT.Enable)
+	assert.False(t, cfg.JWKS.Enable)
+	assert.False(t, cfg.OIDC.Enable)
 }
 
 func TestTokenStatusListsDefaults(t *testing.T) {

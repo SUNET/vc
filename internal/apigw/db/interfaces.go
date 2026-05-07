@@ -25,6 +25,7 @@ type DatastoreStore interface {
 	Replace(ctx context.Context, doc *model.CompleteDocument) error
 	GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
 	DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error
+	Search(ctx context.Context, query *SearchDocumentsQuery) ([]*model.CompleteDocument, error)
 }
 
 // IdentityMappingStore defines the interface for identity mapping operations
@@ -34,6 +35,7 @@ type IdentityMappingStore interface {
 	ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error)
 	UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error
 	DeleteMapping(ctx context.Context, query *DeleteMappingQuery) error
+	SearchMappings(ctx context.Context, query *SearchMappingsQuery) ([]*model.IdentityMapping, error)
 }
 
 // Ensure concrete types implement the interfaces

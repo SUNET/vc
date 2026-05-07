@@ -25,16 +25,18 @@ type Apiv1 interface {
 	DatastoreGetByKey(ctx context.Context, req *apiv1.DatastoreGetByKeyRequest) (*apiv1.DatastoreGetByKeyReply, error)
 	DatastoreResolve(ctx context.Context, req *apiv1.DatastoreResolveRequest) (*apiv1.DatastoreResolveReply, error)
 	DatastoreDeleteByKey(ctx context.Context, req *apiv1.DatastoreDeleteByKeyRequest) error
-
-	// user endpoints
-	UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error)
-	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
+	DatastoreSearch(ctx context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error)
 
 	// identity mapping endpoints
 	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
 	IdentityMappingResolve(ctx context.Context, req *apiv1.IdentityMappingResolveRequest) (*apiv1.IdentityMappingResolveReply, error)
 	IdentityMappingUpdate(ctx context.Context, req *apiv1.IdentityMappingUpdateRequest) error
 	IdentityMappingDelete(ctx context.Context, req *apiv1.IdentityMappingDeleteRequest) error
+	IdentityMappingSearch(ctx context.Context, req *apiv1.IdentityMappingSearchRequest) (*apiv1.IdentityMappingSearchReply, error)
+
+	// user endpoints
+	UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error)
+	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
 
 	// OpenID4VCI endpoints
 	VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error)
@@ -44,6 +46,7 @@ type Apiv1 interface {
 	VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error
 	VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error)
 
+	// OAuth endpoints
 	OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error)
 	OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error)
 	OAuthAuthorizationConsent(ctx context.Context, req *apiv1.OauthAuthorizationConsentRequest) (*apiv1.OAuthAuthorizationConsentResponse, error)
@@ -53,15 +56,15 @@ type Apiv1 interface {
 	JWKS(ctx context.Context) (*apiv1.JWKSResponse, error)
 	SDJWTVCIssuerMetadata(ctx context.Context) (*apiv1.SDJWTVCIssuerMetadataResponse, error)
 
-	//Revoke(ctx context.Context, req *apiv1.RevokeRequest) (*apiv1.RevokeReply, error)
-
+	// verification endpoints
 	VerificationRequestObject(ctx context.Context, req *apiv1.VerificationRequestObjectRequest) (string, error)
 	VerificationDirectPost(ctx context.Context, req *apiv1.VerificationDirectPostRequest) (*apiv1.VerificationDirectPostResponse, error)
 
-	// UI Credential Offer endpoints
+	// credential offer UI endpoints
 	UICredentialOffers(ctx context.Context) (*apiv1.CredentialOfferLookupMetadata, error)
 	UICreateCredentialOffer(ctx context.Context, req *apiv1.UICredentialOfferRequest) (*apiv1.CredentialOfferReply, error)
 
+	// metadata endpoints
 	GetVCTMFromScope(ctx context.Context, req *apiv1.GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error)
 	SVGTemplateReply(ctx context.Context, req *apiv1.SVGTemplateRequest) (*vcclient.SVGTemplateReply, error)
 	TypeMetadata(ctx context.Context, req *apiv1.TypeMetadataRequest) (json.RawMessage, error)
@@ -76,6 +79,11 @@ type Apiv1 interface {
 	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error
 	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
 
-	// misc endpoints
+	// admin UI endpoints
+	AdminLoginURL(ctx context.Context) (*apiv1.AdminLoginURLReply, error)
+	AdminCallback(ctx context.Context, req *apiv1.AdminCallbackRequest) (*apiv1.AdminCallbackReply, error)
+	AdminLogoutURL(idTokenHint string) string
+
+	// health
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
 }

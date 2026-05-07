@@ -287,6 +287,14 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.OIDCRP{})
 
+	// Register struct-level validation for APIAuth: JWKS and OIDC are mutually exclusive
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.APIAuth)
+		if cfg.JWKS.Enable && cfg.OIDC.Enable {
+			sl.ReportError(cfg.JWKS.Enable, "JWKS", "JWKS", "api_auth_jwks_oidc_exclusive", "")
+		}
+	}, model.APIAuth{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)

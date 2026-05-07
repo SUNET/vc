@@ -148,7 +148,9 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 	svgTemplateURI := req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
 
 	if cached, ok := c.cacheService.SVGTemplate.Get(ctx, svgTemplateURI); ok {
-		return &vcclient.SVGTemplateReply{Template: cached}, nil
+		reply := &vcclient.SVGTemplateReply{Template: cached}
+
+		return reply, nil
 	}
 
 	c.log.Debug("SVG template not available in cache, fetching from origin")

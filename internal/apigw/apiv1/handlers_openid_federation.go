@@ -5,9 +5,9 @@ import "context"
 type OpenIDFederationReply struct{}
 
 func (c *Client) OpenIDFederation(ctx context.Context) (*OpenIDFederationReply, error) {
-	response := &OpenIDFederationReply{}
+	reply := &OpenIDFederationReply{}
 
 	c.log.Debug("OpenIDFederation")
 
-	return response, nil
+	return reply, nil
 }
