@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-05-06
+**Generated:** 2026-05-07
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -189,6 +189,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `issuer_client`           | `object` | GRPC client config for issuer                                                                                                                                                                                       | -                           | -       | Yes      |
 | `registry_client`         | `object` | GRPC client config for registry                                                                                                                                                                                     | -                           | -       | Yes      |
 | `identity_mapping_import` | `object` | Automatic import of identity mappings from JSON files at startup. When configured, APIGW reads JSON files and imports them into the identity mappings collection on first startup (skipped if data already exists). | -                           | -       | No       |
+| `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
 
 ### `api_server`
 
@@ -603,6 +604,33 @@ persisted in the database.
 | `file_paths` | `[]string` | JSON files containing identity mappings to import. Each JSON file should contain a map of person IDs to arrays of IdentityMapping objects. Import is skipped if the identity mappings collection already contains data. | `["./bootstrapping/identity_mappings.json"]` | -       | Yes      |
 | `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                                                            | `["100", "102"]`                             | -       | No       |
 
+### `trust`
+
+> **Path:** `.apigw.trust`, `.verifier.trust`
+
+This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
+
+Trust evaluation operates in one of two modes:
+- When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
+- When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
+
+| Field                          | Type       | Description                                                                                                                                                                                                                                                    | Example                                | Default                  | Required |
+| ------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ | -------- |
+| `pdp_url`                      | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation. When set, operates in "default deny" mode - trust decisions require PDP approval. When empty, operates in "allow all" mode - resolved keys are always considered trusted.         | `"https://trust.sunet.se/pdp"`         | -                        | No       |
+| `local_did_methods`            | `[]string` | Which DID methods can be resolved locally without go-trust. Self-contained methods like "did:key" and "did:jwk" are always resolved locally.                                                                                                                   | -                                      | `["did:key", "did:jwk"]` | No       |
+| `trust_policies`               | `object`   | Per-role trust evaluation policies. The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.                                                                                                                                   | -                                      | -                        | No       |
+| `allowed_signature_algorithms` | `[]string` | AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted. If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA. The "none" algorithm is NEVER allowed regardless of configuration. | `["ES256", "ES384", "ES512", "EdDSA"]` | -                        | No       |
+
+### `trust_policies` entry
+
+> **Path:** `.apigw.trust.trust_policies.<role>`, `.verifier.trust.trust_policies.<role>`
+
+| Field                      | Type       | Description                                                                                                                           | Example                                                           | Default | Required |
+| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
+| `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
+| `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
+| `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
+
 ## `issuer` (Top-level)
 
 Configuration for the Issuer service that signs and issues verifiable credentials.
@@ -864,33 +892,6 @@ These clients are checked in addition to dynamically registered clients stored i
 | `show_raw_credential`  | `bool` | The raw VP token/credential in the display page Useful for debugging and technical users                                                 | -       | `false` | No       |
 | `show_claims`          | `bool` | The parsed claims that will be sent to the RP Recommended for transparency and user consent                                              | -       | `true`  | No       |
 | `allow_edit`           | `bool` | Users to redact certain claims before sending to RP (future feature) Currently not implemented                                           | -       | `false` | No       |
-
-### `trust`
-
-> **Path:** `.verifier.trust`
-
-This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
-
-Trust evaluation operates in one of two modes:
-- When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
-- When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
-
-| Field                          | Type       | Description                                                                                                                                                                                                                                                    | Example                                | Default                  | Required |
-| ------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ | -------- |
-| `pdp_url`                      | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation. When set, operates in "default deny" mode - trust decisions require PDP approval. When empty, operates in "allow all" mode - resolved keys are always considered trusted.         | `"https://trust.sunet.se/pdp"`         | -                        | No       |
-| `local_did_methods`            | `[]string` | Which DID methods can be resolved locally without go-trust. Self-contained methods like "did:key" and "did:jwk" are always resolved locally.                                                                                                                   | -                                      | `["did:key", "did:jwk"]` | No       |
-| `trust_policies`               | `object`   | Per-role trust evaluation policies. The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.                                                                                                                                   | -                                      | -                        | No       |
-| `allowed_signature_algorithms` | `[]string` | AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted. If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA. The "none" algorithm is NEVER allowed regardless of configuration. | `["ES256", "ES384", "ES512", "EdDSA"]` | -                        | No       |
-
-### `trust_policies` entry
-
-> **Path:** `.verifier.trust.trust_policies.<role>`
-
-| Field                      | Type       | Description                                                                                                                           | Example                                                           | Default | Required |
-| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
-| `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
-| `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
-| `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
 
 ## `registry` (Top-level)
 
