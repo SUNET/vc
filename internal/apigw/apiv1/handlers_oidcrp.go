@@ -194,13 +194,22 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// The raw OIDC claims (pre-transformation) are used for policy evaluation
 	// since the rules reference OIDC claim names, not mapped credential claim names.
 	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(session.CredentialType); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
-		policyEngine, policyErr := issuance.NewPolicyEngine(scopeCfg.IssuancePolicy)
+		policyEngine, policyErr := issuance.GetPolicyEngine(scopeCfg.IssuancePolicy)
 		if policyErr != nil {
 			span.SetStatus(codes.Error, policyErr.Error())
 			return nil, fmt.Errorf("failed to initialize issuance policy engine: %w", policyErr)
 		}
 		if policyEngine != nil {
-			if policyErr := policyEngine.Evaluate(session.CredentialType, authResp.Claims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
+			// Merge dynamic params into claims for policy evaluation.
+			// Dynamic params from the authentic source are available as dimensions;
+			// OIDC claims take precedence over dynamic params.
+			policyClaims := maps.Clone(authResp.Claims)
+			for k, v := range session.DynamicParams {
+				if _, exists := policyClaims[k]; !exists {
+					policyClaims[k] = v
+				}
+			}
+			if policyErr := policyEngine.Evaluate(session.CredentialType, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
 				c.log.Warn("Issuance policy denied credential",
 					"credential_type", session.CredentialType,
 					"subject", authResp.IDToken.Subject,

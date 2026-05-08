@@ -296,7 +296,7 @@ type OIDCRequestParams struct {
 	ExtraScopes []string `yaml:"extra_scopes,omitempty" doc_example:"[\"organization\", \"address\"]"`
 
 	// CustomParams are arbitrary key-value pairs to add as query parameters to the authorization request.
-	// Supports Go template syntax for dynamic values in both keys and values.
+	// Keys are static; values support Go template syntax for dynamic substitution.
 	CustomParams map[string]string `yaml:"custom_params,omitempty"`
 }
 
@@ -314,10 +314,19 @@ type IssuancePolicy struct {
 
 	// QueryTemplate defines how to build the SPOCP query from OIDC claims.
 	// The outer tag is always "credential". Each entry maps a SPOCP dimension name
-	// to the OIDC claim name whose value should populate it.
+	// to the OIDC claim name whose value should populate it. The order of entries
+	// determines the positional order of dimensions in the SPOCP query, which must
+	// match the order used in the rules.
 	// Special dimension "scope" is auto-populated with the credential type name.
-	// If empty, a default query is built with all claims as dimensions.
-	QueryTemplate map[string]string `yaml:"query_template,omitempty" doc_example:"{\"acr\": \"acr\", \"org_id\": \"org_id\", \"email_verified\": \"email_verified\"}"`
+	// If empty, a default query is built with all claims as dimensions (sorted by key).
+	QueryTemplate []QueryDimension `yaml:"query_template,omitempty"`
+}
+
+// QueryDimension maps a SPOCP dimension name to the OIDC claim whose value populates it.
+// Ordered slices of QueryDimension ensure deterministic query construction.
+type QueryDimension struct {
+	Dimension string `yaml:"dimension"`
+	Claim     string `yaml:"claim"`
 }
 
 // ScopePolicyConfig holds the per-scope issuance policy and OIDC request params.

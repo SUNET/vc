@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -53,9 +54,36 @@ func NewPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 	return &PolicyEngine{engine: engine}, nil
 }
 
+// engineCache caches PolicyEngine instances by IssuancePolicy pointer.
+// Config is loaded once at startup and pointers are stable, so pointer identity
+// is a safe cache key. This avoids re-parsing rules on every OIDC callback.
+var engineCache sync.Map
+
+// GetPolicyEngine returns a cached PolicyEngine for the given policy, creating one if needed.
+func GetPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
+	if policy == nil {
+		return nil, nil
+	}
+
+	if cached, ok := engineCache.Load(policy); ok {
+		return cached.(*PolicyEngine), nil
+	}
+
+	engine, err := NewPolicyEngine(policy)
+	if err != nil {
+		return nil, err
+	}
+	if engine == nil {
+		return nil, nil
+	}
+
+	actual, _ := engineCache.LoadOrStore(policy, engine)
+	return actual.(*PolicyEngine), nil
+}
+
 // Evaluate checks if the given claims satisfy the issuance policy for the specified scope.
 // Returns nil if authorized, or an error describing why issuance was denied.
-func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTemplate map[string]string) error {
+func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTemplate []model.QueryDimension) error {
 	query := BuildQuery(scope, claims, queryTemplate)
 
 	pe.mu.RLock()
@@ -69,25 +97,30 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 
 // BuildQuery constructs a SPOCP query S-expression from credential scope and OIDC claims.
 // The query has the form: (credential (scope <scope>) (claim1 <value1>) (claim2 <value2>) ...)
-func BuildQuery(scope string, claims map[string]any, queryTemplate map[string]string) sexp.Element {
+func BuildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) sexp.Element {
 	elements := []sexp.Element{
 		sexp.NewList("scope", sexp.NewAtom(scope)),
 	}
 
 	if len(queryTemplate) > 0 {
-		// Use explicit template: map dimension names to claim values
-		for dimension, claimName := range queryTemplate {
-			if value, ok := claims[claimName]; ok {
-				elements = append(elements, sexp.NewList(dimension, sexp.NewAtom(toStringValue(value))))
+		// Use explicit template: iterate in defined order to match rule positions
+		for _, dim := range queryTemplate {
+			if value, ok := claims[dim.Claim]; ok {
+				elements = append(elements, sexp.NewList(dim.Dimension, sexp.NewAtom(toStringValue(value))))
 			} else {
 				// Claim not present — include empty dimension (matches wildcard rules)
-				elements = append(elements, sexp.NewList(dimension))
+				elements = append(elements, sexp.NewList(dim.Dimension))
 			}
 		}
 	} else {
-		// Default: include all claims as dimensions
-		for claimName, value := range claims {
-			elements = append(elements, sexp.NewList(claimName, sexp.NewAtom(toStringValue(value))))
+		// Default: include all claims as dimensions, sorted by key for deterministic ordering
+		keys := make([]string, 0, len(claims))
+		for k := range claims {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, claimName := range keys {
+			elements = append(elements, sexp.NewList(claimName, sexp.NewAtom(toStringValue(claims[claimName]))))
 		}
 	}
 

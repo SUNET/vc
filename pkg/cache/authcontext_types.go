@@ -90,7 +90,7 @@ type AuthorizationContext struct {
 	// DynamicParams holds key-value parameters provided by the authentic source business system
 	// at flow initiation time. These values are used for template substitution in OIDC request
 	// parameters (e.g., acr_values, claims) and are available during issuance policy evaluation.
-	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty"`
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty" validate:"omitempty,dive,keys,max=64,printascii,endkeys,max=1024,printascii"`
 
 	// Verifier-specific fields (presentation/RP flows)
 	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
