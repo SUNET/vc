@@ -47,8 +47,8 @@ func TestEvaluate_SimpleMatch(t *testing.T) {
 		Rules: []string{
 			"(credential (scope pid)(email_verified true))",
 		},
-		QueryTemplate: map[string]string{
-			"email_verified": "email_verified",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "email_verified", Claim: "email_verified"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -66,8 +66,8 @@ func TestEvaluate_SimpleDeny(t *testing.T) {
 		Rules: []string{
 			"(credential (scope pid)(email_verified true))",
 		},
-		QueryTemplate: map[string]string{
-			"email_verified": "email_verified",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "email_verified", Claim: "email_verified"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -86,8 +86,8 @@ func TestEvaluate_WrongScope(t *testing.T) {
 		Rules: []string{
 			"(credential (scope pid)(email_verified true))",
 		},
-		QueryTemplate: map[string]string{
-			"email_verified": "email_verified",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "email_verified", Claim: "email_verified"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -106,8 +106,8 @@ func TestEvaluate_WildcardRule(t *testing.T) {
 			// Allow any scope with any email_verified value
 			"(credential (scope pid)(email_verified))",
 		},
-		QueryTemplate: map[string]string{
-			"email_verified": "email_verified",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "email_verified", Claim: "email_verified"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -125,8 +125,8 @@ func TestEvaluate_PrefixStarForm(t *testing.T) {
 		Rules: []string{
 			"(credential (scope org_cred)(acr (* prefix urn:example:loa)))",
 		},
-		QueryTemplate: map[string]string{
-			"acr": "acr",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "acr", Claim: "acr"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -150,8 +150,8 @@ func TestEvaluate_SetStarForm(t *testing.T) {
 		Rules: []string{
 			"(credential (scope pid)(acr (* set loa3 loa4)))",
 		},
-		QueryTemplate: map[string]string{
-			"acr": "acr",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "acr", Claim: "acr"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -181,9 +181,9 @@ func TestEvaluate_MultipleRules(t *testing.T) {
 			"(credential (scope pid)(acr loa3)(org_id 123))",
 			"(credential (scope pid)(acr loa4)(org_id))",
 		},
-		QueryTemplate: map[string]string{
-			"acr":    "acr",
-			"org_id": "org_id",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "acr", Claim: "acr"},
+			{Dimension: "org_id", Claim: "org_id"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -234,8 +234,8 @@ func TestEvaluate_MissingClaim(t *testing.T) {
 			// Rule requires org_id to have a value
 			"(credential (scope pid)(org_id 123))",
 		},
-		QueryTemplate: map[string]string{
-			"org_id": "org_id",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "org_id", Claim: "org_id"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -253,8 +253,8 @@ func TestEvaluate_BooleanClaims(t *testing.T) {
 		Rules: []string{
 			"(credential (scope pid)(email_verified true))",
 		},
-		QueryTemplate: map[string]string{
-			"email_verified": "email_verified",
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "email_verified", Claim: "email_verified"},
 		},
 	}
 	engine, err := NewPolicyEngine(policy)
@@ -278,9 +278,9 @@ func TestBuildQuery_WithTemplate(t *testing.T) {
 		"acr":    "loa3",
 		"org_id": "123",
 		"sub":    "alice",
-	}, map[string]string{
-		"acr":    "acr",
-		"org_id": "org_id",
+	}, []model.QueryDimension{
+		{Dimension: "acr", Claim: "acr"},
+		{Dimension: "org_id", Claim: "org_id"},
 	})
 
 	// Query should be a list with tag "credential"
