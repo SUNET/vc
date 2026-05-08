@@ -209,8 +209,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, errors.New("DCQL query has no credential queries")
 	}
 	for _, cq := range authCtx.DCQLQuery.Credentials {
-		if token, ok := vpResponse.VPToken[cq.ID]; ok {
-			vpToken = token
+		if tokens, ok := vpResponse.VPToken[cq.ID]; ok && len(tokens) > 0 {
+			vpToken = tokens[0]
 			break
 		}
 	}

@@ -8,8 +8,8 @@ import (
 )
 
 type VPResponse struct {
-	VPToken map[string]string `json:"vp_token,omitempty" bson:"vp_token" validate:"required"`
-	State   string            `json:"state,omitempty" bson:"state" validate:"required"`
+	VPToken map[string][]string `json:"vp_token,omitempty" bson:"vp_token" validate:"required"`
+	State   string              `json:"state,omitempty" bson:"state" validate:"required"`
 }
 
 type ResponseParameters struct {
