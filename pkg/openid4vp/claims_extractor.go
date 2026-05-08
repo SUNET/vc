@@ -61,7 +61,7 @@ func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken
 // is a JSON object mapping credential query IDs to their individual VP tokens.
 // Claims from all credentials are merged into a single map.
 func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vpToken string) (map[string]any, error) {
-	var dcqlResponse map[string]string
+	var dcqlResponse map[string][]string
 	if err := json.Unmarshal([]byte(vpToken), &dcqlResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse DCQL vp_token as JSON object: %w", err)
 	}
@@ -71,12 +71,17 @@ func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vp
 	}
 
 	merged := make(map[string]any)
-	for credID, token := range dcqlResponse {
-		claims, err := ce.extractClaimsFromSingleToken(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract claims from credential %q: %w", credID, err)
+	for credID, tokens := range dcqlResponse {
+		if len(tokens) == 0 {
+			return nil, fmt.Errorf("DCQL vp_token contains empty array for credential %q", credID)
 		}
-		maps.Copy(merged, claims)
+		for _, token := range tokens {
+			claims, err := ce.extractClaimsFromSingleToken(token)
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract claims from credential %q: %w", credID, err)
+			}
+			maps.Copy(merged, claims)
+		}
 	}
 
 	return merged, nil
