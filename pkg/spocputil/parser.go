@@ -1,10 +1,17 @@
-package issuance
+// Package spocputil provides shared utilities for working with SPOCP
+// S-expressions, including parsing human-readable "advanced form" into
+// sexp.Element trees and loading rules from files.
+package spocputil
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
+	spocp "github.com/sirosfoundation/go-spocp"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
 	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
@@ -42,6 +49,32 @@ func ParseAdvancedSExp(input string) (sexp.Element, error) {
 		return nil, fmt.Errorf("unexpected trailing input at position %d", p.pos)
 	}
 	return elem, nil
+}
+
+// LoadRulesFromFile reads human-readable SPOCP rules (one per line) from a file
+// and adds them to the engine using ParseAdvancedSExp.
+func LoadRulesFromFile(engine *spocp.AdaptiveEngine, path string) error {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue // skip blanks and comments
+		}
+		elem, err := ParseAdvancedSExp(line)
+		if err != nil {
+			return fmt.Errorf("line %d: %w", lineNum, err)
+		}
+		engine.AddRuleElement(elem)
+	}
+	return scanner.Err()
 }
 
 type advancedParser struct {

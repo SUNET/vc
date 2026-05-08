@@ -1,15 +1,12 @@
 package issuance
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/spocputil"
 
 	spocp "github.com/sirosfoundation/go-spocp"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
@@ -38,7 +35,7 @@ func NewPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 	engine := spocp.New()
 
 	for i, r := range policy.Rules {
-		elem, err := ParseAdvancedSExp(r)
+		elem, err := spocputil.ParseAdvancedSExp(r)
 		if err != nil {
 			return nil, fmt.Errorf("invalid inline issuance policy rule #%d: %w", i+1, err)
 		}
@@ -46,7 +43,7 @@ func NewPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 	}
 
 	if hasFile {
-		if err := loadRulesFromFile(engine, policy.RulesFile); err != nil {
+		if err := spocputil.LoadRulesFromFile(engine, policy.RulesFile); err != nil {
 			return nil, fmt.Errorf("failed to load issuance policy rules from %s: %w", policy.RulesFile, err)
 		}
 	}
@@ -143,28 +140,4 @@ func toStringValue(v any) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
-}
-
-func loadRulesFromFile(engine *spocp.AdaptiveEngine, path string) error {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		elem, err := ParseAdvancedSExp(line)
-		if err != nil {
-			return fmt.Errorf("line %d: %w", lineNum, err)
-		}
-		engine.AddRuleElement(elem)
-	}
-	return scanner.Err()
 }

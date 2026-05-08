@@ -1,4 +1,4 @@
-package issuance
+package spocputil
 
 import (
 	"testing"
