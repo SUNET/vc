@@ -146,12 +146,10 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRestricted := rgRoot.Group("/")
 	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
 	if err != nil {
 		return nil, fmt.Errorf("api_auth middleware: %w", err)
 	}
-	rgRestricted.Use(apiAuthMiddleware)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -162,7 +160,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "credential", http.StatusOK, s.endpointVCICredential)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "credential-offer/:credential_offer_uuid", http.StatusOK, s.endpointVCICredentialOfferURI)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "deferred_credential", http.StatusOK, s.endpointVCIDeferredCredential)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRestricted, http.MethodPost, "notification", http.StatusNoContent, s.endpointVCINotification)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "notification", http.StatusNoContent, s.endpointVCINotification)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer", http.StatusOK, s.endpointVCIMetadata)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
@@ -217,17 +215,20 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPut, "/mapping", http.StatusOK, s.endpointIdentityMappingUpdate)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodDelete, "/mapping", http.StatusOK, s.endpointIdentityMappingDelete)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodGet, "/mapping/search", http.StatusOK, s.endpointIdentityMappingSearch)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/bulk", http.StatusOK, s.endpointIdentityMappingBulkCreate)
 
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "", http.StatusOK, s.endpointDatastoreGet)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "", http.StatusNoContent, s.endpointDatastoreDelete)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPut, "", http.StatusOK, s.endpointDatastoreReplace)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/resolve", http.StatusOK, s.endpointDatastoreResolve)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/list", http.StatusOK, s.endpointDatastoreList)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPut, "/identity", http.StatusOK, s.endpointDatastoreAddIdentity)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "/identity", http.StatusNoContent, s.endpointDatastoreDeleteIdentity)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "/search", http.StatusOK, s.endpointDatastoreSearch)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/bulk", http.StatusOK, s.endpointDatastoreBulkUpload)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)

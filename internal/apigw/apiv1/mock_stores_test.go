@@ -183,6 +183,31 @@ func (m *memoryDatastoreStore) Search(_ context.Context, _ *db.SearchDocumentsQu
 	return result, nil
 }
 
+func (m *memoryDatastoreStore) SaveMany(ctx context.Context, docs []*model.CompleteDocument) error {
+	for _, doc := range docs {
+		if err := m.Save(ctx, doc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *memoryDatastoreStore) ListAuthenticSources(_ context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seen := map[string]struct{}{}
+	for _, doc := range m.docs {
+		if doc.Meta.AuthenticSource != "" {
+			seen[doc.Meta.AuthenticSource] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
+	}
+	return result, nil
+}
+
 // memoryIdentityMappingStore is an in-memory implementation of db.IdentityMappingStore for testing.
 type memoryIdentityMappingStore struct {
 	mu       sync.RWMutex
@@ -283,6 +308,15 @@ func (m *memoryIdentityMappingStore) SearchMappings(_ context.Context, _ *db.Sea
 		result = append(result, mapping)
 	}
 	return result, nil
+}
+
+func (m *memoryIdentityMappingStore) CreateMappings(ctx context.Context, mappings []*model.IdentityMapping) error {
+	for _, mapping := range mappings {
+		if err := m.CreateMapping(ctx, mapping); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // memoryCredentialOfferStore is an in-memory implementation of db.CredentialOfferStore for testing.

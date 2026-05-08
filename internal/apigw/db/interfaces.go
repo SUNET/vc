@@ -16,6 +16,7 @@ type CredentialOfferStore interface {
 // DatastoreStore defines the interface for datastore operations
 type DatastoreStore interface {
 	Save(ctx context.Context, doc *model.CompleteDocument) error
+	SaveMany(ctx context.Context, docs []*model.CompleteDocument) error
 	AddIdentity(ctx context.Context, query *AddIdentityQuery) error
 	DeleteIdentity(ctx context.Context, query *DeleteIdentityQuery) error
 	Delete(ctx context.Context, doc *model.MetaData) error
@@ -26,11 +27,13 @@ type DatastoreStore interface {
 	GetByKey(ctx context.Context, authenticSource, scope, documentID string) (*model.CompleteDocument, error)
 	DeleteByKey(ctx context.Context, authenticSource, scope, documentID string) error
 	Search(ctx context.Context, query *SearchDocumentsQuery) ([]*model.CompleteDocument, error)
+	ListAuthenticSources(ctx context.Context) ([]string, error)
 }
 
 // IdentityMappingStore defines the interface for identity mapping operations
 type IdentityMappingStore interface {
 	CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error
+	CreateMappings(ctx context.Context, mappings []*model.IdentityMapping) error
 	EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error
 	ResolveMapping(ctx context.Context, query *ResolveMappingQuery) (string, error)
 	UpdateMapping(ctx context.Context, mapping *model.IdentityMapping) error

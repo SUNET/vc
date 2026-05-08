@@ -363,6 +363,7 @@ func (c *Client) SDJWTVCIssuerMetadata(ctx context.Context) (*SDJWTVCIssuerMetad
 		Issuer:  c.cfg.APIGW.PublicURL,
 		JWKSURI: c.cfg.APIGW.PublicURL + "/jwks",
 	}
+
 	return reply, nil
 }
 

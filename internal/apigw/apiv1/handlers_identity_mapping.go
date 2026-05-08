@@ -61,6 +61,44 @@ func (c *Client) IdentityMappingCreate(ctx context.Context, req *IdentityMapping
 	return reply, nil
 }
 
+// IdentityMappingBulkCreateRequest is the request for bulk creating identity mappings
+type IdentityMappingBulkCreateRequest struct {
+	Mappings map[string]*IdentityMappingCreateRequest `json:"mappings" validate:"required,min=1,dive"`
+}
+
+// IdentityMappingBulkCreateReply is the reply for a bulk identity mapping creation
+type IdentityMappingBulkCreateReply struct {
+	Count int `json:"count"`
+}
+
+// IdentityMappingBulkCreate creates multiple identity mappings in a single operation
+func (c *Client) IdentityMappingBulkCreate(ctx context.Context, req *IdentityMappingBulkCreateRequest) (*IdentityMappingBulkCreateReply, error) {
+	mappings := make([]*model.IdentityMapping, 0, len(req.Mappings))
+
+	for _, r := range req.Mappings {
+		identifier := r.AuthenticSourcePersonID
+		if identifier == "" {
+			id, err := uuid.NewV7()
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate UUIDv7: %w", err)
+			}
+			identifier = id.String()
+		}
+
+		mappings = append(mappings, &model.IdentityMapping{
+			AuthenticSourcePersonID: identifier,
+			AuthenticSource:         r.AuthenticSource,
+			Attributes:              r.Attributes,
+		})
+	}
+
+	if err := c.identityMappingStore.CreateMappings(ctx, mappings); err != nil {
+		return nil, err
+	}
+
+	return &IdentityMappingBulkCreateReply{Count: len(mappings)}, nil
+}
+
 // IdentityMappingResolveRequest is the request for resolving attributes to an identifier
 type IdentityMappingResolveRequest struct {
 	AuthenticSource string            `json:"authentic_source" validate:"required,max=128,printascii"`
@@ -96,7 +134,7 @@ func (c *Client) IdentityMappingResolve(ctx context.Context, req *IdentityMappin
 	reply := &IdentityMappingResolveReply{
 		AuthenticSourcePersonID: personID,
 	}
-	
+
 	return reply, nil
 }
 
@@ -181,6 +219,10 @@ type IdentityMappingSearchReply struct {
 //	@Param			limit			query	int		false	"Max results (default 50, max 200)"
 //	@Router			/api/v1/identity/mapping/search [get]
 func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMappingSearchRequest) (*IdentityMappingSearchReply, error) {
+	if len(req.AllowedAuthenticSources) == 0 {
+		return &IdentityMappingSearchReply{Data: []*model.IdentityMapping{}}, nil
+	}
+
 	limit := req.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50

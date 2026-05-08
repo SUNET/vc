@@ -507,6 +507,7 @@ func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 	}
 
 	reply := &doc.CredentialOfferParameters
+
 	return reply, nil
 }
 

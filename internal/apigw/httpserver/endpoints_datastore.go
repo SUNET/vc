@@ -30,12 +30,13 @@ func (s *Service) endpointDatastoreUpload(ctx context.Context, c *gin.Context) (
 		return nil, nil
 	}
 
-	if err := s.apiv1.DatastoreUpload(ctx, request); err != nil {
+	reply, err := s.apiv1.DatastoreUpload(ctx, request)
+	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
-	return nil, nil
+	return reply, nil
 }
 
 func (s *Service) endpointDatastoreGet(ctx context.Context, c *gin.Context) (any, error) {
@@ -125,6 +126,23 @@ func (s *Service) endpointDatastoreDeleteIdentity(ctx context.Context, c *gin.Co
 	return nil, nil
 }
 
+func (s *Service) endpointDatastoreReplace(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreReplace")
+	defer span.End()
+
+	request := &vcclient.UploadRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	if err := s.apiv1.DatastoreReplace(ctx, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreList")
 	defer span.End()
@@ -151,7 +169,7 @@ func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	request.AllowedAuthenticSources = sessionOrgIDs(c)
+	request.AllowedAuthenticSources = sessionAllowedAuthenticSources(c)
 	s.log.Info("datastore search", "allowed_authentic_sources", request.AllowedAuthenticSources,
 		"search", request.Search, "authentic_source", request.AuthenticSource)
 
@@ -160,5 +178,24 @@ func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	return reply, nil
+}
+
+func (s *Service) endpointDatastoreBulkUpload(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreBulkUpload")
+	defer span.End()
+
+	request := &apiv1.DatastoreBulkUploadRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	reply, err := s.apiv1.DatastoreBulkUpload(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
 	return reply, nil
 }

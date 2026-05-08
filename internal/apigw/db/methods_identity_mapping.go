@@ -58,6 +58,27 @@ func (c *IdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model
 	return nil
 }
 
+// CreateMappings creates multiple identity mappings using bulk insert
+func (c *IdentityMappingsColl) CreateMappings(ctx context.Context, mappings []*model.IdentityMapping) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createMappings")
+	defer span.End()
+
+	now := time.Now().UTC()
+	inserts := make([]any, 0, len(mappings))
+	for _, m := range mappings {
+		m.CreatedAt = now
+		inserts = append(inserts, m)
+	}
+
+	_, err := c.Coll.InsertMany(ctx, inserts)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 // EnsureMapping creates an identity mapping only if it does not already exist.
 // If a record with the same (authentic_source, authentic_source_person_id) already exists, it is left unchanged.
 func (c *IdentityMappingsColl) EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error {

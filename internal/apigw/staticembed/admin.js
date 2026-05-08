@@ -1,10 +1,65 @@
+// @ts-nocheck
 import Alpine from 'alpinejs';
 
 window.adminApp = function () {
+    /** Flatten a nested object into dot-notation key-value pairs */
+    function flattenObject(obj, prefix) {
+        const entries = [];
+        for (const [k, v] of Object.entries(obj)) {
+            const key = prefix ? prefix + '.' + k : k;
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+                entries.push(...flattenObject(v, key));
+            } else {
+                entries.push({ key, value: v == null ? '' : String(v) });
+            }
+        }
+        return entries;
+    }
+
+    /** Rebuild a nested object from dot-notation key-value pairs */
+    function unflattenEntries(entries) {
+        const result = {};
+        for (const { key, value } of entries) {
+            const parts = key.split('.');
+            let cur = result;
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!(parts[i] in cur) || typeof cur[parts[i]] !== 'object') {
+                    cur[parts[i]] = {};
+                }
+                cur = cur[parts[i]];
+            }
+            cur[parts[parts.length - 1]] = value;
+        }
+        return result;
+    }
+
+    /** Build a tree-view display list from flat dot-notation entries */
+    function buildTreeView(entries) {
+        const rows = [];
+        const seenGroups = new Set();
+        for (let idx = 0; idx < entries.length; idx++) {
+            const parts = entries[idx].key.split('.');
+            for (let d = 0; d < parts.length - 1; d++) {
+                const groupKey = parts.slice(0, d + 1).join('.');
+                if (!seenGroups.has(groupKey)) {
+                    seenGroups.add(groupKey);
+                    rows.push({ type: 'group', label: parts[d], depth: d, idx: -1, path: groupKey });
+                }
+            }
+            rows.push({ type: 'field', label: parts[parts.length - 1], depth: parts.length - 1, idx, path: entries[idx].key });
+        }
+        return rows;
+    }
+
     return {
         authenticated: false,
-        givenName: '',
+        subject: '',
+        allowedResources: [],
+        allowedAuthenticSources: [],
+        scopes: [],
+        scopeTemplates: {},
         view: 'datastore',
+        sidebarOpen: false,
 
         // Datastore state
         ds: {
@@ -13,14 +68,31 @@ window.adminApp = function () {
             loading: false,
             showCreate: false,
             creating: false,
+            sortKey: '',
+            sortDir: 'asc',
             createError: '',
+            /** @type {number|null} */
             detailIdx: null,
+            /** @type {number|null} */
+            editIdx: null,
+            editError: '',
+            updating: false,
+            edit: {
+                identity_mapping_ids_str: '',
+                document_data: [],
+                document_data_json: '{}',
+                newFieldKey: ''
+            },
+            createTab: 'editor',
+            editTab: 'editor',
             create: {
                 authentic_source: '',
                 scope: '',
                 document_id: '',
                 identity_mapping_ids_str: '',
-                document_data_str: '{}'
+                document_data: [],
+                document_data_json: '{}',
+                newFieldKey: ''
             }
         },
 
@@ -32,18 +104,30 @@ window.adminApp = function () {
             showCreate: false,
             creating: false,
             createError: '',
+            sortKey: '',
+            sortDir: 'asc',
             editIdx: null,
             editError: '',
             updating: false,
             create: {
                 authentic_source: '',
                 authentic_source_person_id: '',
-                attributes_str: '{}'
+                attributes: [
+                    { key: 'family_name', value: '' },
+                    { key: 'given_name', value: '' },
+                    { key: 'birth_date', value: '' },
+                ],
+                attributes_json: '{}',
+                newFieldKey: ''
             },
+            createTab: 'editor',
+            editTab: 'editor',
             edit: {
                 authentic_source: '',
                 authentic_source_person_id: '',
-                attributes_str: '{}'
+                attributes: [],
+                attributes_json: '{}',
+                newFieldKey: ''
             }
         },
 
@@ -53,7 +137,11 @@ window.adminApp = function () {
                 const data = await resp.json();
                 if (data.authenticated) {
                     this.authenticated = true;
-                    this.givenName = data.given_name || '';
+                    this.subject = data.subject || '';
+                    this.allowedResources = data.allowed_resources || [];
+                    this.allowedAuthenticSources = [...new Set(this.allowedResources.map(r => r.authentic_source))];
+                    this.scopes = (data.scopes || []).sort();
+                    this.scopeTemplates = data.scope_templates || {};
                     this.searchDocuments();
                 }
             } catch (e) {
@@ -81,16 +169,127 @@ window.adminApp = function () {
             if (v === 'identity' && this.im.mappings.length === 0) this.searchMappings();
         },
 
+        treeView(entries) { return buildTreeView(entries); },
+
+        /** Remove all entries under a group prefix */
+        removeGroup(entries, groupPath) {
+            const prefix = groupPath + '.';
+            for (let i = entries.length - 1; i >= 0; i--) {
+                if (entries[i].key === groupPath || entries[i].key.startsWith(prefix)) {
+                    entries.splice(i, 1);
+                }
+            }
+        },
+
+        /** Add a new empty field inside a group, inserted after the last child */
+        addChildField(entries, groupPath) {
+            const prefix = groupPath + '.';
+            let lastIdx = -1;
+            for (let i = 0; i < entries.length; i++) {
+                if (entries[i].key.startsWith(prefix)) {
+                    lastIdx = i;
+                }
+            }
+            entries.splice(lastIdx + 1, 0, { key: prefix, value: '' });
+        },
+
+        /** Rename a field's leaf segment (used for newly added child fields) */
+        renameField(entries, idx, name) {
+            const entry = entries[idx];
+            const parts = entry.key.split('.');
+            parts[parts.length - 1] = name.trim();
+            entry.key = parts.join('.');
+        },
+
+        /** Convert a flat field into a group with an empty child */
+        promoteToGroup(entries, idx) {
+            const key = entries[idx].key;
+            entries[idx].key = key + '.';
+        },
+
         formatDate(d) {
             if (!d) return '-';
             try {
-                return new Date(d).toLocaleString();
+                return new Date(d).toISOString();
             } catch {
                 return d;
             }
         },
 
         // --- Datastore ---
+
+        sortDocs(key) {
+            if (this.ds.sortKey === key) {
+                this.ds.sortDir = this.ds.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.ds.sortKey = key;
+                this.ds.sortDir = 'asc';
+            }
+            const dir = this.ds.sortDir === 'asc' ? 1 : -1;
+            const accessors = {
+                document_id: d => d.meta?.document_id || '',
+                authentic_source: d => d.meta?.authentic_source || '',
+                scope: d => d.meta?.scope || '',
+                created_at: d => d.meta?.created_at || '',
+            };
+            const accessor = accessors[key];
+            this.ds.docs.sort((a, b) => {
+                const va = accessor(a), vb = accessor(b);
+                return va < vb ? -dir : va > vb ? dir : 0;
+            });
+        },
+
+        openCreateDocument() {
+            this.ds.create = {
+                authentic_source: this.allowedAuthenticSources.length === 1 ? this.allowedAuthenticSources[0] : '',
+                scope: '',
+                document_id: '',
+                identity_mapping_ids_str: '',
+                document_data: [],
+                document_data_json: '{}',
+                newFieldKey: ''
+            };
+            this.ds.createTab = 'editor';
+            this.ds.createError = '';
+            this.ds.showCreate = true;
+        },
+
+        onScopeChange() {
+            const scope = this.ds.create.scope;
+            const template = this.scopeTemplates[scope];
+            if (template && Object.keys(template).length > 0) {
+                this.ds.create.document_data = flattenObject(template, '');
+                this.ds.create.document_data_json = JSON.stringify(template, null, 2);
+            }
+        },
+
+        async importDocument(event) {
+            const file = event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                // Detect format: single document has "meta", batch is a map of documents
+                const docs = data.meta ? { '0': data } : data;
+                const resp = await fetch('/api/v1/datastore/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ documents: docs }),
+                    credentials: 'same-origin'
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    alert('Import failed: ' + (err.detail || resp.statusText));
+                } else {
+                    const result = await resp.json().catch(() => ({}));
+                    alert('Imported ' + (result.data?.count || 0) + ' documents');
+                }
+                this.searchDocuments();
+            } catch (e) {
+                alert('Import failed: ' + e.message);
+            }
+        },
 
         async searchDocuments() {
             this.ds.loading = true;
@@ -116,23 +315,34 @@ window.adminApp = function () {
             this.ds.creating = true;
             this.ds.createError = '';
             try {
-                let docData;
-                try {
-                    docData = JSON.parse(this.ds.create.document_data_str);
-                } catch {
-                    this.ds.createError = 'Invalid JSON in Document Data';
+                if (!this.ds.create.authentic_source.trim()) {
+                    this.ds.createError = 'Authentic Source is required';
                     this.ds.creating = false;
                     return;
                 }
+                if (!this.ds.create.scope.trim()) {
+                    this.ds.createError = 'Scope is required';
+                    this.ds.creating = false;
+                    return;
+                }
+                const docData = this.ds.createTab === 'json'
+                    ? JSON.parse(this.ds.create.document_data_json)
+                    : unflattenEntries(this.ds.create.document_data);
                 const ids = this.ds.create.identity_mapping_ids_str
                     ? this.ds.create.identity_mapping_ids_str.split(',').map(s => s.trim()).filter(Boolean)
                     : [];
+                if (ids.length === 0) {
+                    this.ds.createError = 'At least one Identity Mapping ID is required';
+                    this.ds.creating = false;
+                    return;
+                }
+                const meta = {
+                    authentic_source: this.ds.create.authentic_source,
+                    scope: this.ds.create.scope,
+                    ...(this.ds.create.document_id ? { document_id: this.ds.create.document_id } : {}),
+                };
                 const body = {
-                    meta: {
-                        authentic_source: this.ds.create.authentic_source,
-                        scope: this.ds.create.scope,
-                        document_id: this.ds.create.document_id
-                    },
+                    meta,
                     identity_mapping_ids: ids,
                     document_data: docData
                 };
@@ -147,7 +357,7 @@ window.adminApp = function () {
                     throw new Error(text || resp.statusText);
                 }
                 this.ds.showCreate = false;
-                this.ds.create = { authentic_source: '', scope: '', document_id: '', identity_mapping_ids_str: '', document_data_str: '{}' };
+                this.ds.create = { authentic_source: '', scope: '', document_id: '', identity_mapping_ids_str: '', document_data: [], document_data_json: '{}', newFieldKey: '' };
                 this.searchDocuments();
             } catch (e) {
                 this.ds.createError = 'Failed: ' + e.message;
@@ -174,7 +384,161 @@ window.adminApp = function () {
             }
         },
 
+        /** @param {number} idx */
+        openEditDocument(idx) {
+            const doc = this.ds.docs[idx];
+            const dd = doc.document_data || {};
+            this.ds.edit = {
+                identity_mapping_ids_str: (doc.identity_mapping_ids || []).join(', '),
+                document_data: flattenObject(dd, ''),
+                document_data_json: JSON.stringify(dd, null, 2),
+                newFieldKey: ''
+            };
+            this.ds.editTab = 'editor';
+            this.ds.editError = '';
+            this.ds.editIdx = idx;
+        },
+
+        addEditDocDataField() {
+            const key = this.ds.edit.newFieldKey.trim();
+            if (!key) return;
+            this.ds.edit.document_data.push({ key, value: '' });
+            this.ds.edit.newFieldKey = '';
+        },
+
+        addCreateDocDataField() {
+            const key = this.ds.create.newFieldKey.trim();
+            if (!key) return;
+            this.ds.create.document_data.push({ key, value: '' });
+            this.ds.create.newFieldKey = '';
+        },
+
+        switchDsCreateTab(tab) {
+            if (tab === this.ds.createTab) return;
+            if (tab === 'json') {
+                this.ds.create.document_data_json = JSON.stringify(unflattenEntries(this.ds.create.document_data), null, 2);
+            } else {
+                try { this.ds.create.document_data = flattenObject(JSON.parse(this.ds.create.document_data_json), ''); } catch { /* keep current */ }
+            }
+            this.ds.createTab = tab;
+        },
+
+        switchDsEditTab(tab) {
+            if (tab === this.ds.editTab) return;
+            if (tab === 'json') {
+                this.ds.edit.document_data_json = JSON.stringify(unflattenEntries(this.ds.edit.document_data), null, 2);
+            } else {
+                try { this.ds.edit.document_data = flattenObject(JSON.parse(this.ds.edit.document_data_json), ''); } catch { /* keep current */ }
+            }
+            this.ds.editTab = tab;
+        },
+
+        async updateDocument() {
+            this.ds.updating = true;
+            this.ds.editError = '';
+            const doc = this.ds.docs[/** @type {number} */ (this.ds.editIdx)];
+            try {
+                const docData = this.ds.editTab === 'json'
+                    ? JSON.parse(this.ds.edit.document_data_json)
+                    : unflattenEntries(this.ds.edit.document_data);
+                const ids = this.ds.edit.identity_mapping_ids_str
+                    ? this.ds.edit.identity_mapping_ids_str.split(',').map(s => s.trim()).filter(Boolean)
+                    : [];
+                if (ids.length === 0) {
+                    this.ds.editError = 'At least one Identity Mapping ID is required';
+                    this.ds.updating = false;
+                    return;
+                }
+                const body = {
+                    meta: {
+                        authentic_source: doc.meta?.authentic_source,
+                        scope: doc.meta?.scope,
+                        document_id: doc.meta?.document_id,
+                    },
+                    identity_mapping_ids: ids,
+                    document_data: docData
+                };
+                const resp = await fetch('/api/v1/datastore', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                    credentials: 'same-origin'
+                });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error(text || resp.statusText);
+                }
+                this.ds.editIdx = null;
+                this.searchDocuments();
+            } catch (e) {
+                this.ds.editError = 'Failed: ' + e.message;
+            }
+            this.ds.updating = false;
+        },
+
         // --- Identity Mappings ---
+
+        sortMappings(key) {
+            if (this.im.sortKey === key) {
+                this.im.sortDir = this.im.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.im.sortKey = key;
+                this.im.sortDir = 'asc';
+            }
+            const dir = this.im.sortDir === 'asc' ? 1 : -1;
+            const accessors = {
+                person_id: m => m.authentic_source_person_id || '',
+                authentic_source: m => m.authentic_source || '',
+                attributes: m => JSON.stringify(m.attributes || {}),
+                created_at: m => m.created_at || '',
+            };
+            const accessor = accessors[key];
+            this.im.mappings.sort((a, b) => {
+                const va = accessor(a), vb = accessor(b);
+                return va < vb ? -dir : va > vb ? dir : 0;
+            });
+        },
+
+        async importMapping(event) {
+            const file = event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                // Build a flat map with unique keys for each mapping
+                const mappings = {};
+                if (data.authentic_source) {
+                    // Single mapping
+                    mappings['0'] = data;
+                } else {
+                    // Batch: map of single mappings or arrays of mappings
+                    for (const [key, val] of Object.entries(data)) {
+                        if (Array.isArray(val)) {
+                            val.forEach((m, i) => { mappings[key + '_' + i] = m; });
+                        } else {
+                            mappings[key] = val;
+                        }
+                    }
+                }
+                const resp = await fetch('/api/v1/identity/mapping/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mappings }),
+                    credentials: 'same-origin'
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    alert('Import failed: ' + (err.detail || resp.statusText));
+                } else {
+                    const result = await resp.json().catch(() => ({}));
+                    alert('Imported ' + (result.data?.count || 0) + ' mappings');
+                }
+                this.searchMappings();
+            } catch (e) {
+                alert('Import failed: ' + e.message);
+            }
+        },
 
         async searchMappings() {
             this.im.loading = true;
@@ -192,17 +556,48 @@ window.adminApp = function () {
             this.im.loading = false;
         },
 
+        openCreateMapping() {
+            this.im.create = {
+                authentic_source: this.allowedAuthenticSources.length === 1 ? this.allowedAuthenticSources[0] : '',
+                authentic_source_person_id: '',
+                attributes: [
+                    { key: 'family_name', value: '' },
+                    { key: 'given_name', value: '' },
+                    { key: 'birth_date', value: '' },
+                ],
+                attributes_json: '{}',
+                newFieldKey: ''
+            };
+            this.im.createTab = 'editor';
+            this.im.createError = '';
+            this.im.showCreate = true;
+        },
+
+        addMappingAttribute() {
+            const key = this.im.create.newFieldKey.trim();
+            if (!key) return;
+            this.im.create.attributes.push({ key, value: '' });
+            this.im.create.newFieldKey = '';
+        },
+
         async createMapping() {
             this.im.creating = true;
             this.im.createError = '';
             try {
-                let attrs;
-                try {
-                    attrs = JSON.parse(this.im.create.attributes_str);
-                } catch {
-                    this.im.createError = 'Invalid JSON in Attributes';
+                if (!this.im.create.authentic_source.trim()) {
+                    this.im.createError = 'Authentic Source is required';
                     this.im.creating = false;
                     return;
+                }
+                let attrs;
+                if (this.im.createTab === 'json') {
+                    attrs = JSON.parse(this.im.create.attributes_json);
+                } else {
+                    const attrEntries = this.im.create.attributes.filter(a => a.key.trim());
+                    attrs = {};
+                    for (const a of attrEntries) {
+                        attrs[a.key.trim()] = a.value;
+                    }
                 }
                 const body = {
                     authentic_source: this.im.create.authentic_source,
@@ -220,7 +615,16 @@ window.adminApp = function () {
                     throw new Error(text || resp.statusText);
                 }
                 this.im.showCreate = false;
-                this.im.create = { authentic_source: '', authentic_source_person_id: '', attributes_str: '{}' };
+                this.im.create = {
+                    authentic_source: '', authentic_source_person_id: '',
+                    attributes: [
+                        { key: 'family_name', value: '' },
+                        { key: 'given_name', value: '' },
+                        { key: 'birth_date', value: '' },
+                    ],
+                    attributes_json: '{}',
+                    newFieldKey: ''
+                };
                 this.searchMappings();
             } catch (e) {
                 this.im.createError = 'Failed: ' + e.message;
@@ -232,24 +636,65 @@ window.adminApp = function () {
             const m = this.im.mappings[idx];
             this.im.editIdx = idx;
             this.im.editError = '';
+            const attrs = m.attributes || {};
+            this.im.editTab = 'editor';
             this.im.edit = {
                 authentic_source: m.authentic_source,
                 authentic_source_person_id: m.authentic_source_person_id,
-                attributes_str: JSON.stringify(m.attributes || {}, null, 2)
+                attributes: Object.entries(attrs).map(([key, value]) => ({ key, value: String(value) })),
+                attributes_json: JSON.stringify(attrs, null, 2),
+                newFieldKey: ''
             };
+        },
+
+        addEditMappingAttribute() {
+            const key = this.im.edit.newFieldKey.trim();
+            if (!key) return;
+            this.im.edit.attributes.push({ key, value: '' });
+            this.im.edit.newFieldKey = '';
+        },
+
+        switchImCreateTab(tab) {
+            if (tab === this.im.createTab) return;
+            if (tab === 'json') {
+                const attrs = {};
+                for (const a of this.im.create.attributes) { attrs[a.key] = a.value; }
+                this.im.create.attributes_json = JSON.stringify(attrs, null, 2);
+            } else {
+                try {
+                    const obj = JSON.parse(this.im.create.attributes_json);
+                    this.im.create.attributes = Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
+                } catch { /* keep current */ }
+            }
+            this.im.createTab = tab;
+        },
+
+        switchImEditTab(tab) {
+            if (tab === this.im.editTab) return;
+            if (tab === 'json') {
+                const attrs = {};
+                for (const a of this.im.edit.attributes) { attrs[a.key] = a.value; }
+                this.im.edit.attributes_json = JSON.stringify(attrs, null, 2);
+            } else {
+                try {
+                    const obj = JSON.parse(this.im.edit.attributes_json);
+                    this.im.edit.attributes = Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
+                } catch { /* keep current */ }
+            }
+            this.im.editTab = tab;
         },
 
         async updateMapping() {
             this.im.updating = true;
             this.im.editError = '';
             try {
-                let attrs;
-                try {
-                    attrs = JSON.parse(this.im.edit.attributes_str);
-                } catch {
-                    this.im.editError = 'Invalid JSON in Attributes';
-                    this.im.updating = false;
-                    return;
+                const attrs = {};
+                if (this.im.editTab === 'json') {
+                    Object.assign(attrs, JSON.parse(this.im.edit.attributes_json));
+                } else {
+                    for (const a of this.im.edit.attributes) {
+                        attrs[a.key] = a.value;
+                    }
                 }
                 const body = {
                     authentic_source: this.im.edit.authentic_source,

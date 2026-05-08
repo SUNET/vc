@@ -69,8 +69,7 @@ func (h *UploadMessageHandler) HandleMessage(ctx context.Context, message *saram
 		return err
 	}
 
-	err := h.apiv1.DatastoreUpload(ctx, &uploadRequest)
-	if err != nil {
+	if _, err := h.apiv1.DatastoreUpload(ctx, &uploadRequest); err != nil {
 		h.log.Error(err, "Failed to handle UploadRequest")
 		return err
 	}

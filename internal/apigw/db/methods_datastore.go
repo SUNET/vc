@@ -70,6 +70,30 @@ func (c *DatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument) e
 	return nil
 }
 
+// SaveMany saves multiple documents to the generic collection using bulk insert
+func (c *DatastoreColl) SaveMany(ctx context.Context, docs []*model.CompleteDocument) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:saveMany")
+	defer span.End()
+
+	now := time.Now().UTC()
+	inserts := make([]any, 0, len(docs))
+	for _, doc := range docs {
+		if err := helpers.Check(ctx, c.Service.cfg, doc, c.Service.log); err != nil {
+			return err
+		}
+		doc.Meta.CreatedAt = now
+		inserts = append(inserts, doc)
+	}
+
+	_, err := c.Coll.InsertMany(ctx, inserts)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 // AddIdentityQuery is the query to add document identity
 type AddIdentityQuery struct {
 	AuthenticSource    string   `json:"authentic_source" bson:"authentic_source"`
@@ -355,4 +379,20 @@ func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery)
 	}
 
 	return res, nil
+}
+
+// ListAuthenticSources returns all unique authentic_source values in the datastore
+func (c *DatastoreColl) ListAuthenticSources(ctx context.Context) ([]string, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:listAuthenticSources")
+	defer span.End()
+
+	var results []string
+	err := c.Coll.Distinct(ctx, "meta.authentic_source", bson.D{}).Decode(&results)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	slices.Sort(results)
+	return results, nil
 }

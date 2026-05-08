@@ -82,9 +82,9 @@ func (s *SafeEngine) RuleCount() int {
 	return s.engine.RuleCount()
 }
 
-// buildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
+// BuildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
-func buildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
+func BuildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
 	hasInline := len(cfg.Rules) > 0
 	hasFile := cfg.RulesFile != ""
 
@@ -109,6 +109,74 @@ func buildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
 	}
 
 	return &SafeEngine{engine: engine}, nil
+}
+
+// ExtractUIResources parses SPOCP rules and returns the set of literal
+// resource values found in (ui (resource X)) elements. Star forms are skipped.
+func ExtractUIResources(cfg model.APIAuth) []string {
+	seen := map[string]struct{}{}
+	for _, r := range cfg.Rules {
+		elem, err := parseAdvancedSExp(r)
+		if err != nil {
+			continue
+		}
+		extractResourceFromUI(elem, seen)
+	}
+
+	if cfg.RulesFile != "" {
+		for _, elem := range parseRulesFile(cfg.RulesFile) {
+			extractResourceFromUI(elem, seen)
+		}
+	}
+
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
+	}
+	return result
+}
+
+// extractResourceFromUI extracts the literal resource value from a (ui ...) rule
+func extractResourceFromUI(elem sexp.Element, seen map[string]struct{}) {
+	list, ok := elem.(*sexp.List)
+	if !ok || list.Tag != "ui" {
+		return
+	}
+	for _, child := range list.Elements {
+		childList, ok := child.(*sexp.List)
+		if !ok || childList.Tag != "resource" {
+			continue
+		}
+		if len(childList.Elements) == 1 {
+			if atom, ok := childList.Elements[0].(*sexp.Atom); ok {
+				seen[atom.Value] = struct{}{}
+			}
+		}
+	}
+}
+
+// parseRulesFile parses a rules file and returns the elements (best-effort)
+func parseRulesFile(path string) []sexp.Element {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var elems []sexp.Element
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		elem, err := parseAdvancedSExp(line)
+		if err != nil {
+			continue
+		}
+		elems = append(elems, elem)
+	}
+	return elems
 }
 
 // loadRulesFromFile reads human-readable SPOCP rules (one per line) from a file
@@ -323,19 +391,43 @@ func (p *advancedParser) parseSet() (sexp.Element, error) {
 	}
 }
 
-// buildSPOCPQuery constructs a SPOCP query S-expression for the current HTTP
+// extractSPOCPSubject returns the identity to use as the SPOCP subject
+// from a validated JWT, preferring eppn → email
+func extractSPOCPSubject(token jwt.Token) string {
+	var s string
+	if err := token.Get("eppn", &s); err == nil && s != "" {
+		return s
+	}
+	if err := token.Get("email", &s); err == nil && s != "" {
+		return s
+	}
+	return ""
+}
+
+// buildAPISPOCPQuery constructs a SPOCP query S-expression for the current HTTP
 // request, service name, and JWT subject:
 //
-//	(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))
+//	(api (service apigw)(method POST)(path /api/v1/upload)(subject alice@sunet.se))
 //
 // The service dimension ensures that rules written for one service do not
 // accidentally grant access to another service sharing the same endpoints.
-func buildSPOCPQuery(service, method, path, subject string) sexp.Element {
+func buildAPISPOCPQuery(service, method, path, subject string) sexp.Element {
 	return sexp.NewList("api",
 		sexp.NewList("service", sexp.NewAtom(service)),
 		sexp.NewList("method", sexp.NewAtom(method)),
 		sexp.NewList("path", sexp.NewAtom(path)),
 		sexp.NewList("subject", sexp.NewAtom(subject)),
+	)
+}
+
+// BuildUISPOCPQuery constructs a SPOCP query for UI authorization:
+//
+//	(ui (subject alice@sunet.se)(resource SUNET)(scope eduid))
+func BuildUISPOCPQuery(subject, resource, scope string) sexp.Element {
+	return sexp.NewList("ui",
+		sexp.NewList("subject", sexp.NewAtom(subject)),
+		sexp.NewList("resource", sexp.NewAtom(resource)),
+		sexp.NewList("scope", sexp.NewAtom(scope)),
 	)
 }
 
@@ -392,11 +484,16 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 			return
 		}
 
-		sub, _ := token.Subject()
+		sub := extractSPOCPSubject(token)
 
-		// SPOCP authorization check (if rules are configured).
+		// SPOCP authorization check (only if rules are configured)
 		if engine != nil {
-			query := buildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub)
+			if sub == "" {
+				log.Info("jwt_missing_identity", "error", "token has no eppn or email claim", "req_id", c.GetString("req_id"))
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token missing eppn or email claim"})
+				return
+			}
+			query := buildAPISPOCPQuery(service, c.Request.Method, c.FullPath(), sub)
 			if !engine.QueryElement(query) {
 				log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(), "req_id", c.GetString("req_id"))
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
@@ -427,7 +524,7 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 // do not accidentally grant access to another.
 func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth model.APIAuth, jwksCache JWKSCache) (gin.HandlerFunc, error) {
 	// Build SPOCP engine from top-level rules (applies to either auth mode).
-	engine, err := buildSPOCPEngine(apiAuth)
+	engine, err := BuildSPOCPEngine(apiAuth)
 	if err != nil {
 		return nil, fmt.Errorf("api_auth: failed to build SPOCP engine: %w", err)
 	}

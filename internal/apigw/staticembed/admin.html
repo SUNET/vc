@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html lang="en" class="theme-light">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin UI</title>
-    <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/bootstrap.min.css">
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/bootstrap.bundle.min.js"></script>
     <script type="importmap">
     {
         "imports": {
@@ -16,120 +17,219 @@
     <script src="/static/admin.js" type="module"></script>
     <link rel="icon" href="/static/favicon.png" type="image/png">
     <style>
-        .admin-layout { display: flex; min-height: 100vh; }
+        [x-cloak] { display: none !important; }
+        :root { --sidebar-width: 220px; }
         .admin-sidebar {
-            width: 220px; background: #363636; color: #fff;
-            display: flex; flex-direction: column; padding: 1.5rem 0;
+            width: var(--sidebar-width); position: fixed; top: 0; bottom: 0; left: 0;
+            background: #212529; color: #fff; display: flex; flex-direction: column;
+            padding: 1.25rem 0; z-index: 1030; transition: transform 0.2s ease;
         }
-        .admin-sidebar .logo { text-align: center; margin-bottom: 2rem; padding: 0 1rem; }
+        .admin-sidebar .logo { text-align: center; margin-bottom: 1.5rem; padding: 0 1rem; }
         .admin-sidebar .logo img { height: 36px; }
-        .admin-sidebar .menu-item {
-            display: block; padding: 0.75rem 1.5rem; color: #ccc;
-            text-decoration: none; font-weight: 500; cursor: pointer;
+        .admin-sidebar .nav-link {
+            display: block; padding: 0.6rem 1.25rem; color: #adb5bd;
+            text-decoration: none; font-weight: 500;
         }
-        .admin-sidebar .menu-item:hover { background: #4a4a4a; color: #fff; }
-        .admin-sidebar .menu-item.active { background: #00d1b2; color: #fff; }
-        .admin-sidebar .menu-item.logout {
-            margin-top: auto; border-top: 1px solid #4a4a4a; color: #f14668;
+        .admin-sidebar .nav-link:hover { background: #343a40; color: #fff; }
+        .admin-sidebar .nav-link.active { background: #0d6efd; color: #fff; }
+        .admin-sidebar .nav-link.logout { margin-top: auto; border-top: 1px solid #343a40; color: #dc3545; }
+        .admin-content { margin-left: var(--sidebar-width); padding: 1.5rem; min-height: 100vh; background: #f8f9fa; }
+        .admin-topbar { display: none; }
+        .doc-json { max-height: 300px; overflow: auto; background: #1a1a2e; color: #0f0; padding: 0.75rem; border-radius: 6px; font-size: 0.78rem; white-space: pre-wrap; word-break: break-all; }
+        .tree-row-even { background: #e8f5e9; }
+        .tree-row-odd { background: #f1f8e9; }
+        @media (max-width: 991.98px) {
+            .admin-sidebar { transform: translateX(-100%); }
+            .admin-sidebar.show { transform: translateX(0); }
+            .admin-content { margin-left: 0; padding: 1rem; }
+            .admin-topbar { display: flex; align-items: center; padding: 0.5rem 1rem; background: #212529; color: #fff; position: sticky; top: 0; z-index: 1020; }
+            .sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1025; }
         }
-        .admin-content { flex: 1; padding: 2rem; background: #f5f5f5; overflow-y: auto; }
-        .doc-json { max-height: 300px; overflow: auto; background: #1a1a1a; color: #0f0; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
-        .tag-scope { font-size: 0.7rem; }
+        .btn-touch { min-height: 44px; min-width: 44px; }
+        .table td, .table th { vertical-align: middle; }
     </style>
 </head>
 <body>
 
-<!-- Login view -->
 <div x-data="adminApp()" x-cloak>
 
+<!-- Login view -->
 <template x-if="!authenticated">
-    <section class="section">
-        <div class="container" style="max-width: 380px; margin-top: 10vh;">
-            <div class="has-text-centered mb-5">
-                <img src="/static/logo.png" alt="Logo" style="height: 48px;">
-            </div>
-            <div class="box has-text-centered">
-                <h2 class="title is-4">Admin Login</h2>
-                <a class="button is-primary is-fullwidth" href="/ui/login">Login with OIDC</a>
+    <div class="d-flex align-items-center justify-content-center" style="min-height:100vh;">
+        <div class="text-center" style="max-width:380px;width:100%;padding:1rem;">
+            <img src="/static/logo.png" alt="Logo" style="height:48px;" class="mb-4">
+            <div class="card shadow-sm">
+                <div class="card-body text-center">
+                    <h2 class="h4 mb-3">Admin Login</h2>
+                    <a class="btn btn-primary w-100 btn-touch" href="/ui/login">Login with OIDC</a>
+                </div>
             </div>
         </div>
-    </section>
+    </div>
 </template>
 
+<!-- Authenticated view -->
 <template x-if="authenticated">
-    <div class="admin-layout">
-        <aside class="admin-sidebar">
+    <div>
+        <!-- Mobile top bar -->
+        <div class="admin-topbar">
+            <button class="btn btn-outline-light btn-sm me-3" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle menu">
+                <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/></svg>
+            </button>
+            <img src="/static/logo.png" alt="Logo" style="height:24px;">
+        </div>
+
+        <!-- Sidebar backdrop (mobile) -->
+        <div class="sidebar-backdrop d-lg-none" x-show="sidebarOpen" @click="sidebarOpen = false" x-transition.opacity></div>
+
+        <!-- Sidebar -->
+        <nav class="admin-sidebar" :class="{'show': sidebarOpen}">
             <div class="logo">
                 <img src="/static/logo.png" alt="Logo">
-                <template x-if="givenName">
-                    <div style="margin-top: 0.5rem; font-size: 0.85rem; color: #aaa;">logged in as: <span x-text="givenName"></span></div>
+                <template x-if="subject">
+                    <div class="mt-2 small text-secondary">logged in as: <span x-text="subject"></span></div>
                 </template>
             </div>
-            <a class="menu-item" :class="{'active': view === 'datastore'}" @click="switchView('datastore')">Datastore</a>
-            <a class="menu-item" :class="{'active': view === 'identity'}" @click="switchView('identity')">Identity Mapping</a>
-            <a class="menu-item logout" @click="logout()">Logout</a>
-        </aside>
+            <a class="nav-link" :class="{'active': view === 'datastore'}" @click="switchView('datastore'); sidebarOpen = false">Datastore</a>
+            <a class="nav-link" :class="{'active': view === 'identity'}" @click="switchView('identity'); sidebarOpen = false">Identity Mapping</a>
+            <a class="nav-link logout" @click="logout()">Logout</a>
+        </nav>
+
+        <!-- Main content -->
         <main class="admin-content">
 
             <!-- Datastore View -->
             <template x-if="view === 'datastore'">
                 <div>
-                    <h2 class="title is-4">Datastore</h2>
-
-                    <!-- Search bar -->
-                    <div class="field is-grouped mb-5">
-                        <div class="control is-expanded">
-                            <input class="input" type="text" placeholder="Search documents..." x-model="ds.search" @keyup.enter="searchDocuments()">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                        <h2 class="h4 mb-0">Datastore</h2>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success btn-sm btn-touch" @click="openCreateDocument()">+ New</button>
+                            <label class="btn btn-outline-primary btn-sm btn-touch mb-0">
+                                Import
+                                <input type="file" accept=".json" class="d-none" @change="importDocument($event)">
+                            </label>
                         </div>
-                        <div class="control">
-                            <button class="button is-primary" @click="searchDocuments()" :class="{'is-loading': ds.loading}">Search</button>
-                        </div>
-                        <div class="control">
-                            <button class="button is-success" @click="ds.showCreate = !ds.showCreate">+ New</button>
-                        </div>
+                    </div>
+                    <div class="input-group mb-4">
+                        <input class="form-control" type="text" placeholder="Search documents..." x-model="ds.search" @keyup.enter="searchDocuments()">
+                        <button class="btn btn-primary btn-touch" @click="searchDocuments()">
+                            <span x-show="!ds.loading">Search</span>
+                            <span x-show="ds.loading" class="spinner-border spinner-border-sm"></span>
+                        </button>
                     </div>
 
                     <!-- Create form -->
                     <template x-if="ds.showCreate">
-                        <div class="box mb-5">
-                            <h4 class="title is-5">Create Document</h4>
-                            <template x-if="ds.createError">
-                                <div class="notification is-danger is-light" x-text="ds.createError"></div>
-                            </template>
-                            <div class="columns">
-                                <div class="column">
-                                    <div class="field">
-                                        <label class="label is-small">Authentic Source</label>
-                                        <input class="input is-small" x-model="ds.create.authentic_source">
+                        <div class="card mb-4 shadow-sm">
+                            <div class="card-body">
+                                <h5 class="card-title">Create Document</h5>
+                                <template x-if="ds.createError">
+                                    <div class="alert alert-danger py-2" x-text="ds.createError"></div>
+                                </template>
+                                <div class="alert alert-info py-2 px-3 mb-3">
+                                    <p class="fw-semibold small mb-2">Metadata</p>
+                                    <div class="row g-2">
+                                        <div class="col-12 col-md-4">
+                                            <label class="form-label small mb-1">Authentic Source</label>
+                                            <template x-if="allowedAuthenticSources.length > 1">
+                                                <select class="form-select form-select-sm" x-model="ds.create.authentic_source">
+                                                    <option value="">Select...</option>
+                                                    <template x-for="org in allowedAuthenticSources" :key="org">
+                                                        <option :value="org" x-text="org"></option>
+                                                    </template>
+                                                </select>
+                                            </template>
+                                            <template x-if="allowedAuthenticSources.length <= 1">
+                                                <input class="form-control form-control-sm" x-model="ds.create.authentic_source">
+                                            </template>
+                                        </div>
+                                        <div class="col-12 col-md-4">
+                                            <label class="form-label small mb-1">Scope</label>
+                                            <template x-if="scopes.length > 0">
+                                                <select class="form-select form-select-sm" x-model="ds.create.scope" @change="onScopeChange()">
+                                                    <option value="">Select...</option>
+                                                    <template x-for="s in scopes" :key="s">
+                                                        <option :value="s" x-text="s"></option>
+                                                    </template>
+                                                </select>
+                                            </template>
+                                            <template x-if="scopes.length === 0">
+                                                <input class="form-control form-control-sm" x-model="ds.create.scope">
+                                            </template>
+                                        </div>
+                                        <div class="col-12 col-md-4">
+                                            <label class="form-label small mb-1">Document ID <span class="text-muted fw-normal">(optional)</span></label>
+                                            <input class="form-control form-control-sm" x-model="ds.create.document_id" placeholder="auto-generated if empty">
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <label class="form-label small mb-1">Identity Mapping IDs (comma-separated)</label>
+                                        <input class="form-control form-control-sm" x-model="ds.create.identity_mapping_ids_str">
                                     </div>
                                 </div>
-                                <div class="column">
-                                    <div class="field">
-                                        <label class="label is-small">Scope</label>
-                                        <input class="input is-small" x-model="ds.create.scope">
-                                    </div>
+                                <div class="alert alert-success py-2 px-3 mb-3">
+                                    <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
+                                        <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.createTab==='editor'?'active':''" href="#" @click.prevent="switchDsCreateTab('editor')">Editor</a></li>
+                                        <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.createTab==='json'?'active':''" href="#" @click.prevent="switchDsCreateTab('json')">JSON</a></li>
+                                    </ul>
+                                    <template x-if="ds.createTab==='editor'">
+                                        <div>
+                                            <div class="table-responsive">
+                                                <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
+                                                    <thead>
+                                                        <tr>
+                                                            <th style="width:40%">Key</th>
+                                                            <th>Value</th>
+                                                            <th style="width:50px"></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <template x-for="(row, ri) in treeView(ds.create.document_data)" :key="row.type + '-' + ri">
+                                                            <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
+                                                                    <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
+                                                                    <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
+                                                                    <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(ds.create.document_data, row.idx, $event.target.value)" style="max-width:150px"></template>
+                                                                </td>
+                                                                <td>
+                                                                    <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="ds.create.document_data[row.idx].value"></template>
+                                                                </td>
+                                                                <td class="text-nowrap">
+                                                                    <template x-if="row.type==='group'">
+                                                                        <span>
+                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(ds.create.document_data, row.path)" title="Add child field">+</button>
+                                                                            <button class="btn-close btn-close-sm ms-1" @click="removeGroup(ds.create.document_data, row.path)" title="Remove group" style="font-size:0.6rem;"></button>
+                                                                        </span>
+                                                                    </template>
+                                                                    <template x-if="row.type==='field'">
+                                                                        <span>
+                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(ds.create.document_data, row.idx)" title="Convert to object">+</button>
+                                                                            <button class="btn-close btn-close-sm ms-1" @click="ds.create.document_data.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
+                                                                        </span>
+                                                                    </template>
+                                                                </td>
+                                                            </tr>
+                                                        </template>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div class="input-group input-group-sm">
+                                                <input class="form-control" placeholder="Key (e.g. address.locality)" x-model="ds.create.newFieldKey" @keyup.enter="addCreateDocDataField()">
+                                                <button class="btn btn-outline-secondary" @click="addCreateDocDataField()">+ Add</button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="ds.createTab==='json'">
+                                        <textarea class="form-control form-control-sm" rows="10" x-model="ds.create.document_data_json"></textarea>
+                                    </template>
                                 </div>
-                                <div class="column">
-                                    <div class="field">
-                                        <label class="label is-small">Document ID</label>
-                                        <input class="input is-small" x-model="ds.create.document_id">
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">Identity Mapping IDs (comma-separated)</label>
-                                <input class="input is-small" x-model="ds.create.identity_mapping_ids_str">
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">Document Data (JSON)</label>
-                                <textarea class="textarea is-small" rows="4" x-model="ds.create.document_data_str" placeholder='{"key": "value"}'></textarea>
-                            </div>
-                            <div class="field is-grouped">
-                                <div class="control">
-                                    <button class="button is-primary is-small" @click="createDocument()" :class="{'is-loading': ds.creating}">Save</button>
-                                </div>
-                                <div class="control">
-                                    <button class="button is-small" @click="ds.showCreate = false">Cancel</button>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-primary btn-sm btn-touch" @click="createDocument()">
+                                        <span x-show="!ds.creating">Save</span>
+                                        <span x-show="ds.creating" class="spinner-border spinner-border-sm"></span>
+                                    </button>
+                                    <button class="btn btn-secondary btn-sm btn-touch" @click="ds.showCreate = false">Cancel</button>
                                 </div>
                             </div>
                         </div>
@@ -137,30 +237,31 @@
 
                     <!-- Results table -->
                     <template x-if="ds.docs.length === 0 && !ds.loading">
-                        <div class="notification is-light">No documents found. Try a search or create one.</div>
+                        <div class="alert alert-light">No documents found. Try a search or create one.</div>
                     </template>
                     <template x-if="ds.docs.length > 0">
-                        <div class="table-container">
-                            <table class="table is-fullwidth is-striped is-hoverable">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover align-middle">
                                 <thead>
                                     <tr>
-                                        <th>Document ID</th>
-                                        <th>Source</th>
-                                        <th>Scope</th>
-                                        <th>Created</th>
+                                        <th role="button" @click="sortDocs('document_id')">Document ID <span x-show="ds.sortKey==='document_id'" x-text="ds.sortDir==='asc'?'▲':'▼'"></span></th>
+                                        <th role="button" @click="sortDocs('authentic_source')">Source <span x-show="ds.sortKey==='authentic_source'" x-text="ds.sortDir==='asc'?'▲':'▼'"></span></th>
+                                        <th role="button" @click="sortDocs('scope')">Scope <span x-show="ds.sortKey==='scope'" x-text="ds.sortDir==='asc'?'▲':'▼'"></span></th>
+                                        <th role="button" @click="sortDocs('created_at')" class="d-none d-md-table-cell">Created <span x-show="ds.sortKey==='created_at'" x-text="ds.sortDir==='asc'?'▲':'▼'"></span></th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <template x-for="(doc, idx) in ds.docs" :key="idx">
                                         <tr>
-                                            <td x-text="doc.meta?.document_id || '-'" style="font-family:monospace;font-size:0.85rem;"></td>
+                                            <td style="font-family:monospace;font-size:0.82rem;" x-text="doc.meta?.document_id || '-'"></td>
                                             <td x-text="doc.meta?.authentic_source || '-'"></td>
-                                            <td><span class="tag is-info tag-scope" x-text="doc.meta?.scope || '-'"></span></td>
-                                            <td x-text="formatDate(doc.meta?.created_at)"></td>
-                                            <td>
-                                                <button class="button is-small is-info is-outlined" @click="toggleDocDetail(idx)">View</button>
-                                                <button class="button is-small is-danger is-outlined" @click="deleteDocument(doc)">Delete</button>
+                                            <td><span class="badge bg-info" x-text="doc.meta?.scope || '-'"></span></td>
+                                            <td class="d-none d-md-table-cell" x-text="formatDate(doc.meta?.created_at)"></td>
+                                            <td class="text-nowrap">
+                                                <button class="btn btn-sm btn-outline-info" @click="toggleDocDetail(idx)">View</button>
+                                                <button class="btn btn-sm btn-outline-warning" @click="openEditDocument(idx)">Edit</button>
+                                                <button class="btn btn-sm btn-outline-danger" @click="deleteDocument(doc)">Del</button>
                                             </td>
                                         </tr>
                                     </template>
@@ -171,21 +272,122 @@
 
                     <!-- Detail modal -->
                     <template x-if="ds.detailIdx !== null">
-                        <div class="modal is-active">
-                            <div class="modal-background" @click="ds.detailIdx = null"></div>
-                            <div class="modal-card" style="max-width:700px;width:90vw;">
-                                <header class="modal-card-head">
-                                    <p class="modal-card-title" x-text="'Document: ' + (ds.docs[ds.detailIdx]?.meta?.document_id || '')"></p>
-                                    <button class="delete" @click="ds.detailIdx = null"></button>
-                                </header>
-                                <section class="modal-card-body">
-                                    <h6 class="title is-6">Metadata</h6>
-                                    <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.meta, null, 2)"></pre>
-                                    <h6 class="title is-6 mt-4">Identity Mapping IDs</h6>
-                                    <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.identity_mapping_ids, null, 2)"></pre>
-                                    <h6 class="title is-6 mt-4">Document Data</h6>
-                                    <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.document_data, null, 2)"></pre>
-                                </section>
+                        <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);" @click.self="ds.detailIdx = null">
+                            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" x-text="'Document: ' + (ds.docs[ds.detailIdx]?.meta?.document_id || '')"></h5>
+                                        <button type="button" class="btn-close" @click="ds.detailIdx = null"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <h6>Metadata</h6>
+                                        <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.meta, null, 2)"></pre>
+                                        <h6 class="mt-3">Identity Mapping IDs</h6>
+                                        <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.identity_mapping_ids, null, 2)"></pre>
+                                        <h6 class="mt-3">Document Data</h6>
+                                        <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.document_data, null, 2)"></pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Edit modal -->
+                    <template x-if="ds.editIdx !== null">
+                        <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);" @click.self="ds.editIdx = null">
+                            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" x-text="'Edit: ' + (ds.docs[ds.editIdx]?.meta?.document_id || '')"></h5>
+                                        <button type="button" class="btn-close" @click="ds.editIdx = null"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <template x-if="ds.editError">
+                                            <div class="alert alert-danger py-2" x-text="ds.editError"></div>
+                                        </template>
+                                        <div class="row g-2 mb-3">
+                                            <div class="col-12 col-md-4">
+                                                <label class="form-label small mb-1">Authentic Source</label>
+                                                <input class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.authentic_source || ''" disabled>
+                                            </div>
+                                            <div class="col-12 col-md-4">
+                                                <label class="form-label small mb-1">Scope</label>
+                                                <input class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.scope || ''" disabled>
+                                            </div>
+                                            <div class="col-12 col-md-4">
+                                                <label class="form-label small mb-1">Document ID</label>
+                                                <input class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.document_id || ''" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small mb-1">Identity Mapping IDs (comma-separated)</label>
+                                            <input class="form-control form-control-sm" x-model="ds.edit.identity_mapping_ids_str">
+                                        </div>
+                                        <div class="alert alert-success py-2 px-3 mb-3">
+                                            <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
+                                                <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.editTab==='editor'?'active':''" href="#" @click.prevent="switchDsEditTab('editor')">Editor</a></li>
+                                                <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.editTab==='json'?'active':''" href="#" @click.prevent="switchDsEditTab('json')">JSON</a></li>
+                                            </ul>
+                                            <template x-if="ds.editTab==='editor'">
+                                                <div>
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="width:40%">Key</th>
+                                                                    <th>Value</th>
+                                                                    <th style="width:50px"></th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <template x-for="(row, ri) in treeView(ds.edit.document_data)" :key="row.type + '-' + ri">
+                                                                    <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                        <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
+                                                                            <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
+                                                                            <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
+                                                                            <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(ds.edit.document_data, row.idx, $event.target.value)" style="max-width:150px"></template>
+                                                                        </td>
+                                                                        <td>
+                                                                            <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="ds.edit.document_data[row.idx].value"></template>
+                                                                        </td>
+                                                                        <td class="text-nowrap">
+                                                                            <template x-if="row.type==='group'">
+                                                                                <span>
+                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(ds.edit.document_data, row.path)" title="Add child field">+</button>
+                                                                                    <button class="btn-close btn-close-sm ms-1" @click="removeGroup(ds.edit.document_data, row.path)" style="font-size:0.6rem;"></button>
+                                                                                </span>
+                                                                            </template>
+                                                                            <template x-if="row.type==='field'">
+                                                                                <span>
+                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(ds.edit.document_data, row.idx)" title="Convert to object">+</button>
+                                                                                    <button class="btn-close btn-close-sm ms-1" @click="ds.edit.document_data.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
+                                                                                </span>
+                                                                            </template>
+                                                                        </td>
+                                                                    </tr>
+                                                                </template>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <div class="input-group input-group-sm">
+                                                        <input class="form-control" placeholder="Key (e.g. address.locality)" x-model="ds.edit.newFieldKey" @keyup.enter="addEditDocDataField()">
+                                                        <button class="btn btn-outline-secondary" @click="addEditDocDataField()">+ Add</button>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                            <template x-if="ds.editTab==='json'">
+                                                <textarea class="form-control form-control-sm" rows="10" x-model="ds.edit.document_data_json"></textarea>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button class="btn btn-warning btn-sm btn-touch" @click="updateDocument()">
+                                            <span x-show="!ds.updating">Save</span>
+                                            <span x-show="ds.updating" class="spinner-border spinner-border-sm"></span>
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm btn-touch" @click="ds.editIdx = null">Cancel</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </template>
@@ -195,52 +397,117 @@
             <!-- Identity Mapping View -->
             <template x-if="view === 'identity'">
                 <div>
-                    <h2 class="title is-4">Identity Mapping</h2>
-
-                    <!-- Search bar -->
-                    <div class="field is-grouped mb-5">
-                        <div class="control is-expanded">
-                            <input class="input" type="text" placeholder="Search identity mappings..." x-model="im.search" @keyup.enter="searchMappings()">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                        <h2 class="h4 mb-0">Identity Mapping</h2>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success btn-sm btn-touch" @click="openCreateMapping()">+ New</button>
+                            <label class="btn btn-outline-primary btn-sm btn-touch mb-0">
+                                Import
+                                <input type="file" accept=".json" class="d-none" @change="importMapping($event)">
+                            </label>
                         </div>
-                        <div class="control">
-                            <button class="button is-primary" @click="searchMappings()" :class="{'is-loading': im.loading}">Search</button>
-                        </div>
-                        <div class="control">
-                            <button class="button is-success" @click="im.showCreate = !im.showCreate">+ New</button>
-                        </div>
+                    </div>
+                    <div class="input-group mb-4">
+                        <input class="form-control" type="text" placeholder="Search identity mappings..." x-model="im.search" @keyup.enter="searchMappings()">
+                        <button class="btn btn-primary btn-touch" @click="searchMappings()">
+                            <span x-show="!im.loading">Search</span>
+                            <span x-show="im.loading" class="spinner-border spinner-border-sm"></span>
+                        </button>
                     </div>
 
                     <!-- Create form -->
                     <template x-if="im.showCreate">
-                        <div class="box mb-5">
-                            <h4 class="title is-5">Create Identity Mapping</h4>
-                            <template x-if="im.createError">
-                                <div class="notification is-danger is-light" x-text="im.createError"></div>
-                            </template>
-                            <div class="columns">
-                                <div class="column">
-                                    <div class="field">
-                                        <label class="label is-small">Authentic Source</label>
-                                        <input class="input is-small" x-model="im.create.authentic_source">
+                        <div class="card mb-4 shadow-sm">
+                            <div class="card-body">
+                                <h5 class="card-title">Create Identity Mapping</h5>
+                                <template x-if="im.createError">
+                                    <div class="alert alert-danger py-2" x-text="im.createError"></div>
+                                </template>
+                                <div class="alert alert-info py-2 px-3 mb-3">
+                                    <p class="fw-semibold small mb-2">Identity</p>
+                                    <div class="row g-2">
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label small mb-1">Authentic Source</label>
+                                            <template x-if="allowedAuthenticSources.length > 1">
+                                                <select class="form-select form-select-sm" x-model="im.create.authentic_source">
+                                                    <option value="">Select...</option>
+                                                    <template x-for="org in allowedAuthenticSources" :key="org">
+                                                        <option :value="org" x-text="org"></option>
+                                                    </template>
+                                                </select>
+                                            </template>
+                                            <template x-if="allowedAuthenticSources.length <= 1">
+                                                <input class="form-control form-control-sm" x-model="im.create.authentic_source">
+                                            </template>
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label small mb-1">Person ID <span class="text-muted fw-normal">(optional)</span></label>
+                                            <input class="form-control form-control-sm" x-model="im.create.authentic_source_person_id" placeholder="auto-generated if empty">
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="column">
-                                    <div class="field">
-                                        <label class="label is-small">Person ID (optional, auto-generated if empty)</label>
-                                        <input class="input is-small" x-model="im.create.authentic_source_person_id">
-                                    </div>
+                                <div class="alert alert-success py-2 px-3 mb-3">
+                                    <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
+                                        <li class="nav-item"><a class="nav-link py-1 px-2" :class="im.createTab==='editor'?'active':''" href="#" @click.prevent="switchImCreateTab('editor')">Editor</a></li>
+                                        <li class="nav-item"><a class="nav-link py-1 px-2" :class="im.createTab==='json'?'active':''" href="#" @click.prevent="switchImCreateTab('json')">JSON</a></li>
+                                    </ul>
+                                    <template x-if="im.createTab==='editor'">
+                                        <div>
+                                            <div class="table-responsive">
+                                                <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
+                                                    <thead>
+                                                        <tr>
+                                                            <th style="width:40%">Key</th>
+                                                            <th>Value</th>
+                                                            <th style="width:50px"></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <template x-for="(row, ri) in treeView(im.create.attributes)" :key="row.type + '-' + ri">
+                                                            <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
+                                                                    <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
+                                                                    <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
+                                                                    <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(im.create.attributes, row.idx, $event.target.value)" style="max-width:150px"></template>
+                                                                </td>
+                                                                <td>
+                                                                    <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="im.create.attributes[row.idx].value"></template>
+                                                                </td>
+                                                                <td class="text-nowrap">
+                                                                    <template x-if="row.type==='group'">
+                                                                        <span>
+                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(im.create.attributes, row.path)" title="Add child field">+</button>
+                                                                            <button class="btn-close btn-close-sm ms-1" @click="removeGroup(im.create.attributes, row.path)" style="font-size:0.6rem;"></button>
+                                                                        </span>
+                                                                    </template>
+                                                                    <template x-if="row.type==='field'">
+                                                                        <span>
+                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(im.create.attributes, row.idx)" title="Convert to object">+</button>
+                                                                            <button class="btn-close btn-close-sm ms-1" @click="im.create.attributes.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
+                                                                        </span>
+                                                                    </template>
+                                                                </td>
+                                                            </tr>
+                                                        </template>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div class="input-group input-group-sm">
+                                                <input class="form-control" placeholder="Attribute key" x-model="im.create.newFieldKey" @keyup.enter="addMappingAttribute()">
+                                                <button class="btn btn-outline-secondary" @click="addMappingAttribute()">+ Add</button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="im.createTab==='json'">
+                                        <textarea class="form-control form-control-sm" rows="6" x-model="im.create.attributes_json"></textarea>
+                                    </template>
                                 </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">Attributes (JSON object)</label>
-                                <textarea class="textarea is-small" rows="3" x-model="im.create.attributes_str" placeholder='{"family_name": "Doe", "given_name": "John", "birth_date": "1990-01-01"}'></textarea>
-                            </div>
-                            <div class="field is-grouped">
-                                <div class="control">
-                                    <button class="button is-primary is-small" @click="createMapping()" :class="{'is-loading': im.creating}">Save</button>
-                                </div>
-                                <div class="control">
-                                    <button class="button is-small" @click="im.showCreate = false">Cancel</button>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-primary btn-sm btn-touch" @click="createMapping()">
+                                        <span x-show="!im.creating">Save</span>
+                                        <span x-show="im.creating" class="spinner-border spinner-border-sm"></span>
+                                    </button>
+                                    <button class="btn btn-secondary btn-sm btn-touch" @click="im.showCreate = false">Cancel</button>
                                 </div>
                             </div>
                         </div>
@@ -248,38 +515,38 @@
 
                     <!-- Results table -->
                     <template x-if="im.mappings.length === 0 && !im.loading">
-                        <div class="notification is-light">No identity mappings found. Try a search or create one.</div>
+                        <div class="alert alert-light">No identity mappings found. Try a search or create one.</div>
                     </template>
                     <template x-if="im.mappings.length > 0">
-                        <div class="table-container">
-                            <table class="table is-fullwidth is-striped is-hoverable">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover align-middle">
                                 <thead>
                                     <tr>
-                                        <th>Person ID</th>
-                                        <th>Authentic Source</th>
-                                        <th>Attributes</th>
-                                        <th>Created</th>
+                                        <th role="button" @click="sortMappings('person_id')">Person ID <span x-show="im.sortKey==='person_id'" x-text="im.sortDir==='asc'?'▲':'▼'"></span></th>
+                                        <th role="button" @click="sortMappings('authentic_source')">Source <span x-show="im.sortKey==='authentic_source'" x-text="im.sortDir==='asc'?'▲':'▼'"></span></th>
+                                        <th role="button" @click="sortMappings('attributes')" class="d-none d-md-table-cell">Attributes <span x-show="im.sortKey==='attributes'" x-text="im.sortDir==='asc'?'▲':'▼'"></span></th>
+                                        <th role="button" @click="sortMappings('created_at')" class="d-none d-lg-table-cell">Created <span x-show="im.sortKey==='created_at'" x-text="im.sortDir==='asc'?'▲':'▼'"></span></th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <template x-for="(m, idx) in im.mappings" :key="idx">
                                         <tr>
-                                            <td x-text="m.authentic_source_person_id || '-'" style="font-family:monospace;font-size:0.85rem;"></td>
+                                            <td style="font-family:monospace;font-size:0.82rem;" x-text="m.authentic_source_person_id || '-'"></td>
                                             <td x-text="m.authentic_source || '-'"></td>
-                                            <td>
+                                            <td class="d-none d-md-table-cell">
                                                 <template x-if="m.attributes">
                                                     <div>
                                                         <template x-for="(val, key) in m.attributes" :key="key">
-                                                            <span class="tag is-light is-small mr-1 mb-1" x-text="key + ': ' + val"></span>
+                                                            <span class="badge bg-light text-dark me-1 mb-1" x-text="key + ': ' + val"></span>
                                                         </template>
                                                     </div>
                                                 </template>
                                             </td>
-                                            <td x-text="formatDate(m.created_at)"></td>
-                                            <td>
-                                                <button class="button is-small is-warning is-outlined" @click="startEditMapping(idx)">Edit</button>
-                                                <button class="button is-small is-danger is-outlined" @click="deleteMapping(m)">Delete</button>
+                                            <td class="d-none d-lg-table-cell" x-text="formatDate(m.created_at)"></td>
+                                            <td class="text-nowrap">
+                                                <button class="btn btn-sm btn-outline-warning" @click="startEditMapping(idx)">Edit</button>
+                                                <button class="btn btn-sm btn-outline-danger" @click="deleteMapping(m)">Del</button>
                                             </td>
                                         </tr>
                                     </template>
@@ -290,34 +557,90 @@
 
                     <!-- Edit modal -->
                     <template x-if="im.editIdx !== null">
-                        <div class="modal is-active">
-                            <div class="modal-background" @click="im.editIdx = null"></div>
-                            <div class="modal-card" style="max-width:600px;width:90vw;">
-                                <header class="modal-card-head">
-                                    <p class="modal-card-title">Edit Identity Mapping</p>
-                                    <button class="delete" @click="im.editIdx = null"></button>
-                                </header>
-                                <section class="modal-card-body">
-                                    <template x-if="im.editError">
-                                        <div class="notification is-danger is-light" x-text="im.editError"></div>
-                                    </template>
-                                    <div class="field">
-                                        <label class="label is-small">Authentic Source</label>
-                                        <input class="input is-small" x-model="im.edit.authentic_source" disabled>
+                        <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);" @click.self="im.editIdx = null">
+                            <div class="modal-dialog modal-dialog-scrollable">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Edit Identity Mapping</h5>
+                                        <button type="button" class="btn-close" @click="im.editIdx = null"></button>
                                     </div>
-                                    <div class="field">
-                                        <label class="label is-small">Person ID</label>
-                                        <input class="input is-small" x-model="im.edit.authentic_source_person_id" disabled>
+                                    <div class="modal-body">
+                                        <template x-if="im.editError">
+                                            <div class="alert alert-danger py-2" x-text="im.editError"></div>
+                                        </template>
+                                        <div class="mb-3">
+                                            <label class="form-label small mb-1">Authentic Source</label>
+                                            <input class="form-control form-control-sm" x-model="im.edit.authentic_source" disabled>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small mb-1">Person ID</label>
+                                            <input class="form-control form-control-sm" x-model="im.edit.authentic_source_person_id" disabled>
+                                        </div>
+                                        <div class="alert alert-success py-2 px-3 mb-3">
+                                            <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
+                                                <li class="nav-item"><a class="nav-link py-1 px-2" :class="im.editTab==='editor'?'active':''" href="#" @click.prevent="switchImEditTab('editor')">Editor</a></li>
+                                                <li class="nav-item"><a class="nav-link py-1 px-2" :class="im.editTab==='json'?'active':''" href="#" @click.prevent="switchImEditTab('json')">JSON</a></li>
+                                            </ul>
+                                            <template x-if="im.editTab==='editor'">
+                                                <div>
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="width:40%">Key</th>
+                                                                    <th>Value</th>
+                                                                    <th style="width:50px"></th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <template x-for="(row, ri) in treeView(im.edit.attributes)" :key="row.type + '-' + ri">
+                                                                    <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                        <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
+                                                                            <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
+                                                                            <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
+                                                                            <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(im.edit.attributes, row.idx, $event.target.value)" style="max-width:150px"></template>
+                                                                        </td>
+                                                                        <td>
+                                                                            <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="im.edit.attributes[row.idx].value"></template>
+                                                                        </td>
+                                                                        <td class="text-nowrap">
+                                                                            <template x-if="row.type==='group'">
+                                                                                <span>
+                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(im.edit.attributes, row.path)" title="Add child field">+</button>
+                                                                                    <button class="btn-close btn-close-sm ms-1" @click="removeGroup(im.edit.attributes, row.path)" style="font-size:0.6rem;"></button>
+                                                                                </span>
+                                                                            </template>
+                                                                            <template x-if="row.type==='field'">
+                                                                                <span>
+                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(im.edit.attributes, row.idx)" title="Convert to object">+</button>
+                                                                                    <button class="btn-close btn-close-sm ms-1" @click="im.edit.attributes.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
+                                                                                </span>
+                                                                            </template>
+                                                                        </td>
+                                                                    </tr>
+                                                                </template>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <div class="input-group input-group-sm">
+                                                        <input class="form-control" placeholder="Attribute key" x-model="im.edit.newFieldKey" @keyup.enter="addEditMappingAttribute()">
+                                                        <button class="btn btn-outline-secondary" @click="addEditMappingAttribute()">+ Add</button>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                            <template x-if="im.editTab==='json'">
+                                                <textarea class="form-control form-control-sm" rows="6" x-model="im.edit.attributes_json"></textarea>
+                                            </template>
+                                        </div>
                                     </div>
-                                    <div class="field">
-                                        <label class="label is-small">Attributes (JSON)</label>
-                                        <textarea class="textarea is-small" rows="4" x-model="im.edit.attributes_str"></textarea>
+                                    <div class="modal-footer">
+                                        <button class="btn btn-primary btn-sm btn-touch" @click="updateMapping()">
+                                            <span x-show="!im.updating">Update</span>
+                                            <span x-show="im.updating" class="spinner-border spinner-border-sm"></span>
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm btn-touch" @click="im.editIdx = null">Cancel</button>
                                     </div>
-                                </section>
-                                <footer class="modal-card-foot">
-                                    <button class="button is-primary is-small" @click="updateMapping()" :class="{'is-loading': im.updating}">Update</button>
-                                    <button class="button is-small" @click="im.editIdx = null">Cancel</button>
-                                </footer>
+                                </div>
                             </div>
                         </div>
                     </template>

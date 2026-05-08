@@ -16,7 +16,7 @@ import (
 // Apiv1 interface
 type Apiv1 interface {
 	// datastore endpoints
-	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error
+	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*apiv1.DatastoreUploadReply, error)
 	DatastoreAddIdentity(ctx context.Context, req *apiv1.DatastoreAddIdentityRequest) error
 	DatastoreDeleteIdentity(ctx context.Context, req *apiv1.DatastoreDeleteIdentityRequest) error
 	DatastoreGet(ctx context.Context, req *apiv1.DatastoreGetRequest) (*apiv1.DatastoreGetReply, error)
@@ -25,10 +25,13 @@ type Apiv1 interface {
 	DatastoreGetByKey(ctx context.Context, req *apiv1.DatastoreGetByKeyRequest) (*apiv1.DatastoreGetByKeyReply, error)
 	DatastoreResolve(ctx context.Context, req *apiv1.DatastoreResolveRequest) (*apiv1.DatastoreResolveReply, error)
 	DatastoreDeleteByKey(ctx context.Context, req *apiv1.DatastoreDeleteByKeyRequest) error
+	DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error
 	DatastoreSearch(ctx context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error)
+	DatastoreBulkUpload(ctx context.Context, req *apiv1.DatastoreBulkUploadRequest) (*apiv1.DatastoreBulkUploadReply, error)
 
 	// identity mapping endpoints
 	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
+	IdentityMappingBulkCreate(ctx context.Context, req *apiv1.IdentityMappingBulkCreateRequest) (*apiv1.IdentityMappingBulkCreateReply, error)
 	IdentityMappingResolve(ctx context.Context, req *apiv1.IdentityMappingResolveRequest) (*apiv1.IdentityMappingResolveReply, error)
 	IdentityMappingUpdate(ctx context.Context, req *apiv1.IdentityMappingUpdateRequest) error
 	IdentityMappingDelete(ctx context.Context, req *apiv1.IdentityMappingDeleteRequest) error

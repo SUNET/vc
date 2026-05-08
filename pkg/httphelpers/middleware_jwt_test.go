@@ -140,7 +140,7 @@ func performRequest(r *gin.Engine, method, path string, headers map[string]strin
 // ---------- buildSPOCPEngine tests ----------
 
 func TestBuildSPOCPEngine_NoRules(t *testing.T) {
-	engine, err := buildSPOCPEngine(model.APIAuth{})
+	engine, err := BuildSPOCPEngine(model.APIAuth{})
 	assert.NoError(t, err)
 	assert.Nil(t, engine, "should return nil when no rules configured")
 }
@@ -153,7 +153,7 @@ func TestBuildSPOCPEngine_InlineRules(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 2, engine.RuleCount())
@@ -164,7 +164,7 @@ func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
 		Rules: []string{"not a valid s-expression"},
 	}
 
-	_, err := buildSPOCPEngine(cfg)
+	_, err := BuildSPOCPEngine(cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid inline SPOCP rule #1")
 }
@@ -179,7 +179,7 @@ func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 		RulesFile: path,
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 1, engine.RuleCount())
@@ -190,7 +190,7 @@ func TestBuildSPOCPEngine_RulesFileMissing(t *testing.T) {
 		RulesFile: "/nonexistent/rules.spocp",
 	}
 
-	_, err := buildSPOCPEngine(cfg)
+	_, err := BuildSPOCPEngine(cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load SPOCP rules")
 }
@@ -206,16 +206,16 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 		RulesFile: path,
 	}
 
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 2, engine.RuleCount())
 }
 
-// ---------- buildSPOCPQuery tests ----------
+// ---------- buildAPISPOCPQuery tests ----------
 
-func TestBuildSPOCPQuery(t *testing.T) {
-	q := buildSPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice")
+func TestBuildAPISPOCPQuery(t *testing.T) {
+	q := buildAPISPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice")
 	assert.NotNil(t, q)
 	// The canonical string representation should contain all four tuples.
 	s := q.String()
@@ -250,7 +250,7 @@ func TestJWTAuth_SPOCPAllowed(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -287,7 +287,7 @@ func TestJWTAuth_SPOCPDenied(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -326,7 +326,7 @@ func TestJWTAuth_SPOCPWildcardSubject(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -365,7 +365,7 @@ func TestJWTAuth_SPOCPWildcardMethod(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -410,7 +410,7 @@ func TestJWTAuth_SPOCPPrefixPath(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -462,7 +462,7 @@ func TestJWTAuth_SPOCPMultipleRules(t *testing.T) {
 		},
 	}
 
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -789,7 +789,7 @@ func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 3, engine.RuleCount())
@@ -810,7 +810,7 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 2, engine.RuleCount(), "only non-comment, non-blank lines count")
@@ -822,7 +822,7 @@ func TestLoadRulesFromFile_EmptyFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(""), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	// Engine is created (file path was configured) but has no rules.
 	require.NotNil(t, engine)
@@ -838,7 +838,7 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 0, engine.RuleCount())
@@ -854,7 +854,7 @@ this is not valid
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
-	_, err := buildSPOCPEngine(cfg)
+	_, err := BuildSPOCPEngine(cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "line 2")
 }
@@ -874,7 +874,7 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
-	engine, err := buildSPOCPEngine(cfg)
+	engine, err := BuildSPOCPEngine(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 	assert.Equal(t, 4, engine.RuleCount())
@@ -904,7 +904,7 @@ func TestRulesFile_E2E_MultipleUsersAndPaths(t *testing.T) {
 		Audience: "test-aud",
 	}
 	authCfg := model.APIAuth{RulesFile: rulesPath}
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -959,7 +959,7 @@ func TestRulesFile_E2E_WildcardSubject(t *testing.T) {
 		Audience: "test-aud",
 	}
 	authCfg := model.APIAuth{RulesFile: rulesPath}
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -1004,7 +1004,7 @@ func TestRulesFile_E2E_SuffixPath(t *testing.T) {
 		Audience: "test-aud",
 	}
 	authCfg := model.APIAuth{RulesFile: rulesPath}
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -1045,7 +1045,7 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 		Audience: "test-aud",
 	}
 	authCfg := model.APIAuth{RulesFile: rulesPath}
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
@@ -1098,7 +1098,7 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 		},
 		RulesFile: rulesPath,
 	}
-	engine, err := buildSPOCPEngine(authCfg)
+	engine, err := BuildSPOCPEngine(authCfg)
 	require.NoError(t, err)
 	require.Equal(t, 2, engine.RuleCount())
 
