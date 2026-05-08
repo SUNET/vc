@@ -120,59 +120,56 @@ func TestEvaluate_WildcardRule(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestEvaluate_PrefixStarForm(t *testing.T) {
-	policy := &model.IssuancePolicy{
-		Rules: []string{
-			"(credential (scope org_cred)(acr (* prefix urn:example:loa)))",
+func TestEvaluate_StarForms(t *testing.T) {
+	tests := []struct {
+		name      string
+		rule      string
+		scope     string
+		passCases []map[string]any
+		failCases []map[string]any
+	}{
+		{
+			name:  "prefix match",
+			rule:  "(credential (scope org_cred)(acr (* prefix urn:example:loa)))",
+			scope: "org_cred",
+			passCases: []map[string]any{
+				{"acr": "urn:example:loa3"},
+			},
+			failCases: []map[string]any{
+				{"acr": "urn:other:loa3"},
+			},
 		},
-		QueryTemplate: []model.QueryDimension{
-			{Dimension: "acr", Claim: "acr"},
-		},
-	}
-	engine, err := NewPolicyEngine(policy)
-	require.NoError(t, err)
-
-	// Should pass: acr starts with the prefix
-	err = engine.Evaluate("org_cred", map[string]any{
-		"acr": "urn:example:loa3",
-	}, policy.QueryTemplate)
-	assert.NoError(t, err)
-
-	// Should deny: acr doesn't match prefix
-	err = engine.Evaluate("org_cred", map[string]any{
-		"acr": "urn:other:loa3",
-	}, policy.QueryTemplate)
-	assert.Error(t, err)
-}
-
-func TestEvaluate_SetStarForm(t *testing.T) {
-	policy := &model.IssuancePolicy{
-		Rules: []string{
-			"(credential (scope pid)(acr (* set loa3 loa4)))",
-		},
-		QueryTemplate: []model.QueryDimension{
-			{Dimension: "acr", Claim: "acr"},
+		{
+			name:  "set match",
+			rule:  "(credential (scope pid)(acr (* set loa3 loa4)))",
+			scope: "pid",
+			passCases: []map[string]any{
+				{"acr": "loa3"},
+				{"acr": "loa4"},
+			},
+			failCases: []map[string]any{
+				{"acr": "loa1"},
+			},
 		},
 	}
-	engine, err := NewPolicyEngine(policy)
-	require.NoError(t, err)
 
-	// Should pass: acr is in the set
-	err = engine.Evaluate("pid", map[string]any{
-		"acr": "loa3",
-	}, policy.QueryTemplate)
-	assert.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := &model.IssuancePolicy{
+				Rules:         []string{tt.rule},
+				QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+			}
+			engine, err := NewPolicyEngine(policy)
+			require.NoError(t, err)
 
-	err = engine.Evaluate("pid", map[string]any{
-		"acr": "loa4",
-	}, policy.QueryTemplate)
-	assert.NoError(t, err)
-
-	// Should deny: acr not in set
-	err = engine.Evaluate("pid", map[string]any{
-		"acr": "loa1",
-	}, policy.QueryTemplate)
-	assert.Error(t, err)
+			for _, claims := range tt.passCases {
+				assert.NoError(t, engine.Evaluate(tt.scope, claims, policy.QueryTemplate), "expected pass for %v", claims)
+			}
+			for _, claims := range tt.failCases {
+				assert.Error(t, engine.Evaluate(tt.scope, claims, policy.QueryTemplate), "expected deny for %v", claims)
+			}
+		})
+	}
 }
 
 func TestEvaluate_MultipleRules(t *testing.T) {
