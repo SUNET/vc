@@ -362,30 +362,24 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		Scope:     strings.Join(authCtx.Scopes, " "),
 	}
 
-	// Only generate access/refresh tokens when UserInfo is enabled.
+	// Only generate access tokens when UserInfo is enabled.
 	// When disabled, the verifier-OP is not a traditional IdP and the
 	// access token would not be usable at any endpoint, confusing
 	// standard RP libraries.
+	//
+	// When enabled, the access token is a signed JWT containing the same
+	// claims as the id_token (with typ=at+jwt per RFC 9068). This allows
+	// the userinfo endpoint to be fully stateless: it validates the JWT
+	// signature and returns the embedded claims without any session lookup.
 	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
-		accessToken, err := crypto.GenerateSecureToken(0, 32)
+		accessToken, err := c.generateAccessToken(ctx, authCtx, client)
 		if err != nil {
 			c.log.Error(err, "Failed to generate access token")
 			return nil, ErrServerError
 		}
-		refreshToken, err := crypto.GenerateSecureToken(0, 32)
-		if err != nil {
-			c.log.Error(err, "Failed to generate refresh token")
-			return nil, ErrServerError
-		}
-
-		authCtx.AccessToken = accessToken
-		authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second).Unix()
-		authCtx.RefreshToken = refreshToken
-		authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.RefreshTokenDuration) * time.Second).Unix()
 
 		resp.AccessToken = accessToken
 		resp.ExpiresIn = c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration
-		resp.RefreshToken = refreshToken
 	}
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
@@ -441,6 +435,41 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	}
 
 	return tokenString, nil
+}
+
+// generateAccessToken creates a signed JWT access token (RFC 9068 at+jwt).
+// It contains the same claims as the id_token so the userinfo endpoint can
+// return them without any session/database lookup (stateless).
+func (c *Client) generateAccessToken(ctx context.Context, authCtx *cache.AuthorizationContext, client *db.Client) (string, error) {
+	now := time.Now()
+
+	walletID := authCtx.WalletID
+	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
+
+	accessTokenTTL := time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second
+
+	claims := jwt.MapClaims{
+		"iss": c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
+		"sub": sub,
+		"aud": client.ClientID,
+		"exp": now.Add(accessTokenTTL).Unix(),
+		"iat": now.Unix(),
+	}
+
+	// Add verified claims, but never overwrite reserved OIDC claims
+	for k, v := range authCtx.VerifiedClaims {
+		switch k {
+		case "iss", "sub", "aud", "exp", "iat", "nonce":
+			continue
+		default:
+			claims[k] = v
+		}
+	}
+
+	header := jwt.MapClaims{
+		"typ": "at+jwt",
+	}
+	return jose.MakeJWT(ctx, header, claims, c.pkiSigner)
 }
 
 // authenticateOIDCClient validates client credentials for OIDC endpoints
@@ -531,7 +560,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 
 	// Add grant types that require UserInfo/token support
 	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
-		metadata.GrantTypesSupported = append(metadata.GrantTypesSupported, "implicit", "refresh_token")
+		metadata.GrantTypesSupported = append(metadata.GrantTypesSupported, "implicit")
 	}
 
 	// Add configured credential scopes
@@ -938,43 +967,36 @@ type UserInfoRequest struct {
 // UserInfoResponse contains user claims
 type UserInfoResponse map[string]any
 
-// GetUserInfo returns user claims based on access token
+// GetUserInfo returns user claims based on a JWT access token.
+// The endpoint is fully stateless: it validates the JWT signature and expiration
+// using the same signing key that issued the token, then returns the embedded claims.
 func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
-	// Get session by access token
-	session, err := c.cacheService.AuthContext.GetByAccessToken(ctx, req.AccessToken)
+	if c.pkiSigner == nil {
+		c.log.Error(nil, "Signing key not loaded, cannot validate access token")
+		return nil, ErrServerError
+	}
+
+	// Parse and validate the JWT access token using the issuer's public key
+	claims := jwt.MapClaims{}
+	_, err := jwt.ParseWithClaims(req.AccessToken, claims, func(t *jwt.Token) (any, error) {
+		return c.pkiSigner.PublicKey(), nil
+	}, jwt.WithValidMethods([]string{c.pkiSigner.Algorithm()}),
+		jwt.WithIssuer(c.cfg.Verifier.Outbound.OIDCProvider.Issuer))
 	if err != nil {
-		return nil, ErrInvalidGrant
-	}
-	if session == nil {
-		return nil, ErrInvalidGrant
-	}
-
-	// Check if access token is expired
-	if time.Now().Unix() > session.AccessTokenExpiresAt {
+		c.log.Info("Access token validation failed", "error", err)
 		return nil, ErrInvalidGrant
 	}
 
-	// Generate subject identifier
-	walletID := ""
-	if val, ok := session.VerifiedClaims["sub"]; ok {
-		if str, ok := val.(string); ok {
-			walletID = str
-		}
-	}
-
-	subject := c.generateSubjectIdentifier(walletID, session.ClientID)
-
-	// Return verified claims
-	response := UserInfoResponse{
-		"sub": subject,
-	}
-
-	// Add verified claims from VP, but never overwrite sub
-	for k, v := range session.VerifiedClaims {
-		if k == "sub" {
+	// Build UserInfo response from the JWT claims.
+	// Omit JWT-specific claims that are not userinfo attributes.
+	response := UserInfoResponse{}
+	for k, v := range claims {
+		switch k {
+		case "iss", "aud", "exp", "iat", "nonce", "jti":
 			continue
+		default:
+			response[k] = v
 		}
-		response[k] = v
 	}
 
 	return response, nil
