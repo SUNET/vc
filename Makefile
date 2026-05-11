@@ -467,7 +467,7 @@ swagger-verifier: ## Generate verifier Swagger docs
 	swag init -d internal/verifier/apiv1/ -g client.go --output docs/verifier $(SWAGGER_OPTS)
 
 swagger-apigw: ## Generate apigw Swagger docs
-	swag init -d internal/apigw/apiv1/,pkg/helpers,pkg/model,pkg/vcclient,pkg/openid4vci,internal/gen/issuer/apiv1_issuer -g client.go --output docs/apigw $(SWAGGER_OPTS)
+	swag init -d internal/apigw/apiv1/,pkg/helpers,pkg/model,pkg/vcclient,pkg/openid4vci,pkg/oauth2,internal/gen/issuer/apiv1_issuer -g client.go --output docs/apigw $(SWAGGER_OPTS)
 
 swagger-issuer: ## Generate issuer Swagger docs
 	swag init -d internal/issuer/apiv1/ -g client.go --output docs/issuer $(SWAGGER_OPTS)
