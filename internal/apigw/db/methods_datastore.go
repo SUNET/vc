@@ -332,6 +332,7 @@ type SearchDocumentsQuery struct {
 	Scope                   string   `json:"scope"`
 	Limit                   int64    `json:"limit"`
 	AllowedAuthenticSources []string `json:"-"`
+	AllowedScopes           []string `json:"-"`
 }
 
 // Search returns documents matching a text search or filters, with a limit
@@ -349,7 +350,12 @@ func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery)
 		filter["meta.authentic_source"] = bson.M{"$in": query.AllowedAuthenticSources}
 	}
 	if query.Scope != "" {
+		if len(query.AllowedScopes) > 0 && !slices.Contains(query.AllowedScopes, query.Scope) {
+			return []*model.CompleteDocument{}, nil
+		}
 		filter["meta.scope"] = bson.M{"$eq": query.Scope}
+	} else if len(query.AllowedScopes) > 0 {
+		filter["meta.scope"] = bson.M{"$in": query.AllowedScopes}
 	}
 	if query.Search != "" {
 		searchRegex := bson.M{"$regex": regexp.QuoteMeta(query.Search), "$options": "i"}

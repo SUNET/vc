@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 
@@ -9,6 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+var errForbidden = errors.New("forbidden: insufficient permissions for identity mapping")
 
 func (s *Service) endpointIdentityMappingCreate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIdentityMappingCreate")
@@ -80,12 +83,35 @@ func (s *Service) endpointIdentityMappingSearch(ctx context.Context, c *gin.Cont
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointIdentityMappingSearch")
 	defer span.End()
 
+	// Check that the user has the "identity_mapping" scope.
+	// A nil slice means unrestricted access (wildcard rule).
+	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
+		if scopes, ok := allowed.([]string); ok && scopes != nil {
+			hasScope := false
+			for _, sc := range scopes {
+				if sc == "identity_mapping" {
+					hasScope = true
+					break
+				}
+			}
+			if !hasScope {
+				return nil, errForbidden
+			}
+		}
+	}
+
 	request := &apiv1.IdentityMappingSearchRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	request.AllowedAuthenticSources = sessionAllowedAuthenticSources(c)
+
+	// Apply SPOCP-derived authentic_source filter for DB queries.
+	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
+		if sources, ok := allowed.([]string); ok {
+			request.AllowedAuthenticSources = sources
+		}
+	}
 
 	reply, err := s.apiv1.IdentityMappingSearch(ctx, request)
 	if err != nil {

@@ -2,14 +2,15 @@ package httpserver
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/codes"
 )
 
@@ -95,30 +96,15 @@ func (s *Service) endpointAdminCallback(ctx context.Context, c *gin.Context) (an
 
 	session.Set(adminSessionKey, true)
 	session.Set("admin_subject", reply.Subject)
-	session.Set("admin_id_token", reply.RawIDToken)
 
-	// Derive unique authentic sources for search filtering
-	sourceSet := map[string]struct{}{}
-	for _, r := range reply.AllowedResources {
-		sourceSet[r.AuthenticSource] = struct{}{}
+	// Store the raw ID token server-side in the cache instead of the cookie
+	// session to avoid exceeding the ~4 KB cookie size limit and to reduce
+	// exposure of sensitive token material to the client.
+	if reply.RawIDToken != "" {
+		tokenRef := uuid.NewString()
+		s.cacheService.AdminIDToken.Set(ctx, tokenRef, reply.RawIDToken)
+		session.Set("admin_id_token_ref", tokenRef)
 	}
-	allowedSources := make([]string, 0, len(sourceSet))
-	for s := range sourceSet {
-		allowedSources = append(allowedSources, s)
-	}
-	session.Set("admin_allowed_authentic_sources", allowedSources)
-
-	// Store full resource+scope pairs as JSON for the status API
-	type pair struct {
-		AuthenticSource string `json:"authentic_source"`
-		Scope           string `json:"scope"`
-	}
-	pairs := make([]pair, len(reply.AllowedResources))
-	for i, r := range reply.AllowedResources {
-		pairs[i] = pair{AuthenticSource: r.AuthenticSource, Scope: r.Scope}
-	}
-	pairsJSON, _ := json.Marshal(pairs)
-	session.Set("admin_allowed_resources_json", string(pairsJSON))
 
 	if err := session.Save(); err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -134,25 +120,78 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 	if auth := session.Get(adminSessionKey); auth == true {
 		subject, _ := session.Get("admin_subject").(string)
 
-		// Parse allowed resource+scope pairs from session
-		var allowedResources []map[string]string
-		if raw, ok := session.Get("admin_allowed_resources_json").(string); ok && raw != "" {
-			_ = json.Unmarshal([]byte(raw), &allowedResources)
-		}
-
-		var scopes []string
+		var allScopes []string
 		scopeTemplates := map[string]any{}
 		if s.cfg.Common != nil {
 			for scope, cm := range s.cfg.Common.CredentialMetadata {
-				scopes = append(scopes, scope)
+				allScopes = append(allScopes, scope)
 				if cm != nil && cm.VCTM != nil {
 					scopeTemplates[scope] = buildClaimTemplate(cm.VCTM.Claims)
 				}
 			}
 		}
-		return gin.H{"authenticated": true, "subject": subject, "allowed_resources": allowedResources, "scopes": scopes, "scope_templates": scopeTemplates}, nil
+
+		// Resolve allowed resources from SPOCP rules.
+		allowedSources := httphelpers.AllowedAuthenticSources(s.spocpEngine, subject)
+		pairs := httphelpers.ResolveAllowedResources(s.spocpEngine, subject)
+
+		// When allowedSources is nil (wildcard rule = unrestricted),
+		// fetch all authentic sources from the database for the UI dropdown.
+		if allowedSources == nil {
+			if dbSources, err := s.apiv1.ListAuthenticSources(ctx); err == nil && len(dbSources) > 0 {
+				allowedSources = dbSources
+			}
+		}
+
+		// Filter scopes to only those the user is allowed to access.
+		scopes := filterAllowedScopes(allScopes, pairs)
+
+		return gin.H{
+			"authenticated":             true,
+			"subject":                   subject,
+			"scopes":                    scopes,
+			"scope_templates":           scopeTemplates,
+			"allowed_authentic_sources": allowedSources,
+			"has_identity_mapping":      hasIdentityMappingScope(pairs),
+		}, nil
 	}
 	return gin.H{"authenticated": false}, nil
+}
+
+// filterAllowedScopes returns only configured scopes that the user's SPOCP rules permit.
+// If pairs is empty (no resource constraints) or any pair has Scope "*", all scopes are returned.
+func filterAllowedScopes(allScopes []string, pairs []httphelpers.ResourcePair) []string {
+	if len(pairs) == 0 {
+		return allScopes
+	}
+	allowed := map[string]bool{}
+	for _, p := range pairs {
+		if p.Scope == "*" {
+			return allScopes
+		}
+		allowed[p.Scope] = true
+	}
+	var result []string
+	for _, s := range allScopes {
+		if allowed[s] {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// hasIdentityMappingScope returns true when the SPOCP pairs grant the
+// synthetic "identity_mapping" scope (or a wildcard that covers it).
+func hasIdentityMappingScope(pairs []httphelpers.ResourcePair) bool {
+	if len(pairs) == 0 {
+		return true // no resource constraints — unrestricted
+	}
+	for _, p := range pairs {
+		if p.Scope == "*" || p.Scope == "identity_mapping" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildClaimTemplate creates a nested map from VCTM claims with empty string values
@@ -191,10 +230,17 @@ func buildClaimTemplate(claims []sdjwtvc.Claim) map[string]any {
 
 func (s *Service) endpointAdminLogout(ctx context.Context, c *gin.Context) (any, error) {
 	session := sessions.Default(c)
+
+	// Retrieve the raw ID token from the server-side cache using the opaque
+	// reference stored in the cookie session.
 	var idToken string
-	if v, ok := session.Get("admin_id_token").(string); ok {
-		idToken = v
+	if ref, ok := session.Get("admin_id_token_ref").(string); ok && ref != "" {
+		if v, found := s.cacheService.AdminIDToken.Get(ctx, ref); found {
+			idToken = v
+		}
+		s.cacheService.AdminIDToken.Delete(ctx, ref)
 	}
+
 	session.Clear()
 	_ = session.Save()
 

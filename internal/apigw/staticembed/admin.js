@@ -54,10 +54,10 @@ window.adminApp = function () {
     return {
         authenticated: false,
         subject: '',
-        allowedResources: [],
-        allowedAuthenticSources: [],
         scopes: [],
         scopeTemplates: {},
+        allowedAuthenticSources: [],
+        hasIdentityMapping: false,
         view: 'datastore',
         sidebarOpen: false,
 
@@ -79,20 +79,14 @@ window.adminApp = function () {
             updating: false,
             edit: {
                 identity_mapping_ids_str: '',
-                document_data: [],
-                document_data_json: '{}',
-                newFieldKey: ''
+                document_data: []
             },
-            createTab: 'editor',
-            editTab: 'editor',
             create: {
                 authentic_source: '',
                 scope: '',
                 document_id: '',
                 identity_mapping_ids_str: '',
-                document_data: [],
-                document_data_json: '{}',
-                newFieldKey: ''
+                document_data: []
             }
         },
 
@@ -138,10 +132,10 @@ window.adminApp = function () {
                 if (data.authenticated) {
                     this.authenticated = true;
                     this.subject = data.subject || '';
-                    this.allowedResources = data.allowed_resources || [];
-                    this.allowedAuthenticSources = [...new Set(this.allowedResources.map(r => r.authentic_source))];
                     this.scopes = (data.scopes || []).sort();
                     this.scopeTemplates = data.scope_templates || {};
+                    this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
+                    this.hasIdentityMapping = data.has_identity_mapping || false;
                     this.searchDocuments();
                 }
             } catch (e) {
@@ -241,15 +235,12 @@ window.adminApp = function () {
 
         openCreateDocument() {
             this.ds.create = {
-                authentic_source: this.allowedAuthenticSources.length === 1 ? this.allowedAuthenticSources[0] : '',
+                authentic_source: '',
                 scope: '',
                 document_id: '',
                 identity_mapping_ids_str: '',
-                document_data: [],
-                document_data_json: '{}',
-                newFieldKey: ''
+                document_data: []
             };
-            this.ds.createTab = 'editor';
             this.ds.createError = '';
             this.ds.showCreate = true;
         },
@@ -325,9 +316,7 @@ window.adminApp = function () {
                     this.ds.creating = false;
                     return;
                 }
-                const docData = this.ds.createTab === 'json'
-                    ? JSON.parse(this.ds.create.document_data_json)
-                    : unflattenEntries(this.ds.create.document_data);
+                const docData = unflattenEntries(this.ds.create.document_data);
                 const ids = this.ds.create.identity_mapping_ids_str
                     ? this.ds.create.identity_mapping_ids_str.split(',').map(s => s.trim()).filter(Boolean)
                     : [];
@@ -357,7 +346,7 @@ window.adminApp = function () {
                     throw new Error(text || resp.statusText);
                 }
                 this.ds.showCreate = false;
-                this.ds.create = { authentic_source: '', scope: '', document_id: '', identity_mapping_ids_str: '', document_data: [], document_data_json: '{}', newFieldKey: '' };
+                this.ds.create = { authentic_source: '', scope: '', document_id: '', identity_mapping_ids_str: '', document_data: [] };
                 this.searchDocuments();
             } catch (e) {
                 this.ds.createError = 'Failed: ' + e.message;
@@ -390,47 +379,10 @@ window.adminApp = function () {
             const dd = doc.document_data || {};
             this.ds.edit = {
                 identity_mapping_ids_str: (doc.identity_mapping_ids || []).join(', '),
-                document_data: flattenObject(dd, ''),
-                document_data_json: JSON.stringify(dd, null, 2),
-                newFieldKey: ''
+                document_data: flattenObject(dd, '')
             };
-            this.ds.editTab = 'editor';
             this.ds.editError = '';
             this.ds.editIdx = idx;
-        },
-
-        addEditDocDataField() {
-            const key = this.ds.edit.newFieldKey.trim();
-            if (!key) return;
-            this.ds.edit.document_data.push({ key, value: '' });
-            this.ds.edit.newFieldKey = '';
-        },
-
-        addCreateDocDataField() {
-            const key = this.ds.create.newFieldKey.trim();
-            if (!key) return;
-            this.ds.create.document_data.push({ key, value: '' });
-            this.ds.create.newFieldKey = '';
-        },
-
-        switchDsCreateTab(tab) {
-            if (tab === this.ds.createTab) return;
-            if (tab === 'json') {
-                this.ds.create.document_data_json = JSON.stringify(unflattenEntries(this.ds.create.document_data), null, 2);
-            } else {
-                try { this.ds.create.document_data = flattenObject(JSON.parse(this.ds.create.document_data_json), ''); } catch { /* keep current */ }
-            }
-            this.ds.createTab = tab;
-        },
-
-        switchDsEditTab(tab) {
-            if (tab === this.ds.editTab) return;
-            if (tab === 'json') {
-                this.ds.edit.document_data_json = JSON.stringify(unflattenEntries(this.ds.edit.document_data), null, 2);
-            } else {
-                try { this.ds.edit.document_data = flattenObject(JSON.parse(this.ds.edit.document_data_json), ''); } catch { /* keep current */ }
-            }
-            this.ds.editTab = tab;
         },
 
         async updateDocument() {
@@ -438,9 +390,7 @@ window.adminApp = function () {
             this.ds.editError = '';
             const doc = this.ds.docs[/** @type {number} */ (this.ds.editIdx)];
             try {
-                const docData = this.ds.editTab === 'json'
-                    ? JSON.parse(this.ds.edit.document_data_json)
-                    : unflattenEntries(this.ds.edit.document_data);
+                const docData = unflattenEntries(this.ds.edit.document_data);
                 const ids = this.ds.edit.identity_mapping_ids_str
                     ? this.ds.edit.identity_mapping_ids_str.split(',').map(s => s.trim()).filter(Boolean)
                     : [];
@@ -558,7 +508,7 @@ window.adminApp = function () {
 
         openCreateMapping() {
             this.im.create = {
-                authentic_source: this.allowedAuthenticSources.length === 1 ? this.allowedAuthenticSources[0] : '',
+                authentic_source: '',
                 authentic_source_person_id: '',
                 attributes: [
                     { key: 'family_name', value: '' },
@@ -593,11 +543,7 @@ window.adminApp = function () {
                 if (this.im.createTab === 'json') {
                     attrs = JSON.parse(this.im.create.attributes_json);
                 } else {
-                    const attrEntries = this.im.create.attributes.filter(a => a.key.trim());
-                    attrs = {};
-                    for (const a of attrEntries) {
-                        attrs[a.key.trim()] = a.value;
-                    }
+                    attrs = unflattenEntries(this.im.create.attributes.filter(a => a.key.trim()));
                 }
                 const body = {
                     authentic_source: this.im.create.authentic_source,
@@ -641,7 +587,7 @@ window.adminApp = function () {
             this.im.edit = {
                 authentic_source: m.authentic_source,
                 authentic_source_person_id: m.authentic_source_person_id,
-                attributes: Object.entries(attrs).map(([key, value]) => ({ key, value: String(value) })),
+                attributes: flattenObject(attrs, ''),
                 attributes_json: JSON.stringify(attrs, null, 2),
                 newFieldKey: ''
             };
@@ -657,13 +603,12 @@ window.adminApp = function () {
         switchImCreateTab(tab) {
             if (tab === this.im.createTab) return;
             if (tab === 'json') {
-                const attrs = {};
-                for (const a of this.im.create.attributes) { attrs[a.key] = a.value; }
+                const attrs = unflattenEntries(this.im.create.attributes);
                 this.im.create.attributes_json = JSON.stringify(attrs, null, 2);
             } else {
                 try {
                     const obj = JSON.parse(this.im.create.attributes_json);
-                    this.im.create.attributes = Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
+                    this.im.create.attributes = flattenObject(obj, '');
                 } catch { /* keep current */ }
             }
             this.im.createTab = tab;
@@ -672,13 +617,12 @@ window.adminApp = function () {
         switchImEditTab(tab) {
             if (tab === this.im.editTab) return;
             if (tab === 'json') {
-                const attrs = {};
-                for (const a of this.im.edit.attributes) { attrs[a.key] = a.value; }
+                const attrs = unflattenEntries(this.im.edit.attributes);
                 this.im.edit.attributes_json = JSON.stringify(attrs, null, 2);
             } else {
                 try {
                     const obj = JSON.parse(this.im.edit.attributes_json);
-                    this.im.edit.attributes = Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
+                    this.im.edit.attributes = flattenObject(obj, '');
                 } catch { /* keep current */ }
             }
             this.im.editTab = tab;
@@ -688,13 +632,11 @@ window.adminApp = function () {
             this.im.updating = true;
             this.im.editError = '';
             try {
-                const attrs = {};
+                let attrs;
                 if (this.im.editTab === 'json') {
-                    Object.assign(attrs, JSON.parse(this.im.edit.attributes_json));
+                    attrs = JSON.parse(this.im.edit.attributes_json);
                 } else {
-                    for (const a of this.im.edit.attributes) {
-                        attrs[a.key] = a.value;
-                    }
+                    attrs = unflattenEntries(this.im.edit.attributes.filter(a => a.key.trim()));
                 }
                 const body = {
                     authentic_source: this.im.edit.authentic_source,

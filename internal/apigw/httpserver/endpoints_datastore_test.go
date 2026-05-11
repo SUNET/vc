@@ -151,7 +151,7 @@ func testSetup(t *testing.T, rules []string, mockAPI Apiv1) (*gin.Engine, *ecdsa
 
 	rg := engine.Group("/api/v1")
 	rg.Use(sessions.Sessions("admin_session", store))
-	rg.Use(helpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware))
+	rg.Use(helpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, nil, "apigw"))
 
 	rgDatastore := rg.Group("/datastore")
 	helpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
@@ -335,6 +335,9 @@ func (u unimplementedApiv1) AdminCallback(context.Context, *apiv1.AdminCallbackR
 func (u unimplementedApiv1) AdminLogoutURL(string) string {
 	panic("not implemented")
 }
+func (u unimplementedApiv1) ListAuthenticSources(context.Context) ([]string, error) {
+	return nil, nil
+}
 func (u unimplementedApiv1) Health(context.Context, *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
 	panic("not implemented")
 }
@@ -407,12 +410,13 @@ func TestDatastoreSearch_ValidJWT_SPOCPDenied(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
 		// Only bob is allowed
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject bob))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject bob)(authentic_source SUNET)(scope eduid))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
+	// alice sends a request with resource pair → SPOCP denies
 	token := signTestJWT(t, priv, "alice", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search", token, nil)
+	w := doRequest(engine, "GET", "/api/v1/datastore/search?search=test&authentic_source=SUNET&scope=eduid", token, nil)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.False(t, mock.searchCalled)
@@ -480,7 +484,7 @@ func TestDatastoreUpload_SPOCPMethodMismatch(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
 		// Only GET is allowed, not POST
-		`(api (service apigw)(method GET)(path /api/v1/datastore)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore)(subject alice)(authentic_source TEST)(scope test))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -499,7 +503,7 @@ func TestDatastoreUpload_SPOCPMethodMismatch(t *testing.T) {
 func TestDatastoreUpload_SPOCPAllowed(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method POST)(path /api/v1/datastore)(subject api-client))`,
+		`(vc (service apigw)(method POST)(path /api/v1/datastore)(subject api-client)(authentic_source TEST)(scope test))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -518,7 +522,7 @@ func TestDatastoreUpload_SPOCPAllowed(t *testing.T) {
 func TestDatastoreDelete_SPOCPAllowed(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method DELETE)(path /api/v1/datastore)(subject admin))`,
+		`(vc (service apigw)(method DELETE)(path /api/v1/datastore)(subject admin)(authentic_source TEST)(scope test))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -588,19 +592,19 @@ func TestDatastoreSearch_SPOCPPathPrefix(t *testing.T) {
 func TestDatastoreSearch_SPOCPSubjectSet(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject (* set alice bob carol)))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject (* set alice bob carol))(authentic_source *)(scope *))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
-	// Bob is in the set
+	// Bob is in the set — request with resource pair to trigger SPOCP check
 	token := signTestJWT(t, priv, "bob", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search", token, nil)
+	w := doRequest(engine, "GET", "/api/v1/datastore/search?authentic_source=SUNET&scope=eduid", token, nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Eve is not in the set
 	mock.searchCalled = false
 	token = signTestJWT(t, priv, "eve", "https://test-issuer", "test-audience")
-	w = doRequest(engine, "GET", "/api/v1/datastore/search", token, nil)
+	w = doRequest(engine, "GET", "/api/v1/datastore/search?authentic_source=SUNET&scope=eduid", token, nil)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.False(t, mock.searchCalled)
 }
@@ -670,7 +674,7 @@ func testSetupOIDC(t *testing.T, rules []string, mockAPI Apiv1) (*gin.Engine, *m
 
 	rg := engine.Group("/api/v1")
 	rg.Use(sessions.Sessions("admin_session", store))
-	rg.Use(helpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware))
+	rg.Use(helpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, nil, "apigw"))
 
 	rgDatastore := rg.Group("/datastore")
 	helpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
@@ -748,13 +752,13 @@ func TestOIDC_SearchForbidden(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice)(authentic_source *)(scope *))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
-	// eve is not authorized
+	// eve is not authorized — include resource pair to trigger SPOCP check
 	token := signMockOIDCToken(t, m, "eve")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search", token, nil)
+	w := doRequest(engine, "GET", "/api/v1/datastore/search?authentic_source=SUNET&scope=eduid", token, nil)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.False(t, mock.searchCalled)
 }
@@ -763,12 +767,16 @@ func TestOIDC_Upload(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method POST)(path /api/v1/datastore)(subject api-client))`,
+		`(vc (service apigw)(method POST)(path /api/v1/datastore)(subject api-client)(authentic_source test)(scope *))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
 	token := signMockOIDCToken(t, m, "api-client")
-	body := map[string]string{"authentic_source": "test"}
+	body := map[string]any{
+		"meta":                 map[string]any{"authentic_source": "test", "scope": "test", "document_id": "doc1"},
+		"identity_mapping_ids": []string{"id1"},
+		"document_data":        map[string]any{"key": "value"},
+	}
 	w := doRequest(engine, "POST", "/api/v1/datastore", token, body)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, mock.uploadCalled)
@@ -953,12 +961,13 @@ func TestOIDC_EppnMismatch(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice@sunet.se))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice@sunet.se)(authentic_source *)(scope *))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
+	// bob is not alice — include resource pair to trigger SPOCP check
 	token := signMockOIDCToken(t, m, "bob@sunet.se")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search", token, nil)
+	w := doRequest(engine, "GET", "/api/v1/datastore/search?authentic_source=SUNET&scope=eduid", token, nil)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.False(t, mock.searchCalled)
 }
@@ -1005,7 +1014,7 @@ func testSetupNoAuth(t *testing.T, mockAPI Apiv1) *gin.Engine {
 
 	rg := engine.Group("/api/v1")
 	rg.Use(sessions.Sessions("admin_session", store))
-	rg.Use(helpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware))
+	rg.Use(helpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, nil, "apigw"))
 
 	rgDatastore := rg.Group("/datastore")
 	helpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)

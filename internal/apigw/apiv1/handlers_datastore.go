@@ -493,6 +493,7 @@ type DatastoreSearchRequest struct {
 	Scope                   string   `json:"scope" form:"scope"`
 	Limit                   int64    `json:"limit" form:"limit"`
 	AllowedAuthenticSources []string `json:"-" form:"-"`
+	AllowedScopes           []string `json:"-" form:"-"`
 }
 
 // DatastoreSearchReply is the reply for searching documents
@@ -515,10 +516,6 @@ type DatastoreSearchReply struct {
 //	@Param			limit				query		int						false	"Max results (default 50, max 200)"
 //	@Router			/api/v1/datastore/search [get]
 func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchRequest) (*DatastoreSearchReply, error) {
-	if len(req.AllowedAuthenticSources) == 0 {
-		return &DatastoreSearchReply{Data: []*model.CompleteDocument{}}, nil
-	}
-
 	limit := req.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -529,6 +526,7 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 		Scope:                   req.Scope,
 		Limit:                   limit,
 		AllowedAuthenticSources: req.AllowedAuthenticSources,
+		AllowedScopes:           req.AllowedScopes,
 	})
 	if err != nil {
 		return nil, err

@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
@@ -20,6 +22,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/sirosfoundation/go-spocp/pkg/sexp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,6 +81,32 @@ func signJWT(t *testing.T, priv *ecdsa.PrivateKey, sub, iss, aud string) string 
 		Audience([]string{aud}).
 		IssuedAt(time.Now()).
 		Expiration(time.Now().Add(5 * time.Minute)).
+		Build()
+	require.NoError(t, err)
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256(), privJWK))
+	require.NoError(t, err)
+
+	return string(signed)
+}
+
+// signJWTWithEPPN creates a signed JWT that includes the eppn claim used by
+// extractSPOCPSubject to identify the user in SPOCP rules.
+func signJWTWithEPPN(t *testing.T, priv *ecdsa.PrivateKey, eppn, iss, aud string) string {
+	t.Helper()
+
+	privJWK, err := jwk.Import(priv)
+	require.NoError(t, err)
+	require.NoError(t, privJWK.Set(jwk.KeyIDKey, "test-kid"))
+	require.NoError(t, privJWK.Set(jwk.AlgorithmKey, jwa.ES256()))
+
+	tok, err := jwt.NewBuilder().
+		Subject("opaque-sub-id").
+		Issuer(iss).
+		Audience([]string{aud}).
+		IssuedAt(time.Now()).
+		Expiration(time.Now().Add(5 * time.Minute)).
+		Claim("eppn", eppn).
 		Build()
 	require.NoError(t, err)
 
@@ -215,9 +244,9 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 // ---------- buildAPISPOCPQuery tests ----------
 
 func TestBuildAPISPOCPQuery(t *testing.T) {
-	q := buildAPISPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice")
+	q := BuildSPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice", "", "")
 	assert.NotNil(t, q)
-	// The canonical string representation should contain all four tuples.
+	// With empty authentic_source/scope, only the 4 core tuples should be present.
 	s := q.String()
 	assert.Contains(t, s, "service")
 	assert.Contains(t, s, "test-svc")
@@ -227,9 +256,25 @@ func TestBuildAPISPOCPQuery(t *testing.T) {
 	assert.Contains(t, s, "/api/v1/upload")
 	assert.Contains(t, s, "subject")
 	assert.Contains(t, s, "alice")
+	assert.NotContains(t, s, "authentic_source")
+	assert.NotContains(t, s, "scope")
+}
+
+func TestBuildAPISPOCPQuery_WithResourceFields(t *testing.T) {
+	q := BuildSPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice", "SUNET", "eduid")
+	s := q.String()
+	assert.Contains(t, s, "authentic_source")
+	assert.Contains(t, s, "SUNET")
+	assert.Contains(t, s, "scope")
+	assert.Contains(t, s, "eduid")
 }
 
 // ---------- SPOCP authorization via JWTAuth middleware ----------
+
+// Note: With the unified SPOCP model, rules without authentic_source/scope
+// (4-element rules) cannot grant resource access but requests without
+// resource pairs still pass through. These tests verify the auth flow with
+// full 6-element rules using signJWTWithEPPN (which sets the eppn claim).
 
 func TestJWTAuth_SPOCPAllowed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -245,8 +290,7 @@ func TestJWTAuth_SPOCPAllowed(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			// Allow alice to POST /api/v1/upload
-			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))",
 		},
 	}
 
@@ -256,14 +300,16 @@ func TestJWTAuth_SPOCPAllowed(t *testing.T) {
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
-	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.POST("/api/v1/upload", handler, okHandler)
 
-	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
-	w := performRequest(r, "POST", "/api/v1/upload", map[string]string{
-		"Authorization": "Bearer " + token,
-	})
+	// Request with matching resource pair → allowed
+	token := signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud")
+	body := `{"authentic_source":"SUNET","scope":"eduid"}`
+	req := httptest.NewRequest("POST", "/api/v1/upload", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
@@ -282,8 +328,7 @@ func TestJWTAuth_SPOCPDenied(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			// Only alice can POST /api/v1/upload
-			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))",
 		},
 	}
 
@@ -293,15 +338,16 @@ func TestJWTAuth_SPOCPDenied(t *testing.T) {
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
-	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.POST("/api/v1/upload", handler, okHandler)
 
 	// bob is not authorized
-	token := signJWT(t, priv, "bob", "test-issuer", "test-aud")
-	w := performRequest(r, "POST", "/api/v1/upload", map[string]string{
-		"Authorization": "Bearer " + token,
-	})
+	token := signJWTWithEPPN(t, priv, "bob@test", "test-issuer", "test-aud")
+	body := `{"authentic_source":"SUNET","scope":"eduid"}`
+	req := httptest.NewRequest("POST", "/api/v1/upload", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "insufficient permissions")
@@ -321,8 +367,7 @@ func TestJWTAuth_SPOCPWildcardSubject(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			// Any authenticated subject can POST /api/v1/document
-			"(api (service test-svc)(method POST)(path /api/v1/document)(subject))",
+			"(vc (service test-svc)(method POST)(path /api/v1/document)(subject *)(authentic_source *)(scope *))",
 		},
 	}
 
@@ -332,16 +377,16 @@ func TestJWTAuth_SPOCPWildcardSubject(t *testing.T) {
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
-	r.POST("/api/v1/document", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"sub": c.GetString("jwt_subject")})
-	})
+	r.POST("/api/v1/document", handler, okHandler)
 
-	// Any subject should be accepted
-	for _, sub := range []string{"alice", "bob", "charlie"} {
-		token := signJWT(t, priv, sub, "test-issuer", "test-aud")
-		w := performRequest(r, "POST", "/api/v1/document", map[string]string{
-			"Authorization": "Bearer " + token,
-		})
+	for _, sub := range []string{"alice@test", "bob@test", "charlie@test"} {
+		token := signJWTWithEPPN(t, priv, sub, "test-issuer", "test-aud")
+		body := `{"authentic_source":"ANY","scope":"any"}`
+		req := httptest.NewRequest("POST", "/api/v1/document", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code, "subject %s should be allowed", sub)
 	}
 }
@@ -360,8 +405,7 @@ func TestJWTAuth_SPOCPWildcardMethod(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			// alice can use any method on /api/v1/upload
-			"(api (service test-svc)(method)(path /api/v1/upload)(subject alice))",
+			"(vc (service test-svc)(method *)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))",
 		},
 	}
 
@@ -371,22 +415,18 @@ func TestJWTAuth_SPOCPWildcardMethod(t *testing.T) {
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
-	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-	r.PUT("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-	r.DELETE("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.POST("/api/v1/upload", handler, okHandler)
+	r.PUT("/api/v1/upload", handler, okHandler)
+	r.DELETE("/api/v1/upload", handler, okHandler)
 
-	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
-
+	token := signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud")
 	for _, method := range []string{"POST", "PUT", "DELETE"} {
-		w := performRequest(r, method, "/api/v1/upload", map[string]string{
-			"Authorization": "Bearer " + token,
-		})
+		body := `{"authentic_source":"SUNET","scope":"eduid"}`
+		req := httptest.NewRequest(method, "/api/v1/upload", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code, "method %s should be allowed", method)
 	}
 }
@@ -405,8 +445,7 @@ func TestJWTAuth_SPOCPPrefixPath(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			// alice can access anything under /api/v1/
-			`(api (service test-svc)(method)(path (* prefix /api/v1/))(subject alice))`,
+			"(vc (service test-svc)(method *)(path /api/v1/*)(subject alice@test)(authentic_source SUNET)(scope eduid))",
 		},
 	}
 
@@ -416,30 +455,18 @@ func TestJWTAuth_SPOCPPrefixPath(t *testing.T) {
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
-	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-	r.POST("/api/v1/document", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-	r.DELETE("/api/v1/document", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.POST("/api/v1/upload", handler, okHandler)
+	r.POST("/api/v1/document", handler, okHandler)
 
-	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
-
-	for _, tc := range []struct {
-		method string
-		path   string
-	}{
-		{"POST", "/api/v1/upload"},
-		{"POST", "/api/v1/document"},
-		{"DELETE", "/api/v1/document"},
-	} {
-		w := performRequest(r, tc.method, tc.path, map[string]string{
-			"Authorization": "Bearer " + token,
-		})
-		assert.Equal(t, http.StatusOK, w.Code, "%s %s should be allowed", tc.method, tc.path)
+	token := signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud")
+	for _, path := range []string{"/api/v1/upload", "/api/v1/document"} {
+		body := `{"authentic_source":"SUNET","scope":"eduid"}`
+		req := httptest.NewRequest("POST", path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "path %s should be allowed", path)
 	}
 }
 
@@ -457,8 +484,8 @@ func TestJWTAuth_SPOCPMultipleRules(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
-			"(api (service test-svc)(method POST)(path /api/v1/document)(subject bob))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))",
+			"(vc (service test-svc)(method POST)(path /api/v1/document)(subject bob@test)(authentic_source LADOK)(scope pid))",
 		},
 	}
 
@@ -468,36 +495,32 @@ func TestJWTAuth_SPOCPMultipleRules(t *testing.T) {
 	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
 
 	r := gin.New()
-	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-	r.POST("/api/v1/document", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.POST("/api/v1/upload", handler, okHandler)
+	r.POST("/api/v1/document", handler, okHandler)
 
-	// alice → upload: OK
-	w := performRequest(r, "POST", "/api/v1/upload", map[string]string{
-		"Authorization": "Bearer " + signJWT(t, priv, "alice", "test-issuer", "test-aud"),
-	})
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// alice → document: DENIED
-	w = performRequest(r, "POST", "/api/v1/document", map[string]string{
-		"Authorization": "Bearer " + signJWT(t, priv, "alice", "test-issuer", "test-aud"),
-	})
-	assert.Equal(t, http.StatusForbidden, w.Code)
-
-	// bob → document: OK
-	w = performRequest(r, "POST", "/api/v1/document", map[string]string{
-		"Authorization": "Bearer " + signJWT(t, priv, "bob", "test-issuer", "test-aud"),
-	})
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// bob → upload: DENIED
-	w = performRequest(r, "POST", "/api/v1/upload", map[string]string{
-		"Authorization": "Bearer " + signJWT(t, priv, "bob", "test-issuer", "test-aud"),
-	})
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	tests := []struct {
+		name       string
+		subject    string
+		path       string
+		body       string
+		wantStatus int
+	}{
+		{"alice upload SUNET/eduid", "alice@test", "/api/v1/upload", `{"authentic_source":"SUNET","scope":"eduid"}`, http.StatusOK},
+		{"bob document LADOK/pid", "bob@test", "/api/v1/document", `{"authentic_source":"LADOK","scope":"pid"}`, http.StatusOK},
+		{"alice wrong scope", "alice@test", "/api/v1/upload", `{"authentic_source":"SUNET","scope":"pid"}`, http.StatusForbidden},
+		{"bob wrong path", "bob@test", "/api/v1/upload", `{"authentic_source":"LADOK","scope":"pid"}`, http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			token := signJWTWithEPPN(t, priv, tc.subject, "test-issuer", "test-aud")
+			req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
 }
 
 func TestJWTAuth_NoSPOCPRules_AnyValidJWTPasses(t *testing.T) {
@@ -688,13 +711,13 @@ func TestJWTAuth_SetsContextValues(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
+	token := signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud")
 	w := performRequest(r, "POST", "/api/v1/test", map[string]string{
 		"Authorization": "Bearer " + token,
 	})
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "alice", capturedSubject)
+	assert.Equal(t, "alice@test", capturedSubject)
 	assert.NotNil(t, capturedClaims)
 }
 
@@ -743,7 +766,7 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 	// Write rules to temp file
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
-	rules := "(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))\n"
+	rules := "(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	apiAuth := model.APIAuth{
@@ -760,20 +783,23 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 	require.NoError(t, err)
 
 	r := gin.New()
-	r.POST("/api/v1/upload", handler, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.POST("/api/v1/upload", handler, okHandler)
 
-	// alice: allowed
-	w := performRequest(r, "POST", "/api/v1/upload", map[string]string{
-		"Authorization": "Bearer " + signJWT(t, priv, "alice", "test-issuer", "test-aud"),
-	})
+	// alice with matching resource pair: allowed
+	body := `{"authentic_source":"SUNET","scope":"eduid"}`
+	req := httptest.NewRequest("POST", "/api/v1/upload", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// bob: denied
-	w = performRequest(r, "POST", "/api/v1/upload", map[string]string{
-		"Authorization": "Bearer " + signJWT(t, priv, "bob", "test-issuer", "test-aud"),
-	})
+	// bob with same resource pair: denied
+	req = httptest.NewRequest("POST", "/api/v1/upload", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signJWTWithEPPN(t, priv, "bob@test", "test-issuer", "test-aud"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
@@ -891,9 +917,9 @@ func TestRulesFile_E2E_MultipleUsersAndPaths(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := `# alice may upload, bob may read documents, admin can do everything under /api/v1/
-(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
-(api (service test-svc)(method GET)(path /api/v1/document)(subject bob))
-(api (service test-svc)(method)(path (* prefix /api/v1/))(subject admin))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))
+(vc (service test-svc)(method GET)(path /api/v1/document)(subject bob@test)(authentic_source LADOK)(scope pid))
+(vc (service test-svc)(method *)(path (* prefix /api/v1/))(subject admin@test)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
@@ -919,23 +945,26 @@ func TestRulesFile_E2E_MultipleUsersAndPaths(t *testing.T) {
 		method     string
 		path       string
 		subject    string
+		body       string
 		wantStatus int
 	}{
-		{"alice POST upload → OK", "POST", "/api/v1/upload", "alice", http.StatusOK},
-		{"alice GET document → denied", "GET", "/api/v1/document", "alice", http.StatusForbidden},
-		{"bob GET document → OK", "GET", "/api/v1/document", "bob", http.StatusOK},
-		{"bob POST upload → denied", "POST", "/api/v1/upload", "bob", http.StatusForbidden},
-		{"admin POST upload → OK (prefix)", "POST", "/api/v1/upload", "admin", http.StatusOK},
-		{"admin GET document → OK (prefix)", "GET", "/api/v1/document", "admin", http.StatusOK},
-		{"admin DELETE document → OK (prefix)", "DELETE", "/api/v1/document", "admin", http.StatusOK},
+		{"alice POST upload → OK", "POST", "/api/v1/upload", "alice@test", `{"authentic_source":"SUNET","scope":"eduid"}`, http.StatusOK},
+		{"alice GET document → denied", "GET", "/api/v1/document", "alice@test", `{"authentic_source":"LADOK","scope":"pid"}`, http.StatusForbidden},
+		{"bob GET document → OK", "GET", "/api/v1/document", "bob@test", `{"authentic_source":"LADOK","scope":"pid"}`, http.StatusOK},
+		{"bob POST upload → denied", "POST", "/api/v1/upload", "bob@test", `{"authentic_source":"SUNET","scope":"eduid"}`, http.StatusForbidden},
+		{"admin POST upload → OK (prefix)", "POST", "/api/v1/upload", "admin@test", `{"authentic_source":"SUNET","scope":"eduid"}`, http.StatusOK},
+		{"admin GET document → OK (prefix)", "GET", "/api/v1/document", "admin@test", `{"authentic_source":"LADOK","scope":"pid"}`, http.StatusOK},
+		{"admin DELETE document → OK (prefix)", "DELETE", "/api/v1/document", "admin@test", `{"authentic_source":"LADOK","scope":"pid"}`, http.StatusOK},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			token := signJWT(t, priv, tc.subject, "test-issuer", "test-aud")
-			w := performRequest(r, tc.method, tc.path, map[string]string{
-				"Authorization": "Bearer " + token,
-			})
+			token := signJWTWithEPPN(t, priv, tc.subject, "test-issuer", "test-aud")
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
 			assert.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
@@ -949,7 +978,7 @@ func TestRulesFile_E2E_WildcardSubject(t *testing.T) {
 
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
-	rules := "# Any authenticated user can GET /api/v1/public\n(api (service test-svc)(method GET)(path /api/v1/public)(subject (*)))\n"
+	rules := "# Any authenticated user can GET /api/v1/public with any resource\n(vc (service test-svc)(method GET)(path /api/v1/public)(subject *)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
@@ -968,19 +997,24 @@ func TestRulesFile_E2E_WildcardSubject(t *testing.T) {
 	r.GET("/api/v1/public", handler, okHandler)
 	r.POST("/api/v1/public", handler, okHandler)
 
-	for _, sub := range []string{"alice", "bob", "stranger"} {
-		t.Run("GET_"+sub+"_allowed", func(t *testing.T) {
-			token := signJWT(t, priv, sub, "test-issuer", "test-aud")
-			w := performRequest(r, "GET", "/api/v1/public", map[string]string{
-				"Authorization": "Bearer " + token,
-			})
+	body := `{"authentic_source":"ANY","scope":"any"}`
+	for _, sub := range []string{"alice@test", "bob@test", "stranger@test"} {
+		t.Run("GET "+sub+" allowed", func(t *testing.T) {
+			token := signJWTWithEPPN(t, priv, sub, "test-issuer", "test-aud")
+			req := httptest.NewRequest("GET", "/api/v1/public", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 		})
-		t.Run("POST_"+sub+"_denied", func(t *testing.T) {
-			token := signJWT(t, priv, sub, "test-issuer", "test-aud")
-			w := performRequest(r, "POST", "/api/v1/public", map[string]string{
-				"Authorization": "Bearer " + token,
-			})
+		t.Run("POST "+sub+" denied", func(t *testing.T) {
+			token := signJWTWithEPPN(t, priv, sub, "test-issuer", "test-aud")
+			req := httptest.NewRequest("POST", "/api/v1/public", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusForbidden, w.Code)
 		})
 	}
@@ -994,7 +1028,7 @@ func TestRulesFile_E2E_SuffixPath(t *testing.T) {
 
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
-	rules := "# alice can GET any .json path\n(api (service test-svc)(method GET)(path (* suffix .json))(subject alice))\n"
+	rules := "# alice can GET any .json path\n(vc (service test-svc)(method GET)(path (* suffix .json))(subject alice@test)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
@@ -1013,17 +1047,23 @@ func TestRulesFile_E2E_SuffixPath(t *testing.T) {
 	r.GET("/api/v1/config.json", handler, okHandler)
 	r.GET("/api/v1/config.yaml", handler, okHandler)
 
+	body := `{"authentic_source":"X","scope":"y"}`
+	token := signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud")
+
 	// .json suffix → allowed
-	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
-	w := performRequest(r, "GET", "/api/v1/config.json", map[string]string{
-		"Authorization": "Bearer " + token,
-	})
+	req := httptest.NewRequest("GET", "/api/v1/config.json", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// .yaml suffix → denied
-	w = performRequest(r, "GET", "/api/v1/config.yaml", map[string]string{
-		"Authorization": "Bearer " + token,
-	})
+	req = httptest.NewRequest("GET", "/api/v1/config.yaml", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
@@ -1035,7 +1075,7 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
-	rules := "# alice may GET or POST but not DELETE on /api/v1/items\n(api (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject alice))\n"
+	rules := "# alice may GET or POST but not DELETE on /api/v1/items\n(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject alice@test)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
@@ -1055,7 +1095,8 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 	r.POST("/api/v1/items", handler, okHandler)
 	r.DELETE("/api/v1/items", handler, okHandler)
 
-	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
+	body := `{"authentic_source":"X","scope":"y"}`
+	token := signJWTWithEPPN(t, priv, "alice@test", "test-issuer", "test-aud")
 
 	tests := []struct {
 		method     string
@@ -1067,9 +1108,11 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.method, func(t *testing.T) {
-			w := performRequest(r, tc.method, "/api/v1/items", map[string]string{
-				"Authorization": "Bearer " + token,
-			})
+			req := httptest.NewRequest(tc.method, "/api/v1/items", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
 			assert.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
@@ -1083,7 +1126,7 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
-	fileRules := "(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
+	fileRules := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin@test)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(rulesPath, []byte(fileRules), 0644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
@@ -1094,7 +1137,7 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 	}
 	authCfg := model.APIAuth{
 		Rules: []string{
-			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source *)(scope *))",
 		},
 		RulesFile: rulesPath,
 	}
@@ -1108,6 +1151,7 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 	r.POST("/api/v1/upload", handler, okHandler)
 	r.DELETE("/api/v1/document", handler, okHandler)
 
+	body := `{"authentic_source":"X","scope":"y"}`
 	tests := []struct {
 		name       string
 		method     string
@@ -1115,17 +1159,19 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 		subject    string
 		wantStatus int
 	}{
-		{"alice upload (inline rule)", "POST", "/api/v1/upload", "alice", http.StatusOK},
-		{"admin delete (file rule)", "DELETE", "/api/v1/document", "admin", http.StatusOK},
-		{"alice delete → denied", "DELETE", "/api/v1/document", "alice", http.StatusForbidden},
-		{"admin upload → denied", "POST", "/api/v1/upload", "admin", http.StatusForbidden},
+		{"alice upload (inline rule)", "POST", "/api/v1/upload", "alice@test", http.StatusOK},
+		{"admin delete (file rule)", "DELETE", "/api/v1/document", "admin@test", http.StatusOK},
+		{"alice delete → denied", "DELETE", "/api/v1/document", "alice@test", http.StatusForbidden},
+		{"admin upload → denied", "POST", "/api/v1/upload", "admin@test", http.StatusForbidden},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			token := signJWT(t, priv, tc.subject, "test-issuer", "test-aud")
-			w := performRequest(r, tc.method, tc.path, map[string]string{
-				"Authorization": "Bearer " + token,
-			})
+			token := signJWTWithEPPN(t, priv, tc.subject, "test-issuer", "test-aud")
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
 			assert.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
@@ -1134,4 +1180,453 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 // okHandler is a trivial gin handler that returns 200 {"ok":true}.
 func okHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// ---------- extractListValues tests ----------
+
+func TestExtractListValues_Atom(t *testing.T) {
+	elem := parseAdvancedSExpT(t, "(scope eduid)")
+	vals := extractListValues(elem)
+	assert.Equal(t, []string{"eduid"}, vals)
+}
+
+func TestExtractListValues_Wildcard(t *testing.T) {
+	elem := parseAdvancedSExpT(t, "(scope *)")
+	vals := extractListValues(elem)
+	assert.Equal(t, []string{"*"}, vals)
+}
+
+func TestExtractListValues_Set(t *testing.T) {
+	elem := parseAdvancedSExpT(t, "(scope (* set eduid identity_mapping pid_1_5))")
+	vals := extractListValues(elem)
+	assert.ElementsMatch(t, []string{"eduid", "identity_mapping", "pid_1_5"}, vals)
+}
+
+func TestExtractListValues_EmptyList(t *testing.T) {
+	// A non-list element should return ["*"]
+	atom := sexp.NewAtom("standalone")
+	vals := extractListValues(atom)
+	assert.Equal(t, []string{"*"}, vals)
+}
+
+// parseAdvancedSExpT is a test helper that parses an S-expression or fails.
+func parseAdvancedSExpT(t *testing.T, input string) sexp.Element {
+	t.Helper()
+	elem, err := parseAdvancedSExp(input)
+	require.NoError(t, err)
+	return elem
+}
+
+// ---------- ResolveAllowedResources tests ----------
+
+func TestResolveAllowedResources_NilEngine(t *testing.T) {
+	pairs := ResolveAllowedResources(nil, "alice@sunet.se")
+	assert.Nil(t, pairs)
+}
+
+func TestResolveAllowedResources_SingleScope(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+	pairs := ResolveAllowedResources(engine, "alice@sunet.se")
+	require.Len(t, pairs, 1)
+	assert.Equal(t, "SUNET", pairs[0].AuthenticSource)
+	assert.Equal(t, "eduid", pairs[0].Scope)
+}
+
+func TestResolveAllowedResources_SetScope(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
+	)
+	pairs := ResolveAllowedResources(engine, "alice@sunet.se")
+	require.Len(t, pairs, 2)
+	scopes := []string{pairs[0].Scope, pairs[1].Scope}
+	assert.ElementsMatch(t, []string{"eduid", "identity_mapping"}, scopes)
+	assert.Equal(t, "SUNET", pairs[0].AuthenticSource)
+	assert.Equal(t, "SUNET", pairs[1].AuthenticSource)
+}
+
+func TestResolveAllowedResources_WildcardScope(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))",
+	)
+	pairs := ResolveAllowedResources(engine, "admin@sunet.se")
+	require.Len(t, pairs, 1)
+	assert.Equal(t, "*", pairs[0].AuthenticSource)
+	assert.Equal(t, "*", pairs[0].Scope)
+}
+
+func TestResolveAllowedResources_MultipleRules(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope identity_mapping))",
+	)
+	pairs := ResolveAllowedResources(engine, "alice@sunet.se")
+	require.Len(t, pairs, 2)
+}
+
+func TestResolveAllowedResources_DifferentSubject(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+	pairs := ResolveAllowedResources(engine, "bob@sunet.se")
+	assert.Empty(t, pairs)
+}
+
+// ---------- AllowedScopes tests ----------
+
+func TestAllowedScopes_NilEngine(t *testing.T) {
+	result := AllowedScopes(nil, "alice@sunet.se")
+	assert.Nil(t, result)
+}
+
+func TestAllowedScopes_SingleScope(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+	result := AllowedScopes(engine, "alice@sunet.se")
+	assert.Equal(t, []string{"eduid"}, result)
+}
+
+func TestAllowedScopes_SetScope(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
+	)
+	result := AllowedScopes(engine, "alice@sunet.se")
+	assert.ElementsMatch(t, []string{"eduid", "identity_mapping"}, result)
+}
+
+func TestAllowedScopes_WildcardReturnsNil(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))",
+	)
+	result := AllowedScopes(engine, "admin@sunet.se")
+	assert.Nil(t, result, "wildcard scope means unrestricted")
+}
+
+func TestAllowedScopes_NoMatchingRules(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+	result := AllowedScopes(engine, "stranger@sunet.se")
+	assert.Nil(t, result, "no matching rules = unrestricted (nil)")
+}
+
+// ---------- AllowedAuthenticSources with sets ----------
+
+func TestAllowedAuthenticSources_SetSource(t *testing.T) {
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source (* set SUNET LADOK))(scope eduid))",
+	)
+	result := AllowedAuthenticSources(engine, "alice@sunet.se")
+	assert.ElementsMatch(t, []string{"SUNET", "LADOK"}, result)
+}
+
+// ---------- SPOCP resource authorization via JWTAuth ----------
+
+func TestJWTAuth_ResourceAccess_Allowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	body := `{"authentic_source":"SUNET","scope":"eduid"}`
+	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestJWTAuth_ResourceAccess_WrongScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	body := `{"authentic_source":"SUNET","scope":"ehic"}`
+	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "insufficient permissions for resource")
+}
+
+func TestJWTAuth_ResourceAccess_WrongAuthenticSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	body := `{"authentic_source":"OTHER","scope":"eduid"}`
+	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestJWTAuth_ResourceAccess_SetScope_Allowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+
+	for _, scope := range []string{"eduid", "identity_mapping"} {
+		t.Run(scope, func(t *testing.T) {
+			body := `{"authentic_source":"SUNET","scope":"` + scope + `"}`
+			req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+func TestJWTAuth_ResourceAccess_SetScope_Denied(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	body := `{"authentic_source":"SUNET","scope":"pid_1_5"}`
+	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestJWTAuth_ResourceAccess_WildcardAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "admin@sunet.se", "test-issuer", "test-aud")
+	body := `{"authentic_source":"ANYTHING","scope":"whatever"}`
+	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestJWTAuth_NoResourcePairs_Allowed(t *testing.T) {
+	// Request with no resource fields (e.g. admin status) should pass if authenticated.
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.GET("/api/v1/status", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	w := performRequest(r, "GET", "/api/v1/status", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestJWTAuth_MissingEPPN_Denied(t *testing.T) {
+	// JWT without eppn or email should be denied when SPOCP is active.
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.GET("/api/v1/status", handler, okHandler)
+
+	// signJWT does NOT set eppn/email — only "sub"
+	token := signJWT(t, priv, "alice", "test-issuer", "test-aud")
+	w := performRequest(r, "GET", "/api/v1/status", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "eppn or email")
+}
+
+func TestJWTAuth_ContextContainsAllowedScopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	var capturedSources []string
+	var capturedScopes []string
+
+	r := gin.New()
+	r.GET("/api/v1/status", handler, func(c *gin.Context) {
+		if v, ok := c.Get("spocp_allowed_authentic_sources"); ok {
+			capturedSources = v.([]string)
+		}
+		if v, ok := c.Get("spocp_allowed_scopes"); ok {
+			capturedScopes = v.([]string)
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	w := performRequest(r, "GET", "/api/v1/status", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, []string{"SUNET"}, capturedSources)
+	assert.ElementsMatch(t, []string{"eduid", "identity_mapping"}, capturedScopes)
+}
+
+func TestJWTAuth_OmittedScope_Denied(t *testing.T) {
+	// A datastore upload that omits scope should be denied (empty scope won't match).
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	engine := buildEngine(t,
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+	)
+
+	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
+		Enable: true, JWKSURL: srv.URL, Issuer: "test-issuer", Audience: "test-aud",
+	}, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/datastore", handler, okHandler)
+
+	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
+	// authentic_source present but scope omitted
+	body := `{"authentic_source":"SUNET"}`
+	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// ---------- helpers ----------
+
+// buildEngine creates a SPOCP engine from one or more advanced-syntax rules.
+func buildEngine(t *testing.T, rules ...string) *SafeEngine {
+	t.Helper()
+	cfg := model.APIAuth{Rules: rules}
+	engine, err := BuildSPOCPEngine(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, engine)
+	return engine
 }

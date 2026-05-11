@@ -48,6 +48,7 @@ type Service struct {
 	authProviders   *authproviders.Service
 	dataSources     *datasources.Service
 	cacheService    *cache.Service
+	spocpEngine     *httphelpers.SafeEngine
 }
 
 // New creates a new httpserver service
@@ -146,6 +147,12 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
+	// Build SPOCP engine once — shared between API and session auth paths.
+	s.spocpEngine, err = httphelpers.BuildSPOCPEngine(s.cfg.APIGW.APIServer.APIAuth)
+	if err != nil {
+		return nil, fmt.Errorf("spocp engine: %w", err)
+	}
+
 	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
 	if err != nil {
 		return nil, fmt.Errorf("api_auth middleware: %w", err)
@@ -205,8 +212,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	// Add session middleware so admin session cookies are available for auth check.
 	rgAPIv1.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
-	// Accept either API token/key OR admin session cookie.
-	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware))
+	// Unified auth: session users go through the same SPOCP method+path+subject
+	// check as API clients. Both paths use the shared SPOCP engine.
+	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, "apigw"))
 
 	// Identity mapping endpoints
 	rgIdentity := rgAPIv1.Group("/identity")

@@ -132,7 +132,7 @@
                                     <div class="row g-2">
                                         <div class="col-12 col-md-4">
                                             <label class="form-label small mb-1">Authentic Source</label>
-                                            <template x-if="allowedAuthenticSources.length > 1">
+                                            <template x-if="allowedAuthenticSources.length > 0">
                                                 <select class="form-select form-select-sm" x-model="ds.create.authentic_source">
                                                     <option value="">Select...</option>
                                                     <template x-for="org in allowedAuthenticSources" :key="org">
@@ -140,7 +140,7 @@
                                                     </template>
                                                 </select>
                                             </template>
-                                            <template x-if="allowedAuthenticSources.length <= 1">
+                                            <template x-if="allowedAuthenticSources.length === 0">
                                                 <input class="form-control form-control-sm" x-model="ds.create.authentic_source">
                                             </template>
                                         </div>
@@ -169,60 +169,29 @@
                                     </div>
                                 </div>
                                 <div class="alert alert-success py-2 px-3 mb-3">
-                                    <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
-                                        <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.createTab==='editor'?'active':''" href="#" @click.prevent="switchDsCreateTab('editor')">Editor</a></li>
-                                        <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.createTab==='json'?'active':''" href="#" @click.prevent="switchDsCreateTab('json')">JSON</a></li>
-                                    </ul>
-                                    <template x-if="ds.createTab==='editor'">
-                                        <div>
-                                            <div class="table-responsive">
-                                                <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
-                                                    <thead>
-                                                        <tr>
-                                                            <th style="width:40%">Key</th>
-                                                            <th>Value</th>
-                                                            <th style="width:50px"></th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        <template x-for="(row, ri) in treeView(ds.create.document_data)" :key="row.type + '-' + ri">
-                                                            <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
-                                                                <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
-                                                                    <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
-                                                                    <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
-                                                                    <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(ds.create.document_data, row.idx, $event.target.value)" style="max-width:150px"></template>
-                                                                </td>
-                                                                <td>
-                                                                    <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="ds.create.document_data[row.idx].value"></template>
-                                                                </td>
-                                                                <td class="text-nowrap">
-                                                                    <template x-if="row.type==='group'">
-                                                                        <span>
-                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(ds.create.document_data, row.path)" title="Add child field">+</button>
-                                                                            <button class="btn-close btn-close-sm ms-1" @click="removeGroup(ds.create.document_data, row.path)" title="Remove group" style="font-size:0.6rem;"></button>
-                                                                        </span>
-                                                                    </template>
-                                                                    <template x-if="row.type==='field'">
-                                                                        <span>
-                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(ds.create.document_data, row.idx)" title="Convert to object">+</button>
-                                                                            <button class="btn-close btn-close-sm ms-1" @click="ds.create.document_data.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
-                                                                        </span>
-                                                                    </template>
-                                                                </td>
-                                                            </tr>
-                                                        </template>
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                            <div class="input-group input-group-sm">
-                                                <input class="form-control" placeholder="Key (e.g. address.locality)" x-model="ds.create.newFieldKey" @keyup.enter="addCreateDocDataField()">
-                                                <button class="btn btn-outline-secondary" @click="addCreateDocDataField()">+ Add</button>
-                                            </div>
-                                        </div>
-                                    </template>
-                                    <template x-if="ds.createTab==='json'">
-                                        <textarea class="form-control form-control-sm" rows="10" x-model="ds.create.document_data_json"></textarea>
-                                    </template>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width:40%">Key</th>
+                                                    <th>Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <template x-for="(row, ri) in treeView(ds.create.document_data)" :key="row.type + '-' + ri">
+                                                    <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                        <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
+                                                            <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
+                                                            <template x-if="row.type==='field'"><span x-text="row.label"></span></template>
+                                                        </td>
+                                                        <td>
+                                                            <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="ds.create.document_data[row.idx].value"></template>
+                                                        </td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-primary btn-sm btn-touch" @click="createDocument()">
@@ -324,60 +293,29 @@
                                             <input class="form-control form-control-sm" x-model="ds.edit.identity_mapping_ids_str">
                                         </div>
                                         <div class="alert alert-success py-2 px-3 mb-3">
-                                            <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
-                                                <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.editTab==='editor'?'active':''" href="#" @click.prevent="switchDsEditTab('editor')">Editor</a></li>
-                                                <li class="nav-item"><a class="nav-link py-1 px-2" :class="ds.editTab==='json'?'active':''" href="#" @click.prevent="switchDsEditTab('json')">JSON</a></li>
-                                            </ul>
-                                            <template x-if="ds.editTab==='editor'">
-                                                <div>
-                                                    <div class="table-responsive">
-                                                        <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
-                                                            <thead>
-                                                                <tr>
-                                                                    <th style="width:40%">Key</th>
-                                                                    <th>Value</th>
-                                                                    <th style="width:50px"></th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                <template x-for="(row, ri) in treeView(ds.edit.document_data)" :key="row.type + '-' + ri">
-                                                                    <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
-                                                                        <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
-                                                                            <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
-                                                                            <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
-                                                                            <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(ds.edit.document_data, row.idx, $event.target.value)" style="max-width:150px"></template>
-                                                                        </td>
-                                                                        <td>
-                                                                            <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="ds.edit.document_data[row.idx].value"></template>
-                                                                        </td>
-                                                                        <td class="text-nowrap">
-                                                                            <template x-if="row.type==='group'">
-                                                                                <span>
-                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(ds.edit.document_data, row.path)" title="Add child field">+</button>
-                                                                                    <button class="btn-close btn-close-sm ms-1" @click="removeGroup(ds.edit.document_data, row.path)" style="font-size:0.6rem;"></button>
-                                                                                </span>
-                                                                            </template>
-                                                                            <template x-if="row.type==='field'">
-                                                                                <span>
-                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(ds.edit.document_data, row.idx)" title="Convert to object">+</button>
-                                                                                    <button class="btn-close btn-close-sm ms-1" @click="ds.edit.document_data.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
-                                                                                </span>
-                                                                            </template>
-                                                                        </td>
-                                                                    </tr>
-                                                                </template>
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                    <div class="input-group input-group-sm">
-                                                        <input class="form-control" placeholder="Key (e.g. address.locality)" x-model="ds.edit.newFieldKey" @keyup.enter="addEditDocDataField()">
-                                                        <button class="btn btn-outline-secondary" @click="addEditDocDataField()">+ Add</button>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                            <template x-if="ds.editTab==='json'">
-                                                <textarea class="form-control form-control-sm" rows="10" x-model="ds.edit.document_data_json"></textarea>
-                                            </template>
+                                            <div class="table-responsive">
+                                                <table class="table table-sm table-bordered mb-2" style="font-size:0.85rem;background:transparent;">
+                                                    <thead>
+                                                        <tr>
+                                                            <th style="width:40%">Key</th>
+                                                            <th>Value</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <template x-for="(row, ri) in treeView(ds.edit.document_data)" :key="row.type + '-' + ri">
+                                                            <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
+                                                                    <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
+                                                                    <template x-if="row.type==='field'"><span x-text="row.label"></span></template>
+                                                                </td>
+                                                                <td>
+                                                                    <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="ds.edit.document_data[row.idx].value"></template>
+                                                                </td>
+                                                            </tr>
+                                                        </template>
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="modal-footer">
@@ -428,7 +366,7 @@
                                     <div class="row g-2">
                                         <div class="col-12 col-md-6">
                                             <label class="form-label small mb-1">Authentic Source</label>
-                                            <template x-if="allowedAuthenticSources.length > 1">
+                                            <template x-if="allowedAuthenticSources.length > 0">
                                                 <select class="form-select form-select-sm" x-model="im.create.authentic_source">
                                                     <option value="">Select...</option>
                                                     <template x-for="org in allowedAuthenticSources" :key="org">
@@ -436,7 +374,7 @@
                                                     </template>
                                                 </select>
                                             </template>
-                                            <template x-if="allowedAuthenticSources.length <= 1">
+                                            <template x-if="allowedAuthenticSources.length === 0">
                                                 <input class="form-control form-control-sm" x-model="im.create.authentic_source">
                                             </template>
                                         </div>

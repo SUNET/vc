@@ -219,10 +219,6 @@ type IdentityMappingSearchReply struct {
 //	@Param			limit				query		int							false	"Max results (default 50, max 200)"
 //	@Router			/api/v1/identity/mapping/search [get]
 func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMappingSearchRequest) (*IdentityMappingSearchReply, error) {
-	if len(req.AllowedAuthenticSources) == 0 {
-		return &IdentityMappingSearchReply{Data: []*model.IdentityMapping{}}, nil
-	}
-
 	limit := req.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50

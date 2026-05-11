@@ -54,6 +54,10 @@ type Service struct {
 	// SAMLSession stores SAML authentication flow state.
 	SAMLSession Cache[*samlsp.Session]
 
+	// AdminIDToken stores raw OIDC ID tokens server-side, keyed by an opaque
+	// reference that is kept in the cookie session instead of the full token.
+	AdminIDToken Cache[string]
+
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
 	// SessionEncKey is the AES encryption key for session cookies, shared across HA instances.
@@ -100,6 +104,10 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.SAMLSession, err = pkgcache.NewGenericCache[*samlsp.Session](cs, ctx, "apigw_saml_sessions", time.Duration(cfg.APIGW.AuthProviders.SAML.SessionDuration)*time.Second); err != nil {
 		return nil, fmt.Errorf("cache: saml_sessions: %w", err)
+	}
+
+	if s.AdminIDToken, err = pkgcache.NewGenericCache[string](cs, ctx, "apigw_admin_id_tokens", 1*time.Hour); err != nil {
+		return nil, fmt.Errorf("cache: admin_id_tokens: %w", err)
 	}
 
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).

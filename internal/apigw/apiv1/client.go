@@ -13,7 +13,6 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/grpchelpers"
-	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -64,10 +63,6 @@ type Client struct {
 	adminOIDCVerifier           *oidc.IDTokenVerifier
 	adminOIDCEndSessionURL      string
 	adminOIDCPostLogoutRedirect string
-
-	// SPOCP engine for UI authorization
-	spocpEngine      *httphelpers.SafeEngine
-	spocpUIResources []string
 }
 
 // New creates a new instance of the public api
@@ -159,13 +154,6 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 		c.log.Info("admin OIDC provider initialized", "issuer", oidcCfg.IssuerURL)
 	}
-
-	// Build SPOCP engine for UI authorization from the same rules as API auth
-	c.spocpEngine, err = httphelpers.BuildSPOCPEngine(cfg.APIGW.APIServer.APIAuth)
-	if err != nil {
-		return nil, fmt.Errorf("spocp engine: %w", err)
-	}
-	c.spocpUIResources = httphelpers.ExtractUIResources(cfg.APIGW.APIServer.APIAuth)
 
 	c.log.Info("Started")
 

@@ -1,10 +1,15 @@
 package httphelpers
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -172,16 +177,201 @@ func (m *middlewareHandler) UserSession(name, authKey, encKey string, opts sessi
 }
 
 // SessionOrAPIAuth returns middleware that accepts either a valid session (identified by sessionKey)
-// or falls through to the provided API auth middleware.
-func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.HandlerFunc) gin.HandlerFunc {
+// or falls through to the provided API auth middleware. When a session is present and a SPOCP
+// engine is provided, the middleware runs the same method+path+subject authorization check that
+// API clients go through, so one set of rules governs both paths.
+func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.HandlerFunc, engine *SafeEngine, service string) gin.HandlerFunc {
+	log := m.log.New("session_or_api_auth")
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
-		if auth := session.Get(sessionKey); auth == true {
-			c.Next()
+		if auth := session.Get(sessionKey); auth != true {
+			// No session — fall through to JWT + SPOCP middleware.
+			apiAuth(c)
 			return
 		}
-		apiAuth(c)
+
+		subject, _ := session.Get("admin_subject").(string)
+
+		// SPOCP authorization check.
+		if engine != nil {
+			if subject == "" {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "session missing subject"})
+				return
+			}
+
+			// Store allowedAuthenticSources authentic sources and scopes for downstream handlers (DB filtering).
+			allowedAuthenticSources := AllowedAuthenticSources(engine, subject)
+			c.Set("spocp_allowed_authentic_sources", allowedAuthenticSources)
+			allowedScopes := AllowedScopes(engine, subject)
+			c.Set("spocp_allowed_scopes", allowedScopes)
+
+			// Resource access: every resource-bearing request must include
+			// both authentic_source and scope so the full SPOCP query is used.
+			pairs := extractResourcePairs(c)
+			for _, p := range pairs {
+				if p.authenticSource == "" && p.scope == "" {
+					continue
+				}
+				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), subject, p.authenticSource, p.scope)
+				if !engine.QueryElement(query) {
+					log.Info("spocp_denied", "subject", subject, "method", c.Request.Method, "path", c.FullPath(),
+						"authentic_source", p.authenticSource, "scope", p.scope)
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for resource"})
+					return
+				}
+			}
+		}
+
+		c.Next()
 	}
+}
+
+// resourcePair holds an authentic_source+scope combination extracted from the request.
+type resourcePair struct {
+	authenticSource string
+	scope           string
+}
+
+// extractResourcePairs collects all (authentic_source, scope) pairs from
+// query parameters and the JSON body so that each pair can be checked against
+// the SPOCP engine independently.
+func extractResourcePairs(c *gin.Context) []resourcePair {
+	var pairs []resourcePair
+
+	// Query/form parameters (GET endpoints).
+	qSource := c.Query("authentic_source")
+	qScope := c.Query("scope")
+	if qSource != "" || qScope != "" {
+		pairs = append(pairs, resourcePair{authenticSource: qSource, scope: qScope})
+	}
+
+	// JSON body (POST/PUT/DELETE endpoints).
+	if c.Request.Body != nil && c.Request.ContentLength > 0 {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err == nil {
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			pairs = append(pairs, extractBodyResourcePairs(bodyBytes)...)
+		}
+	}
+
+	// Inject synthetic scope for identity mapping endpoints — these have
+	// authentic_source but no scope in the document model.
+	if strings.Contains(c.FullPath(), "/identity/mapping") {
+		for i := range pairs {
+			if pairs[i].authenticSource != "" && pairs[i].scope == "" {
+				pairs[i].scope = "identity_mapping"
+			}
+		}
+	}
+
+	return deduplicatePairs(pairs)
+}
+
+// extractBodyResourcePairs parses a JSON body and returns all
+// (authentic_source, scope) pairs found at known paths:
+//
+//   - $.authentic_source / $.scope
+//   - $.meta.authentic_source / $.meta.scope
+//   - $.documents.*.meta.authentic_source / $.documents.*.meta.scope
+//   - $.mappings.*.authentic_source
+func extractBodyResourcePairs(body []byte) []resourcePair {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+
+	var pairs []resourcePair
+
+	// Top-level.
+	src := jsonStringField(raw, "authentic_source")
+	scope := jsonStringField(raw, "scope")
+	if src != "" || scope != "" {
+		pairs = append(pairs, resourcePair{authenticSource: src, scope: scope})
+	}
+
+	// $.meta
+	if metaRaw, ok := raw["meta"]; ok {
+		var meta map[string]json.RawMessage
+		if json.Unmarshal(metaRaw, &meta) == nil {
+			src := jsonStringField(meta, "authentic_source")
+			scope := jsonStringField(meta, "scope")
+			if src != "" || scope != "" {
+				pairs = append(pairs, resourcePair{authenticSource: src, scope: scope})
+			}
+		}
+	}
+
+	// $.documents.*.meta (BulkUpload)
+	if docsRaw, ok := raw["documents"]; ok {
+		var docs map[string]json.RawMessage
+		if json.Unmarshal(docsRaw, &docs) == nil {
+			for _, itemRaw := range docs {
+				var item map[string]json.RawMessage
+				if json.Unmarshal(itemRaw, &item) != nil {
+					continue
+				}
+				if metaRaw, ok := item["meta"]; ok {
+					var meta map[string]json.RawMessage
+					if json.Unmarshal(metaRaw, &meta) == nil {
+						src := jsonStringField(meta, "authentic_source")
+						scope := jsonStringField(meta, "scope")
+						if src != "" || scope != "" {
+							pairs = append(pairs, resourcePair{authenticSource: src, scope: scope})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// $.mappings.*.authentic_source (BulkCreate identity mappings)
+	if mappingsRaw, ok := raw["mappings"]; ok {
+		var mappings map[string]json.RawMessage
+		if json.Unmarshal(mappingsRaw, &mappings) == nil {
+			for _, itemRaw := range mappings {
+				var item map[string]json.RawMessage
+				if json.Unmarshal(itemRaw, &item) != nil {
+					continue
+				}
+				src := jsonStringField(item, "authentic_source")
+				if src != "" {
+					pairs = append(pairs, resourcePair{authenticSource: src})
+				}
+			}
+		}
+	}
+
+	return pairs
+}
+
+// jsonStringField unmarshals raw[key] as a string, returning "" on absence or error.
+func jsonStringField(raw map[string]json.RawMessage, key string) string {
+	v, ok := raw[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(v, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// deduplicatePairs returns unique resourcePair values preserving order.
+func deduplicatePairs(pairs []resourcePair) []resourcePair {
+	if len(pairs) <= 1 {
+		return pairs
+	}
+	seen := map[resourcePair]struct{}{}
+	out := make([]resourcePair, 0, len(pairs))
+	for _, p := range pairs {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
 }
 
 // RateLimiter implements a token bucket rate limiter using gin-ratelimit

@@ -86,6 +86,7 @@ type Apiv1 interface {
 	AdminLoginURL(ctx context.Context) (*apiv1.AdminLoginURLReply, error)
 	AdminCallback(ctx context.Context, req *apiv1.AdminCallbackRequest) (*apiv1.AdminCallbackReply, error)
 	AdminLogoutURL(idTokenHint string) string
+	ListAuthenticSources(ctx context.Context) ([]string, error)
 
 	// health
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)

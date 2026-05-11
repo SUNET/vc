@@ -6,7 +6,6 @@ import (
 	"net/url"
 
 	"github.com/SUNET/vc/pkg/crypto"
-	"github.com/SUNET/vc/pkg/httphelpers"
 )
 
 // AdminLoginURLReply holds the authorization URL and state for an OIDC login redirect.
@@ -46,17 +45,10 @@ type AdminCallbackRequest struct {
 	ErrorDescription string `form:"error_description"`
 }
 
-// AdminCallbackReply holds the authenticated subject and resolved resources.
+// AdminCallbackReply holds the authenticated subject.
 type AdminCallbackReply struct {
-	Subject          string
-	RawIDToken       string
-	AllowedResources []AllowedResource
-}
-
-// AllowedResource represents a resource+scope pair the subject can access
-type AllowedResource struct {
-	AuthenticSource string
-	Scope           string
+	Subject    string
+	RawIDToken string
 }
 
 // AdminCallback exchanges the authorization code for tokens, validates the
@@ -108,16 +100,9 @@ func (c *Client) AdminCallback(ctx context.Context, req *AdminCallbackRequest) (
 
 	c.log.Info("admin OIDC callback", "subject", subject)
 
-	// Resolve which authentic sources this subject can access
-	allowedResources, err := c.resolveAdminResources(ctx, subject)
-	if err != nil {
-		return nil, fmt.Errorf("resource resolution failed: %w", err)
-	}
-
 	reply := &AdminCallbackReply{
-		Subject:          subject,
-		RawIDToken:       rawIDToken,
-		AllowedResources: allowedResources,
+		Subject:    subject,
+		RawIDToken: rawIDToken,
 	}
 
 	return reply, nil
@@ -141,43 +126,4 @@ func (c *Client) AdminLogoutURL(idTokenHint string) string {
 // ListAuthenticSources returns all unique authentic source names from the datastore
 func (c *Client) ListAuthenticSources(ctx context.Context) ([]string, error) {
 	return c.datastoreStore.ListAuthenticSources(ctx)
-}
-
-// resolveAdminResources determines which authentic source + scope combinations
-// the subject can access by querying each pair against the SPOCP engine
-func (c *Client) resolveAdminResources(ctx context.Context, subject string) ([]AllowedResource, error) {
-	if c.spocpEngine == nil {
-		return nil, fmt.Errorf("SPOCP engine is not configured")
-	}
-
-	// Combine authentic sources from DB and from parsed SPOCP rules
-	dbSources, err := c.datastoreStore.ListAuthenticSources(ctx)
-	if err != nil {
-		return nil, err
-	}
-	sourceSet := map[string]struct{}{}
-	for _, s := range dbSources {
-		sourceSet[s] = struct{}{}
-	}
-	for _, s := range c.spocpUIResources {
-		sourceSet[s] = struct{}{}
-	}
-
-	var scopes []string
-	if c.cfg.Common != nil {
-		for scope := range c.cfg.Common.CredentialMetadata {
-			scopes = append(scopes, scope)
-		}
-	}
-
-	var allowed []AllowedResource
-	for src := range sourceSet {
-		for _, scope := range scopes {
-			q := httphelpers.BuildUISPOCPQuery(subject, src, scope)
-			if c.spocpEngine.QueryElement(q) {
-				allowed = append(allowed, AllowedResource{AuthenticSource: src, Scope: scope})
-			}
-		}
-	}
-	return allowed, nil
 }

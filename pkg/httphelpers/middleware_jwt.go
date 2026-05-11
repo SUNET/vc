@@ -18,6 +18,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	spocp "github.com/sirosfoundation/go-spocp"
+	"github.com/sirosfoundation/go-spocp/pkg/compare"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
 	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
@@ -109,50 +110,6 @@ func BuildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
 	}
 
 	return &SafeEngine{engine: engine}, nil
-}
-
-// ExtractUIResources parses SPOCP rules and returns the set of literal
-// resource values found in (ui (resource X)) elements. Star forms are skipped.
-func ExtractUIResources(cfg model.APIAuth) []string {
-	seen := map[string]struct{}{}
-	for _, r := range cfg.Rules {
-		elem, err := parseAdvancedSExp(r)
-		if err != nil {
-			continue
-		}
-		extractResourceFromUI(elem, seen)
-	}
-
-	if cfg.RulesFile != "" {
-		for _, elem := range parseRulesFile(cfg.RulesFile) {
-			extractResourceFromUI(elem, seen)
-		}
-	}
-
-	result := make([]string, 0, len(seen))
-	for s := range seen {
-		result = append(result, s)
-	}
-	return result
-}
-
-// extractResourceFromUI extracts the literal resource value from a (ui ...) rule
-func extractResourceFromUI(elem sexp.Element, seen map[string]struct{}) {
-	list, ok := elem.(*sexp.List)
-	if !ok || list.Tag != "ui" {
-		return
-	}
-	for _, child := range list.Elements {
-		childList, ok := child.(*sexp.List)
-		if !ok || childList.Tag != "resource" {
-			continue
-		}
-		if len(childList.Elements) == 1 {
-			if atom, ok := childList.Elements[0].(*sexp.Atom); ok {
-				seen[atom.Value] = struct{}{}
-			}
-		}
-	}
 }
 
 // parseRulesFile parses a rules file and returns the elements (best-effort)
@@ -316,6 +273,17 @@ func (p *advancedParser) parseList() (sexp.Element, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Treat a bare * inside a tagged list as a wildcard star form,
+		// so (method *) is equivalent to (method (*)).
+		// Treat a trailing * (e.g. /api/v1/*) as a prefix star form,
+		// so (path /api/v1/*) is equivalent to (path (* prefix /api/v1/)).
+		if atom, ok := elem.(*sexp.Atom); ok {
+			if atom.Value == "*" {
+				elem = &starform.Wildcard{}
+			} else if strings.HasSuffix(atom.Value, "*") {
+				elem = &starform.Prefix{Value: strings.TrimSuffix(atom.Value, "*")}
+			}
+		}
 		elements = append(elements, elem)
 	}
 }
@@ -404,31 +372,142 @@ func extractSPOCPSubject(token jwt.Token) string {
 	return ""
 }
 
-// buildAPISPOCPQuery constructs a SPOCP query S-expression for the current HTTP
-// request, service name, and JWT subject:
+// BuildSPOCPQuery constructs a SPOCP query S-expression for the current HTTP
+// request, including service, method, path, subject, authentic source and scope:
 //
-//	(api (service apigw)(method POST)(path /api/v1/upload)(subject alice@sunet.se))
+//	(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))
 //
 // The service dimension ensures that rules written for one service do not
 // accidentally grant access to another service sharing the same endpoints.
-func buildAPISPOCPQuery(service, method, path, subject string) sexp.Element {
-	return sexp.NewList("api",
+func BuildSPOCPQuery(service, method, path, subject, authenticSource, scope string) sexp.Element {
+	elements := []sexp.Element{
 		sexp.NewList("service", sexp.NewAtom(service)),
 		sexp.NewList("method", sexp.NewAtom(method)),
 		sexp.NewList("path", sexp.NewAtom(path)),
 		sexp.NewList("subject", sexp.NewAtom(subject)),
-	)
+	}
+	if authenticSource != "" {
+		elements = append(elements, sexp.NewList("authentic_source", sexp.NewAtom(authenticSource)))
+	}
+	if scope != "" {
+		elements = append(elements, sexp.NewList("scope", sexp.NewAtom(scope)))
+	}
+	return sexp.NewList("vc", elements...)
 }
 
-// BuildUISPOCPQuery constructs a SPOCP query for UI authorization:
-//
-//	(ui (subject alice@sunet.se)(resource SUNET)(scope eduid))
-func BuildUISPOCPQuery(subject, resource, scope string) sexp.Element {
-	return sexp.NewList("ui",
-		sexp.NewList("subject", sexp.NewAtom(subject)),
-		sexp.NewList("resource", sexp.NewAtom(resource)),
-		sexp.NewList("scope", sexp.NewAtom(scope)),
-	)
+// ResourcePair represents an allowed (authentic_source, scope) combination.
+type ResourcePair struct {
+	AuthenticSource string
+	Scope           string
+}
+
+// ResolveAllowedResources returns all (authentic_source, scope) pairs that the
+// given subject is authorized for, by inspecting the SPOCP rules directly.
+// A wildcard in the rule position means "any value" — represented as "*" in the result.
+// Returns nil when engine is nil (no authorization configured).
+func ResolveAllowedResources(engine *SafeEngine, subject string) []ResourcePair {
+	if engine == nil {
+		return nil
+	}
+
+	subjectQuery := sexp.NewList("subject", sexp.NewAtom(subject))
+
+	engine.mu.RLock()
+	defer engine.mu.RUnlock()
+	rules := engine.engine.ExportRules()
+
+	var pairs []ResourcePair
+	for _, rule := range rules {
+		ruleList, ok := rule.(*sexp.List)
+		if !ok || ruleList.Tag != "vc" || len(ruleList.Elements) < 6 {
+			continue
+		}
+		// Check if the subject element (position 3) matches.
+		subjectRule := ruleList.Elements[3]
+		if !compare.LessPermissive(subjectQuery, subjectRule) {
+			continue
+		}
+		// Extract authentic_source (position 4) and scope (position 5).
+		// Sets expand into multiple pairs.
+		sources := extractListValues(ruleList.Elements[4])
+		scopes := extractListValues(ruleList.Elements[5])
+		for _, as := range sources {
+			for _, sc := range scopes {
+				pairs = append(pairs, ResourcePair{AuthenticSource: as, Scope: sc})
+			}
+		}
+	}
+	return pairs
+}
+
+// extractListValues extracts string values from a list element like (authentic_source SUNET).
+// Returns ["*"] for wildcards. Expands sets into multiple values.
+func extractListValues(elem sexp.Element) []string {
+	list, ok := elem.(*sexp.List)
+	if !ok || len(list.Elements) == 0 {
+		return []string{"*"}
+	}
+	switch v := list.Elements[0].(type) {
+	case *sexp.Atom:
+		return []string{v.Value}
+	case *starform.Wildcard:
+		return []string{"*"}
+	case *starform.Set:
+		var values []string
+		for _, el := range v.Elements {
+			if a, ok := el.(*sexp.Atom); ok {
+				values = append(values, a.Value)
+			}
+		}
+		if len(values) == 0 {
+			return []string{"*"}
+		}
+		return values
+	default:
+		return []string{"*"}
+	}
+}
+
+// AllowedAuthenticSources returns the distinct authentic_source values the subject
+// is permitted to access. Returns nil for unrestricted access (wildcard rule or no resource rules).
+func AllowedAuthenticSources(engine *SafeEngine, subject string) []string {
+	pairs := ResolveAllowedResources(engine, subject)
+	if len(pairs) == 0 {
+		return nil // no resource constraints — unrestricted
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, p := range pairs {
+		if p.AuthenticSource == "*" {
+			return nil // unrestricted
+		}
+		if !seen[p.AuthenticSource] {
+			seen[p.AuthenticSource] = true
+			result = append(result, p.AuthenticSource)
+		}
+	}
+	return result
+}
+
+// AllowedScopes returns the distinct scope values the subject is permitted to
+// access. Returns nil for unrestricted access (wildcard rule or no resource rules).
+func AllowedScopes(engine *SafeEngine, subject string) []string {
+	pairs := ResolveAllowedResources(engine, subject)
+	if len(pairs) == 0 {
+		return nil // no resource constraints — unrestricted
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, p := range pairs {
+		if p.Scope == "*" {
+			return nil // unrestricted
+		}
+		if !seen[p.Scope] {
+			seen[p.Scope] = true
+			result = append(result, p.Scope)
+		}
+	}
+	return result
 }
 
 // JWKSAuth returns a Gin middleware that validates Bearer JWT tokens and
@@ -493,11 +572,27 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token missing eppn or email claim"})
 				return
 			}
-			query := buildAPISPOCPQuery(service, c.Request.Method, c.FullPath(), sub)
-			if !engine.QueryElement(query) {
-				log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(), "req_id", c.GetString("req_id"))
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-				return
+
+			// Store allowed authentic sources and scopes for downstream handlers (DB filtering).
+			allowed := AllowedAuthenticSources(engine, sub)
+			c.Set("spocp_allowed_authentic_sources", allowed)
+			allowedScopes := AllowedScopes(engine, sub)
+			c.Set("spocp_allowed_scopes", allowedScopes)
+
+			// Resource access: every resource-bearing request must include
+			// both authentic_source and scope so the full SPOCP query is used.
+			pairs := extractResourcePairs(c)
+			for _, p := range pairs {
+				if p.authenticSource == "" && p.scope == "" {
+					continue
+				}
+				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub, p.authenticSource, p.scope)
+				if !engine.QueryElement(query) {
+					log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(),
+						"authentic_source", p.authenticSource, "scope", p.scope, "req_id", c.GetString("req_id"))
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for resource"})
+					return
+				}
 			}
 		}
 

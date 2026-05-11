@@ -169,8 +169,20 @@ func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	request.AllowedAuthenticSources = sessionAllowedAuthenticSources(c)
-	s.log.Info("datastore search", "allowed_authentic_sources", request.AllowedAuthenticSources,
+
+	// Apply SPOCP-derived authentic_source and scope filters for DB queries.
+	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
+		if sources, ok := allowed.([]string); ok {
+			request.AllowedAuthenticSources = sources
+		}
+	}
+	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
+		if scopes, ok := allowed.([]string); ok {
+			request.AllowedScopes = scopes
+		}
+	}
+
+	s.log.Info("datastore search",
 		"search", request.Search, "authentic_source", request.AuthenticSource)
 
 	reply, err := s.apiv1.DatastoreSearch(ctx, request)
