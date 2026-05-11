@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"regexp"
 	"slices"
 	"time"
 
@@ -351,7 +352,7 @@ func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery)
 		filter["meta.scope"] = bson.M{"$eq": query.Scope}
 	}
 	if query.Search != "" {
-		searchRegex := bson.M{"$regex": query.Search, "$options": "i"}
+		searchRegex := bson.M{"$regex": regexp.QuoteMeta(query.Search), "$options": "i"}
 		filter["$or"] = bson.A{
 			bson.M{"meta.document_id": searchRegex},
 			bson.M{"meta.authentic_source": searchRegex},

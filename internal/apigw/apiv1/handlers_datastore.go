@@ -508,11 +508,11 @@ type DatastoreSearchReply struct {
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	DatastoreSearchReply	"Success"
-//	@Param			search			query	string	false	"Search term"
-//	@Param			authentic_source	query	string	false	"Filter by authentic source"
-//	@Param			scope			query	string	false	"Filter by scope"
-//	@Param			limit			query	int		false	"Max results (default 50, max 200)"
+//	@Success		200					{object}	DatastoreSearchReply	"Success"
+//	@Param			search				query		string					false	"Search term"
+//	@Param			authentic_source	query		string					false	"Filter by authentic source"
+//	@Param			scope				query		string					false	"Filter by scope"
+//	@Param			limit				query		int						false	"Max results (default 50, max 200)"
 //	@Router			/api/v1/datastore/search [get]
 func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchRequest) (*DatastoreSearchReply, error) {
 	if len(req.AllowedAuthenticSources) == 0 {

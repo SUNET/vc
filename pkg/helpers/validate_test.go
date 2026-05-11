@@ -482,3 +482,61 @@ func TestImagePNGValidator(t *testing.T) {
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 }
+
+func TestAPIAuth_RulesRequireAuth(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	t.Run("inline rules without auth mode", func(t *testing.T) {
+		cfg := model.APIAuth{
+			Rules: []string{`(api (service apigw)(method GET)(path /api/v1/search)(subject alice))`},
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "api_auth_rules_require_auth")
+	})
+
+	t.Run("rules_file without auth mode", func(t *testing.T) {
+		cfg := model.APIAuth{
+			RulesFile: "/etc/spocp/rules.txt",
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "api_auth_rules_require_auth")
+	})
+
+	t.Run("rules with jwks enabled is valid", func(t *testing.T) {
+		cfg := model.APIAuth{
+			Rules: []string{`(api (service apigw)(method GET)(path /)(subject alice))`},
+			JWKS: model.APIAuthJWKS{
+				Enable:   true,
+				JWKSURL:  "https://auth.example.com/.well-known/jwks.json",
+				Issuer:   "https://auth.example.com",
+				Audience: "my-api",
+			},
+		}
+		assert.NoError(t, validate.Struct(cfg))
+	})
+
+	t.Run("no rules and no auth is valid", func(t *testing.T) {
+		cfg := model.APIAuth{}
+		assert.NoError(t, validate.Struct(cfg))
+	})
+
+	t.Run("jwks and oidc are mutually exclusive", func(t *testing.T) {
+		cfg := model.APIAuth{
+			JWKS: model.APIAuthJWKS{
+				Enable:   true,
+				JWKSURL:  "https://auth.example.com/.well-known/jwks.json",
+				Issuer:   "https://auth.example.com",
+				Audience: "my-api",
+			},
+			OIDC: model.APIAuthOIDC{
+				Enable: true,
+			},
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "api_auth_jwks_oidc_exclusive")
+	})
+}

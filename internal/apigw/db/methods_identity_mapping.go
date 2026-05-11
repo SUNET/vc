@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"time"
 
@@ -232,7 +233,7 @@ func (c *IdentityMappingsColl) SearchMappings(ctx context.Context, query *Search
 		filter["authentic_source"] = bson.M{"$in": query.AllowedAuthenticSources}
 	}
 	if query.Search != "" {
-		searchRegex := bson.M{"$regex": query.Search, "$options": "i"}
+		searchRegex := bson.M{"$regex": regexp.QuoteMeta(query.Search), "$options": "i"}
 		filter["$or"] = bson.A{
 			bson.M{"authentic_source_person_id": searchRegex},
 			bson.M{"authentic_source": searchRegex},

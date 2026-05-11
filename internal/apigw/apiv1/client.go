@@ -66,8 +66,8 @@ type Client struct {
 	adminOIDCPostLogoutRedirect string
 
 	// SPOCP engine for UI authorization
-	spocpEngine        *httphelpers.SafeEngine
-	spocpUIResources   []string
+	spocpEngine      *httphelpers.SafeEngine
+	spocpUIResources []string
 }
 
 // New creates a new instance of the public api

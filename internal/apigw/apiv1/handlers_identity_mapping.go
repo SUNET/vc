@@ -213,10 +213,10 @@ type IdentityMappingSearchReply struct {
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	IdentityMappingSearchReply	"Success"
-//	@Param			search			query	string	false	"Search term"
-//	@Param			authentic_source	query	string	false	"Filter by authentic source"
-//	@Param			limit			query	int		false	"Max results (default 50, max 200)"
+//	@Success		200					{object}	IdentityMappingSearchReply	"Success"
+//	@Param			search				query		string						false	"Search term"
+//	@Param			authentic_source	query		string						false	"Filter by authentic source"
+//	@Param			limit				query		int							false	"Max results (default 50, max 200)"
 //	@Router			/api/v1/identity/mapping/search [get]
 func (c *Client) IdentityMappingSearch(ctx context.Context, req *IdentityMappingSearchRequest) (*IdentityMappingSearchReply, error) {
 	if len(req.AllowedAuthenticSources) == 0 {

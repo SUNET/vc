@@ -287,11 +287,22 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.OIDCRP{})
 
-	// Register struct-level validation for APIAuth: JWKS and OIDC are mutually exclusive
+	// Register struct-level validation for APIAuth
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.APIAuth)
+		// JWKS and OIDC are mutually exclusive
 		if cfg.JWKS.Enable && cfg.OIDC.Enable {
 			sl.ReportError(cfg.JWKS.Enable, "JWKS", "JWKS", "api_auth_jwks_oidc_exclusive", "")
+		}
+		// Rules require an auth mode
+		hasAuth := cfg.JWKS.Enable || cfg.OIDC.Enable
+		if !hasAuth {
+			if len(cfg.Rules) > 0 {
+				sl.ReportError(cfg.Rules, "Rules", "Rules", "api_auth_rules_require_auth", "")
+			}
+			if cfg.RulesFile != "" {
+				sl.ReportError(cfg.RulesFile, "RulesFile", "RulesFile", "api_auth_rules_require_auth", "")
+			}
 		}
 	}, model.APIAuth{})
 
