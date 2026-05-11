@@ -98,6 +98,13 @@
         <!-- Main content -->
         <main class="admin-content">
 
+            <!-- Unrestricted access warning banner -->
+            <template x-if="unrestricted">
+                <div class="alert alert-warning d-flex align-items-center mb-3" role="alert">
+                    <strong class="me-2">Warning:</strong> This admin UI is running without authentication. All operations are unrestricted. Do not expose this to untrusted networks.
+                </div>
+            </template>
+
             <!-- Datastore View -->
             <template x-if="view === 'datastore'">
                 <div>
@@ -401,30 +408,11 @@
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        <template x-for="(row, ri) in treeView(im.create.attributes)" :key="row.type + '-' + ri">
-                                                            <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
-                                                                <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
-                                                                    <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
-                                                                    <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
-                                                                    <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(im.create.attributes, row.idx, $event.target.value)" style="max-width:150px"></template>
-                                                                </td>
-                                                                <td>
-                                                                    <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="im.create.attributes[row.idx].value"></template>
-                                                                </td>
-                                                                <td class="text-nowrap">
-                                                                    <template x-if="row.type==='group'">
-                                                                        <span>
-                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(im.create.attributes, row.path)" title="Add child field">+</button>
-                                                                            <button class="btn-close btn-close-sm ms-1" @click="removeGroup(im.create.attributes, row.path)" style="font-size:0.6rem;"></button>
-                                                                        </span>
-                                                                    </template>
-                                                                    <template x-if="row.type==='field'">
-                                                                        <span>
-                                                                            <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(im.create.attributes, row.idx)" title="Convert to object">+</button>
-                                                                            <button class="btn-close btn-close-sm ms-1" @click="im.create.attributes.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
-                                                                        </span>
-                                                                    </template>
-                                                                </td>
+                                                        <template x-for="(attr, ai) in im.create.attributes" :key="ai">
+                                                            <tr :class="ai % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                <td><span x-text="attr.key"></span></td>
+                                                                <td><input class="form-control form-control-sm" x-model="attr.value"></td>
+                                                                <td><button class="btn-close btn-close-sm" @click="im.create.attributes.splice(ai, 1)" style="font-size:0.6rem;"></button></td>
                                                             </tr>
                                                         </template>
                                                     </tbody>
@@ -531,30 +519,11 @@
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                <template x-for="(row, ri) in treeView(im.edit.attributes)" :key="row.type + '-' + ri">
-                                                                    <tr :class="ri % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
-                                                                        <td :style="'padding-left:' + (row.depth * 20 + 8) + 'px'">
-                                                                            <template x-if="row.type==='group'"><span class="fw-semibold text-secondary">&#9662; <span x-text="row.label"></span></span></template>
-                                                                            <template x-if="row.type==='field' && row.label"><span x-text="row.label"></span></template>
-                                                                            <template x-if="row.type==='field' && !row.label"><input class="form-control form-control-sm" placeholder="field name" @change="renameField(im.edit.attributes, row.idx, $event.target.value)" style="max-width:150px"></template>
-                                                                        </td>
-                                                                        <td>
-                                                                            <template x-if="row.type==='field'"><input class="form-control form-control-sm" x-model="im.edit.attributes[row.idx].value"></template>
-                                                                        </td>
-                                                                        <td class="text-nowrap">
-                                                                            <template x-if="row.type==='group'">
-                                                                                <span>
-                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="addChildField(im.edit.attributes, row.path)" title="Add child field">+</button>
-                                                                                    <button class="btn-close btn-close-sm ms-1" @click="removeGroup(im.edit.attributes, row.path)" style="font-size:0.6rem;"></button>
-                                                                                </span>
-                                                                            </template>
-                                                                            <template x-if="row.type==='field'">
-                                                                                <span>
-                                                                                    <button class="btn btn-sm btn-light px-1 py-0" @click="promoteToGroup(im.edit.attributes, row.idx)" title="Convert to object">+</button>
-                                                                                    <button class="btn-close btn-close-sm ms-1" @click="im.edit.attributes.splice(row.idx, 1)" style="font-size:0.6rem;"></button>
-                                                                                </span>
-                                                                            </template>
-                                                                        </td>
+                                                                <template x-for="(attr, ai) in im.edit.attributes" :key="ai">
+                                                                    <tr :class="ai % 2 === 0 ? 'tree-row-even' : 'tree-row-odd'">
+                                                                        <td><span x-text="attr.key"></span></td>
+                                                                        <td><input class="form-control form-control-sm" x-model="attr.value"></td>
+                                                                        <td><button class="btn-close btn-close-sm" @click="im.edit.attributes.splice(ai, 1)" style="font-size:0.6rem;"></button></td>
                                                                     </tr>
                                                                 </template>
                                                             </tbody>

@@ -46,6 +46,9 @@ type APIServer struct {
 	TLS            TLS     `yaml:"tls" validate:"omitempty"`
 	APIAuth        APIAuth `yaml:"api_auth"`
 	CORS           *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
+	// TrustProxyTLS forces the Secure flag on session cookies even when TLS is not
+	// enabled on this server. Use this when running behind a TLS-terminating reverse proxy.
+	TrustProxyTLS bool `yaml:"trust_proxy_tls" default:"false"`
 }
 
 // CORS holds the CORS configuration
@@ -856,6 +859,9 @@ type APIGWAuthProviders struct {
 type APIGW struct {
 	// APIServer is the HTTP API server configuration
 	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// AdminUIEnable enables the admin web UI. When false (default), the /ui routes are not registered.
+	// This must be explicitly set to true to enable the admin interface.
+	AdminUIEnable bool `yaml:"admin_ui_enable" default:"false"`
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// DataSources maps credential types to their data sources

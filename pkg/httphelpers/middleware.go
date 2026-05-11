@@ -393,6 +393,41 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return ginratelimit.RateLimitByIP(rl.tokenBucket)
 }
 
+// CSRFProtection returns middleware that enforces CSRF token validation on
+// state-changing requests (POST, PUT, DELETE, PATCH) for session-authenticated users.
+// The token is generated on login, stored in the session as "csrf_token", and must
+// be sent by the client in the X-CSRF-Token header.
+func (m *middlewareHandler) CSRFProtection(sessionKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Only enforce on state-changing methods.
+		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
+
+		// Only enforce for session-authenticated users (not JWT API clients).
+		session := sessions.Default(c)
+		if auth := session.Get(sessionKey); auth != true {
+			c.Next()
+			return
+		}
+
+		token, _ := session.Get("csrf_token").(string)
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing CSRF token in session"})
+			return
+		}
+
+		header := c.GetHeader("X-CSRF-Token")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(header)) != 1 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid CSRF token"})
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // CustomBranding returns a middleware that serves custom logo and favicon files
 // when configured in common.branding. Requests not matching /static/logo.png or
 // /static/favicon.png are passed through unchanged.

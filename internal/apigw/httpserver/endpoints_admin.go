@@ -22,7 +22,7 @@ func (s *Service) endpointAdminUI(ctx context.Context, c *gin.Context) (any, err
 }
 
 // endpointAdminLogin redirects the browser to the OIDC provider's authorization endpoint.
-// When no OIDC is configured, it creates a full-access session immediately.
+// When no OIDC is configured, grants anonymous access (the UI must be explicitly enabled via config).
 func (s *Service) endpointAdminLogin(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointAdminLogin")
 	defer span.End()
@@ -33,7 +33,7 @@ func (s *Service) endpointAdminLogin(ctx context.Context, c *gin.Context) (any, 
 		return nil, err
 	}
 
-	// No OIDC configured — grant full access without authentication
+	// No OIDC configured — grant anonymous admin access.
 	if reply.AuthURL == "" {
 		session := sessions.Default(c)
 		session.Set(adminSessionKey, true)
@@ -106,6 +106,9 @@ func (s *Service) endpointAdminCallback(ctx context.Context, c *gin.Context) (an
 		session.Set("admin_id_token_ref", tokenRef)
 	}
 
+	// Generate CSRF token for the session.
+	session.Set("csrf_token", uuid.NewString())
+
 	if err := session.Save(); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -146,6 +149,9 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 		// Filter scopes to only those the user is allowed to access.
 		scopes := filterAllowedScopes(allScopes, pairs)
 
+		// Determine if running without authentication (anonymous mode).
+		authEnabled := s.cfg.APIGW != nil && (s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable || s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable)
+
 		return gin.H{
 			"authenticated":             true,
 			"subject":                   subject,
@@ -153,6 +159,8 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			"scope_templates":           scopeTemplates,
 			"allowed_authentic_sources": allowedSources,
 			"has_identity_mapping":      hasIdentityMappingScope(pairs),
+			"csrf_token":               session.Get("csrf_token"),
+			"unrestricted":             !authEnabled,
 		}, nil
 	}
 	return gin.H{"authenticated": false}, nil

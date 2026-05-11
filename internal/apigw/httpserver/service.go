@@ -77,7 +77,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		},
 	}
 
-	if s.cfg.APIGW.APIServer.TLS.Enable {
+	if s.cfg.APIGW.APIServer.TLS.Enable || s.cfg.APIGW.APIServer.TrustProxyTLS {
 		s.sessionsOptions.Secure = true
 	}
 
@@ -197,13 +197,15 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
 
 	// Admin UI routes (login/logout only — CRUD goes through the real API)
-	rgAdminUI := rgRoot.Group("/ui")
-	rgAdminUI.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "", http.StatusOK, s.endpointAdminUI)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/login", http.StatusFound, s.endpointAdminLogin)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/callback", http.StatusFound, s.endpointAdminCallback)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/status", http.StatusOK, s.endpointAdminStatus)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodPost, "/logout", http.StatusOK, s.endpointAdminLogout)
+	if s.cfg.APIGW.AdminUIEnable {
+		rgAdminUI := rgRoot.Group("/ui")
+		rgAdminUI.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "", http.StatusOK, s.endpointAdminUI)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/login", http.StatusFound, s.endpointAdminLogin)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/callback", http.StatusFound, s.endpointAdminCallback)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/status", http.StatusOK, s.endpointAdminStatus)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodPost, "/logout", http.StatusOK, s.endpointAdminLogout)
+	}
 
 	rgDocs := rgRoot.Group("/swagger")
 	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -212,6 +214,8 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	// Add session middleware so admin session cookies are available for auth check.
 	rgAPIv1.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+	// CSRF protection for session-authenticated users.
+	rgAPIv1.Use(s.httpHelpers.Middleware.CSRFProtection(adminSessionKey))
 	// Unified auth: session users go through the same SPOCP method+path+subject
 	// check as API clients. Both paths use the shared SPOCP engine.
 	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, "apigw"))

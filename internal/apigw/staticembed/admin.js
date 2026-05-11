@@ -53,11 +53,13 @@ window.adminApp = function () {
 
     return {
         authenticated: false,
+        unrestricted: false,
         subject: '',
         scopes: [],
         scopeTemplates: {},
         allowedAuthenticSources: [],
         hasIdentityMapping: false,
+        csrfToken: '',
         view: 'datastore',
         sidebarOpen: false,
 
@@ -125,6 +127,16 @@ window.adminApp = function () {
             }
         },
 
+        /** Fetch wrapper that adds CSRF token header to mutating requests. */
+        apiFetch(url, opts = {}) {
+            opts.credentials = 'same-origin';
+            const method = (opts.method || 'GET').toUpperCase();
+            if (method !== 'GET' && method !== 'HEAD' && this.csrfToken) {
+                opts.headers = { ...opts.headers, 'X-CSRF-Token': this.csrfToken };
+            }
+            return fetch(url, opts);
+        },
+
         async init() {
             try {
                 const resp = await fetch('/ui/status', { credentials: 'same-origin' });
@@ -136,6 +148,8 @@ window.adminApp = function () {
                     this.scopeTemplates = data.scope_templates || {};
                     this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
                     this.hasIdentityMapping = data.has_identity_mapping || false;
+                    this.unrestricted = data.unrestricted || false;
+                    this.csrfToken = data.csrf_token || '';
                     this.searchDocuments();
                 }
             } catch (e) {
@@ -263,7 +277,7 @@ window.adminApp = function () {
                 const data = JSON.parse(text);
                 // Detect format: single document has "meta", batch is a map of documents
                 const docs = data.meta ? { '0': data } : data;
-                const resp = await fetch('/api/v1/datastore/bulk', {
+                const resp = await this.apiFetch('/api/v1/datastore/bulk', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ documents: docs }),
@@ -287,7 +301,7 @@ window.adminApp = function () {
             try {
                 const params = new URLSearchParams();
                 if (this.ds.search) params.set('search', this.ds.search);
-                const resp = await fetch('/api/v1/datastore/search?' + params.toString(), {
+                const resp = await this.apiFetch('/api/v1/datastore/search?' + params.toString(), {
                     credentials: 'same-origin'
                 });
                 const data = await resp.json();
@@ -335,7 +349,7 @@ window.adminApp = function () {
                     identity_mapping_ids: ids,
                     document_data: docData
                 };
-                const resp = await fetch('/api/v1/datastore', {
+                const resp = await this.apiFetch('/api/v1/datastore', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -357,7 +371,7 @@ window.adminApp = function () {
         async deleteDocument(doc) {
             if (!confirm('Delete document ' + (doc.meta?.document_id || '') + '?')) return;
             try {
-                await fetch('/api/v1/datastore', {
+                await this.apiFetch('/api/v1/datastore', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -408,7 +422,7 @@ window.adminApp = function () {
                     identity_mapping_ids: ids,
                     document_data: docData
                 };
-                const resp = await fetch('/api/v1/datastore', {
+                const resp = await this.apiFetch('/api/v1/datastore', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -471,7 +485,7 @@ window.adminApp = function () {
                         }
                     }
                 }
-                const resp = await fetch('/api/v1/identity/mapping/bulk', {
+                const resp = await this.apiFetch('/api/v1/identity/mapping/bulk', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mappings }),
@@ -495,7 +509,7 @@ window.adminApp = function () {
             try {
                 const params = new URLSearchParams();
                 if (this.im.search) params.set('search', this.im.search);
-                const resp = await fetch('/api/v1/identity/mapping/search?' + params.toString(), {
+                const resp = await this.apiFetch('/api/v1/identity/mapping/search?' + params.toString(), {
                     credentials: 'same-origin'
                 });
                 const data = await resp.json();
@@ -543,14 +557,17 @@ window.adminApp = function () {
                 if (this.im.createTab === 'json') {
                     attrs = JSON.parse(this.im.create.attributes_json);
                 } else {
-                    attrs = unflattenEntries(this.im.create.attributes.filter(a => a.key.trim()));
+                    attrs = {};
+                    for (const a of this.im.create.attributes.filter(a => a.key.trim())) {
+                        attrs[a.key.trim()] = a.value;
+                    }
                 }
                 const body = {
                     authentic_source: this.im.create.authentic_source,
                     authentic_source_person_id: this.im.create.authentic_source_person_id,
                     attributes: attrs
                 };
-                const resp = await fetch('/api/v1/identity/mapping', {
+                const resp = await this.apiFetch('/api/v1/identity/mapping', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -587,7 +604,7 @@ window.adminApp = function () {
             this.im.edit = {
                 authentic_source: m.authentic_source,
                 authentic_source_person_id: m.authentic_source_person_id,
-                attributes: flattenObject(attrs, ''),
+                attributes: Object.entries(attrs).map(([key, value]) => ({ key, value: String(value) })),
                 attributes_json: JSON.stringify(attrs, null, 2),
                 newFieldKey: ''
             };
@@ -603,12 +620,13 @@ window.adminApp = function () {
         switchImCreateTab(tab) {
             if (tab === this.im.createTab) return;
             if (tab === 'json') {
-                const attrs = unflattenEntries(this.im.create.attributes);
+                const attrs = {};
+                for (const a of this.im.create.attributes) { attrs[a.key] = a.value; }
                 this.im.create.attributes_json = JSON.stringify(attrs, null, 2);
             } else {
                 try {
                     const obj = JSON.parse(this.im.create.attributes_json);
-                    this.im.create.attributes = flattenObject(obj, '');
+                    this.im.create.attributes = Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
                 } catch { /* keep current */ }
             }
             this.im.createTab = tab;
@@ -617,12 +635,13 @@ window.adminApp = function () {
         switchImEditTab(tab) {
             if (tab === this.im.editTab) return;
             if (tab === 'json') {
-                const attrs = unflattenEntries(this.im.edit.attributes);
+                const attrs = {};
+                for (const a of this.im.edit.attributes) { attrs[a.key] = a.value; }
                 this.im.edit.attributes_json = JSON.stringify(attrs, null, 2);
             } else {
                 try {
                     const obj = JSON.parse(this.im.edit.attributes_json);
-                    this.im.edit.attributes = flattenObject(obj, '');
+                    this.im.edit.attributes = Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
                 } catch { /* keep current */ }
             }
             this.im.editTab = tab;
@@ -636,14 +655,17 @@ window.adminApp = function () {
                 if (this.im.editTab === 'json') {
                     attrs = JSON.parse(this.im.edit.attributes_json);
                 } else {
-                    attrs = unflattenEntries(this.im.edit.attributes.filter(a => a.key.trim()));
+                    attrs = {};
+                    for (const a of this.im.edit.attributes.filter(a => a.key.trim())) {
+                        attrs[a.key.trim()] = a.value;
+                    }
                 }
                 const body = {
                     authentic_source: this.im.edit.authentic_source,
                     authentic_source_person_id: this.im.edit.authentic_source_person_id,
                     attributes: attrs
                 };
-                const resp = await fetch('/api/v1/identity/mapping', {
+                const resp = await this.apiFetch('/api/v1/identity/mapping', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -664,7 +686,7 @@ window.adminApp = function () {
         async deleteMapping(m) {
             if (!confirm('Delete mapping for ' + (m.authentic_source_person_id || '') + '?')) return;
             try {
-                await fetch('/api/v1/identity/mapping', {
+                await this.apiFetch('/api/v1/identity/mapping', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
