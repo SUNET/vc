@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-05-06
+**Generated:** 2026-05-11
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -179,6 +179,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | Field                     | Type     | Description                                                                                                                                                                                                         | Example                     | Default | Required |
 | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
 | `api_server`              | `object` | HTTP API server configuration                                                                                                                                                                                       | -                           | -       | Yes      |
+| `admin_ui_enable`         | `bool`   | The admin web UI. When false (default), the /ui routes are not registered. This must be explicitly set to true to enable the admin interface.                                                                       | -                           | `false` | No       |
 | `key_config`              | `object` | Signing key configuration                                                                                                                                                                                           | -                           | -       | Yes      |
 | `data_sources`            | `object` | Credential types to their data sources                                                                                                                                                                              | -                           | -       | Yes      |
 | `auth_providers`          | `object` | How users authenticate (SAML, OIDC)                                                                                                                                                                                 | -                           | -       | No       |
@@ -201,6 +202,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `tls`              | `object` | TLS                                                                                                                                                              | -       | -       | No       |
 | `api_auth`         | `object` | API Auth                                                                                                                                                         | -       | -       | No       |
 | `cors`             | `object` | CORS                                                                                                                                                             | -       | -       | No       |
+| `trust_proxy_tls`  | `bool`   | The Secure flag on session cookies even when TLS is not enabled on this server. Use this when running behind a TLS-terminating reverse proxy.                    | -       | `false` | No       |
 
 ### `tls`
 
@@ -216,33 +218,11 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`, `.mock_as.api_server.api_auth`, `.ui.api_server.api_auth`
 
-Exactly one of BasicAuth.Enable or JWT.Enable may be true.
-If neither is enabled, no authentication is applied (open access).
+JWKS and OIDC are mutually exclusive
+If neither is enabled, no authentication is applied (open access)
 
-| Field        | Type     | Description                                                                                                                                                                                      | Example | Default | Required |
-| ------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `basic_auth` | `object` | HTTP Basic authentication configuration. When enabled, requests are allowed or rejected based on username/password only.                                                                         | -       | -       | No       |
-| `jwt`        | `object` | JWT Bearer token authentication configuration. When enabled, requests are validated via JWKS and optionally authorized against SPOCP (S-expression) rules for fine-grained per-endpoint control. | -       | -       | No       |
-
-### `basic_auth`
-
-> **Path:** `.apigw.api_server.api_auth.basic_auth`, `.issuer.api_server.api_auth.basic_auth`, `.verifier.api_server.api_auth.basic_auth`, `.registry.api_server.api_auth.basic_auth`, `.mock_as.api_server.api_auth.basic_auth`, `.ui.api_server.api_auth.basic_auth`
-
-This is a simple allow/deny mechanism – valid credentials grant full access.
-
-| Field    | Type     | Description                  | Example | Default | Required |
-| -------- | -------- | ---------------------------- | ------- | ------- | -------- |
-| `enable` | `bool`   | HTTP Basic authentication    | -       | `false` | No       |
-| `users`  | `object` | Username to password mapping | -       | -       | No       |
-
-### `jwt`
-
-> **Path:** `.apigw.api_server.api_auth.jwt`, `.issuer.api_server.api_auth.jwt`, `.verifier.api_server.api_auth.jwt`, `.registry.api_server.api_auth.jwt`, `.mock_as.api_server.api_auth.jwt`, `.ui.api_server.api_auth.jwt`
-
-with optional SPOCP-based authorization.
-
-When Rules (and/or RulesFile) are configured, each request is checked against
-the SPOCP engine. A query of the form
+When Rules (and/or RulesFile) are configured, each authenticated request is
+checked against a SPOCP engine. A query of the form
 
 (api (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
 
@@ -250,16 +230,45 @@ is evaluated; the request is allowed only if a matching rule exists.
 The <SERVICE> value is supplied by the calling service at middleware
 registration time. When two services share endpoints, rules for one
 service do not grant access to the other.
-When no rules are configured, any valid JWT grants access.
+When no rules are configured, any valid Bearer JWT grants access.
 
-| Field        | Type       | Description                                                                                                                                      | Example                                                                      | Default | Required         |
-| ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | ------- | ---------------- |
-| `enable`     | `bool`     | JWT Bearer token authentication                                                                                                                  | -                                                                            | `false` | No               |
-| `jwks_url`   | `string`   | URL of the JSON Web Key Set used to validate token signatures.                                                                                   | `"https://auth.example.com/.well-known/jwks.json"`                           | -       | Yes (if enabled) |
-| `issuer`     | `string`   | Expected "iss" claim. Tokens with a different issuer are rejected.                                                                               | -                                                                            | -       | Yes (if enabled) |
-| `audience`   | `string`   | Expected "aud" claim. Tokens that do not contain this audience are rejected.                                                                     | -                                                                            | -       | Yes (if enabled) |
-| `rules`      | `[]string` | SPOCP S-expression authorization rules loaded into an in-process engine. When non-empty the middleware builds a query per request and checks it. | `["(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))"]` | -       | No               |
-| `rules_file` | `string`   | Optional path to a file containing SPOCP rules (one per line). Rules from this file are loaded in addition to the inline Rules list.             | -                                                                            | -       | No               |
+| Field        | Type       | Description                                                                                                                                                                                                                                                                                    | Example                                                                      | Default | Required |
+| ------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------- | -------- |
+| `jwks`       | `object`   | Static JWKS Bearer token authentication configuration When enabled, requests are validated against a manually configured JWKS URL                                                                                                                                                              | -                                                                            | -       | No       |
+| `oidc`       | `object`   | OIDC Bearer token authentication configuration When enabled, the JWKS endpoint is auto-discovered from the issuer's .well-known/openid-configuration and Bearer JWTs are validated locally The RP fields (client_id, redirect_uri, etc.) also enable the admin UI login flow via OIDC redirect | -                                                                            | -       | No       |
+| `rules`      | `[]string` | SPOCP S-expression authorization rules loaded into an in-process engine When non-empty the middleware builds a query per request and checks it Rules apply regardless of whether JWKS or OIDC is the active auth method                                                                        | `["(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))"]` | -       | No       |
+| `rules_file` | `string`   | Optional path to a file containing SPOCP rules (one per line) Rules from this file are loaded in addition to the inline Rules list                                                                                                                                                             | -                                                                            | -       | No       |
+
+### `jwks`
+
+> **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`, `.mock_as.api_server.api_auth.jwks`, `.ui.api_server.api_auth.jwks`
+
+| Field      | Type     | Description                                                                 | Example                                            | Default | Required         |
+| ---------- | -------- | --------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ---------------- |
+| `enable`   | `bool`   | Static JWKS Bearer token authentication                                     | -                                                  | `false` | No               |
+| `jwks_url` | `string` | URL of the JSON Web Key Set used to validate token signatures               | `"https://auth.example.com/.well-known/jwks.json"` | -       | Yes (if enabled) |
+| `issuer`   | `string` | Expected "iss" claim. Tokens with a different issuer are rejected           | -                                                  | -       | Yes (if enabled) |
+| `audience` | `string` | Expected "aud" claim. Tokens that do not contain this audience are rejected | -                                                  | -       | Yes (if enabled) |
+
+### `oidc`
+
+> **Path:** `.apigw.api_server.api_auth.oidc`, `.issuer.api_server.api_auth.oidc`, `.verifier.api_server.api_auth.oidc`, `.registry.api_server.api_auth.oidc`, `.mock_as.api_server.api_auth.oidc`, `.ui.api_server.api_auth.oidc`
+
+It serves two purposes:
+- API auth: Bearer JWTs in Authorization headers are validated locally
+against the provider's JWKS (auto-discovered from IssuerURL).
+- Admin UI login: the RP fields (ClientID, RedirectURI, Scopes) enable
+an authorization-code redirect flow so admins log in via the OIDC provider.
+
+| Field           | Type       | Description                                                                                   | Example                                   | Default | Required         |
+| --------------- | ---------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ---------------- |
+| `enable`        | `bool`     | OIDC authentication                                                                           | -                                         | `false` | No               |
+| `issuer_url`    | `string`   | OIDC provider's issuer URL used for discovery and "iss" claim validation.                     | `"https://auth.example.com"`              | -       | Yes (if enabled) |
+| `audience`      | `string`   | Expected "aud" claim. Tokens that do not contain this audience are rejected.                  | -                                         | -       | Yes (if enabled) |
+| `client_id`     | `string`   | OAuth2 client identifier registered with the OIDC provider.                                   | -                                         | -       | Yes (if enabled) |
+| `client_secret` | `string`   | OAuth2 client secret. May be empty for public clients.                                        | -                                         | -       | No               |
+| `redirect_uri`  | `string`   | Callback URL for the admin UI OIDC login flow (e.g. "https://apigw.example.com/ui/callback"). | `"https://apigw.example.com/ui/callback"` | -       | Yes (if enabled) |
+| `scopes`        | `[]string` | OAuth2/OIDC scopes to request (default: ["openid"]).                                          | -                                         | -       | No               |
 
 ### `cors`
 
@@ -1050,17 +1059,17 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.apigw.api_server.api_auth`
 
-| Field        | Type     | Description | Example | Default | Required |
-| ------------ | -------- | ----------- | ------- | ------- | -------- |
-| `basic_auth` | `object` | Basic Auth  | -       | -       | No       |
+| Field  | Type     | Description | Example | Default | Required |
+| ------ | -------- | ----------- | ------- | ------- | -------- |
+| `oidc` | `object` | OIDC        | -       | -       | No       |
 
-### `basic_auth`
+### `oidc`
 
-> **Path:** `.apigw.api_server.api_auth.basic_auth`
+> **Path:** `.apigw.api_server.api_auth.oidc`
 
-| Field   | Type     | Description                                          | Example                    | Default | Required |
-| ------- | -------- | ---------------------------------------------------- | -------------------------- | ------- | -------- |
-| `users` | `object` | Usernames to passwords for HTTP Basic Authentication | `<username>: "<password>"` | -       | No       |
+| Field           | Type     | Description                                | Example | Default | Required |
+| --------------- | -------- | ------------------------------------------ | ------- | ------- | -------- |
+| `client_secret` | `string` | OAuth2 client secret for the OIDC provider | -       | -       | No       |
 
 ### `auth_providers`
 
@@ -1163,9 +1172,8 @@ common:
 apigw:
   api_server:
     api_auth:
-      basic_auth:
-        users:
-          <username>: "<password>"
+      oidc:
+        client_secret: "your-oidc-client-secret"
   auth_providers:
     oidc:
       registration:

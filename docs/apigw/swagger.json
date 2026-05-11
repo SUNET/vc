@@ -7,9 +7,51 @@
     },
     "basePath": "/api/v1",
     "paths": {
-        "/consent": {
+        "/.well-known/jwt-vc-issuer": {
+            "get": {
+                "description": "Returns the SD-JWT VC issuer metadata",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "SD-JWT VC Issuer Metadata",
+                "operationId": "sdjwtvc-issuer-metadata",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.SDJWTVCIssuerMetadataResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/.well-known/oauth-authorization-server": {
+            "get": {
+                "description": "Returns the OAuth2 authorization server metadata (RFC 8414)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "OAuth2 Server Metadata",
+                "operationId": "oauth-metadata",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/oauth2.AuthorizationServerMetadata"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/datastore": {
             "post": {
-                "description": "Add consent endpoint",
+                "description": "Get document endpoint",
                 "consumes": [
                     "application/json"
                 ],
@@ -19,8 +61,8 @@
                 "tags": [
                     "vc-platform"
                 ],
-                "summary": "AddConsent",
-                "operationId": "add-consent",
+                "summary": "DatastoreGet",
+                "operationId": "get-document",
                 "parameters": [
                     {
                         "description": " ",
@@ -28,7 +70,529 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/apiv1.AddConsentRequest"
+                            "$ref": "#/definitions/apiv1.DatastoreGetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreGetReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "delete one document endpoint",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreDelete",
+                "operationId": "delete-document",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreDeleteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/datastore/": {
+            "get": {
+                "description": "Get a document by authentic_source, scope, and document_id",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreGetByKey",
+                "operationId": "get-document-by-key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Authentic source",
+                        "name": "authentic_source",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Scope",
+                        "name": "scope",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Document ID",
+                        "name": "document_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreGetByKeyReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Replace an existing document in the datastore",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreReplace",
+                "operationId": "datastore-replace",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/vcclient.UploadRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Upload a document to the datastore",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreUpload",
+                "operationId": "datastore-upload",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/vcclient.UploadRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreUploadReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a document by authentic_source, scope, and document_id",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreDeleteByKey",
+                "operationId": "delete-document-by-key",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreDeleteByKeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/datastore/identity": {
+            "put": {
+                "description": "Adding array of identity mapping IDs to one document",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreAddIdentity",
+                "operationId": "add-identity",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreAddIdentityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete identity to document endpoint",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreDeleteIdentity",
+                "operationId": "delete-identity",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreDeleteIdentityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/datastore/list": {
+            "post": {
+                "description": "List documents for an identity",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreList",
+                "operationId": "document-list",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreListRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreListReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/datastore/resolve": {
+            "post": {
+                "description": "Resolve identity attributes to documents",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreResolve",
+                "operationId": "resolve-document",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreResolveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreResolveReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/datastore/search": {
+            "get": {
+                "description": "Search documents in the datastore",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastoreSearch",
+                "operationId": "search-documents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search term",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by authentic source",
+                        "name": "authentic_source",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by scope",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastoreSearchReply"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/identity/mapping": {
+            "put": {
+                "description": "Update an existing identity mapping",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "IdentityMappingUpdate",
+                "operationId": "update-identity-mapping",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.IdentityMappingUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new identity mapping",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "IdentityMappingCreate",
+                "operationId": "create-identity-mapping",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.IdentityMappingCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.IdentityMappingCreateReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete an identity mapping",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "IdentityMappingDelete",
+                "operationId": "delete-identity-mapping",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.IdentityMappingDeleteRequest"
                         }
                     }
                 ],
@@ -45,9 +609,9 @@
                 }
             }
         },
-        "/consent/get": {
+        "/api/v1/identity/mapping/resolve": {
             "post": {
-                "description": "Get consent endpoint",
+                "description": "Resolve attributes to an authentic_source_person_id",
                 "consumes": [
                     "application/json"
                 ],
@@ -57,8 +621,8 @@
                 "tags": [
                     "vc-platform"
                 ],
-                "summary": "GetConsent",
-                "operationId": "get-consent",
+                "summary": "IdentityMappingResolve",
+                "operationId": "resolve-identity-mapping",
                 "parameters": [
                     {
                         "description": " ",
@@ -66,7 +630,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/apiv1.GetConsentRequest"
+                            "$ref": "#/definitions/apiv1.IdentityMappingResolveRequest"
                         }
                     }
                 ],
@@ -74,8 +638,139 @@
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "$ref": "#/definitions/model.Consent"
+                            "$ref": "#/definitions/apiv1.IdentityMappingResolveReply"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/identity/mapping/search": {
+            "get": {
+                "description": "Search identity mappings",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "IdentityMappingSearch",
+                "operationId": "search-identity-mappings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search term",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by authentic source",
+                        "name": "authentic_source",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.IdentityMappingSearchReply"
+                        }
+                    }
+                }
+            }
+        },
+        "/authorization/consent": {
+            "get": {
+                "description": "Handles the authorization consent flow for credential issuance",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "Authorization Consent",
+                "operationId": "oauth-authorization-consent",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.OAuthAuthorizationConsentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/authorization/consent/callback": {
+            "get": {
+                "description": "Handles the callback after user consents to credential issuance",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "Authorization Consent Callback",
+                "operationId": "oauth-authorization-consent-callback",
+                "responses": {
+                    "302": {
+                        "description": "Redirect"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/authorize": {
+            "get": {
+                "description": "Handle OAuth2 authorization request and redirect to consent",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "OAuth2 Authorize",
+                "operationId": "oauth-authorize",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PAR request URI",
+                        "name": "request_uri",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to consent"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -127,9 +822,30 @@
                 }
             }
         },
-        "/document": {
-            "post": {
-                "description": "Get document endpoint",
+        "/jwks": {
+            "get": {
+                "description": "Returns the JSON Web Key Set for signature verification",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "JWKS",
+                "operationId": "jwks",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.JWKSResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/oidcrp/callback": {
+            "get": {
+                "description": "Receives and processes the authorization code from the OIDC Provider",
                 "consumes": [
                     "application/json"
                 ],
@@ -137,18 +853,146 @@
                     "application/json"
                 ],
                 "tags": [
-                    "vc-platform"
+                    "OIDCRP"
                 ],
-                "summary": "GetDocument",
-                "operationId": "get-document",
+                "summary": "OIDC Provider Callback",
+                "operationId": "oidcrp-callback",
                 "parameters": [
                     {
-                        "description": " ",
-                        "name": "req",
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "OAuth2 state parameter",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.OIDCRPCallbackResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/oidcrp/initiate": {
+            "post": {
+                "description": "Initiates OIDC authentication by generating an OAuth2 authorization URL with PKCE",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OIDCRP"
+                ],
+                "summary": "Initiate OIDC Authentication",
+                "operationId": "oidcrp-initiate",
+                "parameters": [
+                    {
+                        "description": "OIDC RP initiate request",
+                        "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/apiv1.GetDocumentRequest"
+                            "$ref": "#/definitions/apiv1.OIDCRPInitiateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.OIDCRPInitiateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/op/par": {
+            "post": {
+                "description": "Handle OAuth2 Pushed Authorization Request (PAR)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "Pushed Authorization Request",
+                "operationId": "oauth-par",
+                "parameters": [
+                    {
+                        "description": "PAR request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/openid4vci.PARRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/openid4vci.ParResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/token": {
+            "post": {
+                "description": "Exchange authorization code for tokens",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OAuth"
+                ],
+                "summary": "OAuth2 Token",
+                "operationId": "oauth-token",
+                "parameters": [
+                    {
+                        "description": "Token request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/openid4vci.TokenRequest"
                         }
                     }
                 ],
@@ -156,358 +1000,8 @@
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "$ref": "#/definitions/apiv1.GetDocumentReply"
+                            "$ref": "#/definitions/openid4vci.TokenResponse"
                         }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "delete one document endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "DeleteDocument",
-                "operationId": "delete-document",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DeleteDocumentRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/document/collect_id": {
-            "post": {
-                "description": "Get one document with collect id",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "GetDocumentByCollectID",
-                "operationId": "get-document-collect-id",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.GetDocumentCollectIDRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.GetDocumentCollectIDReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/document/identity": {
-            "put": {
-                "description": "Adding array of identities to one document",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "AddDocumentIdentity",
-                "operationId": "add-document-identity",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.AddDocumentIdentityRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete identity to document endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "DeleteDocumentIdentity",
-                "operationId": "delete-document-identity",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DeleteDocumentIdentityRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/document/list": {
-            "post": {
-                "description": "List documents for an identity",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "DocumentList",
-                "operationId": "document-list",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DocumentListRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DocumentListReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/document/revoke": {
-            "post": {
-                "description": "Revoke one document",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "RevokeDocument",
-                "operationId": "revoke-document",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.RevokeDocumentRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/identity/mapping": {
-            "post": {
-                "description": "Identity mapping endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "IdentityMapping",
-                "operationId": "identity-mapping",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.IdentityMappingRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.IdentityMappingReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/notification": {
-            "post": {
-                "description": "notification endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "Notification",
-                "operationId": "generic-notification",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/vcclient.NotificationRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/vcclient.NotificationReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/upload": {
-            "post": {
-                "description": "Upload endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "Upload",
-                "operationId": "generic-upload",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/vcclient.UploadRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -520,40 +1014,13 @@
         }
     },
     "definitions": {
-        "apiv1.AddConsentRequest": {
-            "type": "object",
-            "required": [
-                "authentic_source",
-                "authentic_source_person_id",
-                "consent_to",
-                "session_id"
-            ],
-            "properties": {
-                "authentic_source": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "authentic_source_person_id": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "consent_to": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "session_id": {
-                    "type": "string",
-                    "maxLength": 128
-                }
-            }
-        },
-        "apiv1.AddDocumentIdentityRequest": {
+        "apiv1.DatastoreAddIdentityRequest": {
             "type": "object",
             "required": [
                 "authentic_source",
                 "document_id",
-                "identities",
-                "vct"
+                "identity_mapping_ids",
+                "scope"
             ],
             "properties": {
                 "authentic_source": {
@@ -564,25 +1031,48 @@
                     "description": "required: true\nexample: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8",
                     "type": "string"
                 },
-                "identities": {
+                "identity_mapping_ids": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
-                        "$ref": "#/definitions/model.Identity"
+                        "type": "string"
                     }
                 },
-                "vct": {
-                    "description": "required: true\nexample: urn:eudi:pid:1",
+                "scope": {
+                    "description": "required: true\nexample: pid",
                     "type": "string"
                 }
             }
         },
-        "apiv1.DeleteDocumentIdentityRequest": {
+        "apiv1.DatastoreDeleteByKeyRequest": {
+            "type": "object",
+            "required": [
+                "authentic_source",
+                "document_id",
+                "scope"
+            ],
+            "properties": {
+                "authentic_source": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "document_id": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "scope": {
+                    "type": "string",
+                    "maxLength": 128
+                }
+            }
+        },
+        "apiv1.DatastoreDeleteIdentityRequest": {
             "type": "object",
             "required": [
                 "authentic_source",
                 "authentic_source_person_id",
                 "document_id",
-                "vct"
+                "scope"
             ],
             "properties": {
                 "authentic_source": {
@@ -597,18 +1087,18 @@
                     "description": "required: true\nexample: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8",
                     "type": "string"
                 },
-                "vct": {
-                    "description": "required: true\nexample: urn:eudi:pid:1",
+                "scope": {
+                    "description": "required: true\nexample: pid",
                     "type": "string"
                 }
             }
         },
-        "apiv1.DeleteDocumentRequest": {
+        "apiv1.DatastoreDeleteRequest": {
             "type": "object",
             "required": [
                 "authentic_source",
                 "document_id",
-                "vct"
+                "scope"
             ],
             "properties": {
                 "authentic_source": {
@@ -619,13 +1109,48 @@
                     "description": "required: true\nexample: 5e7a981c-c03f-11ee-b116-9b12c59362b9",
                     "type": "string"
                 },
-                "vct": {
-                    "description": "required: true\nexample: urn:eudi:pid:1",
+                "scope": {
+                    "description": "required: true\nexample: pid",
                     "type": "string"
                 }
             }
         },
-        "apiv1.DocumentListReply": {
+        "apiv1.DatastoreGetByKeyReply": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.CompleteDocument"
+                }
+            }
+        },
+        "apiv1.DatastoreGetReply": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.Document"
+                }
+            }
+        },
+        "apiv1.DatastoreGetRequest": {
+            "type": "object",
+            "required": [
+                "authentic_source",
+                "document_id",
+                "scope"
+            ],
+            "properties": {
+                "authentic_source": {
+                    "type": "string"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.DatastoreListReply": {
             "type": "object",
             "properties": {
                 "data": {
@@ -636,30 +1161,117 @@
                 }
             }
         },
-        "apiv1.DocumentListRequest": {
+        "apiv1.DatastoreListRequest": {
             "type": "object",
             "required": [
-                "identity"
+                "identity_mapping_id"
             ],
             "properties": {
                 "authentic_source": {
                     "type": "string"
                 },
-                "identity": {
-                    "$ref": "#/definitions/model.Identity"
+                "identity_mapping_id": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
                 },
                 "valid_from": {
                     "type": "integer"
                 },
                 "valid_to": {
                     "type": "integer"
+                }
+            }
+        },
+        "apiv1.DatastoreResolveReply": {
+            "type": "object",
+            "properties": {
+                "authentic_source_person_id": {
+                    "type": "string"
                 },
-                "vct": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.DocumentList"
+                    }
+                }
+            }
+        },
+        "apiv1.DatastoreResolveRequest": {
+            "type": "object",
+            "required": [
+                "attributes",
+                "authentic_source",
+                "scope"
+            ],
+            "properties": {
+                "attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "authentic_source": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "scope": {
+                    "type": "string",
+                    "maxLength": 128
+                }
+            }
+        },
+        "apiv1.DatastoreSearchReply": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.CompleteDocument"
+                    }
+                }
+            }
+        },
+        "apiv1.DatastoreUploadReply": {
+            "type": "object",
+            "properties": {
+                "document_id": {
                     "type": "string"
                 }
             }
         },
-        "apiv1.GetConsentRequest": {
+        "apiv1.IdentityMappingCreateReply": {
+            "type": "object",
+            "properties": {
+                "authentic_source_person_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.IdentityMappingCreateRequest": {
+            "type": "object",
+            "required": [
+                "authentic_source"
+            ],
+            "properties": {
+                "attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "authentic_source": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "authentic_source_person_id": {
+                    "type": "string",
+                    "maxLength": 128
+                }
+            }
+        },
+        "apiv1.IdentityMappingDeleteRequest": {
             "type": "object",
             "required": [
                 "authentic_source",
@@ -676,104 +1288,140 @@
                 }
             }
         },
-        "apiv1.GetDocumentCollectIDReply": {
+        "apiv1.IdentityMappingResolveReply": {
+            "type": "object",
+            "properties": {
+                "authentic_source_person_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.IdentityMappingResolveRequest": {
+            "type": "object",
+            "required": [
+                "attributes",
+                "authentic_source"
+            ],
+            "properties": {
+                "attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "authentic_source": {
+                    "type": "string",
+                    "maxLength": 128
+                }
+            }
+        },
+        "apiv1.IdentityMappingSearchReply": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.Document"
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.IdentityMapping"
+                    }
                 }
             }
         },
-        "apiv1.GetDocumentCollectIDRequest": {
+        "apiv1.IdentityMappingUpdateRequest": {
             "type": "object",
             "required": [
                 "authentic_source",
-                "collect_id",
-                "identity",
-                "vct"
+                "authentic_source_person_id"
             ],
             "properties": {
+                "attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "authentic_source": {
-                    "type": "string"
-                },
-                "collect_id": {
-                    "type": "string"
-                },
-                "identity": {
-                    "$ref": "#/definitions/model.Identity"
-                },
-                "vct": {
-                    "type": "string"
-                }
-            }
-        },
-        "apiv1.GetDocumentReply": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.Document"
-                }
-            }
-        },
-        "apiv1.GetDocumentRequest": {
-            "type": "object",
-            "required": [
-                "authentic_source",
-                "document_id",
-                "vct"
-            ],
-            "properties": {
-                "authentic_source": {
-                    "type": "string"
-                },
-                "document_id": {
-                    "type": "string"
-                },
-                "vct": {
-                    "type": "string"
-                }
-            }
-        },
-        "apiv1.IdentityMappingReply": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.IDMapping"
-                }
-            }
-        },
-        "apiv1.IdentityMappingRequest": {
-            "type": "object",
-            "required": [
-                "authentic_source",
-                "identity"
-            ],
-            "properties": {
-                "authentic_source": {
-                    "description": "required: true\nexample: SUNET",
                     "type": "string",
                     "maxLength": 128
                 },
-                "identity": {
-                    "$ref": "#/definitions/model.Identity"
+                "authentic_source_person_id": {
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
-        "apiv1.RevokeDocumentRequest": {
+        "apiv1.JWKSResponse": {
             "type": "object",
-            "required": [
-                "authentic_source",
-                "revocation",
-                "vct"
-            ],
             "properties": {
-                "authentic_source": {
+                "keys": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/apiv1_issuer.Jwk"
+                    }
+                }
+            }
+        },
+        "apiv1.OAuthAuthorizationConsentResponse": {
+            "type": "object",
+            "properties": {
+                "redirectURL": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.OIDCRPCallbackResponse": {
+            "type": "object",
+            "properties": {
+                "credential": {
                     "type": "string"
                 },
-                "revocation": {
-                    "$ref": "#/definitions/model.Revocation"
+                "credential_offer": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
-                "vct": {
+                "credential_type": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "vci_redirect_url": {
+                    "description": "VCIRedirectURL is set when the callback is part of a VCI consent flow.\nThe httpserver should redirect the browser to this URL instead of returning JSON.",
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.OIDCRPInitiateRequest": {
+            "type": "object",
+            "required": [
+                "credential_type"
+            ],
+            "properties": {
+                "credential_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.OIDCRPInitiateResponse": {
+            "type": "object",
+            "properties": {
+                "authorization_url": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1.SDJWTVCIssuerMetadataResponse": {
+            "type": "object",
+            "properties": {
+                "issuer": {
+                    "type": "string"
+                },
+                "jwks_uri": {
                     "type": "string"
                 }
             }
@@ -782,6 +1430,38 @@
             "type": "object",
             "properties": {
                 "credential": {
+                    "type": "string"
+                }
+            }
+        },
+        "apiv1_issuer.Jwk": {
+            "type": "object",
+            "properties": {
+                "crv": {
+                    "type": "string"
+                },
+                "d": {
+                    "type": "string"
+                },
+                "ext": {
+                    "type": "boolean"
+                },
+                "key_ops": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "kid": {
+                    "type": "string"
+                },
+                "kty": {
+                    "type": "string"
+                },
+                "x": {
+                    "type": "string"
+                },
+                "y": {
                     "type": "string"
                 }
             }
@@ -822,41 +1502,27 @@
                 }
             }
         },
-        "model.Collect": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "description": "required: false\nexample: 98fe67fc-c03f-11ee-bbee-4345224d414f",
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "valid_until": {
-                    "description": "required: false\nexample: 509567558\nformat: int64",
-                    "type": "integer"
-                }
-            }
-        },
-        "model.Consent": {
+        "model.CompleteDocument": {
             "type": "object",
             "required": [
-                "consent_to",
-                "created_at",
-                "session_id"
+                "document_data",
+                "identity_mapping_ids",
+                "meta"
             ],
             "properties": {
-                "consent_to": {
-                    "description": "required: true\nexample: \"Using my data for research\"",
-                    "type": "string",
-                    "maxLength": 128
+                "document_data": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
-                "created_at": {
-                    "description": "required: true\nexample: 509567558\nformat: int64",
-                    "type": "integer"
+                "identity_mapping_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
                 },
-                "session_id": {
-                    "description": "required: true\nexample: \"sess-123\"",
-                    "type": "string",
-                    "maxLength": 128
+                "meta": {
+                    "$ref": "#/definitions/model.MetaData"
                 }
             }
         },
@@ -873,242 +1539,43 @@
                 }
             }
         },
-        "model.DocumentDisplay": {
-            "type": "object",
-            "required": [
-                "description_structured",
-                "type",
-                "version"
-            ],
-            "properties": {
-                "description_structured": {
-                    "description": "DescriptionStructured is a map of structured descriptions\nrequired: true\nexample: {\"en\": \"European Health Insurance Card\", \"sv\": \"Europeiskt sjukförsäkringskortet\"}",
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "type": {
-                    "description": "required: true\nexample: secure",
-                    "type": "string"
-                },
-                "version": {
-                    "description": "required: true\nexample: \"1.0.0\"",
-                    "type": "string"
-                }
-            }
-        },
         "model.DocumentList": {
             "type": "object",
             "required": [
-                "meta",
-                "qr"
+                "meta"
             ],
             "properties": {
-                "document_display": {
-                    "$ref": "#/definitions/model.DocumentDisplay"
-                },
                 "meta": {
                     "$ref": "#/definitions/model.MetaData"
-                },
-                "qr": {
-                    "$ref": "#/definitions/openid4vci.QR"
                 }
             }
         },
-        "model.IDMapping": {
-            "type": "object",
-            "properties": {
-                "authentic_source_person_id": {
-                    "type": "string",
-                    "maxLength": 128
-                }
-            }
-        },
-        "model.Identity": {
+        "model.IdentityMapping": {
             "type": "object",
             "required": [
-                "authentic_source_person_id",
-                "birth_date",
-                "family_name",
-                "given_name",
-                "schema"
+                "authentic_source",
+                "authentic_source_person_id"
             ],
             "properties": {
-                "age_birth_year": {
-                    "type": "integer"
-                },
-                "age_in_years": {
-                    "type": "integer"
-                },
-                "age_over_14": {
-                    "type": "string"
-                },
-                "age_over_16": {
-                    "type": "boolean"
-                },
-                "age_over_18": {
-                    "type": "boolean"
-                },
-                "age_over_21": {
-                    "type": "boolean"
-                },
-                "age_over_65": {
-                    "type": "boolean"
-                },
-                "authentic_source_person_id": {
-                    "description": "required: true\nexample: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a",
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "birth_date": {
-                    "description": "required: true\nexample: 1970-01-01 TODO: Day, month, and year?",
-                    "type": "string"
-                },
-                "birth_family_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
-                "birth_given_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
-                "birth_place": {
-                    "description": "required: true\nexample: Stockholm",
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 2
-                },
-                "document_number": {
-                    "description": "required: false\nexample:",
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "email_address": {
-                    "description": "required: false\nexample: \u003cemail-address\u003e",
-                    "type": "string"
-                },
-                "expiry_date": {
-                    "description": "required: false\nexample: Date (and if possible time)",
-                    "type": "string"
-                },
-                "family_name": {
-                    "description": "required: true\nexample: Svensson",
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
-                "given_name": {
-                    "description": "required: true\nexample: Magnus",
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
-                "issuance_date": {
-                    "type": "string"
-                },
-                "issuing_authority": {
-                    "description": "required: false\nexample:",
-                    "type": "string"
-                },
-                "issuing_country": {
-                    "description": "required: false\nexample:",
-                    "type": "string"
-                },
-                "issuing_jurisdiction": {
-                    "description": "required: false\nexample:",
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "mobile_phone_number": {
-                    "description": "required: false\nexample: \u003c+mobile-phone-number\u003e",
-                    "type": "string"
-                },
-                "nationality": {
-                    "description": "required: true\nexample: SE",
-                    "type": "array",
-                    "items": {
+                "attributes": {
+                    "description": "Attributes holds identity attributes used for resolution (e.g. family_name, given_name, birth_date)",
+                    "type": "object",
+                    "additionalProperties": {
                         "type": "string"
                     }
                 },
-                "personal_administrative_number": {
-                    "description": "required: false\nexample: \u003cpersonnummer\u003e",
-                    "type": "string",
-                    "maxLength": 50,
-                    "minLength": 4
-                },
-                "picture": {
-                    "description": "required: false\nexample: facial image compliant with ISO 19794-5 or ISO 39794 specifications",
-                    "type": "string"
-                },
-                "resident_address": {
-                    "description": "required: false\nexample: 221b Baker street",
-                    "type": "string"
-                },
-                "resident_city": {
-                    "description": "required: false\nexample: London",
-                    "type": "string"
-                },
-                "resident_country": {
-                    "description": "required: false\nexample: England",
-                    "type": "string"
-                },
-                "resident_house_number": {
-                    "description": "required: false\nexample: 221b",
-                    "type": "string"
-                },
-                "resident_postal_code": {
-                    "description": "required: false\nexample: W1U 6SG",
-                    "type": "string"
-                },
-                "resident_state": {
-                    "description": "required: false\nexample: england",
-                    "type": "string"
-                },
-                "resident_street_address": {
-                    "description": "required: false\nexample: Baker street",
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
-                "schema": {
-                    "$ref": "#/definitions/model.IdentitySchema"
-                },
-                "sex": {
-                    "description": "required: false\nexample: 0 = not known, 1 = male, 2 = female, ...",
-                    "type": "string",
-                    "enum": [
-                        "0",
-                        "1",
-                        "2",
-                        "3",
-                        "4",
-                        "5",
-                        "6",
-                        "7",
-                        "8",
-                        "9"
-                    ]
-                },
-                "trust_anchor": {
-                    "type": "string",
-                    "maxLength": 128
-                }
-            }
-        },
-        "model.IdentitySchema": {
-            "type": "object",
-            "required": [
-                "name"
-            ],
-            "properties": {
-                "name": {
-                    "description": "required: true\nexample: \"SE\"",
+                "authentic_source": {
+                    "description": "AuthenticSource is the source system that owns this identity",
                     "type": "string",
                     "maxLength": 128
                 },
-                "version": {
-                    "description": "required: false\nexample: \"1.0.0\"",
+                "authentic_source_person_id": {
+                    "description": "AuthenticSourcePersonID is the unique identifier for this entity within the authentic source",
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "created_at": {
+                    "description": "CreatedAt is the timestamp when the mapping was created",
                     "type": "string"
                 }
             }
@@ -1117,10 +1584,7 @@
             "type": "object",
             "required": [
                 "authentic_source",
-                "document_id",
-                "document_version",
-                "scope",
-                "vct"
+                "scope"
             ],
             "properties": {
                 "authentic_source": {
@@ -1128,16 +1592,9 @@
                     "type": "string",
                     "maxLength": 128
                 },
-                "collect": {
-                    "$ref": "#/definitions/model.Collect"
-                },
-                "credential_valid_from": {
-                    "description": "required: false\nexample: 509567558\nformat: int64",
-                    "type": "integer"
-                },
-                "credential_valid_to": {
-                    "description": "required: false\nexample: 509567558\nformat: int64",
-                    "type": "integer"
+                "created_at": {
+                    "description": "CreatedAt is the timestamp when the document was created",
+                    "type": "string"
                 },
                 "document_data_validation": {
                     "description": "required: false\nexample: file://path/to/schema.json or http://example.com/schema.json\nformat: string",
@@ -1149,74 +1606,209 @@
                     "type": "string",
                     "maxLength": 128
                 },
-                "document_version": {
-                    "description": "required: true\nexample: \"1.0.0\"",
-                    "type": "string"
-                },
-                "real_data": {
-                    "description": "RealData is a flag to indicate if the document contains real data\nrequired: true\nexample: true",
-                    "type": "boolean"
-                },
-                "revocation": {
-                    "description": "Revocation is a collection of fields representing a revocation",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/model.Revocation"
-                        }
-                    ]
-                },
                 "scope": {
                     "description": "Scope is the credential configuration ID scope\nrequired: false\nexample: \"ehic\", \"pda1\"",
                     "type": "string",
                     "maxLength": 128
                 },
-                "vct": {
-                    "description": "VCT is the Verifiable Credential Type\nrequired: true\nexample: \"urn:eudi:pid:1\"",
-                    "type": "string",
-                    "maxLength": 128
+                "valid_not_after": {
+                    "description": "ValidNotAfter is an optional expiration timestamp for administrative purposes.\nDocuments past this time should not be used.",
+                    "type": "string"
                 }
             }
         },
-        "model.Revocation": {
+        "oauth2.AuthorizationServerMetadata": {
             "type": "object",
+            "required": [
+                "authorization_endpoint",
+                "issuer",
+                "response_types_supported",
+                "token_endpoint"
+            ],
             "properties": {
-                "id": {
-                    "description": "ID is the ID of the revocation\nrequired: false\nexample: 8dbd2680-c03f-11ee-a21b-034aafe41222",
-                    "type": "string",
-                    "maxLength": 128
+                "authorization_endpoint": {
+                    "description": "AuthorizationEndpoint URL of the authorization server's authorization endpoint [RFC6749].  This is REQUIRED unless no grant types are supported that use the authorization endpoint.",
+                    "type": "string"
                 },
-                "reason": {
-                    "description": "Reason is the reason for revocation\nrequired: false\nexample: lost or stolen",
-                    "type": "string",
-                    "maxLength": 128
+                "code_challenge_methods_supported": {
+                    "description": "CodeChallengeMethodsSupported OPTIONAL. JSON array containing a list of Proof Key for Code Exchange (PKCE) [RFC7636] code challenge methods supported by this authorization server.  Code challenge method values are used in the \"code_challenge_method\" parameter defined in Section 4.3 of [RFC7636].  The valid code challenge method values are those registered in the IANA \"PKCE Code Challenge Methods\" registry [IANA.OAuth.Parameters].  If omitted, the authorization server does not support PKCE.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
-                "reference": {
-                    "$ref": "#/definitions/model.RevocationReference"
+                "dpop_signing_alg_values_supported": {
+                    "description": "DPOPSigningALGValuesSupported from GUNET issuer",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
-                "revoked": {
-                    "description": "Revoked is a flag to indicate if the document has been revoked\nrequired: false\nexample: false",
+                "grant_types_supported": {
+                    "description": "grant_types_supported OPTIONAL.  JSON array containing a list of the OAuth 2.0 grant type values that this authorization server supports.  The array values used are the same as those used with the \"grant_types\" parameter defined by \"OAuth 2.0 Dynamic Client Registration Protocol\" [RFC7591].  If omitted, the default value is \"[\"authorization_code\", \"implicit\"]\".",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "introspection_endpoint": {
+                    "description": "IntrospectionEndpoint OPTIONAL.  URL of the authorization server's OAuth 2.0 introspection endpoint [RFC7662].",
+                    "type": "string"
+                },
+                "introspection_endpoint_auth_methods_supported": {
+                    "description": "IntrospectionEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this introspection endpoint.  The valid client authentication method values are those registered in the IANA \"OAuth Token Endpoint Authentication Methods\" registry [IANA.OAuth.Parameters] or those registered in the IANA \"OAuth Access Token Types\" registry [IANA.OAuth.Parameters].  (These values are and will remain distinct, due to Section 7.2.)  If omitted, the set of supported authentication methods MUST be determined by other means.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "introspection_endpoint_auth_signing_alg_values_supported": {
+                    "description": "IntrospectionEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms (\"alg\" values) supported by the introspection endpoint for the signature on the JWT [JWT] used to authenticate the client at the introspection endpoint for the \"private_key_jwt\" and \"client_secret_jwt\" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the \"introspection_endpoint_auth_methods_supported\" entry.  No default algorithms are implied if this entry is omitted.  The value \"none\" MUST NOT be used.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "issuer": {
+                    "description": "Issuer REQUIRED.  The authorization server's issuer identifier, which is a URL that uses the \"https\" scheme and has no query or fragment components.  Authorization server metadata is published at a location that is \".well-known\" according to RFC 5785 [RFC5785] derived from this issuer identifier, as described in Section 3. The issuer identifier is used to prevent authorization server mix- up attacks, as described in \"OAuth 2.0 Mix-Up Mitigation\".",
+                    "type": "string"
+                },
+                "jwks_uri": {
+                    "description": "JWKSURI   OPTIONAL.  URL of the authorization server's JWK Set [JWK] document.  The referenced document contains the signing key(s) the client uses to validate signatures from the authorization server. This URL MUST use the \"https\" scheme.  The JWK Set MAY also contain the server's encryption key or keys, which are used by clients to encrypt requests to the server.  When both signing and encryption keys are made available, a \"use\" (public key use) parameter value is REQUIRED for all keys in the referenced JWK Set to indicate each key's intended usage.",
+                    "type": "string"
+                },
+                "op_policy_uri": {
+                    "description": "OPPolicyUri OPTIONAL. URL that the authorization server provides to the person registering the client to read about the authorization server's requirements on how the client can use the data provided by the authorization server.  The registration process SHOULD display this URL to the person registering the client if it is given.  As described in Section 5, despite the identifier \"op_policy_uri\" appearing to be OpenID-specific, its usage in this specification is actually referring to a general OAuth 2.0 feature that is not specific to OpenID Connect.",
+                    "type": "string"
+                },
+                "op_tos_uri": {
+                    "description": "OPTOSURI OPTIONAL. URL that the authorization server provides to the person registering the client to read about the authorization server's terms of service. The registration process SHOULD display this URL to the person registering the client if it is given.  As described in Section 5, despite the identifier \"op_tos_uri\", appearing to be OpenID-specific, its usage in this specification is actually referring to a general OAuth 2.0 feature that is not specific to OpenID Connect.",
+                    "type": "string"
+                },
+                "pre-authorized_grant_anonymous_access_supported": {
+                    "description": "PreAuthorizedGrantAnonymousAccessSupported OPTIONAL OPTIONAL. A boolean indicating whether the Credential Issuer accepts a Token Request with a Pre-Authorized Code but without a client_id. The default is false.",
                     "type": "boolean"
                 },
-                "revoked_at": {
-                    "description": "RevokedAt is the time the document was revoked or going to be revoked\nrequired: false\nexample: 509567558\nformat: int64",
-                    "type": "integer"
+                "pushed_authorization_request_endpoint": {
+                    "description": "PushedAuthorizationRequestEndpoint from GUNET issuer",
+                    "type": "string"
+                },
+                "registration_endpoint": {
+                    "description": "RegistrationEndpoint OPTIONAL.  URL of the authorization server's OAuth 2.0 Dynamic Client Registration endpoint [RFC7591].",
+                    "type": "string"
+                },
+                "require_pushed_authorization_requests": {
+                    "description": "require_pushed_authorization_requests from GUNET issuer",
+                    "type": "boolean"
+                },
+                "response_modes_supported": {
+                    "description": "response_modes_supported OPTIONAL.  JSON array containing a list of the OAuth 2.0 \"response_mode\" values that this authorization server supports, as specified in \"OAuth 2.0 Multiple Response Type Encoding Practices\" [OAuth.Responses].  If omitted, the default is \"[\"query\",\"fragment\"]\".  The response mode value \"form_post\" is also defined in \"OAuth 2.0 Form Post Response Mode\" [OAuth.Post].",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "response_types_supported": {
+                    "description": "ResponseTypesSupported REQUIRED.  JSON array containing a list of the OAuth 2.0 \"response_type\" values that this authorization server supports. The array values used are the same as those used with the \"response_types\" parameter defined by \"OAuth 2.0 Dynamic Client Registration Protocol\" [RFC7591].",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "revocation_endpoint": {
+                    "description": "revocation_endpoint    OPTIONAL.  URL of the authorization server's OAuth 2.0 revocation endpoint [RFC7009].",
+                    "type": "string"
+                },
+                "revocation_endpoint_auth_methods_supported": {
+                    "description": "RevocationEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this revocation endpoint.  The valid client authentication method values are those registered in the IANA \"OAuth Token Endpoint Authentication Methods\" registry [IANA.OAuth.Parameters].  If omitted, the default is \"client_secret_basic\" -- the HTTP Basic Authentication Scheme specified in Section 2.3.1 of OAuth 2.0 [RFC6749].",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "revocation_endpoint_auth_signing_alg_values_supported": {
+                    "description": "RevocationEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms (\"alg\" values) supported by the revocation endpoint for the signature on the JWT [JWT] used to authenticate the client at the revocation endpoint for the \"private_key_jwt\" and \"client_secret_jwt\" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the \"revocation_endpoint_auth_methods_supported\" entry.  No default algorithms are implied if this entry is omitted.  The value \"none\" MUST NOT be used.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "scopes_supported": {
+                    "description": "ScopesSupported RECOMMENDED.  JSON array containing a list of the OAuth 2.0 [RFC6749] \"scope\" values that this authorization server supports. Servers MAY choose not to advertise some supported scope values even when this parameter is used.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_documentation": {
+                    "description": "ServiceDocumentation OPTIONAL.  URL of a page containing human-readable information that developers might want or need to know when using the authorization server.  In particular, if the authorization server does not support Dynamic Client Registration, then information on how to register clients needs to be provided in this documentation.",
+                    "type": "string"
+                },
+                "signed_metadata": {
+                    "type": "string"
+                },
+                "token_endpoint": {
+                    "description": "TokenEndpoint URL of the authorization server's token endpoint [RFC6749]. This is REQUIRED unless only the implicit grant type is supported.",
+                    "type": "string"
+                },
+                "token_endpoint_auth_methods_supported": {
+                    "description": "TokenEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this token endpoint.  Client authentication method values are used in the \"token_endpoint_auth_method\" parameter defined in Section 2 of [RFC7591].  If omitted, the default is \"client_secret_basic\" -- the HTTP Basic Authentication Scheme specified in Section 2.3.1 of OAuth 2.0 [RFC6749].",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "token_endpoint_auth_signing_alg_values_supported": {
+                    "description": "TokenEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms (\"alg\" values) supported by the token endpoint for the signature on the JWT [JWT] used to authenticate the client at the token endpoint for the \"private_key_jwt\" and \"client_secret_jwt\" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the \"token_endpoint_auth_methods_supported\" entry.  No default algorithms are implied if this entry is omitted.  Servers SHOULD support \"RS256\".  The value \"none\" MUST NOT be used.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "ui_locales_supported": {
+                    "description": "ui_locales_supported    OPTIONAL.  Languages and scripts supported for the user interface, represented as a JSON array of language tag values from BCP 47 [RFC5646].  If omitted, the set of supported languages and scripts is unspecified.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
-        "model.RevocationReference": {
+        "openid4vci.AuthorizationDetailsParameter": {
             "type": "object",
+            "required": [
+                "type"
+            ],
             "properties": {
-                "authentic_source": {
-                    "type": "string",
-                    "maxLength": 128
+                "claims": {
+                    "description": "Claims OPTIONAL. Object as defined in Appendix A.3.2 excluding the display and value_type parameters. mandatory parameter here is used by the Wallet to indicate to the Issuer that it only accepts Credential(s) issued with those claim(s).",
+                    "type": "object",
+                    "additionalProperties": {}
                 },
-                "document_id": {
+                "credential_configuration_id": {
+                    "description": "CredentialConfigurationID: REQUIRED when format parameter is not present. String specifying a unique identifier of the Credential being described in the credential_configurations_supported map in the Credential Issuer Metadata as defined in Section 11.2.3. The referenced object in the credential_configurations_supported map conveys the details, such as the format, for issuance of the requested Credential. This specification defines Credential Format specific Issuer Metadata in Appendix A. It MUST NOT be present if format parameter is present.",
+                    "type": "string"
+                },
+                "credential_identifiers": {
+                    "description": "CredentialIdentifiers REQUIRED (Token Response only). A non-empty array of strings, each uniquely identifying\na Credential Dataset that can be issued using the Access Token returned in this response.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "format": {
+                    "description": "Format REQUIRED when credential_configuration_id parameter is not present. String identifying the format of the Credential the Wallet needs. This Credential format identifier determines further claims in the authorization details object needed to identify the Credential type in the requested format. This specification defines Credential Format Profiles in Appendix A. It MUST NOT be present if credential_configuration_id parameter is present.",
+                    "type": "string"
+                },
+                "type": {
                     "type": "string",
-                    "maxLength": 128
+                    "enum": [
+                        "openid_credential"
+                    ]
                 },
                 "vct": {
-                    "type": "string",
-                    "maxLength": 128
+                    "description": "VCT REQUIRED. String as defined in Appendix A.3.2. This claim contains the type values the Wallet requests authorization for at the Credential Issuer. It MUST only be present if the format claim is present. It MUST not be present otherwise.",
+                    "type": "string"
                 }
             }
         },
@@ -1372,6 +1964,83 @@
                 }
             }
         },
+        "openid4vci.PARRequest": {
+            "type": "object",
+            "required": [
+                "client_id",
+                "code_challenge",
+                "code_challenge_method",
+                "redirect_uri",
+                "response_type"
+            ],
+            "properties": {
+                "authorization_details": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/openid4vci.AuthorizationDetailsParameter"
+                    }
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "code_challenge": {
+                    "type": "string"
+                },
+                "code_challenge_method": {
+                    "type": "string",
+                    "enum": [
+                        "S256",
+                        "plain"
+                    ]
+                },
+                "issuing_state": {
+                    "type": "string"
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "redirect_uri": {
+                    "type": "string"
+                },
+                "response_type": {
+                    "description": "RFC 6749#4.1.1",
+                    "type": "string",
+                    "enum": [
+                        "code"
+                    ]
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                },
+                "user_hint": {
+                    "type": "string"
+                },
+                "wallet_issuer": {
+                    "description": "https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-additional-request-paramete",
+                    "type": "string"
+                }
+            }
+        },
+        "openid4vci.ParResponse": {
+            "type": "object",
+            "required": [
+                "expires_in",
+                "request_uri"
+            ],
+            "properties": {
+                "expires_in": {
+                    "description": "ExpiresIn : A JSON number that represents the lifetime of the request URI in seconds. The request URI lifetime is at the discretion of the authorization server and will typically be relatively short.",
+                    "type": "integer"
+                },
+                "request_uri": {
+                    "description": "RequestURI : The request URI corresponding to the authorization request posted. This URI is used as reference to the respective request data in the subsequent authorization request only. The way the authorization process obtains the authorization request data is at the discretion of the authorization server and out of scope of this specification. There is no need to make the authorization request data available to other parties via this URI.",
+                    "type": "string"
+                }
+            }
+        },
         "openid4vci.Proof": {
             "type": "object",
             "required": [
@@ -1471,40 +2140,87 @@
                 }
             }
         },
-        "openid4vci.QR": {
-            "type": "object",
-            "properties": {
-                "credential_offer_url": {
-                    "type": "string"
-                },
-                "qr_base64": {
-                    "type": "string"
-                }
-            }
-        },
-        "vcclient.NotificationReply": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/openid4vci.QR"
-                }
-            }
-        },
-        "vcclient.NotificationRequest": {
+        "openid4vci.TokenRequest": {
             "type": "object",
             "required": [
-                "authentic_source",
-                "document_id",
-                "vct"
+                "client_id",
+                "code",
+                "dpop",
+                "grant_type",
+                "redirect_uri"
             ],
             "properties": {
-                "authentic_source": {
+                "client_id": {
+                    "description": "ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.",
                     "type": "string"
                 },
-                "document_id": {
+                "code": {
+                    "description": "Code REQUIRED.  The authorization code received from the authorization server.",
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "code_verifier": {
+                    "description": "CodeVerifier OPTIONAL (required for public clients)",
                     "type": "string"
                 },
-                "vct": {
+                "dpop": {
+                    "description": "Header field",
+                    "type": "string"
+                },
+                "grant_type": {
+                    "description": "// Authorization Code Flow\nGrantType REQUIRED.  Value MUST be set to \"authorization_code\".",
+                    "type": "string",
+                    "enum": [
+                        "authorization_code"
+                    ]
+                },
+                "redirect_uri": {
+                    "description": "RedirectURI\tREQUIRED, if the \"redirect_uri\" parameter was included in the authorization request as described in Section 4.1.1, and their values MUST be identical.",
+                    "type": "string"
+                }
+            }
+        },
+        "openid4vci.TokenResponse": {
+            "type": "object",
+            "required": [
+                "access_token",
+                "expires_in",
+                "token_type"
+            ],
+            "properties": {
+                "access_token": {
+                    "description": "AccessToken REQUIRED.  The access token issued by the authorization server.",
+                    "type": "string"
+                },
+                "authorization_details": {
+                    "description": "AuthorizationDetails REQUIRED when authorization_details parameter is used in either the Authorization Request or Token Request.\nOPTIONAL when scope parameter was used to request issuance of a Credential. It MUST NOT be used otherwise.\nIt is a non-empty array of objects, as defined in Section 7 of [RFC9396].",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/openid4vci.AuthorizationDetailsParameter"
+                    }
+                },
+                "c_nonce": {
+                    "description": "CNonce OPTIONAL. String containing a nonce to be used when creating a proof of possession of the key proof (see Section 7.2). When received, the Wallet MUST use this nonce value for its subsequent requests until the Credential Issuer provides a fresh nonce.",
+                    "type": "string"
+                },
+                "c_nonce_expires_in": {
+                    "description": "CNonceExpiresIn OPTIONAL. Number denoting the lifetime in seconds of the c_nonce.",
+                    "type": "integer"
+                },
+                "expires_in": {
+                    "description": "ExpiresIn RECOMMENDED.  The lifetime in seconds of the access token.  For example, the value \"3600\" denotes that the access token will expire in one hour from the time the response was generated. If omitted, the authorization server SHOULD provide the expiration time via other means or document the default value.",
+                    "type": "integer"
+                },
+                "scope": {
+                    "description": "Scope OPTIONAL, if identical to the scope requested by the client; otherwise, REQUIRED.  The scope of the access token as described by Section 3.3.",
+                    "type": "string"
+                },
+                "state": {
+                    "description": "State REQUIRED if the \"state\" parameter was present in the client authorization request.  The exact value received from the client.",
+                    "type": "string"
+                },
+                "token_type": {
+                    "description": "TokenType REQUIRED.  The type of the token issued as described in Section 7.1.  Value is case insensitive.",
                     "type": "string"
                 }
             }
@@ -1513,7 +2229,7 @@
             "type": "object",
             "required": [
                 "document_data",
-                "document_data_version",
+                "identity_mapping_ids",
                 "meta"
             ],
             "properties": {
@@ -1521,16 +2237,11 @@
                     "type": "object",
                     "additionalProperties": {}
                 },
-                "document_data_version": {
-                    "type": "string"
-                },
-                "document_display": {
-                    "$ref": "#/definitions/model.DocumentDisplay"
-                },
-                "identities": {
+                "identity_mapping_ids": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
-                        "$ref": "#/definitions/model.Identity"
+                        "type": "string"
                     }
                 },
                 "meta": {
