@@ -237,6 +237,9 @@ func (c *IdentityMappingsColl) SearchMappings(ctx context.Context, query *Search
 		filter["$or"] = bson.A{
 			bson.M{"authentic_source_person_id": searchRegex},
 			bson.M{"authentic_source": searchRegex},
+			bson.M{"attributes.family_name": searchRegex},
+			bson.M{"attributes.given_name": searchRegex},
+			bson.M{"attributes.birth_date": searchRegex},
 		}
 	}
 

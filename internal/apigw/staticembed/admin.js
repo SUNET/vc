@@ -66,9 +66,12 @@ window.adminApp = function () {
         // Datastore state
         ds: {
             search: '',
+            filterSource: '',
+            filterScope: '',
             docs: [],
             loading: false,
             showCreate: false,
+            showImport: false,
             creating: false,
             sortKey: '',
             sortDir: 'asc',
@@ -92,12 +95,22 @@ window.adminApp = function () {
             }
         },
 
+        // Import view state
+        importState: {
+            docLoading: false,
+            docResult: null,
+            mapLoading: false,
+            mapResult: null,
+        },
+
         // Identity mapping state
         im: {
             search: '',
+            filterSource: '',
             mappings: [],
             loading: false,
             showCreate: false,
+            showImport: false,
             creating: false,
             createError: '',
             sortKey: '',
@@ -125,6 +138,19 @@ window.adminApp = function () {
                 attributes_json: '{}',
                 newFieldKey: ''
             }
+        },
+
+        /** Show a toast notification instead of alert() */
+        showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast align-items-center text-bg-' + type + ' border-0 show';
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML = '<div class="d-flex"><div class="toast-body">' + message.replace(/</g, '&lt;') + '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" aria-label="Close"></button></div>';
+            toast.querySelector('.btn-close').addEventListener('click', () => toast.remove());
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
         },
 
         /** Fetch wrapper that adds CSRF token header to mutating requests. */
@@ -173,6 +199,8 @@ window.adminApp = function () {
 
         switchView(v) {
             this.view = v;
+            this.importState.docResult = null;
+            this.importState.mapResult = null;
             if (v === 'datastore') this.searchDocuments();
             if (v === 'identity') this.searchMappings();
         },
@@ -277,32 +305,49 @@ window.adminApp = function () {
             }
         },
 
+        async _doDocumentImport(file) {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            const resp = await this.apiFetch('/api/v1/datastore/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ documents: data }),
+                credentials: 'same-origin'
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || err.detail || resp.statusText);
+            }
+            const result = await resp.json().catch(() => ({}));
+            return result.count || 0;
+        },
+
         async importDocument(event) {
             const file = event.target.files[0];
             event.target.value = '';
             if (!file) return;
             try {
-                const text = await file.text();
-                const data = JSON.parse(text);
-                // Detect format: single document has "meta", batch is a map of documents
-                const docs = data.meta ? { '0': data } : data;
-                const resp = await this.apiFetch('/api/v1/datastore/bulk', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ documents: docs }),
-                    credentials: 'same-origin'
-                });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    alert('Import failed: ' + (err.detail || resp.statusText));
-                } else {
-                    const result = await resp.json().catch(() => ({}));
-                    alert('Imported ' + (result.data?.count || 0) + ' documents');
-                }
+                const count = await this._doDocumentImport(file);
+                this.showToast('Imported ' + count + ' document' + (count !== 1 ? 's' : ''), 'success');
                 this.searchDocuments();
             } catch (e) {
-                alert('Import failed: ' + e.message);
+                this.showToast('Import failed: ' + e.message, 'danger');
             }
+        },
+
+        async importDocumentFromView(event) {
+            const file = event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            this.importState.docLoading = true;
+            this.importState.docResult = null;
+            try {
+                const count = await this._doDocumentImport(file);
+                this.importState.docResult = { success: true, message: 'Successfully imported ' + count + ' document' + (count !== 1 ? 's' : '') + ' from ' + file.name };
+            } catch (e) {
+                this.importState.docResult = { success: false, message: 'Import failed: ' + e.message };
+            }
+            this.importState.docLoading = false;
         },
 
         async searchDocuments() {
@@ -310,6 +355,8 @@ window.adminApp = function () {
             try {
                 const params = new URLSearchParams();
                 if (this.ds.search) params.set('search', this.ds.search);
+                if (this.ds.filterSource) params.set('authentic_source', this.ds.filterSource);
+                if (this.ds.filterScope) params.set('scope', this.ds.filterScope);
                 const resp = await this.apiFetch('/api/v1/datastore/search?' + params.toString(), {
                     credentials: 'same-origin'
                 });
@@ -472,45 +519,57 @@ window.adminApp = function () {
             });
         },
 
+        async _doMappingImport(file) {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            const mappings = {};
+            for (const [key, val] of Object.entries(data)) {
+                if (Array.isArray(val)) {
+                    val.forEach((m, i) => { mappings[key + '_' + i] = m; });
+                } else {
+                    mappings[key] = val;
+                }
+            }
+            const resp = await this.apiFetch('/api/v1/identity/mapping/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mappings }),
+                credentials: 'same-origin'
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || err.detail || resp.statusText);
+            }
+            const result = await resp.json().catch(() => ({}));
+            return result.count || 0;
+        },
+
         async importMapping(event) {
             const file = event.target.files[0];
             event.target.value = '';
             if (!file) return;
             try {
-                const text = await file.text();
-                const data = JSON.parse(text);
-                // Build a flat map with unique keys for each mapping
-                const mappings = {};
-                if (data.authentic_source) {
-                    // Single mapping
-                    mappings['0'] = data;
-                } else {
-                    // Batch: map of single mappings or arrays of mappings
-                    for (const [key, val] of Object.entries(data)) {
-                        if (Array.isArray(val)) {
-                            val.forEach((m, i) => { mappings[key + '_' + i] = m; });
-                        } else {
-                            mappings[key] = val;
-                        }
-                    }
-                }
-                const resp = await this.apiFetch('/api/v1/identity/mapping/bulk', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mappings }),
-                    credentials: 'same-origin'
-                });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    alert('Import failed: ' + (err.detail || resp.statusText));
-                } else {
-                    const result = await resp.json().catch(() => ({}));
-                    alert('Imported ' + (result.data?.count || 0) + ' mappings');
-                }
+                const count = await this._doMappingImport(file);
+                this.showToast('Imported ' + count + ' mapping' + (count !== 1 ? 's' : ''), 'success');
                 this.searchMappings();
             } catch (e) {
-                alert('Import failed: ' + e.message);
+                this.showToast('Import failed: ' + e.message, 'danger');
             }
+        },
+
+        async importMappingFromView(event) {
+            const file = event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            this.importState.mapLoading = true;
+            this.importState.mapResult = null;
+            try {
+                const count = await this._doMappingImport(file);
+                this.importState.mapResult = { success: true, message: 'Successfully imported ' + count + ' mapping' + (count !== 1 ? 's' : '') + ' from ' + file.name };
+            } catch (e) {
+                this.importState.mapResult = { success: false, message: 'Import failed: ' + e.message };
+            }
+            this.importState.mapLoading = false;
         },
 
         async searchMappings() {
@@ -518,6 +577,7 @@ window.adminApp = function () {
             try {
                 const params = new URLSearchParams();
                 if (this.im.search) params.set('search', this.im.search);
+                if (this.im.filterSource) params.set('authentic_source', this.im.filterSource);
                 const resp = await this.apiFetch('/api/v1/identity/mapping/search?' + params.toString(), {
                     credentials: 'same-origin'
                 });

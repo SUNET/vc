@@ -363,6 +363,11 @@ func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery)
 			bson.M{"meta.document_id": searchRegex},
 			bson.M{"meta.authentic_source": searchRegex},
 			bson.M{"meta.scope": searchRegex},
+			bson.M{"identity_mapping_ids": searchRegex},
+			bson.M{"document_data.family_name": searchRegex},
+			bson.M{"document_data.given_name": searchRegex},
+			bson.M{"document_data.email": searchRegex},
+			bson.M{"document_data.birthdate": searchRegex},
 		}
 	}
 

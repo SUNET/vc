@@ -51,6 +51,7 @@
 </head>
 <body>
 
+<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index:1100;"></div>
 <div x-data="adminApp()" x-cloak>
 
 <!-- Login view -->
@@ -112,18 +113,79 @@
                         <h2 class="h4 mb-0">Datastore</h2>
                         <div class="d-flex gap-2">
                             <button class="btn btn-success btn-sm btn-touch" @click="openCreateDocument()">+ New</button>
-                            <label class="btn btn-outline-primary btn-sm btn-touch mb-0">
-                                Import
-                                <input type="file" accept=".json" class="d-none" @change="importDocument($event)">
-                            </label>
+                            <button class="btn btn-outline-primary btn-sm btn-touch" @click="ds.showImport = !ds.showImport; if(!ds.showImport) importState.docResult = null">Import</button>
                         </div>
                     </div>
-                    <div class="input-group mb-4">
-                        <input class="form-control" type="text" placeholder="Search documents..." x-model="ds.search" @keyup.enter="searchDocuments()">
-                        <button class="btn btn-primary btn-touch" @click="searchDocuments()">
-                            <span x-show="!ds.loading">Search</span>
-                            <span x-show="ds.loading" class="spinner-border spinner-border-sm"></span>
-                        </button>
+
+                    <!-- Import panel -->
+                    <template x-if="ds.showImport">
+                        <div class="card mb-4 shadow-sm">
+                            <div class="card-body">
+                                <h5 class="card-title">Import Documents</h5>
+                                <p class="card-text small text-muted">Upload a JSON file containing one or more documents to import into the datastore.</p>
+                                <p class="small text-muted mb-2">The file must be a JSON object where each key maps to a document containing <code>meta</code>, <code>identity_mapping_ids</code>, and <code>document_data</code>. The top-level keys (e.g. <code>"document_1"</code>) are just identifiers &mdash; they can be whatever you like and are not stored.</p>
+                                <details class="small mb-3">
+                                    <summary class="text-primary" style="cursor:pointer;">Example format</summary>
+                                    <pre class="doc-json mt-2 mb-0">{
+  "document_1": {
+    "meta": {
+      "authentic_source": "MyOrg",
+      "scope": "eduid",
+      "document_id": "doc-001"
+    },
+    "identity_mapping_ids": [
+      "person-001"
+    ],
+    "document_data": {
+      "family_name": "Smith",
+      "given_name": "Alex",
+      "birthdate": "1990-05-15",
+      "email": "alex.smith@example.com"
+    }
+  }
+}</pre>
+                                </details>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <label class="btn btn-primary btn-touch mb-0" :class="{'disabled': importState.docLoading}">
+                                        <span x-show="!importState.docLoading">Choose File &amp; Import</span>
+                                        <span x-show="importState.docLoading" class="spinner-border spinner-border-sm"></span>
+                                        <input type="file" accept=".json" class="d-none" @change="importDocumentFromView($event)">
+                                    </label>
+                                    <button class="btn btn-secondary btn-sm btn-touch" @click="ds.showImport = false; importState.docResult = null">Cancel</button>
+                                </div>
+                                <template x-if="importState.docResult">
+                                    <div class="alert mt-3 mb-0 py-2" :class="importState.docResult.success ? 'alert-success' : 'alert-danger'" x-text="importState.docResult.message"></div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div class="mb-4">
+                        <div class="input-group mb-2">
+                            <input class="form-control" type="text" placeholder="Search by document ID, name, email..." x-model="ds.search" @keyup.enter="searchDocuments()">
+                            <button class="btn btn-primary btn-touch" @click="searchDocuments()">
+                                <span x-show="!ds.loading">Search</span>
+                                <span x-show="ds.loading" class="spinner-border spinner-border-sm"></span>
+                            </button>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <template x-if="allowedAuthenticSources.length > 0">
+                                <select class="form-select form-select-sm" style="max-width:200px;" x-model="ds.filterSource" @change="searchDocuments()">
+                                    <option value="">All sources</option>
+                                    <template x-for="org in allowedAuthenticSources" :key="org">
+                                        <option :value="org" x-text="org"></option>
+                                    </template>
+                                </select>
+                            </template>
+                            <template x-if="scopes.length > 0">
+                                <select class="form-select form-select-sm" style="max-width:200px;" x-model="ds.filterScope" @change="searchDocuments()">
+                                    <option value="">All scopes</option>
+                                    <template x-for="s in scopes" :key="s">
+                                        <option :value="s" x-text="s"></option>
+                                    </template>
+                                </select>
+                            </template>
+                        </div>
                     </div>
 
                     <!-- Create form -->
@@ -346,18 +408,66 @@
                         <h2 class="h4 mb-0">Identity Mapping</h2>
                         <div class="d-flex gap-2">
                             <button class="btn btn-success btn-sm btn-touch" @click="openCreateMapping()">+ New</button>
-                            <label class="btn btn-outline-primary btn-sm btn-touch mb-0">
-                                Import
-                                <input type="file" accept=".json" class="d-none" @change="importMapping($event)">
-                            </label>
+                            <button class="btn btn-outline-primary btn-sm btn-touch" @click="im.showImport = !im.showImport; if(!im.showImport) importState.mapResult = null">Import</button>
                         </div>
                     </div>
-                    <div class="input-group mb-4">
-                        <input class="form-control" type="text" placeholder="Search identity mappings..." x-model="im.search" @keyup.enter="searchMappings()">
-                        <button class="btn btn-primary btn-touch" @click="searchMappings()">
-                            <span x-show="!im.loading">Search</span>
-                            <span x-show="im.loading" class="spinner-border spinner-border-sm"></span>
-                        </button>
+
+                    <!-- Import panel -->
+                    <template x-if="im.showImport">
+                        <div class="card mb-4 shadow-sm">
+                            <div class="card-body">
+                                <h5 class="card-title">Import Identity Mappings</h5>
+                                <p class="card-text small text-muted">Upload a JSON file containing one or more identity mappings.</p>
+                                <p class="small text-muted mb-2">The file must be a JSON object where each key maps to a single mapping or an array of mappings, each containing <code>authentic_source</code>, <code>authentic_source_person_id</code>, and <code>attributes</code>. The top-level keys (e.g. <code>"mapping_1"</code>) are just identifiers &mdash; they can be whatever you like and are not stored.</p>
+                                <details class="small mb-3">
+                                    <summary class="text-primary" style="cursor:pointer;">Example format</summary>
+                                    <pre class="doc-json mt-2 mb-0">{
+  "mapping_1": [
+    {
+      "authentic_source_person_id": "person-001",
+      "authentic_source": "MyOrg",
+      "attributes": {
+        "family_name": "Doe",
+        "given_name": "Jane",
+        "birth_date": "1990-01-01"
+      }
+    }
+  ]
+}</pre>
+                                </details>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <label class="btn btn-primary btn-touch mb-0" :class="{'disabled': importState.mapLoading}">
+                                        <span x-show="!importState.mapLoading">Choose File &amp; Import</span>
+                                        <span x-show="importState.mapLoading" class="spinner-border spinner-border-sm"></span>
+                                        <input type="file" accept=".json" class="d-none" @change="importMappingFromView($event)">
+                                    </label>
+                                    <button class="btn btn-secondary btn-sm btn-touch" @click="im.showImport = false; importState.mapResult = null">Cancel</button>
+                                </div>
+                                <template x-if="importState.mapResult">
+                                    <div class="alert mt-3 mb-0 py-2" :class="importState.mapResult.success ? 'alert-success' : 'alert-danger'" x-text="importState.mapResult.message"></div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div class="mb-4">
+                        <div class="input-group mb-2">
+                            <input class="form-control" type="text" placeholder="Search by person ID, name..." x-model="im.search" @keyup.enter="searchMappings()">
+                            <button class="btn btn-primary btn-touch" @click="searchMappings()">
+                                <span x-show="!im.loading">Search</span>
+                                <span x-show="im.loading" class="spinner-border spinner-border-sm"></span>
+                            </button>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <template x-if="allowedAuthenticSources.length > 0">
+                                <select class="form-select form-select-sm" style="max-width:200px;" x-model="im.filterSource" @change="searchMappings()">
+                                    <option value="">All sources</option>
+                                    <template x-for="org in allowedAuthenticSources" :key="org">
+                                        <option :value="org" x-text="org"></option>
+                                    </template>
+                                </select>
+                            </template>
+                        </div>
                     </div>
 
                     <!-- Create form -->
