@@ -1,49 +1,13 @@
 {
   "100": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_100",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_100"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_100"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_100",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Mirren",
-        "given_name": "Helen",
-        "birth_date": "1996-01-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_100"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -63,15 +27,14 @@
         "65": false
       },
       "age_in_years": 30,
-      "authentic_source_person_id": "authentic_source_person_id_100",
       "birth_family_name": "Mirren",
       "birth_given_name": "Helen",
       "birthdate": "1996-01-30",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-100",
       "email": "mirren@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Mirren",
       "given_name": "Helen",
       "issuing_authority": "SUNET",
@@ -88,56 +51,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "101": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_101",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_101"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_101"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_101",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Momoa",
-        "given_name": "Jason",
-        "birth_date": "1983-08-20",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_101"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -157,15 +82,14 @@
         "65": false
       },
       "age_in_years": 42,
-      "authentic_source_person_id": "authentic_source_person_id_101",
       "birth_family_name": "Momoa",
       "birth_given_name": "Jason",
       "birthdate": "1983-08-20",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-101",
       "email": "momoa@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Momoa",
       "given_name": "Jason",
       "issuing_authority": "SUNET",
@@ -182,56 +106,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "102": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_102",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_102"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_102"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_102",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Oldman",
-        "given_name": "Gary",
-        "birth_date": "1988-09-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_102"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -251,15 +137,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_102",
       "birth_family_name": "Oldman",
       "birth_given_name": "Gary",
       "birthdate": "1988-09-09",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-102",
       "email": "oldman@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Oldman",
       "given_name": "Gary",
       "issuing_authority": "SUNET",
@@ -276,56 +161,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "103": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_103",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_103"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_103"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_103",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pacino",
-        "given_name": "Al",
-        "birth_date": "1984-06-11",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_103"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -345,15 +192,14 @@
         "65": false
       },
       "age_in_years": 41,
-      "authentic_source_person_id": "authentic_source_person_id_103",
       "birth_family_name": "Pacino",
       "birth_given_name": "Al",
       "birthdate": "1984-06-11",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-103",
       "email": "pacino@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Pacino",
       "given_name": "Al",
       "issuing_authority": "SUNET",
@@ -370,56 +216,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "104": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_104",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_104"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_104"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_104",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pfeiffer",
-        "given_name": "Michelle",
-        "birth_date": "1992-12-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_104"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -439,15 +247,14 @@
         "65": false
       },
       "age_in_years": 33,
-      "authentic_source_person_id": "authentic_source_person_id_104",
       "birth_family_name": "Pfeiffer",
       "birth_given_name": "Michelle",
       "birthdate": "1992-12-15",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-104",
       "email": "pfeiffer@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Pfeiffer",
       "given_name": "Michelle",
       "issuing_authority": "SUNET",
@@ -464,56 +271,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "105": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_105",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_105"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_105"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_105",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Phoenix",
-        "given_name": "Joaquin",
-        "birth_date": "1979-10-16",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_105"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -533,15 +302,14 @@
         "65": false
       },
       "age_in_years": 46,
-      "authentic_source_person_id": "authentic_source_person_id_105",
       "birth_family_name": "Phoenix",
       "birth_given_name": "Joaquin",
       "birthdate": "1979-10-16",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-105",
       "email": "phoenix@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Phoenix",
       "given_name": "Joaquin",
       "issuing_authority": "SUNET",
@@ -558,56 +326,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "106": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_106",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_106"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_106"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_106",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pitt",
-        "given_name": "Brad",
-        "birth_date": "1974-12-07",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_106"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -627,15 +357,14 @@
         "65": false
       },
       "age_in_years": 51,
-      "authentic_source_person_id": "authentic_source_person_id_106",
       "birth_family_name": "Pitt",
       "birth_given_name": "Brad",
       "birthdate": "1974-12-07",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-106",
       "email": "pitt@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Pitt",
       "given_name": "Brad",
       "issuing_authority": "SUNET",
@@ -652,56 +381,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "107": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_107",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_107"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_107"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_107",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Portman",
-        "given_name": "Natalie",
-        "birth_date": "2005-09-01",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_107"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -721,15 +412,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_107",
       "birth_family_name": "Portman",
       "birth_given_name": "Natalie",
       "birthdate": "2005-09-01",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-107",
       "email": "portman@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Portman",
       "given_name": "Natalie",
       "issuing_authority": "SUNET",
@@ -746,56 +436,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "108": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_108",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_108"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_108"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_108",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pratt",
-        "given_name": "Chris",
-        "birth_date": "1974-01-07",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_108"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -815,15 +467,14 @@
         "65": false
       },
       "age_in_years": 52,
-      "authentic_source_person_id": "authentic_source_person_id_108",
       "birth_family_name": "Pratt",
       "birth_given_name": "Chris",
       "birthdate": "1974-01-07",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-108",
       "email": "pratt@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Pratt",
       "given_name": "Chris",
       "issuing_authority": "SUNET",
@@ -840,56 +491,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "109": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_109",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_109"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_109"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_109",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Reeves",
-        "given_name": "Keanu",
-        "birth_date": "1985-11-26",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_109"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -909,15 +522,14 @@
         "65": false
       },
       "age_in_years": 40,
-      "authentic_source_person_id": "authentic_source_person_id_109",
       "birth_family_name": "Reeves",
       "birth_given_name": "Keanu",
       "birthdate": "1985-11-26",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-109",
       "email": "reeves@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Reeves",
       "given_name": "Keanu",
       "issuing_authority": "SUNET",
@@ -934,56 +546,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "110": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_110",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_110"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_110"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_110",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Reilly",
-        "given_name": "John C.",
-        "birth_date": "2005-11-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_110"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1003,15 +577,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_110",
       "birth_family_name": "Reilly",
       "birth_given_name": "John C.",
       "birthdate": "2005-11-19",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-110",
       "email": "reilly@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Reilly",
       "given_name": "John C.",
       "issuing_authority": "SUNET",
@@ -1028,56 +601,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "111": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_111",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_111"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_111"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_111",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Reynolds",
-        "given_name": "Ryan",
-        "birth_date": "1988-12-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_111"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1097,15 +632,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_111",
       "birth_family_name": "Reynolds",
       "birth_given_name": "Ryan",
       "birthdate": "1988-12-05",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-111",
       "email": "reynolds@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Reynolds",
       "given_name": "Ryan",
       "issuing_authority": "SUNET",
@@ -1122,56 +656,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "112": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_112",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_112"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_112"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_112",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Robbie",
-        "given_name": "Margot",
-        "birth_date": "1991-02-14",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_112"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1191,15 +687,14 @@
         "65": false
       },
       "age_in_years": 35,
-      "authentic_source_person_id": "authentic_source_person_id_112",
       "birth_family_name": "Robbie",
       "birth_given_name": "Margot",
       "birthdate": "1991-02-14",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-112",
       "email": "robbie@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Robbie",
       "given_name": "Margot",
       "issuing_authority": "SUNET",
@@ -1216,56 +711,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "113": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_113",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_113"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_113"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_113",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Roberts",
-        "given_name": "Julia",
-        "birth_date": "1982-07-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_113"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1285,15 +742,14 @@
         "65": false
       },
       "age_in_years": 43,
-      "authentic_source_person_id": "authentic_source_person_id_113",
       "birth_family_name": "Roberts",
       "birth_given_name": "Julia",
       "birthdate": "1982-07-30",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-113",
       "email": "roberts@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Roberts",
       "given_name": "Julia",
       "issuing_authority": "SUNET",
@@ -1310,56 +766,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "114": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_114",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_114"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_114"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_114",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Rudd",
-        "given_name": "Paul",
-        "birth_date": "2006-03-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_114"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1379,15 +797,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_114",
       "birth_family_name": "Rudd",
       "birth_given_name": "Paul",
       "birthdate": "2006-03-28",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-114",
       "email": "rudd@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Rudd",
       "given_name": "Paul",
       "issuing_authority": "SUNET",
@@ -1404,56 +821,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "115": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_115",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_115"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_115"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_115",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Smith",
-        "given_name": "Will",
-        "birth_date": "1992-03-13",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_115"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1473,15 +852,14 @@
         "65": false
       },
       "age_in_years": 34,
-      "authentic_source_person_id": "authentic_source_person_id_115",
       "birth_family_name": "Smith",
       "birth_given_name": "Will",
       "birthdate": "1992-03-13",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-115",
       "email": "smith@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Smith",
       "given_name": "Will",
       "issuing_authority": "SUNET",
@@ -1498,56 +876,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "116": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_116",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_116"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_116"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_116",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Spencer",
-        "given_name": "Octavia",
-        "birth_date": "1997-11-18",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_116"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1567,15 +907,14 @@
         "65": false
       },
       "age_in_years": 28,
-      "authentic_source_person_id": "authentic_source_person_id_116",
       "birth_family_name": "Spencer",
       "birth_given_name": "Octavia",
       "birthdate": "1997-11-18",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-116",
       "email": "spencer@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Spencer",
       "given_name": "Octavia",
       "issuing_authority": "SUNET",
@@ -1592,56 +931,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "117": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_117",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_117"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_117"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_117",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Stewart",
-        "given_name": "Kristen",
-        "birth_date": "1993-07-17",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_117"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1661,15 +962,14 @@
         "65": false
       },
       "age_in_years": 32,
-      "authentic_source_person_id": "authentic_source_person_id_117",
       "birth_family_name": "Stewart",
       "birth_given_name": "Kristen",
       "birthdate": "1993-07-17",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-117",
       "email": "stewart@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Stewart",
       "given_name": "Kristen",
       "issuing_authority": "SUNET",
@@ -1686,56 +986,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "118": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_118",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_118"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_118"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_118",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Stone",
-        "given_name": "Emma",
-        "birth_date": "1985-01-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_118"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1755,15 +1017,14 @@
         "65": false
       },
       "age_in_years": 41,
-      "authentic_source_person_id": "authentic_source_person_id_118",
       "birth_family_name": "Stone",
       "birth_given_name": "Emma",
       "birthdate": "1985-01-27",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-118",
       "email": "stone@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Stone",
       "given_name": "Emma",
       "issuing_authority": "SUNET",
@@ -1780,56 +1041,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "119": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_119",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_119"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_119"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_119",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Streep",
-        "given_name": "Meryl",
-        "birth_date": "2005-07-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_119"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1849,15 +1072,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_119",
       "birth_family_name": "Streep",
       "birth_given_name": "Meryl",
       "birthdate": "2005-07-29",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-119",
       "email": "streep@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Streep",
       "given_name": "Meryl",
       "issuing_authority": "SUNET",
@@ -1874,56 +1096,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "120": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_120",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_120"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_120"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_120",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Swinton",
-        "given_name": "Tilda",
-        "birth_date": "1984-04-14",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_120"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -1943,15 +1127,14 @@
         "65": false
       },
       "age_in_years": 42,
-      "authentic_source_person_id": "authentic_source_person_id_120",
       "birth_family_name": "Swinton",
       "birth_given_name": "Tilda",
       "birthdate": "1984-04-14",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-120",
       "email": "swinton@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Swinton",
       "given_name": "Tilda",
       "issuing_authority": "SUNET",
@@ -1968,56 +1151,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "121": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_121",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_121"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_121"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_121",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Tatum",
-        "given_name": "Channing",
-        "birth_date": "2006-10-22",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_121"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2037,15 +1182,14 @@
         "65": false
       },
       "age_in_years": 19,
-      "authentic_source_person_id": "authentic_source_person_id_121",
       "birth_family_name": "Tatum",
       "birth_given_name": "Channing",
       "birthdate": "2006-10-22",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-121",
       "email": "tatum@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Tatum",
       "given_name": "Channing",
       "issuing_authority": "SUNET",
@@ -2062,56 +1206,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "122": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_122",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_122"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_122"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_122",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Theron",
-        "given_name": "Charlize",
-        "birth_date": "1988-12-11",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_122"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2131,15 +1237,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_122",
       "birth_family_name": "Theron",
       "birth_given_name": "Charlize",
       "birthdate": "1988-12-11",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-122",
       "email": "theron@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Theron",
       "given_name": "Charlize",
       "issuing_authority": "SUNET",
@@ -2156,56 +1261,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "123": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_123",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_123"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_123"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_123",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Vaughn",
-        "given_name": "Vince",
-        "birth_date": "1988-02-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_123"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2225,15 +1292,14 @@
         "65": false
       },
       "age_in_years": 38,
-      "authentic_source_person_id": "authentic_source_person_id_123",
       "birth_family_name": "Vaughn",
       "birth_given_name": "Vince",
       "birthdate": "1988-02-19",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-123",
       "email": "vaughn@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Vaughn",
       "given_name": "Vince",
       "issuing_authority": "SUNET",
@@ -2250,56 +1316,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "124": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_124",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_124"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_124"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_124",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Vikander",
-        "given_name": "Alicia",
-        "birth_date": "1985-11-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_124"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2319,15 +1347,14 @@
         "65": false
       },
       "age_in_years": 40,
-      "authentic_source_person_id": "authentic_source_person_id_124",
       "birth_family_name": "Vikander",
       "birth_given_name": "Alicia",
       "birthdate": "1985-11-09",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-124",
       "email": "vikander@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Vikander",
       "given_name": "Alicia",
       "issuing_authority": "SUNET",
@@ -2344,56 +1371,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "125": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_125",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_125"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_125"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_125",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Waltz",
-        "given_name": "Christoph",
-        "birth_date": "1986-03-23",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_125"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2413,15 +1402,14 @@
         "65": false
       },
       "age_in_years": 40,
-      "authentic_source_person_id": "authentic_source_person_id_125",
       "birth_family_name": "Waltz",
       "birth_given_name": "Christoph",
       "birthdate": "1986-03-23",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-125",
       "email": "waltz@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Waltz",
       "given_name": "Christoph",
       "issuing_authority": "SUNET",
@@ -2438,56 +1426,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "126": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_126",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_126"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_126"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_126",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Washington",
-        "given_name": "Denzel",
-        "birth_date": "1981-10-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_126"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2507,15 +1457,14 @@
         "65": false
       },
       "age_in_years": 44,
-      "authentic_source_person_id": "authentic_source_person_id_126",
       "birth_family_name": "Washington",
       "birth_given_name": "Denzel",
       "birthdate": "1981-10-28",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-126",
       "email": "washington@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Washington",
       "given_name": "Denzel",
       "issuing_authority": "SUNET",
@@ -2532,56 +1481,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "127": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_127",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_127"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_127"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_127",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Watts",
-        "given_name": "Naomi",
-        "birth_date": "1990-07-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_127"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2601,15 +1512,14 @@
         "65": false
       },
       "age_in_years": 35,
-      "authentic_source_person_id": "authentic_source_person_id_127",
       "birth_family_name": "Watts",
       "birth_given_name": "Naomi",
       "birthdate": "1990-07-24",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-127",
       "email": "watts@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Watts",
       "given_name": "Naomi",
       "issuing_authority": "SUNET",
@@ -2626,56 +1536,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "128": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_128",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_128"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_128"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_128",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Williams",
-        "given_name": "Michelle",
-        "birth_date": "1992-03-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_128"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2695,15 +1567,14 @@
         "65": false
       },
       "age_in_years": 34,
-      "authentic_source_person_id": "authentic_source_person_id_128",
       "birth_family_name": "Williams",
       "birth_given_name": "Michelle",
       "birthdate": "1992-03-29",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-128",
       "email": "williams@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Williams",
       "given_name": "Michelle",
       "issuing_authority": "SUNET",
@@ -2720,56 +1591,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "129": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_129",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_129"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_129"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_129",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Wilson",
-        "given_name": "Owen",
-        "birth_date": "2007-09-11",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_129"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2789,15 +1622,14 @@
         "65": false
       },
       "age_in_years": 18,
-      "authentic_source_person_id": "authentic_source_person_id_129",
       "birth_family_name": "Wilson",
       "birth_given_name": "Owen",
       "birthdate": "2007-09-11",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-129",
       "email": "wilson@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Wilson",
       "given_name": "Owen",
       "issuing_authority": "SUNET",
@@ -2814,56 +1646,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "130": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_130",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_130"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_130"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_130",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Winslet",
-        "given_name": "Kate",
-        "birth_date": "1986-06-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_130"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2883,15 +1677,14 @@
         "65": false
       },
       "age_in_years": 39,
-      "authentic_source_person_id": "authentic_source_person_id_130",
       "birth_family_name": "Winslet",
       "birth_given_name": "Kate",
       "birthdate": "1986-06-19",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-130",
       "email": "winslet@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Winslet",
       "given_name": "Kate",
       "issuing_authority": "SUNET",
@@ -2908,56 +1701,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "131": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_131",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_131"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_131"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_131",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Witherspoon",
-        "given_name": "Reese",
-        "birth_date": "1987-04-02",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_131"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -2977,15 +1732,14 @@
         "65": false
       },
       "age_in_years": 39,
-      "authentic_source_person_id": "authentic_source_person_id_131",
       "birth_family_name": "Witherspoon",
       "birth_given_name": "Reese",
       "birthdate": "1987-04-02",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-131",
       "email": "witherspoon@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Witherspoon",
       "given_name": "Reese",
       "issuing_authority": "SUNET",
@@ -3002,56 +1756,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "132": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_132",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_132"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_132"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_132",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Adams",
-        "given_name": "Amy",
-        "birth_date": "1990-10-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_132"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3071,15 +1787,14 @@
         "65": false
       },
       "age_in_years": 35,
-      "authentic_source_person_id": "authentic_source_person_id_132",
       "birth_family_name": "Adams",
       "birth_given_name": "Amy",
       "birthdate": "1990-10-05",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-132",
       "email": "adams@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Adams",
       "given_name": "Amy",
       "issuing_authority": "SUNET",
@@ -3096,56 +1811,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "133": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_133",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_133"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_133"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_133",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Affleck",
-        "given_name": "Ben",
-        "birth_date": "1973-07-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_133"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3165,15 +1842,14 @@
         "65": false
       },
       "age_in_years": 52,
-      "authentic_source_person_id": "authentic_source_person_id_133",
       "birth_family_name": "Affleck",
       "birth_given_name": "Ben",
       "birthdate": "1973-07-05",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-133",
       "email": "affleck@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Affleck",
       "given_name": "Ben",
       "issuing_authority": "SUNET",
@@ -3190,56 +1866,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "134": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_134",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_134"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_134"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_134",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Bancroft",
-        "given_name": "Anne",
-        "birth_date": "1980-12-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_134"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3259,15 +1897,14 @@
         "65": false
       },
       "age_in_years": 45,
-      "authentic_source_person_id": "authentic_source_person_id_134",
       "birth_family_name": "Bancroft",
       "birth_given_name": "Anne",
       "birthdate": "1980-12-30",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-134",
       "email": "bancroft@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Bancroft",
       "given_name": "Anne",
       "issuing_authority": "SUNET",
@@ -3284,56 +1921,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "135": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_135",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_135"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_135"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_135",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Berry",
-        "given_name": "Halle",
-        "birth_date": "1989-08-25",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_135"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3353,15 +1952,14 @@
         "65": false
       },
       "age_in_years": 36,
-      "authentic_source_person_id": "authentic_source_person_id_135",
       "birth_family_name": "Berry",
       "birth_given_name": "Halle",
       "birthdate": "1989-08-25",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-135",
       "email": "berry@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Berry",
       "given_name": "Halle",
       "issuing_authority": "SUNET",
@@ -3378,56 +1976,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "136": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_136",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_136"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_136"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_136",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Biel",
-        "given_name": "Jessica",
-        "birth_date": "1988-09-12",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_136"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3447,15 +2007,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_136",
       "birth_family_name": "Biel",
       "birth_given_name": "Jessica",
       "birthdate": "1988-09-12",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-136",
       "email": "biel@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Biel",
       "given_name": "Jessica",
       "issuing_authority": "SUNET",
@@ -3472,56 +2031,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "137": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_137",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_137"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_137"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_137",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Blanchett",
-        "given_name": "Cate",
-        "birth_date": "2006-11-08",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_137"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3541,15 +2062,14 @@
         "65": false
       },
       "age_in_years": 19,
-      "authentic_source_person_id": "authentic_source_person_id_137",
       "birth_family_name": "Blanchett",
       "birth_given_name": "Cate",
       "birthdate": "2006-11-08",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-137",
       "email": "blanchett@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Blanchett",
       "given_name": "Cate",
       "issuing_authority": "SUNET",
@@ -3566,56 +2086,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "138": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_138",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_138"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_138"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_138",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Blunt",
-        "given_name": "Emily",
-        "birth_date": "2000-08-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_138"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3635,15 +2117,14 @@
         "65": false
       },
       "age_in_years": 25,
-      "authentic_source_person_id": "authentic_source_person_id_138",
       "birth_family_name": "Blunt",
       "birth_given_name": "Emily",
       "birthdate": "2000-08-15",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-138",
       "email": "blunt@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Blunt",
       "given_name": "Emily",
       "issuing_authority": "SUNET",
@@ -3660,56 +2141,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "139": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_139",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_139"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_139"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_139",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Boyega",
-        "given_name": "John",
-        "birth_date": "2005-12-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_139"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3729,15 +2172,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_139",
       "birth_family_name": "Boyega",
       "birth_given_name": "John",
       "birthdate": "2005-12-05",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-139",
       "email": "boyega@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Boyega",
       "given_name": "John",
       "issuing_authority": "SUNET",
@@ -3754,56 +2196,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "140": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_140",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_140"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_140"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_140",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Bullock",
-        "given_name": "Sandra",
-        "birth_date": "1984-09-08",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_140"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3823,15 +2227,14 @@
         "65": false
       },
       "age_in_years": 41,
-      "authentic_source_person_id": "authentic_source_person_id_140",
       "birth_family_name": "Bullock",
       "birth_given_name": "Sandra",
       "birthdate": "1984-09-08",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-140",
       "email": "bullock@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Bullock",
       "given_name": "Sandra",
       "issuing_authority": "SUNET",
@@ -3848,56 +2251,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "141": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_141",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_141"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_141"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_141",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Cage",
-        "given_name": "Nicolas",
-        "birth_date": "2005-05-13",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_141"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -3917,15 +2282,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_141",
       "birth_family_name": "Cage",
       "birth_given_name": "Nicolas",
       "birthdate": "2005-05-13",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-141",
       "email": "cage@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Cage",
       "given_name": "Nicolas",
       "issuing_authority": "SUNET",
@@ -3942,56 +2306,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "142": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_142",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_142"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_142"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_142",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Carell",
-        "given_name": "Steve",
-        "birth_date": "2005-06-04",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_142"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4011,15 +2337,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_142",
       "birth_family_name": "Carell",
       "birth_given_name": "Steve",
       "birthdate": "2005-06-04",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-142",
       "email": "carell@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Carell",
       "given_name": "Steve",
       "issuing_authority": "SUNET",
@@ -4036,56 +2361,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "143": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_143",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_143"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_143"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_143",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Chastain",
-        "given_name": "Jessica",
-        "birth_date": "1982-10-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_143"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4105,15 +2392,14 @@
         "65": false
       },
       "age_in_years": 43,
-      "authentic_source_person_id": "authentic_source_person_id_143",
       "birth_family_name": "Chastain",
       "birth_given_name": "Jessica",
       "birthdate": "1982-10-19",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-143",
       "email": "chastain@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Chastain",
       "given_name": "Jessica",
       "issuing_authority": "SUNET",
@@ -4130,56 +2416,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "144": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_144",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_144"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_144"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_144",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Close",
-        "given_name": "Glenn",
-        "birth_date": "1981-02-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_144"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4199,15 +2447,14 @@
         "65": false
       },
       "age_in_years": 45,
-      "authentic_source_person_id": "authentic_source_person_id_144",
       "birth_family_name": "Close",
       "birth_given_name": "Glenn",
       "birthdate": "1981-02-05",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-144",
       "email": "close@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Close",
       "given_name": "Glenn",
       "issuing_authority": "SUNET",
@@ -4224,56 +2471,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "145": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_145",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_145"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_145"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_145",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Craig",
-        "given_name": "Daniel",
-        "birth_date": "1988-10-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_145"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4293,15 +2502,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_145",
       "birth_family_name": "Craig",
       "birth_given_name": "Daniel",
       "birthdate": "1988-10-29",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-145",
       "email": "craig@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Craig",
       "given_name": "Daniel",
       "issuing_authority": "SUNET",
@@ -4318,56 +2526,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "146": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_146",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_146"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_146"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_146",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Cruz",
-        "given_name": "Penélope",
-        "birth_date": "1994-05-22",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_146"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4387,15 +2557,14 @@
         "65": false
       },
       "age_in_years": 31,
-      "authentic_source_person_id": "authentic_source_person_id_146",
       "birth_family_name": "Cruz",
       "birth_given_name": "Penélope",
       "birthdate": "1994-05-22",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-146",
       "email": "cruz@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Cruz",
       "given_name": "Penélope",
       "issuing_authority": "SUNET",
@@ -4412,56 +2581,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "147": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_147",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_147"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_147"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_147",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Cumberbatch",
-        "given_name": "Benedict",
-        "birth_date": "1987-10-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_147"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4481,15 +2612,14 @@
         "65": false
       },
       "age_in_years": 38,
-      "authentic_source_person_id": "authentic_source_person_id_147",
       "birth_family_name": "Cumberbatch",
       "birth_given_name": "Benedict",
       "birthdate": "1987-10-24",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-147",
       "email": "cumberbatch@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Cumberbatch",
       "given_name": "Benedict",
       "issuing_authority": "SUNET",
@@ -4506,56 +2636,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "148": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_148",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_148"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_148"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_148",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Damon",
-        "given_name": "Matt",
-        "birth_date": "1971-07-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_148"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4575,15 +2667,14 @@
         "65": false
       },
       "age_in_years": 54,
-      "authentic_source_person_id": "authentic_source_person_id_148",
       "birth_family_name": "Damon",
       "birth_given_name": "Matt",
       "birthdate": "1971-07-09",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-148",
       "email": "damon@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Damon",
       "given_name": "Matt",
       "issuing_authority": "SUNET",
@@ -4600,56 +2691,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "149": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_149",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_149"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_149"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_149",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Davis",
-        "given_name": "Viola",
-        "birth_date": "2007-04-20",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_149"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4669,15 +2722,14 @@
         "65": false
       },
       "age_in_years": 19,
-      "authentic_source_person_id": "authentic_source_person_id_149",
       "birth_family_name": "Davis",
       "birth_given_name": "Viola",
       "birthdate": "2007-04-20",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-149",
       "email": "davis@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Davis",
       "given_name": "Viola",
       "issuing_authority": "SUNET",
@@ -4694,56 +2746,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "70": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_70",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_70"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_70"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_70",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "De Niro",
-        "given_name": "Robert",
-        "birth_date": "1982-01-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_70"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4763,15 +2777,14 @@
         "65": false
       },
       "age_in_years": 44,
-      "authentic_source_person_id": "authentic_source_person_id_70",
       "birth_family_name": "De Niro",
       "birth_given_name": "Robert",
       "birthdate": "1982-01-15",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-70",
       "email": "de niro@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "De Niro",
       "given_name": "Robert",
       "issuing_authority": "SUNET",
@@ -4788,56 +2801,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "71": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_71",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_71"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_71"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_71",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Dench",
-        "given_name": "Judi",
-        "birth_date": "1995-09-04",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_71"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4857,15 +2832,14 @@
         "65": false
       },
       "age_in_years": 30,
-      "authentic_source_person_id": "authentic_source_person_id_71",
       "birth_family_name": "Dench",
       "birth_given_name": "Judi",
       "birthdate": "1995-09-04",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-71",
       "email": "dench@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Dench",
       "given_name": "Judi",
       "issuing_authority": "SUNET",
@@ -4882,56 +2856,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "72": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_72",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_72"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_72"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_72",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Depp",
-        "given_name": "Johnny",
-        "birth_date": "1985-12-03",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_72"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -4951,15 +2887,14 @@
         "65": false
       },
       "age_in_years": 40,
-      "authentic_source_person_id": "authentic_source_person_id_72",
       "birth_family_name": "Depp",
       "birth_given_name": "Johnny",
       "birthdate": "1985-12-03",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-72",
       "email": "depp@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Depp",
       "given_name": "Johnny",
       "issuing_authority": "SUNET",
@@ -4976,56 +2911,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "73": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_73",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_73"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_73"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_73",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "DiCaprio",
-        "given_name": "Leonardo",
-        "birth_date": "1972-08-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_73"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5045,15 +2942,14 @@
         "65": false
       },
       "age_in_years": 53,
-      "authentic_source_person_id": "authentic_source_person_id_73",
       "birth_family_name": "DiCaprio",
       "birth_given_name": "Leonardo",
       "birthdate": "1972-08-28",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-73",
       "email": "dicaprio@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "DiCaprio",
       "given_name": "Leonardo",
       "issuing_authority": "SUNET",
@@ -5070,56 +2966,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "74": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_74",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_74"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_74"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_74",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Downey Jr.",
-        "given_name": "Robert",
-        "birth_date": "1983-05-12",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_74"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5139,15 +2997,14 @@
         "65": false
       },
       "age_in_years": 42,
-      "authentic_source_person_id": "authentic_source_person_id_74",
       "birth_family_name": "Downey Jr.",
       "birth_given_name": "Robert",
       "birthdate": "1983-05-12",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-74",
       "email": "downey jr.@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Downey Jr.",
       "given_name": "Robert",
       "issuing_authority": "SUNET",
@@ -5164,56 +3021,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "75": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_75",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_75"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_75"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_75",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Driver",
-        "given_name": "Adam",
-        "birth_date": "1988-09-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_75"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5233,15 +3052,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_75",
       "birth_family_name": "Driver",
       "birth_given_name": "Adam",
       "birthdate": "1988-09-27",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-75",
       "email": "driver@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Driver",
       "given_name": "Adam",
       "issuing_authority": "SUNET",
@@ -5258,56 +3076,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "76": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_76",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_76"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_76"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_76",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Elba",
-        "given_name": "Idris",
-        "birth_date": "1980-09-02",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_76"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5327,15 +3107,14 @@
         "65": false
       },
       "age_in_years": 45,
-      "authentic_source_person_id": "authentic_source_person_id_76",
       "birth_family_name": "Elba",
       "birth_given_name": "Idris",
       "birthdate": "1980-09-02",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-76",
       "email": "elba@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Elba",
       "given_name": "Idris",
       "issuing_authority": "SUNET",
@@ -5352,56 +3131,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "77": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_77",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_77"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_77"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_77",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Farrell",
-        "given_name": "Colin",
-        "birth_date": "1977-04-25",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_77"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5421,15 +3162,14 @@
         "65": false
       },
       "age_in_years": 49,
-      "authentic_source_person_id": "authentic_source_person_id_77",
       "birth_family_name": "Farrell",
       "birth_given_name": "Colin",
       "birthdate": "1977-04-25",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-77",
       "email": "farrell@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Farrell",
       "given_name": "Colin",
       "issuing_authority": "SUNET",
@@ -5446,56 +3186,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "78": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_78",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_78"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_78"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_78",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Fassbender",
-        "given_name": "Michael",
-        "birth_date": "1992-04-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_78"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5515,15 +3217,14 @@
         "65": false
       },
       "age_in_years": 34,
-      "authentic_source_person_id": "authentic_source_person_id_78",
       "birth_family_name": "Fassbender",
       "birth_given_name": "Michael",
       "birthdate": "1992-04-24",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-78",
       "email": "fassbender@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Fassbender",
       "given_name": "Michael",
       "issuing_authority": "SUNET",
@@ -5540,56 +3241,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "79": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_79",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_79"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_79"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_79",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Foster",
-        "given_name": "Jodie",
-        "birth_date": "1991-10-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_79"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5609,15 +3272,14 @@
         "65": false
       },
       "age_in_years": 34,
-      "authentic_source_person_id": "authentic_source_person_id_79",
       "birth_family_name": "Foster",
       "birth_given_name": "Jodie",
       "birthdate": "1991-10-30",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-79",
       "email": "foster@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Foster",
       "given_name": "Jodie",
       "issuing_authority": "SUNET",
@@ -5634,56 +3296,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "80": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_80",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_80"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_80"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_80",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Foxx",
-        "given_name": "Jamie",
-        "birth_date": "1977-07-03",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_80"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5703,15 +3327,14 @@
         "65": false
       },
       "age_in_years": 48,
-      "authentic_source_person_id": "authentic_source_person_id_80",
       "birth_family_name": "Foxx",
       "birth_given_name": "Jamie",
       "birthdate": "1977-07-03",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-80",
       "email": "foxx@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Foxx",
       "given_name": "Jamie",
       "issuing_authority": "SUNET",
@@ -5728,56 +3351,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "81": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_81",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_81"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_81"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_81",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Freeman",
-        "given_name": "Morgan",
-        "birth_date": "1990-08-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_81"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5797,15 +3382,14 @@
         "65": false
       },
       "age_in_years": 35,
-      "authentic_source_person_id": "authentic_source_person_id_81",
       "birth_family_name": "Freeman",
       "birth_given_name": "Morgan",
       "birthdate": "1990-08-24",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-81",
       "email": "freeman@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Freeman",
       "given_name": "Morgan",
       "issuing_authority": "SUNET",
@@ -5822,56 +3406,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "82": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_82",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_82"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_82"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_82",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Glover",
-        "given_name": "Donald",
-        "birth_date": "2007-03-17",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_82"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5891,15 +3437,14 @@
         "65": false
       },
       "age_in_years": 19,
-      "authentic_source_person_id": "authentic_source_person_id_82",
       "birth_family_name": "Glover",
       "birth_given_name": "Donald",
       "birthdate": "2007-03-17",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-82",
       "email": "glover@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Glover",
       "given_name": "Donald",
       "issuing_authority": "SUNET",
@@ -5916,56 +3461,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "83": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_83",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_83"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_83"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_83",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hanks",
-        "given_name": "Tom",
-        "birth_date": "1989-12-04",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_83"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -5985,15 +3492,14 @@
         "65": false
       },
       "age_in_years": 36,
-      "authentic_source_person_id": "authentic_source_person_id_83",
       "birth_family_name": "Hanks",
       "birth_given_name": "Tom",
       "birthdate": "1989-12-04",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-83",
       "email": "hanks@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Hanks",
       "given_name": "Tom",
       "issuing_authority": "SUNET",
@@ -6010,56 +3516,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "84": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_84",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_84"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_84"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_84",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Saldana",
-        "given_name": "Zoe",
-        "birth_date": "1981-11-23",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_84"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6079,15 +3547,14 @@
         "65": false
       },
       "age_in_years": 44,
-      "authentic_source_person_id": "authentic_source_person_id_84",
       "birth_family_name": "Saldana",
       "birth_given_name": "Zoe",
       "birthdate": "1981-11-23",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-84",
       "email": "saldana@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Saldana",
       "given_name": "Zoe",
       "issuing_authority": "SUNET",
@@ -6104,56 +3571,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "85": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_85",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_85"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_85"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_85",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hathaway",
-        "given_name": "Anne",
-        "birth_date": "1987-05-06",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_85"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6173,15 +3602,14 @@
         "65": false
       },
       "age_in_years": 38,
-      "authentic_source_person_id": "authentic_source_person_id_85",
       "birth_family_name": "Hathaway",
       "birth_given_name": "Anne",
       "birthdate": "1987-05-06",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-85",
       "email": "hathaway@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Hathaway",
       "given_name": "Anne",
       "issuing_authority": "SUNET",
@@ -6198,56 +3626,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "86": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_86",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_86"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_86"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_86",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hayek",
-        "given_name": "Salma",
-        "birth_date": "1983-08-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_86"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6267,15 +3657,14 @@
         "65": false
       },
       "age_in_years": 42,
-      "authentic_source_person_id": "authentic_source_person_id_86",
       "birth_family_name": "Hayek",
       "birth_given_name": "Salma",
       "birthdate": "1983-08-27",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-86",
       "email": "hayek@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Hayek",
       "given_name": "Salma",
       "issuing_authority": "SUNET",
@@ -6292,56 +3681,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "87": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_87",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_87"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_87"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_87",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hemsworth",
-        "given_name": "Chris",
-        "birth_date": "1992-01-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_87"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6361,15 +3712,14 @@
         "65": false
       },
       "age_in_years": 34,
-      "authentic_source_person_id": "authentic_source_person_id_87",
       "birth_family_name": "Hemsworth",
       "birth_given_name": "Chris",
       "birthdate": "1992-01-19",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-87",
       "email": "hemsworth@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Hemsworth",
       "given_name": "Chris",
       "issuing_authority": "SUNET",
@@ -6386,56 +3736,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "88": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_88",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_88"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_88"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_88",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hopkins",
-        "given_name": "Anthony",
-        "birth_date": "2006-08-16",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_88"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6455,15 +3767,14 @@
         "65": false
       },
       "age_in_years": 19,
-      "authentic_source_person_id": "authentic_source_person_id_88",
       "birth_family_name": "Hopkins",
       "birth_given_name": "Anthony",
       "birthdate": "2006-08-16",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-88",
       "email": "hopkins@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Hopkins",
       "given_name": "Anthony",
       "issuing_authority": "SUNET",
@@ -6480,56 +3791,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "89": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_89",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_89"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_89"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_89",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Jackman",
-        "given_name": "Hugh",
-        "birth_date": "1972-06-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_89"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6549,15 +3822,14 @@
         "65": false
       },
       "age_in_years": 53,
-      "authentic_source_person_id": "authentic_source_person_id_89",
       "birth_family_name": "Jackman",
       "birth_given_name": "Hugh",
       "birthdate": "1972-06-28",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-89",
       "email": "jackman@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Jackman",
       "given_name": "Hugh",
       "issuing_authority": "SUNET",
@@ -6574,56 +3846,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "90": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_90",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_90"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_90"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_90",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Jackson",
-        "given_name": "Samuel L.",
-        "birth_date": "2007-01-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_90"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6643,15 +3877,14 @@
         "65": false
       },
       "age_in_years": 19,
-      "authentic_source_person_id": "authentic_source_person_id_90",
       "birth_family_name": "Jackson",
       "birth_given_name": "Samuel L.",
       "birthdate": "2007-01-27",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-90",
       "email": "jackson@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Jackson",
       "given_name": "Samuel L.",
       "issuing_authority": "SUNET",
@@ -6668,56 +3901,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "91": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_91",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_91"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_91"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_91",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Johansson",
-        "given_name": "Scarlett",
-        "birth_date": "1980-05-12",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_91"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6737,15 +3932,14 @@
         "65": false
       },
       "age_in_years": 45,
-      "authentic_source_person_id": "authentic_source_person_id_91",
       "birth_family_name": "Johansson",
       "birth_given_name": "Scarlett",
       "birthdate": "1980-05-12",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-91",
       "email": "johansson@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Johansson",
       "given_name": "Scarlett",
       "issuing_authority": "SUNET",
@@ -6762,56 +3956,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "92": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_92",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_92"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_92"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_92",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Johnson",
-        "given_name": "Dakota",
-        "birth_date": "1999-04-21",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_92"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6831,15 +3987,14 @@
         "65": false
       },
       "age_in_years": 27,
-      "authentic_source_person_id": "authentic_source_person_id_92",
       "birth_family_name": "Johnson",
       "birth_given_name": "Dakota",
       "birthdate": "1999-04-21",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-92",
       "email": "johnson@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Johnson",
       "given_name": "Dakota",
       "issuing_authority": "SUNET",
@@ -6856,56 +4011,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "93": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_93",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_93"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_93"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_93",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Kidman",
-        "given_name": "Nicole",
-        "birth_date": "1983-03-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_93"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -6925,15 +4042,14 @@
         "65": false
       },
       "age_in_years": 43,
-      "authentic_source_person_id": "authentic_source_person_id_93",
       "birth_family_name": "Kidman",
       "birth_given_name": "Nicole",
       "birthdate": "1983-03-15",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-93",
       "email": "kidman@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Kidman",
       "given_name": "Nicole",
       "issuing_authority": "SUNET",
@@ -6950,56 +4066,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "94": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_94",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_94"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_94"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_94",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Kirby",
-        "given_name": "Vanessa",
-        "birth_date": "1993-06-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_94"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -7019,15 +4097,14 @@
         "65": false
       },
       "age_in_years": 32,
-      "authentic_source_person_id": "authentic_source_person_id_94",
       "birth_family_name": "Kirby",
       "birth_given_name": "Vanessa",
       "birthdate": "1993-06-28",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-94",
       "email": "kirby@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Kirby",
       "given_name": "Vanessa",
       "issuing_authority": "SUNET",
@@ -7044,56 +4121,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "95": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_95",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_95"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_95"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_95",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Kunis",
-        "given_name": "Mila",
-        "birth_date": "1989-01-01",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_95"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -7113,15 +4152,14 @@
         "65": false
       },
       "age_in_years": 37,
-      "authentic_source_person_id": "authentic_source_person_id_95",
       "birth_family_name": "Kunis",
       "birth_given_name": "Mila",
       "birthdate": "1989-01-01",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-95",
       "email": "kunis@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Kunis",
       "given_name": "Mila",
       "issuing_authority": "SUNET",
@@ -7138,56 +4176,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "96": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_96",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_96"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_96"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_96",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Lawrence",
-        "given_name": "Jennifer",
-        "birth_date": "2006-02-14",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_96"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -7207,15 +4207,14 @@
         "65": false
       },
       "age_in_years": 20,
-      "authentic_source_person_id": "authentic_source_person_id_96",
       "birth_family_name": "Lawrence",
       "birth_given_name": "Jennifer",
       "birthdate": "2006-02-14",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-96",
       "email": "lawrence@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "Lawrence",
       "given_name": "Jennifer",
       "issuing_authority": "SUNET",
@@ -7232,56 +4231,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "97": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_97",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_97"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_97"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_97",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "McAdams",
-        "given_name": "Rachel",
-        "birth_date": "1998-06-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_97"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -7301,15 +4262,14 @@
         "65": false
       },
       "age_in_years": 27,
-      "authentic_source_person_id": "authentic_source_person_id_97",
       "birth_family_name": "McAdams",
       "birth_given_name": "Rachel",
       "birthdate": "1998-06-09",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-97",
       "email": "mcadams@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "McAdams",
       "given_name": "Rachel",
       "issuing_authority": "SUNET",
@@ -7326,56 +4286,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "98": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_98",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_98"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_98"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_98",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "McConaughey",
-        "given_name": "Matthew",
-        "birth_date": "1977-09-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_98"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -7395,15 +4317,14 @@
         "65": false
       },
       "age_in_years": 48,
-      "authentic_source_person_id": "authentic_source_person_id_98",
       "birth_family_name": "McConaughey",
       "birth_given_name": "Matthew",
       "birthdate": "1977-09-09",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-98",
       "email": "mcconaughey@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "McConaughey",
       "given_name": "Matthew",
       "issuing_authority": "SUNET",
@@ -7420,56 +4341,18 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   },
   "99": {
     "meta": {
-      "authentic_source": "eduID_Provider:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:credential:eduid:1",
+      "authentic_source": "SUNET",
       "scope": "eduid",
-      "document_id": "document_id_eduid_99",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_eduid_99"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "document_id": "document_id_eduid_99"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_99",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "McGregor",
-        "given_name": "Ewan",
-        "birth_date": "1991-08-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_99"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "eduID Credential"
-        },
-        "sv": {
-          "beskrivning": "eduID-legitimation"
-        }
-      }
-    },
     "document_data": {
       "address": {
         "country": "SE",
@@ -7489,15 +4372,14 @@
         "65": false
       },
       "age_in_years": 34,
-      "authentic_source_person_id": "authentic_source_person_id_99",
       "birth_family_name": "McGregor",
       "birth_given_name": "Ewan",
       "birthdate": "1991-08-29",
-      "date_of_expiry": "2027-04-28T11:03:59Z",
-      "date_of_issuance": "2026-03-29T11:03:59Z",
+      "date_of_expiry": "2027-05-05T09:17:37Z",
+      "date_of_issuance": "2026-04-05T09:17:37Z",
       "document_number": "doc-eduid-99",
       "email": "mcgregor@example.com",
-      "expiry_date": "2027-04-28",
+      "expiry_date": "2027-05-05",
       "family_name": "McGregor",
       "given_name": "Ewan",
       "issuing_authority": "SUNET",
@@ -7514,9 +4396,7 @@
         "locality": "Tulegatan 11",
         "region": "Stockholm"
       },
-      "sex": "0",
-      "trust_anchor": "https://ta.oidf.sunet.se"
-    },
-    "document_data_version": "1.0.0"
+      "sex": "0"
+    }
   }
 }
