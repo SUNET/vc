@@ -83,6 +83,7 @@ func (s *Service) endpointDatastoreDelete(ctx context.Context, c *gin.Context) (
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
 	if err := s.apiv1.DatastoreDeleteByKey(ctx, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -101,6 +102,7 @@ func (s *Service) endpointDatastoreAddIdentity(ctx context.Context, c *gin.Conte
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
 	if err := s.apiv1.DatastoreAddIdentity(ctx, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -117,6 +119,7 @@ func (s *Service) endpointDatastoreDeleteIdentity(ctx context.Context, c *gin.Co
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
 	if err := s.apiv1.DatastoreDeleteIdentity(ctx, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err

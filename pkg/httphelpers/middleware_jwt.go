@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -521,7 +522,8 @@ func AllowedScopes(engine *SafeEngine, subject string) []string {
 // checks whether the request (method + path + subject) is authorized.
 //
 // On success the parsed claims are stored in the Gin context under the key
-// "jwt_claims" and the "sub" claim is stored under "jwt_subject".
+// "jwt_claims" and the subject identity (resolved from the "eppn" or "email"
+// claim, not the standard "sub" claim) is stored under "jwt_subject".
 func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg model.APIAuthJWKS, jwksCache JWKSCache, engine *SafeEngine) gin.HandlerFunc {
 	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:JWKSAuth")
 	defer span.End()
@@ -672,7 +674,8 @@ func discoverJWKSURL(ctx context.Context, issuerURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create discovery request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch discovery document: %w", err)
 	}

@@ -10,6 +10,7 @@ services:
       - ./config.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
+      - ./bootstrapping/:/bootstrapping/:ro
     depends_on:
       - mongo
       - mock-oauth2-server
@@ -32,12 +33,9 @@ services:
     depends_on:
       #      apigw:
       #        condition: service_started
-      #      mockas:
-      #        condition: service_started
       #      kafka0:
       #        condition: service_healthy
       - apigw
-      - mockas
       - verifier
       #- kafka0
       #- kafka1
@@ -100,24 +98,6 @@ services:
     networks:
       vc-dev-net:
         ipv4_address: 172.16.50.8
-    environment:
-      - "VC_CONFIG_YAML=config.yaml"
-      - "SSL_CERT_FILE=/pki/rootCA.crt"
-
-  mockas:
-    container_name: "vc_dev_mockas"
-    hostname: "mockas.vc.docker"
-    image: docker.sunet.se/iam_vc/mockas:local
-    restart: always
-    volumes:
-      - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
-    depends_on:
-      apigw:
-        condition: service_started
-    networks:
-      vc-dev-net:
-        ipv4_address: 172.16.50.13
     environment:
       - "VC_CONFIG_YAML=config.yaml"
       - "SSL_CERT_FILE=/pki/rootCA.crt"

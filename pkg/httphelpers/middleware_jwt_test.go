@@ -1630,3 +1630,57 @@ func buildEngine(t *testing.T, rules ...string) *SafeEngine {
 	require.NotNil(t, engine)
 	return engine
 }
+
+// ---------- discoverJWKSURL ----------
+
+func TestDiscoverJWKSURL_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/.well-known/openid-configuration", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"jwks_uri": "https://auth.example.com/jwks",
+		})
+	}))
+	defer srv.Close()
+
+	jwksURL, err := discoverJWKSURL(t.Context(), srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "https://auth.example.com/jwks", jwksURL)
+}
+
+func TestDiscoverJWKSURL_Non200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	_, err := discoverJWKSURL(t.Context(), srv.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "discovery endpoint returned 500")
+}
+
+func TestDiscoverJWKSURL_InvalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	_, err := discoverJWKSURL(t.Context(), srv.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode discovery document")
+}
+
+func TestDiscoverJWKSURL_MissingJWKSURI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"issuer": "https://auth.example.com",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := discoverJWKSURL(t.Context(), srv.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "discovery document has no jwks_uri")
+}

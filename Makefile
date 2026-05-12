@@ -19,9 +19,9 @@ BUILD_ARCH              := amd64
 BUILD_FLAGS             := -v
 
 # Services Configuration
-SERVICES                := verifier registry mockas apigw issuer ui
-WEB_SERVICES            := verifier ui
-WORKER_SERVICES         := registry mockas apigw issuer
+SERVICES                := verifier registry apigw issuer
+WEB_SERVICES            := verifier
+WORKER_SERVICES         := registry apigw issuer
 
 # Docker Configuration
 DOCKER_REGISTRY         := docker.sunet.se/iam_vc
@@ -41,10 +41,8 @@ PKCS11_TAG              := pkcs11
 BUILD_CONFIGS           := \
 	verifier:static: \
 	registry:static: \
-	mockas:static: \
 	apigw:static: \
 	issuer:static: \
-	ui:static: \
 	vc20-test-server:static:
 
 # ==============================================================================
@@ -467,7 +465,7 @@ swagger-verifier: ## Generate verifier Swagger docs
 	swag init -d internal/verifier/apiv1/ -g client.go --output docs/verifier $(SWAGGER_OPTS)
 
 swagger-apigw: ## Generate apigw Swagger docs
-	swag init -d internal/apigw/apiv1/,pkg/helpers,pkg/model,pkg/vcclient,pkg/openid4vci,internal/gen/issuer/apiv1_issuer -g client.go --output docs/apigw $(SWAGGER_OPTS)
+	swag init -d internal/apigw/apiv1/,pkg/helpers,pkg/model,pkg/vcclient,pkg/openid4vci,pkg/oauth2,internal/gen/issuer/apiv1_issuer -g client.go --output docs/apigw $(SWAGGER_OPTS)
 
 swagger-issuer: ## Generate issuer Swagger docs
 	swag init -d internal/issuer/apiv1/ -g client.go --output docs/issuer $(SWAGGER_OPTS)

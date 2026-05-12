@@ -159,8 +159,8 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			"scope_templates":           scopeTemplates,
 			"allowed_authentic_sources": allowedSources,
 			"has_identity_mapping":      hasIdentityMappingScope(pairs),
-			"csrf_token":               session.Get("csrf_token"),
-			"unrestricted":             !authEnabled,
+			"csrf_token":                session.Get("csrf_token"),
+			"unrestricted":              !authEnabled,
 		}, nil
 	}
 	return gin.H{"authenticated": false}, nil
