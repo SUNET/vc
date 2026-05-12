@@ -173,8 +173,8 @@ window.adminApp = function () {
 
         switchView(v) {
             this.view = v;
-            if (v === 'datastore' && this.ds.docs.length === 0) this.searchDocuments();
-            if (v === 'identity' && this.im.mappings.length === 0) this.searchMappings();
+            if (v === 'datastore') this.searchDocuments();
+            if (v === 'identity') this.searchMappings();
         },
 
         treeView(entries) { return buildTreeView(entries); },
@@ -257,6 +257,15 @@ window.adminApp = function () {
             };
             this.ds.createError = '';
             this.ds.showCreate = true;
+            this.$nextTick(() => {
+                if (this.allowedAuthenticSources.length === 1) {
+                    this.ds.create.authentic_source = this.allowedAuthenticSources[0];
+                }
+                if (this.scopes.length === 1) {
+                    this.ds.create.scope = this.scopes[0];
+                    this.onScopeChange();
+                }
+            });
         },
 
         onScopeChange() {
@@ -535,6 +544,11 @@ window.adminApp = function () {
             this.im.createTab = 'editor';
             this.im.createError = '';
             this.im.showCreate = true;
+            this.$nextTick(() => {
+                if (this.allowedAuthenticSources.length === 1) {
+                    this.im.create.authentic_source = this.allowedAuthenticSources[0];
+                }
+            });
         },
 
         addMappingAttribute() {
