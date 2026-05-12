@@ -138,9 +138,9 @@
                                     <p class="fw-semibold small mb-2">Metadata</p>
                                     <div class="row g-2">
                                         <div class="col-12 col-md-4">
-                                            <label class="form-label small mb-1">Authentic Source</label>
+                                            <label class="form-label small mb-1" for="ds-create-authentic-source">Authentic Source</label>
                                             <template x-if="allowedAuthenticSources.length > 0">
-                                                <select class="form-select form-select-sm" x-model="ds.create.authentic_source">
+                                                <select id="ds-create-authentic-source" class="form-select form-select-sm" x-model="ds.create.authentic_source">
                                                     <option value="">Select...</option>
                                                     <template x-for="org in allowedAuthenticSources" :key="org">
                                                         <option :value="org" x-text="org"></option>
@@ -148,13 +148,13 @@
                                                 </select>
                                             </template>
                                             <template x-if="allowedAuthenticSources.length === 0">
-                                                <input class="form-control form-control-sm" x-model="ds.create.authentic_source">
+                                                <input id="ds-create-authentic-source" class="form-control form-control-sm" x-model="ds.create.authentic_source">
                                             </template>
                                         </div>
                                         <div class="col-12 col-md-4">
-                                            <label class="form-label small mb-1">Scope</label>
+                                            <label class="form-label small mb-1" for="ds-create-scope">Scope</label>
                                             <template x-if="scopes.length > 0">
-                                                <select class="form-select form-select-sm" x-model="ds.create.scope" @change="onScopeChange()">
+                                                <select id="ds-create-scope" class="form-select form-select-sm" x-model="ds.create.scope" @change="onScopeChange()">
                                                     <option value="">Select...</option>
                                                     <template x-for="s in scopes" :key="s">
                                                         <option :value="s" x-text="s"></option>
@@ -162,17 +162,17 @@
                                                 </select>
                                             </template>
                                             <template x-if="scopes.length === 0">
-                                                <input class="form-control form-control-sm" x-model="ds.create.scope">
+                                                <input id="ds-create-scope" class="form-control form-control-sm" x-model="ds.create.scope">
                                             </template>
                                         </div>
                                         <div class="col-12 col-md-4">
-                                            <label class="form-label small mb-1">Document ID <span class="text-muted fw-normal">(optional)</span></label>
-                                            <input class="form-control form-control-sm" x-model="ds.create.document_id" placeholder="auto-generated if empty">
+                                            <label class="form-label small mb-1" for="ds-create-document-id">Document ID <span class="text-muted fw-normal">(optional)</span></label>
+                                            <input id="ds-create-document-id" class="form-control form-control-sm" x-model="ds.create.document_id" placeholder="auto-generated if empty">
                                         </div>
                                     </div>
                                     <div class="mt-2">
-                                        <label class="form-label small mb-1">Identity Mapping IDs (comma-separated)</label>
-                                        <input class="form-control form-control-sm" x-model="ds.create.identity_mapping_ids_str">
+                                        <label class="form-label small mb-1" for="ds-create-identity-mapping-ids">Identity Mapping IDs (comma-separated)</label>
+                                        <input id="ds-create-identity-mapping-ids" class="form-control form-control-sm" x-model="ds.create.identity_mapping_ids_str">
                                     </div>
                                 </div>
                                 <div class="alert alert-success py-2 px-3 mb-3">
@@ -283,21 +283,21 @@
                                         </template>
                                         <div class="row g-2 mb-3">
                                             <div class="col-12 col-md-4">
-                                                <label class="form-label small mb-1">Authentic Source</label>
-                                                <input class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.authentic_source || ''" disabled>
+                                                <label class="form-label small mb-1" for="ds-edit-authentic-source">Authentic Source</label>
+                                                <input id="ds-edit-authentic-source" class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.authentic_source || ''" disabled>
                                             </div>
                                             <div class="col-12 col-md-4">
-                                                <label class="form-label small mb-1">Scope</label>
-                                                <input class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.scope || ''" disabled>
+                                                <label class="form-label small mb-1" for="ds-edit-scope">Scope</label>
+                                                <input id="ds-edit-scope" class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.scope || ''" disabled>
                                             </div>
                                             <div class="col-12 col-md-4">
-                                                <label class="form-label small mb-1">Document ID</label>
-                                                <input class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.document_id || ''" disabled>
+                                                <label class="form-label small mb-1" for="ds-edit-document-id">Document ID</label>
+                                                <input id="ds-edit-document-id" class="form-control form-control-sm" :value="ds.docs[ds.editIdx]?.meta?.document_id || ''" disabled>
                                             </div>
                                         </div>
                                         <div class="mb-3">
-                                            <label class="form-label small mb-1">Identity Mapping IDs (comma-separated)</label>
-                                            <input class="form-control form-control-sm" x-model="ds.edit.identity_mapping_ids_str">
+                                            <label class="form-label small mb-1" for="ds-edit-identity-mapping-ids">Identity Mapping IDs (comma-separated)</label>
+                                            <input id="ds-edit-identity-mapping-ids" class="form-control form-control-sm" x-model="ds.edit.identity_mapping_ids_str">
                                         </div>
                                         <div class="alert alert-success py-2 px-3 mb-3">
                                             <div class="table-responsive">
@@ -372,9 +372,9 @@
                                     <p class="fw-semibold small mb-2">Identity</p>
                                     <div class="row g-2">
                                         <div class="col-12 col-md-6">
-                                            <label class="form-label small mb-1">Authentic Source</label>
+                                            <label class="form-label small mb-1" for="im-create-authentic-source">Authentic Source</label>
                                             <template x-if="allowedAuthenticSources.length > 0">
-                                                <select class="form-select form-select-sm" x-model="im.create.authentic_source">
+                                                <select id="im-create-authentic-source" class="form-select form-select-sm" x-model="im.create.authentic_source">
                                                     <option value="">Select...</option>
                                                     <template x-for="org in allowedAuthenticSources" :key="org">
                                                         <option :value="org" x-text="org"></option>
@@ -382,12 +382,12 @@
                                                 </select>
                                             </template>
                                             <template x-if="allowedAuthenticSources.length === 0">
-                                                <input class="form-control form-control-sm" x-model="im.create.authentic_source">
+                                                <input id="im-create-authentic-source" class="form-control form-control-sm" x-model="im.create.authentic_source">
                                             </template>
                                         </div>
                                         <div class="col-12 col-md-6">
-                                            <label class="form-label small mb-1">Person ID <span class="text-muted fw-normal">(optional)</span></label>
-                                            <input class="form-control form-control-sm" x-model="im.create.authentic_source_person_id" placeholder="auto-generated if empty">
+                                            <label class="form-label small mb-1" for="im-create-person-id">Person ID <span class="text-muted fw-normal">(optional)</span></label>
+                                            <input id="im-create-person-id" class="form-control form-control-sm" x-model="im.create.authentic_source_person_id" placeholder="auto-generated if empty">
                                         </div>
                                     </div>
                                 </div>
@@ -495,12 +495,12 @@
                                             <div class="alert alert-danger py-2" x-text="im.editError"></div>
                                         </template>
                                         <div class="mb-3">
-                                            <label class="form-label small mb-1">Authentic Source</label>
-                                            <input class="form-control form-control-sm" x-model="im.edit.authentic_source" disabled>
+                                            <label class="form-label small mb-1" for="im-edit-authentic-source">Authentic Source</label>
+                                            <input id="im-edit-authentic-source" class="form-control form-control-sm" x-model="im.edit.authentic_source" disabled>
                                         </div>
                                         <div class="mb-3">
-                                            <label class="form-label small mb-1">Person ID</label>
-                                            <input class="form-control form-control-sm" x-model="im.edit.authentic_source_person_id" disabled>
+                                            <label class="form-label small mb-1" for="im-edit-person-id">Person ID</label>
+                                            <input id="im-edit-person-id" class="form-control form-control-sm" x-model="im.edit.authentic_source_person_id" disabled>
                                         </div>
                                         <div class="alert alert-success py-2 px-3 mb-3">
                                             <ul class="nav nav-tabs nav-tabs-sm mb-2" style="font-size:0.85rem;">
