@@ -249,6 +249,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("VP Token validated successfully")
 
+	// Evaluate issuer trust before accepting the credential
+	if err := c.jwtTrustVerifier.EvaluateIssuerTrust(ctx, vpToken, scope); err != nil {
+		c.log.Error(err, "Issuer trust evaluation failed", "scope", scope)
+		return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
+	}
+
 	// Build credential from validated VP Token
 	credential, err := responseParams.BuildCredential()
 	if err != nil {

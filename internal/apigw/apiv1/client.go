@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/cache"
@@ -13,12 +14,14 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -63,6 +66,9 @@ type Client struct {
 	adminOIDCVerifier           *oidc.IDTokenVerifier
 	adminOIDCEndSessionURL      string
 	adminOIDCPostLogoutRedirect string
+
+	// Trust evaluation
+	jwtTrustVerifier *trust.JWTTrustVerifier
 }
 
 // New creates a new instance of the public api
@@ -154,6 +160,27 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 		c.log.Info("admin OIDC provider initialized", "issuer", oidcCfg.IssuerURL)
 	}
+
+	// Initialize trust evaluator for VP credential validation
+	pdpURL := cfg.APIGW.Trust.PDPURL
+	trustEvaluator := trust.NewTrustEvaluatorFromConfig(pdpURL)
+	if pdpURL == "" {
+		c.log.Warn("Trust evaluation is DISABLED - no pdp_url configured. All credential issuers will be trusted.")
+	} else {
+		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
+	}
+
+	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator: trustEvaluator,
+		JWKSResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
+			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
+		}),
+		AllowedSignatureAlgorithms: cfg.APIGW.Trust.AllowedSignatureAlgorithms,
+		ParseX5C:                   func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:                   jose.ParseJWKToPublicKey,
+		Log:                        c.log,
+	})
 
 	c.log.Info("Started")
 

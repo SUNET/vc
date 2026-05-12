@@ -884,6 +884,9 @@ type APIGW struct {
 	// When configured, APIGW reads JSON files and imports them into the
 	// identity mappings collection on first startup (skipped if data already exists).
 	IdentityMappingImport *IdentityMappingImport `yaml:"identity_mapping_import,omitempty"`
+	// Trust holds the trust evaluation configuration for OpenID4VP credential validation.
+	// When configured, credentials presented via VP are validated against a PDP.
+	Trust TrustConfig `yaml:"trust,omitempty"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
