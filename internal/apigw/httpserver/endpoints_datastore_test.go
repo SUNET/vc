@@ -382,7 +382,7 @@ func (m *mockApiv1) AdminLoginURL(_ context.Context) (*apiv1.AdminLoginURLReply,
 func TestDatastoreSearch_NoAuth_Returns401(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, _ := testSetup(t, rules, mock)
 
@@ -395,7 +395,7 @@ func TestDatastoreSearch_NoAuth_Returns401(t *testing.T) {
 func TestDatastoreSearch_ValidJWT_SPOCPAllowed(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -425,7 +425,7 @@ func TestDatastoreSearch_ValidJWT_SPOCPDenied(t *testing.T) {
 func TestDatastoreSearch_ValidJWT_WildcardSubject(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path (* prefix /api/v1/))(subject (*)))`,
+		`(vc (service apigw)(method GET)(path (* prefix /api/v1/))(subject (*)))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -439,7 +439,7 @@ func TestDatastoreSearch_ValidJWT_WildcardSubject(t *testing.T) {
 func TestDatastoreSearch_InvalidToken_Returns401(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, _ := testSetup(t, rules, mock)
 
@@ -452,7 +452,7 @@ func TestDatastoreSearch_InvalidToken_Returns401(t *testing.T) {
 func TestDatastoreSearch_ExpiredToken_Returns401(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -547,7 +547,7 @@ func TestDatastoreSearch_NoSPOCPRules_AuthOnly(t *testing.T) {
 func TestDatastoreSearch_WrongIssuer_Returns401(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -562,7 +562,7 @@ func TestDatastoreSearch_WrongIssuer_Returns401(t *testing.T) {
 func TestDatastoreSearch_WrongAudience_Returns401(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -578,7 +578,7 @@ func TestDatastoreSearch_SPOCPPathPrefix(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
 		// Allow all paths under /api/v1/datastore for alice
-		`(api (service apigw)(method GET)(path (* prefix /api/v1/datastore))(subject alice))`,
+		`(vc (service apigw)(method GET)(path (* prefix /api/v1/datastore))(subject alice))`,
 	}
 	engine, priv := testSetup(t, rules, mock)
 
@@ -738,7 +738,7 @@ func TestOIDC_SearchAuthorized(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
@@ -786,7 +786,7 @@ func TestOIDC_InvalidToken(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, _ := testSetupOIDC(t, rules, mock)
 
@@ -799,7 +799,7 @@ func TestOIDC_ExpiredToken(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
@@ -825,7 +825,7 @@ func TestOIDC_WrongAudience(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
@@ -851,7 +851,7 @@ func TestOIDC_WildcardSubject(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject (*)))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject (*)))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
@@ -871,7 +871,7 @@ func TestOIDC_RealisticOpaqueSubject(t *testing.T) {
 
 	rules := []string{
 		// Rule targets the user's email
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice@sunet.se))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice@sunet.se))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
@@ -909,7 +909,7 @@ func TestOIDC_EmailFallback(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice@sunet.se))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject alice@sunet.se))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 
@@ -944,7 +944,7 @@ func TestOIDC_NoEppnOrEmail(t *testing.T) {
 	mock := &mockApiv1{}
 
 	rules := []string{
-		`(api (service apigw)(method GET)(path /api/v1/datastore/search)(subject api-service-account))`,
+		`(vc (service apigw)(method GET)(path /api/v1/datastore/search)(subject api-service-account))`,
 	}
 	engine, m := testSetupOIDC(t, rules, mock)
 

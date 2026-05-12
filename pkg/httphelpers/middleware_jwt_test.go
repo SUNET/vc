@@ -177,8 +177,8 @@ func TestBuildSPOCPEngine_NoRules(t *testing.T) {
 func TestBuildSPOCPEngine_InlineRules(t *testing.T) {
 	cfg := model.APIAuth{
 		Rules: []string{
-			"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
-			"(api (service test-svc)(method)(path /api/v1/document)(subject))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
+			"(vc (service test-svc)(method)(path /api/v1/document)(subject))",
 		},
 	}
 
@@ -201,7 +201,7 @@ func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
 func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := "(api (service test-svc)(method GET)(path /health)(subject))\n"
+	content := "(vc (service test-svc)(method GET)(path /health)(subject))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{
@@ -227,11 +227,11 @@ func TestBuildSPOCPEngine_RulesFileMissing(t *testing.T) {
 func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := "(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
+	content := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
 	cfg := model.APIAuth{
-		Rules:     []string{"(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
+		Rules:     []string{"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
 		RulesFile: path,
 	}
 
@@ -808,9 +808,9 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := `(api (service test-svc)(method GET)(path /health)(subject))
-(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
-(api (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))
+	content := `(vc (service test-svc)(method GET)(path /health)(subject))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
+(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
@@ -825,11 +825,11 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := `# This is a comment
-(api (service test-svc)(method GET)(path /health)(subject))
+(vc (service test-svc)(method GET)(path /health)(subject))
 
 # Another comment
 
-(api (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
 
 # trailing comment
 `
@@ -873,9 +873,9 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 func TestLoadRulesFromFile_InvalidLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := `(api (service test-svc)(method GET)(path /health)(subject))
+	content := `(vc (service test-svc)(method GET)(path /health)(subject))
 this is not valid
-(api (service test-svc)(method POST)(path /upload)(subject bob))
+(vc (service test-svc)(method POST)(path /upload)(subject bob))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
@@ -889,13 +889,13 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := `# Wildcard subject
-(api (service test-svc)(method GET)(path /api/v1/status)(subject (*)))
+(vc (service test-svc)(method GET)(path /api/v1/status)(subject (*)))
 # Prefix path
-(api (service test-svc)(method)(path (* prefix /api/v1/))(subject alice))
+(vc (service test-svc)(method)(path (* prefix /api/v1/))(subject alice))
 # Suffix path
-(api (service test-svc)(method GET)(path (* suffix .json))(subject bob))
+(vc (service test-svc)(method GET)(path (* suffix .json))(subject bob))
 # Set of methods
-(api (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie))
+(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
 
