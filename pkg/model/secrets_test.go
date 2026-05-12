@@ -50,9 +50,6 @@ func TestClearSecrets(t *testing.T) {
 				},
 			},
 		},
-		UI: &UI{
-			Password: "ui-pass", //NOSONAR
-		},
 	}
 
 	cfg.ClearSecrets()
@@ -65,7 +62,6 @@ func TestClearSecrets(t *testing.T) {
 	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.SubjectSalt, "Verifier.Outbound.OIDCProvider.SubjectSalt should be cleared")                                             //NOSONAR
 	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret, "static client-a secret should be cleared")                                               //NOSONAR
 	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[1].ClientSecret, "static client-b secret should be cleared")                                               //NOSONAR
-	assert.Empty(t, cfg.UI.Password, "UI.Password should be cleared")                                                                                                           //NOSONAR
 }
 
 func TestClearSecrets_NilSections(t *testing.T) {
@@ -91,9 +87,7 @@ func TestApplySecrets(t *testing.T) {
 				},
 			},
 		},
-		UI: &UI{},
 	}
-
 	secrets := &Secrets{
 		Common: &CommonSecrets{
 			Mongo: MongoSecrets{URI: "mongodb://secret-user:secret-pass@host:27017"}, //NOSONAR
@@ -135,9 +129,6 @@ func TestApplySecrets(t *testing.T) {
 				},
 			},
 		},
-		UI: &UISecrets{
-			Password: "secret-ui-pass", //NOSONAR
-		},
 	}
 
 	cfg.ApplySecrets(secrets)
@@ -151,7 +142,6 @@ func TestApplySecrets(t *testing.T) {
 	assert.Equal(t, "secret-for-a", cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret)                   //NOSONAR
 	assert.Equal(t, "secret-for-b", cfg.Verifier.Outbound.OIDCProvider.StaticClients[1].ClientSecret)                   //NOSONAR
 	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[2].ClientSecret, "client-c should have no secret") //NOSONAR
-	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                                  //NOSONAR
 }
 
 func TestApplySecrets_NilSecrets(t *testing.T) {
@@ -168,18 +158,19 @@ func TestApplySecrets_NilSecrets(t *testing.T) {
 func TestApplySecrets_PartialSecrets(t *testing.T) {
 	cfg := &Cfg{
 		Common: &Common{},
-		UI:     &UI{},
 	}
 
 	secrets := &Secrets{
-		UI: &UISecrets{
-			Password: "only-password", //NOSONAR
+		Registry: &RegistrySecrets{
+			AdminGUI: AdminGUISecrets{
+				Password: "only-password", //NOSONAR
+			},
 		},
 	}
 
 	cfg.ApplySecrets(secrets)
 
-	assert.Equal(t, "only-password", cfg.UI.Password) //NOSONAR
+	assert.Equal(t, "only-password", cfg.Registry.AdminGUI.Password) //NOSONAR
 }
 
 func TestApplySecrets_CreatesNilSections(t *testing.T) {
@@ -189,17 +180,12 @@ func TestApplySecrets_CreatesNilSections(t *testing.T) {
 		Common: &CommonSecrets{
 			Mongo: MongoSecrets{URI: "mongodb://new-host:27017"}, //NOSONAR
 		},
-		UI: &UISecrets{
-			Password: "new-password",
-		},
 	}
 
 	cfg.ApplySecrets(secrets)
 
 	require.NotNil(t, cfg.Common, "Common should be created")
 	assert.Equal(t, "mongodb://new-host:27017", cfg.Common.Mongo.URI) //NOSONAR
-	require.NotNil(t, cfg.UI, "UI should be created")
-	assert.Equal(t, "new-password", cfg.UI.Password)
 }
 
 func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
@@ -244,16 +230,12 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 				},
 			},
 		},
-		UI: &UI{ // #nosec G101
-			Password: "config-ui-pass", //NOSONAR
-		},
 	}
 
 	// Step 1: Clear secrets from config
 	cfg.ClearSecrets()
 
 	assert.Empty(t, cfg.Common.Mongo.URI, "after clear: Mongo URI should be empty")
-	assert.Empty(t, cfg.UI.Password, "after clear: UI Password should be empty")
 	assert.Empty(t, cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret, "after clear: static client secret should be empty") //NOSONAR
 
 	// Step 2: Apply secrets from external file
@@ -297,9 +279,6 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 				},
 			},
 		},
-		UI: &UISecrets{
-			Password: "secret-ui-pass", //NOSONAR
-		},
 	}
 	cfg.ApplySecrets(secrets)
 
@@ -310,5 +289,4 @@ func TestClearAndApplySecrets_EndToEnd(t *testing.T) {
 	assert.Equal(t, "secret-admin-pass", cfg.Registry.AdminGUI.Password)                                          //NOSONAR
 	assert.Equal(t, "secret-salt", cfg.Verifier.Outbound.OIDCProvider.SubjectSalt)                                //NOSONAR
 	assert.Equal(t, "secret-for-x", cfg.Verifier.Outbound.OIDCProvider.StaticClients[0].ClientSecret)             //NOSONAR
-	assert.Equal(t, "secret-ui-pass", cfg.UI.Password)                                                            //NOSONAR
 }

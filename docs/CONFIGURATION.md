@@ -15,8 +15,6 @@ Complete reference for all configuration parameters in the VC system.
 - [Issuer](#issuer-top-level)
 - [Verifier](#verifier-top-level)
 - [Registry](#registry-top-level)
-- [Mock AS](#mock_as-top-level)
-- [UI](#ui-top-level)
 - [Secrets File Reference](#secrets-file-reference)
 
 ## Environment Variables
@@ -194,7 +192,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `api_server`
 
-> **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`, `.mock_as.api_server`, `.ui.api_server`
+> **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`
 
 | Field              | Type     | Description                                                                                                                                                      | Example | Default | Required |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -207,7 +205,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `tls`
 
-> **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`, `.mock_as.api_server.tls`, `.ui.api_server.tls`
+> **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`
 
 | Field            | Type     | Description                 | Example | Default | Required |
 | ---------------- | -------- | --------------------------- | ------- | ------- | -------- |
@@ -217,7 +215,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `api_auth`
 
-> **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`, `.mock_as.api_server.api_auth`, `.ui.api_server.api_auth`
+> **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`
 
 JWKS and OIDC are mutually exclusive
 If neither is enabled, no authentication is applied (open access)
@@ -242,7 +240,7 @@ When no rules are configured, any valid Bearer JWT grants access.
 
 ### `jwks`
 
-> **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`, `.mock_as.api_server.api_auth.jwks`, `.ui.api_server.api_auth.jwks`
+> **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`
 
 | Field      | Type     | Description                                                                 | Example                                            | Default | Required         |
 | ---------- | -------- | --------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ---------------- |
@@ -253,7 +251,7 @@ When no rules are configured, any valid Bearer JWT grants access.
 
 ### `oidc`
 
-> **Path:** `.apigw.api_server.api_auth.oidc`, `.issuer.api_server.api_auth.oidc`, `.verifier.api_server.api_auth.oidc`, `.registry.api_server.api_auth.oidc`, `.mock_as.api_server.api_auth.oidc`, `.ui.api_server.api_auth.oidc`
+> **Path:** `.apigw.api_server.api_auth.oidc`, `.issuer.api_server.api_auth.oidc`, `.verifier.api_server.api_auth.oidc`, `.registry.api_server.api_auth.oidc`
 
 It serves two purposes:
 - API auth: Bearer JWTs in Authorization headers are validated locally
@@ -273,7 +271,7 @@ an authorization-code redirect flow so admins log in via the OIDC provider.
 
 ### `cors`
 
-> **Path:** `.apigw.api_server.cors`, `.issuer.api_server.cors`, `.verifier.api_server.cors`, `.registry.api_server.cors`, `.mock_as.api_server.cors`, `.ui.api_server.cors`
+> **Path:** `.apigw.api_server.cors`, `.issuer.api_server.cors`, `.verifier.api_server.cors`, `.registry.api_server.cors`
 
 | Field             | Type       | Description                  | Example                                               | Default | Required |
 | ----------------- | ---------- | ---------------------------- | ----------------------------------------------------- | ------- | -------- |
@@ -939,70 +937,6 @@ Configuration for the Registry service that manages credential status.
 | `username` | `string` | Admin username | -       | `admin` | Yes (if enabled) |
 | `password` | `string` | Admin password | -       | -       | Yes (if enabled) |
 
-## `mock_as` (Top-level)
-
-Configuration for the Mock Authentic Source service used for testing.
-
-### `mock_as`
-
-> **Path:** `.mock_as`
-
-| Field             | Type       | Description                              | Example                   | Default          | Required |
-| ----------------- | ---------- | ---------------------------------------- | ------------------------- | ---------------- | -------- |
-| `api_server`      | `object`   | HTTP API server configuration            | -                         | -                | Yes      |
-| `datastore_url`   | `string`   | Datastore service URL                    | `"http://datastore:8080"` | -                | Yes      |
-| `bootstrap_users` | `[]string` | List of user IDs to bootstrap on startup | -                         | `["100", "102"]` | No       |
-
-## `ui` (Top-level)
-
-Configuration for the User Interface service.
-
-### `ui`
-
-> **Path:** `.ui`
-
-| Field                                   | Type     | Description                           | Example | Default | Required |
-| --------------------------------------- | -------- | ------------------------------------- | ------- | ------- | -------- |
-| `api_server`                            | `object` | HTTP API server configuration         | -       | -       | Yes      |
-| `username`                              | `string` | UI login username                     | -       | `admin` | No       |
-| `password`                              | `string` | UI login password                     | -       | -       | Yes      |
-| `session_inactivity_timeout_in_seconds` | `int`    | Session inactivity timeout in seconds | -       | `1800`  | No       |
-| `services`                              | `object` | Services                              | -       | -       | No       |
-
-### `services`
-
-> **Path:** `.ui.services`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `apigw`    | `object` | APIGW       | -       | -       | No       |
-| `mockas`   | `object` | Mock AS     | -       | -       | No       |
-| `verifier` | `object` | Verifier    | -       | -       | No       |
-
-### `apigw`
-
-> **Path:** `.ui.services.apigw`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `base_url` | `string` | Base URL    | -       | -       | No       |
-
-### `mockas`
-
-> **Path:** `.ui.services.mockas`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `base_url` | `string` | Base URL    | -       | -       | No       |
-
-### `verifier`
-
-> **Path:** `.ui.services.verifier`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `base_url` | `string` | Base URL    | -       | -       | No       |
-
 ## Secrets File Reference
 
 The structure of the separate secrets file.
@@ -1021,7 +955,6 @@ Fields omitted or left empty here remain at their zero value.
 | `apigw`    | `object` | APIGW       | -       | -       | No       |
 | `registry` | `object` | Registry    | -       | -       | No       |
 | `verifier` | `object` | Verifier    | -       | -       | No       |
-| `ui`       | `object` | UI          | -       | -       | No       |
 
 ### `common`
 
@@ -1154,14 +1087,6 @@ Fields omitted or left empty here remain at their zero value.
 | `subject_salt`   | `string` | Secret value used to derive pairwise subject identifiers for OIDC clients                                                                                                                                                            | -                                | -       | No       |
 | `static_clients` | `object` | Client_id to client_secret for static OIDC clients. Only clients listed here will have their secrets applied; clients not present in this map keep whatever value the main config provides (which will be empty after ClearSecrets). | `<client_id>: "<client_secret>"` | -       | No       |
 
-### `ui`
-
-> **Path:** `.ui`
-
-| Field      | Type     | Description       | Example | Default | Required |
-| ---------- | -------- | ----------------- | ------- | ------- | -------- |
-| `password` | `string` | UI login password | -       | -       | No       |
-
 ### Example `secrets.yaml`
 
 > **Path:** `file referenced by .common.secret_file_path`
@@ -1191,8 +1116,6 @@ verifier:
       subject_salt: "random-salt-for-pairwise-subjects"
       static_clients:
         <client_id>: "<client_secret>"
-ui:
-  password: "change-me-in-production"
 ```
 
 

@@ -10,17 +10,15 @@ PKI_DIR="${SCRIPT_DIR}/../pki"
 mkdir -p "${PKI_DIR}"
 
 # Service TLS certificates
-service_names="apigw verifier ui registry issuer mockas vc"
+service_names="apigw verifier registry issuer vc"
 
 # Docker bridge IPs for IP SAN entries (from docker-compose.yaml vc-dev-net)
 service_ip() {
     case "$1" in
         apigw)    echo "172.16.50.2"  ;;
         verifier) echo "172.16.50.6"  ;;
-        ui)       echo "172.16.50.50" ;;
         registry) echo "172.16.50.8"  ;;
         issuer)   echo "172.16.50.4"  ;;
-        mockas)   echo "172.16.50.13" ;;
         *)        echo "" ;;
     esac
 }

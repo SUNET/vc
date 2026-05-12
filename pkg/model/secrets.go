@@ -9,7 +9,6 @@ type Secrets struct {
 	APIGW    *APIGWSecrets    `yaml:"apigw,omitempty"`
 	Registry *RegistrySecrets `yaml:"registry,omitempty"`
 	Verifier *VerifierSecrets `yaml:"verifier,omitempty"`
-	UI       *UISecrets       `yaml:"ui,omitempty"`
 }
 
 // CommonSecrets holds secrets from the common section
@@ -105,11 +104,6 @@ type OIDCOPSecrets struct {
 	StaticClients map[string]string `yaml:"static_clients,omitempty" doc_example:"<client_id>: \"<client_secret>\""`
 }
 
-// UISecrets holds UI secrets
-type UISecrets struct {
-	// Password is the UI login password
-	Password string `yaml:"password"`
-}
 
 // ClearSecrets zeroes out all secret fields in the main config.
 // Called when a secret file is used, to ensure config.yaml secrets are not used.
@@ -139,9 +133,6 @@ func (cfg *Cfg) ClearSecrets() {
 		}
 	}
 
-	if cfg.UI != nil {
-		cfg.UI.Password = ""
-	}
 }
 
 // ApplySecrets applies secret values from the Secrets struct onto the Cfg.
@@ -215,12 +206,4 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		}
 	}
 
-	if secrets.UI != nil {
-		if cfg.UI == nil {
-			cfg.UI = &UI{}
-		}
-		if secrets.UI.Password != "" {
-			cfg.UI.Password = secrets.UI.Password
-		}
-	}
 }

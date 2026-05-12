@@ -38,8 +38,6 @@ verifier:
   outbound:
     oidc_provider:
       subject_salt: "secret-salt-value"
-ui:
-  password: "secret-ui-pass"
 `, testMongoURI)
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
@@ -67,10 +65,6 @@ ui:
 	// Verify Verifier secrets
 	require.NotNil(t, secrets.Verifier)
 	assert.Equal(t, "secret-salt-value", secrets.Verifier.Outbound.OIDCProvider.SubjectSalt)
-
-	// Verify UI secrets
-	require.NotNil(t, secrets.UI)
-	assert.Equal(t, "secret-ui-pass", secrets.UI.Password)
 }
 
 func TestLoadSecrets_FileNotFound(t *testing.T) {
@@ -107,8 +101,9 @@ func TestLoadSecrets_EmptyFile(t *testing.T) {
 
 func TestLoadSecrets_PartialSecrets(t *testing.T) {
 	content := `---
-ui:
-  password: "only-ui-password"
+registry:
+  admin_gui:
+    password: "only-registry-password"
 `
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "partial.yaml")
@@ -117,8 +112,8 @@ ui:
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)
 
-	require.NotNil(t, secrets.UI)
-	assert.Equal(t, "only-ui-password", secrets.UI.Password)
+	require.NotNil(t, secrets.Registry)
+	assert.Equal(t, "only-registry-password", secrets.Registry.AdminGUI.Password)
 	assert.Nil(t, secrets.Common)
 }
 

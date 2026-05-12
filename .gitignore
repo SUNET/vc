@@ -20,10 +20,8 @@ developer_tools/pki/*
 # Build artifacts (binaries in root directory)
 /issuer
 /apigw
-/mockas
 /persistent
 /registry
-/ui
 /verifier
 
 # Working documents (not tracked in git)

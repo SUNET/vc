@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package integration contains integration tests that run against the real
-// docker-compose stack (apigw, verifier, mockas, issuer, registry, mongo).
+// docker-compose stack (apigw, verifier, issuer, registry, mongo).
 //
 // Prerequisites:
 //   - The stack must be running: docker compose up -d
@@ -53,7 +53,6 @@ import (
 var (
 	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")     // NOSONAR
 	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080")  // NOSONAR
-	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "https://172.16.50.13:8080")   // NOSONAR
 	mockOIDCURL = envOrDefault("STACK_MOCK_OIDC_URL", "http://172.16.50.30:8080") // NOSONAR
 
 	// The public URLs the services use for self-referencing
@@ -244,7 +243,6 @@ func TestStack_Health(t *testing.T) {
 	}{
 		{"apigw", apigwURL + "/health"},
 		{"verifier", verifierURL + "/health"},
-		{"mockas", mockasURL + "/health"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := http.Get(tc.url)
@@ -422,7 +420,7 @@ func TestStack_VCI_PAR(t *testing.T) {
 
 func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 	// This test exercises the complete OpenID4VCI authorization_code flow:
-	// 1. Seed mock data via mockas
+	// 1. Seed mock data via apigw
 	// 2. Get credential offer via notification
 	// 3. PAR request
 	// 4. Authorize → OpenID4VP consent → user lookup → get auth code

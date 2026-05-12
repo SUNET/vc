@@ -22,30 +22,6 @@ services:
       # Trust the dev rootCA for inter-service TLS (Go reads SSL_CERT_FILE)
       - "SSL_CERT_FILE=/pki/rootCA.crt"
 
-  ui:
-    container_name: "vc_dev_ui"
-    hostname: "ui.vc.docker"
-    image: docker.sunet.se/iam_vc/ui:local
-    restart: always
-    volumes:
-      - ./developer_tools/pki/:/pki:ro
-      - ./config.yaml:/config.yaml:ro
-    depends_on:
-      #      apigw:
-      #        condition: service_started
-      #      kafka0:
-      #        condition: service_healthy
-      - apigw
-      - verifier
-      #- kafka0
-      #- kafka1
-    networks:
-      vc-dev-net:
-        ipv4_address: 172.16.50.50
-    environment:
-      - "VC_CONFIG_YAML=config.yaml"
-      - "SSL_CERT_FILE=/pki/rootCA.crt"
-
   issuer:
     container_name: "vc_dev_issuer"
     hostname: "issuer.vc.docker"

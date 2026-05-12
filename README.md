@@ -24,11 +24,9 @@ The services will be available on the internal Docker network (`172.16.50.0/24`)
 | Service      | Address                          |
 | ------------ | -------------------------------- |
 | API Gateway  | `http://apigw.vc.docker:8080`    |
-| UI           | `http://ui.vc.docker:8080`       |
 | Issuer       | `http://issuer.vc.docker:8080`   |
 | Verifier     | `http://verifier.vc.docker:8080` |
 | Registry     | `http://registry.vc.docker:8080` |
-| Mock AS      | `http://mockas.vc.docker:8080`    |
 | MongoDB      | `mongodb://mongo.vc.docker:27017` |
 
 To access a service from the host, use its container IP directly (e.g. `http://172.16.50.2:8080` for apigw) or publish ports in `docker-compose.yaml`.
@@ -52,8 +50,6 @@ The main configuration file is `config.yaml`. See [docs/CONFIGURATION.md](docs/C
 | **issuer** | Issues verifiable credentials via OpenID4VCI with VCTM schema validation  |
 | **verifier** | Verifies credential presentations via OpenID4VP, DCQL, and the W3C Digital Credentials API |
 | **registry** | Credential registry and status list management                          |
-| **mockas** | Mock Authorization Server for development and testing                     |
-| **ui**     | Web UI for credential issuance and presentation                           |
 
 ## Architecture
 
@@ -222,8 +218,6 @@ determined by `auth_method` in the credential configuration.
 | issuer           | `make build-issuer`           | Credential Issuer           |
 | verifier         | `make build-verifier`         | Credential Verifier         |
 | registry         | `make build-registry`         | Registry                    |
-| mockas           | `make build-mockas`           | Mock Authentication Service |
-| ui               | `make build-ui`               | Web UI                      |
 | vc20-test-server | `make build-vc20-test-server` | W3C VC 2.0 test server      |
 
 All standard builds produce static binaries (`CGO_ENABLED=0`) for `linux/amd64`. Output goes to `./bin/`.

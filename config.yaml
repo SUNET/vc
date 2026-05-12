@@ -160,23 +160,4 @@ apigw:
           label: "Dev Wallet"
           redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
 
-mock_as:
-  api_server:
-    addr: :8080
-  bootstrap_users:
-    - "100"
-    - "102"
-  datastore_url: http://apigw.vc.docker:8080
 
-ui:
-  api_server:
-    addr: :8080
-  username: "admin"
-  password: "secret123"
-  services:
-    apigw:
-      base_url: http://apigw.vc.docker:8080
-    mockas:
-      base_url: http://mockas.vc.docker:8080
-    verifier:
-      base_url: http://verifier.vc.docker:8080

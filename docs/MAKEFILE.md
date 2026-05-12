@@ -72,13 +72,11 @@ W3C_TEST_PORT=8888   # W3C test server port (default: 8888)
 
 ### Services
 
-The build system manages 6 microservices:
+The build system manages 4 microservices:
 - **verifier** - Credential verification service (web worker)
 - **registry** - Central registry service (worker)
-- **mockas** - Mock assertion service (worker)
 - **apigw** - API gateway (worker, supports SAML/OIDCRP tags)
 - **issuer** - Credential issuing service (worker)
-- **ui** - User interface (web worker)
 
 ### Build Configuration
 
@@ -87,10 +85,8 @@ Each service has a specific build configuration:
 ```makefile
 verifier:static:           # Static linking, no CGO, no build tags
 registry:dynamic:          # Dynamic linking, CGO enabled
-mockas:static:             # Static linking
 apigw:static:              # Static linking, supports saml/oidcrp tags
 issuer:static:             # Static linking, supports pkcs11 tag
-ui:static:                 # Static linking
 ```
 
 ### Template System
@@ -99,8 +95,8 @@ The Makefile uses templates to generate targets dynamically:
 
 - **TEST_TEMPLATE** - Generates `test-SERVICE` targets
 - **BUILD_TEMPLATE** - Generates `build-SERVICE` targets
-- **DOCKER_BUILD_WEB_TEMPLATE** - Docker builds for web workers (verifier, ui)
-- **DOCKER_BUILD_WORKER_TEMPLATE** - Docker builds for workers (registry, mockas, apigw, issuer)
+- **DOCKER_BUILD_WEB_TEMPLATE** - Docker builds for web workers (verifier)
+- **DOCKER_BUILD_WORKER_TEMPLATE** - Docker builds for workers (registry, apigw, issuer)
 - **DOCKER_PUSH_TEMPLATE** - Generates `docker-push-SERVICE` targets
 - **DOCKER_TAG_TEMPLATE** - Generates `docker-tag-SERVICE` targets
 
@@ -110,13 +106,13 @@ Adding a new service requires only 3 edits:
 
 1. **Add to SERVICES list** (line ~22):
 ```makefile
-SERVICES := verifier registry mockas apigw issuer ui newservice
+SERVICES := verifier registry apigw issuer newservice
 ```
 
 2. **Add to WEB_SERVICES or WORKER_SERVICES** (lines ~23-24):
 ```makefile
-WEB_SERVICES    := verifier ui newservice        # if web worker
-WORKER_SERVICES := registry mockas apigw issuer  # OR worker
+WEB_SERVICES    := verifier newservice        # if web worker
+WORKER_SERVICES := registry apigw issuer  # OR worker
 ```
 
 3. **Add build configuration** (lines ~38-45):

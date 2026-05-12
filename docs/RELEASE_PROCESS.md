@@ -210,6 +210,4 @@ All images are pushed to `docker.sunet.se/iam_vc/`. Services:
 | apigw    | `docker.sunet.se/iam_vc/apigw`    |
 | verifier | `docker.sunet.se/iam_vc/verifier` |
 | registry | `docker.sunet.se/iam_vc/registry` |
-| mockas   | `docker.sunet.se/iam_vc/mockas`   |
 | issuer   | `docker.sunet.se/iam_vc/issuer`   |
-| ui       | `docker.sunet.se/iam_vc/ui`       |

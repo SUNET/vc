@@ -451,15 +451,7 @@ type AdminGUI struct {
 	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
-// MockAS holds the configuration for the Mock Authentic Source service used for testing
-type MockAS struct {
-	// APIServer is the HTTP API server configuration
-	APIServer APIServer `yaml:"api_server" validate:"required"`
-	// DatastoreURL is the datastore service URL
-	DatastoreURL string `yaml:"datastore_url" validate:"required" doc_example:"\"http://datastore:8080\""`
-	// BootstrapUsers is the list of user IDs to bootstrap on startup
-	BootstrapUsers []string `yaml:"bootstrap_users" default:"[\"100\", \"102\"]"`
-}
+
 
 // VerifierInbound groups inbound credential verification configuration
 type VerifierInbound struct {
@@ -919,28 +911,7 @@ type OAuthServer struct {
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
 }
 
-// UI holds the configuration for the User Interface service
-type UI struct {
-	// APIServer is the HTTP API server configuration
-	APIServer APIServer `yaml:"api_server" validate:"required"`
-	// Username is the UI login username
-	Username string `yaml:"username" validate:"required" default:"admin"`
-	// Password is the UI login password
-	Password string `yaml:"password" validate:"required"`
-	// SessionInactivityTimeoutInSeconds is the session inactivity timeout in seconds
-	SessionInactivityTimeoutInSeconds int `yaml:"session_inactivity_timeout_in_seconds" validate:"required" default:"1800"`
-	Services                          struct {
-		APIGW struct {
-			BaseURL string `yaml:"base_url"`
-		} `yaml:"apigw"`
-		MockAS struct {
-			BaseURL string `yaml:"base_url"`
-		} `yaml:"mockas"`
-		Verifier struct {
-			BaseURL string `yaml:"base_url"`
-		} `yaml:"verifier"`
-	} `yaml:"services"`
-}
+
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
@@ -949,8 +920,7 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
-	MockAS   *MockAS   `yaml:"mock_as" validate:"omitempty"`
-	UI       *UI       `yaml:"ui" validate:"omitempty"`
+
 }
 
 // LookupCredentialSources returns full data source information for a credential type

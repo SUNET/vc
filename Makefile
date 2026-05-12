@@ -429,7 +429,7 @@ proto: proto-status proto-registry proto-issuer ## Generate all protobuf files
 
 PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=vc --go-grpc_out=. --go_opt=module=vc --go_out=.
 
-# Catch-all for services without explicit proto targets (e.g. apigw, mockas)
+# Catch-all for services without explicit proto targets (e.g. apigw)
 proto-%:
 	@echo "No protobuf for $*"
 
@@ -453,7 +453,7 @@ swagger-fmt: ## Format Swagger annotations
 
 SWAGGER_OPTS := --parseGoList=false --packageName docs
 
-# Catch-all for services without explicit swagger targets (e.g. mockas)
+# Catch-all for services without explicit swagger targets
 swagger-%:
 	@echo "No swagger docs for $*"
 	@mkdir -p docs
