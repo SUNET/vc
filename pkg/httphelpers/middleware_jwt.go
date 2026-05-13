@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -18,6 +19,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	spocp "github.com/sirosfoundation/go-spocp"
+	"github.com/sirosfoundation/go-spocp/pkg/compare"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
 	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
@@ -82,9 +84,9 @@ func (s *SafeEngine) RuleCount() int {
 	return s.engine.RuleCount()
 }
 
-// buildSPOCPEngine creates a SPOCP engine from the JWT config rules.
+// BuildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
-func buildSPOCPEngine(cfg model.APIAuthJWT) (*SafeEngine, error) {
+func BuildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
 	hasInline := len(cfg.Rules) > 0
 	hasFile := cfg.RulesFile != ""
 
@@ -109,6 +111,30 @@ func buildSPOCPEngine(cfg model.APIAuthJWT) (*SafeEngine, error) {
 	}
 
 	return &SafeEngine{engine: engine}, nil
+}
+
+// parseRulesFile parses a rules file and returns the elements (best-effort)
+func parseRulesFile(path string) []sexp.Element {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var elems []sexp.Element
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		elem, err := parseAdvancedSExp(line)
+		if err != nil {
+			continue
+		}
+		elems = append(elems, elem)
+	}
+	return elems
 }
 
 // loadRulesFromFile reads human-readable SPOCP rules (one per line) from a file
@@ -248,6 +274,17 @@ func (p *advancedParser) parseList() (sexp.Element, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Treat a bare * inside a tagged list as a wildcard star form,
+		// so (method *) is equivalent to (method (*)).
+		// Treat a trailing * (e.g. /api/v1/*) as a prefix star form,
+		// so (path /api/v1/*) is equivalent to (path (* prefix /api/v1/)).
+		if atom, ok := elem.(*sexp.Atom); ok {
+			if atom.Value == "*" {
+				elem = &starform.Wildcard{}
+			} else if strings.HasSuffix(atom.Value, "*") {
+				elem = &starform.Prefix{Value: strings.TrimSuffix(atom.Value, "*")}
+			}
+		}
 		elements = append(elements, elem)
 	}
 }
@@ -323,23 +360,158 @@ func (p *advancedParser) parseSet() (sexp.Element, error) {
 	}
 }
 
-// buildSPOCPQuery constructs a SPOCP query S-expression for the current HTTP
-// request, service name, and JWT subject:
+// extractSPOCPSubject returns the identity to use as the SPOCP subject
+// from a validated JWT, preferring eppn → email
+func extractSPOCPSubject(token jwt.Token) string {
+	var s string
+	if err := token.Get("eppn", &s); err == nil && s != "" {
+		return s
+	}
+	if err := token.Get("email", &s); err == nil && s != "" {
+		return s
+	}
+	return ""
+}
+
+// BuildSPOCPQuery constructs a SPOCP query S-expression for the current HTTP
+// request, including service, method, path, subject, authentic source and scope:
 //
-//	(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))
+//	(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))
 //
 // The service dimension ensures that rules written for one service do not
 // accidentally grant access to another service sharing the same endpoints.
-func buildSPOCPQuery(service, method, path, subject string) sexp.Element {
-	return sexp.NewList("api",
+func BuildSPOCPQuery(service, method, path, subject, authenticSource, scope string) sexp.Element {
+	elements := []sexp.Element{
 		sexp.NewList("service", sexp.NewAtom(service)),
 		sexp.NewList("method", sexp.NewAtom(method)),
 		sexp.NewList("path", sexp.NewAtom(path)),
 		sexp.NewList("subject", sexp.NewAtom(subject)),
-	)
+	}
+	if authenticSource != "" {
+		elements = append(elements, sexp.NewList("authentic_source", sexp.NewAtom(authenticSource)))
+	}
+	if scope != "" {
+		elements = append(elements, sexp.NewList("scope", sexp.NewAtom(scope)))
+	}
+	return sexp.NewList("vc", elements...)
 }
 
-// JWTAuth returns a Gin middleware that validates Bearer JWT tokens and
+// ResourcePair represents an allowed (authentic_source, scope) combination.
+type ResourcePair struct {
+	AuthenticSource string
+	Scope           string
+}
+
+// ResolveAllowedResources returns all (authentic_source, scope) pairs that the
+// given subject is authorized for, by inspecting the SPOCP rules directly.
+// A wildcard in the rule position means "any value" — represented as "*" in the result.
+// Returns nil when engine is nil (no authorization configured).
+func ResolveAllowedResources(engine *SafeEngine, subject string) []ResourcePair {
+	if engine == nil {
+		return nil
+	}
+
+	subjectQuery := sexp.NewList("subject", sexp.NewAtom(subject))
+
+	engine.mu.RLock()
+	defer engine.mu.RUnlock()
+	rules := engine.engine.ExportRules()
+
+	var pairs []ResourcePair
+	for _, rule := range rules {
+		ruleList, ok := rule.(*sexp.List)
+		if !ok || ruleList.Tag != "vc" || len(ruleList.Elements) < 6 {
+			continue
+		}
+		// Check if the subject element (position 3) matches.
+		subjectRule := ruleList.Elements[3]
+		if !compare.LessPermissive(subjectQuery, subjectRule) {
+			continue
+		}
+		// Extract authentic_source (position 4) and scope (position 5).
+		// Sets expand into multiple pairs.
+		sources := extractListValues(ruleList.Elements[4])
+		scopes := extractListValues(ruleList.Elements[5])
+		for _, as := range sources {
+			for _, sc := range scopes {
+				pairs = append(pairs, ResourcePair{AuthenticSource: as, Scope: sc})
+			}
+		}
+	}
+	return pairs
+}
+
+// extractListValues extracts string values from a list element like (authentic_source SUNET).
+// Returns ["*"] for wildcards. Expands sets into multiple values.
+func extractListValues(elem sexp.Element) []string {
+	list, ok := elem.(*sexp.List)
+	if !ok || len(list.Elements) == 0 {
+		return []string{"*"}
+	}
+	switch v := list.Elements[0].(type) {
+	case *sexp.Atom:
+		return []string{v.Value}
+	case *starform.Wildcard:
+		return []string{"*"}
+	case *starform.Set:
+		var values []string
+		for _, el := range v.Elements {
+			if a, ok := el.(*sexp.Atom); ok {
+				values = append(values, a.Value)
+			}
+		}
+		if len(values) == 0 {
+			return []string{"*"}
+		}
+		return values
+	default:
+		return []string{"*"}
+	}
+}
+
+// AllowedAuthenticSources returns the distinct authentic_source values the subject
+// is permitted to access. Returns nil for unrestricted access (wildcard rule or no resource rules).
+func AllowedAuthenticSources(engine *SafeEngine, subject string) []string {
+	pairs := ResolveAllowedResources(engine, subject)
+	if len(pairs) == 0 {
+		return nil // no resource constraints — unrestricted
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, p := range pairs {
+		if p.AuthenticSource == "*" {
+			return nil // unrestricted
+		}
+		if !seen[p.AuthenticSource] {
+			seen[p.AuthenticSource] = true
+			result = append(result, p.AuthenticSource)
+		}
+	}
+	return result
+}
+
+// AllowedScopes returns the distinct scope values the subject is permitted to
+// access. Returns nil for unrestricted access (wildcard rule or no resource rules).
+func AllowedScopes(engine *SafeEngine, subject string) []string {
+	pairs := ResolveAllowedResources(engine, subject)
+	if len(pairs) == 0 {
+		return nil // no resource constraints — unrestricted
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, p := range pairs {
+		if p.Scope == "*" {
+			return nil // unrestricted
+		}
+		if !seen[p.Scope] {
+			seen[p.Scope] = true
+			result = append(result, p.Scope)
+		}
+	}
+	return result
+}
+
+// JWKSAuth returns a Gin middleware that validates Bearer JWT tokens and
 // optionally checks SPOCP authorization rules.
 //
 // The middleware extracts the token from the Authorization header, validates
@@ -350,12 +522,13 @@ func buildSPOCPQuery(service, method, path, subject string) sexp.Element {
 // checks whether the request (method + path + subject) is authorized.
 //
 // On success the parsed claims are stored in the Gin context under the key
-// "jwt_claims" and the "sub" claim is stored under "jwt_subject".
-func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg model.APIAuthJWT, jwksCache JWKSCache, engine *SafeEngine) gin.HandlerFunc {
-	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:JWTAuth")
+// "jwt_claims" and the subject identity (resolved from the "eppn" or "email"
+// claim, not the standard "sub" claim) is stored under "jwt_subject".
+func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg model.APIAuthJWKS, jwksCache JWKSCache, engine *SafeEngine) gin.HandlerFunc {
+	_, span := m.client.tracer.Start(ctx, "httphelpers:middleware:JWKSAuth")
 	defer span.End()
 
-	log := m.log.New("jwt_auth")
+	log := m.log.New("jwks_auth")
 
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -392,15 +565,36 @@ func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg mod
 			return
 		}
 
-		sub, _ := token.Subject()
+		sub := extractSPOCPSubject(token)
 
-		// SPOCP authorization check (if rules are configured).
+		// SPOCP authorization check (only if rules are configured)
 		if engine != nil {
-			query := buildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub)
-			if !engine.QueryElement(query) {
-				log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(), "req_id", c.GetString("req_id"))
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			if sub == "" {
+				log.Info("jwt_missing_identity", "error", "token has no eppn or email claim", "req_id", c.GetString("req_id"))
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token missing eppn or email claim"})
 				return
+			}
+
+			// Store allowed authentic sources and scopes for downstream handlers (DB filtering).
+			allowed := AllowedAuthenticSources(engine, sub)
+			c.Set("spocp_allowed_authentic_sources", allowed)
+			allowedScopes := AllowedScopes(engine, sub)
+			c.Set("spocp_allowed_scopes", allowedScopes)
+
+			// Resource access: every resource-bearing request must include
+			// both authentic_source and scope so the full SPOCP query is used.
+			pairs := extractResourcePairs(c)
+			for _, p := range pairs {
+				if p.authenticSource == "" && p.scope == "" {
+					continue
+				}
+				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub, p.authenticSource, p.scope)
+				if !engine.QueryElement(query) {
+					log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(),
+						"authentic_source", p.authenticSource, "scope", p.scope, "req_id", c.GetString("req_id"))
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for resource"})
+					return
+				}
 			}
 		}
 
@@ -415,46 +609,88 @@ func (m *middlewareHandler) JWTAuth(ctx context.Context, service string, cfg mod
 // APIAuth returns a Gin middleware that applies the authentication method
 // configured in APIAuth:
 //
-//   - If JWT.Enable is true  – Bearer JWT authentication + optional SPOCP authz
-//   - If BasicAuth.Enable is true – HTTP Basic authentication (allow/deny)
-//   - If neither is enabled – no authentication (open access)
+//   - If JWKS.Enable is true – Bearer JWT authentication against a static JWKS URL
+//   - If OIDC.Enable is true – Bearer JWT authentication via auto-discovered JWKS
+//   - If neither is enabled  – no authentication (open access)
 //
-// Only one of JWT.Enable and BasicAuth.Enable may be true.
+// JWKS and OIDC are mutually exclusive.
+// SPOCP rules (if configured) apply to whichever mode is active.
 //
 // The service parameter identifies the logical service (e.g. "apigw", "issuer")
 // and is included in SPOCP queries so that rules written for one service
 // do not accidentally grant access to another.
-func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth model.APIAuth, jwksCache JWKSCache) gin.HandlerFunc {
-	if apiAuth.JWT.Enable && apiAuth.BasicAuth.Enable {
-		panic("api_auth: both jwt.enable and basic_auth.enable are true; only one may be enabled")
+func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth model.APIAuth, jwksCache JWKSCache) (gin.HandlerFunc, error) {
+	// Build SPOCP engine from top-level rules (applies to either auth mode).
+	engine, err := BuildSPOCPEngine(apiAuth)
+	if err != nil {
+		return nil, fmt.Errorf("api_auth: failed to build SPOCP engine: %w", err)
 	}
 
 	switch {
-	case apiAuth.JWT.Enable:
+	case apiAuth.JWKS.Enable:
 		if jwksCache == nil {
-			panic("api_auth: jwt.enable is true but no JWKS cache was provided")
+			return nil, fmt.Errorf("api_auth: jwks.enable is true but no JWKS cache was provided")
 		}
-
-		engine, err := buildSPOCPEngine(apiAuth.JWT)
-		if err != nil {
-			panic(fmt.Sprintf("api_auth: failed to build SPOCP engine: %v", err))
-		}
-
 		if engine != nil {
-			m.log.Info("api_auth_mode", "mode", "jwt+spocp", "jwks_url", apiAuth.JWT.JWKSURL, "rules", engine.RuleCount())
+			m.log.Info("api_auth_mode", "mode", "jwks+spocp", "jwks_url", apiAuth.JWKS.JWKSURL, "rules", engine.RuleCount())
 		} else {
-			m.log.Info("api_auth_mode", "mode", "jwt", "jwks_url", apiAuth.JWT.JWKSURL)
+			m.log.Info("api_auth_mode", "mode", "jwks", "jwks_url", apiAuth.JWKS.JWKSURL)
 		}
-		return m.JWTAuth(ctx, service, apiAuth.JWT, jwksCache, engine)
+		return m.JWKSAuth(ctx, service, apiAuth.JWKS, jwksCache, engine), nil
 
-	case apiAuth.BasicAuth.Enable:
-		m.log.Info("api_auth_mode", "mode", "basic")
-		return m.BasicAuth(ctx, apiAuth.BasicAuth.Users)
+	case apiAuth.OIDC.Enable:
+		jwksURL, err := discoverJWKSURL(ctx, apiAuth.OIDC.IssuerURL)
+		if err != nil {
+			return nil, fmt.Errorf("api_auth: oidc discovery failed for %s: %w", apiAuth.OIDC.IssuerURL, err)
+		}
+		if jwksCache == nil {
+			return nil, fmt.Errorf("api_auth: oidc.enable is true but no JWKS cache was provided")
+		}
+		if engine != nil {
+			m.log.Info("api_auth_mode", "mode", "oidc+spocp", "issuer", apiAuth.OIDC.IssuerURL, "jwks_uri", jwksURL, "rules", engine.RuleCount())
+		} else {
+			m.log.Info("api_auth_mode", "mode", "oidc", "issuer", apiAuth.OIDC.IssuerURL, "jwks_uri", jwksURL)
+		}
+		oidcCfg := model.APIAuthJWKS{
+			Enable:   true,
+			JWKSURL:  jwksURL,
+			Issuer:   apiAuth.OIDC.IssuerURL,
+			Audience: apiAuth.OIDC.Audience,
+		}
+		return m.JWKSAuth(ctx, service, oidcCfg, jwksCache, engine), nil
 
 	default:
 		m.log.Info("api_auth_mode", "mode", "none")
 		return func(c *gin.Context) {
 			c.Next()
-		}
+		}, nil
 	}
+}
+
+// discoverJWKSURL fetches the OIDC discovery document and returns the jwks_uri.
+func discoverJWKSURL(ctx context.Context, issuerURL string) (string, error) {
+	wellKnown := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wellKnown, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create discovery request: %w", err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch discovery document: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("discovery endpoint returned %d", resp.StatusCode)
+	}
+	var doc struct {
+		JWKSURI string `json:"jwks_uri"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return "", fmt.Errorf("failed to decode discovery document: %w", err)
+	}
+	if doc.JWKSURI == "" {
+		return "", fmt.Errorf("discovery document has no jwks_uri")
+	}
+	return doc.JWKSURI, nil
 }

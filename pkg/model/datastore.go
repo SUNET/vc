@@ -34,9 +34,9 @@ type MetaData struct {
 	// example: "ehic", "pda1"
 	Scope string `json:"scope,omitempty" bson:"scope" validate:"required,max=128,printascii"`
 
-	// required: true
+	// required: false
 	// example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
-	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"required,max=128,printascii"`
+	DocumentID string `json:"document_id,omitempty" bson:"document_id" validate:"omitempty,max=128,printascii"`
 
 	// required: false
 	// example: file://path/to/schema.json or http://example.com/schema.json

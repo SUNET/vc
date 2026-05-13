@@ -9,7 +9,6 @@ type Secrets struct {
 	APIGW    *APIGWSecrets    `yaml:"apigw,omitempty"`
 	Registry *RegistrySecrets `yaml:"registry,omitempty"`
 	Verifier *VerifierSecrets `yaml:"verifier,omitempty"`
-	UI       *UISecrets       `yaml:"ui,omitempty"`
 }
 
 // CommonSecrets holds secrets from the common section
@@ -41,13 +40,13 @@ type APIServerSecrets struct {
 
 // APIAuthSecrets holds secrets for the api_auth section
 type APIAuthSecrets struct {
-	BasicAuth BasicAuthSecrets `yaml:"basic_auth,omitempty"`
+	OIDC OIDCAuthSecrets `yaml:"oidc,omitempty"`
 }
 
-// BasicAuthSecrets holds basic auth user/password pairs
-type BasicAuthSecrets struct {
-	// Users maps usernames to passwords for HTTP Basic Authentication
-	Users map[string]string `yaml:"users,omitempty" doc_example:"<username>: \"<password>\""`
+// OIDCAuthSecrets holds OIDC client secret for API auth
+type OIDCAuthSecrets struct {
+	// ClientSecret is the OAuth2 client secret for the OIDC provider
+	ClientSecret string `yaml:"client_secret,omitempty"`
 }
 
 // OIDCRPSecrets holds OIDC Relying Party secrets
@@ -105,11 +104,6 @@ type OIDCOPSecrets struct {
 	StaticClients map[string]string `yaml:"static_clients,omitempty" doc_example:"<client_id>: \"<client_secret>\""`
 }
 
-// UISecrets holds UI secrets
-type UISecrets struct {
-	// Password is the UI login password
-	Password string `yaml:"password"`
-}
 
 // ClearSecrets zeroes out all secret fields in the main config.
 // Called when a secret file is used, to ensure config.yaml secrets are not used.
@@ -119,7 +113,7 @@ func (cfg *Cfg) ClearSecrets() {
 	}
 
 	if cfg.APIGW != nil {
-		cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = nil
+		cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret = ""
 		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil {
 			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = ""
 		}
@@ -139,9 +133,6 @@ func (cfg *Cfg) ClearSecrets() {
 		}
 	}
 
-	if cfg.UI != nil {
-		cfg.UI.Password = ""
-	}
 }
 
 // ApplySecrets applies secret values from the Secrets struct onto the Cfg.
@@ -164,8 +155,8 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.APIGW == nil {
 			cfg.APIGW = &APIGW{}
 		}
-		if len(secrets.APIGW.APIServer.APIAuth.BasicAuth.Users) > 0 {
-			cfg.APIGW.APIServer.APIAuth.BasicAuth.Users = secrets.APIGW.APIServer.APIAuth.BasicAuth.Users
+		if secrets.APIGW.APIServer.APIAuth.OIDC.ClientSecret != "" {
+			cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret = secrets.APIGW.APIServer.APIAuth.OIDC.ClientSecret
 		}
 		if secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil && secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret != "" {
 			if cfg.APIGW.AuthProviders.OIDC.Registration == nil {
@@ -215,12 +206,4 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		}
 	}
 
-	if secrets.UI != nil {
-		if cfg.UI == nil {
-			cfg.UI = &UI{}
-		}
-		if secrets.UI.Password != "" {
-			cfg.UI.Password = secrets.UI.Password
-		}
-	}
 }

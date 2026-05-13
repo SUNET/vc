@@ -2,12 +2,20 @@ package apiv1
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
+
+	"github.com/google/uuid"
 )
+
+// DatastoreUploadReply is the reply for a document upload
+type DatastoreUploadReply struct {
+	DocumentID string `json:"document_id"`
+}
 
 // DatastoreUpload uploads a document with a set of attributes
 //
@@ -17,11 +25,19 @@ import (
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	"Success"
+//	@Success		200	{object}	DatastoreUploadReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
 //	@Router			/api/v1/datastore/ [post]
-func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) error {
+func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*DatastoreUploadReply, error) {
+	if req.Meta.DocumentID == "" {
+		id, err := uuid.NewV7()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate document_id: %w", err)
+		}
+		req.Meta.DocumentID = id.String()
+	}
+
 	upload := &model.CompleteDocument{
 		Meta:               req.Meta,
 		DocumentData:       req.DocumentData,
@@ -30,7 +46,7 @@ func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadReques
 
 	if err := helpers.ValidateDocumentData(ctx, upload, c.log); err != nil {
 		c.log.Error(err, "failed to validate document data")
-		return err
+		return nil, err
 	}
 
 	// Ensure identity mapping records exist for each referenced identity_mapping_id.
@@ -43,16 +59,73 @@ func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadReques
 		}
 		if err := c.identityMappingStore.EnsureMapping(ctx, mapping); err != nil {
 			c.log.Error(err, "failed to ensure identity mapping", "identity_mapping_id", id)
-			return err
+			return nil, err
 		}
 	}
 
 	if err := c.datastoreStore.Save(ctx, upload); err != nil {
 		c.log.Error(err, "failed to save document")
-		return err
+		return nil, err
 	}
 
-	return nil
+	reply := &DatastoreUploadReply{
+		DocumentID: req.Meta.DocumentID,
+	}
+	return reply, nil
+}
+
+// DatastoreBulkUploadRequest is the request for bulk uploading documents
+type DatastoreBulkUploadRequest struct {
+	Documents map[string]*vcclient.UploadRequest `json:"documents" validate:"required,min=1,dive"`
+}
+
+// DatastoreBulkUploadReply is the reply for a bulk document upload
+type DatastoreBulkUploadReply struct {
+	Count int `json:"count"`
+}
+
+// DatastoreBulkUpload uploads multiple documents in a single operation
+func (c *Client) DatastoreBulkUpload(ctx context.Context, req *DatastoreBulkUploadRequest) (*DatastoreBulkUploadReply, error) {
+	docs := make([]*model.CompleteDocument, 0, len(req.Documents))
+
+	for _, r := range req.Documents {
+		if r.Meta.DocumentID == "" {
+			id, err := uuid.NewV7()
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate document_id: %w", err)
+			}
+			r.Meta.DocumentID = id.String()
+		}
+
+		doc := &model.CompleteDocument{
+			Meta:               r.Meta,
+			DocumentData:       r.DocumentData,
+			IdentityMappingIDs: r.IdentityMappingIDs,
+		}
+
+		if err := helpers.ValidateDocumentData(ctx, doc, c.log); err != nil {
+			return nil, err
+		}
+
+		for _, id := range r.IdentityMappingIDs {
+			mapping := &model.IdentityMapping{
+				AuthenticSourcePersonID: id,
+				AuthenticSource:         r.Meta.AuthenticSource,
+			}
+			if err := c.identityMappingStore.EnsureMapping(ctx, mapping); err != nil {
+				return nil, err
+			}
+		}
+
+		docs = append(docs, doc)
+	}
+
+	if err := c.datastoreStore.SaveMany(ctx, docs); err != nil {
+		c.log.Error(err, "failed to bulk save documents")
+		return nil, err
+	}
+
+	return &DatastoreBulkUploadReply{Count: len(docs)}, nil
 }
 
 // DatastoreAddIdentityRequest is the request for adding identity to a document
@@ -260,10 +333,12 @@ func (c *Client) DatastoreList(ctx context.Context, req *DatastoreListRequest) (
 	if err != nil {
 		return nil, err
 	}
-	resp := &DatastoreListReply{
+
+	reply := &DatastoreListReply{
 		Data: docs,
 	}
-	return resp, nil
+
+	return reply, nil
 }
 
 // DatastoreGetByKeyRequest is the request for getting a document by its key
@@ -298,15 +373,16 @@ func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRe
 		return nil, err
 	}
 
-	return &DatastoreGetByKeyReply{
+	reply := &DatastoreGetByKeyReply{
 		Data: doc,
-	}, nil
+	}
+	return reply, nil
 }
 
 // DatastoreResolveRequest is the request for resolving identity attributes to documents
 type DatastoreResolveRequest struct {
-	AuthenticSource string         `json:"authentic_source" validate:"required,max=128,printascii"`
-	Scope           string         `json:"scope" validate:"required,max=128,printascii"`
+	AuthenticSource string            `json:"authentic_source" validate:"required,max=128,printascii"`
+	Scope           string            `json:"scope" validate:"required,max=128,printascii"`
 	Attributes      map[string]string `json:"attributes" validate:"required,dive,keys,safe_key,endkeys"`
 }
 
@@ -348,10 +424,11 @@ func (c *Client) DatastoreResolve(ctx context.Context, req *DatastoreResolveRequ
 		return nil, err
 	}
 
-	return &DatastoreResolveReply{
+	reply := &DatastoreResolveReply{
 		AuthenticSourcePersonID: personID,
 		Data:                    docs,
-	}, nil
+	}
+	return reply, nil
 }
 
 // DatastoreDeleteByKeyRequest is the request for deleting a document
@@ -375,4 +452,91 @@ type DatastoreDeleteByKeyRequest struct {
 //	@Router			/api/v1/datastore/ [delete]
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
 	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
+}
+
+// DatastoreReplace replaces an existing document in the datastore
+//
+//	@Summary		DatastoreReplace
+//	@ID				datastore-replace
+//	@Description	Replace an existing document in the datastore
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
+//	@Param			req	body		vcclient.UploadRequest	true	" "
+//	@Router			/api/v1/datastore/ [put]
+func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error {
+	upload := &model.CompleteDocument{
+		Meta:               req.Meta,
+		DocumentData:       req.DocumentData,
+		IdentityMappingIDs: req.IdentityMappingIDs,
+	}
+
+	if err := helpers.ValidateDocumentData(ctx, upload, c.log); err != nil {
+		c.log.Error(err, "failed to validate document data")
+		return err
+	}
+
+	if err := c.datastoreStore.Replace(ctx, upload); err != nil {
+		c.log.Error(err, "failed to replace document")
+		return err
+	}
+
+	return nil
+}
+
+// DatastoreSearchRequest is the request for searching documents
+type DatastoreSearchRequest struct {
+	Search                  string   `json:"search" form:"search"`
+	AuthenticSource         string   `json:"authentic_source" form:"authentic_source"`
+	Scope                   string   `json:"scope" form:"scope"`
+	Limit                   int64    `json:"limit" form:"limit"`
+	AllowedAuthenticSources []string `json:"-" form:"-"`
+	AllowedScopes           []string `json:"-" form:"-"`
+}
+
+// DatastoreSearchReply is the reply for searching documents
+type DatastoreSearchReply struct {
+	Data []*model.CompleteDocument `json:"data"`
+}
+
+// DatastoreSearch searches documents
+//
+//	@Summary		DatastoreSearch
+//	@ID				search-documents
+//	@Description	Search documents in the datastore
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200					{object}	DatastoreSearchReply	"Success"
+//	@Param			search				query		string					false	"Search term"
+//	@Param			authentic_source	query		string					false	"Filter by authentic source"
+//	@Param			scope				query		string					false	"Filter by scope"
+//	@Param			limit				query		int						false	"Max results (default 50, max 200)"
+//	@Router			/api/v1/datastore/search [get]
+func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchRequest) (*DatastoreSearchReply, error) {
+	limit := req.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	docs, err := c.datastoreStore.Search(ctx, &db.SearchDocumentsQuery{
+		Search:                  req.Search,
+		AuthenticSource:         req.AuthenticSource,
+		Scope:                   req.Scope,
+		Limit:                   limit,
+		AllowedAuthenticSources: req.AllowedAuthenticSources,
+		AllowedScopes:           req.AllowedScopes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if docs == nil {
+		docs = []*model.CompleteDocument{}
+	}
+	reply := &DatastoreSearchReply{
+		Data: docs,
+	}
+
+	return reply, nil
 }

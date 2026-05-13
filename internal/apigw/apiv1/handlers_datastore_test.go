@@ -29,11 +29,11 @@ func newDatastoreTestClient(t *testing.T) (*Client, *memoryDatastoreStore, *memo
 }
 
 // seedDoc is a test helper that inserts a document directly into the store.
-func seedDoc(t *testing.T, datastore *memoryDatastoreStore, source, scope, docID string, ids []string, data map[string]any) {
+func seedDoc(t *testing.T, datastore *memoryDatastoreStore, authenticSource, scope, docID string, ids []string, data map[string]any) {
 	t.Helper()
 	err := datastore.Save(t.Context(), &model.CompleteDocument{
 		Meta: &model.MetaData{
-			AuthenticSource: source,
+			AuthenticSource: authenticSource,
 			Scope:           scope,
 			DocumentID:      docID,
 		},
@@ -44,11 +44,11 @@ func seedDoc(t *testing.T, datastore *memoryDatastoreStore, source, scope, docID
 }
 
 // seedMapping is a test helper that inserts an identity mapping directly into the store.
-func seedMapping(t *testing.T, identityStore *memoryIdentityMappingStore, source, personID string, attrs map[string]string) {
+func seedMapping(t *testing.T, identityStore *memoryIdentityMappingStore, authenticSource, personID string, attrs map[string]string) {
 	t.Helper()
 	err := identityStore.CreateMapping(t.Context(), &model.IdentityMapping{
 		AuthenticSourcePersonID: personID,
-		AuthenticSource:         source,
+		AuthenticSource:         authenticSource,
 		Attributes:              attrs,
 	})
 	require.NoError(t, err)
@@ -410,7 +410,7 @@ func TestDocumentDataIntegrity(t *testing.T) {
 		"unicode": "åäö émojis: 🎓",
 	}
 
-	err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+	_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 		Meta: &model.MetaData{
 			AuthenticSource: "AS1",
 			Scope:           "test",
@@ -475,7 +475,7 @@ func TestValidNotAfterRoundTrip(t *testing.T) {
 
 	expiry := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+	_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 		Meta: &model.MetaData{
 			AuthenticSource: "AS1",
 			Scope:           "test",
@@ -495,7 +495,7 @@ func TestValidNotAfterRoundTrip(t *testing.T) {
 	assert.True(t, expiry.Equal(*reply.Data.Meta.ValidNotAfter))
 
 	t.Run("nil_valid_not_after", func(t *testing.T) {
-		err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+		_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 			Meta: &model.MetaData{
 				AuthenticSource: "AS1",
 				Scope:           "test",
@@ -562,7 +562,7 @@ func TestMultipleIdentitiesPerDocument(t *testing.T) {
 	}
 
 	// Upload document linked to both identities
-	err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+	_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 		Meta: &model.MetaData{
 			AuthenticSource: "SUNET",
 			Scope:           "shared",
@@ -685,7 +685,7 @@ func TestFullLifecycle(t *testing.T) {
 	assert.Equal(t, "lifecycle-001", createReply.AuthenticSourcePersonID)
 
 	// 2. Upload document via handler (auto-provisions mapping link)
-	err = client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+	_, err = client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 		Meta: &model.MetaData{
 			AuthenticSource: "SUNET",
 			Scope:           "ehic",
@@ -772,7 +772,7 @@ func TestDatastoreUpload(t *testing.T) {
 	t.Run("saves document and auto-provisions identity mappings", func(t *testing.T) {
 		client, datastore, identityStore := newDatastoreTestClient(t)
 
-		err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+		_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 			Meta: &model.MetaData{
 				AuthenticSource: "SUNET",
 				Scope:           "ehic",
@@ -798,7 +798,7 @@ func TestDatastoreUpload(t *testing.T) {
 	t.Run("multiple identity mappings are all ensured", func(t *testing.T) {
 		client, _, identityStore := newDatastoreTestClient(t)
 
-		err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+		_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 			Meta: &model.MetaData{
 				AuthenticSource: "SUNET",
 				Scope:           "ehic",
@@ -823,7 +823,7 @@ func TestDatastoreUpload(t *testing.T) {
 		// Pre-create mapping with attributes
 		seedMapping(t, identityStore, "SUNET", "existing-person", map[string]string{"ssn": "123"})
 
-		err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+		_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 			Meta: &model.MetaData{
 				AuthenticSource: "SUNET",
 				Scope:           "ehic",
@@ -853,15 +853,16 @@ func TestDatastoreUpload(t *testing.T) {
 			IdentityMappingIDs: []string{"person-001"},
 			DocumentData:       map[string]any{"x": 1},
 		}
-		require.NoError(t, client.DatastoreUpload(t.Context(), req))
-		err := client.DatastoreUpload(t.Context(), req)
+		_, err := client.DatastoreUpload(t.Context(), req)
+		require.NoError(t, err)
+		_, err = client.DatastoreUpload(t.Context(), req)
 		assert.Error(t, err, "uploading the same document twice should fail")
 	})
 
 	t.Run("uploaded document is retrievable by key", func(t *testing.T) {
 		client, _, _ := newDatastoreTestClient(t)
 
-		err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+		_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 			Meta: &model.MetaData{
 				AuthenticSource: "SUNET",
 				Scope:           "ehic",
@@ -882,7 +883,7 @@ func TestDatastoreUpload(t *testing.T) {
 	t.Run("uploaded document is listable by identity", func(t *testing.T) {
 		client, _, _ := newDatastoreTestClient(t)
 
-		err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
+		_, err := client.DatastoreUpload(t.Context(), &vcclient.UploadRequest{
 			Meta: &model.MetaData{
 				AuthenticSource: "SUNET",
 				Scope:           "ehic",

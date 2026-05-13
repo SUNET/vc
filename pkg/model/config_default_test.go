@@ -143,14 +143,6 @@ func TestAdminGUIDefaults(t *testing.T) {
 	assert.Equal(t, "admin", cfg.Username)
 }
 
-func TestMockASDefaults(t *testing.T) {
-	var cfg MockAS
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"100", "102"}, cfg.BootstrapUsers)
-}
-
 func TestTrustConfigDefaults(t *testing.T) {
 	var cfg TrustConfig
 	err := defaults.Set(&cfg)
@@ -226,8 +218,8 @@ func TestAPIAuthDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.BasicAuth.Enable)
-	assert.False(t, cfg.JWT.Enable)
+	assert.False(t, cfg.JWKS.Enable)
+	assert.False(t, cfg.OIDC.Enable)
 }
 
 func TestTokenStatusListsDefaults(t *testing.T) {

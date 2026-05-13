@@ -1,26 +1,6 @@
 basePath: /api/v1
 definitions:
-  apiv1.AddConsentRequest:
-    properties:
-      authentic_source:
-        maxLength: 128
-        type: string
-      authentic_source_person_id:
-        maxLength: 128
-        type: string
-      consent_to:
-        maxLength: 128
-        type: string
-      session_id:
-        maxLength: 128
-        type: string
-    required:
-    - authentic_source
-    - authentic_source_person_id
-    - consent_to
-    - session_id
-    type: object
-  apiv1.AddDocumentIdentityRequest:
+  apiv1.DatastoreAddIdentityRequest:
     properties:
       authentic_source:
         description: |-
@@ -32,22 +12,39 @@ definitions:
           required: true
           example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
         type: string
-      identities:
+      identity_mapping_ids:
         items:
-          $ref: '#/definitions/model.Identity'
+          type: string
+        minItems: 1
         type: array
-      vct:
+      scope:
         description: |-
           required: true
-          example: urn:eudi:pid:1
+          example: pid
         type: string
     required:
     - authentic_source
     - document_id
-    - identities
-    - vct
+    - identity_mapping_ids
+    - scope
     type: object
-  apiv1.DeleteDocumentIdentityRequest:
+  apiv1.DatastoreDeleteByKeyRequest:
+    properties:
+      authentic_source:
+        maxLength: 128
+        type: string
+      document_id:
+        maxLength: 128
+        type: string
+      scope:
+        maxLength: 128
+        type: string
+    required:
+    - authentic_source
+    - document_id
+    - scope
+    type: object
+  apiv1.DatastoreDeleteIdentityRequest:
     properties:
       authentic_source:
         description: |-
@@ -64,18 +61,18 @@ definitions:
           required: true
           example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
         type: string
-      vct:
+      scope:
         description: |-
           required: true
-          example: urn:eudi:pid:1
+          example: pid
         type: string
     required:
     - authentic_source
     - authentic_source_person_id
     - document_id
-    - vct
+    - scope
     type: object
-  apiv1.DeleteDocumentRequest:
+  apiv1.DatastoreDeleteRequest:
     properties:
       authentic_source:
         description: |-
@@ -87,39 +84,120 @@ definitions:
           required: true
           example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
         type: string
-      vct:
+      scope:
         description: |-
           required: true
-          example: urn:eudi:pid:1
+          example: pid
         type: string
     required:
     - authentic_source
     - document_id
-    - vct
+    - scope
     type: object
-  apiv1.DocumentListReply:
+  apiv1.DatastoreGetByKeyReply:
+    properties:
+      data:
+        $ref: '#/definitions/model.CompleteDocument'
+    type: object
+  apiv1.DatastoreGetReply:
+    properties:
+      data:
+        $ref: '#/definitions/model.Document'
+    type: object
+  apiv1.DatastoreGetRequest:
+    properties:
+      authentic_source:
+        type: string
+      document_id:
+        type: string
+      scope:
+        type: string
+    required:
+    - authentic_source
+    - document_id
+    - scope
+    type: object
+  apiv1.DatastoreListReply:
     properties:
       data:
         items:
           $ref: '#/definitions/model.DocumentList'
         type: array
     type: object
-  apiv1.DocumentListRequest:
+  apiv1.DatastoreListRequest:
     properties:
       authentic_source:
         type: string
-      identity:
-        $ref: '#/definitions/model.Identity'
+      identity_mapping_id:
+        type: string
+      scope:
+        type: string
       valid_from:
         type: integer
       valid_to:
         type: integer
-      vct:
+    required:
+    - identity_mapping_id
+    type: object
+  apiv1.DatastoreResolveReply:
+    properties:
+      authentic_source_person_id:
+        type: string
+      data:
+        items:
+          $ref: '#/definitions/model.DocumentList'
+        type: array
+    type: object
+  apiv1.DatastoreResolveRequest:
+    properties:
+      attributes:
+        additionalProperties:
+          type: string
+        type: object
+      authentic_source:
+        maxLength: 128
+        type: string
+      scope:
+        maxLength: 128
         type: string
     required:
-    - identity
+    - attributes
+    - authentic_source
+    - scope
     type: object
-  apiv1.GetConsentRequest:
+  apiv1.DatastoreSearchReply:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.CompleteDocument'
+        type: array
+    type: object
+  apiv1.DatastoreUploadReply:
+    properties:
+      document_id:
+        type: string
+    type: object
+  apiv1.IdentityMappingCreateReply:
+    properties:
+      authentic_source_person_id:
+        type: string
+    type: object
+  apiv1.IdentityMappingCreateRequest:
+    properties:
+      attributes:
+        additionalProperties:
+          type: string
+        type: object
+      authentic_source:
+        maxLength: 128
+        type: string
+      authentic_source_person_id:
+        maxLength: 128
+        type: string
+    required:
+    - authentic_source
+    type: object
+  apiv1.IdentityMappingDeleteRequest:
     properties:
       authentic_source:
         maxLength: 128
@@ -131,80 +209,123 @@ definitions:
     - authentic_source
     - authentic_source_person_id
     type: object
-  apiv1.GetDocumentCollectIDReply:
+  apiv1.IdentityMappingResolveReply:
     properties:
-      data:
-        $ref: '#/definitions/model.Document'
+      authentic_source_person_id:
+        type: string
     type: object
-  apiv1.GetDocumentCollectIDRequest:
+  apiv1.IdentityMappingResolveRequest:
     properties:
+      attributes:
+        additionalProperties:
+          type: string
+        type: object
       authentic_source:
-        type: string
-      collect_id:
-        type: string
-      identity:
-        $ref: '#/definitions/model.Identity'
-      vct:
-        type: string
-    required:
-    - authentic_source
-    - collect_id
-    - identity
-    - vct
-    type: object
-  apiv1.GetDocumentReply:
-    properties:
-      data:
-        $ref: '#/definitions/model.Document'
-    type: object
-  apiv1.GetDocumentRequest:
-    properties:
-      authentic_source:
-        type: string
-      document_id:
-        type: string
-      vct:
-        type: string
-    required:
-    - authentic_source
-    - document_id
-    - vct
-    type: object
-  apiv1.IdentityMappingReply:
-    properties:
-      data:
-        $ref: '#/definitions/model.IDMapping'
-    type: object
-  apiv1.IdentityMappingRequest:
-    properties:
-      authentic_source:
-        description: |-
-          required: true
-          example: SUNET
         maxLength: 128
         type: string
-      identity:
-        $ref: '#/definitions/model.Identity'
     required:
+    - attributes
     - authentic_source
-    - identity
     type: object
-  apiv1.RevokeDocumentRequest:
+  apiv1.IdentityMappingSearchReply:
     properties:
+      data:
+        items:
+          $ref: '#/definitions/model.IdentityMapping'
+        type: array
+    type: object
+  apiv1.IdentityMappingUpdateRequest:
+    properties:
+      attributes:
+        additionalProperties:
+          type: string
+        type: object
       authentic_source:
+        maxLength: 128
         type: string
-      revocation:
-        $ref: '#/definitions/model.Revocation'
-      vct:
+      authentic_source_person_id:
+        maxLength: 128
         type: string
     required:
     - authentic_source
-    - revocation
-    - vct
+    - authentic_source_person_id
+    type: object
+  apiv1.JWKSResponse:
+    properties:
+      keys:
+        items:
+          $ref: '#/definitions/apiv1_issuer.Jwk'
+        type: array
+    type: object
+  apiv1.OAuthAuthorizationConsentResponse:
+    properties:
+      redirectURL:
+        type: string
+    type: object
+  apiv1.OIDCRPCallbackResponse:
+    properties:
+      credential:
+        type: string
+      credential_offer:
+        additionalProperties: {}
+        type: object
+      credential_type:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+      vci_redirect_url:
+        description: |-
+          VCIRedirectURL is set when the callback is part of a VCI consent flow.
+          The httpserver should redirect the browser to this URL instead of returning JSON.
+        type: string
+    type: object
+  apiv1.OIDCRPInitiateRequest:
+    properties:
+      credential_type:
+        type: string
+    required:
+    - credential_type
+    type: object
+  apiv1.OIDCRPInitiateResponse:
+    properties:
+      authorization_url:
+        type: string
+      state:
+        type: string
+    type: object
+  apiv1.SDJWTVCIssuerMetadataResponse:
+    properties:
+      issuer:
+        type: string
+      jwks_uri:
+        type: string
     type: object
   apiv1_issuer.Credential:
     properties:
       credential:
+        type: string
+    type: object
+  apiv1_issuer.Jwk:
+    properties:
+      crv:
+        type: string
+      d:
+        type: string
+      ext:
+        type: boolean
+      key_ops:
+        items:
+          type: string
+        type: array
+      kid:
+        type: string
+      kty:
+        type: string
+      x:
+        type: string
+      "y":
         type: string
     type: object
   apiv1_issuer.MakeSDJWTReply:
@@ -231,45 +352,22 @@ definitions:
       error:
         $ref: '#/definitions/helpers.Error'
     type: object
-  model.Collect:
+  model.CompleteDocument:
     properties:
-      id:
-        description: |-
-          required: false
-          example: 98fe67fc-c03f-11ee-bbee-4345224d414f
-        maxLength: 128
-        type: string
-      valid_until:
-        description: |-
-          required: false
-          example: 509567558
-          format: int64
-        type: integer
-    type: object
-  model.Consent:
-    properties:
-      consent_to:
-        description: |-
-          required: true
-          example: "Using my data for research"
-        maxLength: 128
-        type: string
-      created_at:
-        description: |-
-          required: true
-          example: 509567558
-          format: int64
-        type: integer
-      session_id:
-        description: |-
-          required: true
-          example: "sess-123"
-        maxLength: 128
-        type: string
+      document_data:
+        additionalProperties: {}
+        type: object
+      identity_mapping_ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+      meta:
+        $ref: '#/definitions/model.MetaData'
     required:
-    - consent_to
-    - created_at
-    - session_id
+    - document_data
+    - identity_mapping_ids
+    - meta
     type: object
   model.Document:
     properties:
@@ -280,242 +378,36 @@ definitions:
     - document_data
     - meta
     type: object
-  model.DocumentDisplay:
-    properties:
-      description_structured:
-        additionalProperties: {}
-        description: |-
-          DescriptionStructured is a map of structured descriptions
-          required: true
-          example: {"en": "European Health Insurance Card", "sv": "Europeiskt sjukförsäkringskortet"}
-        type: object
-      type:
-        description: |-
-          required: true
-          example: secure
-        type: string
-      version:
-        description: |-
-          required: true
-          example: "1.0.0"
-        type: string
-    required:
-    - description_structured
-    - type
-    - version
-    type: object
   model.DocumentList:
     properties:
-      document_display:
-        $ref: '#/definitions/model.DocumentDisplay'
       meta:
         $ref: '#/definitions/model.MetaData'
-      qr:
-        $ref: '#/definitions/openid4vci.QR'
     required:
     - meta
-    - qr
     type: object
-  model.IDMapping:
+  model.IdentityMapping:
     properties:
-      authentic_source_person_id:
-        maxLength: 128
-        type: string
-    type: object
-  model.Identity:
-    properties:
-      age_birth_year:
-        type: integer
-      age_in_years:
-        type: integer
-      age_over_14:
-        type: string
-      age_over_16:
-        type: boolean
-      age_over_18:
-        type: boolean
-      age_over_21:
-        type: boolean
-      age_over_65:
-        type: boolean
-      authentic_source_person_id:
-        description: |-
-          required: true
-          example: 65636cbc-c03f-11ee-8dc4-67135cc9bd8a
-        maxLength: 128
-        type: string
-      birth_date:
-        description: |-
-          required: true
-          example: 1970-01-01 TODO: Day, month, and year?
-        type: string
-      birth_family_name:
-        maxLength: 100
-        minLength: 1
-        type: string
-      birth_given_name:
-        maxLength: 100
-        minLength: 1
-        type: string
-      birth_place:
-        description: |-
-          required: true
-          example: Stockholm
-        maxLength: 100
-        minLength: 2
-        type: string
-      document_number:
-        description: |-
-          required: false
-          example:
-        maxLength: 128
-        type: string
-      email_address:
-        description: |-
-          required: false
-          example: <email-address>
-        type: string
-      expiry_date:
-        description: |-
-          required: false
-          example: Date (and if possible time)
-        type: string
-      family_name:
-        description: |-
-          required: true
-          example: Svensson
-        maxLength: 100
-        minLength: 1
-        type: string
-      given_name:
-        description: |-
-          required: true
-          example: Magnus
-        maxLength: 100
-        minLength: 1
-        type: string
-      issuance_date:
-        type: string
-      issuing_authority:
-        description: |-
-          required: false
-          example:
-        type: string
-      issuing_country:
-        description: |-
-          required: false
-          example:
-        type: string
-      issuing_jurisdiction:
-        description: |-
-          required: false
-          example:
-        maxLength: 128
-        type: string
-      mobile_phone_number:
-        description: |-
-          required: false
-          example: <+mobile-phone-number>
-        type: string
-      nationality:
-        description: |-
-          required: true
-          example: SE
-        items:
+      attributes:
+        additionalProperties:
           type: string
-        type: array
-      personal_administrative_number:
-        description: |-
-          required: false
-          example: <personnummer>
-        maxLength: 50
-        minLength: 4
-        type: string
-      picture:
-        description: |-
-          required: false
-          example: facial image compliant with ISO 19794-5 or ISO 39794 specifications
-        type: string
-      resident_address:
-        description: |-
-          required: false
-          example: 221b Baker street
-        type: string
-      resident_city:
-        description: |-
-          required: false
-          example: London
-        type: string
-      resident_country:
-        description: |-
-          required: false
-          example: England
-        type: string
-      resident_house_number:
-        description: |-
-          required: false
-          example: 221b
-        type: string
-      resident_postal_code:
-        description: |-
-          required: false
-          example: W1U 6SG
-        type: string
-      resident_state:
-        description: |-
-          required: false
-          example: england
-        type: string
-      resident_street_address:
-        description: |-
-          required: false
-          example: Baker street
-        maxLength: 100
-        minLength: 1
-        type: string
-      schema:
-        $ref: '#/definitions/model.IdentitySchema'
-      sex:
-        description: |-
-          required: false
-          example: 0 = not known, 1 = male, 2 = female, ...
-        enum:
-        - "0"
-        - "1"
-        - "2"
-        - "3"
-        - "4"
-        - "5"
-        - "6"
-        - "7"
-        - "8"
-        - "9"
-        type: string
-      trust_anchor:
+        description: Attributes holds identity attributes used for resolution (e.g.
+          family_name, given_name, birth_date)
+        type: object
+      authentic_source:
+        description: AuthenticSource is the source system that owns this identity
         maxLength: 128
         type: string
+      authentic_source_person_id:
+        description: AuthenticSourcePersonID is the unique identifier for this entity
+          within the authentic source
+        maxLength: 128
+        type: string
+      created_at:
+        description: CreatedAt is the timestamp when the mapping was created
+        type: string
     required:
+    - authentic_source
     - authentic_source_person_id
-    - birth_date
-    - family_name
-    - given_name
-    - schema
-    type: object
-  model.IdentitySchema:
-    properties:
-      name:
-        description: |-
-          required: true
-          example: "SE"
-        maxLength: 128
-        type: string
-      version:
-        description: |-
-          required: false
-          example: "1.0.0"
-        type: string
-    required:
-    - name
     type: object
   model.MetaData:
     properties:
@@ -525,20 +417,9 @@ definitions:
           example: SUNET
         maxLength: 128
         type: string
-      collect:
-        $ref: '#/definitions/model.Collect'
-      credential_valid_from:
-        description: |-
-          required: false
-          example: 509567558
-          format: int64
-        type: integer
-      credential_valid_to:
-        description: |-
-          required: false
-          example: 509567558
-          format: int64
-        type: integer
+      created_at:
+        description: CreatedAt is the timestamp when the document was created
+        type: string
       document_data_validation:
         description: |-
           required: false
@@ -552,21 +433,6 @@ definitions:
           example: 5e7a981c-c03f-11ee-b116-9b12c59362b9
         maxLength: 128
         type: string
-      document_version:
-        description: |-
-          required: true
-          example: "1.0.0"
-        type: string
-      real_data:
-        description: |-
-          RealData is a flag to indicate if the document contains real data
-          required: true
-          example: true
-        type: boolean
-      revocation:
-        allOf:
-        - $ref: '#/definitions/model.Revocation'
-        description: Revocation is a collection of fields representing a revocation
       scope:
         description: |-
           Scope is the credential configuration ID scope
@@ -574,63 +440,274 @@ definitions:
           example: "ehic", "pda1"
         maxLength: 128
         type: string
-      vct:
+      valid_not_after:
         description: |-
-          VCT is the Verifiable Credential Type
-          required: true
-          example: "urn:eudi:pid:1"
-        maxLength: 128
+          ValidNotAfter is an optional expiration timestamp for administrative purposes.
+          Documents past this time should not be used.
         type: string
     required:
     - authentic_source
-    - document_id
-    - document_version
     - scope
-    - vct
     type: object
-  model.Revocation:
+  oauth2.AuthorizationServerMetadata:
     properties:
-      id:
-        description: |-
-          ID is the ID of the revocation
-          required: false
-          example: 8dbd2680-c03f-11ee-a21b-034aafe41222
-        maxLength: 128
+      authorization_endpoint:
+        description: AuthorizationEndpoint URL of the authorization server's authorization
+          endpoint [RFC6749].  This is REQUIRED unless no grant types are supported
+          that use the authorization endpoint.
         type: string
-      reason:
-        description: |-
-          Reason is the reason for revocation
-          required: false
-          example: lost or stolen
-        maxLength: 128
+      code_challenge_methods_supported:
+        description: CodeChallengeMethodsSupported OPTIONAL. JSON array containing
+          a list of Proof Key for Code Exchange (PKCE) [RFC7636] code challenge methods
+          supported by this authorization server.  Code challenge method values are
+          used in the "code_challenge_method" parameter defined in Section 4.3 of
+          [RFC7636].  The valid code challenge method values are those registered
+          in the IANA "PKCE Code Challenge Methods" registry [IANA.OAuth.Parameters].  If
+          omitted, the authorization server does not support PKCE.
+        items:
+          type: string
+        type: array
+      dpop_signing_alg_values_supported:
+        description: DPOPSigningALGValuesSupported from GUNET issuer
+        items:
+          type: string
+        type: array
+      grant_types_supported:
+        description: grant_types_supported OPTIONAL.  JSON array containing a list
+          of the OAuth 2.0 grant type values that this authorization server supports.  The
+          array values used are the same as those used with the "grant_types" parameter
+          defined by "OAuth 2.0 Dynamic Client Registration Protocol" [RFC7591].  If
+          omitted, the default value is "["authorization_code", "implicit"]".
+        items:
+          type: string
+        type: array
+      introspection_endpoint:
+        description: IntrospectionEndpoint OPTIONAL.  URL of the authorization server's
+          OAuth 2.0 introspection endpoint [RFC7662].
         type: string
-      reference:
-        $ref: '#/definitions/model.RevocationReference'
-      revoked:
-        description: |-
-          Revoked is a flag to indicate if the document has been revoked
-          required: false
-          example: false
+      introspection_endpoint_auth_methods_supported:
+        description: IntrospectionEndpointAuthMethodsSupported OPTIONAL.  JSON array
+          containing a list of client authentication methods supported by this introspection
+          endpoint.  The valid client authentication method values are those registered
+          in the IANA "OAuth Token Endpoint Authentication Methods" registry [IANA.OAuth.Parameters]
+          or those registered in the IANA "OAuth Access Token Types" registry [IANA.OAuth.Parameters].  (These
+          values are and will remain distinct, due to Section 7.2.)  If omitted, the
+          set of supported authentication methods MUST be determined by other means.
+        items:
+          type: string
+        type: array
+      introspection_endpoint_auth_signing_alg_values_supported:
+        description: IntrospectionEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON
+          array containing a list of the JWS signing algorithms ("alg" values) supported
+          by the introspection endpoint for the signature on the JWT [JWT] used to
+          authenticate the client at the introspection endpoint for the "private_key_jwt"
+          and "client_secret_jwt" authentication methods.  This metadata entry MUST
+          be present if either of these authentication methods are specified in the
+          "introspection_endpoint_auth_methods_supported" entry.  No default algorithms
+          are implied if this entry is omitted.  The value "none" MUST NOT be used.
+        items:
+          type: string
+        type: array
+      issuer:
+        description: Issuer REQUIRED.  The authorization server's issuer identifier,
+          which is a URL that uses the "https" scheme and has no query or fragment
+          components.  Authorization server metadata is published at a location that
+          is ".well-known" according to RFC 5785 [RFC5785] derived from this issuer
+          identifier, as described in Section 3. The issuer identifier is used to
+          prevent authorization server mix- up attacks, as described in "OAuth 2.0
+          Mix-Up Mitigation".
+        type: string
+      jwks_uri:
+        description: JWKSURI   OPTIONAL.  URL of the authorization server's JWK Set
+          [JWK] document.  The referenced document contains the signing key(s) the
+          client uses to validate signatures from the authorization server. This URL
+          MUST use the "https" scheme.  The JWK Set MAY also contain the server's
+          encryption key or keys, which are used by clients to encrypt requests to
+          the server.  When both signing and encryption keys are made available, a
+          "use" (public key use) parameter value is REQUIRED for all keys in the referenced
+          JWK Set to indicate each key's intended usage.
+        type: string
+      op_policy_uri:
+        description: OPPolicyUri OPTIONAL. URL that the authorization server provides
+          to the person registering the client to read about the authorization server's
+          requirements on how the client can use the data provided by the authorization
+          server.  The registration process SHOULD display this URL to the person
+          registering the client if it is given.  As described in Section 5, despite
+          the identifier "op_policy_uri" appearing to be OpenID-specific, its usage
+          in this specification is actually referring to a general OAuth 2.0 feature
+          that is not specific to OpenID Connect.
+        type: string
+      op_tos_uri:
+        description: OPTOSURI OPTIONAL. URL that the authorization server provides
+          to the person registering the client to read about the authorization server's
+          terms of service. The registration process SHOULD display this URL to the
+          person registering the client if it is given.  As described in Section 5,
+          despite the identifier "op_tos_uri", appearing to be OpenID-specific, its
+          usage in this specification is actually referring to a general OAuth 2.0
+          feature that is not specific to OpenID Connect.
+        type: string
+      pre-authorized_grant_anonymous_access_supported:
+        description: PreAuthorizedGrantAnonymousAccessSupported OPTIONAL OPTIONAL.
+          A boolean indicating whether the Credential Issuer accepts a Token Request
+          with a Pre-Authorized Code but without a client_id. The default is false.
         type: boolean
-      revoked_at:
-        description: |-
-          RevokedAt is the time the document was revoked or going to be revoked
-          required: false
-          example: 509567558
-          format: int64
-        type: integer
-    type: object
-  model.RevocationReference:
-    properties:
-      authentic_source:
-        maxLength: 128
+      pushed_authorization_request_endpoint:
+        description: PushedAuthorizationRequestEndpoint from GUNET issuer
         type: string
-      document_id:
-        maxLength: 128
+      registration_endpoint:
+        description: RegistrationEndpoint OPTIONAL.  URL of the authorization server's
+          OAuth 2.0 Dynamic Client Registration endpoint [RFC7591].
+        type: string
+      require_pushed_authorization_requests:
+        description: require_pushed_authorization_requests from GUNET issuer
+        type: boolean
+      response_modes_supported:
+        description: response_modes_supported OPTIONAL.  JSON array containing a list
+          of the OAuth 2.0 "response_mode" values that this authorization server supports,
+          as specified in "OAuth 2.0 Multiple Response Type Encoding Practices" [OAuth.Responses].  If
+          omitted, the default is "["query","fragment"]".  The response mode value
+          "form_post" is also defined in "OAuth 2.0 Form Post Response Mode" [OAuth.Post].
+        items:
+          type: string
+        type: array
+      response_types_supported:
+        description: ResponseTypesSupported REQUIRED.  JSON array containing a list
+          of the OAuth 2.0 "response_type" values that this authorization server supports.
+          The array values used are the same as those used with the "response_types"
+          parameter defined by "OAuth 2.0 Dynamic Client Registration Protocol" [RFC7591].
+        items:
+          type: string
+        type: array
+      revocation_endpoint:
+        description: revocation_endpoint    OPTIONAL.  URL of the authorization server's
+          OAuth 2.0 revocation endpoint [RFC7009].
+        type: string
+      revocation_endpoint_auth_methods_supported:
+        description: RevocationEndpointAuthMethodsSupported OPTIONAL.  JSON array
+          containing a list of client authentication methods supported by this revocation
+          endpoint.  The valid client authentication method values are those registered
+          in the IANA "OAuth Token Endpoint Authentication Methods" registry [IANA.OAuth.Parameters].  If
+          omitted, the default is "client_secret_basic" -- the HTTP Basic Authentication
+          Scheme specified in Section 2.3.1 of OAuth 2.0 [RFC6749].
+        items:
+          type: string
+        type: array
+      revocation_endpoint_auth_signing_alg_values_supported:
+        description: RevocationEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON
+          array containing a list of the JWS signing algorithms ("alg" values) supported
+          by the revocation endpoint for the signature on the JWT [JWT] used to authenticate
+          the client at the revocation endpoint for the "private_key_jwt" and "client_secret_jwt"
+          authentication methods.  This metadata entry MUST be present if either of
+          these authentication methods are specified in the "revocation_endpoint_auth_methods_supported"
+          entry.  No default algorithms are implied if this entry is omitted.  The
+          value "none" MUST NOT be used.
+        items:
+          type: string
+        type: array
+      scopes_supported:
+        description: ScopesSupported RECOMMENDED.  JSON array containing a list of
+          the OAuth 2.0 [RFC6749] "scope" values that this authorization server supports.
+          Servers MAY choose not to advertise some supported scope values even when
+          this parameter is used.
+        items:
+          type: string
+        type: array
+      service_documentation:
+        description: ServiceDocumentation OPTIONAL.  URL of a page containing human-readable
+          information that developers might want or need to know when using the authorization
+          server.  In particular, if the authorization server does not support Dynamic
+          Client Registration, then information on how to register clients needs to
+          be provided in this documentation.
+        type: string
+      signed_metadata:
+        type: string
+      token_endpoint:
+        description: TokenEndpoint URL of the authorization server's token endpoint
+          [RFC6749]. This is REQUIRED unless only the implicit grant type is supported.
+        type: string
+      token_endpoint_auth_methods_supported:
+        description: TokenEndpointAuthMethodsSupported OPTIONAL.  JSON array containing
+          a list of client authentication methods supported by this token endpoint.  Client
+          authentication method values are used in the "token_endpoint_auth_method"
+          parameter defined in Section 2 of [RFC7591].  If omitted, the default is
+          "client_secret_basic" -- the HTTP Basic Authentication Scheme specified
+          in Section 2.3.1 of OAuth 2.0 [RFC6749].
+        items:
+          type: string
+        type: array
+      token_endpoint_auth_signing_alg_values_supported:
+        description: TokenEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array
+          containing a list of the JWS signing algorithms ("alg" values) supported
+          by the token endpoint for the signature on the JWT [JWT] used to authenticate
+          the client at the token endpoint for the "private_key_jwt" and "client_secret_jwt"
+          authentication methods.  This metadata entry MUST be present if either of
+          these authentication methods are specified in the "token_endpoint_auth_methods_supported"
+          entry.  No default algorithms are implied if this entry is omitted.  Servers
+          SHOULD support "RS256".  The value "none" MUST NOT be used.
+        items:
+          type: string
+        type: array
+      ui_locales_supported:
+        description: ui_locales_supported    OPTIONAL.  Languages and scripts supported
+          for the user interface, represented as a JSON array of language tag values
+          from BCP 47 [RFC5646].  If omitted, the set of supported languages and scripts
+          is unspecified.
+        items:
+          type: string
+        type: array
+    required:
+    - authorization_endpoint
+    - issuer
+    - response_types_supported
+    - token_endpoint
+    type: object
+  openid4vci.AuthorizationDetailsParameter:
+    properties:
+      claims:
+        additionalProperties: {}
+        description: Claims OPTIONAL. Object as defined in Appendix A.3.2 excluding
+          the display and value_type parameters. mandatory parameter here is used
+          by the Wallet to indicate to the Issuer that it only accepts Credential(s)
+          issued with those claim(s).
+        type: object
+      credential_configuration_id:
+        description: 'CredentialConfigurationID: REQUIRED when format parameter is
+          not present. String specifying a unique identifier of the Credential being
+          described in the credential_configurations_supported map in the Credential
+          Issuer Metadata as defined in Section 11.2.3. The referenced object in the
+          credential_configurations_supported map conveys the details, such as the
+          format, for issuance of the requested Credential. This specification defines
+          Credential Format specific Issuer Metadata in Appendix A. It MUST NOT be
+          present if format parameter is present.'
+        type: string
+      credential_identifiers:
+        description: |-
+          CredentialIdentifiers REQUIRED (Token Response only). A non-empty array of strings, each uniquely identifying
+          a Credential Dataset that can be issued using the Access Token returned in this response.
+        items:
+          type: string
+        type: array
+      format:
+        description: Format REQUIRED when credential_configuration_id parameter is
+          not present. String identifying the format of the Credential the Wallet
+          needs. This Credential format identifier determines further claims in the
+          authorization details object needed to identify the Credential type in the
+          requested format. This specification defines Credential Format Profiles
+          in Appendix A. It MUST NOT be present if credential_configuration_id parameter
+          is present.
+        type: string
+      type:
+        enum:
+        - openid_credential
         type: string
       vct:
-        maxLength: 128
+        description: VCT REQUIRED. String as defined in Appendix A.3.2. This claim
+          contains the type values the Wallet requests authorization for at the Credential
+          Issuer. It MUST only be present if the format claim is present. It MUST
+          not be present otherwise.
         type: string
+    required:
+    - type
     type: object
   openid4vci.CredentialRequest:
     properties:
@@ -759,6 +836,68 @@ definitions:
     - x
     - "y"
     type: object
+  openid4vci.PARRequest:
+    properties:
+      authorization_details:
+        items:
+          $ref: '#/definitions/openid4vci.AuthorizationDetailsParameter'
+        type: array
+      client_id:
+        type: string
+      code_challenge:
+        type: string
+      code_challenge_method:
+        enum:
+        - S256
+        - plain
+        type: string
+      issuing_state:
+        type: string
+      prompt:
+        type: string
+      redirect_uri:
+        type: string
+      response_type:
+        description: RFC 6749#4.1.1
+        enum:
+        - code
+        type: string
+      scope:
+        type: string
+      state:
+        type: string
+      user_hint:
+        type: string
+      wallet_issuer:
+        description: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-additional-request-paramete
+        type: string
+    required:
+    - client_id
+    - code_challenge
+    - code_challenge_method
+    - redirect_uri
+    - response_type
+    type: object
+  openid4vci.ParResponse:
+    properties:
+      expires_in:
+        description: 'ExpiresIn : A JSON number that represents the lifetime of the
+          request URI in seconds. The request URI lifetime is at the discretion of
+          the authorization server and will typically be relatively short.'
+        type: integer
+      request_uri:
+        description: 'RequestURI : The request URI corresponding to the authorization
+          request posted. This URI is used as reference to the respective request
+          data in the subsequent authorization request only. The way the authorization
+          process obtains the authorization request data is at the discretion of the
+          authorization server and out of scope of this specification. There is no
+          need to make the authorization request data available to other parties via
+          this URI.'
+        type: string
+    required:
+    - expires_in
+    - request_uri
+    type: object
   openid4vci.Proof:
     properties:
       cwt:
@@ -835,49 +974,106 @@ definitions:
           type: string
         type: array
     type: object
-  openid4vci.QR:
+  openid4vci.TokenRequest:
     properties:
-      credential_offer_url:
+      client_id:
+        description: ClientID REQUIRED, if the client is not authenticating with the
+          authorization server as described in Section 3.2.1.
         type: string
-      qr_base64:
+      code:
+        description: Code REQUIRED.  The authorization code received from the authorization
+          server.
+        maxLength: 128
         type: string
-    type: object
-  vcclient.NotificationReply:
-    properties:
-      data:
-        $ref: '#/definitions/openid4vci.QR'
-    type: object
-  vcclient.NotificationRequest:
-    properties:
-      authentic_source:
+      code_verifier:
+        description: CodeVerifier OPTIONAL (required for public clients)
         type: string
-      document_id:
+      dpop:
+        description: Header field
         type: string
-      vct:
+      grant_type:
+        description: |-
+          // Authorization Code Flow
+          GrantType REQUIRED.  Value MUST be set to "authorization_code".
+        enum:
+        - authorization_code
+        type: string
+      redirect_uri:
+        description: "RedirectURI\tREQUIRED, if the \"redirect_uri\" parameter was
+          included in the authorization request as described in Section 4.1.1, and
+          their values MUST be identical."
         type: string
     required:
-    - authentic_source
-    - document_id
-    - vct
+    - client_id
+    - code
+    - dpop
+    - grant_type
+    - redirect_uri
+    type: object
+  openid4vci.TokenResponse:
+    properties:
+      access_token:
+        description: AccessToken REQUIRED.  The access token issued by the authorization
+          server.
+        type: string
+      authorization_details:
+        description: |-
+          AuthorizationDetails REQUIRED when authorization_details parameter is used in either the Authorization Request or Token Request.
+          OPTIONAL when scope parameter was used to request issuance of a Credential. It MUST NOT be used otherwise.
+          It is a non-empty array of objects, as defined in Section 7 of [RFC9396].
+        items:
+          $ref: '#/definitions/openid4vci.AuthorizationDetailsParameter'
+        type: array
+      c_nonce:
+        description: CNonce OPTIONAL. String containing a nonce to be used when creating
+          a proof of possession of the key proof (see Section 7.2). When received,
+          the Wallet MUST use this nonce value for its subsequent requests until the
+          Credential Issuer provides a fresh nonce.
+        type: string
+      c_nonce_expires_in:
+        description: CNonceExpiresIn OPTIONAL. Number denoting the lifetime in seconds
+          of the c_nonce.
+        type: integer
+      expires_in:
+        description: ExpiresIn RECOMMENDED.  The lifetime in seconds of the access
+          token.  For example, the value "3600" denotes that the access token will
+          expire in one hour from the time the response was generated. If omitted,
+          the authorization server SHOULD provide the expiration time via other means
+          or document the default value.
+        type: integer
+      scope:
+        description: Scope OPTIONAL, if identical to the scope requested by the client;
+          otherwise, REQUIRED.  The scope of the access token as described by Section
+          3.3.
+        type: string
+      state:
+        description: State REQUIRED if the "state" parameter was present in the client
+          authorization request.  The exact value received from the client.
+        type: string
+      token_type:
+        description: TokenType REQUIRED.  The type of the token issued as described
+          in Section 7.1.  Value is case insensitive.
+        type: string
+    required:
+    - access_token
+    - expires_in
+    - token_type
     type: object
   vcclient.UploadRequest:
     properties:
       document_data:
         additionalProperties: {}
         type: object
-      document_data_version:
-        type: string
-      document_display:
-        $ref: '#/definitions/model.DocumentDisplay'
-      identities:
+      identity_mapping_ids:
         items:
-          $ref: '#/definitions/model.Identity'
+          type: string
+        minItems: 1
         type: array
       meta:
         $ref: '#/definitions/model.MetaData'
     required:
     - document_data
-    - document_data_version
+    - identity_mapping_ids
     - meta
     type: object
 info:
@@ -885,19 +1081,183 @@ info:
   title: Datastore API
   version: "2.8"
 paths:
-  /consent:
-    post:
+  /.well-known/jwt-vc-issuer:
+    get:
+      description: Returns the SD-JWT VC issuer metadata
+      operationId: sdjwtvc-issuer-metadata
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.SDJWTVCIssuerMetadataResponse'
+      summary: SD-JWT VC Issuer Metadata
+      tags:
+      - OAuth
+  /.well-known/oauth-authorization-server:
+    get:
+      description: Returns the OAuth2 authorization server metadata (RFC 8414)
+      operationId: oauth-metadata
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/oauth2.AuthorizationServerMetadata'
+      summary: OAuth2 Server Metadata
+      tags:
+      - OAuth
+  /api/v1/datastore:
+    delete:
       consumes:
       - application/json
-      description: Add consent endpoint
-      operationId: add-consent
+      description: delete one document endpoint
+      operationId: delete-document
       parameters:
       - description: ' '
         in: body
         name: req
         required: true
         schema:
-          $ref: '#/definitions/apiv1.AddConsentRequest'
+          $ref: '#/definitions/apiv1.DatastoreDeleteRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreDelete
+      tags:
+      - vc-platform
+    post:
+      consumes:
+      - application/json
+      description: Get document endpoint
+      operationId: get-document
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.DatastoreGetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.DatastoreGetReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreGet
+      tags:
+      - vc-platform
+  /api/v1/datastore/:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a document by authentic_source, scope, and document_id
+      operationId: delete-document-by-key
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.DatastoreDeleteByKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreDeleteByKey
+      tags:
+      - vc-platform
+    get:
+      consumes:
+      - application/json
+      description: Get a document by authentic_source, scope, and document_id
+      operationId: get-document-by-key
+      parameters:
+      - description: Authentic source
+        in: query
+        name: authentic_source
+        required: true
+        type: string
+      - description: Scope
+        in: query
+        name: scope
+        required: true
+        type: string
+      - description: Document ID
+        in: query
+        name: document_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.DatastoreGetByKeyReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreGetByKey
+      tags:
+      - vc-platform
+    post:
+      consumes:
+      - application/json
+      description: Upload a document to the datastore
+      operationId: datastore-upload
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/vcclient.UploadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.DatastoreUploadReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreUpload
+      tags:
+      - vc-platform
+    put:
+      consumes:
+      - application/json
+      description: Replace an existing document in the datastore
+      operationId: datastore-replace
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/vcclient.UploadRequest'
       produces:
       - application/json
       responses:
@@ -907,36 +1267,334 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
-      summary: AddConsent
+      summary: DatastoreReplace
       tags:
       - vc-platform
-  /consent/get:
-    post:
+  /api/v1/datastore/identity:
+    delete:
       consumes:
       - application/json
-      description: Get consent endpoint
-      operationId: get-consent
+      description: Delete identity to document endpoint
+      operationId: delete-identity
       parameters:
       - description: ' '
         in: body
         name: req
         required: true
         schema:
-          $ref: '#/definitions/apiv1.GetConsentRequest'
+          $ref: '#/definitions/apiv1.DatastoreDeleteIdentityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreDeleteIdentity
+      tags:
+      - vc-platform
+    put:
+      consumes:
+      - application/json
+      description: Adding array of identity mapping IDs to one document
+      operationId: add-identity
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.DatastoreAddIdentityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreAddIdentity
+      tags:
+      - vc-platform
+  /api/v1/datastore/list:
+    post:
+      consumes:
+      - application/json
+      description: List documents for an identity
+      operationId: document-list
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.DatastoreListRequest'
       produces:
       - application/json
       responses:
         "200":
           description: Success
           schema:
-            $ref: '#/definitions/model.Consent'
+            $ref: '#/definitions/apiv1.DatastoreListReply'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
-      summary: GetConsent
+      summary: DatastoreList
       tags:
       - vc-platform
+  /api/v1/datastore/resolve:
+    post:
+      consumes:
+      - application/json
+      description: Resolve identity attributes to documents
+      operationId: resolve-document
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.DatastoreResolveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.DatastoreResolveReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastoreResolve
+      tags:
+      - vc-platform
+  /api/v1/datastore/search:
+    get:
+      consumes:
+      - application/json
+      description: Search documents in the datastore
+      operationId: search-documents
+      parameters:
+      - description: Search term
+        in: query
+        name: search
+        type: string
+      - description: Filter by authentic source
+        in: query
+        name: authentic_source
+        type: string
+      - description: Filter by scope
+        in: query
+        name: scope
+        type: string
+      - description: Max results (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.DatastoreSearchReply'
+      summary: DatastoreSearch
+      tags:
+      - vc-platform
+  /api/v1/identity/mapping:
+    delete:
+      consumes:
+      - application/json
+      description: Delete an identity mapping
+      operationId: delete-identity-mapping
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.IdentityMappingDeleteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: IdentityMappingDelete
+      tags:
+      - vc-platform
+    post:
+      consumes:
+      - application/json
+      description: Create a new identity mapping
+      operationId: create-identity-mapping
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.IdentityMappingCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.IdentityMappingCreateReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: IdentityMappingCreate
+      tags:
+      - vc-platform
+    put:
+      consumes:
+      - application/json
+      description: Update an existing identity mapping
+      operationId: update-identity-mapping
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.IdentityMappingUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: IdentityMappingUpdate
+      tags:
+      - vc-platform
+  /api/v1/identity/mapping/resolve:
+    post:
+      consumes:
+      - application/json
+      description: Resolve attributes to an authentic_source_person_id
+      operationId: resolve-identity-mapping
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.IdentityMappingResolveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.IdentityMappingResolveReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: IdentityMappingResolve
+      tags:
+      - vc-platform
+  /api/v1/identity/mapping/search:
+    get:
+      consumes:
+      - application/json
+      description: Search identity mappings
+      operationId: search-identity-mappings
+      parameters:
+      - description: Search term
+        in: query
+        name: search
+        type: string
+      - description: Filter by authentic source
+        in: query
+        name: authentic_source
+        type: string
+      - description: Max results (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.IdentityMappingSearchReply'
+      summary: IdentityMappingSearch
+      tags:
+      - vc-platform
+  /authorization/consent:
+    get:
+      description: Handles the authorization consent flow for credential issuance
+      operationId: oauth-authorization-consent
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.OAuthAuthorizationConsentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: Authorization Consent
+      tags:
+      - OAuth
+  /authorization/consent/callback:
+    get:
+      description: Handles the callback after user consents to credential issuance
+      operationId: oauth-authorization-consent-callback
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Redirect
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: Authorization Consent Callback
+      tags:
+      - OAuth
+  /authorize:
+    get:
+      consumes:
+      - application/json
+      description: Handle OAuth2 authorization request and redirect to consent
+      operationId: oauth-authorize
+      parameters:
+      - description: PAR request URI
+        in: query
+        name: request_uri
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Redirect to consent
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: OAuth2 Authorize
+      tags:
+      - OAuth
   /credential:
     post:
       consumes:
@@ -964,262 +1622,131 @@ paths:
       summary: VCICredential
       tags:
       - vc-platform
-  /document:
-    delete:
-      consumes:
-      - application/json
-      description: delete one document endpoint
-      operationId: delete-document
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1.DeleteDocumentRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: DeleteDocument
-      tags:
-      - vc-platform
-    post:
-      consumes:
-      - application/json
-      description: Get document endpoint
-      operationId: get-document
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1.GetDocumentRequest'
+  /jwks:
+    get:
+      description: Returns the JSON Web Key Set for signature verification
+      operationId: jwks
       produces:
       - application/json
       responses:
         "200":
           description: Success
           schema:
-            $ref: '#/definitions/apiv1.GetDocumentReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: GetDocument
+            $ref: '#/definitions/apiv1.JWKSResponse'
+      summary: JWKS
       tags:
-      - vc-platform
-  /document/collect_id:
-    post:
+      - OAuth
+  /oidcrp/callback:
+    get:
       consumes:
       - application/json
-      description: Get one document with collect id
-      operationId: get-document-collect-id
+      description: Receives and processes the authorization code from the OIDC Provider
+      operationId: oidcrp-callback
       parameters:
-      - description: ' '
-        in: body
-        name: req
+      - description: Authorization code
+        in: query
+        name: code
         required: true
-        schema:
-          $ref: '#/definitions/apiv1.GetDocumentCollectIDRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/apiv1.GetDocumentCollectIDReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: GetDocumentByCollectID
-      tags:
-      - vc-platform
-  /document/identity:
-    delete:
-      consumes:
-      - application/json
-      description: Delete identity to document endpoint
-      operationId: delete-document-identity
-      parameters:
-      - description: ' '
-        in: body
-        name: req
+        type: string
+      - description: OAuth2 state parameter
+        in: query
+        name: state
         required: true
-        schema:
-          $ref: '#/definitions/apiv1.DeleteDocumentIdentityRequest'
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
+          schema:
+            $ref: '#/definitions/apiv1.OIDCRPCallbackResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
-      summary: DeleteDocumentIdentity
+      summary: OIDC Provider Callback
       tags:
-      - vc-platform
-    put:
+      - OIDCRP
+  /oidcrp/initiate:
+    post:
       consumes:
       - application/json
-      description: Adding array of identities to one document
-      operationId: add-document-identity
+      description: Initiates OIDC authentication by generating an OAuth2 authorization
+        URL with PKCE
+      operationId: oidcrp-initiate
       parameters:
-      - description: ' '
+      - description: OIDC RP initiate request
         in: body
-        name: req
+        name: request
         required: true
         schema:
-          $ref: '#/definitions/apiv1.AddDocumentIdentityRequest'
+          $ref: '#/definitions/apiv1.OIDCRPInitiateRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
+          schema:
+            $ref: '#/definitions/apiv1.OIDCRPInitiateResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
-      summary: AddDocumentIdentity
+      summary: Initiate OIDC Authentication
       tags:
-      - vc-platform
-  /document/list:
+      - OIDCRP
+  /op/par:
     post:
       consumes:
       - application/json
-      description: List documents for an identity
-      operationId: document-list
+      description: Handle OAuth2 Pushed Authorization Request (PAR)
+      operationId: oauth-par
       parameters:
-      - description: ' '
+      - description: PAR request
         in: body
-        name: req
+        name: request
         required: true
         schema:
-          $ref: '#/definitions/apiv1.DocumentListRequest'
+          $ref: '#/definitions/openid4vci.PARRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/openid4vci.ParResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: Pushed Authorization Request
+      tags:
+      - OAuth
+  /token:
+    post:
+      consumes:
+      - application/json
+      description: Exchange authorization code for tokens
+      operationId: oauth-token
+      parameters:
+      - description: Token request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/openid4vci.TokenRequest'
       produces:
       - application/json
       responses:
         "200":
           description: Success
           schema:
-            $ref: '#/definitions/apiv1.DocumentListReply'
+            $ref: '#/definitions/openid4vci.TokenResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
-      summary: DocumentList
+      summary: OAuth2 Token
       tags:
-      - vc-platform
-  /document/revoke:
-    post:
-      consumes:
-      - application/json
-      description: Revoke one document
-      operationId: revoke-document
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1.RevokeDocumentRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: RevokeDocument
-      tags:
-      - vc-platform
-  /identity/mapping:
-    post:
-      consumes:
-      - application/json
-      description: Identity mapping endpoint
-      operationId: identity-mapping
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/apiv1.IdentityMappingRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/apiv1.IdentityMappingReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: IdentityMapping
-      tags:
-      - vc-platform
-  /notification:
-    post:
-      consumes:
-      - application/json
-      description: notification endpoint
-      operationId: generic-notification
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/vcclient.NotificationRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-          schema:
-            $ref: '#/definitions/vcclient.NotificationReply'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: Notification
-      tags:
-      - vc-platform
-  /upload:
-    post:
-      consumes:
-      - application/json
-      description: Upload endpoint
-      operationId: generic-upload
-      parameters:
-      - description: ' '
-        in: body
-        name: req
-        required: true
-        schema:
-          $ref: '#/definitions/vcclient.UploadRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Success
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/helpers.ErrorResponse'
-      summary: Upload
-      tags:
-      - vc-platform
+      - OAuth
 swagger: "2.0"

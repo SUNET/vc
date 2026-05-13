@@ -88,6 +88,15 @@ apigw:
     chain_path: "/pki/signing_ec_chain.pem"
   api_server:
     addr: :8080
+    api_auth:
+      oidc:
+        enable: true
+        issuer_url: "http://mock-oauth2.vc.docker:8080/default"
+        audience: "vc-apigw"
+        client_id: "vc-apigw"
+        client_secret: "vc-apigw-secret"
+        redirect_uri: "http://apigw.vc.docker:8080/ui/callback"
+        scopes: ["openid", "profile"]
   public_url: "http://apigw.vc.docker:8080"
   registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:
@@ -151,23 +160,4 @@ apigw:
           label: "Dev Wallet"
           redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
 
-mock_as:
-  api_server:
-    addr: :8080
-  bootstrap_users:
-    - "100"
-    - "102"
-  datastore_url: http://apigw.vc.docker:8080
 
-ui:
-  api_server:
-    addr: :8080
-  username: "admin"
-  password: "secret123"
-  services:
-    apigw:
-      base_url: http://apigw.vc.docker:8080
-    mockas:
-      base_url: http://mockas.vc.docker:8080
-    verifier:
-      base_url: http://verifier.vc.docker:8080

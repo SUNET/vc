@@ -133,10 +133,10 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 	if err != nil {
 		return nil, err
 	}
-	response := &openid4vci.NonceResponse{
+	reply := &openid4vci.NonceResponse{
 		CNonce: nonce,
 	}
-	return response, nil
+	return reply, nil
 }
 
 // VCICredential implements OpenID4VCI credential issuance endpoint
@@ -290,7 +290,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
-	reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
+	issuerReply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
 		Scope:        scope,
 		DocumentData: documentData,
 		Jwk:          jwk,
@@ -302,7 +302,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		return nil, err
 	}
 
-	if reply == nil {
+	if issuerReply == nil {
 		return nil, errors.New("MakeSDJWT reply is nil")
 	}
 
@@ -310,8 +310,8 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	if identifier != "" {
 		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
 			Identifier: identifier,
-			Section:    reply.TokenStatusListSection,
-			Index:      reply.TokenStatusListIndex,
+			Section:    issuerReply.TokenStatusListSection,
+			Index:      issuerReply.TokenStatusListIndex,
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
@@ -319,17 +319,17 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 	}
 
-	response := &openid4vci.CredentialResponse{}
-	switch len(reply.Credentials) {
+	reply := &openid4vci.CredentialResponse{}
+	switch len(issuerReply.Credentials) {
 	case 0:
 		return nil, helpers.ErrNoDocumentFound
 	case 1:
-		response.Credentials = []openid4vci.Credential{
+		reply.Credentials = []openid4vci.Credential{
 			{
-				Credential: reply.Credentials[0].Credential,
+				Credential: issuerReply.Credentials[0].Credential,
 			},
 		}
-		return response, nil
+		return reply, nil
 	default:
 		return nil, errors.New("multiple credentials returned from issuer, not supported")
 	}
@@ -344,7 +344,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		return nil, err
 	}
 
-	reply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
+	issuerReply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
 		Scope:           scope,
 		DocType:         mdoc.DocType, // org.iso.18013.5.1.mDL
 		DocumentData:    documentData,
@@ -356,16 +356,16 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		return nil, err
 	}
 
-	if reply == nil {
+	if issuerReply == nil {
 		return nil, errors.New("MakeMDoc reply is nil")
 	}
 
 	// Save credential subject info to registry for status management
-	if identifier != "" && reply.StatusListSection > 0 {
+	if identifier != "" && issuerReply.StatusListSection > 0 {
 		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
 			Identifier: identifier,
-			Section:    reply.StatusListSection,
-			Index:      reply.StatusListIndex,
+			Section:    issuerReply.StatusListSection,
+			Index:      issuerReply.StatusListIndex,
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
@@ -374,9 +374,9 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 	}
 
 	// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
-	mdocBase64 := base64.StdEncoding.EncodeToString(reply.Mdoc)
+	mdocBase64 := base64.StdEncoding.EncodeToString(issuerReply.Mdoc)
 
-	response := &openid4vci.CredentialResponse{
+	reply := &openid4vci.CredentialResponse{
 		Credentials: []openid4vci.Credential{
 			{
 				Credential: mdocBase64,
@@ -384,7 +384,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		},
 	}
 
-	return response, nil
+	return reply, nil
 }
 
 // issueVC20 issues a W3C VC 2.0 Data Integrity credential
@@ -420,7 +420,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		subjectDID = req.Proof.ExtractSubjectDID()
 	}
 
-	reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
+	issuerReply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
 		Scope:             scope,
 		DocumentData:      documentData,
 		CredentialTypes:   credentialTypes,
@@ -433,16 +433,16 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		return nil, err
 	}
 
-	if reply == nil {
+	if issuerReply == nil {
 		return nil, errors.New("MakeVC20 reply is nil")
 	}
 
 	// Save credential subject info to registry for status management
-	if identifier != "" && reply.StatusListSection > 0 {
+	if identifier != "" && issuerReply.StatusListSection > 0 {
 		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
 			Identifier: identifier,
-			Section:    reply.StatusListSection,
-			Index:      reply.StatusListIndex,
+			Section:    issuerReply.StatusListSection,
+			Index:      issuerReply.StatusListIndex,
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
@@ -450,16 +450,16 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		}
 	}
 
-	response := &openid4vci.CredentialResponse{
+	reply := &openid4vci.CredentialResponse{
 		Credentials: []openid4vci.Credential{
 			{
 				// VC20 Data Integrity credentials are JSON-LD, return as-is
-				Credential: string(reply.Credential),
+				Credential: string(issuerReply.Credential),
 			},
 		},
 	}
 
-	return response, nil
+	return reply, nil
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes
@@ -506,7 +506,9 @@ func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 		return nil, err
 	}
 
-	return &doc.CredentialOfferParameters, nil
+	reply := &doc.CredentialOfferParameters
+
+	return reply, nil
 }
 
 // VCINotification implements OpenID4VCI notification endpoint
@@ -524,12 +526,12 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	}
 
 	if c.pkiSigner != nil {
-		metadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+		reply, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 		if err != nil {
 			c.log.Error(err, "failed to sign metadata")
 			return nil, err
 		}
-		return metadata, nil
+		return reply, nil
 	}
 
 	return c.issuerMetadata, nil

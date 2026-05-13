@@ -19,7 +19,6 @@ type Client struct {
 	httpClient *http.Client
 	log        *logger.Log
 	APIGW      *APIGWClient
-	MockAS     *MockASClient
 	Verifier   *VerifierClient
 }
 
@@ -35,14 +34,6 @@ type APIGWClient struct {
 	User     *userHandler
 }
 
-// MockASClient handles MockAS endpoints
-type MockASClient struct {
-	client  *Client
-	baseURL string
-	log     *logger.Log
-	Root    *mockasRootHandler
-	Mock    *mockHandler
-}
 
 // VerifierClient handles Verifier endpoints
 type VerifierClient struct {
@@ -54,7 +45,6 @@ type VerifierClient struct {
 // Config is the configuration for the client
 type Config struct {
 	ApigwURL    string `validate:""`
-	MockASURL   string `validate:""`
 	VerifierURL string `validate:""`
 }
 
@@ -84,17 +74,6 @@ func New(config *Config, log *logger.Log) (*Client, error) {
 		c.APIGW.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("apigw.root"), baseURL: config.ApigwURL}
 		c.APIGW.OAuth = &oauthHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("apigw.oauth"), baseURL: config.ApigwURL}
 		c.APIGW.User = &userHandler{client: c, serviceBaseURL: "api/v1/user", defaultContentType: defaultContentType, log: c.log.New("apigw.user"), baseURL: config.ApigwURL}
-	}
-
-	// Initialize MockAS client if configured
-	if config.MockASURL != "" {
-		c.MockAS = &MockASClient{
-			client:  c,
-			baseURL: config.MockASURL,
-			log:     c.log.New("mockas"),
-		}
-		c.MockAS.Root = &mockasRootHandler{client: c, baseURL: config.MockASURL, log: c.log.New("mockas.root")}
-		c.MockAS.Mock = &mockHandler{client: c, serviceBaseURL: "api/v1/mock", defaultContentType: defaultContentType, log: c.log.New("mockas.mock"), baseURL: config.MockASURL}
 	}
 
 	// Initialize Verifier client if configured

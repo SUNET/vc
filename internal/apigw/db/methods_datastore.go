@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"regexp"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
@@ -63,6 +65,30 @@ func (c *DatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument) e
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 
+		return err
+	}
+
+	return nil
+}
+
+// SaveMany saves multiple documents to the generic collection using bulk insert
+func (c *DatastoreColl) SaveMany(ctx context.Context, docs []*model.CompleteDocument) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:saveMany")
+	defer span.End()
+
+	now := time.Now().UTC()
+	inserts := make([]any, 0, len(docs))
+	for _, doc := range docs {
+		if err := helpers.Check(ctx, c.Service.cfg, doc, c.Service.log); err != nil {
+			return err
+		}
+		doc.Meta.CreatedAt = now
+		inserts = append(inserts, doc)
+	}
+
+	_, err := c.Coll.InsertMany(ctx, inserts)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
@@ -297,4 +323,88 @@ func (c *DatastoreColl) DeleteByKey(ctx context.Context, authenticSource, scope,
 	}
 
 	return nil
+}
+
+// SearchDocumentsQuery is the query for searching documents
+type SearchDocumentsQuery struct {
+	Search                  string   `json:"search"`
+	AuthenticSource         string   `json:"authentic_source"`
+	Scope                   string   `json:"scope"`
+	Limit                   int64    `json:"limit"`
+	AllowedAuthenticSources []string `json:"-"`
+	AllowedScopes           []string `json:"-"`
+}
+
+// Search returns documents matching a text search or filters, with a limit
+func (c *DatastoreColl) Search(ctx context.Context, query *SearchDocumentsQuery) ([]*model.CompleteDocument, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:searchDocuments")
+	defer span.End()
+
+	filter := bson.M{}
+	if query.AuthenticSource != "" {
+		if len(query.AllowedAuthenticSources) > 0 && !slices.Contains(query.AllowedAuthenticSources, query.AuthenticSource) {
+			return []*model.CompleteDocument{}, nil
+		}
+		filter["meta.authentic_source"] = bson.M{"$eq": query.AuthenticSource}
+	} else if len(query.AllowedAuthenticSources) > 0 {
+		filter["meta.authentic_source"] = bson.M{"$in": query.AllowedAuthenticSources}
+	}
+	if query.Scope != "" {
+		if len(query.AllowedScopes) > 0 && !slices.Contains(query.AllowedScopes, query.Scope) {
+			return []*model.CompleteDocument{}, nil
+		}
+		filter["meta.scope"] = bson.M{"$eq": query.Scope}
+	} else if len(query.AllowedScopes) > 0 {
+		filter["meta.scope"] = bson.M{"$in": query.AllowedScopes}
+	}
+	if query.Search != "" {
+		searchRegex := bson.M{"$regex": regexp.QuoteMeta(query.Search), "$options": "i"}
+		filter["$or"] = bson.A{
+			bson.M{"meta.document_id": searchRegex},
+			bson.M{"meta.authentic_source": searchRegex},
+			bson.M{"meta.scope": searchRegex},
+			bson.M{"identity_mapping_ids": searchRegex},
+			bson.M{"document_data.family_name": searchRegex},
+			bson.M{"document_data.given_name": searchRegex},
+			bson.M{"document_data.email": searchRegex},
+			bson.M{"document_data.birthdate": searchRegex},
+		}
+	}
+
+	limit := int64(50)
+	if query.Limit > 0 && query.Limit <= 200 {
+		limit = query.Limit
+	}
+
+	opts := options.Find().SetLimit(limit).SetSort(bson.D{{Key: "meta.created_at", Value: -1}})
+
+	cursor, err := c.Coll.Find(ctx, filter, opts)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	var res []*model.CompleteDocument
+	if err := cursor.All(ctx, &res); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return res, nil
+}
+
+// ListAuthenticSources returns all unique authentic_source values in the datastore
+func (c *DatastoreColl) ListAuthenticSources(ctx context.Context) ([]string, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:listAuthenticSources")
+	defer span.End()
+
+	var results []string
+	err := c.Coll.Distinct(ctx, "meta.authentic_source", bson.D{}).Decode(&results)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	slices.Sort(results)
+	return results, nil
 }

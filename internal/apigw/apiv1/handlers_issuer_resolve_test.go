@@ -38,6 +38,12 @@ func (m *mockIdentityMappingStore) UpdateMapping(_ context.Context, _ *model.Ide
 func (m *mockIdentityMappingStore) DeleteMapping(_ context.Context, _ *db.DeleteMappingQuery) error {
 	return nil
 }
+func (m *mockIdentityMappingStore) SearchMappings(_ context.Context, _ *db.SearchMappingsQuery) ([]*model.IdentityMapping, error) {
+	return nil, nil
+}
+func (m *mockIdentityMappingStore) CreateMappings(_ context.Context, _ []*model.IdentityMapping) error {
+	return nil
+}
 
 func newTestClient(t *testing.T, store *mockIdentityMappingStore) *Client {
 	t.Helper()

@@ -31,7 +31,7 @@ var servicesRequiringVCTM = map[string]bool{
 // New parses config file from VC_CONFIG_YAML environment variable.
 // serviceName identifies the calling service so that steps like VCTM loading
 // can be skipped for services that do not use credential constructors (e.g.
-// ui, mockas, registry).
+// registry).
 func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	log := logger.NewSimple("Configuration")
 	log.Info("Read environmental variable")
@@ -84,7 +84,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	// Only services that depend on credentials need VCTM loading
-	// and the requirement check. Other services (ui, mockas, registry) share
+	// and the requirement check. Other services (registry) share
 	// the same config file but do not use credential constructors at all.
 	if servicesRequiringVCTM[serviceName] {
 		if cfg.Common == nil || len(cfg.Common.CredentialMetadata) == 0 {

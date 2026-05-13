@@ -30,12 +30,13 @@ func (s *Service) endpointDatastoreUpload(ctx context.Context, c *gin.Context) (
 		return nil, nil
 	}
 
-	if err := s.apiv1.DatastoreUpload(ctx, request); err != nil {
+	reply, err := s.apiv1.DatastoreUpload(ctx, request)
+	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
-	return nil, nil
+	return reply, nil
 }
 
 func (s *Service) endpointDatastoreGet(ctx context.Context, c *gin.Context) (any, error) {
@@ -82,6 +83,7 @@ func (s *Service) endpointDatastoreDelete(ctx context.Context, c *gin.Context) (
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
 	if err := s.apiv1.DatastoreDeleteByKey(ctx, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -100,6 +102,7 @@ func (s *Service) endpointDatastoreAddIdentity(ctx context.Context, c *gin.Conte
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
 	if err := s.apiv1.DatastoreAddIdentity(ctx, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -116,12 +119,30 @@ func (s *Service) endpointDatastoreDeleteIdentity(ctx context.Context, c *gin.Co
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
 	if err := s.apiv1.DatastoreDeleteIdentity(ctx, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
 	c.Status(http.StatusNoContent)
+	return nil, nil
+}
+
+func (s *Service) endpointDatastoreReplace(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreReplace")
+	defer span.End()
+
+	request := &vcclient.UploadRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	if err := s.apiv1.DatastoreReplace(ctx, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -139,5 +160,57 @@ func (s *Service) endpointDatastoreList(ctx context.Context, c *gin.Context) (an
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	return reply, nil
+}
+
+func (s *Service) endpointDatastoreSearch(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreSearch")
+	defer span.End()
+
+	request := &apiv1.DatastoreSearchRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	// Apply SPOCP-derived authentic_source and scope filters for DB queries.
+	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
+		if sources, ok := allowed.([]string); ok {
+			request.AllowedAuthenticSources = sources
+		}
+	}
+	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
+		if scopes, ok := allowed.([]string); ok {
+			request.AllowedScopes = scopes
+		}
+	}
+
+	s.log.Info("datastore search",
+		"search", request.Search, "authentic_source", request.AuthenticSource)
+
+	reply, err := s.apiv1.DatastoreSearch(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return reply, nil
+}
+
+func (s *Service) endpointDatastoreBulkUpload(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastoreBulkUpload")
+	defer span.End()
+
+	request := &apiv1.DatastoreBulkUploadRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	reply, err := s.apiv1.DatastoreBulkUpload(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
 	return reply, nil
 }

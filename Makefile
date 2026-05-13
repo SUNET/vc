@@ -19,9 +19,9 @@ BUILD_ARCH              := amd64
 BUILD_FLAGS             := -v
 
 # Services Configuration
-SERVICES                := verifier registry mockas apigw issuer ui
-WEB_SERVICES            := verifier ui
-WORKER_SERVICES         := registry mockas apigw issuer
+SERVICES                := verifier registry apigw issuer
+WEB_SERVICES            := verifier
+WORKER_SERVICES         := registry apigw issuer
 
 # Docker Configuration
 DOCKER_REGISTRY         := docker.sunet.se/iam_vc
@@ -41,10 +41,8 @@ PKCS11_TAG              := pkcs11
 BUILD_CONFIGS           := \
 	verifier:static: \
 	registry:static: \
-	mockas:static: \
 	apigw:static: \
 	issuer:static: \
-	ui:static: \
 	vc20-test-server:static:
 
 # ==============================================================================
@@ -431,7 +429,7 @@ proto: proto-status proto-registry proto-issuer ## Generate all protobuf files
 
 PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=vc --go-grpc_out=. --go_opt=module=vc --go_out=.
 
-# Catch-all for services without explicit proto targets (e.g. apigw, mockas)
+# Catch-all for services without explicit proto targets (e.g. apigw)
 proto-%:
 	@echo "No protobuf for $*"
 
@@ -455,7 +453,7 @@ swagger-fmt: ## Format Swagger annotations
 
 SWAGGER_OPTS := --parseGoList=false --packageName docs
 
-# Catch-all for services without explicit swagger targets (e.g. mockas)
+# Catch-all for services without explicit swagger targets
 swagger-%:
 	@echo "No swagger docs for $*"
 	@mkdir -p docs

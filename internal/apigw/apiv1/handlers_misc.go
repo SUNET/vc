@@ -15,7 +15,7 @@ func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*
 	probes := model.Probes{}
 	probes = append(probes, c.db.Status(ctx))
 
-	status := probes.Check("apigw")
+	reply := probes.Check("apigw")
 
-	return status, nil
+	return reply, nil
 }

@@ -2,7 +2,9 @@ package httpserver
 
 import (
 	"context"
+	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"strings"
@@ -46,10 +48,14 @@ type Service struct {
 	authProviders   *authproviders.Service
 	dataSources     *datasources.Service
 	cacheService    *cache.Service
+	spocpEngine     *httphelpers.SafeEngine
 }
 
 // New creates a new httpserver service
 func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, log *logger.Log) (*Service, error) {
+	// Register []string with gob so gin-contrib/sessions can serialize session values of that type
+	gob.Register([]string{})
+
 	s := &Service{
 		cfg:            cfg,
 		log:            log.New("httpserver"),
@@ -71,7 +77,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		},
 	}
 
-	if s.cfg.APIGW.APIServer.TLS.Enable {
+	if s.cfg.APIGW.APIServer.TLS.Enable || s.cfg.APIGW.APIServer.TrustProxyTLS {
 		s.sessionsOptions.Secure = true
 	}
 
@@ -141,8 +147,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		return nil, err
 	}
 
-	rgRestricted := rgRoot.Group("/")
-	rgRestricted.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
+	// Build SPOCP engine once — shared between API and session auth paths.
+	s.spocpEngine, err = httphelpers.BuildSPOCPEngine(s.cfg.APIGW.APIServer.APIAuth)
+	if err != nil {
+		return nil, fmt.Errorf("spocp engine: %w", err)
+	}
+
+	apiAuthMiddleware, err := s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS)
+	if err != nil {
+		return nil, fmt.Errorf("api_auth middleware: %w", err)
+	}
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -153,7 +167,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "credential", http.StatusOK, s.endpointVCICredential)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "credential-offer/:credential_offer_uuid", http.StatusOK, s.endpointVCICredentialOfferURI)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "deferred_credential", http.StatusOK, s.endpointVCIDeferredCredential)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRestricted, http.MethodPost, "notification", http.StatusNoContent, s.endpointVCINotification)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "notification", http.StatusNoContent, s.endpointVCINotification)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer", http.StatusOK, s.endpointVCIMetadata)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
@@ -182,12 +196,29 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
 
+	// Admin UI routes (login/logout only — CRUD goes through the real API)
+	if s.cfg.APIGW.AdminUIEnable {
+		rgAdminUI := rgRoot.Group("/ui")
+		rgAdminUI.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "", http.StatusOK, s.endpointAdminUI)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/login", http.StatusFound, s.endpointAdminLogin)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/callback", http.StatusFound, s.endpointAdminCallback)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/status", http.StatusOK, s.endpointAdminStatus)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodPost, "/logout", http.StatusOK, s.endpointAdminLogout)
+	}
+
 	rgDocs := rgRoot.Group("/swagger")
 	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	rgAPIv1 := rgRoot.Group("api/v1")
 
-	rgAPIv1.Use(s.httpHelpers.Middleware.APIAuth(ctx, "apigw", s.cfg.APIGW.APIServer.APIAuth, cacheService.JWKS))
+	// Add session middleware so admin session cookies are available for auth check.
+	rgAPIv1.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+	// CSRF protection for session-authenticated users.
+	rgAPIv1.Use(s.httpHelpers.Middleware.CSRFProtection(adminSessionKey))
+	// Unified auth: session users go through the same SPOCP method+path+subject
+	// check as API clients. Both paths use the shared SPOCP engine.
+	rgAPIv1.Use(s.httpHelpers.Middleware.SessionOrAPIAuth(adminSessionKey, apiAuthMiddleware, s.spocpEngine, "apigw"))
 
 	// Identity mapping endpoints
 	rgIdentity := rgAPIv1.Group("/identity")
@@ -195,16 +226,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/resolve", http.StatusOK, s.endpointIdentityMappingResolve)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPut, "/mapping", http.StatusOK, s.endpointIdentityMappingUpdate)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodDelete, "/mapping", http.StatusOK, s.endpointIdentityMappingDelete)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodGet, "/mapping/search", http.StatusOK, s.endpointIdentityMappingSearch)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/bulk", http.StatusOK, s.endpointIdentityMappingBulkCreate)
 
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "", http.StatusOK, s.endpointDatastoreGet)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "", http.StatusNoContent, s.endpointDatastoreDelete)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPut, "", http.StatusOK, s.endpointDatastoreReplace)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/resolve", http.StatusOK, s.endpointDatastoreResolve)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/list", http.StatusOK, s.endpointDatastoreList)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPut, "/identity", http.StatusOK, s.endpointDatastoreAddIdentity)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "/identity", http.StatusNoContent, s.endpointDatastoreDeleteIdentity)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "/search", http.StatusOK, s.endpointDatastoreSearch)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/bulk", http.StatusOK, s.endpointDatastoreBulkUpload)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)

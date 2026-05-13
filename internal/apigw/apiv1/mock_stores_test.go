@@ -173,6 +173,41 @@ func (m *memoryDatastoreStore) DeleteIdentity(_ context.Context, query *db.Delet
 	return nil
 }
 
+func (m *memoryDatastoreStore) Search(_ context.Context, _ *db.SearchDocumentsQuery) ([]*model.CompleteDocument, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*model.CompleteDocument
+	for _, doc := range m.docs {
+		result = append(result, doc)
+	}
+	return result, nil
+}
+
+func (m *memoryDatastoreStore) SaveMany(ctx context.Context, docs []*model.CompleteDocument) error {
+	for _, doc := range docs {
+		if err := m.Save(ctx, doc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *memoryDatastoreStore) ListAuthenticSources(_ context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seen := map[string]struct{}{}
+	for _, doc := range m.docs {
+		if doc.Meta.AuthenticSource != "" {
+			seen[doc.Meta.AuthenticSource] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
+	}
+	return result, nil
+}
+
 // memoryIdentityMappingStore is an in-memory implementation of db.IdentityMappingStore for testing.
 type memoryIdentityMappingStore struct {
 	mu       sync.RWMutex
@@ -262,6 +297,25 @@ func (m *memoryIdentityMappingStore) DeleteMapping(_ context.Context, query *db.
 		return helpers.ErrNoIdentityFound
 	}
 	delete(m.mappings, key)
+	return nil
+}
+
+func (m *memoryIdentityMappingStore) SearchMappings(_ context.Context, _ *db.SearchMappingsQuery) ([]*model.IdentityMapping, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*model.IdentityMapping
+	for _, mapping := range m.mappings {
+		result = append(result, mapping)
+	}
+	return result, nil
+}
+
+func (m *memoryIdentityMappingStore) CreateMappings(ctx context.Context, mappings []*model.IdentityMapping) error {
+	for _, mapping := range mappings {
+		if err := m.CreateMapping(ctx, mapping); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

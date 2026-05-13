@@ -1008,8 +1008,6 @@ func sectionLabel(yamlKey string) string {
 		"issuer":       "Issuer",
 		"verifier":     "Verifier",
 		"registry":     "Registry",
-		"mock_as":      "Mock AS",
-		"ui":           "UI",
 		"secrets_file": "Secrets File Reference",
 	}
 	if l, ok := labels[yamlKey]; ok {

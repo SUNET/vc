@@ -46,6 +46,9 @@ type APIServer struct {
 	TLS            TLS     `yaml:"tls" validate:"omitempty"`
 	APIAuth        APIAuth `yaml:"api_auth"`
 	CORS           *CORS   `yaml:"cors,omitempty" validate:"omitempty"`
+	// TrustProxyTLS forces the Secure flag on session cookies even when TLS is not
+	// enabled on this server. Use this when running behind a TLS-terminating reverse proxy.
+	TrustProxyTLS bool `yaml:"trust_proxy_tls" default:"false"`
 }
 
 // CORS holds the CORS configuration
@@ -448,15 +451,7 @@ type AdminGUI struct {
 	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
-// MockAS holds the configuration for the Mock Authentic Source service used for testing
-type MockAS struct {
-	// APIServer is the HTTP API server configuration
-	APIServer APIServer `yaml:"api_server" validate:"required"`
-	// DatastoreURL is the datastore service URL
-	DatastoreURL string `yaml:"datastore_url" validate:"required" doc_example:"\"http://datastore:8080\""`
-	// BootstrapUsers is the list of user IDs to bootstrap on startup
-	BootstrapUsers []string `yaml:"bootstrap_users" default:"[\"100\", \"102\"]"`
-}
+
 
 // VerifierInbound groups inbound credential verification configuration
 type VerifierInbound struct {
@@ -722,56 +717,72 @@ type SupportedCredentialConfig struct {
 	Scopes []string `yaml:"scopes" validate:"required"`
 }
 
-// APIAuth configures the authentication method for the /api/v1 route group.
-// Exactly one of BasicAuth.Enable or JWT.Enable may be true.
-// If neither is enabled, no authentication is applied (open access).
-type APIAuth struct {
-	// BasicAuth holds the HTTP Basic authentication configuration.
-	// When enabled, requests are allowed or rejected based on username/password only.
-	BasicAuth APIAuthBasic `yaml:"basic_auth"`
-	// JWT holds the JWT Bearer token authentication configuration.
-	// When enabled, requests are validated via JWKS and optionally authorized
-	// against SPOCP (S-expression) rules for fine-grained per-endpoint control.
-	JWT APIAuthJWT `yaml:"jwt"`
-}
-
-// APIAuthBasic holds the HTTP Basic authentication configuration.
-// This is a simple allow/deny mechanism – valid credentials grant full access.
-type APIAuthBasic struct {
-	// Enable enables HTTP Basic authentication
-	Enable bool `yaml:"enable" default:"false"`
-	// Users is a username to password mapping
-	Users map[string]string `yaml:"users"`
-}
-
-// APIAuthJWT holds the configuration for JWT Bearer token authentication
-// with optional SPOCP-based authorization.
+// APIAuth configures authentication for the API route group (datastore, identity mapping, admin UI)
+// JWKS and OIDC are mutually exclusive
+// If neither is enabled, no authentication is applied (open access)
 //
-// When Rules (and/or RulesFile) are configured, each request is checked against
-// the SPOCP engine. A query of the form
+// When Rules (and/or RulesFile) are configured, each authenticated request is
+// checked against a SPOCP engine. A query of the form
 //
-//	(api (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
+//	(vc (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
 //
 // is evaluated; the request is allowed only if a matching rule exists.
 // The <SERVICE> value is supplied by the calling service at middleware
 // registration time. When two services share endpoints, rules for one
 // service do not grant access to the other.
-// When no rules are configured, any valid JWT grants access.
-type APIAuthJWT struct {
-	// Enable enables JWT Bearer token authentication
+// When no rules are configured, any valid Bearer JWT grants access.
+type APIAuth struct {
+	// JWKS holds the static JWKS Bearer token authentication configuration
+	// When enabled, requests are validated against a manually configured JWKS URL
+	JWKS APIAuthJWKS `yaml:"jwks"`
+	// OIDC holds the OIDC Bearer token authentication configuration
+	// When enabled, the JWKS endpoint is auto-discovered from the issuer's
+	// .well-known/openid-configuration and Bearer JWTs are validated locally
+	// The RP fields (client_id, redirect_uri, etc.) also enable the admin UI
+	// login flow via OIDC redirect
+	OIDC APIAuthOIDC `yaml:"oidc"`
+	// Rules are SPOCP S-expression authorization rules loaded into an in-process engine
+	// When non-empty the middleware builds a query per request and checks it
+	// Rules apply regardless of whether JWKS or OIDC is the active auth method
+	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice))\"]"`
+	// RulesFile is an optional path to a file containing SPOCP rules (one per line)
+	// Rules from this file are loaded in addition to the inline Rules list
+	RulesFile string `yaml:"rules_file,omitempty"`
+}
+
+// APIAuthJWKS holds the configuration for static JWKS Bearer token authentication
+type APIAuthJWKS struct {
+	// Enable enables static JWKS Bearer token authentication
 	Enable bool `yaml:"enable" default:"false"`
-	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures.
+	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures
 	JWKSURL string `yaml:"jwks_url" validate:"required_if=Enable true,omitempty,url" doc_example:"\"https://auth.example.com/.well-known/jwks.json\""`
-	// Issuer is the expected "iss" claim. Tokens with a different issuer are rejected.
+	// Issuer is the expected "iss" claim. Tokens with a different issuer are rejected
 	Issuer string `yaml:"issuer" validate:"required_if=Enable true"`
+	// Audience is the expected "aud" claim. Tokens that do not contain this audience are rejected
+	Audience string `yaml:"audience" validate:"required_if=Enable true"`
+}
+
+// APIAuthOIDC holds the configuration for OIDC-based authentication.
+// It serves two purposes:
+//   - API auth: Bearer JWTs in Authorization headers are validated locally
+//     against the provider's JWKS (auto-discovered from IssuerURL).
+//   - Admin UI login: the RP fields (ClientID, RedirectURI, Scopes) enable
+//     an authorization-code redirect flow so admins log in via the OIDC provider.
+type APIAuthOIDC struct {
+	// Enable enables OIDC authentication
+	Enable bool `yaml:"enable" default:"false"`
+	// IssuerURL is the OIDC provider's issuer URL used for discovery and "iss" claim validation.
+	IssuerURL string `yaml:"issuer_url" validate:"required_if=Enable true,omitempty,url" doc_example:"\"https://auth.example.com\""`
 	// Audience is the expected "aud" claim. Tokens that do not contain this audience are rejected.
 	Audience string `yaml:"audience" validate:"required_if=Enable true"`
-	// Rules are SPOCP S-expression authorization rules loaded into an in-process engine.
-	// When non-empty the middleware builds a query per request and checks it.
-	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))\"]"`
-	// RulesFile is an optional path to a file containing SPOCP rules (one per line).
-	// Rules from this file are loaded in addition to the inline Rules list.
-	RulesFile string `yaml:"rules_file,omitempty"`
+	// ClientID is the OAuth2 client identifier registered with the OIDC provider.
+	ClientID string `yaml:"client_id" validate:"required_if=Enable true"`
+	// ClientSecret is the OAuth2 client secret. May be empty for public clients.
+	ClientSecret string `yaml:"client_secret"`
+	// RedirectURI is the callback URL for the admin UI OIDC login flow (e.g. "https://apigw.example.com/ui/callback").
+	RedirectURI string `yaml:"redirect_uri" validate:"required_if=Enable true,omitempty,url" doc_example:"\"https://apigw.example.com/ui/callback\""`
+	// Scopes are the OAuth2/OIDC scopes to request (default: ["openid"]).
+	Scopes []string `yaml:"scopes"`
 }
 
 // IssuerMetadata holds the OpenID4VCI issuer metadata configuration
@@ -840,6 +851,9 @@ type APIGWAuthProviders struct {
 type APIGW struct {
 	// APIServer is the HTTP API server configuration
 	APIServer APIServer `yaml:"api_server" validate:"required"`
+	// AdminUIEnable enables the admin web UI. When false (default), the /ui routes are not registered.
+	// This must be explicitly set to true to enable the admin interface.
+	AdminUIEnable bool `yaml:"admin_ui_enable" default:"false"`
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// DataSources maps credential types to their data sources
@@ -897,28 +911,7 @@ type OAuthServer struct {
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
 }
 
-// UI holds the configuration for the User Interface service
-type UI struct {
-	// APIServer is the HTTP API server configuration
-	APIServer APIServer `yaml:"api_server" validate:"required"`
-	// Username is the UI login username
-	Username string `yaml:"username" validate:"required" default:"admin"`
-	// Password is the UI login password
-	Password string `yaml:"password" validate:"required"`
-	// SessionInactivityTimeoutInSeconds is the session inactivity timeout in seconds
-	SessionInactivityTimeoutInSeconds int `yaml:"session_inactivity_timeout_in_seconds" validate:"required" default:"1800"`
-	Services                          struct {
-		APIGW struct {
-			BaseURL string `yaml:"base_url"`
-		} `yaml:"apigw"`
-		MockAS struct {
-			BaseURL string `yaml:"base_url"`
-		} `yaml:"mockas"`
-		Verifier struct {
-			BaseURL string `yaml:"base_url"`
-		} `yaml:"verifier"`
-	} `yaml:"services"`
-}
+
 
 // Cfg is the main configuration structure for this application
 type Cfg struct {
@@ -927,8 +920,7 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
-	MockAS   *MockAS   `yaml:"mock_as" validate:"omitempty"`
-	UI       *UI       `yaml:"ui" validate:"omitempty"`
+
 }
 
 // LookupCredentialSources returns full data source information for a credential type
