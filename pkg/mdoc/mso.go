@@ -186,7 +186,7 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 				return nil, nil, fmt.Errorf("failed to encode wrapper: %w", err)
 			}
 
-			// D. Save the wrapper for the IssuerSigned structure
+			//Save the wrapper for the IssuerSigned structure
 			currentNSTaggedItems = append(currentNSTaggedItems, wrapper)
 
 			// Compute digest of the ENTIRE wrapperEncoded block
