@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"github.com/fxamacker/cbor/v2"
 	"time"
 )
 
@@ -103,10 +104,10 @@ type IssuanceRequest struct {
 	ValidUntil *time.Time
 }
 
-// IssuedDocument contains the issued mDL document.
-type IssuedDocument struct {
+// IssuedDocumentMdoc contains the issued mDL document.
+type IssuedDocumentMdoc struct {
 	// The complete Document structure ready for transmission
-	Document *Document
+	DocumentMdoc *DeviceResponseZk
 	// The signed MSO
 	SignedMSO *COSESign1
 	// Validity information
@@ -115,85 +116,102 @@ type IssuedDocument struct {
 }
 
 // Issue creates a signed mDL document from the request.
-func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocument, error) {
+func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	if req.DevicePublicKey == nil {
 		return nil, fmt.Errorf("device public key is required")
 	}
 	if req.MDoc == nil {
 		return nil, fmt.Errorf("mDL data is required")
 	}
-
 	// Convert device public key to COSE key
 	deviceKey, err := publicKeyToCOSEKey(req.DevicePublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert device key: %w", err)
 	}
-
 	// Determine validity period
 	validFrom := time.Now().UTC()
 	if req.ValidFrom != nil {
 		validFrom = req.ValidFrom.UTC()
 	}
-
 	validUntil := validFrom.Add(i.defaultValidity)
 	if req.ValidUntil != nil {
 		validUntil = req.ValidUntil.UTC()
 	}
-
 	// Build the MSO
 	builder := NewMSOBuilder(DocType).
 		WithDigestAlgorithm(i.digestAlgorithm).
 		WithValidity(validFrom, validUntil).
 		WithDeviceKey(deviceKey).
 		WithSigner(i.signerKey, i.certChain)
-
 	// Add all mandatory data elements
 	if err := i.addMandatoryElements(builder, req.MDoc); err != nil {
 		return nil, fmt.Errorf("failed to add mandatory elements: %w", err)
 	}
-
 	// Add optional data elements
 	if err := i.addOptionalElements(builder, req.MDoc); err != nil {
 		return nil, fmt.Errorf("failed to add optional elements: %w", err)
 	}
-
 	// Add driving privileges
 	if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
 		return nil, fmt.Errorf("failed to add driving privileges: %w", err)
 	}
-
 	// Build and sign the MSO
 	signedMSO, issuerNameSpaces, err := builder.Build()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build MSO: %w", err)
 	}
-
+	issuerSignedNS := make(map[string][]any)
+	for ns, items := range issuerNameSpaces {
+		anyItems := make([]any, len(items))
+		for i, item := range items {
+			anyItems[i] = item
+		}
+		issuerSignedNS[ns] = anyItems
+	}
+	issuerAuthArray := []any{
+		signedMSO.Protected,
+		signedMSO.Unprotected,
+		signedMSO.Payload,
+		signedMSO.Signature,
+	}
+	emptySigArray := []any{
+		[]byte{},
+		map[any]any{},
+		nil,
+		[]byte{},
+	}
 	// Encode the signed MSO
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
-	issuerAuthBytes, err := encoder.Marshal(signedMSO)
+	emptyMapBytes, _ := encoder.Marshal(map[string]any{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode issuer auth: %w", err)
+		return nil, fmt.Errorf("failed to encode device auth: %w", err)
 	}
-
-	// Create the Document - convert IssuerNameSpaces to IssuerSignedItems
-	issuerSignedNS := convertToIssuerSignedItems(issuerNameSpaces, encoder)
-
-	doc := &Document{
+	innerDoc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
+		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: issuerSignedNS,
-			IssuerAuth: issuerAuthBytes,
+			IssuerAuth: issuerAuthArray,
+		},
+		DeviceSigned: DeviceSignedMdoc{
+			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
+			DeviceAuth: DeviceAuthMdoc{
+				DeviceSignature: emptySigArray,
+			},
 		},
 	}
-
-	issuedDoc := &IssuedDocument{
-		Document:   doc,
-		SignedMSO:  signedMSO,
-		ValidFrom:  validFrom,
-		ValidUntil: validUntil,
+	response := &DeviceResponseZk{
+		Version:   "1.0",
+		Documents: []any{innerDoc},
+		Status:    0,
+	}
+	issuedDoc := &IssuedDocumentMdoc{
+		DocumentMdoc: response,
+		SignedMSO:    signedMSO,
+		ValidFrom:    validFrom,
+		ValidUntil:   validUntil,
 	}
 	return issuedDoc, nil
 }
@@ -432,14 +450,14 @@ type BatchIssuanceRequest struct {
 
 // BatchIssuanceResult contains results from batch issuance.
 type BatchIssuanceResult struct {
-	Issued []IssuedDocument
+	Issued []IssuedDocumentMdoc
 	Errors []error
 }
 
 // IssueBatch issues multiple mDL documents.
 func (i *Issuer) IssueBatch(batch BatchIssuanceRequest) *BatchIssuanceResult {
 	result := &BatchIssuanceResult{
-		Issued: make([]IssuedDocument, 0, len(batch.Requests)),
+		Issued: make([]IssuedDocumentMdoc, 0, len(batch.Requests)),
 		Errors: make([]error, 0),
 	}
 

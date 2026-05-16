@@ -209,7 +209,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 
-	mdocBytes, err := encoder.Marshal(issued.Document)
+	mdocBytes, err := encoder.Marshal(issued.DocumentMdoc)
 	if err != nil {
 		c.log.Error(err, "failed to encode mdoc")
 		return nil, fmt.Errorf("failed to encode mdoc: %w", err)

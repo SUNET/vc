@@ -334,3 +334,40 @@ type ItemsRequest struct {
 	// RequestInfo contains optional additional request information.
 	RequestInfo map[string]any `json:"requestInfo,omitempty" cbor:"requestInfo,omitempty"`
 }
+
+type DeviceResponseZk struct {
+	Version   string `cbor:"version"`
+	Documents []any  `cbor:"documents"`
+	Status    uint64 `cbor:"status"`
+}
+
+// Document represents the top-level mDL document structure.
+type DocumentMdoc struct {
+	DocType      string                    `json:"docType" cbor:"docType" validate:"required"`
+	IssuerSigned IssuerSignedMdoc          `json:"issuerSigned" cbor:"issuerSigned" validate:"required"`
+	DeviceSigned DeviceSignedMdoc          `json:"deviceSigned" cbor:"deviceSigned" validate:"required"`
+	Errors       map[string]map[string]int `json:"errors,omitempty" cbor:"errors,omitempty"`
+}
+
+// IssuerSignedMdoc aligns with the nested COSE_Sign1 array format.
+type IssuerSignedMdoc struct {
+	NameSpaces map[string][]any `json:"nameSpaces" cbor:"nameSpaces"`
+
+	// IssuerAuth is changed to 'any' to allow the 4-element COSE_Sign1
+	// array to be encoded as a nested structure rather than a byte slice.
+	IssuerAuth any `json:"issuerAuth" cbor:"issuerAuth" validate:"required"`
+}
+
+// DeviceSignedMdoc handles the DeviceNameSpaces Tag and DeviceAuth structure.
+type DeviceSignedMdoc struct {
+	// NameSpaces is changed to 'any' to allow for cbor.Tag{Number: 24}.
+	NameSpaces any `json:"nameSpaces" cbor:"nameSpaces"`
+
+	DeviceAuth DeviceAuthMdoc `json:"deviceAuth" cbor:"deviceAuth" validate:"required"`
+}
+
+// DeviceAuth ensures the signature is treated as a nested COSE signature.
+type DeviceAuthMdoc struct {
+	// DeviceSignature is an array: [protected, unprotected, payload, signature]
+	DeviceSignature any `json:"deviceSignature" cbor:"deviceSignature"`
+}

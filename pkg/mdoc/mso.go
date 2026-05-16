@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"github.com/fxamacker/cbor/v2"
 	"hash"
 	"maps"
 	"slices"
@@ -147,7 +148,7 @@ func (b *MSOBuilder) AddDataElementWithRandom(namespace, elementID string, value
 }
 
 // Build creates the signed MSO and IssuerNameSpaces.
-func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
+func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	if b.signerKey == nil {
 		return nil, nil, fmt.Errorf("signer key is required")
 	}
@@ -163,35 +164,47 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 
-	// Build IssuerNameSpaces and compute digests
-	issuerNameSpaces := make(IssuerNameSpaces)
-	digestIDMapping := make(DigestIDMapping)
-
+	issuerNameSpaces := make(map[string][]cbor.Tag)
+	valueDigests := make(map[string]map[uint][]byte)
 	for namespace, items := range b.namespaces {
-		taggedItems := make([]TaggedCBOR, 0, len(items))
-		valueDigests := make(ValueDigests)
+		currentNSTaggedItems := make([]cbor.Tag, 0, len(items))
+		nsValueDigests := make(map[uint][]byte)
 
 		for _, item := range items {
-			// Encode the MSOIssuerSignedItem
-			encoded, err := encoder.Marshal(item)
+			// Encode the inner map (MSOIssuerSignedItem)
+			innerEncoded, err := encoder.Marshal(item)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to encode item %s: %w", item.ElementID, err)
 			}
 
-			// Wrap in tag 24 (encoded CBOR data item)
-			taggedItems = append(taggedItems, TaggedCBOR{Data: encoded})
+			// Wrap in Tag 24
+			wrapper := cbor.Tag{Number: 24, Content: innerEncoded}
 
-			// Compute digest of the encoded item
-			digest, err := b.computeDigest(encoded)
+			// Encode the WRAPPER itself
+			wrapperEncoded, err := encoder.Marshal(wrapper)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to encode wrapper: %w", err)
+			}
+
+			// D. Save the wrapper for the IssuerSigned structure
+			currentNSTaggedItems = append(currentNSTaggedItems, wrapper)
+
+			// Compute digest of the ENTIRE wrapperEncoded block
+			digest, err := b.computeDigest(wrapperEncoded)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to compute digest for %s: %w", item.ElementID, err)
 			}
-			valueDigests[item.DigestID] = digest
+			nsValueDigests[item.DigestID] = digest
 		}
 
-		issuerNameSpaces[namespace] = taggedItems
-		digestIDMapping[namespace] = valueDigests
+		// Store results for this namespace
+		issuerNameSpaces[namespace] = currentNSTaggedItems
+		valueDigests[namespace] = nsValueDigests
 	}
+
+	signedTime := time.Now().UTC().Format(time.RFC3339)
+	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
+	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
 	// Get device key bytes
 	deviceKeyBytes, err := b.deviceKey.Bytes()
@@ -199,20 +212,18 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 		return nil, nil, fmt.Errorf("failed to encode device key: %w", err)
 	}
 
-	// Build the MSO structure
-	mso := MobileSecurityObject{
-		Version:         "1.0",
-		DigestAlgorithm: string(b.digestAlgorithm),
-		ValueDigests:    b.convertDigestMapping(digestIDMapping),
-		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+	mso := map[string]any{
+		"version":         "1.0",
+		"digestAlgorithm": string(b.digestAlgorithm),
+		"docType":         b.docType,
+		"valueDigests":    valueDigests,
+		"deviceKeyInfo": map[string]any{
+			"deviceKey": deviceKeyBytes,
 		},
-		DocType: b.docType,
-		ValidityInfo: ValidityInfo{
-			Signed:         time.Now().UTC(),
-			ValidFrom:      b.validFrom.UTC(),
-			ValidUntil:     b.validUntil.UTC(),
-			ExpectedUpdate: nil,
+		"validityInfo": map[string]any{
+			"signed":     cbor.Tag{Number: 0, Content: signedTime},
+			"validFrom":  cbor.Tag{Number: 0, Content: validFromStr},
+			"validUntil": cbor.Tag{Number: 0, Content: validUntilStr},
 		},
 	}
 
@@ -220,6 +231,13 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 	msoBytes, err := encoder.Marshal(mso)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to encode MSO: %w", err)
+	}
+
+	// MSO must also be wrapped in Tag 24 before signing
+	msoTagged := cbor.Tag{Number: 24, Content: msoBytes}
+	msoTaggedBytes, err := encoder.Marshal(msoTagged)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to encode tagged MSO: %w", err)
 	}
 
 	// Determine algorithm from signer key
@@ -234,7 +252,7 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 		certDER = append(certDER, cert.Raw)
 	}
 
-	signedMSO, err := Sign1(msoBytes, b.signerKey, algorithm, certDER, nil)
+	signedMSO, err := Sign1(msoTaggedBytes, b.signerKey, algorithm, certDER, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to sign MSO: %w", err)
 	}
