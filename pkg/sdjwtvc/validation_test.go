@@ -302,6 +302,46 @@ func TestValidateDocument_NilVCTM(t *testing.T) {
 	assert.Contains(t, err.Error(), "VCTM is nil")
 }
 
+// ValidateClaims operates on fully assembled credential claims, so mandatory
+// JWT/SD-JWT envelope claims (iss, exp, cnf, vct, iat, ...) declared by the
+// VCTM must be present. The issuer-supplied exemption used by ValidateDocument
+// must not leak into ValidateClaims.
+func TestValidateClaims_RequiresMandatoryEnvelopeClaims(t *testing.T) {
+	iss := "iss"
+	exp := "exp"
+	cnf := "cnf"
+	givenName := "given_name"
+
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: []*string{&iss}, Mandatory: true},
+			{Path: []*string{&exp}, Mandatory: true},
+			{Path: []*string{&cnf}, Mandatory: true},
+			{Path: []*string{&givenName}, SD: "always", Mandatory: true},
+		},
+	}
+
+	// Assembled-credential payload missing envelope claims — should fail.
+	claims := map[string]any{
+		"given_name": "John",
+	}
+
+	err := ValidateClaims(claims, vctm)
+	require.Error(t, err)
+
+	validationErr, ok := err.(*ValidationErrors)
+	require.True(t, ok)
+
+	missing := map[string]bool{}
+	for _, e := range validationErr.Errors {
+		missing[e.Field] = true
+	}
+	assert.True(t, missing["$.iss"], "expected 'iss' to be reported missing")
+	assert.True(t, missing["$.exp"], "expected 'exp' to be reported missing")
+	assert.True(t, missing["$.cnf"], "expected 'cnf' to be reported missing")
+}
+
 func TestValidateClaims_ArrayValues(t *testing.T) {
 	nationality := "nationality"
 

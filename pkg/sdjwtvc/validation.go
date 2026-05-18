@@ -52,26 +52,40 @@ func (e *ValidationErrors) HasErrors() bool {
 	return len(e.Errors) > 0
 }
 
-// ValidateDocument validates document data against VCTM metadata
-// documentData should be JSON-encoded document claims
-// vctm is the Verifiable Credential Type Metadata defining the schema
+// ValidateDocument validates document data against VCTM metadata.
+// documentData should be JSON-encoded document claims as supplied by the data
+// source — i.e. the input to the issuer pipeline before JWT/SD-JWT envelope
+// claims (iss, exp, cnf, vct, iat, ...) are added at signing time. Those
+// envelope claims are not expected to be present here even when the VCTM marks
+// them mandatory; see isIssuerSuppliedClaim.
 func ValidateDocument(documentData []byte, vctm *VCTM) error {
 	if vctm == nil {
 		return fmt.Errorf("VCTM is nil")
 	}
 
-	// Parse document data
 	var claims map[string]any
 	if err := json.Unmarshal(documentData, &claims); err != nil {
 		return fmt.Errorf("invalid document data: %w", err)
 	}
 
-	// Validate against VCTM
-	return ValidateClaims(claims, vctm)
+	return validateClaims(claims, vctm, true)
 }
 
-// ValidateClaims validates claims map against VCTM metadata
+// ValidateClaims validates a fully assembled claims set against VCTM metadata.
+// All mandatory claims declared by the VCTM must be present, including JWT/
+// SD-JWT envelope claims such as iss, exp, cnf, vct, and iat. Use this when
+// validating an assembled credential payload. To validate document-data prior
+// to issuance — where envelope claims are filled in later by the issuer
+// pipeline — use ValidateDocument instead.
 func ValidateClaims(claims map[string]any, vctm *VCTM) error {
+	return validateClaims(claims, vctm, false)
+}
+
+// validateClaims is the shared implementation behind ValidateClaims and
+// ValidateDocument. When skipIssuerSupplied is true, VCTM mandatory entries
+// for JWT/SD-JWT envelope claims that the issuer pipeline supplies at signing
+// time are not required to be present (see isIssuerSuppliedClaim).
+func validateClaims(claims map[string]any, vctm *VCTM, skipIssuerSupplied bool) error {
 	if vctm == nil {
 		return fmt.Errorf("VCTM is nil")
 	}
@@ -85,7 +99,7 @@ func ValidateClaims(claims map[string]any, vctm *VCTM) error {
 	// Check mandatory claims are present
 	for _, claim := range vctm.Claims {
 		if claim.Mandatory {
-			if isIssuerSuppliedClaim(claim.Path) {
+			if skipIssuerSupplied && isIssuerSuppliedClaim(claim.Path) {
 				continue
 			}
 			claimPath := claim.Path
@@ -203,19 +217,23 @@ func validateClaimValue(claim Claim, value any) error {
 	}
 }
 
-// ValidateClaimPaths validates that all claims in the document have corresponding paths in VCTM
-// This is a stricter validation that ensures no extra claims are present
+// ValidateClaimPaths validates that all claims in the document have
+// corresponding paths in VCTM. This is a stricter validation that ensures no
+// extra claims are present. It operates on document-data semantics, matching
+// ValidateDocument: VCTM-mandatory envelope claims supplied by the issuer
+// pipeline are not required, and the extras check ignores standard JWT/SD-JWT
+// claims (see isStandardClaim).
 func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 	if !strict {
 		// Non-strict mode: just validate mandatory claims and known claims
-		return ValidateClaims(claims, vctm)
+		return validateClaims(claims, vctm, true)
 	}
 
 	// Strict mode: ensure all claims in document are defined in VCTM
 	errors := &ValidationErrors{}
 
 	// First do standard validation
-	if err := ValidateClaims(claims, vctm); err != nil {
+	if err := validateClaims(claims, vctm, true); err != nil {
 		if validationErrs, ok := err.(*ValidationErrors); ok {
 			errors.Errors = append(errors.Errors, validationErrs.Errors...)
 		} else {
@@ -258,6 +276,9 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 // and friends) fills in at signing time, rather than something the data source
 // must provide in documentData. VCTMs commonly mark these mandatory:true for
 // verifier-side conformance, but document-data validation must skip them.
+// This exemption is only applied in document-data paths (ValidateDocument,
+// ValidateClaimPaths) — ValidateClaims validates strictly, since a fully
+// assembled credential must carry these envelope claims.
 func isIssuerSuppliedClaim(path []*string) bool {
 	if len(path) != 1 || path[0] == nil {
 		return false
