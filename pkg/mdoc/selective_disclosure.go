@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"errors"
 	"fmt"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // SelectiveDisclosure provides methods for selectively disclosing mDL data elements.
@@ -12,11 +13,11 @@ import (
 // data elements to release from the requested elements.
 type SelectiveDisclosure struct {
 	// issuerSigned contains the complete issuer-signed data
-	issuerSigned *IssuerSigned
+	issuerSigned *IssuerSignedMdoc
 }
 
 // NewSelectiveDisclosure creates a new SelectiveDisclosure handler from issuer-signed data.
-func NewSelectiveDisclosure(issuerSigned *IssuerSigned) (*SelectiveDisclosure, error) {
+func NewSelectiveDisclosure(issuerSigned *IssuerSignedMdoc) (*SelectiveDisclosure, error) {
 	if issuerSigned == nil {
 		return nil, errors.New("issuer signed data is required")
 	}
@@ -26,36 +27,48 @@ func NewSelectiveDisclosure(issuerSigned *IssuerSigned) (*SelectiveDisclosure, e
 	}, nil
 }
 
-// Disclose creates a new IssuerSigned containing only the specified elements.
-// The request maps namespaces to element identifiers to disclose.
-func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSigned, error) {
+func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSignedMdoc, error) {
 	if request == nil {
 		return nil, errors.New("request is required")
 	}
 
-	disclosed := &IssuerSigned{
-		NameSpaces: make(map[string][]IssuerSignedItem),
-		IssuerAuth: sd.issuerSigned.IssuerAuth, // MSO stays the same
+	disclosed := &IssuerSignedMdoc{
+		NameSpaces: make(map[string][]any),
+		IssuerAuth: sd.issuerSigned.IssuerAuth, // Keep the original signature/MSO
 	}
 
-	for namespace, elements := range request {
-		// Get items for this namespace
+	for namespace, requestedElements := range request {
 		items, ok := sd.issuerSigned.NameSpaces[namespace]
 		if !ok {
-			continue // Namespace not available
+			continue
 		}
 
-		// Build set of requested elements
+		// Build set for O(1) lookup
 		requested := make(map[string]bool)
-		for _, elem := range elements {
+		for _, elem := range requestedElements {
 			requested[elem] = true
 		}
 
-		// Filter items
-		var disclosedItems []IssuerSignedItem
-		for _, item := range items {
+		var disclosedItems []any
+		for _, anyItem := range items {
+			var item IssuerSignedItem
+
+			// 1. Peek inside the item to see the Identifier
+			if tag, ok := anyItem.(cbor.Tag); ok {
+				content, _ := tag.Content.([]byte)
+				if err := cbor.Unmarshal(content, &item); err != nil {
+					continue
+				}
+			} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
+				item = concrete
+			} else {
+				continue
+			}
+
+			// 2. If it's requested, append the ORIGINAL 'anyItem' (the Tag)
+			// Do NOT append the 'item' struct!
 			if requested[item.ElementIdentifier] {
-				disclosedItems = append(disclosedItems, item)
+				disclosedItems = append(disclosedItems, anyItem)
 			}
 		}
 
@@ -68,7 +81,7 @@ func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSig
 }
 
 // DiscloseFromItemsRequest creates a new IssuerSigned from an ItemsRequest.
-func (sd *SelectiveDisclosure) DiscloseFromItemsRequest(request *ItemsRequest) (*IssuerSigned, error) {
+func (sd *SelectiveDisclosure) DiscloseFromItemsRequest(request *ItemsRequest) (*IssuerSignedMdoc, error) {
 	if request == nil {
 		return nil, errors.New("items request is required")
 	}
@@ -92,7 +105,24 @@ func (sd *SelectiveDisclosure) GetAvailableElements() map[string][]string {
 
 	for namespace, items := range sd.issuerSigned.NameSpaces {
 		var elements []string
-		for _, item := range items {
+		for _, anyItem := range items {
+			var item IssuerSignedItem
+
+			if tag, ok := anyItem.(cbor.Tag); ok {
+				content, ok := tag.Content.([]byte)
+				if !ok {
+					continue
+				}
+				if err := cbor.Unmarshal(content, &item); err != nil {
+					continue
+				}
+			} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
+				item = concrete
+			} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
+				item = *pItem
+			} else {
+				continue
+			}
 			elements = append(elements, item.ElementIdentifier)
 		}
 		available[namespace] = elements
@@ -108,7 +138,30 @@ func (sd *SelectiveDisclosure) HasElement(namespace, element string) bool {
 		return false
 	}
 
-	for _, item := range items {
+	for _, anyItem := range items {
+		var item IssuerSignedItem
+
+		// 1. Unwrap the CBOR Tag 24 (The "Wire" state)
+		if tag, ok := anyItem.(cbor.Tag); ok {
+			content, ok := tag.Content.([]byte)
+			if !ok {
+				continue
+			}
+			// We only need to unmarshal to check the ElementIdentifier
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				continue
+			}
+		} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
+			// 2. Handle the "Application" state (Raw struct)
+			item = concrete
+		} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
+			// 3. Handle pointer to struct
+			item = *pItem
+		} else {
+			continue
+		}
+
+		// 4. Check if this is the element we are looking for
 		if item.ElementIdentifier == element {
 			return true
 		}
@@ -120,7 +173,7 @@ func (sd *SelectiveDisclosure) HasElement(namespace, element string) bool {
 // DeviceResponseBuilder builds a DeviceResponse with selective disclosure.
 type DeviceResponseBuilder struct {
 	docType           string
-	issuerSigned      *IssuerSigned
+	issuerSigned      *IssuerSignedMdoc
 	deviceKey         crypto.Signer
 	sessionTranscript []byte
 	request           *ItemsRequest
@@ -138,7 +191,7 @@ func NewDeviceResponseBuilder(docType string) *DeviceResponseBuilder {
 }
 
 // WithIssuerSigned sets the issuer-signed data.
-func (b *DeviceResponseBuilder) WithIssuerSigned(issuerSigned *IssuerSigned) *DeviceResponseBuilder {
+func (b *DeviceResponseBuilder) WithIssuerSigned(issuerSigned *IssuerSignedMdoc) *DeviceResponseBuilder {
 	b.issuerSigned = issuerSigned
 	return b
 }
@@ -183,7 +236,7 @@ func (b *DeviceResponseBuilder) AddError(namespace, element string, errorCode in
 }
 
 // Build creates the DeviceResponse.
-func (b *DeviceResponseBuilder) Build() (*DeviceResponse, error) {
+func (b *DeviceResponseBuilder) Build() (*DeviceResponseMdoc, error) {
 	if b.issuerSigned == nil {
 		return nil, errors.New("issuer signed data is required")
 	}
@@ -198,7 +251,7 @@ func (b *DeviceResponseBuilder) Build() (*DeviceResponse, error) {
 	}
 
 	// Perform selective disclosure if request is provided
-	var disclosedIssuerSigned *IssuerSigned
+	var disclosedIssuerSigned *IssuerSignedMdoc
 	if b.request != nil {
 		disclosedIssuerSigned, err = sd.DiscloseFromItemsRequest(b.request)
 		if err != nil {
@@ -217,23 +270,10 @@ func (b *DeviceResponseBuilder) Build() (*DeviceResponse, error) {
 		disclosedIssuerSigned = b.issuerSigned
 	}
 
-	// Build device authentication
-	var deviceAuth DeviceAuth
-	var deviceNameSpaces []byte
-
+	var deviceAuth DeviceAuthMdoc
+	var deviceNameSpaces cbor.Tag
 	if b.useMAC && b.macKey != nil {
-		// Build MAC authentication
-		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
-			WithSessionTranscript(b.sessionTranscript).
-			WithSessionKey(b.macKey).
-			Build()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build device MAC: %w", err)
-		}
-		deviceAuth = deviceSigned.DeviceAuth
-		deviceNameSpaces = deviceSigned.NameSpaces
 	} else if b.deviceKey != nil {
-		// Build signature authentication
 		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
 			WithSessionTranscript(b.sessionTranscript).
 			WithDeviceKey(b.deviceKey).
@@ -241,31 +281,27 @@ func (b *DeviceResponseBuilder) Build() (*DeviceResponse, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to build device signature: %w", err)
 		}
-		deviceAuth = deviceSigned.DeviceAuth
-		deviceNameSpaces = deviceSigned.NameSpaces
+		deviceAuth = DeviceAuthMdoc{
+			DeviceSignature: deviceSigned.DeviceAuth.DeviceSignature,
+		}
+		deviceNameSpaces = cbor.Tag{Number: 24, Content: deviceSigned.NameSpaces}
 	} else {
 		return nil, errors.New("device key or MAC key is required")
 	}
 
-	// Build document
-	doc := Document{
+	doc := &DocumentMdoc{
 		DocType:      b.docType,
 		IssuerSigned: *disclosedIssuerSigned,
-		DeviceSigned: DeviceSigned{
+		DeviceSigned: DeviceSignedMdoc{
 			NameSpaces: deviceNameSpaces,
 			DeviceAuth: deviceAuth,
 		},
 	}
 
-	// Add errors if any
-	if len(b.errors) > 0 {
-		doc.Errors = b.errors
-	}
-
-	return &DeviceResponse{
+	return &DeviceResponseMdoc{
 		Version:   "1.0",
-		Documents: []Document{doc},
-		Status:    0, // OK
+		Documents: []any{doc},
+		Status:    0,
 	}, nil
 }
 
@@ -407,7 +443,7 @@ func (p *DisclosurePolicy) CanAutoDisclose(request *ItemsRequest) bool {
 }
 
 // EncodeDeviceResponse encodes a DeviceResponse to CBOR.
-func EncodeDeviceResponse(response *DeviceResponse) ([]byte, error) {
+func EncodeDeviceResponse(response *DeviceResponseMdoc) ([]byte, error) {
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, err
@@ -416,13 +452,13 @@ func EncodeDeviceResponse(response *DeviceResponse) ([]byte, error) {
 }
 
 // DecodeDeviceResponse decodes a DeviceResponse from CBOR.
-func DecodeDeviceResponse(data []byte) (*DeviceResponse, error) {
+func DecodeDeviceResponse(data []byte) (*DeviceResponseMdoc, error) {
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, err
 	}
 
-	var response DeviceResponse
+	var response DeviceResponseMdoc
 	if err := encoder.Unmarshal(data, &response); err != nil {
 		return nil, err
 	}
