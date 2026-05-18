@@ -335,7 +335,7 @@ type ItemsRequest struct {
 	RequestInfo map[string]any `json:"requestInfo,omitempty" cbor:"requestInfo,omitempty"`
 }
 
-type DeviceResponseZk struct {
+type DeviceResponseMdoc struct {
 	Version   string `cbor:"version"`
 	Documents []any  `cbor:"documents"`
 	Status    uint64 `cbor:"status"`
@@ -370,4 +370,7 @@ type DeviceSignedMdoc struct {
 type DeviceAuthMdoc struct {
 	// DeviceSignature is an array: [protected, unprotected, payload, signature]
 	DeviceSignature any `json:"deviceSignature" cbor:"deviceSignature"`
+
+	// DeviceMac is the COSE_Mac0 device MAC (mutually exclusive with DeviceSignature).
+	DeviceMac []byte `json:"deviceMac,omitempty" cbor:"deviceMac,omitempty"`
 }

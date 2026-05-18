@@ -107,7 +107,7 @@ type IssuanceRequest struct {
 // IssuedDocumentMdoc contains the issued mDL document.
 type IssuedDocumentMdoc struct {
 	// The complete Document structure ready for transmission
-	DocumentMdoc *DeviceResponseZk
+	DocumentMdoc *DeviceResponseMdoc
 	// The signed MSO
 	SignedMSO *COSESign1
 	// Validity information
@@ -202,7 +202,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 			},
 		},
 	}
-	response := &DeviceResponseZk{
+	response := &DeviceResponseMdoc{
 		Version:   "1.0",
 		Documents: []any{innerDoc},
 		Status:    0,

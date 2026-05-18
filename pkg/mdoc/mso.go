@@ -178,15 +178,14 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 			}
 
 			// Wrap in Tag 24
-			wrapper := cbor.Tag{Number: 24, Content: innerEncoded}
-
+			wrapper := cbor.Tag{Number: TagEncodedCBOR, Content: innerEncoded}
 			// Encode the WRAPPER itself
 			wrapperEncoded, err := encoder.Marshal(wrapper)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to encode wrapper: %w", err)
 			}
 
-			//Save the wrapper for the IssuerSigned structure
+			// Save the wrapper for the IssuerSigned structure
 			currentNSTaggedItems = append(currentNSTaggedItems, wrapper)
 
 			// Compute digest of the ENTIRE wrapperEncoded block
@@ -234,7 +233,8 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	}
 
 	// MSO must also be wrapped in Tag 24 before signing
-	msoTagged := cbor.Tag{Number: 24, Content: msoBytes}
+	msoTagged := cbor.Tag{Number: TagEncodedCBOR, Content: msoBytes}
+
 	msoTaggedBytes, err := encoder.Marshal(msoTagged)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to encode tagged MSO: %w", err)
@@ -327,9 +327,20 @@ func VerifyDigest(mso *MobileSecurityObject, namespace string, item *IssuerSigne
 	if err != nil {
 		return fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
-	encoded, err := encoder.Marshal(item)
+
+	itemBytes, err := encoder.Marshal(item)
 	if err != nil {
 		return fmt.Errorf("failed to encode item: %w", err)
+	}
+
+	taggedItem := cbor.Tag{
+		Number:  TagEncodedCBOR,
+		Content: itemBytes,
+	}
+
+	encoded, err := encoder.Marshal(taggedItem)
+	if err != nil {
+		return fmt.Errorf("failed to encode tagged item: %w", err)
 	}
 
 	var actualDigest []byte
