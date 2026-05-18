@@ -316,9 +316,16 @@ func seedDocument(t *testing.T, scope, identityMappingID, givenName, familyName,
 		DocumentData: map[string]any{
 			"given_name":        givenName,
 			"family_name":       familyName,
-			"birth_date":        birthDate,
+			"birthdate":         birthDate,
+			"date_of_expiry":    "2030-01-01T00:00:00Z",
 			"issuing_country":   "SE",
 			"issuing_authority": "Test Authority",
+			"nationalities":     []string{"SE"},
+			"place_of_birth": map[string]any{
+				"country":  "SE",
+				"locality": "Stockholm",
+				"region":   "Stockholm",
+			},
 		},
 	}
 

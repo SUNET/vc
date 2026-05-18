@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -138,7 +139,7 @@ func main() {
 	writeJSON(outputDir, "microcredential.json", genMicroCredential(pids, &input))
 	writeJSON(outputDir, "identity_mappings.json", genIdentityMappings(pids, &input))
 
-	fmt.Printf("Generated %d credential files for %d persons in %s\n", 8, len(pids), outputDir)
+	fmt.Printf("Generated 7 credential files and identity_mappings.json for %d persons in %s\n", len(pids), outputDir)
 }
 
 // --- PID (urn:eudi:pid:1, ARF 1.7.1 / Rulebook v1.0) ---
@@ -179,7 +180,7 @@ func genPID(pids []string, input *InputFile) map[string]*vcclient.UploadRequest 
 			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
 			"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
 			"sex":                            or_(pidExt.Sex, "0"),
-			"email":                          or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", toLower(p.FamilyName))),
+			"email":                          or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", strings.ReplaceAll(toLower(p.FamilyName), " ", "_"))),
 			"phone_number":                   or_(pidExt.MobilePhoneNumber, "+46700000000"),
 			"address": map[string]any{
 				"locality":       or_(pidExt.ResidentCity, "Stockholm"),
@@ -242,7 +243,7 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
 			"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
 			"sex":                            or_(pidExt.Sex, "0"),
-			"email":                          or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", toLower(p.FamilyName))),
+			"email":                          or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", strings.ReplaceAll(toLower(p.FamilyName), " ", "_"))),
 			"phone_number":                   or_(pidExt.MobilePhoneNumber, "+46700000000"),
 			"address": map[string]any{
 				"locality":       or_(pidExt.ResidentCity, "Stockholm"),
