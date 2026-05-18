@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+
 	internalcache "github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
@@ -895,24 +896,97 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, resp)
-				assert.NotEmpty(t, resp.AccessToken)
 				assert.Equal(t, "Bearer", resp.TokenType)
 				assert.NotEmpty(t, resp.IDToken)
-				assert.NotEmpty(t, resp.RefreshToken)
-				assert.Greater(t, resp.ExpiresIn, 0)
+
+				// With EnableUserInfo=false (default), access/refresh tokens are not issued
+				assert.Empty(t, resp.AccessToken)
+				assert.Empty(t, resp.RefreshToken)
+				assert.Equal(t, 0, resp.ExpiresIn)
 
 				// Verify session was updated
 				authCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, tt.request.Code)
 				if authCtx != nil {
 					assert.True(t, authCtx.Forfeited)
 					assert.Equal(t, cache.SessionStatusTokenIssued, authCtx.Status)
-					assert.Equal(t, resp.AccessToken, authCtx.AccessToken)
 					assert.Equal(t, resp.IDToken, authCtx.IDToken)
-					assert.Equal(t, resp.RefreshToken, authCtx.RefreshToken)
 				}
 			}
 		})
 	}
+}
+
+// TestToken_EnableUserInfoTrue tests token response when EnableUserInfo is true
+func TestToken_EnableUserInfoTrue(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = true
+	client.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration = 3600
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID:      "session-userinfo",
+		Status:         cache.SessionStatusCodeIssued,
+		ClientID:       "test-client",
+		RedirectURI:    "https://example.com/callback",
+		Scopes:         []string{"openid", "profile"},
+		Nonce:          "test-nonce",
+		Code:           "userinfo-code",
+		Forfeited:      false,
+		CodeExpiresAt:  time.Now().Add(10 * time.Minute).Unix(),
+		WalletID:       "wallet-789",
+		VerifiedClaims: map[string]any{"name": "Jane Doe"},
+	}
+	client.cacheService.AuthContext.Create(ctx, authCtx) // #nosec G104
+
+	testClient := &db.Client{
+		ClientID:                "test-client",
+		ClientSecretHash:        hashPassword(t, "secret"),
+		TokenEndpointAuthMethod: "client_secret_basic",
+		RedirectURIs:            []string{"https://example.com/callback"},
+	}
+	mockDB.Clients.Create(ctx, testClient) // #nosec G104
+
+	key := generateTestRSAKey(t)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	resp, err := client.Token(ctx, &TokenRequest{
+		GrantType:    "authorization_code",
+		Code:         "userinfo-code",
+		ClientID:     "test-client",
+		ClientSecret: "secret",
+		RedirectURI:  "https://example.com/callback",
+	})
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "Bearer", resp.TokenType)
+	assert.NotEmpty(t, resp.IDToken)
+	assert.NotEmpty(t, resp.AccessToken)
+	assert.Equal(t, 3600, resp.ExpiresIn)
+
+	// access_token is now a JWT — no refresh_token in stateless mode
+	assert.Empty(t, resp.RefreshToken)
+
+	// Verify the access_token is a valid JWT with at+jwt type
+	parsedAT, err := jwt.Parse(resp.AccessToken, func(t *jwt.Token) (any, error) {
+		return key.Public(), nil
+	})
+	assert.NoError(t, err)
+	require.NotNil(t, parsedAT)
+	assert.Equal(t, "at+jwt", parsedAT.Header["typ"])
+	claims, ok := parsedAT.Claims.(jwt.MapClaims)
+	require.True(t, ok)
+	assert.Equal(t, "https://verifier.example.com", claims["iss"])
+	assert.Equal(t, "test-client", claims["aud"])
+	assert.Equal(t, "Jane Doe", claims["name"])
+
+	// Session should only have id_token stored — access token is self-contained
+	updatedCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, "userinfo-code")
+	require.NotNil(t, updatedCtx)
+	assert.True(t, updatedCtx.Forfeited)
+	assert.Equal(t, cache.SessionStatusTokenIssued, updatedCtx.Status)
+	assert.Equal(t, resp.IDToken, updatedCtx.IDToken)
 }
 
 // TestToken_RefreshTokenGrant tests the refresh token grant (currently unimplemented)
@@ -1619,75 +1693,69 @@ func TestPollSession(t *testing.T) {
 	}
 }
 
-// TestGetUserInfo tests the UserInfo endpoint
+// TestGetUserInfo tests the stateless UserInfo endpoint with JWT access tokens
 func TestGetUserInfo(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Create a session with verified claims
-	authCtx := &cache.AuthorizationContext{
-		SessionID:            "userinfo-session",
-		CreatedAt:            time.Now(),
-		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		ClientID:             "test-client",
-		Scopes:               []string{"openid", "profile", "email"},
-		AccessToken:          "test-access-token-123",
-		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
-		VerifiedClaims: map[string]any{
-			"sub":   "user-123",
-			"name":  "John Doe",
-			"email": "john@example.com",
+	client, _ := CreateTestClientWithMock(&model.Cfg{
+		Verifier: &model.Verifier{
+			PublicURL: "https://verifier.example.com",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:              "https://verifier.example.com",
+					SubjectType:         "public",
+					SubjectSalt:         "test-salt",
+					SessionDuration:     900,
+					CodeDuration:        600,
+					AccessTokenDuration: 3600,
+					IDTokenDuration:     3600,
+					EnableUserInfo:      true,
+				},
+			},
 		},
-	}
-	err := client.cacheService.AuthContext.Create(ctx, authCtx)
-	require.NoError(t, err)
+	})
 
-	// Create a session with expired token
-	expiredSession := &cache.AuthorizationContext{
-		SessionID:            "expired-session",
-		CreatedAt:            time.Now().Add(-2 * time.Hour),
-		ExpiresAt:            time.Now().Add(-1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		AccessToken:          "expired-token",
-		AccessTokenExpiresAt: time.Now().Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
-	}
-	err = client.cacheService.AuthContext.Create(ctx, expiredSession)
-	require.NoError(t, err)
+	// Set up signing key — required for both generating and validating JWT access tokens
+	key := generateTestRSAKey(t)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
 
-	// Create a session without 'sub' claim
-	sessionNoSub := &cache.AuthorizationContext{
-		SessionID:            "session-no-sub",
-		CreatedAt:            time.Now(),
-		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		ClientID:             "test-client",
-		AccessToken:          "token-no-sub",
-		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
-		VerifiedClaims: map[string]any{
-			"name":  "Jane Doe",
-			"email": "jane@example.com",
-		},
-	}
-	err = client.cacheService.AuthContext.Create(ctx, sessionNoSub)
-	require.NoError(t, err)
+	issuer := client.cfg.Verifier.Outbound.OIDCProvider.Issuer
 
-	// Create a session with non-string 'sub' claim
-	sessionNonStringSub := &cache.AuthorizationContext{
-		SessionID:            "session-non-string-sub",
-		CreatedAt:            time.Now(),
-		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		ClientID:             "test-client",
-		AccessToken:          "token-non-string-sub",
-		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
-		VerifiedClaims: map[string]any{
-			"sub":  12345, // Non-string sub
-			"name": "Bob Smith",
-		},
+	// Helper to create a signed JWT access token
+	makeAccessToken := func(claims jwt.MapClaims) string {
+		header := jwt.MapClaims{"typ": "at+jwt"}
+		token, err := jose.MakeJWT(ctx, header, claims, client.pkiSigner)
+		require.NoError(t, err)
+		return token
 	}
-	err = client.cacheService.AuthContext.Create(ctx, sessionNonStringSub)
-	require.NoError(t, err)
+
+	validToken := makeAccessToken(jwt.MapClaims{
+		"iss":   issuer,
+		"sub":   "user-123",
+		"aud":   "test-client",
+		"exp":   time.Now().Add(1 * time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+		"name":  "John Doe",
+		"email": "john@example.com",
+	})
+
+	expiredToken := makeAccessToken(jwt.MapClaims{
+		"iss": issuer,
+		"sub": "user-expired",
+		"aud": "test-client",
+		"exp": time.Now().Add(-1 * time.Hour).Unix(),
+		"iat": time.Now().Add(-2 * time.Hour).Unix(),
+	})
+
+	tokenWithClaims := makeAccessToken(jwt.MapClaims{
+		"iss":   issuer,
+		"sub":   "user-456",
+		"aud":   "test-client",
+		"exp":   time.Now().Add(1 * time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+		"name":  "Jane Doe",
+		"email": "jane@example.com",
+		"nonce": "should-be-stripped",
+	})
 
 	tests := []struct {
 		name      string
@@ -1696,56 +1764,66 @@ func TestGetUserInfo(t *testing.T) {
 		checkResp func(t *testing.T, resp UserInfoResponse)
 	}{
 		{
-			name: "valid access token",
+			name: "valid JWT access token",
 			req: &UserInfoRequest{
-				AccessToken: "test-access-token-123",
+				AccessToken: validToken,
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				// sub should be the generated pairwise identifier, not the raw "user-123" from VerifiedClaims
-				assert.NotEmpty(t, resp["sub"])
-				assert.NotEqual(t, "user-123", resp["sub"], "sub must not be overwritten by VerifiedClaims")
+				assert.Equal(t, "user-123", resp["sub"])
 				assert.Equal(t, "John Doe", resp["name"])
 				assert.Equal(t, "john@example.com", resp["email"])
+				// JWT-specific claims should be stripped
+				assert.Nil(t, resp["iss"])
+				assert.Nil(t, resp["aud"])
+				assert.Nil(t, resp["exp"])
+				assert.Nil(t, resp["iat"])
 			},
 		},
 		{
-			name: "invalid access token",
+			name: "invalid (non-JWT) access token",
 			req: &UserInfoRequest{
-				AccessToken: "invalid-token",
-			},
-			wantErr: ErrInvalidGrant,
-		},
-		{
-			name: "expired access token",
-			req: &UserInfoRequest{
-				AccessToken: "expired-token",
+				AccessToken: "not-a-valid-jwt",
 			},
 			wantErr: ErrInvalidGrant,
 		},
 		{
-			name: "valid token without sub claim",
+			name: "expired JWT access token",
 			req: &UserInfoRequest{
-				AccessToken: "token-no-sub",
+				AccessToken: expiredToken,
+			},
+			wantErr: ErrInvalidGrant,
+		},
+		{
+			name: "JWT with wrong issuer",
+			req: &UserInfoRequest{
+				AccessToken: func() string {
+					return makeAccessToken(jwt.MapClaims{
+						"iss": "https://evil.example.com",
+						"sub": "user-evil",
+						"aud": "test-client",
+						"exp": time.Now().Add(1 * time.Hour).Unix(),
+						"iat": time.Now().Unix(),
+					})
+				}(),
+			},
+			wantErr: ErrInvalidGrant,
+		},
+		{
+			name: "nonce and JWT claims are stripped from response",
+			req: &UserInfoRequest{
+				AccessToken: tokenWithClaims,
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				// Should still return a response, just with generated subject
-				assert.NotEmpty(t, resp["sub"])
+				assert.Equal(t, "user-456", resp["sub"])
 				assert.Equal(t, "Jane Doe", resp["name"])
 				assert.Equal(t, "jane@example.com", resp["email"])
-			},
-		},
-		{
-			name: "valid token with non-string sub claim",
-			req: &UserInfoRequest{
-				AccessToken: "token-non-string-sub",
-			},
-			wantErr: nil,
-			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				// Should still return a response with generated subject (non-string sub is ignored)
-				assert.NotEmpty(t, resp["sub"])
-				assert.Equal(t, "Bob Smith", resp["name"])
+				assert.Nil(t, resp["nonce"], "nonce should be stripped from userinfo response")
+				assert.Nil(t, resp["iss"])
+				assert.Nil(t, resp["aud"])
+				assert.Nil(t, resp["exp"])
+				assert.Nil(t, resp["iat"])
 			},
 		},
 	}
@@ -2307,7 +2385,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	assert.Equal(t, "https://verifier.example.com", metadata.Issuer)
 	assert.Equal(t, "https://verifier.example.com/authorize", metadata.AuthorizationEndpoint)
 	assert.Equal(t, "https://verifier.example.com/token", metadata.TokenEndpoint)
-	assert.Equal(t, "https://verifier.example.com/userinfo", metadata.UserInfoEndpoint)
+	assert.Empty(t, metadata.UserInfoEndpoint, "userinfo_endpoint should be omitted when EnableUserInfo is false")
 	assert.Equal(t, "https://verifier.example.com/jwks", metadata.JwksURI)
 
 	// Verify supported features
@@ -2333,7 +2411,9 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 
 	// Verify grant types
 	assert.Contains(t, metadata.GrantTypesSupported, "authorization_code")
-	assert.Contains(t, metadata.GrantTypesSupported, "refresh_token")
+	// refresh_token and implicit are only advertised when EnableUserInfo is true
+	assert.NotContains(t, metadata.GrantTypesSupported, "refresh_token")
+	assert.NotContains(t, metadata.GrantTypesSupported, "implicit")
 
 	// Verify PKCE support
 	assert.Contains(t, metadata.CodeChallengeMethodsSupported, "S256")
@@ -2411,9 +2491,10 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 					PublicURL: tt.externalURL,
 					Outbound: model.VerifierOutbound{
 						OIDCProvider: &model.OIDCOP{
-							Issuer:      tt.externalURL,
-							SubjectType: "public",
-							SubjectSalt: "test-salt",
+							Issuer:         tt.externalURL,
+							SubjectType:    "public",
+							SubjectSalt:    "test-salt",
+							EnableUserInfo: true,
 						},
 					},
 					Inbound: model.VerifierInbound{
