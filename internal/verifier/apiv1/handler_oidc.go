@@ -558,10 +558,9 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 	}
 
-	// Add grant types that require UserInfo/token support
-	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
-		metadata.GrantTypesSupported = append(metadata.GrantTypesSupported, "implicit")
-	}
+	// Note: "implicit" grant type is intentionally not advertised even when
+	// EnableUserInfo is true, because this OP only supports the authorization_code
+	// flow. The implicit flow is not implemented.
 
 	// Add configured credential scopes
 	for _, cred := range c.cfg.Verifier.Inbound.OpenID4VP.GetSupportedCredentials() {
@@ -971,6 +970,10 @@ type UserInfoResponse map[string]any
 // The endpoint is fully stateless: it validates the JWT signature and expiration
 // using the same signing key that issued the token, then returns the embedded claims.
 func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
+	if !c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		return nil, ErrRequestNotSupported
+	}
+
 	if c.pkiSigner == nil {
 		c.log.Error(nil, "Signing key not loaded, cannot validate access token")
 		return nil, ErrServerError
@@ -978,12 +981,18 @@ func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInf
 
 	// Parse and validate the JWT access token using the issuer's public key
 	claims := jwt.MapClaims{}
-	_, err := jwt.ParseWithClaims(req.AccessToken, claims, func(t *jwt.Token) (any, error) {
+	token, err := jwt.ParseWithClaims(req.AccessToken, claims, func(t *jwt.Token) (any, error) {
 		return c.pkiSigner.PublicKey(), nil
 	}, jwt.WithValidMethods([]string{c.pkiSigner.Algorithm()}),
 		jwt.WithIssuer(c.cfg.Verifier.Outbound.OIDCProvider.Issuer))
 	if err != nil {
 		c.log.Info("Access token validation failed", "error", err)
+		return nil, ErrInvalidGrant
+	}
+
+	// Ensure the JWT is an access token (RFC 9068 typ=at+jwt), not an id_token
+	if typ, _ := token.Header["typ"].(string); typ != "at+jwt" {
+		c.log.Info("Rejected non-access-token JWT at userinfo", "typ", typ)
 		return nil, ErrInvalidGrant
 	}
 

@@ -160,6 +160,13 @@ var (
 
 	// ErrNotFound is a generic not found error
 	ErrNotFound = errors.New("not found")
+
+	// ErrRequestNotSupported indicates the OP does not support the request
+	ErrRequestNotSupported = &OAuthError{
+		ErrorCode:        ErrCodeInvalidRequest,
+		ErrorDescription: "The request is not supported by this server",
+		HTTPStatus:       http.StatusNotFound,
+	}
 )
 
 // NewOAuthError creates a new OAuth error with a custom description
