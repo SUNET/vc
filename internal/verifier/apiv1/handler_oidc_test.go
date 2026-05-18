@@ -1696,7 +1696,23 @@ func TestPollSession(t *testing.T) {
 // TestGetUserInfo tests the stateless UserInfo endpoint with JWT access tokens
 func TestGetUserInfo(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(&model.Cfg{
+		Verifier: &model.Verifier{
+			PublicURL: "https://verifier.example.com",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:              "https://verifier.example.com",
+					SubjectType:         "public",
+					SubjectSalt:         "test-salt",
+					SessionDuration:     900,
+					CodeDuration:        600,
+					AccessTokenDuration: 3600,
+					IDTokenDuration:     3600,
+					EnableUserInfo:      true,
+				},
+			},
+		},
+	})
 
 	// Set up signing key — required for both generating and validating JWT access tokens
 	key := generateTestRSAKey(t)
