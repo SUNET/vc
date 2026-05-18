@@ -2,12 +2,12 @@
 package mdoc
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
-	"encoding/hex"
 	"fmt"
 	"github.com/fxamacker/cbor/v2"
 	"hash"
@@ -291,76 +291,64 @@ func (b *MSOBuilder) convertDigestMapping(mapping DigestIDMapping) map[string]ma
 
 // VerifyMSO verifies a signed MSO against the issuer certificate.
 func VerifyMSO(signedMSO *COSESign1, issuerCert *x509.Certificate) (*MobileSecurityObject, error) {
-	// Verify the COSE_Sign1 signature
 	if err := Verify1(signedMSO, signedMSO.Payload, issuerCert.PublicKey, nil); err != nil {
 		return nil, fmt.Errorf("MSO signature verification failed: %w", err)
 	}
-
-	// Decode the MSO payload
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 	var mso MobileSecurityObject
-	if err := encoder.Unmarshal(signedMSO.Payload, &mso); err != nil {
+	payload := signedMSO.Payload
+	var rawTag cbor.Tag
+	if err := encoder.Unmarshal(payload, &rawTag); err == nil && rawTag.Number == 24 {
+		if content, ok := rawTag.Content.([]byte); ok {
+			payload = content
+		}
+	}
+	if err := encoder.Unmarshal(payload, &mso); err != nil {
 		return nil, fmt.Errorf("failed to decode MSO: %w", err)
 	}
-
 	return &mso, nil
 }
 
-// VerifyDigest verifies that an IssuerSignedItem matches its digest in the MSO.
-func VerifyDigest(mso *MobileSecurityObject, namespace string, item *IssuerSignedItem) error {
-	// Get the expected digest from MSO
+// Change 'item *IssuerSignedItem' to 'anyItem any'
+func VerifyDigest(mso *MobileSecurityObject, namespace string, anyItem any) error {
+	tag, ok := anyItem.(cbor.Tag)
+	if !ok {
+		return fmt.Errorf("expected cbor.Tag, got %T", anyItem)
+	}
+
+	var item IssuerSignedItem
+	contentBytes, ok := tag.Content.([]byte)
+	if !ok {
+		return fmt.Errorf("tag content is not bytes")
+	}
+
+	if err := cbor.Unmarshal(contentBytes, &item); err != nil {
+		return fmt.Errorf("failed to peek into item: %w", err)
+	}
+
 	nsDigests, ok := mso.ValueDigests[namespace]
 	if !ok {
 		return fmt.Errorf("namespace %s not found in MSO", namespace)
 	}
-
 	expectedDigest, ok := nsDigests[item.DigestID]
 	if !ok {
-		return fmt.Errorf("digest ID %d not found in namespace %s", item.DigestID, namespace)
+		return fmt.Errorf("digest ID %d not found in MSO", item.DigestID)
 	}
 
-	// Compute the actual digest
-	encoder, err := NewCBOREncoder()
+	em, _ := cbor.CanonicalEncOptions().EncMode()
+	encodedFullItem, err := em.Marshal(tag)
 	if err != nil {
-		return fmt.Errorf("failed to create CBOR encoder: %w", err)
+		return fmt.Errorf("failed to marshal tagged item: %w", err)
 	}
 
-	itemBytes, err := encoder.Marshal(item)
-	if err != nil {
-		return fmt.Errorf("failed to encode item: %w", err)
-	}
+	h := sha256.Sum256(encodedFullItem)
+	actualDigest := h[:]
 
-	taggedItem := cbor.Tag{
-		Number:  TagEncodedCBOR,
-		Content: itemBytes,
-	}
-
-	encoded, err := encoder.Marshal(taggedItem)
-	if err != nil {
-		return fmt.Errorf("failed to encode tagged item: %w", err)
-	}
-
-	var actualDigest []byte
-	switch DigestAlgorithm(mso.DigestAlgorithm) {
-	case DigestAlgorithmSHA256:
-		h := sha256.Sum256(encoded)
-		actualDigest = h[:]
-	case DigestAlgorithmSHA384:
-		h := sha512.Sum384(encoded)
-		actualDigest = h[:]
-	case DigestAlgorithmSHA512:
-		h := sha512.Sum512(encoded)
-		actualDigest = h[:]
-	default:
-		return fmt.Errorf("unsupported digest algorithm: %s", mso.DigestAlgorithm)
-	}
-
-	// Compare digests
-	if hex.EncodeToString(actualDigest) != hex.EncodeToString(expectedDigest) {
-		return fmt.Errorf("digest mismatch for %s/%s", namespace, item.ElementIdentifier)
+	if !bytes.Equal(actualDigest, expectedDigest) {
+		return fmt.Errorf("digest mismatch for %s (ID %d)", item.ElementIdentifier, item.DigestID)
 	}
 
 	return nil

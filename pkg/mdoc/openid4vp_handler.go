@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/fxamacker/cbor/v2"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/trust"
@@ -74,10 +75,14 @@ func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MD
 		}
 	}
 
-	// Parse the DeviceResponse
-	deviceResponse, err := DecodeDeviceResponse(data)
+	encoder, err := NewCBOREncoder()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
+		return nil, err
+	}
+
+	var deviceResponse *DeviceResponseMdoc
+	if err := encoder.Unmarshal(data, &deviceResponse); err != nil {
+		return nil, err
 	}
 
 	// Verify the device response
@@ -99,14 +104,18 @@ func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MD
 	}
 
 	for i := range deviceResponse.Documents {
-		doc := &deviceResponse.Documents[i]
+		doc, ok := deviceResponse.Documents[i].(*DocumentMdoc)
+		if !ok {
+			return nil, fmt.Errorf("document at index %d is not a valid DocumentMdoc", i)
+		}
+
 		claims, err := h.extractDocumentClaims(doc)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract claims from %s: %w", doc.DocType, err)
 		}
+
 		result.Documents[doc.DocType] = claims
 	}
-
 	return result, nil
 }
 
@@ -127,11 +136,11 @@ func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 	claims := make(map[string]any)
 	for ns, nsItems := range dc.Namespaces {
 		for key, value := range nsItems {
-			// Use qualified name to avoid collisions
+			// Use qualified name to avoid collisions across different namespaces.
 			qualifiedKey := fmt.Sprintf("%s.%s", ns, key)
 			claims[qualifiedKey] = value
 
-			// Also add unqualified name for the primary namespace
+			// Also add unqualified name for the primary namespace.
 			if ns == Namespace {
 				claims[key] = value
 			}
@@ -141,7 +150,7 @@ func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 }
 
 // extractDocumentClaims extracts claims from a verified document.
-func (h *MDocHandler) extractDocumentClaims(doc *Document) (*MDocDocumentClaims, error) {
+func (h *MDocHandler) extractDocumentClaims(doc *DocumentMdoc) (*MDocDocumentClaims, error) {
 	claims := &MDocDocumentClaims{
 		DocType:    doc.DocType,
 		Namespaces: make(map[string]map[string]any),
@@ -149,7 +158,16 @@ func (h *MDocHandler) extractDocumentClaims(doc *Document) (*MDocDocumentClaims,
 
 	for ns, items := range doc.IssuerSigned.NameSpaces {
 		nsClaims := make(map[string]any)
-		for _, item := range items {
+		for _, anyItem := range items {
+			item, ok := anyItem.(IssuerSignedItem)
+			if !ok {
+				if pItem, ok := anyItem.(*IssuerSignedItem); ok {
+					item = *pItem
+				} else {
+					continue
+				}
+			}
+
 			nsClaims[item.ElementIdentifier] = item.ElementValue
 		}
 		claims.Namespaces[ns] = nsClaims
@@ -187,44 +205,52 @@ func IsMDocFormat(vpToken string) bool {
 }
 
 // ExtractMDocClaims extracts claims from an mdoc VP token without full verification.
-// Use this for testing or when verification is handled separately.
 func ExtractMDocClaims(vpToken string) (map[string]any, error) {
-	// Decode the VP token
+	// Decode the VP Token
 	data, err := base64.RawURLEncoding.DecodeString(vpToken)
 	if err != nil {
-		data, err = base64.StdEncoding.DecodeString(vpToken)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
-		}
+		return nil, err
 	}
 
-	// Parse the DeviceResponse
+	// Parse the device response
 	deviceResponse, err := DecodeDeviceResponse(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
+		return nil, err
 	}
 
-	if len(deviceResponse.Documents) == 0 {
-		return nil, errors.New("no documents in DeviceResponse")
-	}
-
-	// Extract claims from the first document (typically the mDL)
 	claims := make(map[string]any)
-	for _, doc := range deviceResponse.Documents {
-		for ns, items := range doc.IssuerSigned.NameSpaces {
-			for _, item := range items {
-				// Add with qualified name
-				qualifiedKey := fmt.Sprintf("%s.%s", ns, item.ElementIdentifier)
-				claims[qualifiedKey] = item.ElementValue
+	for _, anyDoc := range deviceResponse.Documents {
+		var doc DocumentMdoc
+		switch v := anyDoc.(type) {
+		case *DocumentMdoc:
+			doc = *v
+		case DocumentMdoc:
+			doc = v
+		case map[any]any:
+			b, _ := cbor.Marshal(v)
+			cbor.Unmarshal(b, &doc)
+		}
 
-				// Add unqualified for primary namespace
-				if ns == Namespace {
+		for ns, items := range doc.IssuerSigned.NameSpaces {
+			for _, anyItem := range items {
+				var item IssuerSignedItem
+
+				if tag, ok := anyItem.(cbor.Tag); ok {
+					content, _ := tag.Content.([]byte)
+					if err := cbor.Unmarshal(content, &item); err != nil {
+						continue
+					}
+				} else {
+					continue
+				}
+
+				claims[fmt.Sprintf("%s.%s", ns, item.ElementIdentifier)] = item.ElementValue
+				if ns == "org.iso.18013.5.1" {
 					claims[item.ElementIdentifier] = item.ElementValue
 				}
 			}
 		}
 	}
-
 	return claims, nil
 }
 

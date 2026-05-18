@@ -111,7 +111,7 @@ func createTestTrustList(t *testing.T) (trust.TrustEvaluator, *x509.Certificate,
 	return trustEvaluator, dsCert, dsKey, []*x509.Certificate{dsCert, iacaCert}
 }
 
-func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain []*x509.Certificate) *DeviceResponse {
+func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain []*x509.Certificate) *DeviceResponseMdoc {
 	t.Helper()
 
 	// Create issuer
@@ -162,13 +162,7 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 	}
 
 	// Build device response using the Document from issued
-	return &DeviceResponse{
-		Version: "1.0",
-		Documents: []Document{
-			*issued.Document,
-		},
-		Status: 0,
-	}
+	return issued.DocumentMdoc
 }
 
 func TestNewVerifier(t *testing.T) {
@@ -232,10 +226,13 @@ func TestVerifier_VerifyDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVerifier() error = %v", err)
 	}
-
 	response := createTestDeviceResponse(t, dsKey, certChain)
 
-	result := verifier.VerifyDocument(&response.Documents[0])
+	doc, ok := response.Documents[0].(*DocumentMdoc)
+	if !ok {
+		t.Fatalf("Expected *DocumentMdoc, got %T", response.Documents[0])
+	}
+	result := verifier.VerifyDocument(doc)
 
 	if !result.Valid {
 		t.Errorf("VerifyDocument() Valid = false, errors: %v", result.Errors)
@@ -249,7 +246,6 @@ func TestVerifier_VerifyDocument(t *testing.T) {
 		t.Error("VerifyDocument() IssuerCertificate is nil")
 	}
 
-	// Check that elements were verified
 	if len(result.VerifiedElements) == 0 {
 		t.Error("VerifyDocument() VerifiedElements is empty")
 	}
@@ -430,7 +426,7 @@ func TestVerificationResult_VerifyAgeOver(t *testing.T) {
 		t.Error("VerifyAgeOver(18) not found")
 	}
 	if !over18 {
-		t.Error("VerifyAgeOver(18) should be true")
+		t.Error(response.Version)
 	}
 
 	// Test age_over_21 (should be true)
@@ -621,9 +617,15 @@ func TestVerifier_VerifyIssuerSigned(t *testing.T) {
 	}
 
 	response := createTestDeviceResponse(t, dsKey, certChain)
-	doc := response.Documents[0]
+	doc, ok := response.Documents[0].(*DocumentMdoc)
+	if !ok {
+		t.Fatalf("expected *DocumentMdoc, got %T", response.Documents[0])
+	}
 
 	mso, elements, err := verifier.VerifyIssuerSigned(&doc.IssuerSigned, doc.DocType)
+	if err != nil {
+		t.Fatalf("VerifyIssuerSigned() error = %v", err)
+	}
 	if err != nil {
 		t.Fatalf("VerifyIssuerSigned() error = %v", err)
 	}
@@ -644,9 +646,8 @@ func TestVerifier_VerifyIssuerSigned(t *testing.T) {
 func TestVerifier_WithCustomClock(t *testing.T) {
 	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
-	// Create a verifier with a clock set to the future (after cert expiry)
 	futureClock := func() time.Time {
-		return time.Now().Add(50 * 365 * 24 * time.Hour) // 50 years in the future
+		return time.Now().Add(50 * 365 * 24 * time.Hour)
 	}
 
 	verifier, err := NewVerifier(VerifierConfig{

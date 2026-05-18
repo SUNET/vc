@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/fxamacker/cbor/v2"
 	"maps"
 	"time"
 
@@ -98,13 +99,13 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 }
 
 // VerifyDeviceResponse verifies a complete DeviceResponse.
-func (v *Verifier) VerifyDeviceResponse(response *DeviceResponse) *VerificationResult {
+func (v *Verifier) VerifyDeviceResponse(response *DeviceResponseMdoc) *VerificationResult {
 	return v.VerifyDeviceResponseWithContext(context.Background(), response)
 }
 
 // VerifyDeviceResponseWithContext verifies a complete DeviceResponse with a context.
 // The context is used for external trust evaluation when TrustEvaluator is configured.
-func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response *DeviceResponse) *VerificationResult {
+func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response *DeviceResponseMdoc) *VerificationResult {
 	result := &VerificationResult{
 		Valid:     true,
 		Documents: make([]DocumentVerificationResult, 0, len(response.Documents)),
@@ -124,8 +125,13 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 	}
 
 	// Verify each document
-	for _, doc := range response.Documents {
-		docResult := v.verifyDocumentWithContext(ctx, &doc)
+	for _, docAny := range response.Documents {
+		doc, ok := docAny.(*DocumentMdoc)
+		if !ok {
+			result.Valid = false
+			continue
+		}
+		docResult := v.verifyDocumentWithContext(ctx, doc)
 		result.Documents = append(result.Documents, docResult)
 		if !docResult.Valid {
 			result.Valid = false
@@ -136,12 +142,12 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 }
 
 // VerifyDocument verifies a single Document.
-func (v *Verifier) VerifyDocument(doc *Document) DocumentVerificationResult {
+func (v *Verifier) VerifyDocument(doc *DocumentMdoc) DocumentVerificationResult {
 	return v.verifyDocumentWithContext(context.Background(), doc)
 }
 
 // verifyDocumentWithContext verifies a single Document with a context for trust evaluation.
-func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *Document) DocumentVerificationResult {
+func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *DocumentMdoc) DocumentVerificationResult {
 	result := DocumentVerificationResult{
 		DocType:          doc.DocType,
 		Valid:            true,
@@ -201,23 +207,75 @@ func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *Document)
 	for namespace, items := range doc.IssuerSigned.NameSpaces {
 		result.VerifiedElements[namespace] = make(map[string]any)
 
-		for _, item := range items {
-			if err := VerifyDigest(mso, namespace, &item); err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("digest verification failed for %s/%s: %w",
-					namespace, item.ElementIdentifier, err))
+		for _, anyItem := range items {
+			if err := VerifyDigest(mso, namespace, anyItem); err != nil {
+				result.Errors = append(result.Errors, err)
 				result.Valid = false
 				continue
 			}
-			result.VerifiedElements[namespace][item.ElementIdentifier] = item.ElementValue
+			var item IssuerSignedItem
+			if tag, ok := anyItem.(cbor.Tag); ok {
+				content, _ := tag.Content.([]byte)
+				cbor.Unmarshal(content, &item)
+
+				result.VerifiedElements[namespace][item.ElementIdentifier] = item.ElementValue
+			}
 		}
 	}
 
 	return result
 }
 
-// parseIssuerAuth parses the IssuerAuth CBOR bytes into a COSESign1 structure.
-func (v *Verifier) parseIssuerAuth(data []byte) (*COSESign1, error) {
-	if len(data) == 0 {
+// parseIssuerAuthArray handles cases where IssuerAuth is already a decoded slice.
+func (v *Verifier) parseIssuerAuthArray(arr []any) (*COSESign1, error) {
+	if len(arr) != 4 {
+		return nil, fmt.Errorf("invalid COSE_Sign1 array length: %d", len(arr))
+	}
+
+	var sign1 COSESign1
+
+	// 1. Protected Headers
+	if p, ok := arr[0].([]byte); ok {
+		sign1.Protected = p
+	} else {
+		return nil, fmt.Errorf("invalid type for protected headers: %T", arr[0])
+	}
+
+	// 2. Unprotected Headers (usually a map)
+	if u, ok := arr[1].(map[any]any); ok {
+		sign1.Unprotected = u
+	}
+
+	// 3. Payload
+	if payload, ok := arr[2].([]byte); ok {
+		sign1.Payload = payload
+	} else if arr[2] == nil {
+		sign1.Payload = nil // Detached payload
+	} else {
+		return nil, fmt.Errorf("invalid type for payload: %T", arr[2])
+	}
+
+	// 4. Signature
+	if sig, ok := arr[3].([]byte); ok {
+		sign1.Signature = sig
+	} else {
+		return nil, fmt.Errorf("invalid type for signature: %T", arr[3])
+	}
+
+	return &sign1, nil
+}
+
+// parseIssuerAuth parses the IssuerAuth into a COSESign1 structure.
+func (v *Verifier) parseIssuerAuth(data any) (*COSESign1, error) {
+	byteData, ok := data.([]byte)
+	if !ok {
+		if arrayData, ok := data.([]any); ok {
+			return v.parseIssuerAuthArray(arrayData)
+		}
+		return nil, fmt.Errorf("expected []byte for issuer auth, got %T", data)
+	}
+
+	if len(byteData) == 0 {
 		return nil, errors.New("empty issuer auth data")
 	}
 
@@ -227,7 +285,7 @@ func (v *Verifier) parseIssuerAuth(data []byte) (*COSESign1, error) {
 	}
 
 	var sign1 COSESign1
-	if err := encoder.Unmarshal(data, &sign1); err != nil {
+	if err := encoder.Unmarshal(byteData, &sign1); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal COSE_Sign1: %w", err)
 	}
 
@@ -340,7 +398,7 @@ func (v *Verifier) validateMSO(mso *MobileSecurityObject, expectedDocType string
 
 // VerifyIssuerSigned verifies IssuerSigned data and returns verified elements.
 // This is a convenience method for verifying just the issuer-signed portion.
-func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSigned, docType string) (*MobileSecurityObject, map[string]map[string]any, error) {
+func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSignedMdoc, docType string) (*MobileSecurityObject, map[string]map[string]any, error) {
 	// Parse the IssuerAuth
 	issuerAuth, err := v.parseIssuerAuth(issuerSigned.IssuerAuth)
 	if err != nil {
@@ -380,12 +438,27 @@ func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSigned, docType string
 	for namespace, items := range issuerSigned.NameSpaces {
 		verifiedElements[namespace] = make(map[string]any)
 
-		for _, item := range items {
-			if err := VerifyDigest(mso, namespace, &item); err != nil {
-				return nil, nil, fmt.Errorf("digest verification failed for %s/%s: %w",
-					namespace, item.ElementIdentifier, err)
+		for _, rawItem := range items {
+			// 1. Pass the raw item (the any/cbor.Tag) to VerifyDigest.
+			if err := VerifyDigest(mso, namespace, rawItem); err != nil {
+				return nil, nil, fmt.Errorf("digest verification failed in namespace %s: %w", namespace, err)
 			}
-			verifiedElements[namespace][item.ElementIdentifier] = item.ElementValue
+
+			// 2. Now unmarshal the rawItem into the struct so we can read the fields.
+			var decodedItem IssuerSignedItem
+
+			// If rawItem is a cbor.Tag (Tag 24), we unmarshal its content.
+			if tag, ok := rawItem.(cbor.Tag); ok {
+				content, _ := tag.Content.([]byte)
+				if err := cbor.Unmarshal(content, &decodedItem); err != nil {
+					return nil, nil, fmt.Errorf("failed to decode verified item: %w", err)
+				}
+			} else {
+				return nil, nil, fmt.Errorf("unexpected item type: %T", rawItem)
+			}
+
+			// 3. Now we can safely use the fields from decodedItem
+			verifiedElements[namespace][decodedItem.ElementIdentifier] = decodedItem.ElementValue
 		}
 	}
 
