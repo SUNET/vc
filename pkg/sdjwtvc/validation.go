@@ -263,7 +263,7 @@ func isIssuerSuppliedClaim(path []*string) bool {
 		return false
 	}
 	switch *path[0] {
-	case "iss", "nbf", "exp", "cnf", "vct", "status", "sub", "iat":
+	case "iss", "nbf", "exp", "cnf", "vct", "status", "iat":
 		return true
 	}
 	return false
