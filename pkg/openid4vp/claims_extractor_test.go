@@ -788,3 +788,42 @@ func TestClaimsExtractor_ExtractClaimsFromVPToken_MDocFormat(t *testing.T) {
 	// Placeholder: in a full integration test we'd verify with actual mdoc tokens
 	_ = deviceResponse
 }
+
+func TestClaimsExtractor_ExtractClaimsFromVPToken_DCQLArray(t *testing.T) {
+	ce := NewClaimsExtractor()
+	ctx := t.Context()
+
+	t.Run("rejects_map_string_string_json", func(t *testing.T) {
+		// Old format: map[string]string — should fail because DCQL values must be arrays
+		vpToken := `{"cred1": "not-an-array"}`
+		_, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse DCQL vp_token")
+	})
+
+	t.Run("accepts_map_string_array_json", func(t *testing.T) {
+		// New format: map[string][]string — this is what spec-compliant wallets send
+		// The individual tokens will fail to parse (not real SD-JWTs), but the
+		// JSON unmarshal into map[string][]string must succeed
+		vpToken := `{"cred1": ["fake-token"]}`
+		_, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
+		require.Error(t, err)
+		// Error should be about parsing the token, NOT about JSON unmarshalling
+		assert.Contains(t, err.Error(), "failed to extract claims from credential")
+		assert.NotContains(t, err.Error(), "failed to parse DCQL vp_token")
+	})
+
+	t.Run("empty_array_rejected", func(t *testing.T) {
+		vpToken := `{"cred1": []}`
+		_, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty array")
+	})
+
+	t.Run("empty_object_rejected", func(t *testing.T) {
+		vpToken := `{}`
+		_, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no credentials")
+	})
+}
