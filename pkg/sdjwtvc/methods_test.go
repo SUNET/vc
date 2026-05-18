@@ -1013,7 +1013,7 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 	})
 
 	t.Run("both_array_element_and_whole_array_disclosure", func(t *testing.T) {
-		// This tests the real-world scenario from vctm_pid_arf_1_8.json
+		// This tests the real-world scenario from vctm_pid.json
 		// where both ["nationalities", null] and ["nationalities"] exist
 		// First: array element disclosure makes each element selectively disclosable
 		// Second: whole array disclosure makes the entire SD array recursively selectively disclosable
@@ -1167,9 +1167,9 @@ func TestMakeCredential_ArrayElementDisclosure(t *testing.T) {
 }
 
 func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
-	// Load the actual PID ARF 1.8 VCTM file
-	vctmData, err := os.ReadFile("../../metadata/vctm_pid_arf_1_8.json")
-	require.NoError(t, err, "Failed to read vctm_pid_arf_1_8.json")
+	// Load the actual PID VCTM file
+	vctmData, err := os.ReadFile("../../metadata/vctm_pid.json")
+	require.NoError(t, err, "Failed to read vctm_pid.json")
 
 	var vctm VCTM
 	err = json.Unmarshal(vctmData, &vctm)
@@ -1436,22 +1436,16 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 		assert.NotEqual(t, disclosure1, disclosure2, "Different claims should produce different disclosures")
 	})
 
-	t.Run("all_pid_arf_1_8_top_level_claims", func(t *testing.T) {
-		// Test with a complete PID document containing all ARF 1.8 fields
+	t.Run("all_pid_top_level_claims", func(t *testing.T) {
+		// Test with a complete PID document containing PID Rulebook v1.0 fields
 		data := map[string]any{
 			"family_name":                    "Doe",
 			"given_name":                     "John",
 			"birth_family_name":              "Smith",
 			"birthdate":                      "1990-01-01",
-			"age_in_years":                   33,
-			"age_birth_year":                 1990,
-			"age_over_18":                    true,
-			"age_over_21":                    true,
-			"age_over_65":                    false,
-			"nationality":                    []any{"US"},
-			"administrative_number":          "123456789",
-			"issuance_date":                  "2023-01-01",
-			"expiry_date":                    "2033-01-01",
+			"nationalities":                  []any{"US"},
+			"date_of_issuance":               "2023-01-01",
+			"date_of_expiry":                 "2033-01-01",
 			"issuing_authority":              "State Department",
 			"document_number":                "AB123456",
 			"issuing_country":                "US",
@@ -1464,8 +1458,8 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 			"family_name",
 			"given_name",
 			"birthdate",
-			"age_over_18",
-			"nationality",
+			"issuing_country",
+			"nationalities",
 		}
 
 		for _, claimName := range testClaims {
@@ -1523,8 +1517,7 @@ func TestProcessClaimPath_WithRealPIDVCTM(t *testing.T) {
 				"region":   "WA",
 				"country":  "US",
 			},
-			"nationality": []any{"US"},
-			"age_over_18": true,
+			"nationalities": []any{"US"},
 		}
 
 		// Test a subset of claims from the VCTM

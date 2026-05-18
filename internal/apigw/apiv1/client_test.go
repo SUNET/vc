@@ -44,11 +44,8 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 					"pda1": {
 						VCTMFilePath: "../../../metadata/vctm_pda1.json",
 					},
-					"pid_1_5": {
-						VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json",
-					},
-					"pid_1_8": {
-						VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json",
+					"pid": {
+						VCTMFilePath: "../../../metadata/vctm_pid.json",
 					},
 				},
 			},
@@ -127,13 +124,9 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 				Name:        "DC4EU PDA1 SD-JWT VCTM",
 				Description: "DC4EU Portable Document A1 (PDA1) SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 09), using a single language tag (en-US).",
 			},
-			"pid_1_5": {
-				Name:        "Example ARF 1.5 PID SD-JWT VCTM",
-				Description: "Example PID SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 09), using a single language tag (en-US). Adheres to PID Rulebook ARF 1.5 (urn:eu.europa.ec.eudi:pid:1).",
-			},
-			"pid_1_8": {
-				Name:        "Example ARF 1.8 PID SD-JWT TYPE METADATA",
-				Description: "Example PID SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 13), using a single language tag (en-US). Adheres to PID Rulebook ARF 1.8 (urn:eudi:pid:1) and later, as of the time of publication.",
+			"pid": {
+				Name:        "PID SD-JWT VC Type Metadata",
+				Description: "Person Identification Data per EUDI ARF PID Rulebook v1.0 (urn:eudi:pid:1).",
 			},
 		},
 		Wallets: map[string]string{
@@ -298,8 +291,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 					"openbadge_complete":     {VCTMFilePath: "../../../metadata/vctm_elm.json"},
 					"openbadge_endorsements": {VCTMFilePath: "../../../metadata/vctm_elm.json"},
 					"pda1":                   {VCTMFilePath: "../../../metadata/vctm_pda1.json"},
-					"pid_1_5":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json"},
-					"pid_1_8":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json"},
+					"pid":                    {VCTMFilePath: "../../../metadata/vctm_pid.json"},
 				},
 			},
 			APIGW: &model.APIGW{
@@ -344,7 +336,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 	t.Logf("Generated JSON output:\n%s", string(jsonBytes))
 
 	// Verify structure
-	assert.Len(t, output.Credentials, 10, "Should have 10 credential types")
+	assert.Len(t, output.Credentials, 9, "Should have 9 credential types")
 	assert.Len(t, output.Wallets, 5, "Should have 5 wallets")
 
 	// Spot check a few entries

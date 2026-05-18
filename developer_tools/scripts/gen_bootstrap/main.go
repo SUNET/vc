@@ -129,8 +129,7 @@ func main() {
 	// Sorted person IDs for deterministic output.
 	pids := sortedKeys(input.Persons)
 
-	writeJSON(outputDir, "pid-1-5.json", genPID15(pids, &input))
-	writeJSON(outputDir, "pid-1-8.json", genPID18(pids, &input))
+	writeJSON(outputDir, "pid.json", genPID(pids, &input))
 	writeJSON(outputDir, "eduid.json", genEduID(pids, &input))
 	writeJSON(outputDir, "ehic.json", genEHIC(pids, &input))
 	writeJSON(outputDir, "pda1.json", genPDA1(pids, &input))
@@ -139,42 +138,20 @@ func main() {
 	writeJSON(outputDir, "microcredential.json", genMicroCredential(pids, &input))
 	writeJSON(outputDir, "identity_mappings.json", genIdentityMappings(pids, &input))
 
-	fmt.Printf("Generated %d credential files for %d persons in %s\n", 9, len(pids), outputDir)
+	fmt.Printf("Generated %d credential files for %d persons in %s\n", 8, len(pids), outputDir)
 }
 
-// --- PID ARF 1.5 ---
+// --- PID (urn:eudi:pid:1, ARF 1.7.1 / Rulebook v1.0) ---
+//
+// Age verification claims (age_equal_or_over.*, age_over_*, age_in_years,
+// age_birth_year) were removed from PID in CIR 2024/2977; they now belong to
+// a separate Age Verification Attestation.
 
-func genPID15(pids []string, input *InputFile) map[string]*vcclient.UploadRequest {
-	result := make(map[string]*vcclient.UploadRequest, len(pids))
-	for _, pid := range pids {
-		p := input.Persons[pid]
-
-		authenticSourcePersonID := fmt.Sprintf("authentic_source_person_id_%s", pid)
-		dd := makePIDDocumentData(p, authenticSourcePersonID, &input.Defaults)
-		dd["arf"] = "1.5"
-
-		result[pid] = &vcclient.UploadRequest{
-			DocumentData: dd,
-			Meta: &model.MetaData{
-				AuthenticSource: "Skatteverket",
-				Scope:           "pid_1_5",
-				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_5_%s", pid),
-			},
-			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
-		}
-	}
-	return result
-}
-
-// --- PID ARF 1.8 ---
-
-func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadRequest {
+func genPID(pids []string, input *InputFile) map[string]*vcclient.UploadRequest {
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	now := time.Now()
 	for _, pid := range pids {
 		p := input.Persons[pid]
-
-		age := calcAge(p.BirthDate)
 
 		pidExt := p.PID
 		if pidExt == nil {
@@ -195,10 +172,8 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 			"nationalities":                  input.Defaults.Nationality,
 			"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "SUNET"),
 			"date_of_expiry":                 now.Add(365 * 24 * time.Hour).Format(time.RFC3339),
-			"expiry_date":                    now.Add(365 * 24 * time.Hour).Format("2006-01-02"),
 			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"arf":                            "1.8",
-			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid18-%s", pid)),
+			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid-%s", pid)),
 			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
 			"picture":                        minPNG,
 			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
@@ -215,23 +190,14 @@ func genPID18(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 				"street_address": or_(pidExt.ResidentStreetAddress, "Tulegatan"),
 				"region":         or_(pidExt.ResidentState, "Stockholm"),
 			},
-			"age_equal_or_over": map[string]any{
-				"14": age >= 14,
-				"16": age >= 16,
-				"18": age >= 18,
-				"21": age >= 21,
-				"65": age >= 65,
-			},
-			"age_in_years":   age,
-			"age_birth_year": parseBirthYear(p.BirthDate),
 		}
 
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "Skatteverket",
-				Scope:           "pid_1_8",
-				DocumentID:      fmt.Sprintf("document_id_pid_arf_1_8_%s", pid),
+				Scope:           "pid",
+				DocumentID:      fmt.Sprintf("document_id_pid_%s", pid),
 			},
 			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
 		}
@@ -536,50 +502,6 @@ func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.Id
 // --- Helpers ---
 
 const minPNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVQYV2P8z8DwHwYGBgZGMAEADigBCCGZkB0AAAAASUVORK5CYII="
-
-func makePIDDocumentData(p *Person, authenticSourcePersonID string, defaults *PersonDefaults) map[string]any {
-	age := calcAge(p.BirthDate)
-
-	pidExt := p.PID
-	if pidExt == nil {
-		pidExt = &PIDFields{}
-	}
-
-	return map[string]any{
-		"given_name":                     p.GivenName,
-		"family_name":                    p.FamilyName,
-		"birthdate":                      p.BirthDate,
-		"birth_place":                    defaults.BirthPlace,
-		"age_birth_year":                 parseBirthYear(p.BirthDate),
-		"age_in_years":                   age,
-		"age_over_14":                    age >= 14,
-		"age_over_16":                    age >= 16,
-		"age_over_18":                    age >= 18,
-		"age_over_21":                    age >= 21,
-		"age_over_65":                    age >= 65,
-		"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
-		"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
-		"sex":                            or_(pidExt.Sex, "0"),
-		"nationality":                    defaults.Nationality,
-		"issuing_country":                defaults.IssuingCountry,
-		"issuing_authority":              defaults.IssuingAuthority,
-		"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "Stockholm"),
-		"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid15-%s-%s", toLower(p.FamilyName), authenticSourcePersonID)),
-		"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", authenticSourcePersonID)),
-		"issuance_date":                  or_(pidExt.IssuanceDate, "2024-01-01"),
-		"expiry_date":                    defaults.ExpiryDate,
-		"picture":                        minPNG,
-		"email_address":                  or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", toLower(p.FamilyName))),
-		"mobile_phone_number":            or_(pidExt.MobilePhoneNumber, "+46700000000"),
-		"resident_address":               or_(pidExt.ResidentAddress, "Tulegatan 11, Stockholm"),
-		"resident_street_address":        or_(pidExt.ResidentStreetAddress, "Tulegatan"),
-		"resident_house_number":          or_(pidExt.ResidentHouseNumber, "11"),
-		"resident_postal_code":           or_(pidExt.ResidentPostalCode, "11353"),
-		"resident_city":                  or_(pidExt.ResidentCity, "Stockholm"),
-		"resident_state":                 or_(pidExt.ResidentState, "Stockholm"),
-		"resident_country":               or_(pidExt.ResidentCountry, "SE"),
-	}
-}
 
 func calcAge(birthDate string) int {
 	bd, err := time.Parse("2006-01-02", birthDate)

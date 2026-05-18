@@ -36,7 +36,7 @@ type DatastoreImport struct {
 	// FilePaths lists JSON files to import into the datastore.
 	// Each JSON file should contain a map of person IDs to CompleteDocument objects.
 	// Import is skipped if the datastore already contains data.
-	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/pid-1-5.json\", \"./bootstrapping/ehic.json\"]"`
+	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/pid.json\", \"./bootstrapping/ehic.json\"]"`
 
 	// Users limits which person IDs to import. If empty, all persons are imported.
 	Users []string `yaml:"users,omitempty" doc_example:"[\"100\", \"102\"]"`

@@ -1197,9 +1197,9 @@ func TestExtractListValues_Wildcard(t *testing.T) {
 }
 
 func TestExtractListValues_Set(t *testing.T) {
-	elem := parseAdvancedSExpT(t, "(scope (* set eduid identity_mapping pid_1_5))")
+	elem := parseAdvancedSExpT(t, "(scope (* set eduid identity_mapping pid))")
 	vals := extractListValues(elem)
-	assert.ElementsMatch(t, []string{"eduid", "identity_mapping", "pid_1_5"}, vals)
+	assert.ElementsMatch(t, []string{"eduid", "identity_mapping", "pid"}, vals)
 }
 
 func TestExtractListValues_EmptyList(t *testing.T) {
@@ -1459,7 +1459,7 @@ func TestJWTAuth_ResourceAccess_SetScope_Denied(t *testing.T) {
 	r.POST("/api/v1/datastore", handler, okHandler)
 
 	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
-	body := `{"authentic_source":"SUNET","scope":"pid_1_5"}`
+	body := `{"authentic_source":"SUNET","scope":"pid"}`
 	req := httptest.NewRequest("POST", "/api/v1/datastore", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")

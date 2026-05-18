@@ -1,5 +1,10 @@
 # EUDI PID (Personal Identification Data) Presentation Request
 # Compliant with EU Digital Identity Wallet Architecture Reference Framework
+# PID Rulebook v1.0 (ARF 1.7.1) / VCTM pid_v1.4.json — VCT: urn:eudi:pid:1
+#
+# Note: age verification attributes were removed from PID in CIR 2024/2977.
+# They are now expected to come from a separate Age Verification Attestation
+# (ARF 1.7.1 Annex 3.07), not from the PID credential.
 templates:
   - id: "eudi_pid_basic"
     name: "EUDI PID - Basic Profile"
@@ -14,21 +19,17 @@ templates:
           format: "dc+sd-jwt"
           meta:
             vct_values:
-              - "urn:eudi:pid:arf-1.5:1"
               - "urn:eudi:pid:1"
-              - "urn:eu.europa.ec.eudi:pid:1"  # Alternative VCT format
           claims:
             - path: ["given_name"]
             - path: ["family_name"]
             - path: ["birthdate"]
-            - path: ["age_over_18"]
-            - path: ["nationality"]
+            - path: ["nationalities"]
     claim_mappings:
       given_name: "given_name"
       family_name: "family_name"
       birthdate: "birthdate"
-      age_over_18: "age_over_18"
-      nationality: "nationality"
+      nationalities: "nationalities"
     enabled: true
 
   - id: "eudi_pid_full"
@@ -43,52 +44,17 @@ templates:
           format: "dc+sd-jwt"
           meta:
             vct_values:
-              - "urn:eudi:pid:arf-1.5:1"
               - "urn:eudi:pid:1"
-              - "urn:eu.europa.ec.eudi:pid:1"
           claims:
             - path: ["given_name"]
             - path: ["family_name"]
             - path: ["birthdate"]
             - path: ["place_of_birth"]
-            - path: ["age_over_18"]
-            - path: ["age_over_21"]
-            - path: ["nationality"]
-            - path: ["gender"]
+            - path: ["nationalities"]
+            - path: ["sex"]
             - path: ["address"]
             - path: ["issuing_country"]
             - path: ["issuing_authority"]
     claim_mappings:
       "*": "*"  # Map all claims through unchanged
-    enabled: true
-
-  - id: "eudi_pid_age_verification"
-    name: "EUDI PID - Age Verification Only"
-    description: "Request only age verification attributes for privacy-preserving use cases"
-    version: "1.0"
-    oidc_scopes:
-      - "age_verification"
-    dcql:
-      credentials:
-        - id: "eudi_pid_age"
-          format: "dc+sd-jwt"
-          meta:
-            vct_values:
-              - "urn:eudi:pid:arf-1.5:1"
-              - "urn:eudi:pid:1"
-              - "urn:eu.europa.ec.eudi:pid:1"
-          claims:
-            - path: ["age_over_18"]
-            - path: ["age_over_21"]
-            - path: ["age_over_65"]
-    claim_mappings:
-      age_over_18: "age_over_18"
-      age_over_21: "age_over_21"
-      age_over_65: "age_over_65"
-    claim_transforms:
-      age_over_18:
-        type: "boolean_string"
-        params:
-          true_value: "yes"
-          false_value: "no"
     enabled: true

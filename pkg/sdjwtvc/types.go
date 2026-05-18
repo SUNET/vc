@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
-	"strings"
 )
 
 // Discloser represents a selective disclosure element per SD-JWT draft-22
@@ -309,18 +308,22 @@ type Claim struct {
 	SVGID string `json:"svg_id,omitempty"`
 }
 
-// JSONPath returns the JSON path for the claim
+// JSONPath returns the JSON path for the claim.
+// A nil element in Path means "select all elements of an array" per SD-JWT VC §9.1,
+// and is emitted as the JSONPath wildcard "[*]".
 func (c *Claim) JSONPath() string {
 	if c == nil || c.Path == nil {
 		return ""
 	}
 
-	reply := "$."
+	reply := "$"
 	for _, path := range c.Path {
-		reply += fmt.Sprintf("%s.", *path)
+		if path == nil {
+			reply += "[*]"
+			continue
+		}
+		reply += "." + *path
 	}
-
-	reply = strings.TrimRight(reply, ".")
 	return reply
 }
 

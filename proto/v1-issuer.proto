@@ -31,7 +31,7 @@ message MakeSDJWTReply {
 
 // MakeMDocRequest is the request for creating an mDL document (ISO 18013-5)
 message MakeMDocRequest {
-    string scope = 1;            // Credential scope (e.g., "pid_1_8", "ehic")
+    string scope = 1;            // Credential scope (e.g., "pid", "ehic")
     string doc_type = 2;         // Document type (e.g., "org.iso.18013.5.1.mDL")
     bytes document_data = 3;     // JSON encoded mDL data
     bytes device_public_key = 4; // CBOR encoded COSE_Key for holder's device

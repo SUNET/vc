@@ -45,7 +45,7 @@ vc_wallet vci [flags]
 | `-credential-config-id` | | Credential configuration ID to request |
 | `-client-id` | | OAuth2 `client_id` |
 | `-redirect-uri` | `http://localhost:8080/callback` | OAuth2 redirect URI |
-| `-scope` | | OAuth2 scope to request (e.g., `pid_1_5`) |
+| `-scope` | | OAuth2 scope to request (e.g., `pid`) |
 | `-use-dpop` | `false` | Use DPoP token binding |
 | `-use-par` | `false` | Use Pushed Authorization Requests (PAR) |
 | `-pre-authorized-code` | | Pre-authorized code (skips the authorization step) |
@@ -65,7 +65,7 @@ vc_wallet vci [flags]
 vc_wallet vci \
   -issuer-url http://apigw.vc.docker:8080 \
   -pre-authorized-code "abc123" \
-  -credential-config-id "urn:eudi:pid:arf-1.5:1" \
+  -credential-config-id "urn:eudi:pid:1" \
   -v
 ```
 
@@ -75,10 +75,10 @@ vc_wallet vci \
 vc_wallet vci \
   -issuer-url http://apigw.vc.docker:8080 \
   -client-id 1003 \
-  -scope pid_1_5 \
+  -scope pid \
   -use-dpop \
   -use-par \
-  -credential-config-id "urn:eudi:pid:arf-1.5:1" \
+  -credential-config-id "urn:eudi:pid:1" \
   -save /tmp/credential.jwt \
   -v
 ```
@@ -97,7 +97,7 @@ vc_wallet vci \
 
 ```bash
 vc_wallet vci \
-  -credential-offer '{"credential_issuer":"http://apigw.vc.docker:8080","credential_configuration_ids":["urn:eudi:pid:arf-1.5:1"],"grants":{"urn:ietf:params:oauth:grant-type:pre-authorized_code":{"pre-authorized_code":"abc123"}}}' \
+  -credential-offer '{"credential_issuer":"http://apigw.vc.docker:8080","credential_configuration_ids":["urn:eudi:pid:1"],"grants":{"urn:ietf:params:oauth:grant-type:pre-authorized_code":{"pre-authorized_code":"abc123"}}}' \
   -v
 ```
 
@@ -174,7 +174,7 @@ Chain `vci` and `vp` using the `-save` flag:
 vc_wallet vci \
   -issuer-url http://apigw.vc.docker:8080 \
   -pre-authorized-code "abc123" \
-  -credential-config-id "urn:eudi:pid:arf-1.5:1" \
+  -credential-config-id "urn:eudi:pid:1" \
   -save /tmp/credential.jwt
 
 # Step 2: Present it to a verifier
@@ -195,7 +195,7 @@ make docker-build-wallet
 docker run --rm --network vc_vc-dev-net \
   docker.sunet.se/iam_vc/wallet:latest \
   vci -issuer-url http://apigw:8080 -pre-authorized-code "abc123" \
-      -credential-config-id "urn:eudi:pid:arf-1.5:1" -v
+      -credential-config-id "urn:eudi:pid:1" -v
 
 # Run VP flow in Docker (mount credential file)
 docker run --rm --network vc_vc-dev-net \

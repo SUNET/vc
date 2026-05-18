@@ -181,11 +181,11 @@ func TestExtractBodyResourcePairs_TopLevelNoScope(t *testing.T) {
 }
 
 func TestExtractBodyResourcePairs_Meta(t *testing.T) {
-	body := []byte(`{"meta":{"authentic_source":"LADOK","scope":"pid_1_5"}}`)
+	body := []byte(`{"meta":{"authentic_source":"LADOK","scope":"pid"}}`)
 	pairs := extractBodyResourcePairs(body)
 	require.Len(t, pairs, 1)
 	assert.Equal(t, "LADOK", pairs[0].authenticSource)
-	assert.Equal(t, "pid_1_5", pairs[0].scope)
+	assert.Equal(t, "pid", pairs[0].scope)
 }
 
 func TestExtractBodyResourcePairs_NoFields(t *testing.T) {
@@ -209,7 +209,7 @@ func TestExtractBodyResourcePairs_Mappings(t *testing.T) {
 }
 
 func TestExtractBodyResourcePairs_DocumentsMeta(t *testing.T) {
-	body := []byte(`{"documents":{"doc1":{"meta":{"authentic_source":"SUNET","scope":"eduid"}},"doc2":{"meta":{"authentic_source":"LADOK","scope":"pid_1_5"}}}}`)
+	body := []byte(`{"documents":{"doc1":{"meta":{"authentic_source":"SUNET","scope":"eduid"}},"doc2":{"meta":{"authentic_source":"LADOK","scope":"pid"}}}}`)
 	pairs := extractBodyResourcePairs(body)
 	require.Len(t, pairs, 2)
 	sources := []string{pairs[0].authenticSource, pairs[1].authenticSource}
@@ -341,7 +341,7 @@ func TestExtractResourcePairs_IdentityMappingSearch_InjectsScope(t *testing.T) {
 func TestDeduplicatePairs_NoDuplicates(t *testing.T) {
 	pairs := []resourcePair{
 		{authenticSource: "SUNET", scope: "eduid"},
-		{authenticSource: "LADOK", scope: "pid_1_5"},
+		{authenticSource: "LADOK", scope: "pid"},
 	}
 	result := deduplicatePairs(pairs)
 	assert.Len(t, result, 2)
@@ -351,7 +351,7 @@ func TestDeduplicatePairs_WithDuplicates(t *testing.T) {
 	pairs := []resourcePair{
 		{authenticSource: "SUNET", scope: "eduid"},
 		{authenticSource: "SUNET", scope: "eduid"},
-		{authenticSource: "LADOK", scope: "pid_1_5"},
+		{authenticSource: "LADOK", scope: "pid"},
 	}
 	result := deduplicatePairs(pairs)
 	assert.Len(t, result, 2)

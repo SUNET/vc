@@ -69,7 +69,7 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 		samplePathCheck map[string]string   // label -> expected path (first one)
 	}{
 		{
-			filename:      "vctm_pid_arf_1_8.json",
+			filename:      "vctm_pid.json",
 			expectedLangs: []string{"en-US"},
 			expectedLabels: map[string][]string{
 				"en-US": {"Last name", "First name", "Date of birth", "Nationality"},
@@ -77,7 +77,7 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 			samplePathCheck: map[string]string{
 				"Last name":     "family_name",
 				"First name":    "given_name",
-				"Date of birth": "birthdate", // Note: uses birthdate not birth_date in metadata
+				"Date of birth": "birthdate",
 				// Nationality uses path ["nationalities", null] so we can't check a single string path
 			},
 		},

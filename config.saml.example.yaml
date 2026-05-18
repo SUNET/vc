@@ -15,7 +15,7 @@ common:
 
   credential_metadata:
     pid:
-      vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
+      vctm_file_path: "/metadata/vctm_pid.json"
       format: "dc+sd-jwt"
     diploma:
       vctm_file_path: "/metadata/vctm_diploma.json"

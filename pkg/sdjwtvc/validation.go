@@ -85,6 +85,9 @@ func ValidateClaims(claims map[string]any, vctm *VCTM) error {
 	// Check mandatory claims are present
 	for _, claim := range vctm.Claims {
 		if claim.Mandatory {
+			if isIssuerSuppliedClaim(claim.Path) {
+				continue
+			}
 			claimPath := claim.Path
 			if !claimExists(claims, claimPath) {
 				errors.AddError(
@@ -248,6 +251,22 @@ func ValidateClaimPaths(claims map[string]any, vctm *VCTM, strict bool) error {
 	}
 
 	return nil
+}
+
+// isIssuerSuppliedClaim reports whether a VCTM claim path refers to a
+// JWT/SD-JWT VC envelope claim that the issuer pipeline (BuildCredentialWithSigner
+// and friends) fills in at signing time, rather than something the data source
+// must provide in documentData. VCTMs commonly mark these mandatory:true for
+// verifier-side conformance, but document-data validation must skip them.
+func isIssuerSuppliedClaim(path []*string) bool {
+	if len(path) != 1 || path[0] == nil {
+		return false
+	}
+	switch *path[0] {
+	case "iss", "nbf", "exp", "cnf", "vct", "status", "sub", "iat":
+		return true
+	}
+	return false
 }
 
 // isStandardClaim checks if a claim is a standard JWT/SD-JWT claim
