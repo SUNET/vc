@@ -210,6 +210,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 	for _, cq := range authCtx.DCQLQuery.Credentials {
 		if tokens, ok := vpResponse.VPToken[cq.ID]; ok && len(tokens) > 0 {
+			if len(tokens) > 1 {
+				c.log.Info("multiple VP tokens received for credential query, using first", "credential_query_id", cq.ID, "count", len(tokens))
+			}
 			vpToken = tokens[0]
 			break
 		}

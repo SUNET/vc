@@ -146,6 +146,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			c.log.Error(nil, "VP token not found for scope", "scope", scope)
 			return nil, fmt.Errorf("VP token not found for scope: %s", scope)
 		}
+		if len(vpTokens) > 1 {
+			c.log.Info("multiple VP tokens received for scope, using first", "scope", scope, "count", len(vpTokens))
+		}
 		vpToken := vpTokens[0]
 
 		responseParams := &openid4vp.ResponseParameters{}
