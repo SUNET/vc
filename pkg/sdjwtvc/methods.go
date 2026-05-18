@@ -139,8 +139,10 @@ func (c *Client) BuildCredentialWithSigner(ctx context.Context, issuer string, s
 	// - iss: OPTIONAL (set when provided)
 	// - nbf, exp: OPTIONAL
 	// - vct: REQUIRED
-	body["nbf"] = int64(time.Now().Unix())
-	body["exp"] = time.Now().Add(time.Duration(opts.ExpirationDays) * 24 * time.Hour).Unix()
+	now := time.Now()
+	body["iat"] = now.Unix()
+	body["nbf"] = now.Unix()
+	body["exp"] = now.Add(time.Duration(opts.ExpirationDays) * 24 * time.Hour).Unix()
 	if issuer != "" {
 		body["iss"] = issuer
 	}

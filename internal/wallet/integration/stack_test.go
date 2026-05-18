@@ -906,7 +906,7 @@ func TestStack_VCI_Credential_NoDPoP(t *testing.T) {
 	proofJWT := createProofJWT(t, rewriteInternalToPublic(issuerMeta.CredentialEndpoint),
 		tokenResp.CNonce, signingKey)
 	reqBody, _ := json.Marshal(map[string]any{
-		"credential_configuration_id": "urn:eudi:pid:1",
+		"credential_configuration_id": "pid",
 		"proofs":                      map[string]any{"jwt": []string{proofJWT}},
 	})
 
