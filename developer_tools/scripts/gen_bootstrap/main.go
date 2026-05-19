@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/socialsecurity"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"gopkg.in/yaml.v2"
@@ -291,9 +290,9 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		}
 		e := p.EHIC
 
-		doc := &socialsecurity.EHICDocument{
+		doc := &EHICDocument{
 			PersonalAdministrativeNumber: e.PersonalAdministrativeNumber,
-			IssuingAuthority: socialsecurity.IssuingAuthority{
+			IssuingAuthority: IssuingAuthority{
 				ID:   or_(e.InstitutionID, "CLEISS"),
 				Name: input.Defaults.IssuingAuthority,
 			},
@@ -303,7 +302,7 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 			DocumentNumber: e.DocumentNumber,
 			StartingDate:   now.Format("2006-01-02"),
 			EndingDate:     now.AddDate(1, 0, 0).Format("2006-01-02"),
-			AuthenticSource: socialsecurity.AuthenticSource{
+			AuthenticSource: AuthenticSource{
 				ID:   or_(e.InstitutionID, "CLEISS"),
 				Name: input.Defaults.IssuingAuthority,
 			},
@@ -340,12 +339,12 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 		}
 		d := p.PDA1
 
-		employer := socialsecurity.Employer{ID: "01", Name: "SUNET", Country: "SE"}
+		employer := Employer{ID: "01", Name: "SUNET", Country: "SE"}
 		if d.Employer != nil {
-			employer = socialsecurity.Employer{ID: d.Employer.ID, Name: d.Employer.Name, Country: d.Employer.Country}
+			employer = Employer{ID: d.Employer.ID, Name: d.Employer.Name, Country: d.Employer.Country}
 		}
 
-		wa := socialsecurity.WorkAddress{
+		wa := WorkAddress{
 			Formatted:      "Tulegatan 11, Stockholm",
 			Street_address: "Tulegatan",
 			House_number:   "11",
@@ -355,7 +354,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 			Country:        "SE",
 		}
 		if d.WorkAddress != nil {
-			wa = socialsecurity.WorkAddress{
+			wa = WorkAddress{
 				Formatted:      d.WorkAddress.Formatted,
 				Street_address: d.WorkAddress.StreetAddress,
 				House_number:   d.WorkAddress.HouseNumber,
@@ -366,11 +365,11 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 			}
 		}
 
-		doc := &socialsecurity.PDA1Document{
+		doc := &PDA1Document{
 			PersonalAdministrativeNumber: d.PersonalAdministrativeNumber,
 			Employer:                     employer,
 			WorkAddress:                  wa,
-			IssuingAuthority: socialsecurity.IssuingAuthority{
+			IssuingAuthority: IssuingAuthority{
 				ID:   "01",
 				Name: input.Defaults.IssuingAuthority,
 			},
@@ -382,7 +381,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 			DocumentNumber:     d.DocumentNumber,
 			StartingDate:       now.Format("2006-01-02"),
 			EndingDate:         now.AddDate(1, 0, 0).Format("2006-01-02"),
-			AuthenticSource: socialsecurity.AuthenticSource{
+			AuthenticSource: AuthenticSource{
 				ID:   fmt.Sprintf("pda1-as-%s", pid),
 				Name: input.Defaults.IssuingAuthority,
 			},

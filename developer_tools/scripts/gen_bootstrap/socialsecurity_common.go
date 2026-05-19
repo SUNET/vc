@@ -1,4 +1,4 @@
-package socialsecurity
+package main
 
 type AuthenticSource struct {
 	ID   string `json:"id" bson:"id" validate:"required,min=1,max=20"`
