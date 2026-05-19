@@ -160,15 +160,17 @@ func NewServerContext(logger logging.Logger) *ServerContext {
 //	validating that a public key (in resource.key) is correctly bound to a name (in subject.id)
 //	according to the trusted certificates in the pipeline context.
 //
-// TSL Information:
+// Registry Information:
 //
-// GET /tsls - Returns detailed information about all loaded Trust Status Lists
+// GET /registries - Returns information about all configured trust registries
 //
 // Deprecated Endpoints (will be removed in v2.0.0):
 //
+// GET /tsls - DEPRECATED: Use GET /registries instead
+//
 // GET /status - DEPRECATED: Use GET /readyz instead
 //
-// GET /info - DEPRECATED: Use GET /tsls instead
+// GET /info - DEPRECATED: Use GET /registries instead
 //
 // If a RateLimiter is configured in the ServerContext, it will be applied to all routes.
 func RegisterAPIRoutes(r *gin.Engine, serverCtx *ServerContext) {
@@ -189,10 +191,11 @@ func RegisterAPIRoutes(r *gin.Engine, serverCtx *ServerContext) {
 	// AuthZEN evaluation endpoint
 	r.POST("/evaluation", AuthZENDecisionHandler(serverCtx))
 
-	// TSL information endpoint
-	r.GET("/tsls", TSLsHandler(serverCtx))
+	// Registry information endpoint
+	r.GET("/registries", RegistriesHandler(serverCtx))
 
 	// Deprecated endpoints (kept for backward compatibility)
+	r.GET("/tsls", DeprecatedTSLsHandler(serverCtx))
 	r.GET("/status", StatusHandler(serverCtx))
 	r.GET("/info", InfoHandler(serverCtx))
 

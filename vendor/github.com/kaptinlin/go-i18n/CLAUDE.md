@@ -19,7 +19,7 @@ task bench
 task fmt
 task vet
 task lint
-task markdownlint
+
 task vuln
 task verify
 ```
@@ -94,7 +94,7 @@ When you encounter a bug, limitation, or unexpected behavior in a dependency lib
 
 ### Must Follow
 
-- Use Go 1.26.2 features when they simplify code without obscuring behavior.
+- Use the Go version declared in `go.mod` and features when they simplify code without obscuring behavior.
 - Keep locale parsing and matching on `golang.org/x/text/language`.
 - Keep `github.com/kaptinlin/messageformat-go/v1` as the MessageFormat dependency; this package currently targets ICU MessageFormat v1 syntax and semantics, not the MessageFormat 2.0 mainline.
 - Keep the module graph on a release that still ships the `v1` compatibility package.
@@ -102,7 +102,6 @@ When you encounter a bug, limitation, or unexpected behavior in a dependency lib
 - Keep translation lookup Localizer-centric; `I18n` owns shared state and locale matching.
 - Reuse the existing `Option` helpers for configuration before adding new public knobs.
 - Use table-driven tests with `assert` and `require`, and call `t.Parallel()` when the test is safe to parallelize.
-- Run `task markdownlint` whenever you edit markdown files.
 
 ### Domain Patterns
 
@@ -122,7 +121,6 @@ See [SPECS/00-overview.md](SPECS/00-overview.md) for the locale model, fallback 
 
 - Run `task test` for normal validation and `go test -race -p 1 ./...` for focused race-safe checks.
 - Run `task lint` before shipping changes; it includes `golangci-lint` and tidy checks.
-- Run `task markdownlint` when changing `README.md`, `CLAUDE.md`, or `SPECS/`.
 - Run `task bench` before claiming a performance improvement.
 - Keep docs, examples, and tests aligned when public behavior changes.
 

@@ -6,7 +6,6 @@ package didweb
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,7 +20,7 @@ import (
 // DIDWebRegistry implements a trust registry using the did:web method.
 // It resolves DID documents via HTTPS and validates key bindings.
 type DIDWebRegistry struct {
-	httpClient  *http.Client
+	httpClient  registry.HTTPClientInterface
 	timeout     time.Duration
 	description string
 	allowHTTP   bool // For testing only
@@ -41,6 +40,10 @@ type Config struct {
 	// AllowHTTP allows using HTTP instead of HTTPS for DID resolution.
 	// WARNING: This should only be used for testing. The did:web spec requires HTTPS.
 	AllowHTTP bool `json:"allow_http,omitempty"`
+
+	// AllowPrivateIPs permits requests to private/internal networks (RFC 1918).
+	// WARNING: This should only be used for testing or internal deployments.
+	AllowPrivateIPs bool `json:"allow_private_ips,omitempty"`
 }
 
 // DIDDocument represents a W3C DID Document.
@@ -66,6 +69,10 @@ type VerificationMethod struct {
 }
 
 // NewDIDWebRegistry creates a new did:web trust registry.
+//
+// The registry uses SafeHTTPClient with SSRF protection that blocks requests
+// to private/internal IP addresses by default. This can be overridden with
+// AllowPrivateIPs for testing or internal deployments.
 func NewDIDWebRegistry(config Config) (*DIDWebRegistry, error) {
 	timeout := config.Timeout
 	if timeout == 0 {
@@ -77,24 +84,14 @@ func NewDIDWebRegistry(config Config) (*DIDWebRegistry, error) {
 		description = "DID Web Method (did:web) Registry"
 	}
 
-	// Configure TLS with strong security settings per spec
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-		},
+	// Use SafeHTTPClient with SSRF protection
+	// See ADR 0012: SSRF Mitigation Strategy
+	httpClient := registry.NewSafeHTTPClient(registry.SafeClientConfig{
+		Timeout:            timeout,
+		AllowHTTP:          config.AllowHTTP,
+		AllowPrivateIPs:    config.AllowPrivateIPs,
 		InsecureSkipVerify: config.InsecureSkipVerify,
-	}
-
-	httpClient := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-	}
+	})
 
 	return &DIDWebRegistry{
 		httpClient:  httpClient,

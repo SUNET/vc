@@ -51,7 +51,7 @@ func isSyntacticError(err error) bool {
 	return ok
 }
 
-// isFatalError reports whether this error must terminate asharling.
+// isFatalError reports whether this error must terminate arshaling.
 // All errors are considered fatal unless operating under
 // [jsonflags.ReportErrorsWithLegacySemantics] in which case only
 // syntactic errors and I/O errors are considered fatal.
@@ -165,7 +165,7 @@ func newUnmarshalErrorAfter(d *jsontext.Decoder, t reflect.Type, err error) erro
 		JSONKind:    jsontext.Value(tokOrVal).Kind()}
 }
 
-// newUnmarshalErrorAfter wraps err in a SemanticError assuming that d
+// newUnmarshalErrorAfterWithValue wraps err in a SemanticError assuming that d
 // is positioned right after the previous token or value, which caused an error.
 // It also stores a copy of the last JSON value if it is a string or number.
 func newUnmarshalErrorAfterWithValue(d *jsontext.Decoder, t reflect.Type, err error) error {

@@ -2,7 +2,6 @@ package jsonpointer
 
 import "errors"
 
-// Predefined errors matching TypeScript error semantics.
 var (
 	// ErrInvalidIndex is returned when an invalid array index is encountered.
 	// TypeScript original code from find.ts:
@@ -45,7 +44,6 @@ var (
 	ErrInvalidPathStep = errors.New("invalid path step")
 )
 
-// Go-specific errors providing more detailed information for Go use cases.
 var (
 	// ErrIndexOutOfBounds is returned when array index is out of bounds.
 	ErrIndexOutOfBounds = errors.New("array index out of bounds")

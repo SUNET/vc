@@ -49,6 +49,12 @@ type OIDFedPolicyConstraints struct {
 
 	// MaxChainDepth limits trust chain resolution depth
 	MaxChainDepth int `json:"max_chain_depth,omitempty" yaml:"max_chain_depth,omitempty"`
+
+	// CredentialTypeTrustMarks maps credential type identifiers (VCT) to required trust marks.
+	// When a request includes credential_types, the corresponding trust marks are added
+	// to the required_trust_marks for validation.
+	// Example: {"eu.europa.ec.eudi.pid.1": ["https://trust.eu/wallet/pid-issuer"]}
+	CredentialTypeTrustMarks map[string][]string `json:"credential_type_trust_marks,omitempty" yaml:"credential_type_trust_marks,omitempty"`
 }
 
 // ETSIPolicyConstraints contains ETSI TSL-specific constraints.
@@ -61,6 +67,12 @@ type ETSIPolicyConstraints struct {
 
 	// Countries filters by country codes (e.g., ["DE", "FR"])
 	Countries []string `json:"countries,omitempty" yaml:"countries,omitempty"`
+
+	// CredentialTypes specifies credential type identifiers (e.g., SD-JWT VCT values).
+	// When specified, these values are included in the evaluation response for audit
+	// purposes and may be used for filtering when supported by the registry
+	// implementation (e.g., validated against TSL extensions or service metadata).
+	CredentialTypes []string `json:"credential_types,omitempty" yaml:"credential_types,omitempty"`
 }
 
 // DIDPolicyConstraints contains DID method-specific constraints.

@@ -4,7 +4,6 @@ import (
 	"reflect"
 )
 
-// fastGet implements direct access without intermediate token creation.
 func fastGet(val any, step string) (any, bool) {
 	switch v := val.(type) {
 	case map[string]any:
@@ -19,27 +18,13 @@ func fastGet(val any, step string) (any, bool) {
 		return result, exists
 
 	case []any:
-		if step == "-" {
-			return nil, false
-		}
-		index := fastAtoi(step)
-		if index < 0 || index >= len(v) {
-			return nil, false
-		}
-		return v[index], true
+		return fastSliceGet(v, step)
 
 	case *[]any:
 		if v == nil {
 			return nil, false
 		}
-		if step == "-" {
-			return nil, false
-		}
-		index := fastAtoi(step)
-		if index < 0 || index >= len(*v) {
-			return nil, false
-		}
-		return (*v)[index], true
+		return fastSliceGet(*v, step)
 
 	case *any:
 		if v == nil {
@@ -52,96 +37,33 @@ func fastGet(val any, step string) (any, bool) {
 	}
 }
 
-// tryArrayAccess attempts array access using type assertions for performance.
-// Enhanced to handle all slice types efficiently.
-// Returns (value, handled, error) where handled indicates if this was an array access attempt.
-func tryArrayAccess(current any, key string) (any, bool, error) {
-	switch arr := current.(type) {
-	case []any:
-		index, err := validateAndAccessArray(key, len(arr))
-		if err != nil {
-			return nil, true, err
-		}
-		return arr[index], true, nil
-
-	case *[]any:
-		if arr == nil {
-			return nil, true, ErrNilPointer
-		}
-		index, err := validateAndAccessArray(key, len(*arr))
-		if err != nil {
-			return nil, true, err
-		}
-		return (*arr)[index], true, nil
-
-	default:
-		arrayVal, err := derefValue(reflect.ValueOf(current))
-		if err != nil {
-			return nil, true, err
-		}
-
-		if arrayVal.Kind() != reflect.Slice && arrayVal.Kind() != reflect.Array {
-			return nil, false, nil
-		}
-
-		index, err := validateAndAccessArray(key, arrayVal.Len())
-		if err != nil {
-			return nil, true, err
-		}
-		return arrayVal.Index(index).Interface(), true, nil
+func fastSliceGet(values []any, step string) (any, bool) {
+	if step == "-" {
+		return nil, false
 	}
+	index := fastAtoi(step)
+	if index < 0 || index >= len(values) {
+		return nil, false
+	}
+	return values[index], true
 }
 
-// tryObjectAccess attempts object access using type assertions for performance.
-// Enhanced with proper struct field handling.
-// Returns (value, handled, error) where handled indicates if this was an object access attempt.
-func tryObjectAccess(current any, key string) (any, bool, error) {
-	switch obj := current.(type) {
-	case map[string]any:
-		result, exists := obj[key]
-		if !exists {
-			return nil, true, ErrKeyNotFound
-		}
-		return result, true, nil
-
-	case *map[string]any:
-		if obj == nil {
-			return nil, true, ErrNilPointer
-		}
-		result, exists := (*obj)[key]
-		if !exists {
-			return nil, true, ErrKeyNotFound
-		}
-		return result, true, nil
-
-	default:
-		objVal, err := derefValue(reflect.ValueOf(current))
-		if err != nil {
-			return nil, false, err
-		}
-
-		switch objVal.Kind() {
-		case reflect.Map:
-			mapEntry, err := mapValueByPathKey(objVal, key)
-			if err != nil {
-				return nil, true, err
-			}
-			return mapEntry.Interface(), true, nil
-
-		case reflect.Struct:
-			if !structField(key, &objVal) {
-				return nil, true, ErrFieldNotFound
-			}
-			return objVal.Interface(), true, nil
-
-		default:
-			return nil, false, nil
-		}
+func sliceValue(values []any, step string) (any, error) {
+	index, err := validateAndAccessArray(step, len(values))
+	if err != nil {
+		return nil, err
 	}
+	return values[index], nil
 }
 
-// get retrieves value at JSON pointer path, returns error if path cannot be traversed.
-// Optimized for zero-allocation paths with layered fallback strategy.
+func stringMapValue(values map[string]any, step string) (any, error) {
+	result, ok := values[step]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	return result, nil
+}
+
 func get(val any, path Path) (any, error) {
 	pathLength := len(path)
 	if pathLength == 0 {
@@ -151,7 +73,6 @@ func get(val any, path Path) (any, error) {
 	current := val
 	fastPathDepth := 0
 
-	// Ultra-fast path - direct access without token creation
 	for i := range pathLength {
 		step := path[i]
 
@@ -163,30 +84,69 @@ func get(val any, path Path) (any, error) {
 		}
 	}
 
-	// Type assertion fallback for remaining path
 	for i := fastPathDepth; i < pathLength; i++ {
-		step := path[i]
-
-		if current == nil {
-			return nil, ErrNotFound
-		}
-
-		if result, handled, err := tryArrayAccess(current, step); err != nil {
+		var err error
+		current, err = traverseStep(current, path[i])
+		if err != nil {
 			return nil, err
-		} else if handled {
-			current = result
-			continue
 		}
-
-		if result, handled, err := tryObjectAccess(current, step); err != nil {
-			return nil, err
-		} else if handled {
-			current = result
-			continue
-		}
-
-		return nil, ErrNotFound
 	}
 
 	return current, nil
+}
+
+func traverseStep(current any, step string) (any, error) {
+	if current == nil {
+		return nil, ErrNotFound
+	}
+
+	switch value := current.(type) {
+	case []any:
+		return sliceValue(value, step)
+
+	case *[]any:
+		if value == nil {
+			return nil, ErrNilPointer
+		}
+		return sliceValue(*value, step)
+
+	case map[string]any:
+		return stringMapValue(value, step)
+
+	case *map[string]any:
+		if value == nil {
+			return nil, ErrNilPointer
+		}
+		return stringMapValue(*value, step)
+	}
+
+	value, err := derefValue(reflect.ValueOf(current))
+	if err != nil {
+		return nil, err
+	}
+
+	switch value.Kind() {
+	case reflect.Slice, reflect.Array:
+		index, err := validateAndAccessArray(step, value.Len())
+		if err != nil {
+			return nil, err
+		}
+		return value.Index(index).Interface(), nil
+
+	case reflect.Map:
+		result, err := mapValueByPathKey(value, step)
+		if err != nil {
+			return nil, err
+		}
+		return result.Interface(), nil
+
+	case reflect.Struct:
+		if !structField(step, &value) {
+			return nil, ErrFieldNotFound
+		}
+		return value.Interface(), nil
+
+	default:
+		return nil, ErrNotFound
+	}
 }

@@ -244,6 +244,11 @@ type MessageFormat struct {
 // DefaultLocale is used by the constructor when no locale argument is given
 var DefaultLocale = "en"
 
+var (
+	escapeRegexp           = regexp.MustCompile(`[{}]`)
+	escapeOctothorpeRegexp = regexp.MustCompile(`[#{}]`)
+)
+
 // Escape escapes characters that may be considered as MessageFormat markup
 // This surrounds the characters {, } and optionally # with 'quotes'.
 // This will allow those characters to not be considered as MessageFormat control characters.
@@ -254,14 +259,11 @@ var DefaultLocale = "en"
 //	  return String(str).replace(esc, "'$&'");
 //	}
 func Escape(str string, octothorpe bool) string {
-	var pattern string
+	re := escapeRegexp
 	if octothorpe {
-		pattern = `[#{}]`
-	} else {
-		pattern = `[{}]`
+		re = escapeOctothorpeRegexp
 	}
 
-	re := regexp.MustCompile(pattern)
 	return re.ReplaceAllString(str, "'$0'")
 }
 

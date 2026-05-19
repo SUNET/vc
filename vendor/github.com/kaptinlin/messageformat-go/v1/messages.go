@@ -3,7 +3,10 @@ package v1
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
+	"strings"
 )
 
 // MessageData represents hierarchical message object
@@ -97,11 +100,7 @@ func NewMessages(msgData map[string]MessageData, defaultLocale ...string) *Messa
 //	  return Object.keys(this._data);
 //	}
 func (m *Messages) AvailableLocales() []string {
-	locales := make([]string, 0, len(m._data))
-	for lc := range m._data {
-		locales = append(locales, lc)
-	}
-	return locales
+	return slices.Collect(maps.Keys(m._data))
 }
 
 // Locale returns current locale
@@ -215,7 +214,7 @@ func (m *Messages) AddMessages(data any, locale string, keypath []string) *Messa
 		parent := m._data[lc]
 
 		// Navigate to parent of target location
-		for i := 0; i < len(keypath)-1; i++ {
+		for i := range len(keypath) - 1 {
 			key := keypath[i]
 			if parent[key] == nil {
 				parent[key] = make(MessageData)
@@ -290,10 +289,8 @@ func (m *Messages) resolveLocale(locale string) *string {
 
 	// Try forward matching (locale is prefix of available locale)
 	availableLocales := m.AvailableLocales()
-	pattern := fmt.Sprintf("^%s[-_]", regexp.QuoteMeta(locale))
-	re := regexp.MustCompile(pattern)
 	for _, availableLc := range availableLocales {
-		if re.MatchString(availableLc) {
+		if strings.HasPrefix(availableLc, locale+"-") || strings.HasPrefix(availableLc, locale+"_") {
 			return &availableLc
 		}
 	}

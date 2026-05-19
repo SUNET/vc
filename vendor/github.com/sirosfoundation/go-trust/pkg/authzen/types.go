@@ -34,9 +34,16 @@ type Resource struct {
 // This is optional and used to distinguish different uses of the same name-to-key binding.
 // For example, to authorize that an X.509 certificate is allowed to act as a TLS server
 // or as a digital credential issuer.
+//
+// The Parameters field allows additional role-specific constraints. The interpretation
+// of parameters is defined by the action.name value. Common parameters include:
+//   - credential_types: array of credential type identifiers (e.g., SD-JWT VCT values)
+//   - query: credential query object (e.g., DCQL)
+//
 // @Description Action (role) in an AuthZEN trust evaluation request
 type Action struct {
-	Name string `json:"name" example:"http://ec.europa.eu/NS/wallet-provider"` // The role name
+	Name       string                 `json:"name" example:"http://ec.europa.eu/NS/wallet-provider"` // The role name
+	Parameters map[string]interface{} `json:"parameters,omitempty" swaggertype:"object"`             // Role-specific constraints
 }
 
 // EvaluationRequest represents a trust evaluation request according to the AuthZEN Trust Registry Profile.
@@ -82,9 +89,9 @@ type EvaluationResponseContext struct {
 //
 // Resolution-only requests are supported by registries that implement SupportsResolutionOnly().
 func (r *EvaluationRequest) Validate() error {
-	// Subject.type MUST be "key"
-	if r.Subject.Type != "key" {
-		return fmt.Errorf("subject.type must be 'key', got '%s'", r.Subject.Type)
+	// Subject.type MUST be "key" or "url"
+	if r.Subject.Type != "key" && r.Subject.Type != "url" {
+		return fmt.Errorf("subject.type must be 'key' or 'url', got '%s'", r.Subject.Type)
 	}
 
 	// Subject.id MUST be present

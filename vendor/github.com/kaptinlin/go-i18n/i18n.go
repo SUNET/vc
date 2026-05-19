@@ -14,11 +14,9 @@ import (
 	"golang.org/x/text/language"
 )
 
-var (
-	// ErrMessageFormatCompilation indicates that MessageFormat template compilation failed.
-	// The translation text is returned as-is without formatting capabilities.
-	ErrMessageFormatCompilation = errors.New("messageformat compilation failed")
-)
+// ErrMessageFormatCompilation indicates that MessageFormat template compilation failed.
+// The translation text is returned as-is without formatting capabilities.
+var ErrMessageFormatCompilation = errors.New("messageformat compilation failed")
 
 // Unmarshaler unmarshals translation files. Common implementations include
 // json.Unmarshal, yaml.Unmarshal, and toml.Unmarshal.
@@ -44,8 +42,6 @@ type I18n struct {
 	mfOptions                 *mf.MessageFormatOptions
 }
 
-// parsedTranslation holds a pre-compiled translation with its locale, name,
-// original text, and an optional compiled MessageFormat function.
 type parsedTranslation struct {
 	locale string
 	name   string
@@ -111,9 +107,8 @@ func WithMessageFormatOptions(opts *mf.MessageFormatOptions) Option {
 			return
 		}
 
-		cloned := *opts
-		cloned.CustomFormatters = maps.Clone(opts.CustomFormatters)
-		i.mfOptions = &cloned
+		i.mfOptions = new(*opts)
+		i.mfOptions.CustomFormatters = maps.Clone(opts.CustomFormatters)
 	}
 }
 
@@ -153,9 +148,8 @@ func NewBundle(options ...Option) *I18n {
 		o(i)
 	}
 	if i.defaultLanguage == language.Und {
-		if len(i.languages) == 0 {
-			i.defaultLanguage = language.English
-		} else {
+		i.defaultLanguage = language.English
+		if len(i.languages) > 0 {
 			i.defaultLanguage = i.languages[0]
 		}
 		i.defaultLocale = i.defaultLanguage.String()
@@ -231,8 +225,6 @@ func (i *I18n) resolveLocalizedLocale(locale string) (string, bool) {
 	return i.resolveLocaleForTable(locale, i.parsedTranslations, true)
 }
 
-// ensureDefaultLanguageFirst ensures the default language is the first element
-// in the languages slice, adding it if absent or moving it to the front.
 func (i *I18n) ensureDefaultLanguageFirst() {
 	if len(i.languages) == 0 {
 		i.languages = []language.Tag{i.defaultLanguage}
@@ -256,8 +248,6 @@ func messageFormatBase(locale string) (string, error) {
 	return base.String(), nil
 }
 
-// matchExactLocale returns the string form of the supported locale that
-// exactly matches the given locale, or an empty string if none matches.
 func (i *I18n) matchExactLocale(locale string) string {
 	_, idx, conf := i.languageMatcher.Match(language.Make(locale))
 	if conf == language.Exact {
@@ -276,32 +266,32 @@ func (i *I18n) IsLanguageSupported(lang language.Tag) bool {
 // NewLocalizer creates a Localizer for the first matching locale from
 // locales. If none match, the default locale is used.
 func (i *I18n) NewLocalizer(locales ...string) *Localizer {
+	locale := i.defaultLocale
 	for _, loc := range locales {
 		if matched, ok := i.resolveLocalizedLocale(loc); ok {
-			return &Localizer{
-				bundle: i,
-				locale: matched,
-			}
+			locale = matched
+			break
 		}
 	}
 	return &Localizer{
 		bundle: i,
-		locale: i.defaultLocale,
+		locale: locale,
 	}
 }
 
 // trimContext removes the trailing context suffix (e.g., " <verb>") from a
 // translation key, returning the base key.
 func trimContext(v string) string {
-	if idx := strings.LastIndex(v, " <"); idx != -1 && strings.HasSuffix(v, ">") {
-		return v[:idx]
+	trimmed, ok := strings.CutSuffix(v, ">")
+	if !ok {
+		return v
+	}
+	if idx := strings.LastIndex(trimmed, " <"); idx != -1 {
+		return trimmed[:idx]
 	}
 	return v
 }
 
-// parseTranslation compiles a translation text into a parsedTranslation.
-// Returns [ErrMessageFormatCompilation] if MessageFormat compilation fails,
-// along with a parsedTranslation that contains the raw text (usable without formatting).
 func (i *I18n) parseTranslation(locale, name, text string) (*parsedTranslation, error) {
 	pt := &parsedTranslation{
 		name:   name,
@@ -370,32 +360,37 @@ func (i *I18n) formatFallbacks() {
 			if _, ok := trans[defTrans.name]; ok {
 				continue
 			}
-			if best := i.lookupFallback(locale, defTrans.name, make(map[string]struct{})); best != nil {
+			if best := i.lookupFallback(locale, defTrans.name); best != nil {
 				i.parsedTranslations[locale][defTrans.name] = best
 			}
 		}
 	}
 }
 
-// lookupFallback recursively searches the fallback chain for a translation.
-// The visited set prevents infinite recursion from circular fallback configs.
-func (i *I18n) lookupFallback(locale, name string, visited map[string]struct{}) *parsedTranslation {
-	if _, ok := visited[locale]; ok {
-		return nil
+func (i *I18n) lookupFallback(locale, name string) *parsedTranslation {
+	fallbacks := i.fallbacks[locale]
+	visited := map[string]struct{}{locale: {}}
+	stack := make([]string, 0, len(fallbacks))
+	for _, fallback := range slices.Backward(fallbacks) {
+		stack = append(stack, fallback)
 	}
-	visited[locale] = struct{}{}
 
-	chain, ok := i.fallbacks[locale]
-	if !ok {
-		return i.parsedTranslations[i.defaultLocale][name]
-	}
-	for _, fb := range chain {
-		if v, ok := i.parsedTranslations[fb][name]; ok {
-			return v
+	for len(stack) > 0 {
+		locale := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if _, ok := visited[locale]; ok {
+			continue
 		}
-		if found := i.lookupFallback(fb, name, visited); found != nil {
-			return found
+		visited[locale] = struct{}{}
+
+		if pt, ok := i.directTranslations[locale][name]; ok {
+			return pt
+		}
+		fallbacks = i.fallbacks[locale]
+		for _, fallback := range slices.Backward(fallbacks) {
+			stack = append(stack, fallback)
 		}
 	}
+
 	return i.parsedTranslations[i.defaultLocale][name]
 }
