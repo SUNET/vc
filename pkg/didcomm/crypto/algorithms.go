@@ -93,13 +93,6 @@ type ContentAlgorithmInfo struct {
 	TagSize   int // Authentication tag size in bytes
 }
 
-// SigningAlgorithmInfo contains information about a signing algorithm.
-type SigningAlgorithmInfo struct {
-	Name    string
-	Support AlgorithmSupport
-	Curve   string // Required curve for this algorithm
-}
-
 // keyAlgorithms maps algorithm names to their info.
 var keyAlgorithms = map[string]KeyAlgorithmInfo{
 	AlgECDHESA256KW: {
@@ -169,35 +162,6 @@ var contentAlgorithms = map[string]ContentAlgorithmInfo{
 	},
 }
 
-// signingAlgorithms maps algorithm names to their info.
-var signingAlgorithms = map[string]SigningAlgorithmInfo{
-	SigEdDSA: {
-		Name:    SigEdDSA,
-		Support: SupportNative,
-		Curve:   CurveEd25519,
-	},
-	SigES256: {
-		Name:    SigES256,
-		Support: SupportNative,
-		Curve:   CurveP256,
-	},
-	SigES256K: {
-		Name:    SigES256K,
-		Support: SupportCustom, // Requires custom implementation
-		Curve:   CurveSecp256k1,
-	},
-	SigES384: {
-		Name:    SigES384,
-		Support: SupportNative,
-		Curve:   CurveP384,
-	},
-	SigES512: {
-		Name:    SigES512,
-		Support: SupportNative,
-		Curve:   CurveP521,
-	},
-}
-
 // GetKeyAlgorithmInfo returns information about a key agreement algorithm.
 func GetKeyAlgorithmInfo(alg string) (KeyAlgorithmInfo, bool) {
 	info, ok := keyAlgorithms[alg]
@@ -220,45 +184,6 @@ func GetContentAlgorithmInfo(enc string) (ContentAlgorithmInfo, bool) {
 		}, false
 	}
 	return info, true
-}
-
-// GetSigningAlgorithmInfo returns information about a signing algorithm.
-func GetSigningAlgorithmInfo(alg string) (SigningAlgorithmInfo, bool) {
-	info, ok := signingAlgorithms[alg]
-	if !ok {
-		return SigningAlgorithmInfo{
-			Name:    alg,
-			Support: SupportUnknown,
-		}, false
-	}
-	return info, true
-}
-
-// IsKeyAlgorithmSupported returns true if the key algorithm is supported.
-func IsKeyAlgorithmSupported(alg string) bool {
-	info, ok := GetKeyAlgorithmInfo(alg)
-	if !ok {
-		return false
-	}
-	return info.Support == SupportNative || info.Support == SupportCustom
-}
-
-// IsContentAlgorithmSupported returns true if the content algorithm is supported.
-func IsContentAlgorithmSupported(enc string) bool {
-	info, ok := GetContentAlgorithmInfo(enc)
-	if !ok {
-		return false
-	}
-	return info.Support == SupportNative || info.Support == SupportCustom
-}
-
-// IsSigningAlgorithmSupported returns true if the signing algorithm is supported.
-func IsSigningAlgorithmSupported(alg string) bool {
-	info, ok := GetSigningAlgorithmInfo(alg)
-	if !ok {
-		return false
-	}
-	return info.Support == SupportNative || info.Support == SupportCustom
 }
 
 // DIDCommAnoncryptDefaults returns the default algorithms for DIDComm anoncrypt.

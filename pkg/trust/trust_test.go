@@ -2,10 +2,12 @@ package trust
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"math/big"
 	"testing"
 	"time"
@@ -668,4 +670,251 @@ func TestErrMsgNilRequest_Constant(t *testing.T) {
 	if ErrMsgNilRequest != "evaluation request is nil" {
 		t.Errorf("ErrMsgNilRequest = %q, want 'evaluation request is nil'", ErrMsgNilRequest)
 	}
+}
+
+func TestCompositeEvaluator_AllMustSucceed(t *testing.T) {
+	chain, rootCert, _ := createTestCertChain(t)
+	ctx := t.Context()
+
+	t.Run("all evaluators accept", func(t *testing.T) {
+		eval1 := NewLocalTrustEvaluator(LocalTrustConfig{
+			TrustedRoots: []*x509.Certificate{rootCert},
+		})
+		eval2 := NewLocalTrustEvaluator(LocalTrustConfig{
+			TrustedRoots: []*x509.Certificate{rootCert},
+		})
+
+		composite := NewCompositeEvaluator(StrategyAllMustSucceed, eval1, eval2)
+
+		decision, err := composite.Evaluate(ctx, &EvaluationRequest{
+			EvaluationRequest: trustapi.EvaluationRequest{
+				SubjectID: "https://issuer.example.com",
+				KeyType:   KeyTypeX5C,
+				Key:       chain,
+			},
+		})
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !decision.Trusted {
+			t.Errorf("expected trusted, got: %s", decision.Reason)
+		}
+	})
+
+	t.Run("one evaluator rejects", func(t *testing.T) {
+		accepting := NewLocalTrustEvaluator(LocalTrustConfig{
+			TrustedRoots: []*x509.Certificate{rootCert},
+		})
+		rejecting := NewLocalTrustEvaluator(LocalTrustConfig{
+			TrustedRoots: []*x509.Certificate{}, // Empty, will reject
+		})
+
+		composite := NewCompositeEvaluator(StrategyAllMustSucceed, accepting, rejecting)
+
+		decision, err := composite.Evaluate(ctx, &EvaluationRequest{
+			EvaluationRequest: trustapi.EvaluationRequest{
+				SubjectID: "https://issuer.example.com",
+				KeyType:   KeyTypeX5C,
+				Key:       chain,
+			},
+		})
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if decision.Trusted {
+			t.Error("expected untrusted when one evaluator rejects")
+		}
+	})
+
+	t.Run("no evaluator supports key type", func(t *testing.T) {
+		eval := NewLocalTrustEvaluator(LocalTrustConfig{
+			TrustedRoots: []*x509.Certificate{rootCert},
+		})
+		// LocalTrustEvaluator only supports X5C
+		composite := NewCompositeEvaluator(StrategyAllMustSucceed, eval)
+
+		_, err := composite.Evaluate(ctx, &EvaluationRequest{
+			EvaluationRequest: trustapi.EvaluationRequest{
+				SubjectID: "https://issuer.example.com",
+				KeyType:   KeyTypeJWK,
+				Key:       map[string]any{"kty": "EC"},
+			},
+		})
+
+		if err == nil {
+			t.Error("expected error when no evaluator supports key type")
+		}
+	})
+}
+
+func TestCompositeEvaluator_AddEvaluator(t *testing.T) {
+	chain, rootCert, _ := createTestCertChain(t)
+	ctx := t.Context()
+
+	composite := NewCompositeEvaluator(StrategyFirstSuccess)
+
+	// Initially no evaluators - should fail
+	_, err := composite.Evaluate(ctx, &EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			SubjectID: "https://issuer.example.com",
+			KeyType:   KeyTypeX5C,
+			Key:       chain,
+		},
+	})
+	if err == nil {
+		t.Error("expected error with no evaluators")
+	}
+
+	// Add evaluator dynamically
+	composite.AddEvaluator(NewLocalTrustEvaluator(LocalTrustConfig{
+		TrustedRoots: []*x509.Certificate{rootCert},
+	}))
+
+	decision, err := composite.Evaluate(ctx, &EvaluationRequest{
+		EvaluationRequest: trustapi.EvaluationRequest{
+			SubjectID: "https://issuer.example.com",
+			KeyType:   KeyTypeX5C,
+			Key:       chain,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !decision.Trusted {
+		t.Error("expected trusted after adding evaluator")
+	}
+}
+
+func TestJwkToEd25519(t *testing.T) {
+	// Generate a real Ed25519 key
+	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	xB64 := base64.RawURLEncoding.EncodeToString(pubKey)
+
+	t.Run("valid Ed25519 JWK", func(t *testing.T) {
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   xB64,
+		}
+		got, err := jwkToEd25519(jwk)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !pubKey.Equal(got) {
+			t.Error("keys don't match")
+		}
+	})
+
+	t.Run("wrong key type", func(t *testing.T) {
+		jwk := map[string]any{
+			"kty": "EC",
+			"crv": "Ed25519",
+			"x":   xB64,
+		}
+		_, err := jwkToEd25519(jwk)
+		if err == nil {
+			t.Error("expected error for wrong kty")
+		}
+	})
+
+	t.Run("wrong curve", func(t *testing.T) {
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "X25519",
+			"x":   xB64,
+		}
+		_, err := jwkToEd25519(jwk)
+		if err == nil {
+			t.Error("expected error for wrong curve")
+		}
+	})
+
+	t.Run("missing x coordinate", func(t *testing.T) {
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+		}
+		_, err := jwkToEd25519(jwk)
+		if err == nil {
+			t.Error("expected error for missing x")
+		}
+	})
+
+	t.Run("invalid base64 x coordinate", func(t *testing.T) {
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   "!!!invalid!!!",
+		}
+		_, err := jwkToEd25519(jwk)
+		if err == nil {
+			t.Error("expected error for invalid base64")
+		}
+	})
+
+	t.Run("wrong key size", func(t *testing.T) {
+		jwk := map[string]any{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString([]byte("short")),
+		}
+		_, err := jwkToEd25519(jwk)
+		if err == nil {
+			t.Error("expected error for wrong key size")
+		}
+	})
+}
+
+func TestDecodeMultibaseKey(t *testing.T) {
+	t.Run("too short", func(t *testing.T) {
+		_, err := decodeMultibaseKey("z")
+		if err == nil {
+			t.Error("expected error for short input")
+		}
+	})
+
+	t.Run("base58-btc not implemented", func(t *testing.T) {
+		_, err := decodeMultibaseKey("z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")
+		if err == nil {
+			t.Error("expected error for base58-btc")
+		}
+	})
+
+	t.Run("unsupported encoding", func(t *testing.T) {
+		_, err := decodeMultibaseKey("xsomething")
+		if err == nil {
+			t.Error("expected error for unsupported encoding")
+		}
+	})
+}
+
+func TestExtractKeyFromJWK(t *testing.T) {
+	t.Run("unsupported key type", func(t *testing.T) {
+		_, err := extractKeyFromJWK(map[string]any{"kty": "RSA"})
+		if err == nil {
+			t.Error("expected error for unsupported key type")
+		}
+	})
+
+	t.Run("EC key type delegates to jwkToECDSA", func(t *testing.T) {
+		// Minimal invalid EC JWK - will fail inside jwkToECDSA
+		_, err := extractKeyFromJWK(map[string]any{"kty": "EC"})
+		if err == nil {
+			t.Error("expected error for invalid EC JWK")
+		}
+	})
+
+	t.Run("OKP key type delegates to jwkToEd25519", func(t *testing.T) {
+		// Invalid OKP JWK - missing crv
+		_, err := extractKeyFromJWK(map[string]any{"kty": "OKP"})
+		if err == nil {
+			t.Error("expected error for invalid OKP JWK")
+		}
+	})
 }

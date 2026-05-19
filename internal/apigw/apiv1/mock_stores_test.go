@@ -318,39 +318,3 @@ func (m *memoryIdentityMappingStore) CreateMappings(ctx context.Context, mapping
 	}
 	return nil
 }
-
-// memoryCredentialOfferStore is an in-memory implementation of db.CredentialOfferStore for testing.
-type memoryCredentialOfferStore struct {
-	mu    sync.RWMutex
-	offers map[string]*db.CredentialOfferDocument
-}
-
-func newMemoryCredentialOfferStore() *memoryCredentialOfferStore {
-	return &memoryCredentialOfferStore{
-		offers: make(map[string]*db.CredentialOfferDocument),
-	}
-}
-
-func (m *memoryCredentialOfferStore) Save(_ context.Context, doc *db.CredentialOfferDocument) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.offers[doc.UUID] = doc
-	return nil
-}
-
-func (m *memoryCredentialOfferStore) Get(_ context.Context, uuid string) (*db.CredentialOfferDocument, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	doc, ok := m.offers[uuid]
-	if !ok {
-		return nil, fmt.Errorf("credential offer not found: %s", uuid)
-	}
-	return doc, nil
-}
-
-func (m *memoryCredentialOfferStore) Delete(_ context.Context, uuid string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.offers, uuid)
-	return nil
-}

@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -462,4 +463,128 @@ func TestStatusListGenerateCWTMethod(t *testing.T) {
 	assert.NotNil(t, claims[cwtClaimIat])
 	assert.NotNil(t, claims[cwtClaimExp])
 	assert.NotNil(t, claims[cwtClaimStatusList])
+}
+
+func TestParseJWT(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	statuses := []uint8{5, 10, 15, 20, 25}
+
+	cfg := JWTConfig{
+		TokenConfig: TokenConfig{
+			Issuer:    "https://example.com",
+			Subject:   "https://example.com/statuslists/1",
+			Statuses:  statuses,
+			ExpiresIn: 24 * time.Hour,
+			TTL:       43200,
+			KeyID:     "key-1",
+		},
+		SigningKey:    privateKey,
+		SigningMethod: jwt.SigningMethodES256,
+	}
+
+	tokenString, err := GenerateJWT(cfg)
+	require.NoError(t, err)
+
+	claims, err := ParseJWT(tokenString, func(token *jwt.Token) (any, error) {
+		return &privateKey.PublicKey, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Issuer, claims.Issuer)
+	assert.Equal(t, cfg.Subject, claims.Subject)
+	assert.Equal(t, int64(43200), claims.TTL)
+	assert.Equal(t, Bits, claims.StatusList.Bits)
+	assert.NotEmpty(t, claims.StatusList.Lst)
+}
+
+func TestParseJWT_InvalidToken(t *testing.T) {
+	_, err := ParseJWT("invalid.token.string", func(token *jwt.Token) (any, error) {
+		return nil, fmt.Errorf("no key")
+	})
+	assert.Error(t, err)
+}
+
+func TestGetStatusFromJWT(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	statuses := []uint8{5, 10, 15, 20, 25}
+
+	cfg := JWTConfig{
+		TokenConfig: TokenConfig{
+			Issuer:   "https://example.com",
+			Subject:  "https://example.com/statuslists/1",
+			Statuses: statuses,
+		},
+		SigningKey:    privateKey,
+		SigningMethod: jwt.SigningMethodES256,
+	}
+
+	tokenString, err := GenerateJWT(cfg)
+	require.NoError(t, err)
+
+	claims, err := ParseJWT(tokenString, func(token *jwt.Token) (any, error) {
+		return &privateKey.PublicKey, nil
+	})
+	require.NoError(t, err)
+
+	for i, expected := range statuses {
+		got, err := GetStatusFromJWT(claims, i)
+		require.NoError(t, err)
+		assert.Equal(t, expected, got)
+	}
+
+	_, err = GetStatusFromJWT(claims, 100)
+	assert.Error(t, err)
+}
+
+func FuzzCompressDecompress(f *testing.F) {
+	f.Add([]byte{0, 1, 2, 3})
+	f.Add([]byte{255, 0, 128})
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, input []byte) {
+		statuses := make([]uint8, len(input))
+		copy(statuses, input)
+
+		compressed, err := CompressStatuses(statuses)
+		if err != nil {
+			return
+		}
+		decompressed, err := DecompressStatuses(compressed)
+		require.NoError(t, err)
+		assert.Equal(t, statuses, decompressed)
+	})
+}
+
+// FuzzParseCWT fuzzes CWT (CBOR Web Token) parsing.
+// CWTs may be received from untrusted status list providers.
+func FuzzParseCWT(f *testing.F) {
+	f.Add([]byte{0xd2, 0x84, 0x40, 0xa0, 0x40, 0x40}) // COSE tag 18 + minimal array
+	f.Add([]byte{})
+	f.Add([]byte{0xff})
+	f.Add([]byte{0xa0})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		claims, err := ParseCWT(data)
+		if err != nil {
+			return
+		}
+		if claims == nil {
+			t.Fatal("ParseCWT returned nil without error")
+		}
+	})
+}
+
+// FuzzDecodeAndDecompress fuzzes base64 decoding + zlib decompression.
+func FuzzDecodeAndDecompress(f *testing.F) {
+	f.Add("eJwBAAD__wFJ")
+	f.Add("")
+	f.Add("not-base64!")
+	f.Add("AAAA")
+
+	f.Fuzz(func(t *testing.T, encoded string) {
+		_, _ = DecodeAndDecompress(encoded)
+	})
 }
