@@ -14,6 +14,7 @@ package registry
 
 import (
 	"context"
+	"time"
 
 	"github.com/sirosfoundation/go-trust/pkg/authzen"
 )
@@ -72,14 +73,15 @@ type TrustRegistry interface {
 
 // RegistryInfo provides metadata about a TrustRegistry instance
 type RegistryInfo struct {
-	Name           string   // Human-readable name, e.g. "ETSI TSL Registry"
-	Type           string   // Registry type identifier, e.g. "etsi_tsl", "openid_federation"
-	Description    string   // Description of what this registry provides
-	Version        string   // Implementation version
-	TrustAnchors   []string // List of trust anchor identifiers (TSL URLs, federation roots, etc.)
-	ResourceTypes  []string // Supported resource types (from SupportedResourceTypes())
-	ResolutionOnly bool     // Whether this is a resolution-only registry (from SupportsResolutionOnly())
-	Healthy        bool     // Whether the registry is healthy (from Healthy())
+	Name           string     // Human-readable name, e.g. "ETSI TSL Registry"
+	Type           string     // Registry type identifier, e.g. "etsi_tsl", "openid_federation"
+	Description    string     // Description of what this registry provides
+	Version        string     // Implementation version
+	TrustAnchors   []string   // List of trust anchor identifiers (TSL URLs, federation roots, etc.)
+	ResourceTypes  []string   // Supported resource types (from SupportedResourceTypes())
+	ResolutionOnly bool       // Whether this is a resolution-only registry (from SupportsResolutionOnly())
+	Healthy        bool       // Whether the registry is healthy (from Healthy())
+	LastUpdated    *time.Time // When the registry data was last refreshed (nil if not applicable)
 }
 
 // ResolutionStrategy defines how RegistryManager aggregates results from multiple registries

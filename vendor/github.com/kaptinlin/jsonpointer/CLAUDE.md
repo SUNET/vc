@@ -9,7 +9,6 @@ For installation, usage examples, and API-oriented guidance, see [README.md](REA
 ```bash
 task test          # Run package tests with the race detector
 task lint          # Run golangci-lint and go.mod/go.sum tidy checks
-task markdownlint  # Lint Markdown files
 task yamllint      # Lint YAML files
 task bench         # Run benchmark suites
 ```
@@ -75,7 +74,7 @@ Specification documents in [`SPECS/`](SPECS/) — package contracts, traversal s
 
 ### Must Follow
 
-- Go 1.26.2 — use modern standard library helpers where they simplify code.
+- Use the Go version declared in `go.mod`; use modern standard library helpers where they simplify code.
 - Follow [Google Go Best Practices](https://google.github.io/go-style/best-practices)
 - Follow [Google Go Style Decisions](https://google.github.io/go-style/decisions)
 - KISS/DRY/YAGNI — keep the package small, direct, and free of speculative APIs.
@@ -101,7 +100,6 @@ Specification documents in [`SPECS/`](SPECS/) — package contracts, traversal s
 - Keep coverage for map and slice traversal, typed slices and arrays, struct tag lookup, pointer dereference, escaped pointer handling, and validation limits.
 - Keep executable examples in `example_test.go` aligned with `README.md` and the runnable demo in `examples/`.
 - Run `task test` and `task lint` for code changes.
-- Run `task markdownlint` for Markdown changes.
 - Run `task yamllint` for YAML changes.
 
 ## Dependencies

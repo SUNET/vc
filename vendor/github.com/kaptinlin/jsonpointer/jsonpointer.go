@@ -1,36 +1,7 @@
-// Package jsonpointer provides JSON Pointer (RFC 6901) implementation for Go.
-// This is a direct port of the TypeScript json-pointer library with identical behavior,
-// using modern Go generics for type safety and performance.
+// Package jsonpointer implements read-only JSON Pointer (RFC 6901) traversal helpers for Go values.
 //
-// This package implements helper functions for JSON Pointer (RFC 6901) specification.
-// https://tools.ietf.org/html/rfc6901
-//
-// TypeScript original source: https://github.com/jsonjoy-com/json-pointer
-//
-// Usage:
-//
-//	import "github.com/kaptinlin/jsonpointer"
-//
-//	// Parse JSON Pointer string to path
-//	path := jsonpointer.Parse("/users/0/name")
-//
-//	// Find value with error handling
-//	ref, err := jsonpointer.Find(data, path...)
-//	if err != nil {
-//		// Handle error
-//	}
-//
-//	// Get value with error handling
-//	value, err := jsonpointer.Get(data, path...)
-//	if err != nil {
-//		// Handle error
-//	}
-//
-//	// Validate JSON Pointer
-//	err = jsonpointer.Validate("/users/0/name")
-//
+// The implementation follows https://github.com/jsonjoy-com/json-pointer behavior.
 // Public traversal APIs return errors for invalid paths and unsupported access patterns.
-// This package does not expose Must* wrappers and does not use panic for traversal failures.
 package jsonpointer
 
 // Get retrieves a value from document using string path components.

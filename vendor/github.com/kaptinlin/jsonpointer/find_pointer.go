@@ -46,6 +46,50 @@ func findByPointer(pointer string, val any) (*Reference, error) {
 	for keyStr := range strings.SplitSeq(pointer[1:], "/") {
 		obj = val
 
+		switch current := obj.(type) {
+		case map[string]any:
+			key = unescapeComponent(keyStr)
+			var err error
+			val, err = stringMapValue(current, key)
+			if err != nil {
+				return nil, err
+			}
+			continue
+
+		case *map[string]any:
+			if current == nil {
+				return nil, ErrNilPointer
+			}
+			key = unescapeComponent(keyStr)
+			var err error
+			val, err = stringMapValue(*current, key)
+			if err != nil {
+				return nil, err
+			}
+			continue
+
+		case []any:
+			next, err := sliceValue(current, keyStr)
+			if err != nil {
+				return nil, err
+			}
+			key = keyStr
+			val = next
+			continue
+
+		case *[]any:
+			if current == nil {
+				return nil, ErrNilPointer
+			}
+			next, err := sliceValue(*current, keyStr)
+			if err != nil {
+				return nil, err
+			}
+			key = keyStr
+			val = next
+			continue
+		}
+
 		if obj == nil {
 			return nil, ErrNotFound
 		}

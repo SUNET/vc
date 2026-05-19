@@ -100,13 +100,17 @@ func ReadinessHandler(serverCtx *ServerContext) gin.HandlerFunc {
 					healthyCount++
 				}
 				if verbose {
-					registryInfos = append(registryInfos, map[string]interface{}{
+					entry := map[string]interface{}{
 						"name":            info.Name,
 						"type":            info.Type,
 						"resource_types":  info.ResourceTypes,
 						"resolution_only": info.ResolutionOnly,
 						"healthy":         info.Healthy,
-					})
+					}
+					if info.LastUpdated != nil {
+						entry["last_updated"] = info.LastUpdated
+					}
+					registryInfos = append(registryInfos, entry)
 				}
 			}
 		}

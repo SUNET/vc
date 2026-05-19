@@ -36,18 +36,21 @@ func (l *Localizer) GetX(name, context string, data ...Vars) string {
 // Use [Localizer.Get] for the common case where only the text is needed.
 func (l *Localizer) Lookup(name string, data ...Vars) TranslationResult {
 	pt, found := l.resolve(name)
-	source := TranslationSourceMissing
-	if found {
-		source = TranslationSourceFallback
-		if pt.locale == l.locale {
-			source = TranslationSourceDirect
-		}
-	}
 	return TranslationResult{
 		Text:   l.localize(pt, data...),
 		Locale: pt.locale,
-		Source: source,
+		Source: l.translationSource(pt, found),
 	}
+}
+
+func (l *Localizer) translationSource(pt *parsedTranslation, found bool) TranslationSource {
+	if !found {
+		return TranslationSourceMissing
+	}
+	if pt.locale == l.locale {
+		return TranslationSourceDirect
+	}
+	return TranslationSourceFallback
 }
 
 func (l *Localizer) resolve(name string) (*parsedTranslation, bool) {
@@ -58,22 +61,16 @@ func (l *Localizer) resolve(name string) (*parsedTranslation, bool) {
 }
 
 func (l *Localizer) localize(pt *parsedTranslation, data ...Vars) string {
-	if pt.format == nil {
-		return pt.text
-	}
 	params := varsToParams(data)
-	if params == nil {
+	if pt.format == nil || params == nil {
 		return pt.text
 	}
+
 	result, err := pt.format(params)
-	if err != nil {
-		return pt.text
+	if str, ok := result.(string); err == nil && ok {
+		return str
 	}
-	str, ok := result.(string)
-	if !ok {
-		return pt.text
-	}
-	return str
+	return pt.text
 }
 
 // Format compiles and formats a MessageFormat message directly.
@@ -93,7 +90,7 @@ func (l *Localizer) Format(message string, data ...Vars) (string, error) {
 
 	compiled, err := formatter.Compile(message)
 	if err != nil {
-		return "", fmt.Errorf("compile message: %w", err)
+		return "", fmt.Errorf("%w: compile message: %w", ErrMessageFormatCompilation, err)
 	}
 
 	params := varsToParams(data)
@@ -110,9 +107,9 @@ func (l *Localizer) Format(message string, data ...Vars) (string, error) {
 	return str, nil
 }
 
-func varsToParams(data []Vars) any {
-	if len(data) == 0 {
+func varsToParams(vars []Vars) any {
+	if len(vars) == 0 {
 		return nil
 	}
-	return map[string]any(data[0])
+	return map[string]any(vars[0])
 }

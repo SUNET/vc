@@ -24,10 +24,9 @@ type Reference struct {
 //	  readonly key: number;
 //	}
 type ArrayReference[T any] struct {
-	// Use pointer for undefined | T semantics (nil = undefined)
 	Val *T  `json:"val"`
 	Obj []T `json:"obj"`
-	Key int `json:"key"` // Numeric index for array access
+	Key int `json:"key"`
 }
 
 // ObjectReference represents a reference to an object property.
@@ -50,12 +49,8 @@ type ObjectReference[T any] struct {
 //
 //	isArray(ref.obj) && typeof ref.key === 'number';
 func IsArrayReference(ref Reference) bool {
-	if ref.Obj == nil || ref.Key == "" {
-		return false
-	}
-
-	objType := reflect.TypeOf(ref.Obj)
-	if objType.Kind() != reflect.Slice {
+	objType, ok := referenceObjectType(ref)
+	if !ok || objType.Kind() != reflect.Slice {
 		return false
 	}
 
@@ -69,10 +64,13 @@ func IsArrayReference(ref Reference) bool {
 //
 //	typeof ref.obj === 'object' && typeof ref.key === 'string';
 func IsObjectReference(ref Reference) bool {
-	if ref.Obj == nil || ref.Key == "" {
-		return false
-	}
+	objType, ok := referenceObjectType(ref)
+	return ok && objType.Kind() == reflect.Map && objType.Key().Kind() == reflect.String
+}
 
-	objType := reflect.TypeOf(ref.Obj)
-	return objType.Kind() == reflect.Map && objType.Key().Kind() == reflect.String
+func referenceObjectType(ref Reference) (reflect.Type, bool) {
+	if ref.Obj == nil || ref.Key == "" {
+		return nil, false
+	}
+	return reflect.TypeOf(ref.Obj), true
 }
