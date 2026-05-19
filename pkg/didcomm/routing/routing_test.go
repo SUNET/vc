@@ -429,3 +429,100 @@ func TestExtractDIDFromKeyID(t *testing.T) {
 		}
 	}
 }
+
+func TestNewForwardWithID(t *testing.T) {
+	forward := NewForwardWithID("custom-id", "did:example:mediator", "did:example:recipient", []byte(`{}`))
+
+	if forward.ID != "custom-id" {
+		t.Errorf("expected ID=custom-id, got %s", forward.ID)
+	}
+	if forward.Body.Next != "did:example:recipient" {
+		t.Errorf("expected Next=did:example:recipient, got %s", forward.Body.Next)
+	}
+}
+
+func TestWrapInForward(t *testing.T) {
+	encrypted := []byte(`{"protected":"eyJ...","ciphertext":"abc"}`)
+	forward := WrapInForward("did:example:mediator", "did:example:next", encrypted)
+
+	if forward.Type != ForwardMessageType {
+		t.Errorf("expected forward type, got %s", forward.Type)
+	}
+
+	wrapped, err := forward.GetWrappedMessage()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var expected, actual any
+	json.Unmarshal(encrypted, &expected)
+	json.Unmarshal(wrapped, &actual)
+	if expected == nil || actual == nil {
+		t.Fatal("failed to parse JSON for comparison")
+	}
+}
+
+func TestRoute_FirstHop(t *testing.T) {
+	t.Run("empty route", func(t *testing.T) {
+		route := &Route{}
+		if route.FirstHop() != nil {
+			t.Error("expected nil for empty route")
+		}
+	})
+
+	t.Run("single hop", func(t *testing.T) {
+		route := &Route{
+			Hops: []Hop{{RecipientDID: "did:example:recipient", ServiceEndpoint: "https://example.com"}},
+		}
+		hop := route.FirstHop()
+		if hop == nil {
+			t.Fatal("expected non-nil hop")
+		}
+		if hop.RecipientDID != "did:example:recipient" {
+			t.Errorf("expected did:example:recipient, got %s", hop.RecipientDID)
+		}
+	})
+}
+
+func TestRouteBuilder_WithMaxHops_ZeroMaxHops(t *testing.T) {
+	resolver := &mockServiceResolver{
+		services: map[string]*DIDCommService{
+			"did:example:a": {
+				ServiceEndpoint: "https://a.example.com",
+				RoutingKeys:     []string{"did:example:b#key-1"},
+			},
+			"did:example:b": {
+				ServiceEndpoint: "https://b.example.com",
+			},
+		},
+	}
+
+	// maxHops=0 should fail immediately since depth(0) >= maxHops(0)
+	rb := NewRouteBuilder(resolver).WithMaxHops(0)
+
+	_, err := rb.BuildRoute(context.Background(), "did:example:a")
+	if err == nil {
+		t.Error("expected error for zero max hops")
+	}
+}
+
+func TestGetWrappedMessage_NoAttachments(t *testing.T) {
+	forward := &Forward{
+		Type: ForwardMessageType,
+	}
+	_, err := forward.GetWrappedMessage()
+	if err == nil {
+		t.Error("expected error for no attachments")
+	}
+}
+
+func TestGetWrappedMessage_EmptyAttachment(t *testing.T) {
+	forward := &Forward{
+		Type:        ForwardMessageType,
+		Attachments: []message.Attachment{{ID: "1"}},
+	}
+	_, err := forward.GetWrappedMessage()
+	if err == nil {
+		t.Error("expected error for empty attachment data")
+	}
+}

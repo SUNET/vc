@@ -312,13 +312,6 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 	}
 }
 
-// Helper function to create a pointer to a string
-//
-//go:fix inline
-func ptrString(s string) *string {
-	return new(s)
-}
-
 func TestClient_createDCQLQuery(t *testing.T) {
 	ctx := t.Context()
 

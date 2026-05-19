@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -149,11 +148,6 @@ func generateRSAKeyFile(t *testing.T) string {
 	}
 
 	return keyPath
-}
-
-// base64Encode helper for encoding
-func base64Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
 }
 
 // initializeConfiguration creates test configuration

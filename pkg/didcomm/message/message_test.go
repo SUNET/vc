@@ -258,3 +258,83 @@ func TestMessage_IsExpired(t *testing.T) {
 		}
 	})
 }
+
+func TestWithCreatedTime(t *testing.T) {
+	ts := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	msg := New(WithCreatedTime(ts))
+	if msg.CreatedTime == nil {
+		t.Fatal("expected created time")
+	}
+	if *msg.CreatedTime != ts.Unix() {
+		t.Errorf("expected %d, got %d", ts.Unix(), *msg.CreatedTime)
+	}
+}
+
+func TestWithExpiresTime(t *testing.T) {
+	ts := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	msg := New(WithExpiresTime(ts))
+	if msg.ExpiresTime == nil {
+		t.Fatal("expected expires time")
+	}
+	if *msg.ExpiresTime != ts.Unix() {
+		t.Errorf("expected %d, got %d", ts.Unix(), *msg.ExpiresTime)
+	}
+}
+
+func TestWithAttachments(t *testing.T) {
+	attachments := []Attachment{{ID: "a1"}, {ID: "a2"}}
+	msg := New(WithAttachments(attachments))
+	if len(msg.Attachments) != 2 {
+		t.Errorf("expected 2 attachments, got %d", len(msg.Attachments))
+	}
+}
+
+func TestWithFromPrior(t *testing.T) {
+	msg := New(WithFromPrior("jwt-token"))
+	if msg.FromPrior != "jwt-token" {
+		t.Errorf("expected jwt-token, got %s", msg.FromPrior)
+	}
+}
+
+func TestMessage_AddAttachment(t *testing.T) {
+	msg := &Message{}
+	msg.AddAttachment(Attachment{ID: "1"})
+	msg.AddAttachment(Attachment{ID: "2"})
+	if len(msg.Attachments) != 2 {
+		t.Errorf("expected 2, got %d", len(msg.Attachments))
+	}
+}
+
+func TestMessage_SetBody_GetBody(t *testing.T) {
+	msg := &Message{}
+	body := map[string]string{"key": "value"}
+	if err := msg.SetBody(body); err != nil {
+		t.Fatal(err)
+	}
+
+	var result map[string]string
+	if err := msg.GetBody(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["key"] != "value" {
+		t.Errorf("expected value, got %s", result["key"])
+	}
+}
+
+func TestMessage_GetBody_Nil(t *testing.T) {
+	msg := &Message{}
+	var result map[string]string
+	if err := msg.GetBody(&result); err != nil {
+		t.Errorf("expected nil error for nil body, got %v", err)
+	}
+}
+
+func TestMessage_Validate_ExpiredAttachment(t *testing.T) {
+	msg := New(
+		WithType("test"),
+		WithAttachments([]Attachment{{ID: "1"}}), // empty data = invalid
+	)
+	if err := msg.Validate(); err == nil {
+		t.Error("expected validation error for invalid attachment")
+	}
+}

@@ -174,3 +174,93 @@ func TestWithHandshakeProtocols(t *testing.T) {
 		t.Errorf("HandshakeProtocols = %v, want 2 protocols", body.HandshakeProtocols)
 	}
 }
+
+func TestWithLabel(t *testing.T) {
+	inv, err := NewInvitation(
+		"did:example:alice",
+		WithLabel("Alice's Invitation"),
+	)
+	if err != nil {
+		t.Fatalf("NewInvitation() error = %v", err)
+	}
+
+	if inv.From != "did:example:alice" {
+		t.Errorf("From = %v, want did:example:alice", inv.From)
+	}
+
+	if inv.Type != TypeInvitation {
+		t.Errorf("Type = %v, want %v", inv.Type, TypeInvitation)
+	}
+}
+
+func TestWithAttachments(t *testing.T) {
+	att := message.Attachment{
+		ID:          "att-1",
+		Description: "test attachment",
+		MediaType:   "application/json",
+		Data: message.AttachmentData{
+			JSON: map[string]any{"key": "value"},
+		},
+	}
+
+	inv, err := NewInvitation(
+		"did:example:alice",
+		WithAttachments(att),
+	)
+	if err != nil {
+		t.Fatalf("NewInvitation() error = %v", err)
+	}
+
+	if len(inv.Attachments) != 1 {
+		t.Fatalf("Attachments count = %d, want 1", len(inv.Attachments))
+	}
+
+	if inv.Attachments[0].ID != "att-1" {
+		t.Errorf("Attachment ID = %v, want att-1", inv.Attachments[0].ID)
+	}
+}
+
+func TestEncodeAsJSON_NonInvitation(t *testing.T) {
+	msg := message.New(message.WithType("https://example.com/other"))
+	_, err := EncodeAsJSON(msg)
+	if err == nil {
+		t.Error("expected error for non-invitation message")
+	}
+}
+
+func TestGetInvitationBody_NonInvitation(t *testing.T) {
+	msg := message.New(message.WithType("https://example.com/other"))
+	_, err := GetInvitationBody(msg)
+	if err == nil {
+		t.Error("expected error for non-invitation message")
+	}
+}
+
+func TestDecodeFromBase64_Invalid(t *testing.T) {
+	_, err := DecodeFromBase64("not-valid-base64!!!")
+	if err == nil {
+		t.Error("expected error for invalid base64")
+	}
+}
+
+func FuzzDecodeFromBase64(f *testing.F) {
+	f.Add("eyJ0eXBlIjoiaW52aXRhdGlvbiJ9")
+	f.Add("")
+	f.Add("!!!invalid!!!")
+
+	f.Fuzz(func(t *testing.T, input string) {
+		// Should never panic
+		_, _ = DecodeFromBase64(input)
+	})
+}
+
+func FuzzDecodeFromJSON(f *testing.F) {
+	f.Add([]byte(`{"type":"https://didcomm.org/out-of-band/2.0/invitation"}`))
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`invalid json`))
+
+	f.Fuzz(func(t *testing.T, input []byte) {
+		// Should never panic
+		_, _ = DecodeFromJSON(input)
+	})
+}

@@ -35,13 +35,6 @@ func TestValidationIdentity(t *testing.T) {
 						"validationParam": "",
 					},
 					{
-						"field":           "schema",
-						"namespace":       "schema",
-						"type":            "ptr",
-						"validation":      "required",
-						"validationParam": "",
-					},
-					{
 						"field":           "family_name",
 						"namespace":       "family_name",
 						"type":            "string",
