@@ -567,7 +567,12 @@ func TestSingaporeCredentials_EdDSA_DirectVerify(t *testing.T) {
 			// Parse credential for verification
 			cred, err := credential.NewRDFCredentialFromJSON(data, nil)
 			if err != nil {
-				t.Skipf("skipping verification - cannot load credential context: %v", err)
+				// Context loading requires fetching remote JSON-LD documents
+				// which may return 403 in restricted environments.
+				if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "no such host") {
+					t.Skipf("skipping verification - remote context unavailable: %v", err)
+				}
+				t.Fatalf("failed to parse credential: %v", err)
 			}
 
 			// Verify the signature
