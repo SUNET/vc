@@ -3,7 +3,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_100"
+      "document_id": "document_id_diploma_100",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_100"
@@ -394,7 +395,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_101"
+      "document_id": "document_id_diploma_101",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_101"
@@ -785,7 +787,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_102"
+      "document_id": "document_id_diploma_102",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_102"
@@ -1176,7 +1179,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_103"
+      "document_id": "document_id_diploma_103",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_103"
@@ -1567,7 +1571,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_104"
+      "document_id": "document_id_diploma_104",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_104"
@@ -1958,7 +1963,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_105"
+      "document_id": "document_id_diploma_105",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_105"
@@ -2349,7 +2355,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_106"
+      "document_id": "document_id_diploma_106",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_106"
@@ -2740,7 +2747,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_107"
+      "document_id": "document_id_diploma_107",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_107"
@@ -3131,7 +3139,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_108"
+      "document_id": "document_id_diploma_108",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_108"
@@ -3522,7 +3531,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_109"
+      "document_id": "document_id_diploma_109",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_109"
@@ -3913,7 +3923,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_110"
+      "document_id": "document_id_diploma_110",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_110"
@@ -4304,7 +4315,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_111"
+      "document_id": "document_id_diploma_111",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_111"
@@ -4695,7 +4707,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_112"
+      "document_id": "document_id_diploma_112",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_112"
@@ -5086,7 +5099,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_113"
+      "document_id": "document_id_diploma_113",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_113"
@@ -5477,7 +5491,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_114"
+      "document_id": "document_id_diploma_114",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_114"
@@ -5868,7 +5883,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_115"
+      "document_id": "document_id_diploma_115",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_115"
@@ -6259,7 +6275,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_116"
+      "document_id": "document_id_diploma_116",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_116"
@@ -6650,7 +6667,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_117"
+      "document_id": "document_id_diploma_117",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_117"
@@ -7041,7 +7059,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_118"
+      "document_id": "document_id_diploma_118",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_118"
@@ -7432,7 +7451,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_119"
+      "document_id": "document_id_diploma_119",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_119"
@@ -7823,7 +7843,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_120"
+      "document_id": "document_id_diploma_120",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_120"
@@ -8214,7 +8235,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_121"
+      "document_id": "document_id_diploma_121",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_121"
@@ -8605,7 +8627,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_122"
+      "document_id": "document_id_diploma_122",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_122"
@@ -8996,7 +9019,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_123"
+      "document_id": "document_id_diploma_123",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_123"
@@ -9387,7 +9411,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_124"
+      "document_id": "document_id_diploma_124",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_124"
@@ -9778,7 +9803,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_125"
+      "document_id": "document_id_diploma_125",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_125"
@@ -10169,7 +10195,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_126"
+      "document_id": "document_id_diploma_126",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_126"
@@ -10560,7 +10587,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_127"
+      "document_id": "document_id_diploma_127",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_127"
@@ -10951,7 +10979,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_128"
+      "document_id": "document_id_diploma_128",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_128"
@@ -11342,7 +11371,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_129"
+      "document_id": "document_id_diploma_129",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_129"
@@ -11733,7 +11763,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_130"
+      "document_id": "document_id_diploma_130",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_130"
@@ -12124,7 +12155,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_131"
+      "document_id": "document_id_diploma_131",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_131"
@@ -12515,7 +12547,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_132"
+      "document_id": "document_id_diploma_132",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_132"
@@ -12906,7 +12939,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_133"
+      "document_id": "document_id_diploma_133",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_133"
@@ -13297,7 +13331,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_134"
+      "document_id": "document_id_diploma_134",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_134"
@@ -13688,7 +13723,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_135"
+      "document_id": "document_id_diploma_135",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_135"
@@ -14079,7 +14115,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_136"
+      "document_id": "document_id_diploma_136",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_136"
@@ -14470,7 +14507,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_137"
+      "document_id": "document_id_diploma_137",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_137"
@@ -14861,7 +14899,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_138"
+      "document_id": "document_id_diploma_138",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_138"
@@ -15252,7 +15291,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_139"
+      "document_id": "document_id_diploma_139",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_139"
@@ -15643,7 +15683,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_140"
+      "document_id": "document_id_diploma_140",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_140"
@@ -16034,7 +16075,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_141"
+      "document_id": "document_id_diploma_141",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_141"
@@ -16425,7 +16467,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_142"
+      "document_id": "document_id_diploma_142",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_142"
@@ -16816,7 +16859,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_143"
+      "document_id": "document_id_diploma_143",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_143"
@@ -17207,7 +17251,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_144"
+      "document_id": "document_id_diploma_144",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_144"
@@ -17598,7 +17643,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_145"
+      "document_id": "document_id_diploma_145",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_145"
@@ -17989,7 +18035,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_146"
+      "document_id": "document_id_diploma_146",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_146"
@@ -18380,7 +18427,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_147"
+      "document_id": "document_id_diploma_147",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_147"
@@ -18771,7 +18819,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_148"
+      "document_id": "document_id_diploma_148",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_148"
@@ -19162,7 +19211,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_149"
+      "document_id": "document_id_diploma_149",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_149"
@@ -19553,7 +19603,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_70"
+      "document_id": "document_id_diploma_70",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_70"
@@ -19944,7 +19995,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_71"
+      "document_id": "document_id_diploma_71",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_71"
@@ -20335,7 +20387,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_72"
+      "document_id": "document_id_diploma_72",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_72"
@@ -20726,7 +20779,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_73"
+      "document_id": "document_id_diploma_73",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_73"
@@ -21117,7 +21171,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_74"
+      "document_id": "document_id_diploma_74",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_74"
@@ -21508,7 +21563,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_75"
+      "document_id": "document_id_diploma_75",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_75"
@@ -21899,7 +21955,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_76"
+      "document_id": "document_id_diploma_76",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_76"
@@ -22290,7 +22347,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_77"
+      "document_id": "document_id_diploma_77",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_77"
@@ -22681,7 +22739,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_78"
+      "document_id": "document_id_diploma_78",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_78"
@@ -23072,7 +23131,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_79"
+      "document_id": "document_id_diploma_79",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_79"
@@ -23463,7 +23523,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_80"
+      "document_id": "document_id_diploma_80",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_80"
@@ -23854,7 +23915,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_81"
+      "document_id": "document_id_diploma_81",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_81"
@@ -24245,7 +24307,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_82"
+      "document_id": "document_id_diploma_82",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_82"
@@ -24636,7 +24699,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_83"
+      "document_id": "document_id_diploma_83",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_83"
@@ -25027,7 +25091,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_84"
+      "document_id": "document_id_diploma_84",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_84"
@@ -25418,7 +25483,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_85"
+      "document_id": "document_id_diploma_85",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_85"
@@ -25809,7 +25875,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_86"
+      "document_id": "document_id_diploma_86",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_86"
@@ -26200,7 +26267,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_87"
+      "document_id": "document_id_diploma_87",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_87"
@@ -26591,7 +26659,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_88"
+      "document_id": "document_id_diploma_88",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_88"
@@ -26982,7 +27051,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_89"
+      "document_id": "document_id_diploma_89",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_89"
@@ -27373,7 +27443,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_90"
+      "document_id": "document_id_diploma_90",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_90"
@@ -27764,7 +27835,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_91"
+      "document_id": "document_id_diploma_91",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_91"
@@ -28155,7 +28227,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_92"
+      "document_id": "document_id_diploma_92",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_92"
@@ -28546,7 +28619,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_93"
+      "document_id": "document_id_diploma_93",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_93"
@@ -28937,7 +29011,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_94"
+      "document_id": "document_id_diploma_94",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_94"
@@ -29328,7 +29403,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_95"
+      "document_id": "document_id_diploma_95",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_95"
@@ -29719,7 +29795,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_96"
+      "document_id": "document_id_diploma_96",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_96"
@@ -30110,7 +30187,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_97"
+      "document_id": "document_id_diploma_97",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_97"
@@ -30501,7 +30579,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_98"
+      "document_id": "document_id_diploma_98",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_98"
@@ -30892,7 +30971,8 @@
     "meta": {
       "authentic_source": "Ladok",
       "scope": "diploma",
-      "document_id": "document_id_diploma_99"
+      "document_id": "document_id_diploma_99",
+      "created_at": "0001-01-01T00:00:00Z"
     },
     "identity_mapping_ids": [
       "authentic_source_person_id_99"

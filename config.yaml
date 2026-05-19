@@ -5,8 +5,8 @@ common:
   production: false
 
   credential_metadata:
-    pid_1_5:
-      vctm_file_path: "/metadata/vctm_pid_arf_1_5.json"
+    pid:
+      vctm_file_path: "/metadata/vctm_pid.json"
       format: "dc+sd-jwt"
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
@@ -44,12 +44,12 @@ verifier:
           type: "public"
           redirect_uri: "https://dev.wallet.sunet.se"
           scopes:
-            - "pid_1_5"
+            - "pid"
             - "ehic"
       supported_credentials:
-        - vct: "urn:eudi:pid:arf-1.5:1"
+        - vct: "urn:eudi:pid:1"
           scopes:
-            - "pid_1_5"
+            - "pid"
         - vct: "urn:eudi:ehic:1"
           scopes:
             - "ehic"
@@ -118,18 +118,17 @@ apigw:
           - "bootstrapping/ehic.json"
           - "bootstrapping/elm.json"
           - "bootstrapping/pda1.json"
-          - "bootstrapping/pid-1-5.json"
-          - "bootstrapping/pid-1-8.json"
+          - "bootstrapping/pid.json"
         users:
           - "100"
           - "102"
       scopes:
-        pid_1_5:
+        pid:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birth_date"]
         ehic:
           auth_provider: openid4vp
-          auth_scopes: ["pid_1_5"]
+          auth_scopes: ["pid"]
           auth_claims: ["given_name", "family_name", "birth_date"]
   auth_providers:
     oidc:
@@ -151,7 +150,7 @@ apigw:
           type: "public"
           redirect_uri: "http://localhost:3000"
           scopes:
-            - "pid_1_5"
+            - "pid"
             - "ehic"
     credential_offers:
       issuer_url: "http://apigw.vc.docker:8080"

@@ -90,7 +90,7 @@ determined by `auth_method` in the credential configuration.
                           │                         │
                ┌──────────▼──────────┐   ┌──────────▼───────────────┐
                │  PATH 1: PID        │   │  PATH 2: OTHER           │
-               │  (pid_1_5, pid_1_8) │   │  (ehic, diploma, pda1,   │
+               │  (pid)              │   │  (ehic, diploma, pda1,   │
                │                     │   │   elm, eduid, micro...)   │
                │  User authenticates │   │                           │
                │  via external IdP:  │   │  Wallet presents existing │

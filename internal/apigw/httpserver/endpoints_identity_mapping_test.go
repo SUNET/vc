@@ -277,7 +277,7 @@ func TestIdentityMappingCreate_SPOCPScopeSetMissing(t *testing.T) {
 	mock := &identityMappingMock{}
 	rules := []string{
 		// Scope set doesn't include identity_mapping
-		`(vc (service apigw)(method *)(path /api/v1/*)(subject alice)(authentic_source SUNET)(scope (* set eduid pid_1_5)))`,
+		`(vc (service apigw)(method *)(path /api/v1/*)(subject alice)(authentic_source SUNET)(scope (* set eduid pid)))`,
 	}
 	engine, priv := testSetupIdentityMapping(t, rules, mock)
 
@@ -491,12 +491,12 @@ func TestIdentityMappingSearch_SPOCPContextForwarding(t *testing.T) {
 }
 
 // TestIdentityMappingSearch_SPOCPDenied_NoIdentityMappingScope verifies that a user
-// whose SPOCP rules only grant a credential scope (e.g. pid_1_5) cannot list
+// whose SPOCP rules only grant a credential scope (e.g. pid) cannot list
 // identity mappings.
 func TestIdentityMappingSearch_SPOCPDenied_NoIdentityMappingScope(t *testing.T) {
 	mock := &identityMappingMock{}
 	rules := []string{
-		`(vc (service apigw)(method *)(path /api/v1/*)(subject bob)(authentic_source SUNET)(scope pid_1_5))`,
+		`(vc (service apigw)(method *)(path /api/v1/*)(subject bob)(authentic_source SUNET)(scope pid))`,
 	}
 	engine, priv := testSetupIdentityMapping(t, rules, mock)
 
@@ -510,7 +510,7 @@ func TestIdentityMappingSearch_SPOCPDenied_NoIdentityMappingScope(t *testing.T) 
 // ==================== Cross-scope isolation ====================
 
 // TestUploadDenied_WrongScope verifies that a user with scope "eduid" cannot
-// upload a document with scope "pid_1_5".
+// upload a document with scope "pid".
 func TestUploadDenied_WrongScope(t *testing.T) {
 	mock := &mockApiv1{}
 	rules := []string{
@@ -521,7 +521,7 @@ func TestUploadDenied_WrongScope(t *testing.T) {
 
 	token := signTestJWT(t, priv, "alice", "https://test-issuer", "test-audience")
 	body := map[string]any{
-		"meta":                 map[string]any{"authentic_source": "SUNET", "scope": "pid_1_5", "document_id": "doc1"},
+		"meta":                 map[string]any{"authentic_source": "SUNET", "scope": "pid", "document_id": "doc1"},
 		"identity_mapping_ids": []string{"id1"},
 		"document_data":        map[string]any{"key": "value"},
 	}

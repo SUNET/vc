@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-05-12
+**Generated:** 2026-05-18
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -340,10 +340,10 @@ Each key under a data source is a credential type.
 
 > **Path:** `.apigw.data_sources.datastore.import`
 
-| Field        | Type       | Description                                                                                                                                                                       | Example                                                         | Default | Required |
-| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------- | -------- |
-| `file_paths` | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. Import is skipped if the datastore already contains data. | `["./bootstrapping/pid-1-5.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
-| `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                      | `["100", "102"]`                                                | -       | No       |
+| Field        | Type       | Description                                                                                                                                                                       | Example                                                     | Default | Required |
+| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------- | -------- |
+| `file_paths` | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. Import is skipped if the datastore already contains data. | `["./bootstrapping/pid.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
+| `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                      | `["100", "102"]`                                            | -       | No       |
 
 ### `assertion`
 

@@ -53,7 +53,7 @@ func TestDeriveVPFormatsFromMetadata_CompareWithHardcoded(t *testing.T) {
 					},
 				},
 			},
-			"pid_1_5": {
+			"pid": {
 				Format:                              "dc+sd-jwt",
 				CredentialSigningAlgValuesSupported: []any{"ES256"},
 				ProofTypesSupported: map[string]openid4vci.ProofsTypesSupported{
@@ -62,7 +62,7 @@ func TestDeriveVPFormatsFromMetadata_CompareWithHardcoded(t *testing.T) {
 					},
 				},
 			},
-			"pid_1_5_mdoc": {
+			"pid_mdoc": {
 				Format:                              "mso_mdoc",
 				CredentialSigningAlgValuesSupported: []any{float64(-7)}, // -7 is ES256 in COSE
 			},

@@ -69,7 +69,7 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 		samplePathCheck map[string]string   // label -> expected path (first one)
 	}{
 		{
-			filename:      "vctm_pid_arf_1_8.json",
+			filename:      "vctm_pid.json",
 			expectedLangs: []string{"en-US"},
 			expectedLabels: map[string][]string{
 				"en-US": {"Last name", "First name", "Date of birth", "Nationality"},
@@ -77,7 +77,7 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 			samplePathCheck: map[string]string{
 				"Last name":     "family_name",
 				"First name":    "given_name",
-				"Date of birth": "birthdate", // Note: uses birthdate not birth_date in metadata
+				"Date of birth": "birthdate",
 				// Nationality uses path ["nationalities", null] so we can't check a single string path
 			},
 		},
@@ -499,5 +499,45 @@ func TestClaim_JSONPath(t *testing.T) {
 
 		path := claim.JSONPath()
 		assert.Equal(t, "$.a.b.c.d", path)
+	})
+
+	t.Run("wildcard_array_element", func(t *testing.T) {
+		nationalities := "nationalities"
+		claim := &Claim{
+			Path: []*string{&nationalities, nil},
+		}
+
+		path := claim.JSONPath()
+		assert.Equal(t, "$.nationalities[*]", path)
+	})
+
+	t.Run("wildcard_only", func(t *testing.T) {
+		claim := &Claim{
+			Path: []*string{nil},
+		}
+
+		path := claim.JSONPath()
+		assert.Equal(t, "$[*]", path)
+	})
+
+	t.Run("wildcard_then_key", func(t *testing.T) {
+		addresses := "addresses"
+		street := "street"
+		claim := &Claim{
+			Path: []*string{&addresses, nil, &street},
+		}
+
+		path := claim.JSONPath()
+		assert.Equal(t, "$.addresses[*].street", path)
+	})
+
+	t.Run("multiple_wildcards", func(t *testing.T) {
+		matrix := "matrix"
+		claim := &Claim{
+			Path: []*string{&matrix, nil, nil},
+		}
+
+		path := claim.JSONPath()
+		assert.Equal(t, "$.matrix[*][*]", path)
 	})
 }

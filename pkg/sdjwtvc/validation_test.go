@@ -241,6 +241,38 @@ func TestValidateDocument_OptionalClaimsMissing(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// VCTMs frequently mark JWT envelope claims (iss, exp, cnf) as mandatory for
+// verifier-side conformance, but those values are filled in by the issuer
+// pipeline at signing time rather than by the document data source. Document
+// validation must skip them — see isIssuerSuppliedClaim in validation.go.
+func TestValidateDocument_IssuerSuppliedMandatoryClaimsExempt(t *testing.T) {
+	iss := "iss"
+	exp := "exp"
+	cnf := "cnf"
+	givenName := "given_name"
+
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: []*string{&iss}, Mandatory: true},
+			{Path: []*string{&exp}, Mandatory: true},
+			{Path: []*string{&cnf}, Mandatory: true},
+			{Path: []*string{&givenName}, SD: "always", Mandatory: true},
+		},
+	}
+
+	// Document data omits iss/exp/cnf — those come from the issuer at signing.
+	doc := map[string]any{
+		"given_name": "John",
+	}
+
+	docData, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	err = ValidateDocument(docData, vctm)
+	assert.NoError(t, err)
+}
+
 func TestValidateDocument_InvalidJSON(t *testing.T) {
 	vctm := &VCTM{
 		VCT:    "test:credential:1",
@@ -268,6 +300,46 @@ func TestValidateDocument_NilVCTM(t *testing.T) {
 	err = ValidateDocument(docData, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "VCTM is nil")
+}
+
+// ValidateClaims operates on fully assembled credential claims, so mandatory
+// JWT/SD-JWT envelope claims (iss, exp, cnf, vct, iat, ...) declared by the
+// VCTM must be present. The issuer-supplied exemption used by ValidateDocument
+// must not leak into ValidateClaims.
+func TestValidateClaims_RequiresMandatoryEnvelopeClaims(t *testing.T) {
+	iss := "iss"
+	exp := "exp"
+	cnf := "cnf"
+	givenName := "given_name"
+
+	vctm := &VCTM{
+		VCT: "test:credential:1",
+		Claims: []Claim{
+			{Path: []*string{&iss}, Mandatory: true},
+			{Path: []*string{&exp}, Mandatory: true},
+			{Path: []*string{&cnf}, Mandatory: true},
+			{Path: []*string{&givenName}, SD: "always", Mandatory: true},
+		},
+	}
+
+	// Assembled-credential payload missing envelope claims — should fail.
+	claims := map[string]any{
+		"given_name": "John",
+	}
+
+	err := ValidateClaims(claims, vctm)
+	require.Error(t, err)
+
+	validationErr, ok := err.(*ValidationErrors)
+	require.True(t, ok)
+
+	missing := map[string]bool{}
+	for _, e := range validationErr.Errors {
+		missing[e.Field] = true
+	}
+	assert.True(t, missing["$.iss"], "expected 'iss' to be reported missing")
+	assert.True(t, missing["$.exp"], "expected 'exp' to be reported missing")
+	assert.True(t, missing["$.cnf"], "expected 'cnf' to be reported missing")
 }
 
 func TestValidateClaims_ArrayValues(t *testing.T) {
