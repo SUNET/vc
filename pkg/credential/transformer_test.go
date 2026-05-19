@@ -19,7 +19,7 @@ func TestTransformClaims(t *testing.T) {
 		{
 			name: "simple flat mapping",
 			mapping: model.AttributeMapping{
-				"given_name": {Claim: "given_name", Required: true},
+				"given_name":  {Claim: "given_name", Required: true},
 				"family_name": {Claim: "family_name", Required: true},
 			},
 			attributes: map[string]any{

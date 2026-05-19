@@ -557,3 +557,34 @@ func FuzzCompressDecompress(f *testing.F) {
 		assert.Equal(t, statuses, decompressed)
 	})
 }
+
+// FuzzParseCWT fuzzes CWT (CBOR Web Token) parsing.
+// CWTs may be received from untrusted status list providers.
+func FuzzParseCWT(f *testing.F) {
+	f.Add([]byte{0xd2, 0x84, 0x40, 0xa0, 0x40, 0x40}) // COSE tag 18 + minimal array
+	f.Add([]byte{})
+	f.Add([]byte{0xff})
+	f.Add([]byte{0xa0})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		claims, err := ParseCWT(data)
+		if err != nil {
+			return
+		}
+		if claims == nil {
+			t.Fatal("ParseCWT returned nil without error")
+		}
+	})
+}
+
+// FuzzDecodeAndDecompress fuzzes base64 decoding + zlib decompression.
+func FuzzDecodeAndDecompress(f *testing.F) {
+	f.Add("eJwBAAD__wFJ")
+	f.Add("")
+	f.Add("not-base64!")
+	f.Add("AAAA")
+
+	f.Fuzz(func(t *testing.T, encoded string) {
+		_, _ = DecodeAndDecompress(encoded)
+	})
+}

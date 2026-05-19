@@ -13,9 +13,13 @@ common:
       format: "dc+sd-jwt"
 
 issuer:
-  issuer_url: "http://apigw.vc.docker:8080"
+  issuer_url: "https://apigw.vc.docker:8080"
   api_server:
     addr: :8080
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_issuer.crt"
+      key_file_path: "/pki/tls_issuer.key"
   grpc_server:
     addr: issuer.vc.docker:8090
   registry_client:
@@ -32,13 +36,17 @@ issuer:
 verifier:
   api_server:
     addr: :8080
-  public_url: "http://verifier.vc.docker:8080"
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_verifier.crt"
+      key_file_path: "/pki/tls_verifier.key"
+  public_url: "https://verifier.vc.docker:8080"
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
   inbound:
     openid4vp:
-      token_endpoint: "http://verifier.vc.docker:8080/token"
+      token_endpoint: "https://verifier.vc.docker:8080/token"
       clients:
         "1003":
           type: "public"
@@ -57,7 +65,11 @@ verifier:
 registry:
   api_server:
     addr: :8080
-  public_url: "http://localhost:8080"
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_registry.crt"
+      key_file_path: "/pki/tls_registry.key"
+  public_url: "https://localhost:8080"
   grpc_server:
     addr: :8090
     # mTLS configuration (optional)
@@ -88,17 +100,21 @@ apigw:
     chain_path: "/pki/signing_ec_chain.pem"
   api_server:
     addr: :8080
+    tls:
+      enable: true
+      cert_file_path: "/pki/tls_apigw.crt"
+      key_file_path: "/pki/tls_apigw.key"
     api_auth:
       oidc:
-        enable: true
+        enable: false
         issuer_url: "http://mock-oauth2.vc.docker:8080/default"
         audience: "vc-apigw"
         client_id: "vc-apigw"
         client_secret: "vc-apigw-secret"
-        redirect_uri: "http://apigw.vc.docker:8080/ui/callback"
+        redirect_uri: "https://apigw.vc.docker:8080/ui/callback"
         scopes: ["openid", "profile"]
-  public_url: "http://apigw.vc.docker:8080"
-  registry_public_url: "http://registry.vc.docker:8080"
+  public_url: "https://apigw.vc.docker:8080"
+  registry_public_url: "https://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
@@ -134,7 +150,7 @@ apigw:
     oidc:
       enable: true
       issuer_url: "http://mock-oauth2.vc.docker:8080/default"
-      redirect_uri: "http://apigw.vc.docker:8080/oidcrp/callback"
+      redirect_uri: "https://apigw.vc.docker:8080/oidcrp/callback"
       scopes: ["openid", "profile"]
       session_duration: 300
       registration:
@@ -144,7 +160,7 @@ apigw:
           client_secret: "vc-apigw-secret"
   delivery:
     openid4vci:
-      token_endpoint: "http://apigw.vc.docker:8080/token"
+      token_endpoint: "https://apigw.vc.docker:8080/token"
       clients:
         "1003":
           type: "public"
@@ -153,7 +169,7 @@ apigw:
             - "pid"
             - "ehic"
     credential_offers:
-      issuer_url: "http://apigw.vc.docker:8080"
+      issuer_url: "https://apigw.vc.docker:8080"
       wallets:
         dev_wallet:
           label: "Dev Wallet"

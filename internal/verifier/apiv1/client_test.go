@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -234,11 +235,11 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 			expectedCredCount: 1,
 		},
 		{
-			name:        "no matching scopes",
-			scopes:      []string{"unknown_scope"},
-			credMeta:    map[string]*model.CredentialMetadata{},
-			expectError:           true,
-			expectedCredCount:     0,
+			name:              "no matching scopes",
+			scopes:            []string{"unknown_scope"},
+			credMeta:          map[string]*model.CredentialMetadata{},
+			expectError:       true,
+			expectedCredCount: 0,
 		},
 		{
 			name:   "all scopes are openid or unmatched",
@@ -337,7 +338,7 @@ func TestClient_createDCQLQuery(t *testing.T) {
 			name:        "falls back to legacy with empty config",
 			scopes:      []string{"unknown_scope"},
 			credMeta:    map[string]*model.CredentialMetadata{},
-			expectError:           true,
+			expectError: true,
 		},
 	}
 

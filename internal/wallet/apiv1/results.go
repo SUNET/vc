@@ -44,3 +44,24 @@ func (r *ResultStore) Add(result *ScenarioResult) {
 	defer r.mu.Unlock()
 	r.results = append(r.results, result)
 }
+
+// List returns all results
+func (r *ResultStore) List() []*ScenarioResult {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*ScenarioResult, len(r.results))
+	copy(out, r.results)
+	return out
+}
+
+// LastByName returns the most recent result for a given scenario name
+func (r *ResultStore) LastByName(name string) *ScenarioResult {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for i := len(r.results) - 1; i >= 0; i-- {
+		if r.results[i].ScenarioName == name {
+			return r.results[i]
+		}
+	}
+	return nil
+}

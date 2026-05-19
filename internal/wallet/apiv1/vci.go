@@ -74,6 +74,11 @@ func (c *Client) Store() *credential.Store {
 	return c.store
 }
 
+// Results returns the result store
+func (c *Client) Results() *ResultStore {
+	return c.results
+}
+
 // RunScenario executes a single scenario by name
 func (c *Client) RunScenario(ctx context.Context, name string) (*ScenarioResult, error) {
 	for _, s := range c.cfg.Scenarios {
