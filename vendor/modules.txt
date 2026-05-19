@@ -34,8 +34,6 @@ github.com/beevik/etree
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
-# github.com/brianvoe/gofakeit/v6 v6.28.0
-## explicit; go 1.21
 # github.com/bytedance/gopkg v0.1.4
 ## explicit; go 1.18
 github.com/bytedance/gopkg/lang/dirtmake
