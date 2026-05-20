@@ -131,14 +131,17 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// because Gin snapshots the middleware chain at route-registration time.
 	// See https://github.com/SUNET/vc/issues/361
 	//
-	// In development, comment the four lines below and uncomment the two after:
-	// s.gin.Static("/static", "./staticembed")
-	// s.gin.LoadHTMLGlob("./staticembed/*.html")
+	// --- Development mode ---
+	// To serve static files from disk instead of the embedded FS (useful for
+	// live-editing HTML/CSS/JS without recompiling), replace the StaticFS call
+	// and the ParseFS+SetHTMLTemplate block below with:
+	//
+	//   s.gin.Static("/static", "./staticembed")
+	//   s.gin.LoadHTMLGlob("./staticembed/*.html")
 
 	s.gin.StaticFS("/static", http.FS(staticembed.FS))
 
-	// Create a new template with custom functions before parsing
-	t := template.New("").Funcs(template.FuncMap{
+	tmpl := template.New("").Funcs(template.FuncMap{
 		"json": func(v any) (any, error) {
 			jsonBytes, err := json.Marshal(v)
 			if err != nil {
@@ -147,10 +150,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
 		},
 	})
-
-	f := template.Must(t.ParseFS(staticembed.FS, "*.html"))
-
-	s.gin.SetHTMLTemplate(f)
+	s.gin.SetHTMLTemplate(template.Must(tmpl.ParseFS(staticembed.FS, "*.html")))
 
 	// Build SPOCP engine once — shared between API and session auth paths.
 	s.spocpEngine, err = httphelpers.BuildSPOCPEngine(s.cfg.APIGW.APIServer.APIAuth)
