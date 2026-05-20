@@ -66,7 +66,8 @@ BUILD_CONFIGS           := \
 	oidc-conformance-test oidc-conformance-test-vci oidc-conformance-test-vp oidc-conformance-test-oidc \
 	oidc-conformance-status \
 	_check-reserved-tag \
-	release release-prod release-demo check_current_branch
+	release release-prod release-demo check_current_branch \
+	release-check-issuer-jwks
 
 # ==============================================================================
 # Help Target
@@ -295,6 +296,45 @@ build-wallet: ## Build wallet test tool
 	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
+
+build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
+	$(info Building check_issuer_jwks)
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/check_issuer_jwks \
+		$(LDFLAGS) ./developer_tools/scripts/check_issuer_jwks/
+
+release-check-issuer-jwks: ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "check-issuer-jwks-v*" --sort=-v:refname | grep -E '^check-issuer-jwks-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing check-issuer-jwks tags found, starting at check-issuer-jwks-v0.0.0"; \
+		LATEST="check-issuer-jwks-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^check-issuer-jwks-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="check-issuer-jwks-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed. GitHub Actions will build check_issuer_jwks binaries."; \
+	echo ""
 
 docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test tool
 	$(info Docker Building wallet with tag: $(VERSION))
