@@ -33,6 +33,7 @@ const (
 
 type issuerMetadata struct {
 	CredentialIssuer string `json:"credential_issuer"`
+	JWKsURI          string `json:"jwks_uri,omitempty"`
 	SignedMetadata   string `json:"signed_metadata,omitempty"`
 }
 
@@ -109,8 +110,13 @@ func main() {
 		fmt.Printf("  credential_issuer: %s%s%s\n", c.cyan, metadata.CredentialIssuer, c.reset)
 	}
 
-	jwksURI := hostURL + "/jwks"
-	fmt.Printf("  jwks_uri: %s%s%s\n\n", c.cyan, jwksURI, c.reset)
+	jwksURI := metadata.JWKsURI
+	if jwksURI == "" {
+		jwksURI = hostURL + "/jwks"
+		fmt.Printf("  jwks_uri: %s%s%s (not in metadata, using default)\n\n", c.cyan, jwksURI, c.reset)
+	} else {
+		fmt.Printf("  jwks_uri: %s%s%s\n\n", c.cyan, jwksURI, c.reset)
+	}
 
 	// Step 2: Fetch JWKS
 	fmt.Printf("%s[2] Fetching JWKS from %s%s\n", c.heading, jwksURI, c.reset)

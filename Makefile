@@ -303,7 +303,7 @@ build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 		$(BUILD_FLAGS) -o ./bin/check_issuer_jwks \
 		$(LDFLAGS) ./developer_tools/scripts/check_issuer_jwks/
 
-release-check-issuer-jwks: ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
+release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
 	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
 		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
 	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
