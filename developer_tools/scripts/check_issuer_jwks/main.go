@@ -387,15 +387,21 @@ func verifyJWTWithCert(jwtStr string, header jwtHeader, leafCert *x509.Certifica
 			fmt.Printf("      %s Signature is valid (signed by x5c leaf cert)\n", c.ok)
 		}
 	case *rsa.PublicKey:
-		if err := rsa.VerifyPKCS1v15(key, hashFunc, digest, sigBytes); err != nil {
-			if err2 := rsa.VerifyPSS(key, hashFunc, digest, sigBytes, nil); err2 != nil {
-				fmt.Printf("      %s RSA signature verification FAILED\n", c.fail)
-				*failures = append(*failures, "signed_metadata: signature verification failed")
-			} else {
-				fmt.Printf("      %s Signature is valid (signed by x5c leaf cert, RSA-PSS)\n", c.ok)
-			}
+		var rsaErr error
+		if strings.HasPrefix(header.Alg, "PS") {
+			rsaErr = rsa.VerifyPSS(key, hashFunc, digest, sigBytes, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash})
 		} else {
-			fmt.Printf("      %s Signature is valid (signed by x5c leaf cert, PKCS1v15)\n", c.ok)
+			rsaErr = rsa.VerifyPKCS1v15(key, hashFunc, digest, sigBytes)
+		}
+		if rsaErr != nil {
+			fmt.Printf("      %s RSA signature verification FAILED\n", c.fail)
+			*failures = append(*failures, "signed_metadata: signature verification failed")
+		} else {
+			scheme := "PKCS1v15"
+			if strings.HasPrefix(header.Alg, "PS") {
+				scheme = "PSS"
+			}
+			fmt.Printf("      %s Signature is valid (signed by x5c leaf cert, RSA-%s)\n", c.ok, scheme)
 		}
 	default:
 		fmt.Printf("      %s unsupported key type in cert: %T\n", c.fail, leafCert.PublicKey)
