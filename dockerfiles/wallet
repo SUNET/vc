@@ -1,5 +1,5 @@
 # Wallet test tool - lightweight build without swagger/proto
-FROM golang:latest AS builder
+FROM golang:1.26.3 AS builder
 
 ARG SERVICE_NAME=wallet
 
@@ -27,7 +27,7 @@ FROM debian:13-slim
 
 WORKDIR /
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /go/src/app/bin/vc_wallet /vc_wallet
 
