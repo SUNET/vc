@@ -1,15 +1,13 @@
-package socialsecurity_test
+package main
 
 import (
 	"fmt"
-
-	"github.com/SUNET/vc/pkg/socialsecurity"
 )
 
 func ExampleEHICDocument_Marshal() {
-	doc := &socialsecurity.EHICDocument{
+	doc := &EHICDocument{
 		PersonalAdministrativeNumber: "123456789",
-		IssuingAuthority: socialsecurity.IssuingAuthority{
+		IssuingAuthority: IssuingAuthority{
 			ID:   "auth-001",
 			Name: "National Health Authority",
 		},
@@ -17,7 +15,7 @@ func ExampleEHICDocument_Marshal() {
 		DateOfExpiry:   "2026-12-31",
 		DateOfIssuance: "2024-01-01",
 		DocumentNumber: "EHIC-0001",
-		AuthenticSource: socialsecurity.AuthenticSource{
+		AuthenticSource: AuthenticSource{
 			ID:   "src-001",
 			Name: "Swedish Social Insurance Agency",
 		},
@@ -41,18 +39,18 @@ func ExampleEHICDocument_Marshal() {
 }
 
 func ExamplePDA1Document_Marshal() {
-	doc := &socialsecurity.PDA1Document{
+	doc := &PDA1Document{
 		PersonalAdministrativeNumber: "987654321",
-		Employer: socialsecurity.Employer{
+		Employer: Employer{
 			ID:      "emp-001",
 			Name:    "Example Corp",
 			Country: "SE",
 		},
-		WorkAddress: socialsecurity.WorkAddress{
+		WorkAddress: WorkAddress{
 			Locality: "Stockholm",
 			Country:  "SE",
 		},
-		IssuingAuthority: socialsecurity.IssuingAuthority{
+		IssuingAuthority: IssuingAuthority{
 			ID:   "auth-002",
 			Name: "Swedish Social Insurance Agency",
 		},
@@ -62,7 +60,7 @@ func ExamplePDA1Document_Marshal() {
 		DateOfExpiry:       "2026-12-31",
 		DateOfIssuance:     "2024-01-01",
 		DocumentNumber:     "PDA1-0001",
-		AuthenticSource: socialsecurity.AuthenticSource{
+		AuthenticSource: AuthenticSource{
 			ID:   "src-002",
 			Name: "Swedish Social Insurance Agency",
 		},

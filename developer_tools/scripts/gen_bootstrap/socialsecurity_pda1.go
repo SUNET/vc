@@ -1,4 +1,4 @@
-package socialsecurity
+package main
 
 import "encoding/json"
 
