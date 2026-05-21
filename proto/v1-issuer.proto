@@ -72,6 +72,10 @@ message jwk {
     string d = 6;
     repeated string key_ops = 7;
     bool ext = 8;
+    string n = 9;
+    string e = 10;
+    string alg = 11;
+    string use = 12;
 }
 
 // MakeVC20Request is the request for creating a W3C VC 2.0 Data Integrity credential
