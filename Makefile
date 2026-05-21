@@ -299,9 +299,11 @@ build-wallet: ## Build wallet test tool
 
 build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 	$(info Building check_issuer_jwks)
+	$(eval CHECK_ISSUER_JWKS_VERSION := $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//' || echo "dev"))
 	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		$(BUILD_FLAGS) -o ./bin/check_issuer_jwks \
-		$(LDFLAGS) ./developer_tools/scripts/check_issuer_jwks/
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(CHECK_ISSUER_JWKS_VERSION)" \
+		./developer_tools/scripts/check_issuer_jwks/
 
 release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
 	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
