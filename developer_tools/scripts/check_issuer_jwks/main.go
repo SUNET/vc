@@ -18,6 +18,8 @@ import (
 	"time"
 )
 
+var version = "n/a"
+
 const (
 	colorRed    = "\033[0;31m"
 	colorGreen  = "\033[0;32m"
@@ -68,6 +70,7 @@ type jwkKey struct {
 
 func main() {
 	noColor := flag.Bool("no-color", false, "Disable colored output")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: check_issuer_jwks [flags] <host-url>\n\n")
 		fmt.Fprintf(os.Stderr, "Check /jwks and x5c certificates from an OpenID Credential Issuer.\n\n")
@@ -76,6 +79,11 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("check_issuer_jwks %s\n", version)
+		os.Exit(0)
+	}
 
 	if flag.NArg() < 1 {
 		flag.Usage()
