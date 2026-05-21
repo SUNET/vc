@@ -20,8 +20,7 @@ BUILD_FLAGS             := -v
 
 # Services Configuration
 SERVICES                := verifier registry apigw issuer
-WEB_SERVICES            := verifier
-WORKER_SERVICES         := registry apigw issuer
+WORKER_SERVICES         := verifier registry apigw issuer
 
 # Docker Configuration
 DOCKER_REGISTRY         := docker.sunet.se/iam_vc
@@ -342,7 +341,7 @@ docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test t
 	$(info Docker Building wallet with tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=wallet \
 		--tag $(call docker-tag,wallet,$(VERSION)) \
-		--file dockerfiles/wallet .
+		--file dockerfiles/worker .
 
 # ==============================================================================
 # Optional Feature Builds (with build tags)
@@ -359,19 +358,6 @@ build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
 # ==============================================================================
 
 docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
-
-# Generate docker-build targets for web workers
-define DOCKER_BUILD_WEB_TEMPLATE
-docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
-	$$(info Docker Building $(1) with tag: $$(VERSION))
-	docker build --build-arg SERVICE_NAME=$(1) \
-		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
-		--tag $$(call docker-tag,$(1),$$(VERSION)) \
-		--file dockerfiles/web_worker .
-
-endef
-
-$(foreach service,$(WEB_SERVICES),$(eval $(call DOCKER_BUILD_WEB_TEMPLATE,$(service))))
 
 # Generate docker-build targets for workers
 define DOCKER_BUILD_WORKER_TEMPLATE

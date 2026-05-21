@@ -11,6 +11,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/middleware"
 	"github.com/SUNET/vc/internal/verifier/notify"
+	"github.com/SUNET/vc/internal/verifier/staticembed"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -104,8 +105,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		return nil, err
 	}
 
-	// templating functions
-	s.gin.SetFuncMap(template.FuncMap{
+	s.gin.StaticFS("/static", http.FS(staticembed.FS))
+
+	tmpl := template.New("").Funcs(template.FuncMap{
 		"toJSON": func(v any) string {
 			b, _ := json.MarshalIndent(v, "", "  ")
 			return string(b)
@@ -118,9 +120,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
 		},
 	})
-
-	s.gin.Static("/static", "./static")
-	s.gin.LoadHTMLGlob("./static/*.html")
+	s.gin.SetHTMLTemplate(template.Must(tmpl.ParseFS(staticembed.FS, "*.html")))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
