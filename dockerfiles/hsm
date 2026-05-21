@@ -1,3 +1,7 @@
+# Mock HSM container using SoftHSM2 and pkcs11-proxy.
+# Provides a software PKCS#11 token exposed over the network for local
+# development and testing of the HSM-enabled issuer build.
+
 # Deploy
 FROM debian:bookworm-slim
 

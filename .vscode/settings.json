@@ -162,6 +162,7 @@
         "swaggo",
         "testcontainers",
         "timestamppb",
+        "tmpl",
         "toarray",
         "tokenstatuslist",
         "tokenstatuslistissuer",
