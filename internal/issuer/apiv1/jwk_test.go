@@ -40,6 +40,10 @@ func TestCreateJWK_RSA(t *testing.T) {
 	assert.Equal(t, client.signer.KeyID(), client.jwkProto.Kid)
 	assert.Equal(t, "RSA", client.jwkProto.Kty)
 
+	// RSA public key components must be present
+	assert.NotEmpty(t, client.jwkProto.N, "RSA modulus 'n' must be present")
+	assert.NotEmpty(t, client.jwkProto.E, "RSA exponent 'e' must be present")
+
 	// Private key component must NOT be present
 	assert.Empty(t, client.jwkProto.D, "private key component 'd' must not be present")
 }

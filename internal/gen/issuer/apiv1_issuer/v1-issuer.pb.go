@@ -7,12 +7,11 @@
 package apiv1_issuer
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -161,7 +160,7 @@ func (x *MakeSDJWTReply) GetTokenStatusListIndex() int64 {
 // MakeMDocRequest is the request for creating an mDL document (ISO 18013-5)
 type MakeMDocRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	Scope           string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`                                              // Credential scope (e.g., "pid_1_8", "ehic")
+	Scope           string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`                                              // Credential scope (e.g., "pid", "ehic")
 	DocType         string                 `protobuf:"bytes,2,opt,name=doc_type,json=docType,proto3" json:"doc_type,omitempty"`                           // Document type (e.g., "org.iso.18013.5.1.mDL")
 	DocumentData    []byte                 `protobuf:"bytes,3,opt,name=document_data,json=documentData,proto3" json:"document_data,omitempty"`            // JSON encoded mDL data
 	DevicePublicKey []byte                 `protobuf:"bytes,4,opt,name=device_public_key,json=devicePublicKey,proto3" json:"device_public_key,omitempty"` // CBOR encoded COSE_Key for holder's device
@@ -498,6 +497,10 @@ type Jwk struct {
 	D             string                 `protobuf:"bytes,6,opt,name=d,proto3" json:"d,omitempty"`
 	KeyOps        []string               `protobuf:"bytes,7,rep,name=key_ops,json=keyOps,proto3" json:"key_ops,omitempty"`
 	Ext           bool                   `protobuf:"varint,8,opt,name=ext,proto3" json:"ext,omitempty"`
+	N             string                 `protobuf:"bytes,9,opt,name=n,proto3" json:"n,omitempty"`
+	E             string                 `protobuf:"bytes,10,opt,name=e,proto3" json:"e,omitempty"`
+	Alg           string                 `protobuf:"bytes,11,opt,name=alg,proto3" json:"alg,omitempty"`
+	Use           string                 `protobuf:"bytes,12,opt,name=use,proto3" json:"use,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -586,6 +589,34 @@ func (x *Jwk) GetExt() bool {
 		return x.Ext
 	}
 	return false
+}
+
+func (x *Jwk) GetN() string {
+	if x != nil {
+		return x.N
+	}
+	return ""
+}
+
+func (x *Jwk) GetE() string {
+	if x != nil {
+		return x.E
+	}
+	return ""
+}
+
+func (x *Jwk) GetAlg() string {
+	if x != nil {
+		return x.Alg
+	}
+	return ""
+}
+
+func (x *Jwk) GetUse() string {
+	if x != nil {
+		return x.Use
+	}
+	return ""
 }
 
 // MakeVC20Request is the request for creating a W3C VC 2.0 Data Integrity credential
@@ -797,7 +828,7 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x06issuer\x18\x01 \x01(\tR\x06issuer\x12#\n" +
 	"\x04jwks\x18\x02 \x01(\v2\x0f.v1.issuer.keysR\x04jwks\"*\n" +
 	"\x04keys\x12\"\n" +
-	"\x04keys\x18\x01 \x03(\v2\x0e.v1.issuer.jwkR\x04keys\"\x90\x01\n" +
+	"\x04keys\x18\x01 \x03(\v2\x0e.v1.issuer.jwkR\x04keys\"\xd0\x01\n" +
 	"\x03jwk\x12\x10\n" +
 	"\x03kid\x18\x01 \x01(\tR\x03kid\x12\x10\n" +
 	"\x03crv\x18\x02 \x01(\tR\x03crv\x12\x10\n" +
@@ -806,7 +837,12 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x01y\x18\x05 \x01(\tR\x01y\x12\f\n" +
 	"\x01d\x18\x06 \x01(\tR\x01d\x12\x17\n" +
 	"\akey_ops\x18\a \x03(\tR\x06keyOps\x12\x10\n" +
-	"\x03ext\x18\b \x01(\bR\x03ext\"\xe9\x01\n" +
+	"\x03ext\x18\b \x01(\bR\x03ext\x12\f\n" +
+	"\x01n\x18\t \x01(\tR\x01n\x12\f\n" +
+	"\x01e\x18\n" +
+	" \x01(\tR\x01e\x12\x10\n" +
+	"\x03alg\x18\v \x01(\tR\x03alg\x12\x10\n" +
+	"\x03use\x18\f \x01(\tR\x03use\"\xe9\x01\n" +
 	"\x0fMakeVC20Request\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x02 \x01(\fR\fdocumentData\x12)\n" +
