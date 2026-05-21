@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"github.com/fxamacker/cbor/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -411,13 +412,30 @@ func TestExtractStatusReference_NilDoc(t *testing.T) {
 }
 
 func TestExtractStatusReference_NoStatus(t *testing.T) {
-	doc := &Document{
+	issuerSignedNS := make(map[string][]any)
+	for ns, items := range map[string][]IssuerSignedItem{
+		Namespace: {{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Test"}},
+	} {
+		anyItems := make([]any, len(items))
+		for i, item := range items {
+			// Here, item is an IssuerSignedItem, being stored as 'any'
+			anyItems[i] = item
+		}
+		issuerSignedNS[ns] = anyItems
+	}
+
+	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "family_name", ElementValue: "Test"},
-				},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: issuerSignedNS,
+			IssuerAuth: []any{0xD2},
+		},
+		DeviceSigned: DeviceSignedMdoc{
+			// Wrap in Tag 24 as required by the latest review comments
+			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
+			DeviceAuth: DeviceAuthMdoc{
+				DeviceSignature: []byte{0xD2},
 			},
 		},
 	}
@@ -436,12 +454,16 @@ func TestExtractStatusReference_WithStatus(t *testing.T) {
 		},
 	}
 
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "status", ElementValue: statusValue},
+		IssuerSigned: IssuerSignedMdoc{
+			// Change the slice type in the map literal to []any
+			NameSpaces: map[string][]any{
+				Namespace: []any{
+					IssuerSignedItem{
+						ElementIdentifier: "status",
+						ElementValue:      statusValue,
+					},
 				},
 			},
 		},
@@ -579,7 +601,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Disabled(t *testing.T) {
 	vsc.SetEnabled(false)
 
 	// Create a document (status doesn't matter when disabled)
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
 	}
 
@@ -601,13 +623,14 @@ func TestVerifierStatusCheck_CheckDocumentStatus_NoStatusReference(t *testing.T)
 	sc := newTestStatusChecker(t)
 	vsc := NewVerifierStatusCheck(sc)
 
-	// Document without status element
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "family_name", ElementValue: "Test"},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: map[string][]any{
+				Namespace: []any{
+					IssuerSignedItem{
+						ElementIdentifier: "status",
+					},
 				},
 			},
 		},
@@ -657,12 +680,15 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Valid(t *testing.T) {
 		},
 	}
 
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "status", ElementValue: statusValue},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: map[string][]any{
+				Namespace: []any{
+					IssuerSignedItem{
+						ElementIdentifier: "status",
+						ElementValue:      statusValue,
+					},
 				},
 			},
 		},
@@ -714,12 +740,15 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Revoked(t *testing.T) {
 		},
 	}
 
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "status", ElementValue: statusValue},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: map[string][]any{
+				Namespace: []any{
+					IssuerSignedItem{
+						ElementIdentifier: "status",
+						ElementValue:      statusValue,
+					},
 				},
 			},
 		},
@@ -767,12 +796,15 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Suspended(t *testing.T) {
 		},
 	}
 
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "status", ElementValue: statusValue},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: map[string][]any{
+				Namespace: []any{
+					IssuerSignedItem{
+						ElementIdentifier: "status",
+						ElementValue:      statusValue,
+					},
 				},
 			},
 		},
@@ -811,19 +843,33 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 			"idx": statusRef.Index,
 		},
 	}
+	issuerSignedNS := make(map[string][]any)
+	for ns, items := range map[string][]IssuerSignedItem{
+		Namespace: {{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Test"}, {ElementIdentifier: "status", ElementValue: statusValue}},
+	} {
+		anyItems := make([]any, len(items))
+		for i, item := range items {
+			// Here, item is an IssuerSignedItem, being stored as 'any'
+			anyItems[i] = item
+		}
+		issuerSignedNS[ns] = anyItems
+	}
 
-	doc := &Document{
+	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "family_name", ElementValue: "Test"},
-					{ElementIdentifier: "status", ElementValue: statusValue},
-				},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: issuerSignedNS,
+			IssuerAuth: []any{0xD2},
+		},
+		DeviceSigned: DeviceSignedMdoc{
+			// Wrap in Tag 24 as required by the latest review comments
+			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
+			DeviceAuth: DeviceAuthMdoc{
+				DeviceSignature: []byte{0xD2},
 			},
 		},
 	}
-
 	// 5. Issuer revokes the credential
 	err = sm.Revoke(credIndex)
 	if err != nil {
@@ -850,11 +896,14 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 	defer server.Close()
 
 	// Update the document's status URI to point to test server
-	doc.IssuerSigned.NameSpaces[Namespace][1].ElementValue = map[string]any{
-		"status_list": map[string]any{
-			"uri": server.URL,
-			"idx": statusRef.Index,
-		},
+	if item, ok := doc.IssuerSigned.NameSpaces[Namespace][1].(IssuerSignedItem); ok {
+		item.ElementValue = map[string]any{
+			"status_list": map[string]any{
+				"uri": server.URL,
+				"idx": statusRef.Index,
+			},
+		}
+		doc.IssuerSigned.NameSpaces[Namespace][1] = item
 	}
 
 	// 8. Verifier checks document status
@@ -1080,16 +1129,19 @@ func TestVerifierStatusCheck_CheckDocumentStatus_CWT(t *testing.T) {
 	statusValue := map[string]any{
 		"status_list": map[string]any{
 			"uri": server.URL,
-			"idx": int64(25),
+			"idx": int64(5),
 		},
 	}
 
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		IssuerSigned: IssuerSigned{
-			NameSpaces: map[string][]IssuerSignedItem{
-				Namespace: {
-					{ElementIdentifier: "status", ElementValue: statusValue},
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: map[string][]any{
+				Namespace: []any{
+					IssuerSignedItem{
+						ElementIdentifier: "status",
+						ElementValue:      statusValue,
+					},
 				},
 			},
 		},

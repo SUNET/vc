@@ -467,7 +467,7 @@ func (vsc *VerifierStatusCheck) SetEnabled(enabled bool) {
 }
 
 // CheckDocumentStatus checks the status of a document if it has a status reference.
-func (vsc *VerifierStatusCheck) CheckDocumentStatus(ctx context.Context, doc *Document) (*StatusCheckResult, error) {
+func (vsc *VerifierStatusCheck) CheckDocumentStatus(ctx context.Context, doc *DocumentMdoc) (*StatusCheckResult, error) {
 	if !vsc.enabled {
 		return &StatusCheckResult{
 			Status:    CredentialStatusValid,
@@ -487,7 +487,7 @@ func (vsc *VerifierStatusCheck) CheckDocumentStatus(ctx context.Context, doc *Do
 
 // ExtractStatusReference extracts the status reference from a Document.
 // Returns nil if no status reference is present.
-func ExtractStatusReference(doc *Document) (*StatusReference, error) {
+func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 	if doc == nil {
 		return nil, errors.New("document is nil")
 	}
@@ -495,11 +495,13 @@ func ExtractStatusReference(doc *Document) (*StatusReference, error) {
 	// Look for status reference in issuer signed items
 	for _, items := range doc.IssuerSigned.NameSpaces {
 		for _, item := range items {
-			if item.ElementIdentifier == "status" {
-				// Parse the status element
-				ref, ok := parseStatusElement(item.ElementValue)
-				if ok {
-					return ref, nil
+			// Type assert 'item' to your specific struct type
+			if signedItem, ok := item.(IssuerSignedItem); ok {
+				if signedItem.ElementIdentifier == "status" {
+					ref, ok := parseStatusElement(signedItem.ElementValue)
+					if ok {
+						return ref, nil
+					}
 				}
 			}
 		}

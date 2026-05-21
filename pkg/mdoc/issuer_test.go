@@ -146,7 +146,7 @@ func TestIssuer_Issue(t *testing.T) {
 	if issued == nil {
 		t.Fatal("Issue() returned nil")
 	}
-	if issued.DocumentMdoc.Documents != nil {
+	if issued.DocumentMdoc.Documents == nil {
 		t.Error("Documents is nil")
 
 	}

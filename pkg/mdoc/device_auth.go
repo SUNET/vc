@@ -4,6 +4,8 @@ package mdoc
 import (
 	"crypto"
 	"errors"
+	"github.com/fxamacker/cbor/v2"
+
 	"fmt"
 )
 
@@ -64,7 +66,7 @@ func (b *DeviceAuthBuilder) AddDeviceNameSpace(namespace string, elements map[st
 }
 
 // Build creates the DeviceSigned structure.
-func (b *DeviceAuthBuilder) Build() (*DeviceSigned, error) {
+func (b *DeviceAuthBuilder) Build() (*DeviceSignedMdoc, error) {
 	if b.sessionTranscript == nil {
 		return nil, errors.New("session transcript is required")
 	}
@@ -111,7 +113,7 @@ func (b *DeviceAuthBuilder) Build() (*DeviceSigned, error) {
 		return nil, fmt.Errorf("failed to encode device authentication: %w", err)
 	}
 
-	var deviceSigned DeviceSigned
+	var deviceSigned DeviceSignedMdoc
 	deviceSigned.NameSpaces = deviceNameSpacesBytes
 
 	if b.useMAC {
@@ -175,7 +177,7 @@ func NewDeviceAuthVerifier(sessionTranscript []byte, docType string) *DeviceAuth
 }
 
 // VerifySignature verifies a signature-based device authentication.
-func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSigned, deviceKey crypto.PublicKey) error {
+func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, deviceKey crypto.PublicKey) error {
 	if len(deviceSigned.DeviceAuth.DeviceSignature) == 0 {
 		return errors.New("no device signature present")
 	}
@@ -191,8 +193,24 @@ func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSigned, deviceK
 		return fmt.Errorf("failed to parse device signature: %w", err)
 	}
 
+	var nameSpacesBytes []byte
+
+	switch v := deviceSigned.NameSpaces.(type) {
+	case []byte:
+		nameSpacesBytes = v
+	case cbor.Tag:
+		// If it's a Tag 24, the content is the byte slice
+		if b, ok := v.Content.([]byte); ok {
+			nameSpacesBytes = b
+		}
+	case nil:
+		nameSpacesBytes = nil
+	default:
+		return fmt.Errorf("unexpected type for NameSpaces: %T", v)
+	}
+
 	// Reconstruct DeviceAuthentication
-	deviceAuthBytes, err := v.buildDeviceAuthBytes(deviceSigned.NameSpaces)
+	deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
 	if err != nil {
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}
@@ -206,7 +224,7 @@ func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSigned, deviceK
 }
 
 // VerifyMAC verifies a MAC-based device authentication.
-func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSigned, sessionKey []byte) error {
+func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKey []byte) error {
 	if len(deviceSigned.DeviceAuth.DeviceMac) == 0 {
 		return errors.New("no device MAC present")
 	}
@@ -222,8 +240,24 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSigned, sessionKey []
 		return fmt.Errorf("failed to parse device MAC: %w", err)
 	}
 
+	var nameSpacesBytes []byte
+
+	switch v := deviceSigned.NameSpaces.(type) {
+	case []byte:
+		nameSpacesBytes = v
+	case cbor.Tag:
+		// If it's a Tag 24, the content is the byte slice
+		if b, ok := v.Content.([]byte); ok {
+			nameSpacesBytes = b
+		}
+	case nil:
+		nameSpacesBytes = nil
+	default:
+		return fmt.Errorf("unexpected type for NameSpaces: %T", v)
+	}
+
 	// Reconstruct DeviceAuthentication
-	deviceAuthBytes, err := v.buildDeviceAuthBytes(deviceSigned.NameSpaces)
+	deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
 	if err != nil {
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}
@@ -296,7 +330,7 @@ func ExtractDeviceKeyFromMSO(mso *MobileSecurityObject) (crypto.PublicKey, error
 
 // VerifyDeviceAuth verifies device authentication as part of document verification.
 // This should be called after verifying the issuer signature.
-func (v *Verifier) VerifyDeviceAuth(doc *Document, mso *MobileSecurityObject, sessionTranscript []byte) error {
+func (v *Verifier) VerifyDeviceAuth(doc *DocumentMdoc, mso *MobileSecurityObject, sessionTranscript []byte) error {
 	// Check if device auth is present
 	if len(doc.DeviceSigned.DeviceAuth.DeviceSignature) == 0 && len(doc.DeviceSigned.DeviceAuth.DeviceMac) == 0 {
 		// No device auth - this may be acceptable in some contexts
@@ -322,7 +356,7 @@ func (v *Verifier) VerifyDeviceAuth(doc *Document, mso *MobileSecurityObject, se
 }
 
 // VerifyDeviceAuthWithSessionKey verifies MAC-based device authentication.
-func (v *Verifier) VerifyDeviceAuthWithSessionKey(doc *Document, sessionTranscript []byte, sessionKey []byte) error {
+func (v *Verifier) VerifyDeviceAuthWithSessionKey(doc *DocumentMdoc, sessionTranscript []byte, sessionKey []byte) error {
 	if len(doc.DeviceSigned.DeviceAuth.DeviceMac) == 0 {
 		return errors.New("no device MAC present")
 	}

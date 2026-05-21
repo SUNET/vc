@@ -174,12 +174,14 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		signedMSO.Payload,
 		signedMSO.Signature,
 	}
-	emptySigArray := []any{
-		[]byte{},
-		map[any]any{},
-		nil,
-		[]byte{},
+
+	emptySigStructure := []any{
+		[]byte{},      // Protected headers (empty)
+		map[any]any{}, // Unprotected headers
+		nil,           // Payload (nil for detached signature)
+		[]byte{},      // The actual signature bytes (empty)
 	}
+
 	// Encode the signed MSO
 	encoder, err := NewCBOREncoder()
 	if err != nil {
@@ -188,6 +190,11 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	emptyMapBytes, _ := encoder.Marshal(map[string]any{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode device auth: %w", err)
+	}
+
+	emptySigBytes, err := encoder.Marshal(emptySigStructure)
+	if err != nil {
+		return nil, err
 	}
 	innerDoc := &DocumentMdoc{
 		DocType: DocType,
@@ -198,7 +205,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		DeviceSigned: DeviceSignedMdoc{
 			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
 			DeviceAuth: DeviceAuthMdoc{
-				DeviceSignature: emptySigArray,
+				DeviceSignature: emptySigBytes,
 			},
 		},
 	}

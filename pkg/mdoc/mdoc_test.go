@@ -321,28 +321,34 @@ func TestIssuerSignedItem(t *testing.T) {
 }
 
 func TestIssuerSigned(t *testing.T) {
-	issuerSigned := IssuerSigned{
-		NameSpaces: map[string][]IssuerSignedItem{
-			Namespace: {
-				{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Smith"},
-				{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "given_name", ElementValue: "John"},
+	issuerSigned := IssuerSignedMdoc{
+		NameSpaces: map[string][]any{
+			Namespace: []any{
+				IssuerSignedItem{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Smith"},
+				IssuerSignedItem{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "given_name", ElementValue: "John"},
 			},
 		},
-		IssuerAuth: []byte{0xD2, 0x84}, // COSE_Sign1 prefix
+		IssuerAuth: []any{
+			[]byte{0xD2, 0x84},
+			map[any]any{},
+			[]byte{},
+			[]byte{},
+		},
 	}
 
 	if len(issuerSigned.NameSpaces[Namespace]) != 2 {
 		t.Errorf("NameSpaces items = %d, want 2", len(issuerSigned.NameSpaces[Namespace]))
 	}
-	if len(issuerSigned.IssuerAuth) != 2 {
-		t.Errorf("IssuerAuth length = %d, want 2", len(issuerSigned.IssuerAuth))
+
+	if len(issuerSigned.IssuerAuth) != 4 {
+		t.Errorf("IssuerAuth elements = %d, want 4", len(issuerSigned.IssuerAuth))
 	}
 }
 
 func TestDeviceSigned(t *testing.T) {
-	deviceSigned := DeviceSigned{
+	deviceSigned := DeviceSignedMdoc{
 		NameSpaces: []byte{0xA0}, // Empty map
-		DeviceAuth: DeviceAuth{
+		DeviceAuth: DeviceAuthMdoc{
 			DeviceSignature: []byte{0xD2, 0x84}, // COSE_Sign1
 		},
 	}
@@ -389,8 +395,8 @@ func TestDocument(t *testing.T) {
 	doc := &DocumentMdoc{
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
-			NameSpaces: issuerSignedNS, // Now matches map[string][]any
-			IssuerAuth: []byte{0xD2},
+			NameSpaces: issuerSignedNS,
+			IssuerAuth: []any{0xD2},
 		},
 		DeviceSigned: DeviceSignedMdoc{
 			// Wrap in Tag 24 as required by the latest review comments
@@ -409,7 +415,7 @@ func TestDocument(t *testing.T) {
 func TestDocument_WithErrors(t *testing.T) {
 	// 1. Prepare DeviceSigned dependencies
 	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
-	issuerAuthArray := []byte{0xD2}
+	issuerAuthArray := []any{0xD2}
 
 	// 2. Prepare NameSpaces using the []any slice to match the secondary structure
 	issuerSignedNS := make(map[string][]any)

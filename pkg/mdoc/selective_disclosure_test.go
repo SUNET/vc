@@ -155,7 +155,7 @@ func TestSelectiveDisclosure_Disclose(t *testing.T) {
 		} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
 			item = *pItem
 		} else {
-			t.Fatalf("Discloseaa() returned unexpected type %T in NameSpaces", anyItem)
+			t.Fatalf("Disclose() returned unexpected type %T in NameSpaces", anyItem)
 		}
 
 		elementSet[item.ElementIdentifier] = true
@@ -307,16 +307,20 @@ func TestDeviceResponseBuilder_Build_WithSignature(t *testing.T) {
 		t.Errorf("DocType = %s, want %s", doc.DocType, DocType)
 	}
 
+	// Remember doc.IssuerSigned.NameSpaces is map[string][]any
 	items := doc.IssuerSigned.NameSpaces[Namespace]
 	if len(items) != 2 {
 		t.Errorf("Disclosed elements = %d, want 2", len(items))
 	}
-	sig, ok := doc.DeviceSigned.DeviceAuth.DeviceSignature.([]byte)
+
+	sig := doc.DeviceSigned.DeviceAuth.DeviceSignature
+	if len(sig) == 0 {
+		t.Error("DeviceSignature should not be empty")
+	}
 	if !ok {
-		if sigArray, isArray := doc.DeviceSigned.DeviceAuth.DeviceSignature.([]any); isArray {
-			if len(sigArray) == 0 {
-				t.Error("DeviceSignature array is empty")
-			}
+
+		if len(doc.DeviceSigned.DeviceAuth.DeviceSignature) == 0 {
+			t.Error("DeviceSignature is empty")
 		} else {
 			t.Fatalf("DeviceSignature is unexpected type %T", doc.DeviceSigned.DeviceAuth.DeviceSignature)
 		}
@@ -348,8 +352,8 @@ func TestDeviceResponseBuilder_Build_WithMAC(t *testing.T) {
 		t.Error("DeviceMac is empty")
 	}
 	if doc.DeviceSigned.DeviceAuth.DeviceSignature != nil {
-		sig, ok := doc.DeviceSigned.DeviceAuth.DeviceSignature.([]byte)
-		if ok && len(sig) == 0 {
+		sig := doc.DeviceSigned.DeviceAuth.DeviceSignature
+		if len(sig) == 0 {
 			t.Error("DeviceSignature was provided but is empty")
 		}
 	}
