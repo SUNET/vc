@@ -27,6 +27,35 @@ func NewSelectiveDisclosure(issuerSigned *IssuerSignedMdoc) (*SelectiveDisclosur
 	}, nil
 }
 
+// iterateItems now returns true if the callback requested an early exit
+func iterateItems(items []any, fn func(item IssuerSignedItem, original any) bool) bool {
+	for _, anyItem := range items {
+		var item IssuerSignedItem
+		valid := false
+
+		switch v := anyItem.(type) {
+		case IssuerSignedItem:
+			item = v
+			valid = true
+		case *IssuerSignedItem:
+			item = *v
+			valid = true
+		case cbor.Tag:
+			if content, ok := v.Content.([]byte); ok {
+				if err := cbor.Unmarshal(content, &item); err == nil {
+					valid = true
+				}
+			}
+		}
+
+		if valid {
+			if !fn(item, anyItem) {
+				return true
+			}
+		}
+	}
+	return false
+}
 func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSignedMdoc, error) {
 	if request == nil {
 		return nil, errors.New("request is required")
@@ -50,27 +79,13 @@ func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSig
 		}
 
 		var disclosedItems []any
-		for _, anyItem := range items {
-			var item IssuerSignedItem
 
-			// 1. Peek inside the item to see the Identifier
-			if tag, ok := anyItem.(cbor.Tag); ok {
-				content, _ := tag.Content.([]byte)
-				if err := cbor.Unmarshal(content, &item); err != nil {
-					continue
-				}
-			} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
-				item = concrete
-			} else {
-				continue
-			}
-
-			// 2. If it's requested, append the ORIGINAL 'anyItem' (the Tag)
-			// Do NOT append the 'item' struct!
+		iterateItems(items, func(item IssuerSignedItem, original any) bool {
 			if requested[item.ElementIdentifier] {
-				disclosedItems = append(disclosedItems, anyItem)
+				disclosedItems = append(disclosedItems, original)
 			}
-		}
+			return true
+		})
 
 		if len(disclosedItems) > 0 {
 			disclosed.NameSpaces[namespace] = disclosedItems
@@ -105,27 +120,14 @@ func (sd *SelectiveDisclosure) GetAvailableElements() map[string][]string {
 
 	for namespace, items := range sd.issuerSigned.NameSpaces {
 		var elements []string
-		for _, anyItem := range items {
-			var item IssuerSignedItem
-
-			if tag, ok := anyItem.(cbor.Tag); ok {
-				content, ok := tag.Content.([]byte)
-				if !ok {
-					continue
-				}
-				if err := cbor.Unmarshal(content, &item); err != nil {
-					continue
-				}
-			} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
-				item = concrete
-			} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
-				item = *pItem
-			} else {
-				continue
-			}
+		iterateItems(items, func(item IssuerSignedItem, _ any) bool {
 			elements = append(elements, item.ElementIdentifier)
+			return true
+		})
+
+		if len(elements) > 0 {
+			available[namespace] = elements
 		}
-		available[namespace] = elements
 	}
 
 	return available
@@ -138,36 +140,15 @@ func (sd *SelectiveDisclosure) HasElement(namespace, element string) bool {
 		return false
 	}
 
-	for _, anyItem := range items {
-		var item IssuerSignedItem
-
-		// 1. Unwrap the CBOR Tag 24 (The "Wire" state)
-		if tag, ok := anyItem.(cbor.Tag); ok {
-			content, ok := tag.Content.([]byte)
-			if !ok {
-				continue
-			}
-			// We only need to unmarshal to check the ElementIdentifier
-			if err := cbor.Unmarshal(content, &item); err != nil {
-				continue
-			}
-		} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
-			// 2. Handle the "Application" state (Raw struct)
-			item = concrete
-		} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
-			// 3. Handle pointer to struct
-			item = *pItem
-		} else {
-			continue
-		}
-
-		// 4. Check if this is the element we are looking for
+	found := false
+	iterateItems(items, func(item IssuerSignedItem, _ any) bool {
 		if item.ElementIdentifier == element {
-			return true
+			found = true
+			return false
 		}
-	}
-
-	return false
+		return true
+	})
+	return found
 }
 
 // DeviceResponseBuilder builds a DeviceResponse with selective disclosure.
