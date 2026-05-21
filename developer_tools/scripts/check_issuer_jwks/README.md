@@ -16,9 +16,10 @@ make build-check-issuer-jwks
 
 ### Flags
 
-| Flag         | Description            |
-|--------------|------------------------|
-| `--no-color` | Disable colored output |
+| Flag         | Description              |
+|--------------|--------------------------|
+| `--no-color` | Disable colored output   |
+| `--version`  | Print version and exit   |
 
 ### Example
 
