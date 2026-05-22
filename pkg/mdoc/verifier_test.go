@@ -160,7 +160,6 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 	if err != nil {
 		t.Fatalf("failed to issue mDL: %v", err)
 	}
-
 	// Build device response using the Document from issued
 	return issued.DocumentMdoc
 }
@@ -217,42 +216,45 @@ func TestVerifier_VerifyDeviceResponse(t *testing.T) {
 }
 
 func TestVerifier_VerifyDocument(t *testing.T) {
-	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
+    trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
-	verifier, err := NewVerifier(VerifierConfig{
-		TrustEvaluator:      trustEvaluator,
-		SkipRevocationCheck: true,
-	})
-	if err != nil {
-		t.Fatalf("NewVerifier() error = %v", err)
-	}
-	response := createTestDeviceResponse(t, dsKey, certChain)
+    verifier, err := NewVerifier(VerifierConfig{
+        TrustEvaluator:      trustEvaluator,
+        SkipRevocationCheck: true,
+    })
+    if err != nil {
+        t.Fatalf("NewVerifier() error = %v", err)
+    }
+    
+    response := createTestDeviceResponse(t, dsKey, certChain)
 
-	doc, ok := response.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatalf("Expected *DocumentMdoc, got %T", response.Documents[0])
-	}
-	result := verifier.VerifyDocument(doc)
+    if len(response.Documents) == 0 {
+        t.Fatal("expected at least one document in test response")
+    }
 
-	if !result.Valid {
-		t.Errorf("VerifyDocument() Valid = false, errors: %v", result.Errors)
-	}
+    doc := &response.Documents[0]
 
-	if result.MSO == nil {
-		t.Error("VerifyDocument() MSO is nil")
-	}
+    result := verifier.VerifyDocument(doc)
 
-	if result.IssuerCertificate == nil {
-		t.Error("VerifyDocument() IssuerCertificate is nil")
-	}
+    if !result.Valid {
+        t.Errorf("VerifyDocument() Valid = false, errors: %v", result.Errors)
+    }
 
-	if len(result.VerifiedElements) == 0 {
-		t.Error("VerifyDocument() VerifiedElements is empty")
-	}
+    if result.MSO == nil {
+        t.Error("VerifyDocument() MSO is nil")
+    }
 
-	if _, ok := result.VerifiedElements[Namespace]; !ok {
-		t.Errorf("VerifyDocument() missing namespace %s", Namespace)
-	}
+    if result.IssuerCertificate == nil {
+        t.Error("VerifyDocument() IssuerCertificate is nil")
+    }
+
+    if len(result.VerifiedElements) == 0 {
+        t.Error("VerifyDocument() VerifiedElements is empty")
+    }
+
+    if _, ok := result.VerifiedElements[Namespace]; !ok {
+        t.Errorf("VerifyDocument() missing namespace %s", Namespace)
+    }
 }
 
 func TestVerifier_VerifyDocument_InvalidVersion(t *testing.T) {
@@ -426,7 +428,7 @@ func TestVerificationResult_VerifyAgeOver(t *testing.T) {
 		t.Error("VerifyAgeOver(18) not found")
 	}
 	if !over18 {
-		t.Error(response.Version)
+		t.Error("VerifyAgeOver(18) should be true")
 	}
 
 	// Test age_over_21 (should be true)
@@ -606,41 +608,40 @@ func TestRequestBuilder_BuildDeviceRequest(t *testing.T) {
 }
 
 func TestVerifier_VerifyIssuerSigned(t *testing.T) {
-	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
+    trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
-	verifier, err := NewVerifier(VerifierConfig{
-		TrustEvaluator:      trustEvaluator,
-		SkipRevocationCheck: true,
-	})
-	if err != nil {
-		t.Fatalf("NewVerifier() error = %v", err)
-	}
+    verifier, err := NewVerifier(VerifierConfig{
+        TrustEvaluator:      trustEvaluator,
+        SkipRevocationCheck: true,
+    })
+    if err != nil {
+        t.Fatalf("NewVerifier() error = %v", err)
+    }
 
-	response := createTestDeviceResponse(t, dsKey, certChain)
-	doc, ok := response.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatalf("expected *DocumentMdoc, got %T", response.Documents[0])
-	}
+    response := createTestDeviceResponse(t, dsKey, certChain)
+    
+    if len(response.Documents) == 0 {
+        t.Fatal("expected at least one document in response")
+    }
 
-	mso, elements, err := verifier.VerifyIssuerSigned(&doc.IssuerSigned, doc.DocType)
-	if err != nil {
-		t.Fatalf("VerifyIssuerSigned() error = %v", err)
-	}
-	if err != nil {
-		t.Fatalf("VerifyIssuerSigned() error = %v", err)
-	}
+    doc := &response.Documents[0]
 
-	if mso == nil {
-		t.Error("VerifyIssuerSigned() MSO is nil")
-	}
+    mso, elements, err := verifier.VerifyIssuerSigned(&doc.IssuerSigned, doc.DocType)
+    if err != nil {
+        t.Fatalf("VerifyIssuerSigned() error = %v", err)
+    }
 
-	if len(elements) == 0 {
-		t.Error("VerifyIssuerSigned() elements is empty")
-	}
+    if mso == nil {
+        t.Error("VerifyIssuerSigned() MSO is nil")
+    }
 
-	if elements[Namespace]["family_name"] != "Smith" {
-		t.Errorf("VerifyIssuerSigned() family_name = %v, want Smith", elements[Namespace]["family_name"])
-	}
+    if len(elements) == 0 {
+        t.Error("VerifyIssuerSigned() elements is empty")
+    }
+
+    if val, ok := elements[Namespace]["family_name"]; !ok || val != "Smith" {
+        t.Errorf("VerifyIssuerSigned() family_name = %v, want Smith", val)
+    }
 }
 
 func TestVerifier_WithCustomClock(t *testing.T) {

@@ -321,28 +321,34 @@ func TestIssuerSignedItem(t *testing.T) {
 }
 
 func TestIssuerSigned(t *testing.T) {
-	issuerSigned := IssuerSignedMdoc{
-		NameSpaces: map[string][]any{
-			Namespace: []any{
-				IssuerSignedItem{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Smith"},
-				IssuerSignedItem{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "given_name", ElementValue: "John"},
-			},
-		},
-		IssuerAuth: []any{
-			[]byte{0xD2, 0x84},
-			map[any]any{},
-			[]byte{},
-			[]byte{},
-		},
-	}
+    issuerSigned := IssuerSignedMdoc{
+        NameSpaces: map[string][]any{
+            Namespace: []any{
+                IssuerSignedItem{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Smith"},
+                IssuerSignedItem{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "given_name", ElementValue: "John"},
+            },
+        },
+        // This is being assigned to a field of type 'any'
+        IssuerAuth: []any{
+            []byte{0xD2, 0x84},
+            map[any]any{},
+            []byte{},
+            []byte{},
+        },
+    }
 
-	if len(issuerSigned.NameSpaces[Namespace]) != 2 {
-		t.Errorf("NameSpaces items = %d, want 2", len(issuerSigned.NameSpaces[Namespace]))
-	}
+    if len(issuerSigned.NameSpaces[Namespace]) != 2 {
+        t.Errorf("NameSpaces items = %d, want 2", len(issuerSigned.NameSpaces[Namespace]))
+    }
 
-	if len(issuerSigned.IssuerAuth) != 4 {
-		t.Errorf("IssuerAuth elements = %d, want 4", len(issuerSigned.IssuerAuth))
-	}
+    // Fix: Type assert to []any before checking length
+    if auth, ok := issuerSigned.IssuerAuth.([]any); ok {
+        if len(auth) != 4 {
+            t.Errorf("IssuerAuth elements = %d, want 4", len(auth))
+        }
+    } else {
+        t.Errorf("IssuerAuth is not a slice, got %T", issuerSigned.IssuerAuth)
+    }
 }
 
 func TestDeviceSigned(t *testing.T) {

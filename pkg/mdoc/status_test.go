@@ -1129,7 +1129,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_CWT(t *testing.T) {
 	statusValue := map[string]any{
 		"status_list": map[string]any{
 			"uri": server.URL,
-			"idx": int64(5),
+			"idx": int64(25),
 		},
 	}
 

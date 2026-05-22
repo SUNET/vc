@@ -337,15 +337,29 @@ func VerifyDigest(mso *MobileSecurityObject, namespace string, anyItem any) erro
 	if !ok {
 		return fmt.Errorf("digest ID %d not found in MSO", item.DigestID)
 	}
-
-	em, _ := cbor.CanonicalEncOptions().EncMode()
+	em, err := cbor.CanonicalEncOptions().EncMode()
+	if err != nil {
+		return fmt.Errorf("failed to initialize canonical encoder: %w", err)
+	}
 	encodedFullItem, err := em.Marshal(tag)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tagged item: %w", err)
 	}
 
-	h := sha256.Sum256(encodedFullItem)
-	actualDigest := h[:]
+    var actualDigest []byte
+    switch DigestAlgorithm(mso.DigestAlgorithm) {
+    case DigestAlgorithmSHA256:
+        h := sha256.Sum256(encodedFullItem)
+        actualDigest = h[:]
+    case DigestAlgorithmSHA384:
+        h := sha512.Sum384(encodedFullItem)
+        actualDigest = h[:]
+    case DigestAlgorithmSHA512:
+        h := sha512.Sum512(encodedFullItem)
+        actualDigest = h[:]
+    default:
+        return fmt.Errorf("unsupported digest algorithm: %s", mso.DigestAlgorithm)
+    }
 
 	if !bytes.Equal(actualDigest, expectedDigest) {
 		return fmt.Errorf("digest mismatch for %s (ID %d)", item.ElementIdentifier, item.DigestID)

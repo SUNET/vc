@@ -87,14 +87,9 @@ func createTestIssuerSigned(t *testing.T) *IssuerSignedMdoc {
 		t.Fatal("no documents found in issued response")
 	}
 
-	doc, ok := issuedDoc.DocumentMdoc.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatal("document is not of type *DocumentMdoc")
-	}
+	doc := issuedDoc.DocumentMdoc.Documents[0]
 
-	issuerSigned := doc.IssuerSigned
-
-	return &issuerSigned
+	return &doc.IssuerSigned
 }
 
 func TestNewSelectiveDisclosure(t *testing.T) {
@@ -298,65 +293,82 @@ func TestDeviceResponseBuilder_Build_WithSignature(t *testing.T) {
 		t.Fatalf("Documents count = %d, want 1", len(response.Documents))
 	}
 
-	doc, ok := response.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatalf("Document at index 0 is type %T, want *DocumentMdoc", response.Documents[0])
+	if len(response.Documents) == 0 {
+		t.Fatal("No documents found in response")
 	}
+	doc := &response.Documents[0]
 
 	if doc.DocType != DocType {
 		t.Errorf("DocType = %s, want %s", doc.DocType, DocType)
 	}
 
-	// Remember doc.IssuerSigned.NameSpaces is map[string][]any
 	items := doc.IssuerSigned.NameSpaces[Namespace]
 	if len(items) != 2 {
 		t.Errorf("Disclosed elements = %d, want 2", len(items))
 	}
 
-	sig := doc.DeviceSigned.DeviceAuth.DeviceSignature
-	if len(sig) == 0 {
-		t.Error("DeviceSignature should not be empty")
+	sigRaw := doc.DeviceSigned.DeviceAuth.DeviceSignature
+	if sigRaw == nil {
+		t.Fatal("DeviceSignature should not be nil")
 	}
-	if !ok {
 
-		if len(doc.DeviceSigned.DeviceAuth.DeviceSignature) == 0 {
-			t.Error("DeviceSignature is empty")
-		} else {
-			t.Fatalf("DeviceSignature is unexpected type %T", doc.DeviceSigned.DeviceAuth.DeviceSignature)
-		}
-	} else if len(sig) == 0 {
-		t.Error("DeviceSignature bytes are empty")
+	var sigLen int
+	switch v := sigRaw.(type) {
+	case []byte:
+		sigLen = len(v)
+	case []any:
+		sigLen = len(v)
+	default:
+		t.Fatalf("DeviceSignature has unexpected type %T", sigRaw)
+	}
+
+	if sigLen == 0 {
+		t.Error("DeviceSignature contains no data")
 	}
 }
 
 func TestDeviceResponseBuilder_Build_WithMAC(t *testing.T) {
-	issuerSigned := createTestIssuerSigned(t)
-	macKey := make([]byte, 32)
-	rand.Read(macKey)
-	transcript := []byte("test session transcript")
+    issuerSigned := createTestIssuerSigned(t)
+    macKey := make([]byte, 32)
+    rand.Read(macKey)
+    transcript := []byte("test session transcript")
 
-	builder := NewDeviceResponseBuilder(DocType).
-		WithIssuerSigned(issuerSigned).
-		WithMACKey(macKey).
-		WithSessionTranscript(transcript)
+    builder := NewDeviceResponseBuilder(DocType).
+        WithIssuerSigned(issuerSigned).
+        WithMACKey(macKey).
+        WithSessionTranscript(transcript)
 
-	response, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
-	doc, ok := response.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatalf("expected *DocumentMdoc, got %T", response.Documents[0])
-	}
-	if len(doc.DeviceSigned.DeviceAuth.DeviceMac) == 0 {
-		t.Error("DeviceMac is empty")
-	}
-	if doc.DeviceSigned.DeviceAuth.DeviceSignature != nil {
-		sig := doc.DeviceSigned.DeviceAuth.DeviceSignature
-		if len(sig) == 0 {
-			t.Error("DeviceSignature was provided but is empty")
-		}
-	}
+    response, err := builder.Build()
+    if err != nil {
+        t.Fatalf("Build() error = %v", err)
+    }
+
+    if len(response.Documents) == 0 {
+        t.Fatal("expected at least one document")
+    }
+
+    doc := &response.Documents[0]
+
+    if doc.DeviceSigned.DeviceAuth.DeviceMac == nil {
+        t.Error("DeviceMac is empty")
+    }
+
+    if doc.DeviceSigned.DeviceAuth.DeviceSignature != nil {
+        // Extract the value to check length
+        var sigLen int
+        switch v := doc.DeviceSigned.DeviceAuth.DeviceSignature.(type) {
+        case []byte:
+            sigLen = len(v)
+        case []any:
+            sigLen = len(v)
+        default:
+            t.Errorf("unexpected type for DeviceSignature: %T", v)
+        }
+
+        if sigLen == 0 {
+            t.Error("DeviceSignature was provided but is empty")
+        }
+    }
 }
 
 func TestDeviceResponseBuilder_Build_MissingTranscript(t *testing.T) {
@@ -388,45 +400,52 @@ func TestDeviceResponseBuilder_Build_MissingKey(t *testing.T) {
 }
 
 func TestDeviceResponseBuilder_AddError(t *testing.T) {
-	issuerSigned := createTestIssuerSigned(t)
-	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+    issuerSigned := createTestIssuerSigned(t)
+    deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    transcript := []byte("test session transcript")
 
-	// Request an element that doesn't exist
-	request := &ItemsRequest{
-		DocType: DocType,
-		NameSpaces: map[string]map[string]bool{
-			Namespace: {"family_name": false, "nonexistent": false},
-		},
-	}
+    // Request an element that doesn't exist
+    request := &ItemsRequest{
+        DocType: DocType,
+        NameSpaces: map[string]map[string]bool{
+            Namespace: {"family_name": false, "nonexistent": false},
+        },
+    }
 
-	builder := NewDeviceResponseBuilder(DocType).
-		WithIssuerSigned(issuerSigned).
-		WithDeviceKey(deviceKey).
-		WithSessionTranscript(transcript).
-		WithRequest(request)
+    builder := NewDeviceResponseBuilder(DocType).
+        WithIssuerSigned(issuerSigned).
+        WithDeviceKey(deviceKey).
+        WithSessionTranscript(transcript).
+        WithRequest(request)
 
-	response, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
+    response, err := builder.Build()
+    if err != nil {
+        t.Fatalf("Build() error = %v", err)
+    }
 
-	doc, ok := response.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatalf("expected *DocumentMdoc, got %T", response.Documents[0])
-	}
+    if len(response.Documents) == 0 {
+        t.Fatal("expected at least one document")
+    }
 
-	if doc.Errors == nil {
-		t.Fatal("Errors should not be nil")
-	}
+    doc := &response.Documents[0]
 
-	errorCode, ok := doc.Errors[Namespace]["nonexistent"]
-	if !ok {
-		t.Error("Missing error for nonexistent element")
-	}
-	if errorCode != ErrorDataNotAvailable {
-		t.Errorf("Error code = %d, want %d", errorCode, ErrorDataNotAvailable)
-	}
+    if doc.Errors == nil {
+        t.Fatal("Errors should not be nil")
+    }
+
+    namespaceErrors, ok := doc.Errors[Namespace]
+    if !ok {
+        t.Fatalf("Namespace %s missing from Errors map", Namespace)
+    }
+
+    errorCode, ok := namespaceErrors["nonexistent"]
+    if !ok {
+        t.Error("Missing error entry for 'nonexistent' element")
+    }
+    
+    if errorCode != ErrorDataNotAvailable {
+        t.Errorf("Error code = %d, want %d", errorCode, ErrorDataNotAvailable)
+    }
 }
 
 func TestNewDisclosurePolicy(t *testing.T) {
@@ -583,80 +602,80 @@ func TestEncodeDecodeDeviceResponse(t *testing.T) {
 }
 
 func TestSelectiveDisclosure_RoundTrip(t *testing.T) {
-	// Complete round-trip test: issue -> selective disclose -> verify
-	issuerSigned := createTestIssuerSigned(t)
-	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+    issuerSigned := createTestIssuerSigned(t)
+    deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    transcript := []byte("test session transcript")
 
-	// Create request for subset of elements
-	request := &ItemsRequest{
-		DocType: DocType,
-		NameSpaces: map[string]map[string]bool{
-			Namespace: {
-				"family_name": false,
-				"age_over_18": false,
-			},
-		},
-	}
+    request := &ItemsRequest{
+        DocType: DocType,
+        NameSpaces: map[string]map[string]bool{
+            Namespace: {
+                "family_name": false,
+                "age_over_18": false,
+            },
+        },
+    }
 
-	// Build response with selective disclosure
-	response, err := NewDeviceResponseBuilder(DocType).
-		WithIssuerSigned(issuerSigned).
-		WithDeviceKey(deviceKey).
-		WithSessionTranscript(transcript).
-		WithRequest(request).
-		Build()
+    response, err := NewDeviceResponseBuilder(DocType).
+        WithIssuerSigned(issuerSigned).
+        WithDeviceKey(deviceKey).
+        WithSessionTranscript(transcript).
+        WithRequest(request).
+        Build()
 
-	if err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
+    if err != nil {
+        t.Fatalf("Build() error = %v", err)
+    }
 
-	doc, ok := response.Documents[0].(*DocumentMdoc)
-	if !ok {
-		t.Fatalf("expected *DocumentMdoc, got %T", response.Documents[0])
-	}
+    if len(response.Documents) == 0 {
+        t.Fatal("expected at least one document")
+    }
 
-	items := doc.IssuerSigned.NameSpaces[Namespace]
-	if len(items) != 2 {
-		t.Errorf("Expected 2 disclosed elements, got %d", len(items))
-	}
+    doc := &response.Documents[0]
 
-	identifiers := make(map[string]bool)
-	for _, anyItem := range items {
-		var item IssuerSignedItem
+    items := doc.IssuerSigned.NameSpaces[Namespace]
+    if len(items) != 2 {
+        t.Errorf("Expected 2 disclosed elements, got %d", len(items))
+    }
 
-		// Unwrap the Tag 24 bytes to see what's inside
-		if tag, ok := anyItem.(cbor.Tag); ok {
-			content, _ := tag.Content.([]byte)
-			if err := cbor.Unmarshal(content, &item); err != nil {
-				t.Fatalf("failed to unmarshal disclosed item: %v", err)
-			}
-		} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
-			item = concrete
-		} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
-			item = *pItem
-		} else {
-			t.Fatalf("unexpected item type %T: verifier needs cbor.Tag or IssuerSignedItem", anyItem)
-		}
+    identifiers := make(map[string]bool)
+    for i, anyItem := range items {
+        var item IssuerSignedItem
 
-		identifiers[item.ElementIdentifier] = true
-	}
+        switch v := anyItem.(type) {
+        case cbor.Tag:
+            content, ok := v.Content.([]byte)
+            if !ok {
+                t.Fatalf("item at index %d: tag content is not bytes", i)
+            }
+            if err := cbor.Unmarshal(content, &item); err != nil {
+                t.Fatalf("item at index %d: failed to unmarshal: %v", i, err)
+            }
+        case IssuerSignedItem:
+            item = v
+        case *IssuerSignedItem:
+            item = *v
+        default:
+            t.Fatalf("unexpected item type %T at index %d", anyItem, i)
+        }
 
-	if !identifiers["family_name"] {
-		t.Error("family_name should be disclosed")
-	}
-	if !identifiers["age_over_18"] {
-		t.Error("age_over_18 should be disclosed")
-	}
-	if identifiers["given_name"] {
-		t.Error("given_name should not be disclosed")
-	}
-	if identifiers["portrait"] {
-		t.Error("portrait should not be disclosed")
-	}
+        identifiers[item.ElementIdentifier] = true
+    }
 
-	// If IssuerAuth is 'any', check it's not nil. If it's []byte, check len.
-	if doc.IssuerSigned.IssuerAuth == nil {
-		t.Error("IssuerAuth should be preserved")
-	}
+    if !identifiers["family_name"] {
+        t.Error("family_name should be disclosed")
+    }
+    if !identifiers["age_over_18"] {
+        t.Error("age_over_18 should be disclosed")
+    }
+    if identifiers["given_name"] {
+        t.Error("given_name should not be disclosed")
+    }
+    if identifiers["portrait"] {
+        t.Error("portrait should not be disclosed")
+    }
+
+    if doc.IssuerSigned.IssuerAuth == nil {
+        t.Error("IssuerAuth should be preserved")
+    }
 }

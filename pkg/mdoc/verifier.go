@@ -125,12 +125,8 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 	}
 
 	// Verify each document
-	for _, docAny := range response.Documents {
-		doc, ok := docAny.(*DocumentMdoc)
-		if !ok {
-			result.Valid = false
-			continue
-		}
+	for i := range response.Documents {
+		doc := &response.Documents[i]
 		docResult := v.verifyDocumentWithContext(ctx, doc)
 		result.Documents = append(result.Documents, docResult)
 		if !docResult.Valid {
@@ -205,21 +201,37 @@ func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *DocumentM
 
 	// Step 6: Verify each IssuerSignedItem against MSO digests
 	for namespace, items := range doc.IssuerSigned.NameSpaces {
+		// Initialize the map for this namespace
 		result.VerifiedElements[namespace] = make(map[string]any)
 
-		for _, anyItem := range items {
+		for i, anyItem := range items {
 			if err := VerifyDigest(mso, namespace, anyItem); err != nil {
-				result.Errors = append(result.Errors, err)
+				result.Errors = append(result.Errors, fmt.Errorf("digest mismatch in %s at index %d: %w", namespace, i, err))
 				result.Valid = false
 				continue
 			}
-			var item IssuerSignedItem
-			if tag, ok := anyItem.(cbor.Tag); ok {
-				content, _ := tag.Content.([]byte)
-				cbor.Unmarshal(content, &item)
 
-				result.VerifiedElements[namespace][item.ElementIdentifier] = item.ElementValue
+			var item IssuerSignedItem
+			tag, ok := anyItem.(cbor.Tag)
+			if !ok {
+				result.Errors = append(result.Errors, fmt.Errorf("item in %s at index %d is not a CBOR Tag", namespace, i))
+				result.Valid = false
+				continue
 			}
+
+			content, ok := tag.Content.([]byte)
+			if !ok {
+				result.Errors = append(result.Errors, fmt.Errorf("tag content in %s at index %d is not a byte slice", namespace, i))
+				result.Valid = false
+				continue
+			}
+
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("failed to decode IssuerSignedItem in %s: %w", namespace, err))
+				result.Valid = false
+				continue
+			}
+			result.VerifiedElements[namespace][item.ElementIdentifier] = item.ElementValue
 		}
 	}
 

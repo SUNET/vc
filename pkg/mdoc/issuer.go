@@ -187,14 +187,14 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
-	emptyMapBytes, _ := encoder.Marshal(map[string]any{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode device auth: %w", err)
+	emptyMapBytes, err2 := encoder.Marshal(map[string]any{})
+	if err2 != nil {
+		return nil, fmt.Errorf("failed to encode device auth: %w", err2)
 	}
 
-	emptySigBytes, err := encoder.Marshal(emptySigStructure)
-	if err != nil {
-		return nil, err
+	emptySigBytes, err3 := encoder.Marshal(emptySigStructure)
+	if err3 != nil {
+		return nil, err3
 	}
 	innerDoc := &DocumentMdoc{
 		DocType: DocType,
@@ -210,10 +210,11 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		},
 	}
 	response := &DeviceResponseMdoc{
-		Version:   "1.0",
-		Documents: []any{innerDoc},
+		Version: "1.0",
+		Documents: []DocumentMdoc{*innerDoc}, 
 		Status:    0,
 	}
+
 	issuedDoc := &IssuedDocumentMdoc{
 		DocumentMdoc: response,
 		SignedMSO:    signedMSO,

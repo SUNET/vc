@@ -254,14 +254,29 @@ func (b *DeviceResponseBuilder) Build() (*DeviceResponseMdoc, error) {
 	var deviceAuth DeviceAuthMdoc
 	var deviceNameSpaces cbor.Tag
 	if b.useMAC && b.macKey != nil {
+		// Build MAC authentication
+		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
+		WithSessionTranscript(b.sessionTranscript).
+		WithSessionKey(b.macKey).
+		Build()
+		if err != nil {
+			return nil, fmt.Errorf("failed to build device MAC: %w", err)
+		}
+
+		deviceAuth = DeviceAuthMdoc{
+			DeviceMac: deviceSigned.DeviceAuth.DeviceMac,
+		}
+		deviceNameSpaces = cbor.Tag{Number: 24, Content: deviceSigned.NameSpaces}
 	} else if b.deviceKey != nil {
 		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
-			WithSessionTranscript(b.sessionTranscript).
-			WithDeviceKey(b.deviceKey).
-			Build()
+		WithSessionTranscript(b.sessionTranscript).
+		WithDeviceKey(b.deviceKey).
+		Build()
 		if err != nil {
 			return nil, fmt.Errorf("failed to build device signature: %w", err)
 		}
+
+		// FIX: Assign to DeviceSignature
 		deviceAuth = DeviceAuthMdoc{
 			DeviceSignature: deviceSigned.DeviceAuth.DeviceSignature,
 		}
@@ -278,10 +293,12 @@ func (b *DeviceResponseBuilder) Build() (*DeviceResponseMdoc, error) {
 			DeviceAuth: deviceAuth,
 		},
 	}
-
+	if len(b.errors) > 0 {
+		doc.Errors = b.errors
+	}
 	return &DeviceResponseMdoc{
 		Version:   "1.0",
-		Documents: []any{doc},
+		Documents: []DocumentMdoc{*doc},
 		Status:    0,
 	}, nil
 }
