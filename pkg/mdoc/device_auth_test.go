@@ -108,6 +108,30 @@ func createTestDSCert(t *testing.T, dsKey *ecdsa.PrivateKey, iacaCert *x509.Cert
 	return dsCert
 }
 
+// getEffectiveLength returns the length of the data regardless of its 
+// container (raw bytes, any slice, or CBOR tag).
+func getEffectiveLength(v any) int {
+    if v == nil {
+        return 0
+    }
+
+    switch val := v.(type) {
+    case []byte:
+        return len(val)
+    case []any:
+        return len(val)
+    case cbor.Tag:
+        // If it's a tag, we check the length of its content
+        if content, ok := val.Content.([]byte); ok {
+            return len(content)
+        }
+        if content, ok := val.Content.([]any); ok {
+            return len(content)
+        }
+    }
+    return 0
+}
+
 func TestNewDeviceAuthBuilder(t *testing.T) {
 	builder := NewDeviceAuthBuilder(DocType)
 
@@ -213,47 +237,17 @@ func TestDeviceAuthBuilder_Build_Signature(t *testing.T) {
 	if deviceSigned.DeviceAuth.DeviceSignature == nil {
 		t.Error("DeviceSignature should not be nil")
 	} else {
-		// Handle both raw bytes and decoded CBOR arrays
-		var sigLen int
-		switch v := deviceSigned.DeviceAuth.DeviceSignature.(type) {
-		case []byte:
-			sigLen = len(v)
-		case []any:
-			sigLen = len(v)
-		case cbor.Tag:
-			if b, ok := v.Content.([]byte); ok {
-				sigLen = len(b)
-			}
-		default:
-			t.Errorf("DeviceSignature has unexpected type: %T", v)
-		}
-
-		if sigLen == 0 {
+		if getEffectiveLength(deviceSigned.DeviceAuth.DeviceSignature) == 0 {
 			t.Error("DeviceSignature should contain data")
 		}
 	}
-
 	// Ensure DeviceMac is empty/nil
 	if deviceSigned.DeviceAuth.DeviceMac != nil {
 		t.Error("DeviceMac should be nil for signature-based auth")
 	}
-	var length int
-	switch v := deviceSigned.NameSpaces.(type) {
-	case []byte:
-		length = len(v)
-	case cbor.Tag:
-		if b, ok := v.Content.([]byte); ok {
-			length = len(b)
-		}
-	case nil:
-		length = 0
-	default:
-		t.Errorf("NameSpaces has unexpected type: %T", v)
-	}
-
-	if length == 0 {
-		t.Error("NameSpaces should be set and contain data")
-	}
+    if getEffectiveLength(deviceSigned.NameSpaces) == 0 {
+        t.Error("NameSpaces should be set and contain data")
+    }
 }
 
 func TestDeviceAuthBuilder_Build_MAC(t *testing.T) {
@@ -326,22 +320,7 @@ func TestDeviceAuthBuilder_Build_WithNameSpaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-
-	var length int
-	switch v := deviceSigned.NameSpaces.(type) {
-	case []byte:
-		length = len(v)
-	case cbor.Tag:
-		if b, ok := v.Content.([]byte); ok {
-			length = len(b)
-		}
-	case nil:
-		length = 0
-	default:
-		t.Errorf("NameSpaces has unexpected type: %T", v)
-	}
-
-	if length == 0 {
+	if getEffectiveLength(deviceSigned.NameSpaces) == 0 {
 		t.Error("NameSpaces should be set and contain data")
 	}
 }
