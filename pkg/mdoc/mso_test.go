@@ -6,7 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"github.com/fxamacker/cbor/v2"
+	//"github.com/fxamacker/cbor/v2"
 	"math/big"
 	"testing"
 	"time"
@@ -443,41 +443,18 @@ func TestVerifyDigest(t *testing.T) {
 		t.Fatalf("NewCBOREncoder() error = %v", err)
 	}
 
-	issuerSignedNS := make(map[string][]any)
-
-	for _, anyItem := range issuerSignedNS[Namespace] {
-		var item IssuerSignedItem
-
-		// 1. Cast 'any' to cbor.Tag to access the wrapped data
-		taggedItem, ok := anyItem.(cbor.Tag)
-		if !ok {
-			t.Fatalf("Item in NameSpaces is not a cbor.Tag")
-		}
-
-		// 2. Ensure it is Tag 24
-		if taggedItem.Number != 24 {
-			t.Fatalf("Expected CBOR Tag 24, got %d", taggedItem.Number)
-		}
-
-		// 3. The content of Tag 24 is the encoded byte slice
-		encodedBytes, ok := taggedItem.Content.([]byte)
-		if !ok {
-			t.Fatalf("Tag 24 content is not a byte slice")
-		}
-
-		// 4. Unmarshal the actual item
-		if err := encoder.Unmarshal(encodedBytes, &item); err != nil {
-			t.Fatalf("Unmarshal IssuerSignedItem error = %v", err)
-		}
-
-		// 5. Verify the digest
-		// NOTE: If your VerifyDigest follows the Copilot comment's logic,
-		// it will hash the TaggedItem. If it follows old logic, it hashes the 'item'.
-		err := VerifyDigest(mso, Namespace, &item)
-		if err != nil {
-			t.Errorf("VerifyDigest() for %s error = %v", item.ElementIdentifier, err)
-		}
-	}
+	issuerSignedNS := issuerNameSpaces
+	for _, taggedItem := range issuerSignedNS[Namespace] {
+        var item IssuerSignedItem
+        encodedBytes, _ := taggedItem.Content.([]byte)
+        if err := encoder.Unmarshal(encodedBytes, &item); err != nil {
+            t.Fatalf("Unmarshal error = %v", err)
+        }
+        err := VerifyDigest(mso, Namespace, taggedItem) 
+        if err != nil {
+            t.Errorf("VerifyDigest() for %s error = %v", item.ElementIdentifier, err)
+        }
+    }
 }
 
 func TestVerifyDigest_InvalidItem(t *testing.T) {

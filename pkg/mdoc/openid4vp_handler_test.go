@@ -158,7 +158,7 @@ func TestExtractMDocClaims_ValidToken(t *testing.T) {
 
 	for key, want := range expected {
 		if got, ok := claims[key]; !ok || got != want {
-			t.Errorf("claima %s = %v, want %v", vpToken, got, want)
+			t.Errorf("claim %s = %v, want %v", vpToken, got, want)
 		}
 	}
 }

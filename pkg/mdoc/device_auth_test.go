@@ -729,7 +729,7 @@ func TestVerifier_VerifyDeviceAuth_NoDeviceAuth(t *testing.T) {
 	// Should succeed (no device auth may be acceptable in some contexts)
 	err := verifier.VerifyDeviceAuth(doc, mso, transcript)
 	if err != nil {
-		t.Errorf("VerifyDeviceAuth() with no device auth should not error = %v", err)
+		t.Errorf("VerifyDeviceAuthaaa() with no device auth should not error = %v", err)
 	}
 }
 
@@ -779,7 +779,7 @@ func TestVerifier_VerifyDeviceAuth_WrongKey(t *testing.T) {
 
 	// Should fail - device signed with different key than MSO declares
 	err := verifier.VerifyDeviceAuth(doc, mso, transcript)
-	if err != nil {
+	if err == nil {
 		t.Error("VerifyDeviceAuth() should fail when signature key doesn't match MSO device key")
 	}
 }
@@ -994,7 +994,7 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 	// Should fail - invalid device key in MSO
 	err := verifier.VerifyDeviceAuth(doc, mso, transcript)
 	
-	if err != nil {
+	if err == nil {
 		t.Error("VerifyDeviceAuth() should fail with invalid device key")
 	}
 }

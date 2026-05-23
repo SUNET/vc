@@ -239,6 +239,10 @@ func ExtractMDocClaims(vpToken string) (map[string]any, error) {
         return nil, fmt.Errorf("failed to decode device response: %w", err)
     }
 
+	if len(deviceResponse.Documents) == 0 {
+        return nil, errors.New("invalid mdoc VP token: device response contains no documents")
+    }
+
     claims := make(map[string]any)
 
     for _, doc := range deviceResponse.Documents {

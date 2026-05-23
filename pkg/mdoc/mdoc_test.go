@@ -369,7 +369,7 @@ func TestDeviceSigned(t *testing.T) {
 
 func TestDeviceAuth_MAC(t *testing.T) {
 	deviceAuth := DeviceAuthMdoc{
-		DeviceMac: []byte{0xD1, 0x84}, // COSE_Mac0
+		DeviceMac: []any{0xD1, 0x84}, // COSE_Mac0
 	}
 
 	if deviceAuth.DeviceMac == nil {

@@ -315,5 +315,6 @@ type DeviceAuthMdoc struct {
 	DeviceSignature any `json:"deviceSignature" cbor:"deviceSignature"`
 
 	// DeviceMac is the COSE_Mac0 device MAC (mutually exclusive with DeviceSignature).
-	DeviceMac []byte `json:"deviceMac,omitempty" cbor:"deviceMac,omitempty"`
+	DeviceMac []any `json:"deviceMac,omitempty" cbor:"deviceMac,omitempty"`
 }
+
