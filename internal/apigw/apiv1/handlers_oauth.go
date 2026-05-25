@@ -207,12 +207,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				dpopErr.Error(), 400, dpopErr)
 		}
 
-		if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
+		if !c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true) {
 			c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
 			return nil, oauth2.OAuthErrJTIReplay
 		}
-
-		c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
 
 		// Validate HTU matches token endpoint
 		if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
@@ -241,6 +239,18 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			"Authorization code is invalid or has already been used", 400, err)
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
+
+	// Verify client_id and redirect_uri match the values stored during PAR (RFC 6749 §4.1.3).
+	if !isPreAuthFlow {
+		if authorizationContext.WalletClientID != "" && req.ClientID != authorizationContext.WalletClientID {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"client_id does not match the authorization request", 400)
+		}
+		if authorizationContext.WalletURI != "" && req.RedirectURI != authorizationContext.WalletURI {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"redirect_uri does not match the authorization request", 400)
+		}
+	}
 
 	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
 		c.log.Debug("Authorization context expired")

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -11,6 +12,7 @@ import (
 // Suitable for single-instance deployments. For HA, swap with MongoCache.
 type MemoryCache[V any] struct {
 	cache *ttlcache.Cache[string, V]
+	mu    sync.Mutex
 }
 
 // NewMemoryCache creates a new in-memory generic cache with the given default TTL.
@@ -37,6 +39,19 @@ func (m *MemoryCache[V]) Get(_ context.Context, key string) (V, bool) {
 // Set stores a value with the default TTL.
 func (m *MemoryCache[V]) Set(_ context.Context, key string, value V) {
 	m.cache.Set(key, value, ttlcache.DefaultTTL)
+}
+
+// SetNX stores a value only if the key does not already exist.
+// Returns true if the value was set, false if the key already existed.
+func (m *MemoryCache[V]) SetNX(_ context.Context, key string, value V) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cache.Get(key) != nil {
+		return false
+	}
+	m.cache.Set(key, value, ttlcache.DefaultTTL)
+	return true
 }
 
 // SetWithTTL stores a value with a custom TTL.

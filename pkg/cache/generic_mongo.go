@@ -90,6 +90,27 @@ func (m *MongoCache[V]) Set(ctx context.Context, key string, value V) {
 	m.upsert(ctx, key, value)
 }
 
+// SetNX stores a value only if the key does not already exist (atomic).
+// Returns true if the value was inserted, false if the key already existed.
+func (m *MongoCache[V]) SetNX(ctx context.Context, key string, value V) bool {
+	entry := mongoCacheEntry[V]{
+		Key:       key,
+		Value:     value,
+		CreatedAt: time.Now(),
+	}
+	_, err := m.coll.InsertOne(ctx, entry)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return false
+		}
+		m.log.Error(err, "mongo cache setnx failed",
+			"cache", m.collection, "key", key,
+		)
+		return false
+	}
+	return true
+}
+
 // SetWithTTL stores a value with a custom TTL.
 // Note: MongoDB TTL is per-collection, so custom TTL is approximated by
 // setting created_at in the past/future relative to the collection TTL.

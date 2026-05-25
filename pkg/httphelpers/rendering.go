@@ -53,6 +53,9 @@ func isOIDCEndpoint(path string) bool {
 		"/register",
 		"/token",
 		"/userinfo",
+		"/oidcrp/",
+		"/samlsp/",
+		"/op/par",
 	}
 
 	for _, indicator := range oidcIndicators {

@@ -53,8 +53,12 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 			s.log.Debug("RegEndpoint", "err", err)
 
 			// OAuth 2.0 structured error response per RFC 6749 §5.2
-			var oauthErr *oauth2.OAuthError
-			if errors.As(err, &oauthErr) {
+			if oauthErr, ok := errors.AsType[*oauth2.OAuthError](err); ok {
+				c.Header("Cache-Control", "no-store")
+				c.Header("Pragma", "no-cache")
+				if oauthErr.HTTPStatus == http.StatusUnauthorized {
+					c.Header("WWW-Authenticate", "Bearer")
+				}
 				c.JSON(oauthErr.HTTPStatus, gin.H{
 					"error":             oauthErr.ErrorCode,
 					"error_description": oauthErr.ErrorDescription,

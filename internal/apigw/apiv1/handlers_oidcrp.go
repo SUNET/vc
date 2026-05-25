@@ -36,11 +36,11 @@ type OIDCRPCallbackRequest struct {
 
 // OIDCRPCallbackResponse represents the credential issuance response
 type OIDCRPCallbackResponse struct {
-	Status          string                          `json:"status"`
-	CredentialType  string                          `json:"credential_type"`
-	Credential      string                          `json:"credential"`
-	CredentialOffer *openid4vci.CredentialOfferResult `json:"credential_offer"`
-	Message         string                          `json:"message"`
+	Status          string                           `json:"status"`
+	CredentialType  string                           `json:"credential_type"`
+	Credential      string                           `json:"credential,omitempty"`
+	CredentialOffer *openid4vci.CredentialOfferResult `json:"credential_offer,omitempty"`
+	Message         string                           `json:"message"`
 
 	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
 	// The httpserver should redirect the browser to this URL instead of returning JSON.
@@ -307,7 +307,10 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		Meta:         &model.MetaData{AuthenticSource: session.IssuerURL},
 		DocumentData: claims,
 	}
-	c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc})
+	if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
+		span.SetStatus(codes.Error, "failed to store VCI documents")
+		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+	}
 
 	// Clean up session (clear err so defer doesn't double-delete)
 	err = nil
