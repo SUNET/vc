@@ -229,7 +229,26 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
 
-	// Now consume the authorization code (after DPoP is validated)
+	// Verify client_id and redirect_uri BEFORE consuming the authorization code
+	// (RFC 6749 §4.1.3). A mismatched client_id must not burn the code, otherwise
+	// an attacker with a stolen code could invalidate it for the legitimate client.
+	if !isPreAuthFlow {
+		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		if err != nil {
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400, err)
+		}
+		if preCheck.WalletClientID != "" && req.ClientID != preCheck.WalletClientID {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"client_id does not match the authorization request", 400)
+		}
+		if preCheck.WalletURI != "" && req.RedirectURI != preCheck.WalletURI {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"redirect_uri does not match the authorization request", 400)
+		}
+	}
+
+	// Now consume the authorization code (after DPoP and client binding are validated)
 	authorizationContext, err := c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 		Code: code,
 	})
@@ -239,18 +258,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			"Authorization code is invalid or has already been used", 400, err)
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
-
-	// Verify client_id and redirect_uri match the values stored during PAR (RFC 6749 §4.1.3).
-	if !isPreAuthFlow {
-		if authorizationContext.WalletClientID != "" && req.ClientID != authorizationContext.WalletClientID {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-				"client_id does not match the authorization request", 400)
-		}
-		if authorizationContext.WalletURI != "" && req.RedirectURI != authorizationContext.WalletURI {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-				"redirect_uri does not match the authorization request", 400)
-		}
-	}
 
 	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
 		c.log.Debug("Authorization context expired")
