@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
 
@@ -18,6 +19,8 @@ func StatusCode(ctx context.Context, err error) int {
 
 	// Check for specific error types first
 	switch err := err.(type) {
+	case *oauth2.OAuthError:
+		return err.HTTPStatus
 	case *openid4vci.Error:
 		return openid4vci.StatusCode(err)
 	case *helpers.Error:
@@ -65,6 +68,23 @@ func StatusCode(ctx context.Context, err error) int {
 	}
 	if errors.Is(err, helpers.ErrInternalServerError) {
 		return http.StatusInternalServerError
+	}
+
+	// Check for OAuth2 sentinel errors (fallback for code that hasn't migrated to OAuthError yet)
+	if errors.Is(err, oauth2.ErrInvalidClient) {
+		return http.StatusUnauthorized // RFC 6749 §5.2
+	}
+	if errors.Is(err, oauth2.ErrPKCERequired) {
+		return http.StatusBadRequest
+	}
+	if errors.Is(err, oauth2.ErrDPoPRequired) {
+		return http.StatusBadRequest
+	}
+	if errors.Is(err, oauth2.ErrExpiredRequest) {
+		return http.StatusBadRequest
+	}
+	if errors.Is(err, oauth2.ErrJTIReplay) {
+		return http.StatusBadRequest
 	}
 
 	// Try to infer status from error content

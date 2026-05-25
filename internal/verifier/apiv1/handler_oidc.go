@@ -78,6 +78,11 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	ctx, span := c.tracer.Start(ctx, "apiv1:authorize")
 	defer span.End()
 
+	if c.cfg.Verifier.Outbound.OIDCProvider == nil {
+		c.log.Error(nil, "OIDC Provider not configured")
+		return nil, ErrServerError
+	}
+
 	// Validate client (includes static clients from config)
 	client, _, err := c.getClientByID(ctx, req.ClientID)
 	if err != nil {
@@ -273,6 +278,11 @@ type TokenResponse struct {
 func (c *Client) Token(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:token")
 	defer span.End()
+
+	if c.cfg.Verifier.Outbound.OIDCProvider == nil {
+		c.log.Error(nil, "OIDC Provider not configured")
+		return nil, ErrServerError
+	}
 
 	switch req.GrantType {
 	case "authorization_code":

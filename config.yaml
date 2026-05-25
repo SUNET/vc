@@ -44,6 +44,16 @@ verifier:
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
+  outbound:
+    oidc_provider:
+      issuer: "https://verifier.vc.docker:8080"
+      subject_type: "public"
+      subject_salt: "dev-salt-verifier"
+      code_duration: 300
+      session_duration: 3600
+      access_token_duration: 3600
+      id_token_duration: 3600
+      refresh_token_duration: 86400
   inbound:
     openid4vp:
       token_endpoint: "https://verifier.vc.docker:8080/token"

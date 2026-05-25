@@ -2,9 +2,9 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	"github.com/SUNET/vc/internal/apigw/cache"
@@ -36,11 +36,11 @@ type OIDCRPCallbackRequest struct {
 
 // OIDCRPCallbackResponse represents the credential issuance response
 type OIDCRPCallbackResponse struct {
-	Status          string         `json:"status"`
-	CredentialType  string         `json:"credential_type"`
-	Credential      string         `json:"credential"`
-	CredentialOffer map[string]any `json:"credential_offer"`
-	Message         string         `json:"message"`
+	Status          string                           `json:"status"`
+	CredentialType  string                           `json:"credential_type"`
+	Credential      string                           `json:"credential,omitempty"`
+	CredentialOffer *openid4vci.CredentialOfferResult `json:"credential_offer,omitempty"`
+	Message         string                           `json:"message"`
 
 	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
 	// The httpserver should redirect the browser to this URL instead of returning JSON.
@@ -254,42 +254,77 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return reply, nil
 	}
 
-	// Standalone mode: create credential directly via issuer gRPC
-	// Marshal claims to JSON for the credential
-	documentData, err := json.Marshal(claims)
-	if err != nil {
-		span.SetStatus(codes.Error, "document marshaling failed")
-		return nil, fmt.Errorf("failed to marshal document: %w", err)
-	}
-
-	// Create credential using the issuer gRPC API
-	credential, err := c.createCredentialViaOIDCRP(ctx, session.CredentialType, documentData, nil)
-	if err != nil {
-		span.SetStatus(codes.Error, "credential creation failed")
-		return nil, fmt.Errorf("failed to create credential: %w", err)
-	}
+	// Standalone mode: generate a credential offer with a pre-authorized code.
+	// The actual credential is created later when the wallet redeems the offer
+	// via the token + credential endpoints (which provide the wallet's JWK).
 
 	// Generate credential offer for wallet
-	credentialOffer, err := c.generateCredentialOfferOIDCRP(ctx, session.CredentialType, session.CredentialType)
+	credentialOffer, err := openid4vci.NewCredentialOffer(c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, session.CredentialType, openid4vci.GrantTypePreAuthorizedCode)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
+	}
+
+	// Persist the pre-authorized code in the auth context cache so the wallet
+	// can redeem the credential offer via the token endpoint.
+	preAuthCode := credentialOffer.ID
+	nonce, nonceErr := crypto.GenerateSecureToken(0, 32)
+	if nonceErr != nil {
+		span.SetStatus(codes.Error, "nonce generation failed")
+		return nil, fmt.Errorf("failed to generate nonce: %w", nonceErr)
+	}
+
+	identifier, resolveErr := c.ResolveIdentifier(ctx, session.IssuerURL, claims)
+	if resolveErr != nil {
+		c.log.Debug("standalone OIDC: could not resolve identifier", "error", resolveErr)
+	}
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID: preAuthCode,
+		Code:      preAuthCode,
+		Status:    "code_issued",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:    []string{session.CredentialType},
+		Nonce:     nonce,
+		AuthProvider:   model.AuthProviderOIDC,
+		Identifier:     identifier,
+		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
+			{
+				Type:                      "openid_credential",
+				CredentialConfigurationID: session.CredentialType,
+			},
+		},
+	}
+	if saveErr := c.cacheService.AuthContext.Save(ctx, authCtx); saveErr != nil {
+		span.SetStatus(codes.Error, "pre-auth code persistence failed")
+		return nil, fmt.Errorf("failed to store pre-auth code: %w", saveErr)
+	}
+
+	// Store document data so the credential endpoint can issue the credential
+	// when the wallet redeems the offer.
+	doc := &model.CompleteDocument{
+		Meta:         &model.MetaData{AuthenticSource: session.IssuerURL},
+		DocumentData: claims,
+	}
+	if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
+		span.SetStatus(codes.Error, "failed to store VCI documents")
+		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
 	}
 
 	// Clean up session (clear err so defer doesn't double-delete)
 	err = nil
 	service.DeleteSession(ctx, req.State)
 
-	c.log.Info("Credential issued successfully via OIDC RP",
+	c.log.Info("Credential offer created via OIDC RP standalone",
 		"credential_type", session.CredentialType,
-		"offer_id", credentialOffer["id"])
+		"offer_id", credentialOffer.ID)
 
 	reply := &OIDCRPCallbackResponse{
 		Status:          "success",
 		CredentialType:  session.CredentialType,
-		Credential:      credential,
 		CredentialOffer: credentialOffer,
-		Message:         "OIDC authentication and credential issuance successful",
+		Message:         "OIDC authentication successful, credential offer created",
 	}
 
 	return reply, nil
@@ -333,48 +368,4 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 	}
 
 	return reply.Credentials[0].Credential, nil
-}
-
-// generateCredentialOfferOIDCRP creates an OpenID4VCI credential offer
-func (c *Client) generateCredentialOfferOIDCRP(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
-	ctx, span := c.tracer.Start(ctx, "apiv1:generateCredentialOfferOIDCRP")
-	defer span.End()
-
-	// Generate a unique pre-authorized code
-	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
-	}
-
-	// Build credential offer parameters
-	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
-		CredentialConfigurationIDs: []string{credentialConfigID},
-		Grants: map[string]any{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-				"pre-authorized_code": preAuthCode,
-				"tx_code":             nil,
-			},
-		},
-	}
-
-	// Generate credential offer
-	offer, err := params.CredentialOffer()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
-	}
-
-	// Convert to map for response
-	var offerMap map[string]any
-	offerBytes, err := json.Marshal(offer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal offer: %w", err)
-	}
-	if err := json.Unmarshal(offerBytes, &offerMap); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal offer to map: %w", err)
-	}
-
-	offerMap["id"] = preAuthCode
-
-	return offerMap, nil
 }

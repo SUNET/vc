@@ -157,6 +157,13 @@ func (r *JWKSKeyResolver) ResolveKeyByKID(ctx context.Context, issuerURL, kid st
 		}
 	}
 
+	// Fallback: if the JWKS has exactly one key, use it regardless of kid.
+	// This handles the common case where the issuer generates the kid
+	// differently (e.g. from certificate CN vs key thumbprint).
+	if len(jwks.keys) == 1 {
+		return jwks.keys[0].publicKey, jwks.keys[0].jwkMap, nil
+	}
+
 	return nil, nil, fmt.Errorf("no key found in issuer JWKS matching kid %q", kid)
 }
 

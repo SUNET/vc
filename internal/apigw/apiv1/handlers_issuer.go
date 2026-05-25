@@ -161,12 +161,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
+	if !c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true) {
 		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
 		return nil, oauth2.ErrJTIReplay
 	}
-
-	c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
 
 	// Validate HTU matches credential endpoint
 	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
