@@ -83,6 +83,9 @@ func StatusCode(ctx context.Context, err error) int {
 	if errors.Is(err, oauth2.ErrExpiredRequest) {
 		return http.StatusBadRequest
 	}
+	if errors.Is(err, oauth2.ErrJTIReplay) {
+		return http.StatusBadRequest
+	}
 
 	// Try to infer status from error content
 	errStr := err.Error()
