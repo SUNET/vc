@@ -207,7 +207,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				dpopErr.Error(), 400, dpopErr)
 		}
 
-		if !c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true) {
+		unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+		if err != nil {
+			c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+				"internal error checking DPoP JTI", 500, err)
+		}
+		if !unique {
 			c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
 			return nil, oauth2.OAuthErrJTIReplay
 		}

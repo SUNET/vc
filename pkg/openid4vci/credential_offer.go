@@ -30,7 +30,7 @@ const (
 // CredentialOfferResult wraps a credential offer with its pre-authorized code.
 type CredentialOfferResult struct {
 	CredentialOfferParameters
-	ID string `json:"id"`
+	ID string `json:"-"`
 }
 
 // Marshal marshals the CredentialOffer

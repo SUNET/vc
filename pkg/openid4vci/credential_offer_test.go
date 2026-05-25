@@ -487,11 +487,11 @@ func TestCredentialOfferQR(t *testing.T) {
 
 func TestCredentialOfferURIQR(t *testing.T) {
 	tts := []struct {
-		name              string
-		parameters        *CredentialOfferParameters
-		walletURL         string
-		issuerURL         string
-		expectedProtocol  string
+		name             string
+		parameters       *CredentialOfferParameters
+		walletURL        string
+		issuerURL        string
+		expectedProtocol string
 	}{
 		{
 			name: "default-protocol",
@@ -658,4 +658,76 @@ func TestCredentialOfferUriUUID(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestNewCredentialOffer(t *testing.T) {
+	t.Run("pre-authorized_code", func(t *testing.T) {
+		result, err := NewCredentialOffer("https://issuer.example.com", "TestCredential", GrantTypePreAuthorizedCode)
+		assert.NoError(t, err)
+
+		// ID is set internally
+		assert.NotEmpty(t, result.ID)
+
+		// Credential offer fields are populated
+		assert.Equal(t, "https://issuer.example.com", result.CredentialIssuer)
+		assert.Equal(t, []string{"TestCredential"}, result.CredentialConfigurationIDs)
+		assert.Contains(t, result.Grants, GrantTypePreAuthorizedCode)
+
+		// The grant's pre-authorized_code matches the internal ID
+		grantBytes, err := json.Marshal(result.Grants[GrantTypePreAuthorizedCode])
+		assert.NoError(t, err)
+		var grant GrantPreAuthorizedCode
+		err = json.Unmarshal(grantBytes, &grant)
+		assert.NoError(t, err)
+		assert.Equal(t, result.ID, grant.PreAuthorizedCode)
+
+		// ID must not appear in the JSON wire format
+		wireBytes, err := json.Marshal(result)
+		assert.NoError(t, err)
+		var wireMap map[string]any
+		err = json.Unmarshal(wireBytes, &wireMap)
+		assert.NoError(t, err)
+		assert.NotContains(t, wireMap, "id", "id field must not be serialized")
+	})
+
+	t.Run("authorization_code", func(t *testing.T) {
+		result, err := NewCredentialOffer("https://issuer.example.com", "DegreeCredential", GrantTypeAuthorizationCode)
+		assert.NoError(t, err)
+
+		assert.NotEmpty(t, result.ID)
+		assert.Equal(t, "https://issuer.example.com", result.CredentialIssuer)
+		assert.Equal(t, []string{"DegreeCredential"}, result.CredentialConfigurationIDs)
+		assert.Contains(t, result.Grants, GrantTypeAuthorizationCode)
+
+		// The grant's issuer_state matches the internal ID
+		grantBytes, err := json.Marshal(result.Grants[GrantTypeAuthorizationCode])
+		assert.NoError(t, err)
+		var grant GrantAuthorizationCode
+		err = json.Unmarshal(grantBytes, &grant)
+		assert.NoError(t, err)
+		assert.Equal(t, result.ID, grant.IssuerState)
+
+		// ID must not appear in the JSON wire format
+		wireBytes, err := json.Marshal(result)
+		assert.NoError(t, err)
+		var wireMap map[string]any
+		err = json.Unmarshal(wireBytes, &wireMap)
+		assert.NoError(t, err)
+		assert.NotContains(t, wireMap, "id", "id field must not be serialized")
+	})
+
+	t.Run("unsupported_grant_type", func(t *testing.T) {
+		result, err := NewCredentialOffer("https://issuer.example.com", "TestCredential", "unsupported_grant")
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "unsupported grant type")
+	})
+
+	t.Run("unique_tokens", func(t *testing.T) {
+		r1, err := NewCredentialOffer("https://issuer.example.com", "Cred", GrantTypePreAuthorizedCode)
+		assert.NoError(t, err)
+		r2, err := NewCredentialOffer("https://issuer.example.com", "Cred", GrantTypePreAuthorizedCode)
+		assert.NoError(t, err)
+		assert.NotEqual(t, r1.ID, r2.ID, "each offer must have a unique token")
+	})
 }

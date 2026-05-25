@@ -62,6 +62,7 @@ const (
 	ErrCodeUnsupportedGrantType = "unsupported_grant_type"
 	ErrCodeInvalidScope         = "invalid_scope"
 	ErrCodeInvalidDPoPProof     = "invalid_dpop_proof" // RFC 9449 §7
+	ErrCodeServerError          = "server_error"        // RFC 6749 §4.1.2.1
 )
 
 // Sentinel errors (kept for errors.Is compatibility)

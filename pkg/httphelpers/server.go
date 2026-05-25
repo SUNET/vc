@@ -59,10 +59,7 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 				if oauthErr.HTTPStatus == http.StatusUnauthorized {
 					c.Header("WWW-Authenticate", "Bearer")
 				}
-				c.JSON(oauthErr.HTTPStatus, gin.H{
-					"error":             oauthErr.ErrorCode,
-					"error_description": oauthErr.ErrorDescription,
-				})
+				c.JSON(oauthErr.HTTPStatus, oauthErr)
 				return
 			}
 
