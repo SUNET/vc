@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"time"
@@ -37,11 +36,11 @@ type OIDCRPCallbackRequest struct {
 
 // OIDCRPCallbackResponse represents the credential issuance response
 type OIDCRPCallbackResponse struct {
-	Status          string         `json:"status"`
-	CredentialType  string         `json:"credential_type"`
-	Credential      string         `json:"credential"`
-	CredentialOffer map[string]any `json:"credential_offer"`
-	Message         string         `json:"message"`
+	Status          string                          `json:"status"`
+	CredentialType  string                          `json:"credential_type"`
+	Credential      string                          `json:"credential"`
+	CredentialOffer *openid4vci.CredentialOfferResult `json:"credential_offer"`
+	Message         string                          `json:"message"`
 
 	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
 	// The httpserver should redirect the browser to this URL instead of returning JSON.
@@ -260,7 +259,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// via the token + credential endpoints (which provide the wallet's JWK).
 
 	// Generate credential offer for wallet
-	credentialOffer, err := c.GenerateCredentialOffer(ctx, session.CredentialType, session.CredentialType)
+	credentialOffer, err := openid4vci.NewCredentialOffer(c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, session.CredentialType, openid4vci.GrantTypePreAuthorizedCode)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
@@ -268,7 +267,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 	// Persist the pre-authorized code in the auth context cache so the wallet
 	// can redeem the credential offer via the token endpoint.
-	preAuthCode := credentialOffer["id"].(string)
+	preAuthCode := credentialOffer.ID
 	nonce, nonceErr := crypto.GenerateSecureToken(0, 32)
 	if nonceErr != nil {
 		span.SetStatus(codes.Error, "nonce generation failed")
@@ -316,7 +315,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 	c.log.Info("Credential offer created via OIDC RP standalone",
 		"credential_type", session.CredentialType,
-		"offer_id", credentialOffer["id"])
+		"offer_id", credentialOffer.ID)
 
 	reply := &OIDCRPCallbackResponse{
 		Status:          "success",
@@ -366,42 +365,4 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 	}
 
 	return reply.Credentials[0].Credential, nil
-}
-
-// GenerateCredentialOffer creates an OpenID4VCI credential offer with a pre-authorized code.
-func (c *Client) GenerateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
-	ctx, span := c.tracer.Start(ctx, "apiv1:GenerateCredentialOffer")
-	defer span.End()
-
-	// Generate a unique pre-authorized code
-	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
-	}
-
-	// Build credential offer parameters
-	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
-		CredentialConfigurationIDs: []string{credentialConfigID},
-		Grants: map[string]any{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-				"pre-authorized_code": preAuthCode,
-				"tx_code":             nil,
-			},
-		},
-	}
-
-	// Marshal the offer parameters to JSON and convert to a map for the response.
-	var offerMap map[string]any
-	offerBytes, err := params.Marshal()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal credential offer: %w", err)
-	}
-	if err := json.Unmarshal(offerBytes, &offerMap); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal offer to map: %w", err)
-	}
-
-	offerMap["id"] = preAuthCode
-
-	return offerMap, nil
 }

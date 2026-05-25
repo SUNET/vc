@@ -12,14 +12,15 @@ type TokenRequest struct {
 
 	// Authorization Code Flow fields
 
-	// Code REQUIRED for authorization_code grant.  The authorization code received from the authorization server.
-	Code string `form:"code" json:"code" validate:"omitempty,max=128,printascii"`
+	// Code REQUIRED for authorization_code grant. The authorization code received from the authorization server.
+	Code string `form:"code" json:"code" validate:"required_if=GrantType authorization_code,omitempty,max=128,printascii"`
 
 	// RedirectURI REQUIRED for authorization_code grant, if the "redirect_uri" parameter was included in the authorization request.
 	RedirectURI string `form:"redirect_uri" json:"redirect_uri"`
 
-	// ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.
-	ClientID string `form:"client_id" json:"client_id" validate:"required"`
+	// ClientID REQUIRED for authorization_code grant (RFC 6749 §4.1.3).
+	// OPTIONAL for pre-authorized_code grant.
+	ClientID string `form:"client_id" json:"client_id" validate:"required_if=GrantType authorization_code"`
 
 	// CodeVerifier OPTIONAL (required for public clients using authorization_code grant)
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`
@@ -27,7 +28,7 @@ type TokenRequest struct {
 	// Pre-Authorized Code Flow fields
 
 	// PreAuthorizedCode REQUIRED for pre-authorized_code grant. The code representing the authorization to obtain Credentials.
-	PreAuthorizedCode string `form:"pre-authorized_code" json:"pre-authorized_code" validate:"omitempty,max=128,printascii"`
+	PreAuthorizedCode string `form:"pre-authorized_code" json:"pre-authorized_code" validate:"required_if=GrantType urn:ietf:params:oauth:grant-type:pre-authorized_code,omitempty,max=128,printascii"`
 
 	// TXCode OPTIONAL. String value containing a Transaction Code.
 	TXCode string `form:"tx_code" json:"tx_code"`

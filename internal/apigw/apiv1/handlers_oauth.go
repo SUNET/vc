@@ -173,14 +173,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
-	// Resolve the code to look up: pre-authorized_code for pre-auth flow, code for auth code flow.
+	// Resolve the code to look up based on grant type.
+	// Field presence is enforced by required_if validation tags on TokenRequest.
 	code := req.Code
 	if isPreAuthFlow {
 		code = req.PreAuthorizedCode
-		if code == "" {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-				"pre-authorized_code is required for pre-authorized_code grant type", 400)
-		}
 	}
 
 	// Look up the client to enforce type-specific requirements (client_id is optional for pre-auth flow)

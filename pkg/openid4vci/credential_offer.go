@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	vccrypto "github.com/SUNET/vc/pkg/crypto"
 	"github.com/google/uuid"
 	"github.com/skip2/go-qrcode"
 )
@@ -17,6 +18,19 @@ type CredentialOfferParameters struct {
 	CredentialIssuer           string         `json:"credential_issuer" bson:"credential_issuer" validate:"required"`
 	CredentialConfigurationIDs []string       `json:"credential_configuration_ids" bson:"credential_configuration_ids" validate:"required"`
 	Grants                     map[string]any `json:"grants"`
+}
+
+// Grant type constants used as map keys in CredentialOfferParameters.Grants
+// and as GrantType values in TokenRequest.
+const (
+	GrantTypeAuthorizationCode = "authorization_code"
+	GrantTypePreAuthorizedCode = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+)
+
+// CredentialOfferResult wraps a credential offer with its pre-authorized code.
+type CredentialOfferResult struct {
+	CredentialOfferParameters
+	ID string `json:"id"`
 }
 
 // Marshal marshals the CredentialOffer
@@ -253,4 +267,38 @@ func ParseCredentialOfferURI(credentialOfferURI string) (*CredentialOfferParamet
 	}
 
 	return credentialOfferParameter, nil
+}
+
+// NewCredentialOffer creates an OpenID4VCI credential offer for the given grant type.
+// Supported grant types: GrantTypePreAuthorizedCode, GrantTypeAuthorizationCode.
+func NewCredentialOffer(issuerURL, credentialConfigID, grantType string) (*CredentialOfferResult, error) {
+	token, err := vccrypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	var grant any
+	switch grantType {
+	case GrantTypePreAuthorizedCode:
+		grant = GrantPreAuthorizedCode{
+			PreAuthorizedCode: token,
+		}
+	case GrantTypeAuthorizationCode:
+		grant = GrantAuthorizationCode{
+			IssuerState: token,
+		}
+	default:
+		return nil, fmt.Errorf("unsupported grant type: %s", grantType)
+	}
+
+	return &CredentialOfferResult{
+		CredentialOfferParameters: CredentialOfferParameters{
+			CredentialIssuer:           issuerURL,
+			CredentialConfigurationIDs: []string{credentialConfigID},
+			Grants: map[string]any{
+				grantType: grant,
+			},
+		},
+		ID: token,
+	}, nil
 }

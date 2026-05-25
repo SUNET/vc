@@ -281,7 +281,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Generate credential offer for wallet
-	credentialOffer, err := s.apiv1.GenerateCredentialOffer(ctx, session.CredentialType, session.CredentialType)
+	credentialOffer, err := openid4vci.NewCredentialOffer(s.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, session.CredentialType, openid4vci.GrantTypePreAuthorizedCode)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
@@ -289,7 +289,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Persist the pre-authorized code in the auth context cache so the wallet
 	// can redeem the credential offer via the token endpoint.
-	preAuthCode := credentialOffer["id"].(string)
+	preAuthCode := credentialOffer.ID
 	nonce, nonceErr := crypto.GenerateSecureToken(0, 32)
 	if nonceErr != nil {
 		span.SetStatus(codes.Error, "nonce generation failed")
@@ -331,7 +331,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	s.log.Info("Credential issued successfully",
 		"credential_type", session.CredentialType,
-		"offer_id", credentialOffer["id"])
+		"offer_id", credentialOffer.ID)
 
 	response := map[string]any{
 		"status":           "success",
