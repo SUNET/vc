@@ -72,13 +72,12 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	// If a secret file path is configured, load secrets from that file
-	// and clear all secrets from the main config so they are not used.
+	// and apply secrets to the config (clearing secret fields first).
 	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
 		secrets, err := LoadSecrets(cfg.Common.SecretFilePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load secrets file: %w", err)
 		}
-		cfg.ClearSecrets()
 		cfg.ApplySecrets(secrets)
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}

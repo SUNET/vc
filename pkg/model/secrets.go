@@ -1,9 +1,12 @@
 package model
 
 // Secrets defines the structure of the separate secrets file.
-// When Common.SecretFilePath is set, secret values in config.yaml are
-// cleared; only non-empty fields from this file are applied.
-// Fields omitted or left empty here remain at their zero value.
+// When Common.SecretFilePath is set, ApplySecrets merges these values
+// into the main config: the Mongo URI is only used when the main config
+// has none. For each service section (apigw, registry, verifier) that
+// is present in the secrets file, the corresponding secret fields in
+// the main config are cleared and replaced by the secrets-file values.
+// Sections omitted from the secrets file are left untouched.
 type Secrets struct {
 	Common   *CommonSecrets   `yaml:"common,omitempty"`
 	APIGW    *APIGWSecrets    `yaml:"apigw,omitempty"`
@@ -100,53 +103,27 @@ type OIDCOPSecrets struct {
 	// StaticClients maps client_id to client_secret for static OIDC clients.
 	// Only clients listed here will have their secrets applied; clients not
 	// present in this map keep whatever value the main config provides (which
-	// will be empty after ClearSecrets).
+	// will be empty after ApplySecrets clears them).
 	StaticClients map[string]string `yaml:"static_clients,omitempty" doc_example:"<client_id>: \"<client_secret>\""`
 }
 
-
-// ClearSecrets zeroes out all secret fields in the main config.
-// Called when a secret file is used, to ensure config.yaml secrets are not used.
-func (cfg *Cfg) ClearSecrets() {
-	if cfg.Common != nil && cfg.Common.Mongo.URI != "" {
-		cfg.Common.Mongo.URI = ""
-	}
-
-	if cfg.APIGW != nil {
-		cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret = ""
-		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil {
-			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = ""
-		}
-		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic != nil {
-			cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken = ""
-		}
-	}
-
-	if cfg.Registry != nil {
-		cfg.Registry.AdminGUI.Password = ""
-	}
-
-	if cfg.Verifier != nil && cfg.Verifier.Outbound.OIDCProvider != nil {
-		cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = ""
-		for i := range cfg.Verifier.Outbound.OIDCProvider.StaticClients {
-			cfg.Verifier.Outbound.OIDCProvider.StaticClients[i].ClientSecret = ""
-		}
-	}
-
-}
-
-// ApplySecrets applies secret values from the Secrets struct onto the Cfg.
-// Only non-empty secret values are applied.
+// ApplySecrets updates the configuration with values from the secrets file.
+// Secret fields (OIDC client secrets, passwords, salts) in the main config
+// are cleared and replaced by values from the secrets file.
+// The Mongo URI is only set from the secrets file when the main config
+// leaves it empty; TLS and certificate paths are not secrets and should
+// always be defined in the main config file.
 func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 	if secrets == nil {
 		return
 	}
 
+	// Mongo URI: fill from secrets only when the main config has none.
 	if secrets.Common != nil {
 		if cfg.Common == nil {
 			cfg.Common = &Common{}
 		}
-		if secrets.Common.Mongo.URI != "" {
+		if cfg.Common.Mongo.URI == "" && secrets.Common.Mongo.URI != "" {
 			cfg.Common.Mongo.URI = secrets.Common.Mongo.URI
 		}
 	}
@@ -155,6 +132,15 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.APIGW == nil {
 			cfg.APIGW = &APIGW{}
 		}
+		// Clear secret fields first, then apply from secrets file.
+		cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret = ""
+		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured != nil {
+			cfg.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret = ""
+		}
+		if cfg.APIGW.AuthProviders.OIDC.Registration != nil && cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic != nil {
+			cfg.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken = ""
+		}
+
 		if secrets.APIGW.APIServer.APIAuth.OIDC.ClientSecret != "" {
 			cfg.APIGW.APIServer.APIAuth.OIDC.ClientSecret = secrets.APIGW.APIServer.APIAuth.OIDC.ClientSecret
 		}
@@ -182,6 +168,7 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		if cfg.Registry == nil {
 			cfg.Registry = &Registry{}
 		}
+		cfg.Registry.AdminGUI.Password = ""
 		if secrets.Registry.AdminGUI.Password != "" {
 			cfg.Registry.AdminGUI.Password = secrets.Registry.AdminGUI.Password
 		}
@@ -190,6 +177,13 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 	if secrets.Verifier != nil {
 		if cfg.Verifier == nil {
 			cfg.Verifier = &Verifier{}
+		}
+		// Clear verifier secret fields first.
+		if cfg.Verifier.Outbound.OIDCProvider != nil {
+			cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = ""
+			for i := range cfg.Verifier.Outbound.OIDCProvider.StaticClients {
+				cfg.Verifier.Outbound.OIDCProvider.StaticClients[i].ClientSecret = ""
+			}
 		}
 		if secrets.Verifier.Outbound.OIDCProvider.SubjectSalt != "" || len(secrets.Verifier.Outbound.OIDCProvider.StaticClients) > 0 {
 			if cfg.Verifier.Outbound.OIDCProvider == nil {
