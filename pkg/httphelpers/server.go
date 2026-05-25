@@ -2,6 +2,7 @@ package httphelpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -49,6 +51,17 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 		res, err := handler(ctx, c)
 		if err != nil {
 			s.log.Debug("RegEndpoint", "err", err)
+
+			// OAuth 2.0 structured error response per RFC 6749 §5.2
+			var oauthErr *oauth2.OAuthError
+			if errors.As(err, &oauthErr) {
+				c.JSON(oauthErr.HTTPStatus, gin.H{
+					"error":             oauthErr.ErrorCode,
+					"error_description": oauthErr.ErrorDescription,
+				})
+				return
+			}
+
 			statusCode := StatusCode(ctx, err)
 			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": helpers.NewErrorFromError(err)})
 			return

@@ -108,6 +108,10 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 				"AllowQRFallback": model.BoolVal(s.cfg.Verifier.DigitalCredentials.AllowQRFallback, true),
 				"DeepLinkScheme":  s.cfg.Verifier.DigitalCredentials.DeepLinkScheme,
 			},
+			"CredentialDisplay": gin.H{
+				"Enable":              s.cfg.Verifier.CredentialDisplay.Enable,
+				"RequireConfirmation": s.cfg.Verifier.CredentialDisplay.RequireConfirmation,
+			},
 		},
 	}
 

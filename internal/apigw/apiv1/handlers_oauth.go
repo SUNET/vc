@@ -34,12 +34,12 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	c.log.Debug("OAuthPar", "req", req)
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
-		return nil, errors.Join(oauth2.ErrInvalidClient, err)
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, err.Error(), 401, err)
 	}
 
 	// Public clients MUST use PKCE (RFC 6749 Section 2.1)
 	if oauthClient.Type == oauth2.ClientTypePublic && req.CodeChallenge == "" {
-		return nil, errors.Join(oauth2.ErrInvalidClient, oauth2.ErrPKCERequired)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, "code_challenge is required for public clients", 400)
 	}
 
 	c.log.Debug("par")
@@ -171,38 +171,94 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	c.log.Debug("OAuthToken", "req", req)
 
-	// Look up the client to enforce type-specific requirements
-	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(req.ClientID)
-	if err != nil {
-		c.log.Error(err, "client validation failed")
-		return nil, errors.Join(oauth2.ErrInvalidClient, err)
+	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+
+	// Resolve the code to look up: pre-authorized_code for pre-auth flow, code for auth code flow.
+	code := req.Code
+	if isPreAuthFlow {
+		code = req.PreAuthorizedCode
+		if code == "" {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				"pre-authorized_code is required for pre-authorized_code grant type", 400)
+		}
 	}
 
-	// Public clients (wallets) MUST use PKCE per RFC 6749 Section 2.1
-	if oauthClient.Type == oauth2.ClientTypePublic && req.CodeVerifier == "" {
-		return nil, oauth2.ErrPKCERequired
+	// Look up the client to enforce type-specific requirements (client_id is optional for pre-auth flow)
+	var oauthClient *oauth2.Client
+	if req.ClientID != "" {
+		var err error
+		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(req.ClientID)
+		if err != nil {
+			c.log.Error(err, "client validation failed")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+				"Client authentication failed", 401, err)
+		}
 	}
 
+	// Public clients (wallets) MUST use PKCE per RFC 6749 Section 2.1 — but only for authorization_code grant
+	if !isPreAuthFlow && oauthClient != nil && oauthClient.Type == oauth2.ClientTypePublic && req.CodeVerifier == "" {
+		return nil, oauth2.OAuthErrPKCERequired
+	}
+
+	// Validate DPoP BEFORE consuming the authorization code (RFC 9449 §4).
+	// This ensures a stolen code cannot be consumed without a valid DPoP proof.
+	if req.DPOP != "" {
+		dpop, dpopErr := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
+		if dpopErr != nil {
+			c.log.Error(dpopErr, "dpop validation error")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof,
+				dpopErr.Error(), 400, dpopErr)
+		}
+
+		if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
+			c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+			return nil, oauth2.OAuthErrJTIReplay
+		}
+
+		c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
+
+		// Validate HTU matches token endpoint
+		if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+				fmt.Sprintf("invalid htu: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU), 400)
+		}
+
+		// Validate HTM is POST (token endpoint only accepts POST)
+		if dpop.HTM != "POST" {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+				fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
+		}
+
+		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
+	} else if !isPreAuthFlow {
+		return nil, oauth2.OAuthErrDPoPRequired
+	}
+
+	// Now consume the authorization code (after DPoP is validated)
 	authorizationContext, err := c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
-		Code: req.Code,
+		Code: code,
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
-		return nil, err
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+			"Authorization code is invalid or has already been used", 400, err)
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
 	if authorizationContext.ExpiresAt > 0 && time.Now().Unix() > authorizationContext.ExpiresAt {
 		c.log.Debug("Authorization context expired")
-		return nil, oauth2.ErrExpiredRequest
+		return nil, oauth2.OAuthErrExpiredRequest
 	}
 
-	// Verify PKCE code_challenge (for all clients that provided one)
-	if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
-		c.log.Error(err, "PKCE validation failed")
-		return nil, fmt.Errorf("PKCE validation failed: %w", err)
+	// Verify PKCE code_challenge (skip for pre-authorized code flow)
+	if !isPreAuthFlow {
+		if err := oauth2.ValidatePKCE(req.CodeVerifier, authorizationContext.CodeChallenge, authorizationContext.CodeChallengeMethod); err != nil {
+			c.log.Error(err, "PKCE validation failed")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+				"PKCE validation failed", 400, err)
+		}
+		c.log.Debug("PKCE validation successful")
 	}
-	c.log.Debug("PKCE validation successful")
 
 	// generating a new access token
 	accessToken, err := crypto.GenerateSecureToken(0, 32)
@@ -244,38 +300,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
-	// Validate DPoP JWT signature and claims first, before checking JTI replay.
-	// This prevents attackers from poisoning the JTI cache with forged tokens.
-	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
-	if err != nil {
-		c.log.Error(err, "dpop validation error")
-		return nil, err
-	}
-
-	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, dpop.JTI); hasJTI {
-		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
-		return nil, oauth2.ErrJTIReplay
-	}
-
-	c.cacheService.DPopJTI.Set(ctx, dpop.JTI, true)
-
-	// Validate HTU matches token endpoint
-	if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
-		return nil, fmt.Errorf("invalid HTU in DPoP claims: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU)
-	}
-
-	// Validate HTM is POST (token endpoint only accepts POST)
-	if dpop.HTM != "POST" {
-		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
-	}
-
-	c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
-
-	//c.db.VCAuthColl.Grant(ctx, req.ClientID, req.Code)
-
-	// Check if ClientID and Code match
-	// Check if Code have been used
-	// Check if Code is expired
 	return reply, nil
 }
 

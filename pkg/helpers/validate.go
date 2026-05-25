@@ -125,7 +125,8 @@ func NewValidator() (*validator.Validate, error) {
 	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
-	// Also blocks private/loopback IPs to prevent SSRF if the URI is ever fetched server-side.
+	// Per RFC 8252 §7.3: loopback redirect URIs MUST be allowed for native clients.
+	// Non-loopback private IPs are blocked to prevent SSRF.
 	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -150,9 +151,11 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		// Block localhost
-		if strings.ToLower(hostname) == "localhost" {
-			return false
+		// Per RFC 8252 §7.3: loopback redirect URIs (localhost, 127.0.0.1, [::1])
+		// MUST be allowed for native OAuth 2.0 clients.
+		lowerHost := strings.ToLower(hostname)
+		if lowerHost == "localhost" || lowerHost == "127.0.0.1" || lowerHost == "::1" {
+			return true
 		}
 
 		// Resolve hostname and block private/loopback IPs

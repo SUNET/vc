@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
@@ -280,11 +281,49 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Generate credential offer for wallet
-	credentialOffer, err := s.generateCredentialOffer(ctx, session.CredentialType, session.CredentialType)
+	credentialOffer, err := s.apiv1.GenerateCredentialOffer(ctx, session.CredentialType, session.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
 	}
+
+	// Persist the pre-authorized code in the auth context cache so the wallet
+	// can redeem the credential offer via the token endpoint.
+	preAuthCode := credentialOffer["id"].(string)
+	nonce, nonceErr := crypto.GenerateSecureToken(0, 32)
+	if nonceErr != nil {
+		span.SetStatus(codes.Error, "nonce generation failed")
+		return nil, fmt.Errorf("failed to generate nonce: %w", nonceErr)
+	}
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID:    preAuthCode,
+		Code:         preAuthCode,
+		Status:       "code_issued",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:       []string{session.CredentialType},
+		Nonce:        nonce,
+		AuthProvider: model.AuthProviderSAML,
+		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
+			{
+				Type:                      "openid_credential",
+				CredentialConfigurationID: session.CredentialType,
+			},
+		},
+	}
+	if saveErr := s.cacheService.AuthContext.Save(ctx, authCtx); saveErr != nil {
+		span.SetStatus(codes.Error, "pre-auth code persistence failed")
+		return nil, fmt.Errorf("failed to store pre-auth code: %w", saveErr)
+	}
+
+	// Store document data so the credential endpoint can issue the credential
+	// when the wallet redeems the offer.
+	doc := &model.CompleteDocument{
+		Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
+		DocumentData: claims,
+	}
+	s.apiv1.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IDPEntityID: doc})
 
 	// Clean up SAML session (clear err so defer doesn't double-delete)
 	err = nil
@@ -345,47 +384,4 @@ func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType st
 
 	// Return the first credential (assuming single credential response)
 	return reply.Credentials[0].Credential, nil
-}
-
-// generateCredentialOffer creates an OpenID4VCI credential offer
-func (s *Service) generateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:generateCredentialOffer")
-	defer span.End()
-
-	// Build credential offer parameters
-	// Generate pre-authorized code (fixed-length 32-character string)
-	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
-	}
-
-	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           s.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
-		CredentialConfigurationIDs: []string{credentialConfigID},
-		Grants: map[string]any{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-				"pre-authorized_code": preAuthCode,
-				"tx_code":             nil, // Optional transaction code
-			},
-		},
-	}
-
-	// Generate credential offer
-	offer, err := params.CredentialOffer()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
-	}
-
-	// Convert to map for response
-	offerData := make(map[string]any)
-	offerJSON, err := json.Marshal(offer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal credential offer: %w", err)
-	}
-
-	if err := json.Unmarshal(offerJSON, &offerData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal credential offer: %w", err)
-	}
-
-	return offerData, nil
 }

@@ -326,6 +326,9 @@ func (u unimplementedApiv1) LookupDatastoreByIdentity(context.Context, string, s
 func (u unimplementedApiv1) ResolveIdentifier(context.Context, string, map[string]any) (string, error) {
 	panic("not implemented")
 }
+func (u unimplementedApiv1) GenerateCredentialOffer(context.Context, string, string) (map[string]any, error) {
+	panic("not implemented")
+}
 func (u unimplementedApiv1) AdminLoginURL(context.Context) (*apiv1.AdminLoginURLReply, error) {
 	panic("not implemented")
 }

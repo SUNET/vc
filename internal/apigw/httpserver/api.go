@@ -81,6 +81,7 @@ type Apiv1 interface {
 	HasVCIDocuments(ctx context.Context, sessionID string) bool
 	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error
 	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
+	GenerateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error)
 
 	// admin UI endpoints
 	AdminLoginURL(ctx context.Context) (*apiv1.AdminLoginURLReply, error)
