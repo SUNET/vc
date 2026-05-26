@@ -129,6 +129,102 @@ func TestTransformClaims(t *testing.T) {
 			attributes: map[string]any{"anything": "value"},
 			want:       map[string]any{},
 		},
+		{
+			name: "transform country_alpha2 from name",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2"},
+			},
+			attributes: map[string]any{
+				"country": "Sweden",
+			},
+			want: map[string]any{
+				"nationalities": "se",
+			},
+		},
+		{
+			name: "transform country_alpha2 from alpha3",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2"},
+			},
+			attributes: map[string]any{
+				"country": "SWE",
+			},
+			want: map[string]any{
+				"nationalities": "se",
+			},
+		},
+		{
+			name: "transform country_alpha3 from name",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha3"},
+			},
+			attributes: map[string]any{
+				"country": "Sweden",
+			},
+			want: map[string]any{
+				"nationalities": "swe",
+			},
+		},
+		{
+			name: "transform country_alpha2 from lowercase name",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2"},
+			},
+			attributes: map[string]any{
+				"country": "sweden",
+			},
+			want: map[string]any{
+				"nationalities": "se",
+			},
+		},
+		{
+			name: "transform country_alpha2 from lowercase alpha3",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2"},
+			},
+			attributes: map[string]any{
+				"country": "swe",
+			},
+			want: map[string]any{
+				"nationalities": "se",
+			},
+		},
+		{
+			name: "transform country_alpha3 from lowercase name",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha3"},
+			},
+			attributes: map[string]any{
+				"country": "sweden",
+			},
+			want: map[string]any{
+				"nationalities": "swe",
+			},
+		},
+		{
+			name: "transform country_alpha3 from lowercase alpha3",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha3"},
+			},
+			attributes: map[string]any{
+				"country": "swe",
+			},
+			want: map[string]any{
+				"nationalities": "swe",
+			},
+		},
+		{
+			name: "transform country_alpha2 unknown returns original",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2"},
+			},
+			attributes: map[string]any{
+				"country": "NotACountry",
+			},
+			want: map[string]any{
+				"nationalities": "NotACountry",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -154,6 +250,28 @@ func FuzzApplyTransform(f *testing.F) {
 	f.Add("  spaced  ", "trim")
 	f.Add("unchanged", "")
 	f.Add("test", "unknown")
+	f.Add("Sweden", "country_alpha2")
+	f.Add("Sweden", "country_alpha3")
+	f.Add("sweden", "country_alpha2")
+	f.Add("sweden", "country_alpha3")
+	f.Add("SWE", "country_alpha2")
+	f.Add("SWE", "country_alpha3")
+	f.Add("swe", "country_alpha2")
+	f.Add("swe", "country_alpha3")
+	f.Add("SE", "country_alpha2")
+	f.Add("SE", "country_alpha3")
+	f.Add("se", "country_alpha2")
+	f.Add("se", "country_alpha3")
+	f.Add("sWe", "country_alpha2")
+	f.Add("sWe", "country_alpha3")
+	f.Add("sWE", "country_alpha2")
+	f.Add("sWE", "country_alpha3")
+	f.Add("SwEdEn", "country_alpha2")
+	f.Add("SwEdEn", "country_alpha3")
+	f.Add("NotACountry", "country_alpha2")
+	f.Add("NotACountry", "country_alpha3")
+	f.Add("", "country_alpha2")
+	f.Add("", "country_alpha3")
 
 	f.Fuzz(func(t *testing.T, input string, transform string) {
 		result := ApplyTransform(input, transform)

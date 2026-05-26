@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/biter777/countries"
 )
 
 // ClaimTransformer transforms external attributes/claims into credential document structures.
@@ -69,6 +70,18 @@ func ApplyTransform(value any, transform string) any {
 		return strings.ToUpper(str)
 	case "trim":
 		return strings.TrimSpace(str)
+	case "country_alpha2":
+		cc := countries.ByName(str)
+		if cc == countries.Unknown {
+			return value
+		}
+		return strings.ToLower(cc.Alpha2())
+	case "country_alpha3":
+		cc := countries.ByName(str)
+		if cc == countries.Unknown {
+			return value
+		}
+		return strings.ToLower(cc.Alpha3())
 	default:
 		return value
 	}
