@@ -14,8 +14,8 @@ import (
 )
 
 // mongoCacheEntry is the document structure stored in MongoDB for generic cache entries.
-// Values are stored as JSON bytes to support interface types (e.g. jwk.Key) that
-// have no BSON codec but implement json.Marshal/Unmarshal.
+// Values are stored as JSON bytes to avoid BSON codec requirements for interface
+// types (e.g. jwk.Key) that have no registered BSON encoder/decoder.
 type mongoCacheEntry struct {
 	Key       string    `bson:"_id"`
 	JSONValue []byte    `bson:"json_value"`
@@ -27,9 +27,9 @@ type mongoCacheEntry struct {
 // (e.g. jwk.Key) to round-trip correctly. A TTL index on `created_at`
 // provides automatic expiration. Enables HA by sharing state across instances.
 //
-// V must be JSON-serializable (implement json.Marshal/Unmarshal).
-// For interface types that require custom parsing, supply a MongoCacheOption
-// via WithDecoder.
+// V must be serializable by encoding/json. Interface or opaque types whose
+// concrete type cannot be inferred by json.Unmarshal (e.g. jwk.Key) require
+// a custom decoder supplied via WithDecoder.
 type MongoCache[V any] struct {
 	coll       *mongo.Collection
 	log        Logger

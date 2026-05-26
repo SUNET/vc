@@ -239,5 +239,3 @@ func TestMongoCache_JWKKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, string(origJSON), string(gotJSON))
 }
-
-
