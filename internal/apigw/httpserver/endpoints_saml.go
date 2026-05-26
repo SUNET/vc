@@ -231,20 +231,19 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 		// Resolve the authenticated identifier for registry (applies to all flows).
 		if authCtx.Identifier == "" {
-			if authCtx.DataSource == string(model.DataSourceAssertion) {
-				// Assertion: derive identifier directly from claims (no identity mapping needed).
-				if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
-					authCtx.Identifier = v
-				} else if v, ok := claims["sub"].(string); ok && v != "" {
-					authCtx.Identifier = v
-				}
-			} else {
-				var resolveErr error
-				authCtx.Identifier, resolveErr = s.apiv1.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
-				if resolveErr != nil {
-					span.SetStatus(codes.Error, "identifier resolution failed")
-					return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
-				}
+			var resolveErr error
+			// For assertion: pre-transform fallbacks are raw SAML attrs and NameID.
+			var fallbacks []string
+			if v, ok := samlAttrs["authentic_source_person_id"].(string); ok && v != "" {
+				fallbacks = append(fallbacks, v)
+			}
+			if assertion.NameID != "" {
+				fallbacks = append(fallbacks, assertion.NameID)
+			}
+			authCtx.Identifier, resolveErr = s.apiv1.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
+			if resolveErr != nil {
+				span.SetStatus(codes.Error, "identifier resolution failed")
+				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
 			}
 		}
 		if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {

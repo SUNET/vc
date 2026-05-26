@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	cache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -81,6 +82,7 @@ type Apiv1 interface {
 	HasVCIDocuments(ctx context.Context, sessionID string) bool
 	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error
 	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
+	ResolveVCIIdentifier(ctx context.Context, authCtx *cache.AuthorizationContext, claims map[string]any, fallbacks ...string) (string, error)
 
 	// admin UI endpoints
 	AdminLoginURL(ctx context.Context) (*apiv1.AdminLoginURLReply, error)
