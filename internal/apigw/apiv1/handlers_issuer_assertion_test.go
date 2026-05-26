@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/cache"
-	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -159,37 +158,37 @@ func TestResolveVCIIdentifier_PreExistingIdentifier(t *testing.T) {
 func TestAssertionDataSource_CredentialIssuance_AllowsEmptyIdentifier(t *testing.T) {
 	tts := []struct {
 		name       string
-		dataSource string
+		dataSource model.DataSourceType
 		identifier string
 		wantErr    bool
 	}{
 		{
 			name:       "assertion_empty_identifier_allowed",
-			dataSource: string(model.DataSourceAssertion),
+			dataSource: model.DataSourceAssertion,
 			identifier: "",
 			wantErr:    false,
 		},
 		{
 			name:       "assertion_with_identifier_allowed",
-			dataSource: string(model.DataSourceAssertion),
+			dataSource: model.DataSourceAssertion,
 			identifier: "some-id",
 			wantErr:    false,
 		},
 		{
 			name:       "datastore_empty_identifier_rejected",
-			dataSource: string(model.DataSourceDatastore),
+			dataSource: model.DataSourceDatastore,
 			identifier: "",
 			wantErr:    true,
 		},
 		{
 			name:       "external_api_empty_identifier_rejected",
-			dataSource: string(model.DataSourceExternalAPI),
+			dataSource: model.DataSourceExternalAPI,
 			identifier: "",
 			wantErr:    true,
 		},
 		{
 			name:       "datastore_with_identifier_allowed",
-			dataSource: string(model.DataSourceDatastore),
+			dataSource: model.DataSourceDatastore,
 			identifier: "person-123",
 			wantErr:    false,
 		},
@@ -197,17 +196,13 @@ func TestAssertionDataSource_CredentialIssuance_AllowsEmptyIdentifier(t *testing
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			// This exercises the identifier check logic from handlers_issuer.go
-			identifier := tt.identifier
-			var err error
-			if identifier == "" && tt.dataSource != string(model.DataSourceAssertion) {
-				err = helpers.ErrNoIdentityFound
-			}
+			got, err := requireIdentifier(tt.identifier, tt.dataSource)
 
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+				assert.Equal(t, tt.identifier, got)
 			}
 		})
 	}

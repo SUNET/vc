@@ -54,6 +54,16 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 	return personID, nil
 }
 
+// requireIdentifier validates that a non-empty identifier exists for data sources
+// that require it. Assertion-based issuance allows an empty identifier because
+// all data comes from the trusted IdP claims.
+func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
+	if identifier == "" && dataSource != model.DataSourceAssertion {
+		return "", errors.New("no identifier in auth context")
+	}
+	return identifier, nil
+}
+
 // ResolveVCIIdentifier resolves an identifier for a VCI session based on the
 // data source. For assertion data source, it derives the identifier directly
 // from claims and optional pre-transform fallback values (no identity mapping
@@ -306,9 +316,9 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	// The authenticated identifier is used for registry; for assertion-based
 	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
-	identifier := authContext.Identifier
-	if identifier == "" && authContext.DataSource != string(model.DataSourceAssertion) {
-		return nil, errors.New("no identifier in auth context")
+	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
+	if err != nil {
+		return nil, err
 	}
 
 	// Branch based on requested credential format
