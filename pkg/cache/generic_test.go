@@ -2,11 +2,17 @@ package cache
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // runGenericCacheContractTests runs the shared contract tests that every
@@ -207,4 +213,106 @@ func TestMongoCache_NilClient(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestMongoCache_JWKKey(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
 
+	ctx := t.Context()
+	c, err := NewMongoCache[jwk.Key](ctx, client, "test_generic", "cache_jwk", 10*time.Minute, nil, WithDecoder(func(data []byte) (jwk.Key, error) {
+		return jwk.ParseKey(data)
+	}))
+	require.NoError(t, err)
+
+	// Generate a fresh EC key
+	raw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	key, err := jwk.Import(raw)
+	require.NoError(t, err)
+
+	c.Set(ctx, "k1", key)
+	got, ok := c.Get(ctx, "k1")
+	require.True(t, ok, "expected jwk.Key to round-trip through MongoCache")
+
+	// Verify the key material survived by comparing JSON serializations
+	origJSON, err := json.Marshal(key)
+	require.NoError(t, err)
+	gotJSON, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(origJSON), string(gotJSON))
+}
+
+func TestMongoCache_SetWithTTL_ShorterThanDefault(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	// Collection TTL = 10 minutes.
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_ttl_short", 10*time.Minute, nil)
+	require.NoError(t, err)
+
+	// Store with a 2-minute TTL. created_at should be shifted 8 minutes into the past.
+	c.SetWithTTL(ctx, "short", "val", 2*time.Minute)
+
+	// Read the raw document to verify the created_at shift.
+	coll := client.Database("test_generic").Collection("cache_ttl_short")
+	var doc bson.M
+	err = coll.FindOne(ctx, bson.M{"_id": "short"}).Decode(&doc)
+	require.NoError(t, err)
+
+	createdAt := doc["created_at"].(bson.DateTime).Time()
+	age := time.Since(createdAt)
+	// created_at should be ~8 minutes in the past (shift = 10m - 2m).
+	assert.InDelta(t, 8*time.Minute, age, float64(5*time.Second),
+		"created_at should be shifted ~8 minutes into the past")
+
+	// Value should still be readable.
+	got, ok := c.Get(ctx, "short")
+	require.True(t, ok)
+	assert.Equal(t, "val", got)
+}
+
+func TestMongoCache_SetWithTTL_LongerThanDefault(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	// Collection TTL = 5 minutes.
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_ttl_long", 5*time.Minute, nil)
+	require.NoError(t, err)
+
+	// Store with a 15-minute TTL. created_at should be shifted 10 minutes into the future.
+	c.SetWithTTL(ctx, "long", "val", 15*time.Minute)
+
+	coll := client.Database("test_generic").Collection("cache_ttl_long")
+	var doc bson.M
+	err = coll.FindOne(ctx, bson.M{"_id": "long"}).Decode(&doc)
+	require.NoError(t, err)
+
+	createdAt := doc["created_at"].(bson.DateTime).Time()
+	offset := time.Until(createdAt)
+	// created_at should be ~10 minutes in the future (shift = 5m - 15m = -10m).
+	assert.InDelta(t, 10*time.Minute, offset, float64(5*time.Second),
+		"created_at should be shifted ~10 minutes into the future")
+}
+
+func TestMongoCache_SetWithTTL_SameAsDefault(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_ttl_same", 10*time.Minute, nil)
+	require.NoError(t, err)
+
+	c.SetWithTTL(ctx, "same", "val", 10*time.Minute)
+
+	coll := client.Database("test_generic").Collection("cache_ttl_same")
+	var doc bson.M
+	err = coll.FindOne(ctx, bson.M{"_id": "same"}).Decode(&doc)
+	require.NoError(t, err)
+
+	createdAt := doc["created_at"].(bson.DateTime).Time()
+	age := time.Since(createdAt)
+	// No shift; created_at should be ~now.
+	assert.InDelta(t, 0, age, float64(5*time.Second),
+		"created_at should be approximately now when TTL equals default")
+}
