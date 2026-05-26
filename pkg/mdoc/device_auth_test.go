@@ -729,7 +729,7 @@ func TestVerifier_VerifyDeviceAuth_NoDeviceAuth(t *testing.T) {
 	// Should succeed (no device auth may be acceptable in some contexts)
 	err := verifier.VerifyDeviceAuth(doc, mso, transcript)
 	if err != nil {
-		t.Errorf("VerifyDeviceAuthaaa() with no device auth should not error = %v", err)
+		t.Errorf("VerifyDeviceAuth() with no device auth should not error = %v", err)
 	}
 }
 

@@ -312,9 +312,10 @@ type DeviceSignedMdoc struct {
 // DeviceAuth ensures the signature is treated as a nested COSE signature.
 type DeviceAuthMdoc struct {
 	// DeviceSignature is an array: [protected, unprotected, payload, signature]
-	DeviceSignature any `json:"deviceSignature" cbor:"deviceSignature"`
+	DeviceSignature any `json:"deviceSignature,omitempty" cbor:"deviceSignature,omitempty"`
 
 	// DeviceMac is the COSE_Mac0 device MAC (mutually exclusive with DeviceSignature).
 	DeviceMac []any `json:"deviceMac,omitempty" cbor:"deviceMac,omitempty"`
+	
 }
 

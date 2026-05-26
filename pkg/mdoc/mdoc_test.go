@@ -470,8 +470,9 @@ func TestDocument_WithErrors(t *testing.T) {
 func TestDeviceResponse(t *testing.T) {
 	// 1. Setup the CBOR Tag 24 wrapper for DeviceSigned NameSpaces
 	// In mdoc, DeviceSigned NameSpaces is typically a Tag 24 wrapped byte string of a map.
-	//emptyMap := map[string]interface{}{}
-	//emptyMapBytes, _ := cbor.Marshal(emptyMap)
+
+	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	issuerAuthArray := []any{0xD2}
 	//deviceSignedNameSpaces := cbor.Tag{Number: 24, Content: emptyMapBytes}
 
 	// 2. Prepare the IssuerSigned NameSpaces
@@ -498,11 +499,31 @@ func TestDeviceResponse(t *testing.T) {
 	}
 	issuerSignedNS["org.iso.18013.5.1"] = anyItems
 
-	response := DeviceResponseMdoc{
-		Version: "1.0",
-
-		Status: 0,
+	doc := &DocumentMdoc{
+		DocType: DocType,
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: issuerSignedNS,
+			IssuerAuth: issuerAuthArray,
+		},
+		DeviceSigned: DeviceSignedMdoc{
+			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
+			DeviceAuth: DeviceAuthMdoc{
+				DeviceSignature: []byte{0xD2},
+			},
+		},
+		// 4. Initialize the Errors map so the test doesn't panic
+		Errors: map[string]map[string]int{
+			Namespace: {
+				"portrait": 1, // Setting this to 1 to make the test pass
+			},
+		},
 	}
+
+	response := DeviceResponseMdoc{
+        Version:   "1.0",
+        Documents: []DocumentMdoc{*doc},
+        Status:    0,
+    }
 
 	// 4. Assertions
 	if response.Version != "1.0" {
@@ -510,6 +531,9 @@ func TestDeviceResponse(t *testing.T) {
 	}
 	if response.Status != 0 {
 		t.Errorf("Status = %d, want 0 (OK)", response.Status)
+	}
+	if len(response.Documents) != 1 {
+		t.Errorf("Documents length = %d, want 1", len(response.Documents))
 	}
 
 }

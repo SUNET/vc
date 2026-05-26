@@ -187,14 +187,14 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
-	emptyMapBytes, err2 := encoder.Marshal(map[string]any{})
-	if err2 != nil {
-		return nil, fmt.Errorf("failed to encode device auth: %w", err2)
+	emptyMapBytes, err := encoder.Marshal(map[string]any{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode device auth: %w", err)
 	}
 
-	emptySigBytes, err3 := encoder.Marshal(emptySigStructure)
-	if err3 != nil {
-		return nil, err3
+	emptySigBytes, err := encoder.Marshal(emptySigStructure)
+	if err != nil {
+		return nil, err
 	}
 	innerDoc := &DocumentMdoc{
 		DocType: DocType,
