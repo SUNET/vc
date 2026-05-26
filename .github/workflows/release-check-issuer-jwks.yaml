@@ -42,7 +42,7 @@ jobs:
             ./developer_tools/scripts/check_issuer_jwks/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: check_issuer_jwks-${{ matrix.goos }}-${{ matrix.goarch }}
           path: check_issuer_jwks-${{ matrix.goos }}-${{ matrix.goarch }}
