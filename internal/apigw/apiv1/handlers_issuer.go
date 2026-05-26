@@ -161,9 +161,15 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	if !c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true) {
+	unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+	if err != nil {
+		c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error checking DPoP proof", 500, err)
+	}
+	if !unique {
 		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
-		return nil, oauth2.ErrJTIReplay
+		return nil, oauth2.OAuthErrJTIReplay
 	}
 
 	// Validate HTU matches credential endpoint

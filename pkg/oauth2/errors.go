@@ -53,7 +53,7 @@ func NewOAuthErrorWithCause(code, description string, status int, cause error) *
 	}
 }
 
-// Standard OAuth 2.0 error code constants per RFC 6749 §5.2
+// Standard OAuth 2.0 error code constants (RFC 6749 §4.1.2.1, §5.2)
 const (
 	ErrCodeInvalidRequest       = "invalid_request"
 	ErrCodeInvalidClient        = "invalid_client"
@@ -61,6 +61,7 @@ const (
 	ErrCodeUnauthorizedClient   = "unauthorized_client"
 	ErrCodeUnsupportedGrantType = "unsupported_grant_type"
 	ErrCodeInvalidScope         = "invalid_scope"
+	ErrCodeServerError          = "server_error"
 	ErrCodeInvalidDPoPProof     = "invalid_dpop_proof" // RFC 9449 §7
 )
 

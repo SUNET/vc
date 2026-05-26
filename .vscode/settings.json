@@ -146,6 +146,7 @@
         "secp",
         "securego",
         "semconv",
+        "setnx",
         "sexp",
         "shortuuid",
         "simplequeue",
