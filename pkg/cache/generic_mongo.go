@@ -104,7 +104,7 @@ func (m *MongoCache[V]) SetNX(ctx context.Context, key string, value V) (bool, e
 		if mongo.IsDuplicateKeyError(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("mongo cache setnx failed (cache=%s, key=%s): %w", m.collection, key, err)
+		return false, fmt.Errorf("mongo cache setnx failed (cache=%s): %w", m.collection, err)
 	}
 	return true, nil
 }
