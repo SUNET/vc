@@ -2,9 +2,14 @@ package cache
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -205,6 +210,34 @@ func TestMongoCache_Bytes(t *testing.T) {
 func TestMongoCache_NilClient(t *testing.T) {
 	_, err := NewMongoCache[string](context.Background(), nil, "db", "col", 5*time.Minute, nil)
 	assert.Error(t, err)
+}
+
+func TestMongoCache_JWKKey(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewMongoCache[jwk.Key](ctx, client, "test_generic", "cache_jwk", 10*time.Minute, nil, WithDecoder(func(data []byte) (jwk.Key, error) {
+		return jwk.ParseKey(data)
+	}))
+	require.NoError(t, err)
+
+	// Generate a fresh EC key
+	raw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	key, err := jwk.Import(raw)
+	require.NoError(t, err)
+
+	c.Set(ctx, "k1", key)
+	got, ok := c.Get(ctx, "k1")
+	require.True(t, ok, "expected jwk.Key to round-trip through MongoCache")
+
+	// Verify the key material survived by comparing JSON serializations
+	origJSON, err := json.Marshal(key)
+	require.NoError(t, err)
+	gotJSON, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(origJSON), string(gotJSON))
 }
 
 
