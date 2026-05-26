@@ -318,7 +318,9 @@ func VerifyDigest(mso *MobileSecurityObject, namespace string, anyItem any) erro
 	if !ok {
 		return fmt.Errorf("expected cbor.Tag, got %T", anyItem)
 	}
-
+	if tag.Number !=TagEncodedCBOR {
+		return fmt.Errorf("expected 24, got %T", tag.Number)
+	}
 	var item IssuerSignedItem
 	contentBytes, ok := tag.Content.([]byte)
 	if !ok {

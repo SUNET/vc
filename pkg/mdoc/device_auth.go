@@ -202,7 +202,7 @@ func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, dev
             return fmt.Errorf("failed to parse device signature bytes: %w", err)
         }
     case []any:
-		if len(val) < 4 {
+		if len(val) != 4 {
             return errors.New("device signature array must have 4 elements")
         }
 
@@ -274,7 +274,7 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKe
 	}
 	macArray := deviceSigned.DeviceAuth.DeviceMac
 
-	if len(macArray) < 4 {
+	if len(macArray) != 4 {
 		return fmt.Errorf("invalid device MAC: expected at least 4 elements")
 	}
 	var mac0 COSEMac0

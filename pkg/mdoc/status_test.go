@@ -629,7 +629,9 @@ func TestVerifierStatusCheck_CheckDocumentStatus_NoStatusReference(t *testing.T)
 			NameSpaces: map[string][]any{
 				Namespace: []any{
 					IssuerSignedItem{
-						ElementIdentifier: "status",
+						ElementIdentifier: "family_name",
+						ElementValue: "Test",
+
 					},
 				},
 			},
