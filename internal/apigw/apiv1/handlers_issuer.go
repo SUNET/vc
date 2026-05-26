@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
@@ -51,6 +52,56 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 	}
 	c.log.Debug("ResolveIdentifier: resolved via identity mapping", "identifier", personID)
 	return personID, nil
+}
+
+// requireIdentifier validates that a non-empty identifier exists for data sources
+// that require it. Assertion-based issuance allows an empty identifier because
+// all data comes from the trusted IdP claims.
+func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
+	if identifier == "" && dataSource != model.DataSourceAssertion {
+		return "", errors.New("no identifier in auth context")
+	}
+	return identifier, nil
+}
+
+// ResolveVCIIdentifier resolves an identifier for a VCI session based on the
+// data source. For assertion data source, it derives the identifier directly
+// from claims and optional pre-transform fallback values (no identity mapping
+// lookup is performed — the issuer trusts the IdP). For other data sources, it
+// delegates to ResolveIdentifier which may perform identity mapping lookups.
+//
+// The fallbacks parameter allows callers to supply pre-transform identifiers
+// (e.g., authResp.IDToken.Subject for OIDC, assertion.NameID for SAML) that
+// should be tried when the transformed claims don't contain the expected keys.
+func (c *Client) ResolveVCIIdentifier(ctx context.Context, authCtx *cache.AuthorizationContext, claims map[string]any, fallbacks ...string) (string, error) {
+	if authCtx.Identifier != "" {
+		return authCtx.Identifier, nil
+	}
+
+	if authCtx.DataSource == string(model.DataSourceAssertion) {
+		// Assertion: derive identifier from claims, no identity mapping lookup.
+		if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
+			return v, nil
+		}
+		if v, ok := claims["sub"].(string); ok && v != "" {
+			return v, nil
+		}
+		// Try caller-provided pre-transform fallbacks.
+		for _, fb := range fallbacks {
+			if fb != "" {
+				return fb, nil
+			}
+		}
+		// Best-effort: identifier may remain empty for assertion.
+		return "", nil
+	}
+
+	// Non-assertion: perform full identity resolution (may include mapping lookup).
+	identifier, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+	if err != nil {
+		return "", err
+	}
+	return identifier, nil
 }
 
 // StoreVCIDocuments stores transformed credential documents in the VCI session cache.
@@ -263,10 +314,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// The authenticated identifier is required for registry
-	identifier := authContext.Identifier
-	if identifier == "" {
-		return nil, errors.New("no identifier in auth context")
+	// The authenticated identifier is used for registry; for assertion-based
+	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
+	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
+	if err != nil {
+		return nil, err
 	}
 
 	// Branch based on requested credential format

@@ -15,6 +15,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -324,6 +325,9 @@ func (u unimplementedApiv1) LookupDatastoreByIdentity(context.Context, string, s
 	panic("not implemented")
 }
 func (u unimplementedApiv1) ResolveIdentifier(context.Context, string, map[string]any) (string, error) {
+	panic("not implemented")
+}
+func (u unimplementedApiv1) ResolveVCIIdentifier(context.Context, *cache.AuthorizationContext, map[string]any, ...string) (string, error) {
 	panic("not implemented")
 }
 func (u unimplementedApiv1) AdminLoginURL(context.Context) (*apiv1.AdminLoginURLReply, error) {

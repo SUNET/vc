@@ -227,7 +227,15 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		// Resolve the authenticated identifier for registry (applies to all flows).
 		if authCtx.Identifier == "" {
 			var resolveErr error
-			authCtx.Identifier, resolveErr = c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+			// For assertion: pre-transform fallbacks are raw OIDC Claims["sub"] and IDToken.Subject.
+			var fallbacks []string
+			if v, ok := authResp.Claims["sub"].(string); ok && v != "" {
+				fallbacks = append(fallbacks, v)
+			}
+			if authResp.IDToken != nil && authResp.IDToken.Subject != "" {
+				fallbacks = append(fallbacks, authResp.IDToken.Subject)
+			}
+			authCtx.Identifier, resolveErr = c.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
 			if resolveErr != nil {
 				span.SetStatus(codes.Error, "identifier resolution failed")
 				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
