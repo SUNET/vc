@@ -263,9 +263,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// The authenticated identifier is required for registry
+	// The authenticated identifier is used for registry; for assertion-based
+	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
 	identifier := authContext.Identifier
-	if identifier == "" {
+	if identifier == "" && authContext.DataSource != string(model.DataSourceAssertion) {
 		return nil, errors.New("no identifier in auth context")
 	}
 

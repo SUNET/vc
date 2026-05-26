@@ -226,11 +226,20 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 		// Resolve the authenticated identifier for registry (applies to all flows).
 		if authCtx.Identifier == "" {
-			var resolveErr error
-			authCtx.Identifier, resolveErr = c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
-			if resolveErr != nil {
-				span.SetStatus(codes.Error, "identifier resolution failed")
-				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
+			if authCtx.DataSource == string(model.DataSourceAssertion) {
+				// Assertion: derive identifier directly from claims (no identity mapping needed).
+				if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
+					authCtx.Identifier = v
+				} else if v, ok := claims["sub"].(string); ok && v != "" {
+					authCtx.Identifier = v
+				}
+			} else {
+				var resolveErr error
+				authCtx.Identifier, resolveErr = c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+				if resolveErr != nil {
+					span.SetStatus(codes.Error, "identifier resolution failed")
+					return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
+				}
 			}
 		}
 		if updateErr := c.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
@@ -274,9 +283,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to generate nonce: %w", nonceErr)
 	}
 
-	identifier, resolveErr := c.ResolveIdentifier(ctx, session.IssuerURL, claims)
-	if resolveErr != nil {
-		c.log.Debug("standalone OIDC: could not resolve identifier", "error", resolveErr)
+	// Standalone OIDC: derive identifier directly from claims (no identity mapping needed,
+	// the issuer trusts the IdP/OP).
+	var identifier string
+	if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
+		identifier = v
+	} else if v, ok := claims["sub"].(string); ok && v != "" {
+		identifier = v
 	}
 
 	authCtx := &cache.AuthorizationContext{
