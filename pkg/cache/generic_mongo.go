@@ -34,6 +34,7 @@ type MongoCache[V any] struct {
 	coll       *mongo.Collection
 	log        Logger
 	collection string
+	ttl        time.Duration            // collection-level TTL used by the TTL index
 	decode     func([]byte) (V, error) // optional custom JSON decoder
 }
 
@@ -77,6 +78,7 @@ func NewMongoCache[V any](ctx context.Context, client *mongo.Client, database, c
 		coll:       coll,
 		log:        log,
 		collection: collection,
+		ttl:        ttl,
 	}
 
 	for _, opt := range opts {
@@ -125,7 +127,7 @@ func (m *MongoCache[V]) Set(ctx context.Context, key string, value V) {
 // Returns true if the value was inserted, false if the key already existed.
 // Returns a non-nil error on operational failures (e.g. connectivity issues).
 func (m *MongoCache[V]) SetNX(ctx context.Context, key string, value V) (bool, error) {
-	entry, err := m.marshalEntry(key, value)
+	entry, err := m.marshalEntry(key, value, time.Now())
 	if err != nil {
 		return false, fmt.Errorf("mongo cache setnx marshal failed (cache=%s): %w", m.collection, err)
 	}
@@ -140,13 +142,17 @@ func (m *MongoCache[V]) SetNX(ctx context.Context, key string, value V) (bool, e
 }
 
 // SetWithTTL stores a value with a custom TTL.
-// Note: MongoDB TTL is per-collection, so custom TTL is approximated by
-// setting created_at in the past/future relative to the collection TTL.
-// For most use cases, use Set with the collection default.
-func (m *MongoCache[V]) SetWithTTL(ctx context.Context, key string, value V, _ time.Duration) {
-	// MongoDB TTL indexes are collection-wide; per-entry TTL isn't natively supported.
-	// We store with current time and rely on the collection TTL index.
-	m.upsert(ctx, key, value)
+// MongoDB TTL indexes are collection-wide, so per-entry TTL is approximated
+// by shifting created_at: the document expires when
+//
+//	now >= created_at + collection_ttl
+//
+// Setting created_at = now - (collection_ttl - custom_ttl) makes the
+// document expire ~custom_ttl from now.
+func (m *MongoCache[V]) SetWithTTL(ctx context.Context, key string, value V, ttl time.Duration) {
+	shift := m.ttl - ttl
+	createdAt := time.Now().Add(-shift)
+	m.upsertAt(ctx, key, value, createdAt)
 }
 
 // Delete removes a value by key.
@@ -169,7 +175,11 @@ func (m *MongoCache[V]) Len() int {
 }
 
 func (m *MongoCache[V]) upsert(ctx context.Context, key string, value V) {
-	entry, err := m.marshalEntry(key, value)
+	m.upsertAt(ctx, key, value, time.Now())
+}
+
+func (m *MongoCache[V]) upsertAt(ctx context.Context, key string, value V, createdAt time.Time) {
+	entry, err := m.marshalEntry(key, value, createdAt)
 	if err != nil {
 		m.log.Error(err, "mongo cache upsert marshal failed",
 			"cache", m.collection, "key", key,
@@ -186,7 +196,7 @@ func (m *MongoCache[V]) upsert(ctx context.Context, key string, value V) {
 }
 
 // marshalEntry serializes value to JSON and wraps it in a mongoCacheEntry.
-func (m *MongoCache[V]) marshalEntry(key string, value V) (mongoCacheEntry, error) {
+func (m *MongoCache[V]) marshalEntry(key string, value V, createdAt time.Time) (mongoCacheEntry, error) {
 	jsonBytes, err := json.Marshal(value)
 	if err != nil {
 		return mongoCacheEntry{}, fmt.Errorf("json marshal: %w", err)
@@ -194,6 +204,6 @@ func (m *MongoCache[V]) marshalEntry(key string, value V) (mongoCacheEntry, erro
 	return mongoCacheEntry{
 		Key:       key,
 		JSONValue: jsonBytes,
-		CreatedAt: time.Now(),
+		CreatedAt: createdAt,
 	}, nil
 }
