@@ -539,17 +539,40 @@ func TestDeviceResponse(t *testing.T) {
 }
 
 func TestDeviceResponse_WithDocumentErrors(t *testing.T) {
-	// Assuming DocType is a variable containing "org.iso.18013.5.1.mDL"
-	response := DeviceResponseMdoc{
-		Version:   "1.0",
-		Documents: nil,
-		Status:    10,
-	}
+    // 1. Setup the DocumentError following the standard layout: DocumentError = {DocType => ErrorCode}
+    docErrors := []DocumentError{
+        DocumentError{
+            DocType: 1, // 1 = Data Not Available / Generation Failure
+        },
+    }
 
-	// Assertions
-	if response.Status != 10 {
-		t.Errorf("Status = %d, want 10", response.Status)
-	}
+    // 2. Build the DeviceResponseMdoc simulating a document-level failure scenario
+    response := DeviceResponseMdoc{
+        Version:        "1.0",
+        Documents:      nil,        // Omitted when document errors are present
+        DocumentErrors: docErrors, // Correctly type assigned using our DocumentError slice
+        Status:         0,
+    }
+
+    // 3. Assertions
+    if response.Version != "1.0" {
+        t.Errorf("Version = %s, want 1.0", response.Version)
+    }
+    if response.Status != 0 {
+        t.Errorf("Status = %d, want 0 (OK)", response.Status)
+    }
+    if len(response.DocumentErrors) != 1 {
+        t.Errorf("DocumentErrors length = %d, want 1", len(response.DocumentErrors))
+    }
+
+    // Explicit type inspection to ensure compliance
+    errCode, exists := response.DocumentErrors[0][DocType]
+    if !exists {
+        t.Errorf("Expected an error entry for DocType %q, but it was not found", DocType)
+    }
+    if errCode != 1 {
+        t.Errorf("Document error code = %d, want 1", errCode)
+    }
 }
 
 func TestDeviceRequest(t *testing.T) {
