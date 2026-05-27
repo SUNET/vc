@@ -7,6 +7,7 @@ require (
 	github.com/IBM/sarama v1.49.0
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.6.0
+	github.com/biter777/countries v1.7.5
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/creasty/defaults v1.8.0
 	github.com/crewjam/saml v0.5.1
@@ -72,7 +73,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/PaesslerAG/gval v1.2.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/biter777/countries v1.7.5 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/bytedance/sonic v1.15.1 // indirect
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
