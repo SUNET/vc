@@ -549,7 +549,6 @@ func TestDeviceResponse_WithDocumentErrors(t *testing.T) {
     // 2. Build the DeviceResponseMdoc simulating a document-level failure scenario
     response := DeviceResponseMdoc{
         Version:        "1.0",
-        Documents:      nil,        // Omitted when document errors are present
         DocumentErrors: docErrors, // Correctly type assigned using our DocumentError slice
         Status:         0,
     }

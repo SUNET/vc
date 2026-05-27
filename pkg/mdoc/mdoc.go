@@ -280,7 +280,7 @@ type ItemsRequest struct {
 
 type DeviceResponseMdoc struct {
 	Version   string `cbor:"version"`
-	Documents []DocumentMdoc  `cbor:"documents"`
+	Documents []DocumentMdoc  `cbor:"documents,omitempty"`
 	DocumentErrors []DocumentError `json:"documentErrors,omitempty" cbor:"documentErrors,omitempty"`
 	Status    uint64 `cbor:"status"`
 }
