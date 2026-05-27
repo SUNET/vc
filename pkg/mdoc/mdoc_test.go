@@ -542,7 +542,7 @@ func TestDeviceResponse_WithDocumentErrors(t *testing.T) {
     // 1. Setup the DocumentError following the standard layout: DocumentError = {DocType => ErrorCode}
     docErrors := []DocumentError{
         DocumentError{
-            DocType: 1, // 1 = Data Not Available / Generation Failure
+            DocType: 0, // 0 = Data Not Available / Generation Failure
         },
     }
 
@@ -570,8 +570,8 @@ func TestDeviceResponse_WithDocumentErrors(t *testing.T) {
     if !exists {
         t.Errorf("Expected an error entry for DocType %q, but it was not found", DocType)
     }
-    if errCode != 1 {
-        t.Errorf("Document error code = %d, want 1", errCode)
+    if errCode != 0 {
+        t.Errorf("Document error code = %d, want 0", errCode)
     }
 }
 

@@ -152,30 +152,26 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 
     // Add all mandatory data elements
     if err := i.addMandatoryElements(builder, req.MDoc); err != nil {
-       // return nil, fmt.Errorf("failed to add mandatory elements: %w", err)
-	   documentErrors = append(documentErrors, DocumentError{DocType: 1})
+	   documentErrors = append(documentErrors, DocumentError{DocType: 0})
 
     }
 
     // Add optional data elements
     if err := i.addOptionalElements(builder, req.MDoc); err != nil {
-       // return nil, fmt.Errorf("failed to add optional elements: %w", err)
-		documentErrors = append(documentErrors, DocumentError{DocType: 1})
+		documentErrors = append(documentErrors, DocumentError{DocType: 0})
 
     }
 
     // Add driving privileges
     if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
-       // return nil, fmt.Errorf("failed to add driving privileges: %w", err)
-		documentErrors = append(documentErrors, DocumentError{DocType: 1})
+		documentErrors = append(documentErrors, DocumentError{DocType: 0})
 
     }
 
     // Build and sign the MSO
     signedMSO, issuerNameSpaces, err := builder.Build()
     if err != nil {
-       // return nil, fmt.Errorf("failed to build MSO: %w", err)
-	   documentErrors = append(documentErrors, DocumentError{DocType: 1})
+	   documentErrors = append(documentErrors, DocumentError{DocType: 0})
 
     }
 
