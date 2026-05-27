@@ -175,22 +175,6 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 
     }
 
-    issuerSignedNS := make(map[string][]any)
-    for ns, items := range issuerNameSpaces {
-        anyItems := make([]any, len(items))
-        for idx, item := range items {
-            anyItems[idx] = item
-        }
-        issuerSignedNS[ns] = anyItems
-    }
-
-    issuerAuthArray := []any{
-        signedMSO.Protected,
-        signedMSO.Unprotected,
-        signedMSO.Payload,
-        signedMSO.Signature,
-    }
-
 
 
     // Encode the signed MSO elements
@@ -209,7 +193,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
     }
     if len(documentErrors) > 0 {
         // An encoding error happened: build response containing ONLY documentErrors
-        // documents slice remains nil/empty and is cleanly dropped by omitempty tags
+        // documents slice remains empty and is cleanly dropped by omitempty tags
         response := &DeviceResponseMdoc{
             Version:        "1.0",
             DocumentErrors: documentErrors,
@@ -224,6 +208,20 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
         }, nil
     }
 
+	issuerSignedNS := make(map[string][]any)
+    for ns, items := range issuerNameSpaces {
+        anyItems := make([]any, len(items))
+        for idx, item := range items {
+            anyItems[idx] = item
+        }
+        issuerSignedNS[ns] = anyItems
+    }
+    issuerAuthArray := []any{
+        signedMSO.Protected,
+        signedMSO.Unprotected,
+        signedMSO.Payload,
+        signedMSO.Signature,
+    }
     // Everything encoded successfully: build response containing the document
     innerDoc := DocumentMdoc{
         DocType: DocType,
