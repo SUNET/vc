@@ -91,16 +91,14 @@ func ApplyTransform(value any, transform string) any {
 	}
 }
 
-// wrapAsArray ensures the value is a slice. If already a slice, returns it unchanged;
-// otherwise wraps it in a single-element []any.
+// wrapAsArray wraps a scalar string value in a single-element []string.
+// Any non-string value (including slices of any element type) is returned unchanged.
 func wrapAsArray(value any) any {
 	switch v := value.(type) {
-	case []any:
-		return v
-	case []string:
-		return v
+	case string:
+		return []string{v}
 	default:
-		return []any{value}
+		return v
 	}
 }
 

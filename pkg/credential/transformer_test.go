@@ -222,7 +222,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "Sweden",
 			},
 			want: map[string]any{
-				"nationalities": []any{"SE"},
+				"nationalities": []string{"SE"},
 			},
 		},
 		{
@@ -258,7 +258,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "SE",
 			},
 			want: map[string]any{
-				"nationalities": []any{"SE"},
+				"nationalities": []string{"SE"},
 			},
 		},
 		{
@@ -287,6 +287,72 @@ func TestTransformClaims(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestWrapAsArray(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+		want  any
+	}{
+		{
+			name:  "scalar string is wrapped in []string",
+			input: "SE",
+			want:  []string{"SE"},
+		},
+		{
+			name:  "any-typed variable holding string is wrapped",
+			input: any("SE"),
+			want:  []string{"SE"},
+		},
+		{
+			name:  "empty string is wrapped",
+			input: "",
+			want:  []string{""},
+		},
+		{
+			name:  "existing []string is unchanged",
+			input: []string{"SE", "NO"},
+			want:  []string{"SE", "NO"},
+		},
+		{
+			name:  "existing []any is unchanged",
+			input: []any{"SE", "NO"},
+			want:  []any{"SE", "NO"},
+		},
+		{
+			name:  "existing []int is unchanged",
+			input: []int{1, 2, 3},
+			want:  []int{1, 2, 3},
+		},
+		{
+			name:  "existing []map[string]any is unchanged",
+			input: []map[string]any{{"k": "v"}},
+			want:  []map[string]any{{"k": "v"}},
+		},
+		{
+			name:  "non-string scalar (int) is unchanged",
+			input: 42,
+			want:  42,
+		},
+		{
+			name:  "non-string scalar (bool) is unchanged",
+			input: true,
+			want:  true,
+		},
+		{
+			name:  "nil is unchanged",
+			input: nil,
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapAsArray(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
 	}
