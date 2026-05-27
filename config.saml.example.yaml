@@ -122,7 +122,9 @@ apigw:
         "urn:oid:1.2.752.29.4.13":  # Swedish personnummer
           claim: "personal_administrative_number"
         "urn:oid:2.5.4.6":   # country
-          claim: "nationality"
+          claim: "nationalities"
+          transform: "country_alpha2"
+          as_array: true
         "urn:oid:1.3.6.1.5.5.7.9.1":  # dateOfBirth
           claim: "birth_date"
         "urn:oid:1.3.6.1.4.1.5923.1.1.1.1":  # eduPersonAffiliation

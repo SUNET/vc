@@ -47,7 +47,7 @@ type AttributeConfig struct {
 	Required bool `yaml:"required" default:"false"`
 
 	// Transform is an optional transformation to apply
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim"`
+	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`
