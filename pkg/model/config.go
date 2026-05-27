@@ -345,11 +345,15 @@ type AttributeConfig struct {
 	Required bool `yaml:"required" default:"false"`
 
 	// Transform is an optional transformation to apply
-	// Supported: "lowercase", "uppercase", "trim"
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim"`
+	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3"
+	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`
+
+	// AsArray wraps a scalar value in a single-element array before setting the claim.
+	// No-op when the value is already a slice (e.g. multi-valued OIDC claim).
+	AsArray bool `yaml:"as_array,omitempty"`
 }
 
 // Issuer holds the configuration for the Issuer service that signs and issues verifiable credentials

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/biter777/countries"
 )
 
 // ClaimTransformer transforms external attributes/claims into credential document structures.
@@ -43,6 +44,10 @@ func (t *ClaimTransformer) TransformClaims(
 
 		value = ApplyTransform(value, attrCfg.Transform)
 
+		if attrCfg.AsArray {
+			value = wrapAsArray(value)
+		}
+
 		if err := SetNestedValue(doc, attrCfg.Claim, value); err != nil {
 			return nil, fmt.Errorf("failed to set claim %s: %w", attrCfg.Claim, err)
 		}
@@ -69,8 +74,31 @@ func ApplyTransform(value any, transform string) any {
 		return strings.ToUpper(str)
 	case "trim":
 		return strings.TrimSpace(str)
+	case "country_alpha2":
+		cc := countries.ByName(str)
+		if cc == countries.Unknown {
+			return value
+		}
+		return cc.Alpha2()
+	case "country_alpha3":
+		cc := countries.ByName(str)
+		if cc == countries.Unknown {
+			return value
+		}
+		return cc.Alpha3()
 	default:
 		return value
+	}
+}
+
+// wrapAsArray wraps a scalar string value in a single-element []string.
+// Any non-string value (including slices of any element type) is returned unchanged.
+func wrapAsArray(value any) any {
+	switch v := value.(type) {
+	case string:
+		return []string{v}
+	default:
+		return v
 	}
 }
 
