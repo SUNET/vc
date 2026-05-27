@@ -123,7 +123,19 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 		result.Errors = append(result.Errors, fmt.Errorf("response status indicates error: %d", response.Status))
 		result.Valid = false
 	}
-
+	// Check response documentErrors
+    if len(response.DocumentErrors) > 0 {
+        result.Valid = false
+        
+        // Loop through and log the actual document-level failures 
+        for _, docErr := range response.DocumentErrors {
+            for docType, errorCode := range docErr {
+                result.Errors = append(result.Errors, 
+                    fmt.Errorf("document verification failed: docType %q returned error code %d", docType, errorCode),
+                )
+            }
+        }
+    }
 	// Verify each document
 	for i := range response.Documents {
 		doc := &response.Documents[i]

@@ -299,6 +299,44 @@ func TestVerifier_VerifyDocument_InvalidStatus(t *testing.T) {
 	}
 }
 
+func TestVerifier_VerifyDocument_DocumentErrors(t *testing.T) {
+    trustEvaluator, _, _, _ := createTestTrustList(t)
+
+    verifier, err := NewVerifier(VerifierConfig{
+        TrustEvaluator:      trustEvaluator,
+        SkipRevocationCheck: true,
+    })
+    if err != nil {
+        t.Fatalf("NewVerifier() error = %v", err)
+    }
+
+    // 1. Manually build a response representing a protocol failure
+    // According to the spec, an error response contains DocumentErrors and drops Documents
+    response := &DeviceResponseMdoc{
+        Version:   "1.0",
+        Documents: nil, // Clear documents to simulate an unpresentable state
+        DocumentErrors: []DocumentError{
+            DocumentError{
+                DocType: 1, // 1 = Data Not Available / Generation Failure
+            },
+        },
+        Status: 0, // Session status is fine, but the document itself failed
+    }
+
+    // 2. Execute verification
+    result := verifier.VerifyDeviceResponse(response)
+
+    // 3. Assertions
+    if result.Valid {
+        t.Error("VerifyDeviceResponse() should fail when DocumentErrors are present")
+    }
+
+    // Ensure our exact error message is surfaced in the result block
+    if len(result.Errors) == 0 {
+        t.Error("Expected error messages to be appended to result.Errors, but found none")
+    }
+}
+
 func TestVerifier_UntrustedIssuer(t *testing.T) {
 	// Create a TrustEvaluator that does NOT trust the issuer
 	untrustedEvaluator := createTestTrustEvaluator(false)
