@@ -138,7 +138,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "Sweden",
 			},
 			want: map[string]any{
-				"nationalities": "se",
+				"nationalities": "SE",
 			},
 		},
 		{
@@ -150,7 +150,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "SWE",
 			},
 			want: map[string]any{
-				"nationalities": "se",
+				"nationalities": "SE",
 			},
 		},
 		{
@@ -162,7 +162,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "Sweden",
 			},
 			want: map[string]any{
-				"nationalities": "swe",
+				"nationalities": "SWE",
 			},
 		},
 		{
@@ -174,7 +174,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "sweden",
 			},
 			want: map[string]any{
-				"nationalities": "se",
+				"nationalities": "SE",
 			},
 		},
 		{
@@ -186,7 +186,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "swe",
 			},
 			want: map[string]any{
-				"nationalities": "se",
+				"nationalities": "SE",
 			},
 		},
 		{
@@ -198,7 +198,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "sweden",
 			},
 			want: map[string]any{
-				"nationalities": "swe",
+				"nationalities": "SWE",
 			},
 		},
 		{
@@ -210,7 +210,7 @@ func TestTransformClaims(t *testing.T) {
 				"country": "swe",
 			},
 			want: map[string]any{
-				"nationalities": "swe",
+				"nationalities": "SWE",
 			},
 		},
 		{

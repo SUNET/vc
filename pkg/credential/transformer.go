@@ -75,13 +75,13 @@ func ApplyTransform(value any, transform string) any {
 		if cc == countries.Unknown {
 			return value
 		}
-		return strings.ToLower(cc.Alpha2())
+		return cc.Alpha2()
 	case "country_alpha3":
 		cc := countries.ByName(str)
 		if cc == countries.Unknown {
 			return value
 		}
-		return strings.ToLower(cc.Alpha3())
+		return cc.Alpha3()
 	default:
 		return value
 	}
