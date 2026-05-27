@@ -214,6 +214,54 @@ func TestTransformClaims(t *testing.T) {
 			},
 		},
 		{
+			name: "as_array wraps scalar after transform",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2", AsArray: true},
+			},
+			attributes: map[string]any{
+				"country": "Sweden",
+			},
+			want: map[string]any{
+				"nationalities": []any{"SE"},
+			},
+		},
+		{
+			name: "as_array no-op on existing []any slice",
+			mapping: model.AttributeMapping{
+				"nats": {Claim: "nationalities", AsArray: true},
+			},
+			attributes: map[string]any{
+				"nats": []any{"SE", "NO"},
+			},
+			want: map[string]any{
+				"nationalities": []any{"SE", "NO"},
+			},
+		},
+		{
+			name: "as_array no-op on existing []string slice",
+			mapping: model.AttributeMapping{
+				"nats": {Claim: "nationalities", AsArray: true},
+			},
+			attributes: map[string]any{
+				"nats": []string{"SE", "NO"},
+			},
+			want: map[string]any{
+				"nationalities": []string{"SE", "NO"},
+			},
+		},
+		{
+			name: "as_array wraps plain scalar without transform",
+			mapping: model.AttributeMapping{
+				"country": {Claim: "nationalities", AsArray: true},
+			},
+			attributes: map[string]any{
+				"country": "SE",
+			},
+			want: map[string]any{
+				"nationalities": []any{"SE"},
+			},
+		},
+		{
 			name: "transform country_alpha2 unknown returns original",
 			mapping: model.AttributeMapping{
 				"country": {Claim: "nationalities", Required: true, Transform: "country_alpha2"},

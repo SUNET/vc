@@ -44,6 +44,10 @@ func (t *ClaimTransformer) TransformClaims(
 
 		value = ApplyTransform(value, attrCfg.Transform)
 
+		if attrCfg.AsArray {
+			value = wrapAsArray(value)
+		}
+
 		if err := SetNestedValue(doc, attrCfg.Claim, value); err != nil {
 			return nil, fmt.Errorf("failed to set claim %s: %w", attrCfg.Claim, err)
 		}
@@ -84,6 +88,19 @@ func ApplyTransform(value any, transform string) any {
 		return cc.Alpha3()
 	default:
 		return value
+	}
+}
+
+// wrapAsArray ensures the value is a slice. If already a slice, returns it unchanged;
+// otherwise wraps it in a single-element []any.
+func wrapAsArray(value any) any {
+	switch v := value.(type) {
+	case []any:
+		return v
+	case []string:
+		return v
+	default:
+		return []any{value}
 	}
 }
 
