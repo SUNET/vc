@@ -112,9 +112,17 @@ func (b *DeviceAuthBuilder) Build() (*DeviceSignedMdoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode device authentication: %w", err)
 	}
-
+ 	// DeviceSigned.nameSpaces must use the wire format: Tag 24 wrapping the
+ 	// already-encoded CBOR namespaces item.
+ 	deviceNameSpacesTaggedBytes, err := encoder.Marshal(cbor.Tag{
+		Number:  24,
+		Content: deviceNameSpacesBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode tagged device namespaces: %w", err)
+	}
 	var deviceSigned DeviceSignedMdoc
-	deviceSigned.NameSpaces = deviceNameSpacesBytes
+	deviceSigned.NameSpaces = deviceNameSpacesTaggedBytes
 
 	if b.useMAC {
 		// MAC-based authentication using session key
@@ -181,6 +189,21 @@ func NewDeviceAuthVerifier(sessionTranscript []byte, docType string) *DeviceAuth
 	}
 }
 
+func extractDeviceNameSpacesBytes(ns interface{}) ([]byte, error) {
+    b, ok := ns.([]byte)
+    if !ok {
+        return nil, fmt.Errorf("unexpected type for NameSpaces: expected []byte, got %T", ns)
+    }
+
+    var tag cbor.Tag
+    if err := cbor.Unmarshal(b, &tag); err == nil && tag.Number == 24 {
+        if untaggedBytes, ok := tag.Content.([]byte); ok {
+            return untaggedBytes, nil
+        }
+    }
+    return b, nil
+}
+
 func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, deviceKey crypto.PublicKey) error {
     if deviceSigned.DeviceAuth.DeviceSignature == nil {
         return errors.New("no device signature present")
@@ -238,24 +261,10 @@ func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, dev
         return fmt.Errorf("unexpected type for DeviceSignature: %T", val)
     }
 
-    var nameSpacesBytes []byte
-    switch ns := deviceSigned.NameSpaces.(type) {
-    case []byte:
-        nameSpacesBytes = ns
-    case cbor.Tag:
-        if b, ok := ns.Content.([]byte); ok {
-            nameSpacesBytes = b
-        }
-    case nil:
-        nameSpacesBytes = nil
-    default:
-        b, err := encoder.Marshal(ns)
-        if err != nil {
-            return fmt.Errorf("failed to marshal NameSpaces for signature verification: %w", err)
-        }
-        nameSpacesBytes = b
+	nameSpacesBytes, err := extractDeviceNameSpacesBytes(deviceSigned.NameSpaces)
+    if err != nil {
+        return fmt.Errorf("failed to process NameSpaces: %w", err)
     }
-
     deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
     if err != nil {
         return fmt.Errorf("failed to build device auth bytes: %w", err)
@@ -287,24 +296,14 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKe
 	}
 	mac0.Tag, ok = macArray[3].([]byte)
 	if !ok { return fmt.Errorf("MAC tag must be bytes") }
-	var nameSpacesBytes []byte
 
-	switch v := deviceSigned.NameSpaces.(type) {
-	case []byte:
-		nameSpacesBytes = v
-	case cbor.Tag:
-		// If it's a Tag 24, the content is the byte slice
-		if b, ok := v.Content.([]byte); ok {
-			nameSpacesBytes = b
-		}
-	case nil:
-		nameSpacesBytes = nil
-	default:
-		return fmt.Errorf("unexpected type for NameSpaces: %T", v)
-	}
+	nameSpacesBytes, err := extractDeviceNameSpacesBytes(deviceSigned.NameSpaces)
+    if err != nil {
+        return fmt.Errorf("unexpected data layout or type for NameSpaces: %w", err)
+    }
 
-	// Reconstruct DeviceAuthentication
-	deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
+    // Reconstruct DeviceAuthentication using the stripped, untagged bytes
+    deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
 	if err != nil {
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}

@@ -152,27 +152,24 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 
     // Add all mandatory data elements
     if err := i.addMandatoryElements(builder, req.MDoc); err != nil {
-	   documentErrors = append(documentErrors, DocumentError{DocType: 0})
-
+	   return nil, fmt.Errorf("add mandatory elements: %w", err)
     }
 
     // Add optional data elements
     if err := i.addOptionalElements(builder, req.MDoc); err != nil {
-		documentErrors = append(documentErrors, DocumentError{DocType: 0})
-
+		return nil, fmt.Errorf("add optional elements: %w", err)
     }
 
     // Add driving privileges
     if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
-		documentErrors = append(documentErrors, DocumentError{DocType: 0})
+		return nil, fmt.Errorf("add driving privileges: %w", err)
 
     }
 
     // Build and sign the MSO
     signedMSO, issuerNameSpaces, err := builder.Build()
     if err != nil {
-	   documentErrors = append(documentErrors, DocumentError{DocType: 0})
-
+	   return nil, fmt.Errorf("build signed MSO: %w", err)
     }
 
 
@@ -180,33 +177,15 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
     // Encode the signed MSO elements
     encoder, err := NewCBOREncoder()
     if err != nil {
-        // Code 1 = Data Not Available / Generation Failure
-        documentErrors = append(documentErrors, DocumentError{DocType: 1})
+        // Code 0 = Data Not Available / Generation Failure
+		return nil, fmt.Errorf("create CBOR encoder: %w", err)
+
     }
 
-    var emptyMapBytes []byte
-    if len(documentErrors) == 0 {
-        emptyMapBytes, err = encoder.Marshal(map[string]any{})
-        if err != nil {
-            documentErrors = append(documentErrors, DocumentError{DocType: 1})
-        }
-    }
-    if len(documentErrors) > 0 {
-        // An encoding error happened: build response containing ONLY documentErrors
-        // documents slice remains empty and is cleanly dropped by omitempty tags
-        response := &DeviceResponseMdoc{
-            Version:        "1.0",
-            DocumentErrors: documentErrors,
-            Status:         0,
-        }
-
-        return &IssuedDocumentMdoc{
-            DocumentMdoc: response,
-            SignedMSO:    nil, // Safe to leave nil on generation failure
-            ValidFrom:    validFrom,
-            ValidUntil:   validUntil,
-        }, nil
-    }
+	emptyMapBytes, err := encoder.Marshal(map[string]any{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode device auth: %w", err)
+	}
 
 	issuerSignedNS := make(map[string][]any)
     for ns, items := range issuerNameSpaces {
@@ -237,7 +216,23 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
         },
     }
     documents = append(documents, innerDoc)
+    
+	if len(documents) == 0 {
+		documentErrors = append(documentErrors, DocumentError{DocType: 0})
 
+        response := &DeviceResponseMdoc{
+            Version:        "1.0",
+            DocumentErrors: documentErrors,
+            Status:         0,
+        }
+
+        return &IssuedDocumentMdoc{
+            DocumentMdoc: response,
+            SignedMSO:    nil,
+            ValidFrom:    validFrom,
+            ValidUntil:   validUntil,
+        }, nil
+    }
     response := &DeviceResponseMdoc{
         Version:   "1.0",
         Documents: documents,
