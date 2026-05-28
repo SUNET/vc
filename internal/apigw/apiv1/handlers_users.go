@@ -133,7 +133,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			} else if len(claim.Display) > 0 {
 				// No svg_id — fall back to extracting claim value from document data by path
 				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+				if value := findValueByName(doc.DocumentData, claim.Path); value != nil {
 					svgTemplateClaims[key] = vcclient.SVGClaim{
 						Label: claim.Display[0].Label,
 						Value: value,
@@ -197,11 +197,12 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			if claim.SVGID != "" {
 				value, ok := claimValues[claim.SVGID].(string)
 				if !ok {
-					// JSONPath extraction missed this claim — try direct lookup as fallback
-					if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+					// JSONPath extraction missed this claim — try direct lookup as fallback.
+					// SVG-template claims must be strings to be substitutable.
+					if s, ok := findValueByName(doc.DocumentData, claim.Path).(string); ok && s != "" {
 						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
 							Label: claim.Display[0].Label,
-							Value: value,
+							Value: s,
 						}
 					}
 					continue
@@ -213,7 +214,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			} else if len(claim.Display) > 0 {
 				// No svg_id — fall back to extracting claim value from document data by path
 				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+				if value := findValueByName(doc.DocumentData, claim.Path); value != nil {
 					svgTemplateClaims[key] = vcclient.SVGClaim{
 						Label: claim.Display[0].Label,
 						Value: value,
@@ -258,9 +259,11 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 // findValueByName searches the document data for a claim value matching
 // the VCTM claim path. It first tries an exact JSONPath-style lookup,
 // then falls back to searching recursively by the leaf key name.
-func findValueByName(data map[string]any, path []*string) string {
+// Returns the raw value (string, map, slice, ...) so that the consent UI
+// can render nested structures as a tree. Returns nil if not found.
+func findValueByName(data map[string]any, path []*string) any {
 	if len(path) == 0 {
-		return ""
+		return nil
 	}
 
 	// Walk the path through nested maps
@@ -281,26 +284,21 @@ func findValueByName(data map[string]any, path []*string) string {
 		}
 	}
 
-	if s, ok := current.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", current)
+	return current
 }
 
-// findValueRecursive searches a nested map for the first string value matching key.
-func findValueRecursive(data map[string]any, key string) string {
+// findValueRecursive searches a nested map for the first value matching key.
+// Returns nil if not found.
+func findValueRecursive(data map[string]any, key string) any {
 	if v, ok := data[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-		return fmt.Sprintf("%v", v)
+		return v
 	}
 	for _, v := range data {
 		if nested, ok := v.(map[string]any); ok {
-			if result := findValueRecursive(nested, key); result != "" {
+			if result := findValueRecursive(nested, key); result != nil {
 				return result
 			}
 		}
 	}
-	return ""
+	return nil
 }

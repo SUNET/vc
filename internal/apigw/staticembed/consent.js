@@ -6,7 +6,7 @@ import * as v from "valibot";
  * @property {string} vct
  * @property {string} name
  * @property {string} svg
- * @property {Record<string, { label: string; value: string; }>} claims
+ * @property {Record<string, { label: string; value: unknown; }>} claims
  */
 
 /**
@@ -23,13 +23,16 @@ const SvgTemplateResponseSchema = v.required(v.object({
 const UserDataSchema = v.required(v.object({
     svg_template_claims: v.record(v.string(), v.object({
         label: v.string(),
-        value: v.string(),
+        // value may be a string, number, boolean, or a nested object/array
+        // (e.g. an address with sub-fields). The consent UI renders objects
+        // as a tree.
+        value: v.unknown(),
     })),
     redirect_url: v.string(),
 }));
 
 /**
- * @param {string} key 
+ * @param {string} key
  * @returns {string}
  */
 function keyToLabel(key) {
@@ -42,6 +45,76 @@ function keyToLabel(key) {
     }
 
     return key;
+}
+
+/**
+ * Escape a string for safe injection into HTML text content / attribute values.
+ * @param {string} s
+ * @returns {string}
+ */
+function escapeHtml(s) {
+    return s
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
+/**
+ * Detect base64-encoded image data and return a `data:` URL, or null if the
+ * string isn't recognizable image data. Showing a raw base64 blob in a
+ * consent UI is useless — we render the picture instead.
+ * @param {string} s
+ * @returns {string | null}
+ */
+function detectBase64Image(s) {
+    if (s.startsWith("data:image/")) return s;
+    // PNG: base64 of "\x89PNG\r\n\x1a\n..." starts with "iVBORw0KGgo"
+    if (s.startsWith("iVBORw0KGgo")) return `data:image/png;base64,${s}`;
+    // JPEG: base64 of "\xff\xd8\xff..." starts with "/9j/"
+    if (s.startsWith("/9j/")) return `data:image/jpeg;base64,${s}`;
+    return null;
+}
+
+/**
+ * Render a claim value as HTML. Primitives become escaped text; objects and
+ * arrays become a nested tree of indented key:value rows. Base64 image data
+ * is rendered as an inline preview. Used via `x-html` in consent.html.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function renderClaimValueHtml(value) {
+    if (value === null || value === undefined) {
+        return "";
+    }
+
+    if (Array.isArray(value)) {
+        if (value.length === 0) return "";
+        const items = value
+            .map((v, i) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(String(i))}</span><div class="min-w-0 break-words">${renderClaimValueHtml(v)}</div></div>`)
+            .join("");
+        return `<div class="pl-3 space-y-0.5">${items}</div>`;
+    }
+
+    if (typeof value === "object") {
+        const entries = Object.entries(/** @type {Record<string, unknown>} */(value));
+        if (entries.length === 0) return "";
+        const items = entries
+            .map(([k, v]) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(keyToLabel(k))}:</span><div class="min-w-0 break-words">${renderClaimValueHtml(v)}</div></div>`)
+            .join("");
+        return `<div class="pl-3 space-y-0.5">${items}</div>`;
+    }
+
+    if (typeof value === "string") {
+        const dataUrl = detectBase64Image(value);
+        if (dataUrl) {
+            return `<img src="${escapeHtml(dataUrl)}" alt="" class="max-h-32 rounded border border-black/10 dark:border-white/10" />`;
+        }
+        return escapeHtml(value);
+    }
+
+    return escapeHtml(String(value));
 }
 
 /**
@@ -302,7 +375,7 @@ Alpine.data("app", () => ({
     },
 
     /**
-     * @param {Record<string, { label: string; value: string; }>} claims
+     * @param {Record<string, { label: string; value: unknown; }>} claims
      * @returns {Promise<string>}
      */
     async createCredentialSvgImageUri(claims) {
@@ -314,10 +387,29 @@ Alpine.data("app", () => ({
         let svg = atob(data.template);
 
         for (const [svg_id, claim] of Object.entries(claims)) {
-            svg = svg.replaceAll(`{{${svg_id}}}`, claim.value);
+            // SVG templates only substitute scalar text — skip nested
+            // structures (those are rendered in the claims table as a tree).
+            if (typeof claim.value !== "string") continue;
+            // For image-bearing placeholders (e.g. <image href="{{picture}}"/>)
+            // the raw base64 isn't a valid URL — convert to a data: URL so
+            // browsers will actually render it inside the SVG.
+            const value = detectBase64Image(claim.value) ?? claim.value;
+            svg = svg.replaceAll(`{{${svg_id}}}`, value);
         }
 
         return `data:image/svg+xml;base64,${btoa(svg)}`;
+    },
+
+    /**
+     * Renders a claim value as HTML. Primitive values become escaped text;
+     * objects and arrays become a nested <ul> tree.
+     * Returned HTML is safe to set via x-html: all user-supplied strings are
+     * passed through escapeHtml first.
+     * @param {unknown} value
+     * @returns {string}
+     */
+    renderClaimValue(value) {
+        return renderClaimValueHtml(value);
     },
 
     /** @param {string} url */

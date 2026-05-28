@@ -22,7 +22,10 @@ type UserLookupRequest struct {
 
 type SVGClaim struct {
 	Label string `json:"label"`
-	Value string `json:"value"`
+	// Value is the displayable claim value. Typically a string, but may be a
+	// nested map/array when the claim itself is structured (e.g. an address).
+	// The consent UI renders structured values as a tree.
+	Value any `json:"value"`
 }
 
 // SVGTemplateReply holds SVG template data.
