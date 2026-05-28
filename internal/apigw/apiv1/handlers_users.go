@@ -122,8 +122,8 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID].(string)
-				if !ok {
+				value, ok := claimValues[claim.SVGID]
+				if !ok || value == nil {
 					continue
 				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
@@ -195,14 +195,13 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID].(string)
-				if !ok {
+				value, ok := claimValues[claim.SVGID]
+				if !ok || value == nil {
 					// JSONPath extraction missed this claim — try direct lookup as fallback.
-					// SVG-template claims must be strings to be substitutable.
-					if s, ok := findValueByName(doc.DocumentData, claim.Path).(string); ok && s != "" {
+					if v := findValueByName(doc.DocumentData, claim.Path); v != nil {
 						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
 							Label: claim.Display[0].Label,
-							Value: s,
+							Value: v,
 						}
 					}
 					continue
