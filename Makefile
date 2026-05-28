@@ -48,7 +48,7 @@ BUILD_CONFIGS           := \
 # Phony Targets Declaration
 # ==============================================================================
 
-.PHONY: help pki pki-clean test test-env \
+.PHONY: help pki pki-clean test test-env test-js \
 	build build-% \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
@@ -181,6 +181,20 @@ $(foreach service,$(SERVICES),$(eval $(call TEST_TEMPLATE,$(service))))
 test-env: ## Set up test environment
 	$(info Setting up test environment)
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
+
+test-js: ## Run JS unit tests for staticembed helpers (with coverage; fails below 80%)
+	$(info Running JS unit tests)
+	@set -o pipefail; \
+	node --test --experimental-test-coverage $(APIGW_STATIC)/tests/ 2>&1 | tee /tmp/test-js.log; \
+	awk -F '|' '/consent-helpers\.js[[:space:]]+\|/ { \
+		l=$$2+0; b=$$3+0; f=$$4+0; \
+		printf "\nJS coverage (consent-helpers.js): line=%g%% branch=%g%% func=%g%%\n", l, b, f; \
+		if (l<80 || b<80 || f<80) { \
+			printf "FAIL: coverage below 80%% threshold\n"; \
+			exit 1; \
+		} \
+		printf "OK: coverage meets 80%% threshold\n"; \
+	}' /tmp/test-js.log
 
 # Test targets with build tags
 test-pkcs11: ## Test with PKCS#11 build tag
