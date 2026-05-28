@@ -108,6 +108,21 @@ function utf8ToBase64(s) {
 }
 
 /**
+ * Decode a base64 string as UTF-8 text. The counterpart to `utf8ToBase64`:
+ * `atob` alone produces a Latin-1 byte string where each char holds a raw
+ * byte (0–255), which is the wrong shape for downstream string operations
+ * if the source bytes are UTF-8 (non-ASCII chars become mojibake on re-encode).
+ * @param {string} b64
+ * @returns {string}
+ */
+function base64ToUtf8(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+}
+
+/**
  * Detect base64-encoded image data and return a safe `data:` URL, or null if
  * the input isn't a recognized image. Showing a raw base64 blob in a consent
  * UI is useless — we render the picture instead.
@@ -449,7 +464,10 @@ Alpine.data("app", () => ({
         /** @type {SvgTemplateResponse} */
         const data = await this.fetchData(url.toString(), {});
 
-        let svg = atob(data.template);
+        // Decode the template as UTF-8 — `atob` alone returns a Latin-1 byte
+        // string, which would corrupt any non-ASCII characters in the SVG
+        // when re-encoded with utf8ToBase64 below.
+        let svg = base64ToUtf8(data.template);
 
         for (const [svg_id, claim] of Object.entries(claims)) {
             // SVG templates only substitute scalar text — skip nested
@@ -458,7 +476,12 @@ Alpine.data("app", () => ({
             // For image-bearing placeholders (e.g. <image href="{{picture}}"/>)
             // the raw base64 isn't a valid URL — convert to a data: URL so
             // browsers will actually render it inside the SVG.
-            const value = detectBase64Image(claim.value) ?? claim.value;
+            const raw = detectBase64Image(claim.value) ?? claim.value;
+            // Escape for XML text/attribute contexts. Without this, a value
+            // like O'Brien & Co. or "</text>..." would break SVG parsing or
+            // alter its structure. Base64 data: URLs only use characters
+            // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
+            const value = escapeHtml(raw);
             svg = svg.replaceAll(`{{${svg_id}}}`, value);
         }
 
