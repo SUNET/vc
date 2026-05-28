@@ -278,13 +278,30 @@ func findValueByName(data map[string]any, path []*string) any {
 		}
 		current, ok = m[*p]
 		if !ok {
-			// Exact path failed — try recursive search by leaf key name
-			leafKey := *path[len(path)-1]
+			// Exact path failed — try recursive search by the last named
+			// path segment. Paths can end with a nil element (array
+			// wildcard, e.g. ["nationalities", null]); skip nil segments
+			// when picking the leaf key, and bail if there isn't one.
+			leafKey := lastNamedSegment(path)
+			if leafKey == "" {
+				return nil
+			}
 			return findValueRecursive(data, leafKey)
 		}
 	}
 
 	return current
+}
+
+// lastNamedSegment returns the value of the last non-nil entry in a VCTM
+// claim path, or "" if every segment is a nil wildcard.
+func lastNamedSegment(path []*string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] != nil {
+			return *path[i]
+		}
+	}
+	return ""
 }
 
 // findValueRecursive searches a nested map for the first value matching key.
