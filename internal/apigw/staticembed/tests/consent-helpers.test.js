@@ -9,10 +9,12 @@ import {
     base64ToUtf8,
     detectBase64Image,
     escapeHtml,
+    IMAGE_PLACEHOLDERS,
     keyToLabel,
     renderClaimValueHtml,
     SAFE_IMAGE_SUBTYPES,
     utf8ToBase64,
+    valueForSvgPlaceholder,
 } from "../consent-helpers.js";
 
 describe("keyToLabel", () => {
@@ -110,6 +112,20 @@ describe("detectBase64Image", () => {
         assert.equal(result, `data:image/png;base64,${tinyPngB64}`);
     });
 
+    it("normalizes the common image/jpg alias to image/jpeg", () => {
+        // Upstream sometimes emits the non-IANA `image/jpg`. We accept it
+        // but normalize the returned URL to the canonical `image/jpeg`.
+        const payload = "/9j/AAAA";
+        assert.equal(
+            detectBase64Image(`data:image/jpg;base64,${payload}`),
+            `data:image/jpeg;base64,${payload}`
+        );
+        assert.equal(
+            detectBase64Image(`data:image/JPG;base64,${payload}`),
+            `data:image/jpeg;base64,${payload}`
+        );
+    });
+
     it("rejects data:image/svg+xml regardless of encoding", () => {
         assert.equal(detectBase64Image("data:image/svg+xml,<svg onload='x'/>"), null);
         assert.equal(detectBase64Image("data:image/svg+xml;base64,PHN2Zy8+"), null);
@@ -149,6 +165,57 @@ describe("detectBase64Image", () => {
         assert.ok(SAFE_IMAGE_SUBTYPES.has("gif"));
         assert.ok(SAFE_IMAGE_SUBTYPES.has("webp"));
         assert.ok(!SAFE_IMAGE_SUBTYPES.has("svg+xml"));
+    });
+});
+
+describe("valueForSvgPlaceholder", () => {
+    const tinyPngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=";
+
+    it("declares `picture` as an image-bearing placeholder", () => {
+        assert.ok(IMAGE_PLACEHOLDERS.has("picture"));
+    });
+
+    it("accepts a validated base64 image for an image placeholder", () => {
+        const result = valueForSvgPlaceholder("picture", tinyPngB64);
+        assert.equal(result, `data:image/png;base64,${tinyPngB64}`);
+    });
+
+    it("rejects arbitrary URLs in image placeholders (no external fetch)", () => {
+        // The whole point: a malicious issuer could put a tracking URL in
+        // the picture claim — must NOT end up in <image href=…>.
+        assert.equal(valueForSvgPlaceholder("picture", "https://tracker.example/x"), "");
+        assert.equal(valueForSvgPlaceholder("picture", "http://10.0.0.1/internal"), "");
+        assert.equal(valueForSvgPlaceholder("picture", "javascript:alert(1)"), "");
+        assert.equal(valueForSvgPlaceholder("picture", "data:image/svg+xml,<svg onload='x'/>"), "");
+        assert.equal(valueForSvgPlaceholder("picture", "not-an-image"), "");
+    });
+
+    it("returns empty string for non-string values in image placeholders", () => {
+        // Non-string values still need a substitution so the literal
+        // `{{picture}}` doesn't end up in the rendered SVG.
+        assert.equal(valueForSvgPlaceholder("picture", null), "");
+        assert.equal(valueForSvgPlaceholder("picture", undefined), "");
+        assert.equal(valueForSvgPlaceholder("picture", 42), "");
+        assert.equal(valueForSvgPlaceholder("picture", { foo: "bar" }), "");
+    });
+
+    it("passes scalar strings through unchanged for text placeholders", () => {
+        assert.equal(valueForSvgPlaceholder("given_name", "Penélope"), "Penélope");
+        assert.equal(valueForSvgPlaceholder("issuing_country", "SE"), "SE");
+        // Arbitrary URLs are fine here — they'll be rendered as text content
+        // inside a <text> element, not fetched.
+        assert.equal(
+            valueForSvgPlaceholder("document_number", "https://example.com/doc"),
+            "https://example.com/doc"
+        );
+    });
+
+    it("returns null for non-string values in text placeholders", () => {
+        // null tells the caller to skip the substitution, leaving the
+        // literal `{{name}}` rather than producing "[object Object]".
+        assert.equal(valueForSvgPlaceholder("given_name", null), null);
+        assert.equal(valueForSvgPlaceholder("given_name", { foo: "bar" }), null);
+        assert.equal(valueForSvgPlaceholder("given_name", 42), null);
     });
 });
 

@@ -39,6 +39,19 @@ export function escapeHtml(s) {
 // contexts in some browsers.
 export const SAFE_IMAGE_SUBTYPES = new Set(["png", "jpeg", "gif", "webp"]);
 
+// SVG template placeholders whose substituted value is used as an image
+// `href`. Anything that fails detectBase64Image() in these slots is
+// replaced with the empty string so an arbitrary URL in a claim value
+// (e.g. https://tracker.example/...) cannot cause the consent page to
+// perform an external network fetch at render time.
+export const IMAGE_PLACEHOLDERS = new Set(["picture"]);
+
+// Common subtype aliases normalized to their canonical form before the
+// allowlist check. Upstream issuers sometimes emit `image/jpg` even though
+// the IANA-registered subtype is `image/jpeg`.
+/** @type {Record<string, string>} */
+const SUBTYPE_ALIASES = { jpg: "jpeg" };
+
 // Standard base64 alphabet — no URL-safe variants, no whitespace, no other
 // characters.
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -97,7 +110,8 @@ export function detectBase64Image(s) {
     if (s.startsWith("data:")) {
         const m = DATA_URL_RE.exec(s);
         if (!m) return null;
-        const subtype = m[1].toLowerCase();
+        const raw = m[1].toLowerCase();
+        const subtype = SUBTYPE_ALIASES[raw] ?? raw;
         if (!SAFE_IMAGE_SUBTYPES.has(subtype)) return null;
         return `data:image/${subtype};base64,${m[2]}`;
     }
@@ -113,6 +127,33 @@ export function detectBase64Image(s) {
     // WebP: base64 of "RIFF....WEBP" starts with "UklGR"
     if (s.startsWith("UklGR")) return `data:image/webp;base64,${s}`;
     return null;
+}
+
+/**
+ * Resolve a claim value for substitution into a specific SVG template
+ * placeholder. Returns the string to substitute, or null to skip the
+ * substitution entirely (leaves the literal `{{name}}` in the template).
+ *
+ * Image-bearing placeholders (used in <image href=…>, see IMAGE_PLACEHOLDERS)
+ * are strictly validated: the value must be a recognized base64 image data
+ * URL, otherwise an empty string is returned so the rendered SVG won't fetch
+ * arbitrary remote URLs from the consent page.
+ *
+ * Text placeholders pass scalar strings through unchanged; non-string values
+ * return null so the loop can keep the placeholder rather than producing
+ * "[object Object]".
+ *
+ * @param {string} svgId
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function valueForSvgPlaceholder(svgId, value) {
+    if (IMAGE_PLACEHOLDERS.has(svgId)) {
+        if (typeof value !== "string") return "";
+        return detectBase64Image(value) ?? "";
+    }
+    if (typeof value !== "string") return null;
+    return value;
 }
 
 /**

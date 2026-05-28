@@ -184,8 +184,10 @@ test-env: ## Set up test environment
 
 test-js: ## Run JS unit tests for staticembed helpers (with coverage; fails below 80%)
 	$(info Running JS unit tests)
-	@set -o pipefail; \
-	node --test --experimental-test-coverage $(APIGW_STATIC)/tests/ 2>&1 | tee /tmp/test-js.log; \
+	@node --test --experimental-test-coverage $(APIGW_STATIC)/tests/ > /tmp/test-js.log 2>&1; \
+	status=$$?; \
+	cat /tmp/test-js.log; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
 	awk -F '|' '/consent-helpers\.js[[:space:]]+\|/ { \
 		l=$$2+0; b=$$3+0; f=$$4+0; \
 		printf "\nJS coverage (consent-helpers.js): line=%g%% branch=%g%% func=%g%%\n", l, b, f; \

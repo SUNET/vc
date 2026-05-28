@@ -3,10 +3,10 @@ import * as v from "valibot";
 
 import {
     base64ToUtf8,
-    detectBase64Image,
     escapeHtml,
     renderClaimValueHtml,
     utf8ToBase64,
+    valueForSvgPlaceholder,
 } from "./consent-helpers.js";
 
 /**
@@ -326,19 +326,18 @@ Alpine.data("app", () => ({
         let svg = base64ToUtf8(data.template);
 
         for (const [svg_id, claim] of Object.entries(claims)) {
-            // SVG templates only substitute scalar text — skip nested
-            // structures (those are rendered in the claims table as a tree).
-            if (typeof claim.value !== "string") continue;
-            // For image-bearing placeholders (e.g. <image href="{{picture}}"/>)
-            // the raw base64 isn't a valid URL — convert to a data: URL so
-            // browsers will actually render it inside the SVG.
-            const raw = detectBase64Image(claim.value) ?? claim.value;
+            // valueForSvgPlaceholder decides what (if anything) is safe to
+            // substitute for this placeholder. Image-bearing slots only
+            // accept validated data: URLs — arbitrary strings are coerced
+            // to "" so the consent page can't be made to fetch external
+            // URLs at render time. Text slots pass scalar strings through.
+            const resolved = valueForSvgPlaceholder(svg_id, claim.value);
+            if (resolved === null) continue;
             // Escape for XML text/attribute contexts. Without this, a value
             // like O'Brien & Co. or "</text>..." would break SVG parsing or
             // alter its structure. Base64 data: URLs only use characters
             // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
-            const value = escapeHtml(raw);
-            svg = svg.replaceAll(`{{${svg_id}}}`, value);
+            svg = svg.replaceAll(`{{${svg_id}}}`, escapeHtml(resolved));
         }
 
         return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
