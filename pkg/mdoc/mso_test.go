@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	//"github.com/fxamacker/cbor/v2"
 	"math/big"
 	"testing"
 	"time"
@@ -154,8 +155,8 @@ func TestMSOBuilder_Build(t *testing.T) {
 		WithSigner(priv, certChain)
 
 	// Add some data elements
-	builder.AddDataElement(Namespace, "family_name", "Doe") // #nosec G104
-	builder.AddDataElement(Namespace, "given_name", "John") // #nosec G104
+	builder.AddDataElement(Namespace, "family_name", "Doe")       // #nosec G104
+	builder.AddDataElement(Namespace, "given_name", "John")       // #nosec G104
 	builder.AddDataElement(Namespace, "birth_date", "1990-01-15") // #nosec G104
 
 	signedMSO, issuerNameSpaces, err := builder.Build()
@@ -253,10 +254,10 @@ func TestValidateMSOValidity(t *testing.T) {
 	now := time.Now().UTC()
 
 	tests := []struct {
-		name      string
-		validFrom time.Time
+		name       string
+		validFrom  time.Time
 		validUntil time.Time
-		wantError bool
+		wantError  bool
 	}{
 		{
 			name:       "valid",
@@ -412,7 +413,7 @@ func TestVerifyDigest(t *testing.T) {
 
 	// Add some data elements
 	builder.AddDataElement(Namespace, "family_name", "Andersson") // #nosec G104
-	builder.AddDataElement(Namespace, "given_name", "Erik") // #nosec G104
+	builder.AddDataElement(Namespace, "given_name", "Erik")       // #nosec G104
 	builder.AddDataElement(Namespace, "birth_date", "1990-03-15") // #nosec G104
 
 	signedMSO, issuerNameSpaces, err := builder.Build()
@@ -442,17 +443,18 @@ func TestVerifyDigest(t *testing.T) {
 		t.Fatalf("NewCBOREncoder() error = %v", err)
 	}
 
-	for _, taggedItem := range issuerNameSpaces[Namespace] {
-		var item IssuerSignedItem
-		if err := encoder.Unmarshal(taggedItem.Data, &item); err != nil {
-			t.Fatalf("Unmarshal IssuerSignedItem error = %v", err)
-		}
-
-		err := VerifyDigest(mso, Namespace, &item)
-		if err != nil {
-			t.Errorf("VerifyDigest() for %s error = %v", item.ElementIdentifier, err)
-		}
-	}
+	issuerSignedNS := issuerNameSpaces
+	for _, taggedItem := range issuerSignedNS[Namespace] {
+        var item IssuerSignedItem
+        encodedBytes, _ := taggedItem.Content.([]byte)
+        if err := encoder.Unmarshal(encodedBytes, &item); err != nil {
+            t.Fatalf("Unmarshal error = %v", err)
+        }
+        err := VerifyDigest(mso, Namespace, taggedItem) 
+        if err != nil {
+            t.Errorf("VerifyDigest() for %s error = %v", item.ElementIdentifier, err)
+        }
+    }
 }
 
 func TestVerifyDigest_InvalidItem(t *testing.T) {
@@ -491,4 +493,3 @@ func TestVerifyDigest_InvalidItem(t *testing.T) {
 		t.Error("VerifyDigest() should fail for invalid item")
 	}
 }
-

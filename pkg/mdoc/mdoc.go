@@ -248,63 +248,6 @@ type IssuerSignedItem struct {
 	ElementValue any `json:"elementValue" cbor:"elementValue" validate:"required"`
 }
 
-// IssuerSigned contains the issuer-signed data.
-type IssuerSigned struct {
-	// NameSpaces maps namespaces to arrays of IssuerSignedItem.
-	NameSpaces map[string][]IssuerSignedItem `json:"nameSpaces" cbor:"nameSpaces"`
-
-	// IssuerAuth is the COSE_Sign1 structure containing the MSO.
-	IssuerAuth []byte `json:"issuerAuth" cbor:"issuerAuth" validate:"required"`
-}
-
-// DeviceSigned contains the device-signed data.
-type DeviceSigned struct {
-	// NameSpaces contains device-signed name spaces (CBOR encoded).
-	NameSpaces []byte `json:"nameSpaces" cbor:"nameSpaces"`
-
-	// DeviceAuth contains the device authentication (MAC or signature).
-	DeviceAuth DeviceAuth `json:"deviceAuth" cbor:"deviceAuth" validate:"required"`
-}
-
-// DeviceAuth contains either a device signature or MAC.
-type DeviceAuth struct {
-	// DeviceSignature is the COSE_Sign1 device signature (mutually exclusive with DeviceMac).
-	DeviceSignature []byte `json:"deviceSignature,omitempty" cbor:"deviceSignature,omitempty"`
-
-	// DeviceMac is the COSE_Mac0 device MAC (mutually exclusive with DeviceSignature).
-	DeviceMac []byte `json:"deviceMac,omitempty" cbor:"deviceMac,omitempty"`
-}
-
-// Document represents a complete mdoc document in a response.
-type Document struct {
-	// DocType is the document type identifier.
-	DocType string `json:"docType" cbor:"docType" validate:"required"`
-
-	// IssuerSigned contains issuer-signed data.
-	IssuerSigned IssuerSigned `json:"issuerSigned" cbor:"issuerSigned" validate:"required"`
-
-	// DeviceSigned contains device-signed data.
-	DeviceSigned DeviceSigned `json:"deviceSigned" cbor:"deviceSigned" validate:"required"`
-
-	// Errors contains any errors for specific data elements.
-	Errors map[string]map[string]int `json:"errors,omitempty" cbor:"errors,omitempty"`
-}
-
-// DeviceResponse represents a complete device response.
-type DeviceResponse struct {
-	// Version is the response version (e.g., "1.0").
-	Version string `json:"version" cbor:"version" validate:"required"`
-
-	// Documents contains the returned documents.
-	Documents []Document `json:"documents,omitempty" cbor:"documents,omitempty"`
-
-	// DocumentErrors contains errors for documents that could not be returned.
-	DocumentErrors []map[string]int `json:"documentErrors,omitempty" cbor:"documentErrors,omitempty"`
-
-	// Status is the overall status code (0 = OK).
-	Status uint `json:"status" cbor:"status"`
-}
-
 // DeviceRequest represents a request for mdoc data.
 type DeviceRequest struct {
 	// Version is the request version (e.g., "1.0").
@@ -334,3 +277,48 @@ type ItemsRequest struct {
 	// RequestInfo contains optional additional request information.
 	RequestInfo map[string]any `json:"requestInfo,omitempty" cbor:"requestInfo,omitempty"`
 }
+
+type DeviceResponseMdoc struct {
+	Version   string `cbor:"version"`
+	Documents []DocumentMdoc  `cbor:"documents,omitempty"`
+	DocumentErrors []DocumentError `json:"documentErrors,omitempty" cbor:"documentErrors,omitempty"`
+	Status    uint64 `cbor:"status"`
+}
+
+type DocumentError map[string]int
+
+// Document represents the top-level mDL document structure.
+type DocumentMdoc struct {
+	DocType      string                    `json:"docType" cbor:"docType" validate:"required"`
+	IssuerSigned IssuerSignedMdoc          `json:"issuerSigned" cbor:"issuerSigned" validate:"required"`
+	DeviceSigned DeviceSignedMdoc          `json:"deviceSigned" cbor:"deviceSigned" validate:"required"`
+	Errors       map[string]map[string]int `json:"errors,omitempty" cbor:"errors,omitempty"`
+}
+
+// IssuerSignedMdoc aligns with the nested COSE_Sign1 array format.
+type IssuerSignedMdoc struct {
+	NameSpaces map[string][]any `json:"nameSpaces" cbor:"nameSpaces"`
+
+	// IssuerAuth is changed to 'any' to allow the 4-element COSE_Sign1
+	// array to be encoded as a nested structure rather than a byte slice.
+	IssuerAuth any `json:"issuerAuth" cbor:"issuerAuth" validate:"required"`
+}
+
+// DeviceSignedMdoc handles the DeviceNameSpaces Tag and DeviceAuth structure.
+type DeviceSignedMdoc struct {
+	// NameSpaces is changed to 'any' to allow for cbor.Tag{Number: 24}.
+	NameSpaces any `json:"nameSpaces" cbor:"nameSpaces"`
+
+	DeviceAuth DeviceAuthMdoc `json:"deviceAuth" cbor:"deviceAuth" validate:"required"`
+}
+
+// DeviceAuth ensures the signature is treated as a nested COSE signature.
+type DeviceAuthMdoc struct {
+	// DeviceSignature is an array: [protected, unprotected, payload, signature]
+	DeviceSignature any `json:"deviceSignature,omitempty" cbor:"deviceSignature,omitempty"`
+
+	// DeviceMac is the COSE_Mac0 device MAC (mutually exclusive with DeviceSignature).
+	DeviceMac []any `json:"deviceMac,omitempty" cbor:"deviceMac,omitempty"`
+	
+}
+

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"github.com/fxamacker/cbor/v2"
 	"math/big"
 	"testing"
 	"time"
@@ -105,6 +106,30 @@ func createTestDSCert(t *testing.T, dsKey *ecdsa.PrivateKey, iacaCert *x509.Cert
 	}
 
 	return dsCert
+}
+
+// getEffectiveLength returns the length of the data regardless of its 
+// container (raw bytes, any slice, or CBOR tag).
+func getEffectiveLength(v any) int {
+    if v == nil {
+        return 0
+    }
+
+    switch val := v.(type) {
+    case []byte:
+        return len(val)
+    case []any:
+        return len(val)
+    case cbor.Tag:
+        // If it's a tag, we check the length of its content
+        if content, ok := val.Content.([]byte); ok {
+            return len(content)
+        }
+        if content, ok := val.Content.([]any); ok {
+            return len(content)
+        }
+    }
+    return 0
 }
 
 func TestNewDeviceAuthBuilder(t *testing.T) {
@@ -208,45 +233,52 @@ func TestDeviceAuthBuilder_Build_Signature(t *testing.T) {
 		t.Fatal("Build() returned nil")
 	}
 
-	if len(deviceSigned.DeviceAuth.DeviceSignature) == 0 {
-		t.Error("DeviceSignature should be set for signature-based auth")
+	// Fix for: invalid argument: deviceSigned.DeviceAuth.DeviceSignature (any) for len
+	if deviceSigned.DeviceAuth.DeviceSignature == nil {
+		t.Error("DeviceSignature should not be nil")
+	} else {
+		if getEffectiveLength(deviceSigned.DeviceAuth.DeviceSignature) == 0 {
+			t.Error("DeviceSignature should contain data")
+		}
 	}
-
-	if len(deviceSigned.DeviceAuth.DeviceMac) != 0 {
-		t.Error("DeviceMac should not be set for signature-based auth")
+	// Ensure DeviceMac is empty/nil
+	if deviceSigned.DeviceAuth.DeviceMac != nil {
+		t.Error("DeviceMac should be nil for signature-based auth")
 	}
-
-	if len(deviceSigned.NameSpaces) == 0 {
-		t.Error("NameSpaces should be set")
-	}
+    if getEffectiveLength(deviceSigned.NameSpaces) == 0 {
+        t.Error("NameSpaces should be set and contain data")
+    }
 }
 
 func TestDeviceAuthBuilder_Build_MAC(t *testing.T) {
-	sessionKey := make([]byte, 32)
-	rand.Read(sessionKey)
+    sessionKey := make([]byte, 32)
+    rand.Read(sessionKey)
 
-	transcript := []byte("test session transcript")
+    transcript := []byte("test session transcript")
 
-	builder := NewDeviceAuthBuilder(DocType).
-		WithSessionTranscript(transcript).
-		WithSessionKey(sessionKey)
+    builder := NewDeviceAuthBuilder(DocType).
+        WithSessionTranscript(transcript).
+        WithSessionKey(sessionKey)
 
-	deviceSigned, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
+    deviceSigned, err := builder.Build()
+    if err != nil {
+        t.Fatalf("Build() error = %v", err)
+    }
 
-	if deviceSigned == nil {
-		t.Fatal("Build() returned nil")
-	}
+    if deviceSigned == nil {
+        t.Fatal("Build() returned nil")
+    }
 
-	if len(deviceSigned.DeviceAuth.DeviceMac) == 0 {
-		t.Error("DeviceMac should be set for MAC-based auth")
-	}
+    // 1. DeviceMac is []byte: Use standard len()
+    if len(deviceSigned.DeviceAuth.DeviceMac) == 0 {
+        t.Error("DeviceMac should be set for MAC-based auth")
+    }
 
-	if len(deviceSigned.DeviceAuth.DeviceSignature) != 0 {
-		t.Error("DeviceSignature should not be set for MAC-based auth")
-	}
+    // 2. DeviceSignature is any: Check for nil
+    // A nil interface means the field was not populated.
+    if deviceSigned.DeviceAuth.DeviceSignature != nil {
+        t.Errorf("DeviceSignature should be nil for MAC-based auth, got %T", deviceSigned.DeviceAuth.DeviceSignature)
+    }
 }
 
 func TestDeviceAuthBuilder_Build_MissingTranscript(t *testing.T) {
@@ -288,9 +320,8 @@ func TestDeviceAuthBuilder_Build_WithNameSpaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-
-	if len(deviceSigned.NameSpaces) == 0 {
-		t.Error("NameSpaces should contain device-signed elements")
+	if getEffectiveLength(deviceSigned.NameSpaces) == 0 {
+		t.Error("NameSpaces should be set and contain data")
 	}
 }
 
@@ -401,9 +432,9 @@ func TestDeviceAuthVerifier_VerifyMAC_WrongKey(t *testing.T) {
 func TestDeviceAuthVerifier_VerifySignature_NoSignature(t *testing.T) {
 	transcript := []byte("test session transcript")
 
-	deviceSigned := &DeviceSigned{
+	deviceSigned := &DeviceSignedMdoc{
 		NameSpaces: []byte{},
-		DeviceAuth: DeviceAuth{},
+		DeviceAuth: DeviceAuthMdoc{},
 	}
 
 	verifier := NewDeviceAuthVerifier(transcript, DocType)
@@ -416,9 +447,9 @@ func TestDeviceAuthVerifier_VerifySignature_NoSignature(t *testing.T) {
 func TestDeviceAuthVerifier_VerifyMAC_NoMAC(t *testing.T) {
 	transcript := []byte("test session transcript")
 
-	deviceSigned := &DeviceSigned{
+	deviceSigned := &DeviceSignedMdoc{
 		NameSpaces: []byte{},
-		DeviceAuth: DeviceAuth{},
+		DeviceAuth: DeviceAuthMdoc{},
 	}
 
 	verifier := NewDeviceAuthVerifier(transcript, DocType)
@@ -639,7 +670,7 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 	}
 
 	// Create Document
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType:      DocType,
 		DeviceSigned: *deviceSigned,
 	}
@@ -675,10 +706,10 @@ func TestVerifier_VerifyDeviceAuth_NoDeviceAuth(t *testing.T) {
 	})
 
 	// Create document without device auth
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		DeviceSigned: DeviceSigned{
-			DeviceAuth: DeviceAuth{}, // Empty - no signature or MAC
+		DeviceSigned: DeviceSignedMdoc{
+			DeviceAuth: DeviceAuthMdoc{}, // Empty - no signature or MAC
 		},
 	}
 
@@ -732,7 +763,7 @@ func TestVerifier_VerifyDeviceAuth_WrongKey(t *testing.T) {
 	deviceSigned, _ := builder.Build()
 
 	// Create Document
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType:      DocType,
 		DeviceSigned: *deviceSigned,
 	}
@@ -784,7 +815,7 @@ func TestVerifier_VerifyDeviceAuth_MACRequiresSessionKey(t *testing.T) {
 	}
 
 	// Create Document
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType:      DocType,
 		DeviceSigned: *deviceSigned,
 	}
@@ -831,7 +862,7 @@ func TestVerifier_VerifyDeviceAuthWithSessionKey(t *testing.T) {
 	}
 
 	// Create Document
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType:      DocType,
 		DeviceSigned: *deviceSigned,
 	}
@@ -874,7 +905,7 @@ func TestVerifier_VerifyDeviceAuthWithSessionKey_WrongKey(t *testing.T) {
 	deviceSigned, _ := builder.Build()
 
 	// Create Document
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType:      DocType,
 		DeviceSigned: *deviceSigned,
 	}
@@ -897,10 +928,10 @@ func TestVerifier_VerifyDeviceAuthWithSessionKey_WrongKey(t *testing.T) {
 
 func TestVerifier_VerifyDeviceAuthWithSessionKey_NoMAC(t *testing.T) {
 	// Create document with no MAC
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType: DocType,
-		DeviceSigned: DeviceSigned{
-			DeviceAuth: DeviceAuth{}, // Empty - no MAC
+		DeviceSigned: DeviceSignedMdoc{
+			DeviceAuth: DeviceAuthMdoc{}, // Empty - no MAC
 		},
 	}
 
@@ -946,7 +977,7 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 	deviceSigned, _ := builder.Build()
 
 	// Create Document
-	doc := &Document{
+	doc := &DocumentMdoc{
 		DocType:      DocType,
 		DeviceSigned: *deviceSigned,
 	}
@@ -962,6 +993,7 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 
 	// Should fail - invalid device key in MSO
 	err := verifier.VerifyDeviceAuth(doc, mso, transcript)
+	
 	if err == nil {
 		t.Error("VerifyDeviceAuth() should fail with invalid device key")
 	}

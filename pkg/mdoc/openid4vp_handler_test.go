@@ -106,26 +106,36 @@ func TestExtractMDocClaims_InvalidToken(t *testing.T) {
 	}
 }
 
-func TestExtractMDocClaims_ValidToken(t *testing.T) {
-	// Create a minimal DeviceResponse with test data
-	deviceResponse := DeviceResponse{
-		Version: "1.0",
-		Status:  0,
-		Documents: []Document{
-			{
-				DocType: DocType,
-				IssuerSigned: IssuerSigned{
-					NameSpaces: map[string][]IssuerSignedItem{
-						Namespace: {
-							{ElementIdentifier: "family_name", ElementValue: "Doe"},
-							{ElementIdentifier: "given_name", ElementValue: "John"},
-							{ElementIdentifier: "birth_date", ElementValue: "1990-01-15"},
-						},
-					},
-				},
-			},
-		},
+func wrapItem(id uint, key string, value any) cbor.Tag {
+	item := IssuerSignedItem{
+		DigestID:          id,
+		Random:            []byte{0x01, 0x02, 0x03},
+		ElementIdentifier: key,
+		ElementValue:      value,
 	}
+	encoded, _ := cbor.Marshal(item)
+	return cbor.Tag{Number: 24, Content: encoded}
+}
+
+func TestExtractMDocClaims_ValidToken(t *testing.T) {
+	deviceResponse := DeviceResponseMdoc{
+        Version: "1.0",
+        Status:  0,
+        Documents: []DocumentMdoc{
+            {
+                DocType: "org.iso.18013.5.1.mDL",
+                IssuerSigned: IssuerSignedMdoc{
+                    NameSpaces: map[string][]any{
+                        "org.iso.18013.5.1": {
+                            wrapItem(0, "family_name", "Doe"),
+                            wrapItem(1, "given_name", "John"),
+                            wrapItem(2, "birth_date", "1990-01-15"),
+                        },
+                    },
+                },
+            },
+        },
+    }
 
 	// Encode to CBOR
 	data, err := cbor.Marshal(deviceResponse)
@@ -140,21 +150,16 @@ func TestExtractMDocClaims_ValidToken(t *testing.T) {
 		t.Fatalf("ExtractMDocClaims() error = %v", err)
 	}
 
-	// Check unqualified claims (from primary namespace)
-	if claims["family_name"] != "Doe" {
-		t.Errorf("family_name = %v, want Doe", claims["family_name"])
-	}
-	if claims["given_name"] != "John" {
-		t.Errorf("given_name = %v, want John", claims["given_name"])
-	}
-	if claims["birth_date"] != "1990-01-15" {
-		t.Errorf("birth_date = %v, want 1990-01-15", claims["birth_date"])
+	expected := map[string]string{
+		"family_name": "Doe",
+		"given_name":  "John",
+		"birth_date":  "1990-01-15",
 	}
 
-	// Check qualified claims
-	qualifiedKey := Namespace + ".family_name"
-	if claims[qualifiedKey] != "Doe" {
-		t.Errorf("%s = %v, want Doe", qualifiedKey, claims[qualifiedKey])
+	for key, want := range expected {
+		if got, ok := claims[key]; !ok || got != want {
+			t.Errorf("claim %s = %v, want %v", vpToken, got, want)
+		}
 	}
 }
 

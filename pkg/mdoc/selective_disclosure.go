@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"errors"
 	"fmt"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // SelectiveDisclosure provides methods for selectively disclosing mDL data elements.
@@ -12,11 +13,11 @@ import (
 // data elements to release from the requested elements.
 type SelectiveDisclosure struct {
 	// issuerSigned contains the complete issuer-signed data
-	issuerSigned *IssuerSigned
+	issuerSigned *IssuerSignedMdoc
 }
 
 // NewSelectiveDisclosure creates a new SelectiveDisclosure handler from issuer-signed data.
-func NewSelectiveDisclosure(issuerSigned *IssuerSigned) (*SelectiveDisclosure, error) {
+func NewSelectiveDisclosure(issuerSigned *IssuerSignedMdoc) (*SelectiveDisclosure, error) {
 	if issuerSigned == nil {
 		return nil, errors.New("issuer signed data is required")
 	}
@@ -26,38 +27,65 @@ func NewSelectiveDisclosure(issuerSigned *IssuerSigned) (*SelectiveDisclosure, e
 	}, nil
 }
 
-// Disclose creates a new IssuerSigned containing only the specified elements.
-// The request maps namespaces to element identifiers to disclose.
-func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSigned, error) {
+// iterateItems now returns true if the callback requested an early exit
+func iterateItems(items []any, fn func(item IssuerSignedItem, original any) bool) bool {
+	for _, anyItem := range items {
+		var item IssuerSignedItem
+		valid := false
+
+		switch v := anyItem.(type) {
+		case IssuerSignedItem:
+			item = v
+			valid = true
+		case *IssuerSignedItem:
+			item = *v
+			valid = true
+		case cbor.Tag:
+			if content, ok := v.Content.([]byte); ok {
+				if err := cbor.Unmarshal(content, &item); err == nil {
+					valid = true
+				}
+			}
+		}
+
+		if valid {
+			if !fn(item, anyItem) {
+				return true
+			}
+		}
+	}
+	return false
+}
+func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSignedMdoc, error) {
 	if request == nil {
 		return nil, errors.New("request is required")
 	}
 
-	disclosed := &IssuerSigned{
-		NameSpaces: make(map[string][]IssuerSignedItem),
-		IssuerAuth: sd.issuerSigned.IssuerAuth, // MSO stays the same
+	disclosed := &IssuerSignedMdoc{
+		NameSpaces: make(map[string][]any),
+		IssuerAuth: sd.issuerSigned.IssuerAuth, // Keep the original signature/MSO
 	}
 
-	for namespace, elements := range request {
-		// Get items for this namespace
+	for namespace, requestedElements := range request {
 		items, ok := sd.issuerSigned.NameSpaces[namespace]
 		if !ok {
-			continue // Namespace not available
+			continue
 		}
 
-		// Build set of requested elements
+		// Build set for O(1) lookup
 		requested := make(map[string]bool)
-		for _, elem := range elements {
+		for _, elem := range requestedElements {
 			requested[elem] = true
 		}
 
-		// Filter items
-		var disclosedItems []IssuerSignedItem
-		for _, item := range items {
+		var disclosedItems []any
+
+		iterateItems(items, func(item IssuerSignedItem, original any) bool {
 			if requested[item.ElementIdentifier] {
-				disclosedItems = append(disclosedItems, item)
+				disclosedItems = append(disclosedItems, original)
 			}
-		}
+			return true
+		})
 
 		if len(disclosedItems) > 0 {
 			disclosed.NameSpaces[namespace] = disclosedItems
@@ -68,7 +96,7 @@ func (sd *SelectiveDisclosure) Disclose(request map[string][]string) (*IssuerSig
 }
 
 // DiscloseFromItemsRequest creates a new IssuerSigned from an ItemsRequest.
-func (sd *SelectiveDisclosure) DiscloseFromItemsRequest(request *ItemsRequest) (*IssuerSigned, error) {
+func (sd *SelectiveDisclosure) DiscloseFromItemsRequest(request *ItemsRequest) (*IssuerSignedMdoc, error) {
 	if request == nil {
 		return nil, errors.New("items request is required")
 	}
@@ -92,10 +120,14 @@ func (sd *SelectiveDisclosure) GetAvailableElements() map[string][]string {
 
 	for namespace, items := range sd.issuerSigned.NameSpaces {
 		var elements []string
-		for _, item := range items {
+		iterateItems(items, func(item IssuerSignedItem, _ any) bool {
 			elements = append(elements, item.ElementIdentifier)
+			return true
+		})
+
+		if len(elements) > 0 {
+			available[namespace] = elements
 		}
-		available[namespace] = elements
 	}
 
 	return available
@@ -108,19 +140,21 @@ func (sd *SelectiveDisclosure) HasElement(namespace, element string) bool {
 		return false
 	}
 
-	for _, item := range items {
+	found := false
+	iterateItems(items, func(item IssuerSignedItem, _ any) bool {
 		if item.ElementIdentifier == element {
-			return true
+			found = true
+			return false
 		}
-	}
-
-	return false
+		return true
+	})
+	return found
 }
 
 // DeviceResponseBuilder builds a DeviceResponse with selective disclosure.
 type DeviceResponseBuilder struct {
 	docType           string
-	issuerSigned      *IssuerSigned
+	issuerSigned      *IssuerSignedMdoc
 	deviceKey         crypto.Signer
 	sessionTranscript []byte
 	request           *ItemsRequest
@@ -138,7 +172,7 @@ func NewDeviceResponseBuilder(docType string) *DeviceResponseBuilder {
 }
 
 // WithIssuerSigned sets the issuer-signed data.
-func (b *DeviceResponseBuilder) WithIssuerSigned(issuerSigned *IssuerSigned) *DeviceResponseBuilder {
+func (b *DeviceResponseBuilder) WithIssuerSigned(issuerSigned *IssuerSignedMdoc) *DeviceResponseBuilder {
 	b.issuerSigned = issuerSigned
 	return b
 }
@@ -183,90 +217,92 @@ func (b *DeviceResponseBuilder) AddError(namespace, element string, errorCode in
 }
 
 // Build creates the DeviceResponse.
-func (b *DeviceResponseBuilder) Build() (*DeviceResponse, error) {
-	if b.issuerSigned == nil {
-		return nil, errors.New("issuer signed data is required")
-	}
-	if b.sessionTranscript == nil {
-		return nil, errors.New("session transcript is required")
-	}
+func (b *DeviceResponseBuilder) Build() (*DeviceResponseMdoc, error) {
+    if b.issuerSigned == nil {
+        return nil, errors.New("issuer signed data is required")
+    }
+    if b.sessionTranscript == nil {
+        return nil, errors.New("session transcript is required")
+    }
 
-	// Create selective disclosure handler
-	sd, err := NewSelectiveDisclosure(b.issuerSigned)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create selective disclosure: %w", err)
-	}
+    // Create selective disclosure handler
+    sd, err := NewSelectiveDisclosure(b.issuerSigned)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create selective disclosure: %w", err)
+    }
 
-	// Perform selective disclosure if request is provided
-	var disclosedIssuerSigned *IssuerSigned
-	if b.request != nil {
-		disclosedIssuerSigned, err = sd.DiscloseFromItemsRequest(b.request)
-		if err != nil {
-			return nil, fmt.Errorf("failed to disclose elements: %w", err)
-		}
+    // Perform selective disclosure if request is provided
+    var disclosedIssuerSigned *IssuerSignedMdoc
+    if b.request != nil {
+        disclosedIssuerSigned, err = sd.DiscloseFromItemsRequest(b.request)
+        if err != nil {
+            return nil, fmt.Errorf("failed to disclose elements: %w", err)
+        }
 
-		// Add errors for requested but unavailable elements
-		for namespace, elemMap := range b.request.NameSpaces {
-			for elem := range elemMap {
-				if !sd.HasElement(namespace, elem) {
-					b.AddError(namespace, elem, ErrorDataNotAvailable)
-				}
-			}
-		}
-	} else {
-		disclosedIssuerSigned = b.issuerSigned
-	}
+        // Add errors for requested but unavailable elements
+        for namespace, elemMap := range b.request.NameSpaces {
+            for elem := range elemMap {
+                if !sd.HasElement(namespace, elem) {
+                    b.AddError(namespace, elem, ErrorDataNotAvailable)
+                }
+            }
+        }
+    } else {
+        disclosedIssuerSigned = b.issuerSigned
+    }
 
-	// Build device authentication
-	var deviceAuth DeviceAuth
-	var deviceNameSpaces []byte
+    var deviceAuth DeviceAuthMdoc
+    var deviceNameSpaces any 
 
-	if b.useMAC && b.macKey != nil {
-		// Build MAC authentication
-		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
-			WithSessionTranscript(b.sessionTranscript).
-			WithSessionKey(b.macKey).
-			Build()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build device MAC: %w", err)
-		}
-		deviceAuth = deviceSigned.DeviceAuth
-		deviceNameSpaces = deviceSigned.NameSpaces
-	} else if b.deviceKey != nil {
-		// Build signature authentication
-		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
-			WithSessionTranscript(b.sessionTranscript).
-			WithDeviceKey(b.deviceKey).
-			Build()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build device signature: %w", err)
-		}
-		deviceAuth = deviceSigned.DeviceAuth
-		deviceNameSpaces = deviceSigned.NameSpaces
-	} else {
-		return nil, errors.New("device key or MAC key is required")
-	}
+    if b.useMAC && b.macKey != nil {
+        // Build MAC authentication
+        deviceSigned, err := NewDeviceAuthBuilder(b.docType).
+            WithSessionTranscript(b.sessionTranscript).
+            WithSessionKey(b.macKey).
+            Build()
+        if err != nil {
+            return nil, fmt.Errorf("failed to build device MAC: %w", err)
+        }
 
-	// Build document
-	doc := Document{
-		DocType:      b.docType,
-		IssuerSigned: *disclosedIssuerSigned,
-		DeviceSigned: DeviceSigned{
-			NameSpaces: deviceNameSpaces,
-			DeviceAuth: deviceAuth,
-		},
-	}
+        deviceAuth = DeviceAuthMdoc{
+            DeviceMac: deviceSigned.DeviceAuth.DeviceMac,
+        }
+        deviceNameSpaces = deviceSigned.NameSpaces
 
-	// Add errors if any
-	if len(b.errors) > 0 {
-		doc.Errors = b.errors
-	}
+    } else if b.deviceKey != nil {
+        deviceSigned, err := NewDeviceAuthBuilder(b.docType).
+            WithSessionTranscript(b.sessionTranscript).
+            WithDeviceKey(b.deviceKey).
+            Build()
+        if err != nil {
+            return nil, fmt.Errorf("failed to build device signature: %w", err)
+        }
 
-	return &DeviceResponse{
-		Version:   "1.0",
-		Documents: []Document{doc},
-		Status:    0, // OK
-	}, nil
+        deviceAuth = DeviceAuthMdoc{
+            DeviceSignature: deviceSigned.DeviceAuth.DeviceSignature,
+        }
+        deviceNameSpaces = deviceSigned.NameSpaces
+    } else {
+        return nil, errors.New("device key or MAC key is required")
+    }
+
+    doc := &DocumentMdoc{
+        DocType:      b.docType,
+        IssuerSigned: *disclosedIssuerSigned,
+        DeviceSigned: DeviceSignedMdoc{
+            NameSpaces: deviceNameSpaces,
+            DeviceAuth: deviceAuth,
+        },
+    }
+    if len(b.errors) > 0 {
+        doc.Errors = b.errors
+    }
+    
+    return &DeviceResponseMdoc{
+        Version:   "1.0",
+        Documents: []DocumentMdoc{*doc},
+        Status:    0,
+    }, nil
 }
 
 // Error codes per ISO 18013-5:2021 Table 8
@@ -407,7 +443,7 @@ func (p *DisclosurePolicy) CanAutoDisclose(request *ItemsRequest) bool {
 }
 
 // EncodeDeviceResponse encodes a DeviceResponse to CBOR.
-func EncodeDeviceResponse(response *DeviceResponse) ([]byte, error) {
+func EncodeDeviceResponse(response *DeviceResponseMdoc) ([]byte, error) {
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, err
@@ -416,13 +452,13 @@ func EncodeDeviceResponse(response *DeviceResponse) ([]byte, error) {
 }
 
 // DecodeDeviceResponse decodes a DeviceResponse from CBOR.
-func DecodeDeviceResponse(data []byte) (*DeviceResponse, error) {
+func DecodeDeviceResponse(data []byte) (*DeviceResponseMdoc, error) {
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, err
 	}
 
-	var response DeviceResponse
+	var response DeviceResponseMdoc
 	if err := encoder.Unmarshal(data, &response); err != nil {
 		return nil, err
 	}

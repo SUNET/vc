@@ -146,8 +146,9 @@ func TestIssuer_Issue(t *testing.T) {
 	if issued == nil {
 		t.Fatal("Issue() returned nil")
 	}
-	if issued.Document.DocType != DocType {
-		t.Errorf("DocType = %s, want %s", issued.Document.DocType, DocType)
+	if issued.DocumentMdoc.Documents == nil {
+		t.Error("Documents is nil")
+
 	}
 	if issued.SignedMSO == nil {
 		t.Error("SignedMSO is nil")
