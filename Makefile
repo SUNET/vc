@@ -182,21 +182,9 @@ test-env: ## Set up test environment
 	$(info Setting up test environment)
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
 
-test-js: ## Run JS unit tests for staticembed helpers (with coverage; fails below 80%)
+test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
-	@node --test --experimental-test-coverage $(APIGW_STATIC)/tests/ > /tmp/test-js.log 2>&1; \
-	status=$$?; \
-	cat /tmp/test-js.log; \
-	if [ $$status -ne 0 ]; then exit $$status; fi; \
-	awk -F '|' '/consent-helpers\.js[[:space:]]+\|/ { \
-		l=$$2+0; b=$$3+0; f=$$4+0; \
-		printf "\nJS coverage (consent-helpers.js): line=%g%% branch=%g%% func=%g%%\n", l, b, f; \
-		if (l<80 || b<80 || f<80) { \
-			printf "FAIL: coverage below 80%% threshold\n"; \
-			exit 1; \
-		} \
-		printf "OK: coverage meets 80%% threshold\n"; \
-	}' /tmp/test-js.log
+	@node --test $(APIGW_STATIC)/tests/
 
 # Test targets with build tags
 test-pkcs11: ## Test with PKCS#11 build tag

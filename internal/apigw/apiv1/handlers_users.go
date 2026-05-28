@@ -286,11 +286,32 @@ func findValueByName(data map[string]any, path []*string) any {
 			if leafKey == "" {
 				return nil
 			}
-			return findValueRecursive(data, leafKey)
+			return normalizeEmpty(findValueRecursive(data, leafKey))
 		}
 	}
 
-	return current
+	return normalizeEmpty(current)
+}
+
+// normalizeEmpty returns nil for values that are semantically empty
+// (empty strings, empty maps, empty slices) so that callers checking
+// for != nil continue to suppress blank consent-preview rows.
+func normalizeEmpty(v any) any {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return nil
+		}
+	case map[string]any:
+		if len(val) == 0 {
+			return nil
+		}
+	case []any:
+		if len(val) == 0 {
+			return nil
+		}
+	}
+	return v
 }
 
 // lastNamedSegment returns the value of the last non-nil entry in a VCTM
