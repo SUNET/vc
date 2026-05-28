@@ -18,15 +18,28 @@ const SvgTemplateResponseSchema = v.required(v.object({
 }));
 
 /**
+ * Recursive JSON-value schema for claim values. Claim values are always
+ * delivered as JSON (string, number, boolean, null, or a nested object/array
+ * of the same), so anything outside that set is rejected at parse time and
+ * the consumer can rely on `typeof` checks at use sites.
+ * @type {import('valibot').GenericSchema<unknown>}
+ */
+const ClaimValueSchema = v.lazy(() => v.union([
+    v.string(),
+    v.number(),
+    v.boolean(),
+    v.null(),
+    v.array(ClaimValueSchema),
+    v.record(v.string(), ClaimValueSchema),
+]));
+
+/**
  * @typedef {v.InferOutput<typeof UserDataSchema>} UserData
  */
 const UserDataSchema = v.required(v.object({
     svg_template_claims: v.record(v.string(), v.object({
         label: v.string(),
-        // value may be a string, number, boolean, or a nested object/array
-        // (e.g. an address with sub-fields). The consent UI renders objects
-        // as a tree.
-        value: v.unknown(),
+        value: ClaimValueSchema,
     })),
     redirect_url: v.string(),
 }));
@@ -61,19 +74,70 @@ function escapeHtml(s) {
         .replaceAll("'", "&#39;");
 }
 
+// Raster image subtypes that are safe to inline as data: URLs in this UI.
+// SVG (and other types that can carry script/external references) are
+// intentionally excluded — they would execute in <img>/SVG <image href=…>
+// contexts in some browsers.
+const SAFE_IMAGE_SUBTYPES = new Set(["png", "jpeg", "gif", "webp"]);
+
+// Standard base64 alphabet (anchored elsewhere) — no URL-safe variants, no
+// whitespace, no other characters.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+// data:image/<subtype>;base64,<base64-payload>
+const DATA_URL_RE = /^data:image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/i;
+
 /**
- * Detect base64-encoded image data and return a `data:` URL, or null if the
- * string isn't recognizable image data. Showing a raw base64 blob in a
- * consent UI is useless — we render the picture instead.
+ * Base64-encode a string as UTF-8 bytes. `btoa` only accepts Latin-1
+ * characters and throws on Unicode (e.g. "Penélope" in test data), which
+ * would break the SVG card preview. Encode to UTF-8 first.
+ * @param {string} s
+ * @returns {string}
+ */
+function utf8ToBase64(s) {
+    const bytes = new TextEncoder().encode(s);
+    let bin = "";
+    // Build the Latin-1 string in chunks to avoid the argument-count limit
+    // of String.fromCharCode for very long inputs (substituted card images
+    // can be tens of KB).
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, /** @type {any} */(bytes.subarray(i, i + CHUNK)));
+    }
+    return btoa(bin);
+}
+
+/**
+ * Detect base64-encoded image data and return a safe `data:` URL, or null if
+ * the input isn't a recognized image. Showing a raw base64 blob in a consent
+ * UI is useless — we render the picture instead.
+ *
+ * Only a small allowlist of raster MIME types is permitted, and the payload
+ * must be base64-encoded. Anything else (SVG, plaintext data URLs, unknown
+ * subtypes, base64 with stray characters) returns null.
+ *
  * @param {string} s
  * @returns {string | null}
  */
 function detectBase64Image(s) {
-    if (s.startsWith("data:image/")) return s;
+    if (s.startsWith("data:")) {
+        const m = DATA_URL_RE.exec(s);
+        if (!m) return null;
+        const subtype = m[1].toLowerCase();
+        if (!SAFE_IMAGE_SUBTYPES.has(subtype)) return null;
+        return `data:image/${subtype};base64,${m[2]}`;
+    }
+    // Bare base64 — sniff the decoded magic bytes via the base64 prefix and
+    // require the full string to be valid standard base64.
+    if (!BASE64_RE.test(s)) return null;
     // PNG: base64 of "\x89PNG\r\n\x1a\n..." starts with "iVBORw0KGgo"
     if (s.startsWith("iVBORw0KGgo")) return `data:image/png;base64,${s}`;
     // JPEG: base64 of "\xff\xd8\xff..." starts with "/9j/"
     if (s.startsWith("/9j/")) return `data:image/jpeg;base64,${s}`;
+    // GIF: base64 of "GIF87a"/"GIF89a" starts with "R0lGO"
+    if (s.startsWith("R0lGO")) return `data:image/gif;base64,${s}`;
+    // WebP: base64 of "RIFF....WEBP" starts with "UklGR"
+    if (s.startsWith("UklGR")) return `data:image/webp;base64,${s}`;
     return null;
 }
 
@@ -325,8 +389,9 @@ Alpine.data("app", () => ({
                 claims: data.svg_template_claims,
             });
 
-            if (data.svg_template_claims.given_name?.value) {
-                this.$refs.title.innerText = `Welcome, ${data.svg_template_claims.given_name.value}!`
+            const givenName = data.svg_template_claims.given_name?.value;
+            if (typeof givenName === "string" && givenName.length > 0) {
+                this.$refs.title.innerText = `Welcome, ${givenName}!`;
             }
         } catch (err) {
             if (err instanceof v.ValiError) {
@@ -397,12 +462,12 @@ Alpine.data("app", () => ({
             svg = svg.replaceAll(`{{${svg_id}}}`, value);
         }
 
-        return `data:image/svg+xml;base64,${btoa(svg)}`;
+        return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
     },
 
     /**
      * Renders a claim value as HTML. Primitive values become escaped text;
-     * objects and arrays become a nested <ul> tree.
+     * objects and arrays become nested <div> rows of indented key:value pairs.
      * Returned HTML is safe to set via x-html: all user-supplied strings are
      * passed through escapeHtml first.
      * @param {unknown} value
