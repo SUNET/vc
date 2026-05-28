@@ -112,17 +112,11 @@ func (b *DeviceAuthBuilder) Build() (*DeviceSignedMdoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode device authentication: %w", err)
 	}
- 	// DeviceSigned.nameSpaces must use the wire format: Tag 24 wrapping the
- 	// already-encoded CBOR namespaces item.
- 	deviceNameSpacesTaggedBytes, err := encoder.Marshal(cbor.Tag{
-		Number:  24,
-		Content: deviceNameSpacesBytes,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode tagged device namespaces: %w", err)
-	}
 	var deviceSigned DeviceSignedMdoc
-	deviceSigned.NameSpaces = deviceNameSpacesTaggedBytes
+	deviceSigned.NameSpaces = cbor.Tag{
+		Number:  24,
+		Content: deviceNameSpacesBytes, // The raw encoded namespace bytes
+	}
 
 	if b.useMAC {
 		// MAC-based authentication using session key
@@ -188,20 +182,17 @@ func NewDeviceAuthVerifier(sessionTranscript []byte, docType string) *DeviceAuth
 		docType:           docType,
 	}
 }
-
 func extractDeviceNameSpacesBytes(ns interface{}) ([]byte, error) {
-    b, ok := ns.([]byte)
-    if !ok {
-        return nil, fmt.Errorf("unexpected type for NameSpaces: expected []byte, got %T", ns)
+    if tag, ok := ns.(cbor.Tag); ok {
+        if tag.Number == 24 {
+            if untaggedBytes, ok := tag.Content.([]byte); ok {
+                return untaggedBytes, nil
+            }
+        }
+        return nil, fmt.Errorf("unexpected CBOR tag number: expected 24, got %d", tag.Number)
     }
 
-    var tag cbor.Tag
-    if err := cbor.Unmarshal(b, &tag); err == nil && tag.Number == 24 {
-        if untaggedBytes, ok := tag.Content.([]byte); ok {
-            return untaggedBytes, nil
-        }
-    }
-    return b, nil
+    return nil, fmt.Errorf("unexpected type for NameSpaces: got %T", ns)
 }
 
 func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, deviceKey crypto.PublicKey) error {

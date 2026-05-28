@@ -218,89 +218,91 @@ func (b *DeviceResponseBuilder) AddError(namespace, element string, errorCode in
 
 // Build creates the DeviceResponse.
 func (b *DeviceResponseBuilder) Build() (*DeviceResponseMdoc, error) {
-	if b.issuerSigned == nil {
-		return nil, errors.New("issuer signed data is required")
-	}
-	if b.sessionTranscript == nil {
-		return nil, errors.New("session transcript is required")
-	}
+    if b.issuerSigned == nil {
+        return nil, errors.New("issuer signed data is required")
+    }
+    if b.sessionTranscript == nil {
+        return nil, errors.New("session transcript is required")
+    }
 
-	// Create selective disclosure handler
-	sd, err := NewSelectiveDisclosure(b.issuerSigned)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create selective disclosure: %w", err)
-	}
+    // Create selective disclosure handler
+    sd, err := NewSelectiveDisclosure(b.issuerSigned)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create selective disclosure: %w", err)
+    }
 
-	// Perform selective disclosure if request is provided
-	var disclosedIssuerSigned *IssuerSignedMdoc
-	if b.request != nil {
-		disclosedIssuerSigned, err = sd.DiscloseFromItemsRequest(b.request)
-		if err != nil {
-			return nil, fmt.Errorf("failed to disclose elements: %w", err)
-		}
+    // Perform selective disclosure if request is provided
+    var disclosedIssuerSigned *IssuerSignedMdoc
+    if b.request != nil {
+        disclosedIssuerSigned, err = sd.DiscloseFromItemsRequest(b.request)
+        if err != nil {
+            return nil, fmt.Errorf("failed to disclose elements: %w", err)
+        }
 
-		// Add errors for requested but unavailable elements
-		for namespace, elemMap := range b.request.NameSpaces {
-			for elem := range elemMap {
-				if !sd.HasElement(namespace, elem) {
-					b.AddError(namespace, elem, ErrorDataNotAvailable)
-				}
-			}
-		}
-	} else {
-		disclosedIssuerSigned = b.issuerSigned
-	}
+        // Add errors for requested but unavailable elements
+        for namespace, elemMap := range b.request.NameSpaces {
+            for elem := range elemMap {
+                if !sd.HasElement(namespace, elem) {
+                    b.AddError(namespace, elem, ErrorDataNotAvailable)
+                }
+            }
+        }
+    } else {
+        disclosedIssuerSigned = b.issuerSigned
+    }
 
-	var deviceAuth DeviceAuthMdoc
-	var deviceNameSpaces cbor.Tag
-	if b.useMAC && b.macKey != nil {
-		// Build MAC authentication
-		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
-		WithSessionTranscript(b.sessionTranscript).
-		WithSessionKey(b.macKey).
-		Build()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build device MAC: %w", err)
-		}
+    var deviceAuth DeviceAuthMdoc
+    var deviceNameSpaces any 
 
-		deviceAuth = DeviceAuthMdoc{
-			DeviceMac: deviceSigned.DeviceAuth.DeviceMac,
-		}
-		deviceNameSpaces = cbor.Tag{Number: 24, Content: deviceSigned.NameSpaces}
-	} else if b.deviceKey != nil {
-		deviceSigned, err := NewDeviceAuthBuilder(b.docType).
-		WithSessionTranscript(b.sessionTranscript).
-		WithDeviceKey(b.deviceKey).
-		Build()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build device signature: %w", err)
-		}
+    if b.useMAC && b.macKey != nil {
+        // Build MAC authentication
+        deviceSigned, err := NewDeviceAuthBuilder(b.docType).
+            WithSessionTranscript(b.sessionTranscript).
+            WithSessionKey(b.macKey).
+            Build()
+        if err != nil {
+            return nil, fmt.Errorf("failed to build device MAC: %w", err)
+        }
 
-		// FIX: Assign to DeviceSignature
-		deviceAuth = DeviceAuthMdoc{
-			DeviceSignature: deviceSigned.DeviceAuth.DeviceSignature,
-		}
-		deviceNameSpaces = cbor.Tag{Number: 24, Content: deviceSigned.NameSpaces}
-	} else {
-		return nil, errors.New("device key or MAC key is required")
-	}
+        deviceAuth = DeviceAuthMdoc{
+            DeviceMac: deviceSigned.DeviceAuth.DeviceMac,
+        }
+        deviceNameSpaces = deviceSigned.NameSpaces
 
-	doc := &DocumentMdoc{
-		DocType:      b.docType,
-		IssuerSigned: *disclosedIssuerSigned,
-		DeviceSigned: DeviceSignedMdoc{
-			NameSpaces: deviceNameSpaces,
-			DeviceAuth: deviceAuth,
-		},
-	}
-	if len(b.errors) > 0 {
-		doc.Errors = b.errors
-	}
-	return &DeviceResponseMdoc{
-		Version:   "1.0",
-		Documents: []DocumentMdoc{*doc},
-		Status:    0,
-	}, nil
+    } else if b.deviceKey != nil {
+        deviceSigned, err := NewDeviceAuthBuilder(b.docType).
+            WithSessionTranscript(b.sessionTranscript).
+            WithDeviceKey(b.deviceKey).
+            Build()
+        if err != nil {
+            return nil, fmt.Errorf("failed to build device signature: %w", err)
+        }
+
+        deviceAuth = DeviceAuthMdoc{
+            DeviceSignature: deviceSigned.DeviceAuth.DeviceSignature,
+        }
+        deviceNameSpaces = deviceSigned.NameSpaces
+    } else {
+        return nil, errors.New("device key or MAC key is required")
+    }
+
+    doc := &DocumentMdoc{
+        DocType:      b.docType,
+        IssuerSigned: *disclosedIssuerSigned,
+        DeviceSigned: DeviceSignedMdoc{
+            NameSpaces: deviceNameSpaces,
+            DeviceAuth: deviceAuth,
+        },
+    }
+    if len(b.errors) > 0 {
+        doc.Errors = b.errors
+    }
+    
+    return &DeviceResponseMdoc{
+        Version:   "1.0",
+        Documents: []DocumentMdoc{*doc},
+        Status:    0,
+    }, nil
 }
 
 // Error codes per ISO 18013-5:2021 Table 8
