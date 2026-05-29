@@ -167,6 +167,7 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 		if parentPaths[jp] {
 			// This is a parent claim — collect its children.
 			children := map[string]any{}
+			var wildcardValue any
 			for _, child := range v.Claims {
 				if len(child.Display) == 0 || len(child.Path) <= 1 {
 					continue
@@ -181,20 +182,30 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 				}
 				lastSeg := child.Path[len(child.Path)-1]
 				if lastSeg == nil {
-					continue // array wildcard — not a named child
+					// Array wildcard child — remember the resolved value
+					// so the parent can fall back to a leaf entry.
+					wildcardValue = childValue
+					continue
 				}
 				children[*lastSeg] = map[string]any{
 					"label": child.Display[0].Label,
 					"value": childValue,
 				}
 			}
+			if c.Path[0] == nil {
+				continue // no usable key for parent node
+			}
 			if len(children) > 0 {
-				if c.Path[0] == nil {
-					continue // no usable key for parent node
-				}
 				result[*c.Path[0]] = map[string]any{
 					"label":    label,
 					"children": children,
+				}
+			} else if wildcardValue != nil {
+				// All children were array wildcards — emit the parent as
+				// a leaf with the resolved array value.
+				result[*c.Path[0]] = map[string]any{
+					"label": label,
+					"value": wildcardValue,
 				}
 			}
 		} else if !isChildOfDisplayableParent(c.Path, parentPaths) {

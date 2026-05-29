@@ -299,6 +299,29 @@ func TestVCTMPresentation(t *testing.T) {
 		})
 	})
 
+	t.Run("parent with only array-wildcard children emits value", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{new("nationalities")}, Display: []ClaimDisplay{{Locale: "en", Label: "Nationalities"}}},
+				{Path: []*string{new("nationalities"), nil}, Display: []ClaimDisplay{{Locale: "en", Label: "Nationality"}}},
+				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+			},
+		}
+		data := map[string]any{
+			"nationalities": []any{"DE", "SE"},
+			"given_name":    "Helen",
+		}
+		result := v.Presentation(data)
+		// Parent with wildcard-only children should appear as a leaf with the array value.
+		nat := result["nationalities"].(map[string]any)
+		assert.Equal(t, "Nationalities", nat["label"])
+		assert.Equal(t, []any{"DE", "SE"}, nat["value"])
+		assert.Nil(t, nat["children"])
+		// Normal leaf still works.
+		gn := result["given_name"].(map[string]any)
+		assert.Equal(t, "Helen", gn["value"])
+	})
+
 	t.Run("parent with nil Path[0] does not panic", func(t *testing.T) {
 		v := &VCTM{
 			Claims: []Claim{
