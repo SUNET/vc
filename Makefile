@@ -166,7 +166,7 @@ pki-clean: ## Clean PKI material
 # Testing Targets
 # ==============================================================================
 
-test: $(addprefix test-,$(SERVICES)) ## Run all service tests
+test: $(addprefix test-,$(SERVICES)) test-js ## Run all service tests
 
 # Generate test-SERVICE targets dynamically
 define TEST_TEMPLATE
