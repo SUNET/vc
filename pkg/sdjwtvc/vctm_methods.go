@@ -157,7 +157,7 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 	result := map[string]any{}
 
 	for _, c := range v.Claims {
-		if len(c.Display) == 0 {
+		if len(c.Display) == 0 || len(c.Path) == 0 {
 			continue
 		}
 

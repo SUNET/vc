@@ -311,6 +311,21 @@ func TestVCTMPresentation(t *testing.T) {
 			v.Presentation(data)
 		})
 	})
+
+	t.Run("empty path claim does not panic", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{}, Display: []ClaimDisplay{{Locale: "en", Label: "Empty"}}},
+				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+			},
+		}
+		data := map[string]any{"given_name": "Helen"}
+		assert.NotPanics(t, func() {
+			result := v.Presentation(data)
+			assert.Len(t, result, 1)
+			assert.Equal(t, "Helen", result["given_name"].(map[string]any)["value"])
+		})
+	})
 }
 
 func TestVCTMSVGValues(t *testing.T) {
