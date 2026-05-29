@@ -28,7 +28,7 @@ type SVGTemplateReply struct {
 type UserLookupReply struct {
 	// SVGTemplateClaims is keyed by svg_id — flat values for SVG template placeholder substitution.
 	SVGTemplateClaims map[string]sdjwtvc.SVGValue `json:"svg_template_claims"`
-	// PresentationClaims is keyed by path — nested parent/children structure for the consent page.
+	// PresentationClaims is keyed by claim name — nested parent/children structure for the consent page.
 	PresentationClaims map[string]any `json:"presentation_claims"`
 	RedirectURL        string         `json:"redirect_url,omitempty"`
 }

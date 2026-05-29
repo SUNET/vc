@@ -134,6 +134,13 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	presentationClaims = req.VCTM.Presentation(doc.DocumentData)
 	svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
 
+	if svgTemplateClaims == nil {
+		svgTemplateClaims = map[string]sdjwtvc.SVGValue{}
+	}
+	if presentationClaims == nil {
+		presentationClaims = map[string]any{}
+	}
+
 	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims, "presentationClaims", presentationClaims)
 
 	if err := c.cacheService.AuthContext.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
