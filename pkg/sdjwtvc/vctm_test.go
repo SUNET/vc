@@ -275,6 +275,29 @@ func TestVCTMPresentation(t *testing.T) {
 		assert.Len(t, result, 1)
 		assert.NotNil(t, result["given_name"])
 	})
+
+	t.Run("array wildcard path does not panic", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{new("nationalities"), nil}, Display: []ClaimDisplay{{Locale: "en", Label: "Nationalities"}}},
+				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+			},
+		}
+		data := map[string]any{
+			"nationalities": []any{"DE", "SE"},
+			"given_name":    "Helen",
+		}
+		assert.NotPanics(t, func() {
+			result := v.Presentation(data)
+			// The array wildcard claim should resolve using the first path segment.
+			nat := result["nationalities"].(map[string]any)
+			assert.Equal(t, "Nationalities", nat["label"])
+			assert.Equal(t, []any{"DE", "SE"}, nat["value"])
+			// Normal leaf still works.
+			gn := result["given_name"].(map[string]any)
+			assert.Equal(t, "Helen", gn["value"])
+		})
+	})
 }
 
 func TestVCTMSVGValues(t *testing.T) {

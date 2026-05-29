@@ -174,8 +174,11 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 				if childValue == nil {
 					continue
 				}
-				childKey := *child.Path[len(child.Path)-1]
-				children[childKey] = map[string]any{
+				lastSeg := child.Path[len(child.Path)-1]
+				if lastSeg == nil {
+					continue // array wildcard — not a named child
+				}
+				children[*lastSeg] = map[string]any{
 					"label": child.Display[0].Label,
 					"value": childValue,
 				}
@@ -192,9 +195,13 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 			if value == nil {
 				continue
 			}
-			key := *c.Path[0]
-			if len(c.Path) > 1 {
+			var key string
+			if len(c.Path) > 1 && c.Path[len(c.Path)-1] != nil {
 				key = *c.Path[len(c.Path)-1]
+			} else if c.Path[0] != nil {
+				key = *c.Path[0]
+			} else {
+				continue // no usable key segment
 			}
 			result[key] = map[string]any{
 				"label": label,
