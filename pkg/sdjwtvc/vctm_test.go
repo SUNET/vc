@@ -298,6 +298,19 @@ func TestVCTMPresentation(t *testing.T) {
 			assert.Equal(t, "Helen", gn["value"])
 		})
 	})
+
+	t.Run("parent with nil Path[0] does not panic", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{nil}, Display: []ClaimDisplay{{Locale: "en", Label: "Root"}}},
+				{Path: []*string{nil, new("child")}, Display: []ClaimDisplay{{Locale: "en", Label: "Child"}}},
+			},
+		}
+		data := map[string]any{"child": "val"}
+		assert.NotPanics(t, func() {
+			v.Presentation(data)
+		})
+	})
 }
 
 func TestVCTMSVGValues(t *testing.T) {

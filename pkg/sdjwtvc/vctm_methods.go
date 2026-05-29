@@ -114,9 +114,14 @@ func (v *VCTM) ClaimJSONPath() (*VCTMJSONPath, error) {
 // Presentation resolves VCTM claims against document data and returns a nested
 // map suitable for the consent preview UI.
 //
-// The returned map is keyed by the top-level path element. Each entry is a
-// map[string]any with "label" and either "value" (leaf claims) or "children"
-// (parent claims whose children are also defined in the VCTM with display info).
+// The returned map is keyed by claim name. For single-segment claims and
+// displayable parents, the key is the first path element. For multi-segment
+// leaf claims without a displayable parent, the key is the last path segment
+// (e.g. a claim with path ["address", "country"] is keyed as "country").
+//
+// Each entry is a map[string]any with "label" and either "value" (leaf claims)
+// or "children" (parent claims whose children are also defined in the VCTM
+// with display info).
 //
 // Example output:
 //
@@ -184,6 +189,9 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 				}
 			}
 			if len(children) > 0 {
+				if c.Path[0] == nil {
+					continue // no usable key for parent node
+				}
 				result[*c.Path[0]] = map[string]any{
 					"label":    label,
 					"children": children,
