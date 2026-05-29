@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 
@@ -87,13 +88,7 @@ func (s *Service) endpointIdentityMappingSearch(ctx context.Context, c *gin.Cont
 	// A nil slice means unrestricted access (wildcard rule).
 	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
 		if scopes, ok := allowed.([]string); ok && scopes != nil {
-			hasScope := false
-			for _, sc := range scopes {
-				if sc == "identity_mapping" {
-					hasScope = true
-					break
-				}
-			}
+			hasScope := slices.Contains(scopes, "identity_mapping")
 			if !hasScope {
 				return nil, errForbidden
 			}

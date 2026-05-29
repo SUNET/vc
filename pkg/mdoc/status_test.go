@@ -426,7 +426,7 @@ func TestExtractStatusReference_NoStatus(t *testing.T) {
 		issuerSignedNS[ns] = anyItems
 	}
 
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 	doc := &DocumentMdoc{
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
@@ -859,7 +859,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 		issuerSignedNS[ns] = anyItems
 	}
 
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 	doc := &DocumentMdoc{
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{

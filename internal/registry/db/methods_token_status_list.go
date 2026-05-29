@@ -159,7 +159,7 @@ func (c *TokenStatusListColl) CreateNewSection(ctx context.Context, section int6
 	defer span.End()
 
 	docs := []*TokenStatusListDoc{}
-	for i := int64(0); i < sectionSize; i++ {
+	for i := range sectionSize {
 		docs = append(docs, &TokenStatusListDoc{
 			Index:   i,
 			Status:  uint8(cryptoRandIntn(maxRandomLimit) & 0xFF),
@@ -229,7 +229,7 @@ func (c *TokenStatusListColl) Add(ctx context.Context, section int64, status uin
 	defer span.End()
 
 	const maxRetries = 3
-	for retry := 0; retry < maxRetries; retry++ {
+	for retry := range maxRetries {
 		decoys, err := c.getRandomDecoys(ctx, section)
 		if err != nil {
 			return 0, err

@@ -183,7 +183,7 @@ func NewDeviceAuthVerifier(sessionTranscript []byte, docType string) *DeviceAuth
 	}
 }
 
-func extractDeviceNameSpacesBytes(ns interface{}) ([]byte, error) {
+func extractDeviceNameSpacesBytes(ns any) ([]byte, error) {
 	if tag, ok := ns.(cbor.Tag); ok {
 		if tag.Number == 24 {
 			if untaggedBytes, ok := tag.Content.([]byte); ok {

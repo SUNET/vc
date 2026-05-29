@@ -200,7 +200,7 @@ func TestTokenStatusLists_HistoricalResolution_NotSupported(t *testing.T) {
 
 	req := &TokenStatusListsRequest{
 		ID:   1,
-		Time: int64Ptr(1686920170), // Valid Unix timestamp
+		Time: new(int64(1686920170)), // Valid Unix timestamp
 	}
 
 	resp, err := client.TokenStatusLists(ctx, req)
@@ -219,7 +219,7 @@ func TestTokenStatusLists_NegativeTimeParameter(t *testing.T) {
 
 	req := &TokenStatusListsRequest{
 		ID:   1,
-		Time: int64Ptr(-1234567890), // Valid negative timestamp (before 1970)
+		Time: new(int64(-1234567890)), // Valid negative timestamp (before 1970)
 	}
 
 	resp, err := client.TokenStatusLists(ctx, req)

@@ -396,7 +396,7 @@ func TestDocument(t *testing.T) {
 	}
 
 	// 2. Prepare the empty map for DeviceSigned
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 
 	// 3. Construct the document
 	doc := &DocumentMdoc{
@@ -421,7 +421,7 @@ func TestDocument(t *testing.T) {
 
 func TestDocument_WithErrors(t *testing.T) {
 	// 1. Prepare DeviceSigned dependencies
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 	issuerAuthArray := []any{0xD2}
 
 	// 2. Prepare NameSpaces using the []any slice to match the secondary structure
@@ -472,7 +472,7 @@ func TestDeviceResponse(t *testing.T) {
 	// 1. Setup the CBOR Tag 24 wrapper for DeviceSigned NameSpaces
 	// In mdoc, DeviceSigned NameSpaces is typically a Tag 24 wrapped byte string of a map.
 
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 	issuerAuthArray := []any{0xD2}
 	//deviceSignedNameSpaces := cbor.Tag{Number: 24, Content: emptyMapBytes}
 

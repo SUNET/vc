@@ -14,8 +14,8 @@ func TestBoolVal(t *testing.T) {
 	}{
 		{"nil with false fallback", nil, false, false},
 		{"nil with true fallback", nil, true, true},
-		{"true pointer", BoolPtr(true), false, true},
-		{"false pointer", BoolPtr(false), true, false},
+		{"true pointer", new(true), false, true},
+		{"false pointer", new(false), true, false},
 	}
 
 	for _, tt := range tests {

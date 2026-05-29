@@ -281,8 +281,8 @@ func (p *advancedParser) parseList() (sexp.Element, error) {
 		if atom, ok := elem.(*sexp.Atom); ok {
 			if atom.Value == "*" {
 				elem = &starform.Wildcard{}
-			} else if strings.HasSuffix(atom.Value, "*") {
-				elem = &starform.Prefix{Value: strings.TrimSuffix(atom.Value, "*")}
+			} else if before, found := strings.CutSuffix(atom.Value, "*"); found {
+				elem = &starform.Prefix{Value: before}
 			}
 		}
 		elements = append(elements, elem)

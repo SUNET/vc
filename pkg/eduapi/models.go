@@ -77,7 +77,7 @@ type Demographics struct {
 type Role struct {
 	RoleType string  `json:"roleType"`
 	Role     string  `json:"role"`
-	OrgRef   GUIDRef `json:"org,omitempty"`
+	OrgRef   GUIDRef `json:"org"`
 }
 
 // AgentRef represents a reference to an agent (advisor, parent, etc.).
@@ -125,9 +125,9 @@ type CourseOffering struct {
 	Title        string         `json:"title"`
 	CourseCode   string         `json:"courseCode,omitempty"`
 	ClassType    string         `json:"classType,omitempty"`
-	SchoolRef    GUIDRef        `json:"school,omitempty"`
+	SchoolRef    GUIDRef        `json:"school"`
 	TermRefs     []GUIDRef      `json:"terms,omitempty"`
-	CourseRef    GUIDRef        `json:"course,omitempty"`
+	CourseRef    GUIDRef        `json:"course"`
 	Periods      []string       `json:"periods,omitempty"`
 	SubjectCodes []string       `json:"subjectCodes,omitempty"`
 	Grades       []string       `json:"grades,omitempty"`
@@ -146,7 +146,7 @@ type CollectionOffering struct {
 	DateLastMod  string         `json:"dateLastModified,omitempty"`
 	Title        string         `json:"title"`
 	OfferingType string         `json:"collectionType,omitempty"`
-	SchoolRef    GUIDRef        `json:"school,omitempty"`
+	SchoolRef    GUIDRef        `json:"school"`
 	CourseRefs   []GUIDRef      `json:"courses,omitempty"`
 	Extensions   map[string]any `json:"extensions,omitempty"`
 }

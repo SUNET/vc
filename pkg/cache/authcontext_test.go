@@ -679,7 +679,6 @@ func TestConcurrentAccess(t *testing.T) {
 	// Concurrent reads
 	done := make(chan bool, 10)
 	for i := range 10 {
-		i := i
 		go func() {
 			defer func() { done <- true }()
 			query := &AuthorizationContext{Code: fmt.Sprintf("code-%d", i)}
