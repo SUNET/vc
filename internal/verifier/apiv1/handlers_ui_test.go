@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -53,7 +54,7 @@ func TestUIMetadata(t *testing.T) {
 			name: "credentials only",
 			credentials: map[string]*model.CredentialMetadata{
 				"ehic": {
-					VCTM:       &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
+					VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
 				},
 			},
 			supportedWallets:  nil,

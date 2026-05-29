@@ -3,6 +3,7 @@ package openid4vp_test
 import (
 	"slices"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )

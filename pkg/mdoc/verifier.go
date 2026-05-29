@@ -6,9 +6,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/fxamacker/cbor/v2"
 	"maps"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -124,18 +125,19 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 		result.Valid = false
 	}
 	// Check response documentErrors
-    if len(response.DocumentErrors) > 0 {
-        result.Valid = false
-        
-        // Loop through and log the actual document-level failures 
-        for _, docErr := range response.DocumentErrors {
-            for docType, errorCode := range docErr {
-                result.Errors = append(result.Errors, 
-                    fmt.Errorf("document verification failed: docType %q returned error code %d", docType, errorCode),
-                )
-            }
-        }
-    }
+	if len(response.DocumentErrors) > 0 {
+		result.Valid = false
+
+		// Loop through and log the actual document-level failures
+		for _, docErr := range response.DocumentErrors {
+			for docType, errorCode := range docErr {
+				result.Errors = append(
+					result.Errors,
+					fmt.Errorf("document verification failed: docType %q returned error code %d", docType, errorCode),
+				)
+			}
+		}
+	}
 	// Verify each document
 	for i := range response.Documents {
 		doc := &response.Documents[i]
@@ -354,7 +356,6 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 			DocType:   docType,
 		},
 	})
-
 	if err != nil {
 		return fmt.Errorf("trust evaluation failed: %w", err)
 	}

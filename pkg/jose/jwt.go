@@ -191,7 +191,6 @@ func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[str
 			return nil, fmt.Errorf("unsupported signing method: %v", algStr)
 		}
 	})
-
 	if err != nil {
 		return nil, nil, nil, "", err
 	}

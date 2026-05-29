@@ -455,8 +455,6 @@ type AdminGUI struct {
 	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
-
-
 // VerifierInbound groups inbound credential verification configuration
 type VerifierInbound struct {
 	// OpenID4VP holds the OpenID4VP configuration for accepting wallet presentations
@@ -923,8 +921,6 @@ type OAuthServer struct {
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
 }
 
-
-
 // Cfg is the main configuration structure for this application
 type Cfg struct {
 	Common   *Common   `yaml:"common"`
@@ -932,7 +928,6 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
-
 }
 
 // LookupCredentialSources returns full data source information for a credential type

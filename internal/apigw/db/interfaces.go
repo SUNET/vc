@@ -42,6 +42,8 @@ type IdentityMappingStore interface {
 }
 
 // Ensure concrete types implement the interfaces
-var _ CredentialOfferStore = (*CredentialOfferColl)(nil)
-var _ DatastoreStore = (*DatastoreColl)(nil)
-var _ IdentityMappingStore = (*IdentityMappingsColl)(nil)
+var (
+	_ CredentialOfferStore = (*CredentialOfferColl)(nil)
+	_ DatastoreStore       = (*DatastoreColl)(nil)
+	_ IdentityMappingStore = (*IdentityMappingsColl)(nil)
+)

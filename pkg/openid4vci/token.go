@@ -51,7 +51,7 @@ type TokenResponse struct {
 	// State REQUIRED if the "state" parameter was present in the client authorization request.  The exact value received from the client.
 	State string `json:"state"`
 
-	//CNonce OPTIONAL. String containing a nonce to be used when creating a proof of possession of the key proof (see Section 7.2). When received, the Wallet MUST use this nonce value for its subsequent requests until the Credential Issuer provides a fresh nonce.
+	// CNonce OPTIONAL. String containing a nonce to be used when creating a proof of possession of the key proof (see Section 7.2). When received, the Wallet MUST use this nonce value for its subsequent requests until the Credential Issuer provides a fresh nonce.
 	CNonce string `json:"c_nonce"`
 
 	// CNonceExpiresIn OPTIONAL. Number denoting the lifetime in seconds of the c_nonce.

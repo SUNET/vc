@@ -40,7 +40,6 @@ func TestNewError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want.title, tt.have.Title)
 			assert.Equal(t, tt.want.details, tt.have.Err)
-
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"hash"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/jose"
 )
 

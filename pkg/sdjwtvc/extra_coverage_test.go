@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/jose"
 )
 

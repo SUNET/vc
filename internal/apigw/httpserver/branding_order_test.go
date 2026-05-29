@@ -48,7 +48,7 @@ func TestBrandingMiddlewareOrder_CorrectOrder(t *testing.T) {
 
 	dir := t.TempDir()
 	logoPath := filepath.Join(dir, "logo.png")
-	require.NoError(t, os.WriteFile(logoPath, []byte("custom-logo"), 0644)) //#nosec G306
+	require.NoError(t, os.WriteFile(logoPath, []byte("custom-logo"), 0o644)) //#nosec G306
 
 	branding := model.Branding{LogoPath: logoPath}
 
@@ -73,7 +73,7 @@ func TestBrandingMiddlewareOrder_WrongOrder(t *testing.T) {
 
 	dir := t.TempDir()
 	logoPath := filepath.Join(dir, "logo.png")
-	require.NoError(t, os.WriteFile(logoPath, []byte("custom-logo"), 0644)) //#nosec G306
+	require.NoError(t, os.WriteFile(logoPath, []byte("custom-logo"), 0o644)) //#nosec G306
 
 	branding := model.Branding{LogoPath: logoPath}
 

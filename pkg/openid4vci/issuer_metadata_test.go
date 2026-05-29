@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -332,7 +333,6 @@ func TestMarshal(t *testing.T) {
 
 		assert.Equal(t, want, metadata)
 	})
-
 }
 
 func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {

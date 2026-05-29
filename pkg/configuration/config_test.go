@@ -41,7 +41,7 @@ verifier:
 `, testMongoURI)
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0o600))
 
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestLoadSecrets_DirectoryPath(t *testing.T) {
 func TestLoadSecrets_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "bad.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte("{{not valid yaml"), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte("{{not valid yaml"), 0o600))
 
 	_, err := LoadSecrets(secretsPath)
 	assert.Error(t, err)
@@ -90,7 +90,7 @@ func TestLoadSecrets_InvalidYAML(t *testing.T) {
 func TestLoadSecrets_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "empty.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte(""), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte(""), 0o600))
 
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ registry:
 `
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "partial.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0o600))
 
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)

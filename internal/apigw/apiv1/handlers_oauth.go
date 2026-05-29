@@ -412,7 +412,7 @@ func (c *Client) SDJWTVCIssuerMetadata(ctx context.Context) (*SDJWTVCIssuerMetad
 }
 
 type OauthAuthorizationConsentRequest struct {
-	//AuthMethod string `json:"-"`
+	// AuthMethod string `json:"-"`
 	SessionID string `json:"-"`
 }
 
@@ -486,7 +486,7 @@ type OauthAuthorizationConsentCallbackRequest struct {
 }
 
 type OAuthAuthorizationConsentCallbackResponse struct {
-	//RedirectURL string `json:"-"`
+	// RedirectURL string `json:"-"`
 }
 
 // OAuthAuthorizationConsentCallback handles the consent callback

@@ -110,7 +110,7 @@ func TestMongoClientOptions_MissingCAFile(t *testing.T) {
 func TestMongoClientOptions_InvalidCAPEM(t *testing.T) {
 	dir := t.TempDir()
 	caPath := filepath.Join(dir, "bad_ca.crt")
-	require.NoError(t, os.WriteFile(caPath, []byte("not a PEM cert"), 0600))
+	require.NoError(t, os.WriteFile(caPath, []byte("not a PEM cert"), 0o600))
 
 	m := Mongo{
 		URI:        "mongodb://localhost:27017",
@@ -156,7 +156,7 @@ func writeTempCA(t *testing.T) string {
 
 	caPath := filepath.Join(dir, "ca.crt")
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	require.NoError(t, os.WriteFile(caPath, certPEM, 0600))
+	require.NoError(t, os.WriteFile(caPath, certPEM, 0o600))
 
 	return caPath
 }
@@ -179,13 +179,13 @@ func writeTempCertKey(t *testing.T) (string, string) {
 
 	certPath := filepath.Join(dir, "client.crt")
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	require.NoError(t, os.WriteFile(certPath, certPEM, 0600))
+	require.NoError(t, os.WriteFile(certPath, certPEM, 0o600))
 
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	require.NoError(t, err)
 	keyPath := filepath.Join(dir, "client.key")
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0600))
+	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0o600))
 
 	return certPath, keyPath
 }

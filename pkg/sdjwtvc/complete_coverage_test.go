@@ -10,6 +10,7 @@ import (
 	"crypto/sha512"
 	"hash"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/jose"
 )
 
@@ -63,7 +64,6 @@ func TestComprehensiveCoverage(t *testing.T) {
 			holderJWK,
 			opts,
 		)
-
 		if err != nil {
 			t.Fatalf("BuildCredentialWithOptions failed: %v", err)
 		}

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"

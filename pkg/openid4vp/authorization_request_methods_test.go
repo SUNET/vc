@@ -200,7 +200,6 @@ func TestAuthorizationRequestSign(t *testing.T) {
 			expectError: false,
 			expectedAlg: "ES256",
 		},
-
 	}
 
 	for _, tt := range tts {

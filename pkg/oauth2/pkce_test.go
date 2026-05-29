@@ -31,10 +31,10 @@ func TestCreateCodeVerifier(t *testing.T) {
 	t.Run("generates unique verifiers", func(t *testing.T) {
 		verifier1, err := CreateCodeVerifier()
 		assert.NoError(t, err)
-		
+
 		verifier2, err := CreateCodeVerifier()
 		assert.NoError(t, err)
-		
+
 		assert.NotEqual(t, verifier1, verifier2, "consecutive verifiers should be unique")
 	})
 
@@ -42,11 +42,11 @@ func TestCreateCodeVerifier(t *testing.T) {
 	t.Run("verifier works with challenge creation", func(t *testing.T) {
 		verifier, err := CreateCodeVerifier()
 		assert.NoError(t, err)
-		
+
 		challenge := CreateCodeChallenge(CodeChallengeMethodS256, verifier)
 		assert.NotEmpty(t, challenge)
 		assert.NotEqual(t, verifier, challenge, "S256 challenge should differ from verifier")
-		
+
 		// Verify the challenge can be validated
 		err = ValidatePKCE(verifier, challenge, CodeChallengeMethodS256)
 		assert.NoError(t, err)

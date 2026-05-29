@@ -1,9 +1,10 @@
 package mdoc
 
 import (
-	"github.com/fxamacker/cbor/v2"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 func TestConstants(t *testing.T) {
@@ -321,34 +322,34 @@ func TestIssuerSignedItem(t *testing.T) {
 }
 
 func TestIssuerSigned(t *testing.T) {
-    issuerSigned := IssuerSignedMdoc{
-        NameSpaces: map[string][]any{
-            Namespace: []any{
-                IssuerSignedItem{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Smith"},
-                IssuerSignedItem{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "given_name", ElementValue: "John"},
-            },
-        },
-        // This is being assigned to a field of type 'any'
-        IssuerAuth: []any{
-            []byte{0xD2, 0x84},
-            map[any]any{},
-            []byte{},
-            []byte{},
-        },
-    }
+	issuerSigned := IssuerSignedMdoc{
+		NameSpaces: map[string][]any{
+			Namespace: {
+				IssuerSignedItem{DigestID: 0, Random: make([]byte, 16), ElementIdentifier: "family_name", ElementValue: "Smith"},
+				IssuerSignedItem{DigestID: 1, Random: make([]byte, 16), ElementIdentifier: "given_name", ElementValue: "John"},
+			},
+		},
+		// This is being assigned to a field of type 'any'
+		IssuerAuth: []any{
+			[]byte{0xD2, 0x84},
+			map[any]any{},
+			[]byte{},
+			[]byte{},
+		},
+	}
 
-    if len(issuerSigned.NameSpaces[Namespace]) != 2 {
-        t.Errorf("NameSpaces items = %d, want 2", len(issuerSigned.NameSpaces[Namespace]))
-    }
+	if len(issuerSigned.NameSpaces[Namespace]) != 2 {
+		t.Errorf("NameSpaces items = %d, want 2", len(issuerSigned.NameSpaces[Namespace]))
+	}
 
-    // Fix: Type assert to []any before checking length
-    if auth, ok := issuerSigned.IssuerAuth.([]any); ok {
-        if len(auth) != 4 {
-            t.Errorf("IssuerAuth elements = %d, want 4", len(auth))
-        }
-    } else {
-        t.Errorf("IssuerAuth is not a slice, got %T", issuerSigned.IssuerAuth)
-    }
+	// Fix: Type assert to []any before checking length
+	if auth, ok := issuerSigned.IssuerAuth.([]any); ok {
+		if len(auth) != 4 {
+			t.Errorf("IssuerAuth elements = %d, want 4", len(auth))
+		}
+	} else {
+		t.Errorf("IssuerAuth is not a slice, got %T", issuerSigned.IssuerAuth)
+	}
 }
 
 func TestDeviceSigned(t *testing.T) {
@@ -520,10 +521,10 @@ func TestDeviceResponse(t *testing.T) {
 	}
 
 	response := DeviceResponseMdoc{
-        Version:   "1.0",
-        Documents: []DocumentMdoc{*doc},
-        Status:    0,
-    }
+		Version:   "1.0",
+		Documents: []DocumentMdoc{*doc},
+		Status:    0,
+	}
 
 	// 4. Assertions
 	if response.Version != "1.0" {
@@ -535,43 +536,42 @@ func TestDeviceResponse(t *testing.T) {
 	if len(response.Documents) != 1 {
 		t.Errorf("Documents length = %d, want 1", len(response.Documents))
 	}
-
 }
 
 func TestDeviceResponse_WithDocumentErrors(t *testing.T) {
-    // 1. Setup the DocumentError following the standard layout: DocumentError = {DocType => ErrorCode}
-    docErrors := []DocumentError{
-        DocumentError{
-            DocType: 0, // 0 = Data Not Available / Generation Failure
-        },
-    }
+	// 1. Setup the DocumentError following the standard layout: DocumentError = {DocType => ErrorCode}
+	docErrors := []DocumentError{
+		{
+			DocType: 0, // 0 = Data Not Available / Generation Failure
+		},
+	}
 
-    // 2. Build the DeviceResponseMdoc simulating a document-level failure scenario
-    response := DeviceResponseMdoc{
-        Version:        "1.0",
-        DocumentErrors: docErrors, // Correctly type assigned using our DocumentError slice
-        Status:         0,
-    }
+	// 2. Build the DeviceResponseMdoc simulating a document-level failure scenario
+	response := DeviceResponseMdoc{
+		Version:        "1.0",
+		DocumentErrors: docErrors, // Correctly type assigned using our DocumentError slice
+		Status:         0,
+	}
 
-    // 3. Assertions
-    if response.Version != "1.0" {
-        t.Errorf("Version = %s, want 1.0", response.Version)
-    }
-    if response.Status != 0 {
-        t.Errorf("Status = %d, want 0 (OK)", response.Status)
-    }
-    if len(response.DocumentErrors) != 1 {
-        t.Errorf("DocumentErrors length = %d, want 1", len(response.DocumentErrors))
-    }
+	// 3. Assertions
+	if response.Version != "1.0" {
+		t.Errorf("Version = %s, want 1.0", response.Version)
+	}
+	if response.Status != 0 {
+		t.Errorf("Status = %d, want 0 (OK)", response.Status)
+	}
+	if len(response.DocumentErrors) != 1 {
+		t.Errorf("DocumentErrors length = %d, want 1", len(response.DocumentErrors))
+	}
 
-    // Explicit type inspection to ensure compliance
-    errCode, exists := response.DocumentErrors[0][DocType]
-    if !exists {
-        t.Errorf("Expected an error entry for DocType %q, but it was not found", DocType)
-    }
-    if errCode != 0 {
-        t.Errorf("Document error code = %d, want 0", errCode)
-    }
+	// Explicit type inspection to ensure compliance
+	errCode, exists := response.DocumentErrors[0][DocType]
+	if !exists {
+		t.Errorf("Expected an error entry for DocType %q, but it was not found", DocType)
+	}
+	if errCode != 0 {
+		t.Errorf("Document error code = %d, want 0", errCode)
+	}
 }
 
 func TestDeviceRequest(t *testing.T) {

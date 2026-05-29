@@ -454,7 +454,8 @@ func TestGetResultsForPersonWithOptions(t *testing.T) {
 	defer srv.Close()
 
 	// Verify query options are accepted (mock returns same data regardless)
-	results, err := client.GetResultsForPerson(context.Background(), "p-lisa",
+	results, err := client.GetResultsForPerson(
+		context.Background(), "p-lisa",
 		WithLimit(10),
 		WithOffset(0),
 		WithSort("scoreDate"),

@@ -189,159 +189,211 @@ type unimplementedApiv1 struct{}
 func (u unimplementedApiv1) DatastoreUpload(context.Context, *vcclient.UploadRequest) (*apiv1.DatastoreUploadReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreAddIdentity(context.Context, *apiv1.DatastoreAddIdentityRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreDeleteIdentity(context.Context, *apiv1.DatastoreDeleteIdentityRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreGet(context.Context, *apiv1.DatastoreGetRequest) (*apiv1.DatastoreGetReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreList(context.Context, *apiv1.DatastoreListRequest) (*apiv1.DatastoreListReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreDelete(context.Context, *apiv1.DatastoreDeleteRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreGetByKey(context.Context, *apiv1.DatastoreGetByKeyRequest) (*apiv1.DatastoreGetByKeyReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreResolve(context.Context, *apiv1.DatastoreResolveRequest) (*apiv1.DatastoreResolveReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreDeleteByKey(context.Context, *apiv1.DatastoreDeleteByKeyRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreReplace(context.Context, *vcclient.UploadRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreSearch(context.Context, *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) DatastoreBulkUpload(context.Context, *apiv1.DatastoreBulkUploadRequest) (*apiv1.DatastoreBulkUploadReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) IdentityMappingCreate(context.Context, *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) IdentityMappingBulkCreate(context.Context, *apiv1.IdentityMappingBulkCreateRequest) (*apiv1.IdentityMappingBulkCreateReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) IdentityMappingResolve(context.Context, *apiv1.IdentityMappingResolveRequest) (*apiv1.IdentityMappingResolveReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) IdentityMappingUpdate(context.Context, *apiv1.IdentityMappingUpdateRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) IdentityMappingDelete(context.Context, *apiv1.IdentityMappingDeleteRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) IdentityMappingSearch(context.Context, *apiv1.IdentityMappingSearchRequest) (*apiv1.IdentityMappingSearchReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) UserAuthenticSourceLookup(context.Context, *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) UserLookup(context.Context, *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VCINonce(context.Context) (*openid4vci.NonceResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VCICredential(context.Context, *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VCICredentialOfferURI(context.Context, *openid4vci.CredentialOfferURIRequest) (*openid4vci.CredentialOfferParameters, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VCIDeferredCredential(context.Context, *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VCINotification(context.Context, *openid4vci.NotificationRequest) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VCIMetadata(context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OAuthPar(context.Context, *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OAuthAuthorize(context.Context, *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OAuthAuthorizationConsent(context.Context, *apiv1.OauthAuthorizationConsentRequest) (*apiv1.OAuthAuthorizationConsentResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OAuthAuthorizationConsentCallback(context.Context, *apiv1.OauthAuthorizationConsentCallbackRequest) (*apiv1.OAuthAuthorizationConsentCallbackResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OAuthToken(context.Context, *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OAuthMetadata(context.Context) (*oauth2.AuthorizationServerMetadata, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) JWKS(context.Context) (*apiv1.JWKSResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) SDJWTVCIssuerMetadata(context.Context) (*apiv1.SDJWTVCIssuerMetadataResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VerificationRequestObject(context.Context, *apiv1.VerificationRequestObjectRequest) (string, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) VerificationDirectPost(context.Context, *apiv1.VerificationDirectPostRequest) (*apiv1.VerificationDirectPostResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) UICredentialOffers(context.Context) (*apiv1.CredentialOfferLookupMetadata, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) UICreateCredentialOffer(context.Context, *apiv1.UICredentialOfferRequest) (*apiv1.CredentialOfferReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) GetVCTMFromScope(context.Context, *apiv1.GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) SVGTemplateReply(context.Context, *apiv1.SVGTemplateRequest) (*vcclient.SVGTemplateReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) TypeMetadata(context.Context, *apiv1.TypeMetadataRequest) (json.RawMessage, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OIDCRPInitiate(context.Context, *apiv1.OIDCRPInitiateRequest, any) (*apiv1.OIDCRPInitiateResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) OIDCRPCallback(context.Context, *apiv1.OIDCRPCallbackRequest, any) (*apiv1.OIDCRPCallbackResponse, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) StoreVCIDocuments(context.Context, string, map[string]*model.CompleteDocument) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) HasVCIDocuments(context.Context, string) bool {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) LookupDatastoreByIdentity(context.Context, string, string, string, map[string]any, *model.DatastoreScope) error {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) ResolveIdentifier(context.Context, string, map[string]any) (string, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) ResolveVCIIdentifier(context.Context, *cache.AuthorizationContext, map[string]any, ...string) (string, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) AdminLoginURL(context.Context) (*apiv1.AdminLoginURLReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) AdminCallback(context.Context, *apiv1.AdminCallbackRequest) (*apiv1.AdminCallbackReply, error) {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) AdminLogoutURL(string) string {
 	panic("not implemented")
 }
+
 func (u unimplementedApiv1) ListAuthenticSources(context.Context) ([]string, error) {
 	return nil, nil
 }
+
 func (u unimplementedApiv1) Health(context.Context, *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
 	panic("not implemented")
 }

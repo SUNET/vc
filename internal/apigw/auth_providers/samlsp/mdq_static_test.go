@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,7 @@ func TestNewStaticMDQClient_FromFile(t *testing.T) {
 	// Create temporary metadata file
 	tmpDir := t.TempDir()
 	metadataPath := filepath.Join(tmpDir, "idp-metadata.xml")
-	err := os.WriteFile(metadataPath, []byte(testStaticIDPMetadata), 0644) // #nosec G306
+	err := os.WriteFile(metadataPath, []byte(testStaticIDPMetadata), 0o644) // #nosec G306
 	require.NoError(t, err)
 
 	log, err := logger.New("test", "", false)
@@ -83,7 +84,7 @@ func TestStaticMDQClient_GetIDPMetadata_IgnoresEntityID(t *testing.T) {
 	// Create temporary metadata file
 	tmpDir := t.TempDir()
 	metadataPath := filepath.Join(tmpDir, "idp-metadata.xml")
-	err := os.WriteFile(metadataPath, []byte(testStaticIDPMetadata), 0644) // #nosec G306
+	err := os.WriteFile(metadataPath, []byte(testStaticIDPMetadata), 0o644) // #nosec G306
 	require.NoError(t, err)
 
 	log, err := logger.New("test", "", false)
@@ -121,7 +122,7 @@ func TestNewStaticMDQClient_FileNotFound(t *testing.T) {
 func TestNewStaticMDQClient_InvalidXML(t *testing.T) {
 	tmpDir := t.TempDir()
 	metadataPath := filepath.Join(tmpDir, "invalid-metadata.xml")
-	err := os.WriteFile(metadataPath, []byte("not valid xml"), 0644) // #nosec G306
+	err := os.WriteFile(metadataPath, []byte("not valid xml"), 0o644) // #nosec G306
 	require.NoError(t, err)
 
 	log, err := logger.New("test", "", false)
@@ -141,7 +142,7 @@ func TestNewStaticMDQClient_NoIDPDescriptor(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	metadataPath := filepath.Join(tmpDir, "sp-metadata.xml")
-	err := os.WriteFile(metadataPath, []byte(invalidMetadata), 0644) // #nosec G306
+	err := os.WriteFile(metadataPath, []byte(invalidMetadata), 0o644) // #nosec G306
 	require.NoError(t, err)
 
 	log, err := logger.New("test", "", false)
@@ -165,7 +166,7 @@ func TestNewStaticMDQClient_URLFetchError(t *testing.T) {
 func TestNewStaticMDQClient_EntityIDMismatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	metadataPath := filepath.Join(tmpDir, "idp-metadata.xml")
-	err := os.WriteFile(metadataPath, []byte(testStaticIDPMetadata), 0644) // #nosec G306
+	err := os.WriteFile(metadataPath, []byte(testStaticIDPMetadata), 0o644) // #nosec G306
 	require.NoError(t, err)
 
 	log, err := logger.New("test", "", false)

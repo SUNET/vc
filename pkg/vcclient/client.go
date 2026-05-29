@@ -34,7 +34,6 @@ type APIGWClient struct {
 	User     *userHandler
 }
 
-
 // VerifierClient handles Verifier endpoints
 type VerifierClient struct {
 	client  *Client
@@ -173,7 +172,6 @@ func (c *Client) do(ctx context.Context, req *http.Request, reply any, prefixRep
 	}
 
 	return resp, nil
-
 }
 
 // read body and make it reusable

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 

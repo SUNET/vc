@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	//StatusOK status ok
+	// StatusOK status ok
 	StatusOK = "STATUS_OK_%s"
 	// StatusFail status fail
 	StatusFail = "STATUS_FAIL_%s"

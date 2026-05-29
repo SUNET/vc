@@ -111,7 +111,7 @@ type CredentialResponse struct {
 	// CNonceExpiresIn: OPTIONAL. Number denoting the lifetime in seconds of the c_nonce.
 	CNonceExpiresIn int `json:"c_nonce_expires_in,omitempty"`
 
-	//NotificationID: OPTIONAL. String identifying an issued Credential that the Wallet includes in the Notification Request as defined in Section 10.1. This parameter MUST NOT be present if credential parameter is not present.
+	// NotificationID: OPTIONAL. String identifying an issued Credential that the Wallet includes in the Notification Request as defined in Section 10.1. This parameter MUST NOT be present if credential parameter is not present.
 	NotificationID string `json:"notification_id,omitempty" validate:"required_with=Credentials"`
 }
 

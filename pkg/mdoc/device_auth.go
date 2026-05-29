@@ -4,9 +4,9 @@ package mdoc
 import (
 	"crypto"
 	"errors"
-	"github.com/fxamacker/cbor/v2"
-
 	"fmt"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // DeviceAuthentication represents the structure to be signed/MACed for device authentication.
@@ -182,89 +182,90 @@ func NewDeviceAuthVerifier(sessionTranscript []byte, docType string) *DeviceAuth
 		docType:           docType,
 	}
 }
-func extractDeviceNameSpacesBytes(ns interface{}) ([]byte, error) {
-    if tag, ok := ns.(cbor.Tag); ok {
-        if tag.Number == 24 {
-            if untaggedBytes, ok := tag.Content.([]byte); ok {
-                return untaggedBytes, nil
-            }
-        }
-        return nil, fmt.Errorf("unexpected CBOR tag number: expected 24, got %d", tag.Number)
-    }
 
-    return nil, fmt.Errorf("unexpected type for NameSpaces: got %T", ns)
+func extractDeviceNameSpacesBytes(ns interface{}) ([]byte, error) {
+	if tag, ok := ns.(cbor.Tag); ok {
+		if tag.Number == 24 {
+			if untaggedBytes, ok := tag.Content.([]byte); ok {
+				return untaggedBytes, nil
+			}
+		}
+		return nil, fmt.Errorf("unexpected CBOR tag number: expected 24, got %d", tag.Number)
+	}
+
+	return nil, fmt.Errorf("unexpected type for NameSpaces: got %T", ns)
 }
 
 func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, deviceKey crypto.PublicKey) error {
-    if deviceSigned.DeviceAuth.DeviceSignature == nil {
-        return errors.New("no device signature present")
-    }
+	if deviceSigned.DeviceAuth.DeviceSignature == nil {
+		return errors.New("no device signature present")
+	}
 
-    encoder, err := NewCBOREncoder()
-    if err != nil {
-        return fmt.Errorf("failed to create CBOR encoder: %w", err)
-    }
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		return fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
 
-    var sign1 COSESign1
-    sigRaw := deviceSigned.DeviceAuth.DeviceSignature
-    switch val := sigRaw.(type) {
-    case []byte:
-        if len(val) == 0 {
-            return errors.New("device signature byte slice is empty")
-        }
-        if err := encoder.Unmarshal(val, &sign1); err != nil {
-            return fmt.Errorf("failed to parse device signature bytes: %w", err)
-        }
-    case []any:
+	var sign1 COSESign1
+	sigRaw := deviceSigned.DeviceAuth.DeviceSignature
+	switch val := sigRaw.(type) {
+	case []byte:
+		if len(val) == 0 {
+			return errors.New("device signature byte slice is empty")
+		}
+		if err := encoder.Unmarshal(val, &sign1); err != nil {
+			return fmt.Errorf("failed to parse device signature bytes: %w", err)
+		}
+	case []any:
 		if len(val) != 4 {
-            return errors.New("device signature array must have 4 elements")
-        }
+			return errors.New("device signature array must have 4 elements")
+		}
 
-        // Direct assignment avoids the "cbor.Tag" unmarshal error
-        if b, ok := val[0].([]byte); ok {
-            sign1.Protected = b
-        }
-        
-        // Unprotected headers are often a map, but we'll accept any/nil here
-        if m, ok := val[1].(map[any]any); ok {
-            sign1.Unprotected = m
-        }
+		// Direct assignment avoids the "cbor.Tag" unmarshal error
+		if b, ok := val[0].([]byte); ok {
+			sign1.Protected = b
+		}
 
-        // Payload is usually nil for mDL Device Auth
-        if b, ok := val[2].([]byte); ok {
-            sign1.Payload = b
-        }
+		// Unprotected headers are often a map, but we'll accept any/nil here
+		if m, ok := val[1].(map[any]any); ok {
+			sign1.Unprotected = m
+		}
 
-        // The actual ECDSA signature bytes
-        if b, ok := val[3].([]byte); ok {
-            sign1.Signature = b
-        }
-    case cbor.Tag:
+		// Payload is usually nil for mDL Device Auth
+		if b, ok := val[2].([]byte); ok {
+			sign1.Payload = b
+		}
+
+		// The actual ECDSA signature bytes
+		if b, ok := val[3].([]byte); ok {
+			sign1.Signature = b
+		}
+	case cbor.Tag:
 		sigBytes, err := encoder.Marshal(val)
 		if err != nil {
 			return fmt.Errorf("failed to re-encode tagged device signature: %w", err)
 		}
-		
+
 		if err := encoder.Unmarshal(sigBytes, &sign1); err != nil {
 			return fmt.Errorf("failed to map tagged device signature to COSESign1: %w", err)
 		}
-    default:
-        return fmt.Errorf("unexpected type for DeviceSignature: %T", val)
-    }
+	default:
+		return fmt.Errorf("unexpected type for DeviceSignature: %T", val)
+	}
 
 	nameSpacesBytes, err := extractDeviceNameSpacesBytes(deviceSigned.NameSpaces)
-    if err != nil {
-        return fmt.Errorf("failed to process NameSpaces: %w", err)
-    }
-    deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
-    if err != nil {
-        return fmt.Errorf("failed to build device auth bytes: %w", err)
-    }
-    if err := Verify1(&sign1, deviceAuthBytes, deviceKey, nil); err != nil {
-        return fmt.Errorf("device signature verification failed: %w", err)
-    }
+	if err != nil {
+		return fmt.Errorf("failed to process NameSpaces: %w", err)
+	}
+	deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
+	if err != nil {
+		return fmt.Errorf("failed to build device auth bytes: %w", err)
+	}
+	if err := Verify1(&sign1, deviceAuthBytes, deviceKey, nil); err != nil {
+		return fmt.Errorf("device signature verification failed: %w", err)
+	}
 
-    return nil
+	return nil
 }
 
 // VerifyMAC verifies a MAC-based device authentication.
@@ -280,21 +281,25 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKe
 	var mac0 COSEMac0
 	var ok bool
 	mac0.Protected, ok = macArray[0].([]byte)
-	if !ok { return fmt.Errorf("protected header must be bytes") }
+	if !ok {
+		return fmt.Errorf("protected header must be bytes")
+	}
 	mac0.Unprotected, _ = macArray[1].(map[any]any)
 	if macArray[2] != nil {
 		mac0.Payload, _ = macArray[2].([]byte)
 	}
 	mac0.Tag, ok = macArray[3].([]byte)
-	if !ok { return fmt.Errorf("MAC tag must be bytes") }
+	if !ok {
+		return fmt.Errorf("MAC tag must be bytes")
+	}
 
 	nameSpacesBytes, err := extractDeviceNameSpacesBytes(deviceSigned.NameSpaces)
-    if err != nil {
-        return fmt.Errorf("unexpected data layout or type for NameSpaces: %w", err)
-    }
+	if err != nil {
+		return fmt.Errorf("unexpected data layout or type for NameSpaces: %w", err)
+	}
 
-    // Reconstruct DeviceAuthentication using the stripped, untagged bytes
-    deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
+	// Reconstruct DeviceAuthentication using the stripped, untagged bytes
+	deviceAuthBytes, err := v.buildDeviceAuthBytes(nameSpacesBytes)
 	if err != nil {
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}
@@ -368,21 +373,21 @@ func ExtractDeviceKeyFromMSO(mso *MobileSecurityObject) (crypto.PublicKey, error
 // VerifyDeviceAuth verifies device authentication as part of document verification.
 // This should be called after verifying the issuer signature.
 func (v *Verifier) VerifyDeviceAuth(doc *DocumentMdoc, mso *MobileSecurityObject, sessionTranscript []byte) error {
-    hasSignature := false
-    switch s := doc.DeviceSigned.DeviceAuth.DeviceSignature.(type) {
-    case []any:
-        hasSignature = len(s) > 0
-    case []byte:
-        hasSignature = len(s) > 0
-    case cbor.Tag:
-        hasSignature = true
-    }
+	hasSignature := false
+	switch s := doc.DeviceSigned.DeviceAuth.DeviceSignature.(type) {
+	case []any:
+		hasSignature = len(s) > 0
+	case []byte:
+		hasSignature = len(s) > 0
+	case cbor.Tag:
+		hasSignature = true
+	}
 
-    hasMac := len(doc.DeviceSigned.DeviceAuth.DeviceMac) > 0
+	hasMac := len(doc.DeviceSigned.DeviceAuth.DeviceMac) > 0
 
-    if !hasSignature && !hasMac {
-        return nil
-    }
+	if !hasSignature && !hasMac {
+		return nil
+	}
 	// Extract device key from MSO
 	deviceKey, err := ExtractDeviceKeyFromMSO(mso)
 	if err != nil {

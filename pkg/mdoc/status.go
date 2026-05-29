@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
 	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -488,52 +489,53 @@ func (vsc *VerifierStatusCheck) CheckDocumentStatus(ctx context.Context, doc *Do
 
 // ExtractStatusReference extracts the status reference from a Document.
 func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
-    if doc == nil {
-        return nil, errors.New("document is nil")
-    }
+	if doc == nil {
+		return nil, errors.New("document is nil")
+	}
 
-    // Look for status reference in issuer signed items
-    for _, items := range doc.IssuerSigned.NameSpaces {
-        for _, item := range items {
-            var signedItem IssuerSignedItem
-            var found bool
+	// Look for status reference in issuer signed items
+	for _, items := range doc.IssuerSigned.NameSpaces {
+		for _, item := range items {
+			var signedItem IssuerSignedItem
+			var found bool
 
-            switch v := item.(type) {
-            case IssuerSignedItem:
-                signedItem = v
-                found = true
-            case *IssuerSignedItem:
-                if v != nil {
-                    signedItem = *v
-                    found = true
-                }
-            case cbor.Tag:
-                // Tag 24 unwrapping: Unmarshal the content into the struct
-                contentBytes, ok := v.Content.([]byte)
-                if ok {
-                    if err := cbor.Unmarshal(contentBytes, &signedItem); err == nil {
-                        found = true
-                    }
-                }
-            case []byte:
-                // Handle cases where it's already a raw byte slice
-                if err := cbor.Unmarshal(v, &signedItem); err == nil {
-                    found = true
-                }
-            }
+			switch v := item.(type) {
+			case IssuerSignedItem:
+				signedItem = v
+				found = true
+			case *IssuerSignedItem:
+				if v != nil {
+					signedItem = *v
+					found = true
+				}
+			case cbor.Tag:
+				// Tag 24 unwrapping: Unmarshal the content into the struct
+				contentBytes, ok := v.Content.([]byte)
+				if ok {
+					if err := cbor.Unmarshal(contentBytes, &signedItem); err == nil {
+						found = true
+					}
+				}
+			case []byte:
+				// Handle cases where it's already a raw byte slice
+				if err := cbor.Unmarshal(v, &signedItem); err == nil {
+					found = true
+				}
+			}
 
-            // If successfully resolved an IssuerSignedItem, check for the status element
-            if found && signedItem.ElementIdentifier == "status" {
-                ref, ok := parseStatusElement(signedItem.ElementValue)
-                if ok {
-                    return ref, nil
-                }
-            }
-        }
-    }
+			// If successfully resolved an IssuerSignedItem, check for the status element
+			if found && signedItem.ElementIdentifier == "status" {
+				ref, ok := parseStatusElement(signedItem.ElementValue)
+				if ok {
+					return ref, nil
+				}
+			}
+		}
+	}
 
-    return nil, errors.New("no status reference found")
+	return nil, errors.New("no status reference found")
 }
+
 // parseStatusElement parses a status element value into a StatusReference.
 func parseStatusElement(value any) (*StatusReference, bool) {
 	m, ok := value.(map[string]any)

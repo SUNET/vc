@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 

@@ -53,7 +53,8 @@ func TestMultiKeyDecryption(t *testing.T) {
 	plaintext := []byte(`{"id":"multi-key-test","type":"test","body":{"msg":"Hello from multi-device test!"}}`)
 
 	// Encrypt for Bob using his first public key
-	encrypted, err := jwe.Encrypt(plaintext,
+	encrypted, err := jwe.Encrypt(
+		plaintext,
 		jwe.WithKey(jwa.ECDH_ES_A256KW(), bobPubKey1),
 		jwe.WithContentEncryption(jwa.A256GCM()),
 	)
@@ -138,7 +139,8 @@ func TestAliceBobCompleteFlow(t *testing.T) {
 	t.Logf("Signed message length: %d bytes", len(signed))
 
 	// Step 2: Encrypt the signed message for Bob
-	encrypted, err := jwe.Encrypt(signed,
+	encrypted, err := jwe.Encrypt(
+		signed,
 		jwe.WithKey(jwa.ECDH_ES_A256KW(), bobPubKey),
 		jwe.WithContentEncryption(jwa.A256GCM()),
 	)
@@ -194,7 +196,8 @@ func TestForwardMessageWrapping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Encrypt the inner message for Bob
-	innerEncrypted, err := jwe.Encrypt(innerPlaintext,
+	innerEncrypted, err := jwe.Encrypt(
+		innerPlaintext,
 		jwe.WithKey(jwa.ECDH_ES_A256KW(), bobPubKey),
 		jwe.WithContentEncryption(jwa.A256GCM()),
 	)
@@ -499,7 +502,8 @@ func TestDifferentCurveKeyAgreement(t *testing.T) {
 			require.NoError(t, err, "Failed to get public key for %s", tc.name)
 
 			// Encrypt
-			encrypted, err := jwe.Encrypt(plaintext,
+			encrypted, err := jwe.Encrypt(
+				plaintext,
 				jwe.WithKey(jwa.ECDH_ES_A256KW(), pubKey),
 				jwe.WithContentEncryption(jwa.A256GCM()),
 			)

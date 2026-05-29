@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"
@@ -26,13 +27,13 @@ func TestValidateSAMLConfig(t *testing.T) {
 		{
 			name: "valid MDQ configuration",
 			config: model.SAMLSP{
-				Enable:             true,
-				EntityID:           "https://sp.example.com",
-				MDQServer:          "https://md.example.org/entities/",
-				CertificatePath:    "/pki/saml.crt",
-				PrivateKeyPath:     "/pki/saml.key",
-				ACSEndpoint:        "https://sp.example.com/acs",
-				SessionDuration:    300,
+				Enable:           true,
+				EntityID:         "https://sp.example.com",
+				MDQServer:        "https://md.example.org/entities/",
+				CertificatePath:  "/pki/saml.crt",
+				PrivateKeyPath:   "/pki/saml.key",
+				ACSEndpoint:      "https://sp.example.com/acs",
+				SessionDuration:  300,
 				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
 			},
 			expectError: false,
@@ -40,16 +41,16 @@ func TestValidateSAMLConfig(t *testing.T) {
 		{
 			name: "valid static IdP with path",
 			config: model.SAMLSP{
-				Enable:          true,
+				Enable: true,
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:     "https://idp.example.com",
 					MetadataPath: "/path/to/metadata.xml",
 				},
-				EntityID:           "https://sp.example.com",
-				CertificatePath:    "/pki/saml.crt",
-				PrivateKeyPath:     "/pki/saml.key",
-				ACSEndpoint:        "https://sp.example.com/acs",
-				SessionDuration:    300,
+				EntityID:         "https://sp.example.com",
+				CertificatePath:  "/pki/saml.crt",
+				PrivateKeyPath:   "/pki/saml.key",
+				ACSEndpoint:      "https://sp.example.com/acs",
+				SessionDuration:  300,
 				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
 			},
 			expectError: false,
@@ -57,16 +58,16 @@ func TestValidateSAMLConfig(t *testing.T) {
 		{
 			name: "valid static IdP with URL",
 			config: model.SAMLSP{
-				Enable:          true,
+				Enable: true,
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:    "https://idp.example.com",
 					MetadataURL: "https://idp.example.com/metadata",
 				},
-				EntityID:           "https://sp.example.com",
-				CertificatePath:    "/pki/saml.crt",
-				PrivateKeyPath:     "/pki/saml.key",
-				ACSEndpoint:        "https://sp.example.com/acs",
-				SessionDuration:    300,
+				EntityID:         "https://sp.example.com",
+				CertificatePath:  "/pki/saml.crt",
+				PrivateKeyPath:   "/pki/saml.key",
+				ACSEndpoint:      "https://sp.example.com/acs",
+				SessionDuration:  300,
 				AttributeMapping: model.AttributeMapping{"test": {Claim: "test"}},
 			},
 			expectError: false,
@@ -82,7 +83,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 		{
 			name: "both MDQ and static IdP configured",
 			config: model.SAMLSP{
-				Enable:   true,
+				Enable:    true,
 				MDQServer: "https://md.example.org/entities/",
 				StaticIDPMetadata: &model.StaticIDPConfig{
 					EntityID:     "https://idp.example.com",

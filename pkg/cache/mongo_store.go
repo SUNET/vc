@@ -287,7 +287,8 @@ func (s *MongoStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 		return errors.New("id cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"session_id": id},
 		bson.M{"$set": bson.M{"forfeited": true}},
 	)
@@ -307,7 +308,8 @@ func (s *MongoStore) Consent(ctx context.Context, query *AuthorizationContext) e
 		return errors.New("request_uri cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"request_uri": query.RequestURI},
 		bson.M{"$set": bson.M{"consent": true}},
 	)
@@ -327,7 +329,8 @@ func (s *MongoStore) AddToken(ctx context.Context, code string, token *Token) er
 		return errors.New("code cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"code": code},
 		bson.M{"$set": bson.M{"token": token}},
 	)
@@ -350,7 +353,8 @@ func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *Authorizatio
 		return errors.New("session_id cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"session_id": query.SessionID},
 		bson.M{"$set": bson.M{"authentic_source": authenticSource}},
 	)
@@ -373,7 +377,8 @@ func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationCont
 		return errors.New("session_id cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"session_id": query.SessionID},
 		bson.M{"$set": bson.M{"identifier": identifier}},
 	)

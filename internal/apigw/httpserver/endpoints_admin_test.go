@@ -728,7 +728,7 @@ func TestE2E_RestrictedUser_SeesOnlyAllowedDocuments(t *testing.T) {
 			mkDoc("SUNET", "eduid", "doc-1"),
 			mkDoc("SUNET", "pid", "doc-2"),   // wrong scope for alice
 			mkDoc("LADOK", "eduid", "doc-3"), // wrong source for alice
-			mkDoc("CSN", "ehic", "doc-4"),     // wrong source+scope
+			mkDoc("CSN", "ehic", "doc-4"),    // wrong source+scope
 		},
 	}
 	cfg := &model.Cfg{
@@ -772,9 +772,9 @@ func TestE2E_SourceSet_FiltersToSetMembers(t *testing.T) {
 		documents: []*model.CompleteDocument{
 			mkDoc("SUNET", "eduid", "doc-1"),
 			mkDoc("LADOK", "pid", "doc-2"),
-			mkDoc("CSN", "ehic", "doc-3"),     // not in source set
-			mkDoc("SKV", "eduid", "doc-4"),    // not in source set
-			mkDoc("SUNET", "ehic", "doc-5"),   // wrong scope
+			mkDoc("CSN", "ehic", "doc-3"),   // not in source set
+			mkDoc("SKV", "eduid", "doc-4"),  // not in source set
+			mkDoc("SUNET", "ehic", "doc-5"), // wrong scope
 		},
 	}
 	cfg := &model.Cfg{

@@ -103,7 +103,7 @@ func TestFetchVCTM(t *testing.T) {
 			name: "invalid_json",
 			setup: func(t *testing.T) (string, string) {
 				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-	// #nosec G104
+					// #nosec G104
 					w.Write([]byte(`{not json`))
 				}))
 				t.Cleanup(ts.Close)

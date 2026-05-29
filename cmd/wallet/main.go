@@ -113,7 +113,7 @@ func runVCI(args []string) {
 	if *saveTo != "" {
 		creds := client.Store().List()
 		if len(creds) > 0 {
-			if err := os.WriteFile(*saveTo, []byte(creds[len(creds)-1].RawCredential), 0600); err != nil {
+			if err := os.WriteFile(*saveTo, []byte(creds[len(creds)-1].RawCredential), 0o600); err != nil {
 				fatal("saving credential: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "credential saved to %s\n", *saveTo)

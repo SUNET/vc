@@ -105,7 +105,7 @@ func signJWTWithEPPN(t *testing.T, priv *ecdsa.PrivateKey, eppn, iss, aud string
 		Issuer(iss).
 		Audience([]string{aud}).
 		IssuedAt(time.Now()).
-		Expiration(time.Now().Add(5 * time.Minute)).
+		Expiration(time.Now().Add(5*time.Minute)).
 		Claim("eppn", eppn).
 		Build()
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := "(vc (service test-svc)(method GET)(path /health)(subject))\n"
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{
 		RulesFile: path,
@@ -228,7 +228,7 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{
 		Rules:     []string{"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
@@ -767,7 +767,7 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@test)(authentic_source SUNET)(scope eduid))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0o644)) // #nosec G306
 
 	apiAuth := model.APIAuth{
 		JWKS: model.APIAuthJWKS{
@@ -812,7 +812,7 @@ func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 (vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
 (vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
 	engine, err := BuildSPOCPEngine(cfg)
@@ -833,7 +833,7 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 
 # trailing comment
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
 	engine, err := BuildSPOCPEngine(cfg)
@@ -845,7 +845,7 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 func TestLoadRulesFromFile_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	require.NoError(t, os.WriteFile(path, []byte(""), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(""), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
 	engine, err := BuildSPOCPEngine(cfg)
@@ -861,7 +861,7 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 	content := `# comment one
 # comment two
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
 	engine, err := BuildSPOCPEngine(cfg)
@@ -877,7 +877,7 @@ func TestLoadRulesFromFile_InvalidLine(t *testing.T) {
 this is not valid
 (vc (service test-svc)(method POST)(path /upload)(subject bob))
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
 	_, err := BuildSPOCPEngine(cfg)
@@ -897,7 +897,7 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 # Set of methods
 (vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie))
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{RulesFile: path}
 	engine, err := BuildSPOCPEngine(cfg)
@@ -921,7 +921,7 @@ func TestRulesFile_E2E_MultipleUsersAndPaths(t *testing.T) {
 (vc (service test-svc)(method GET)(path /api/v1/document)(subject bob@test)(authentic_source LADOK)(scope pid))
 (vc (service test-svc)(method *)(path (* prefix /api/v1/))(subject admin@test)(authentic_source *)(scope *))
 `
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0o644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
@@ -979,7 +979,7 @@ func TestRulesFile_E2E_WildcardSubject(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "# Any authenticated user can GET /api/v1/public with any resource\n(vc (service test-svc)(method GET)(path /api/v1/public)(subject *)(authentic_source *)(scope *))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0o644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
@@ -1029,7 +1029,7 @@ func TestRulesFile_E2E_SuffixPath(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "# alice can GET any .json path\n(vc (service test-svc)(method GET)(path (* suffix .json))(subject alice@test)(authentic_source *)(scope *))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0o644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
@@ -1076,7 +1076,7 @@ func TestRulesFile_E2E_MethodSet(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	rules := "# alice may GET or POST but not DELETE on /api/v1/items\n(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject alice@test)(authentic_source *)(scope *))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(rulesPath, []byte(rules), 0o644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
@@ -1127,7 +1127,7 @@ func TestRulesFile_E2E_InlinePlusFile(t *testing.T) {
 	dir := t.TempDir()
 	rulesPath := filepath.Join(dir, "rules.spocp")
 	fileRules := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin@test)(authentic_source *)(scope *))\n"
-	require.NoError(t, os.WriteFile(rulesPath, []byte(fileRules), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(rulesPath, []byte(fileRules), 0o644)) // #nosec G306
 
 	jwksCfg := model.APIAuthJWKS{
 		Enable:   true,
@@ -1225,7 +1225,8 @@ func TestResolveAllowedResources_NilEngine(t *testing.T) {
 }
 
 func TestResolveAllowedResources_SingleScope(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 	pairs := ResolveAllowedResources(engine, "alice@sunet.se")
@@ -1235,7 +1236,8 @@ func TestResolveAllowedResources_SingleScope(t *testing.T) {
 }
 
 func TestResolveAllowedResources_SetScope(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
 	)
 	pairs := ResolveAllowedResources(engine, "alice@sunet.se")
@@ -1247,7 +1249,8 @@ func TestResolveAllowedResources_SetScope(t *testing.T) {
 }
 
 func TestResolveAllowedResources_WildcardScope(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))",
 	)
 	pairs := ResolveAllowedResources(engine, "admin@sunet.se")
@@ -1257,7 +1260,8 @@ func TestResolveAllowedResources_WildcardScope(t *testing.T) {
 }
 
 func TestResolveAllowedResources_MultipleRules(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope identity_mapping))",
 	)
@@ -1266,7 +1270,8 @@ func TestResolveAllowedResources_MultipleRules(t *testing.T) {
 }
 
 func TestResolveAllowedResources_DifferentSubject(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 	pairs := ResolveAllowedResources(engine, "bob@sunet.se")
@@ -1281,7 +1286,8 @@ func TestAllowedScopes_NilEngine(t *testing.T) {
 }
 
 func TestAllowedScopes_SingleScope(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 	result := AllowedScopes(engine, "alice@sunet.se")
@@ -1289,7 +1295,8 @@ func TestAllowedScopes_SingleScope(t *testing.T) {
 }
 
 func TestAllowedScopes_SetScope(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
 	)
 	result := AllowedScopes(engine, "alice@sunet.se")
@@ -1297,7 +1304,8 @@ func TestAllowedScopes_SetScope(t *testing.T) {
 }
 
 func TestAllowedScopes_WildcardReturnsNil(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))",
 	)
 	result := AllowedScopes(engine, "admin@sunet.se")
@@ -1305,7 +1313,8 @@ func TestAllowedScopes_WildcardReturnsNil(t *testing.T) {
 }
 
 func TestAllowedScopes_NoMatchingRules(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 	result := AllowedScopes(engine, "stranger@sunet.se")
@@ -1315,7 +1324,8 @@ func TestAllowedScopes_NoMatchingRules(t *testing.T) {
 // ---------- AllowedAuthenticSources with sets ----------
 
 func TestAllowedAuthenticSources_SetSource(t *testing.T) {
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source (* set SUNET LADOK))(scope eduid))",
 	)
 	result := AllowedAuthenticSources(engine, "alice@sunet.se")
@@ -1330,7 +1340,8 @@ func TestJWTAuth_ResourceAccess_Allowed(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 
@@ -1358,7 +1369,8 @@ func TestJWTAuth_ResourceAccess_WrongScope(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 
@@ -1387,7 +1399,8 @@ func TestJWTAuth_ResourceAccess_WrongAuthenticSource(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 
@@ -1415,7 +1428,8 @@ func TestJWTAuth_ResourceAccess_SetScope_Allowed(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
 	)
 
@@ -1447,7 +1461,8 @@ func TestJWTAuth_ResourceAccess_SetScope_Denied(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
 	)
 
@@ -1475,7 +1490,8 @@ func TestJWTAuth_ResourceAccess_WildcardAdmin(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))",
 	)
 
@@ -1504,7 +1520,8 @@ func TestJWTAuth_NoResourcePairs_Allowed(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 
@@ -1530,7 +1547,8 @@ func TestJWTAuth_MissingEPPN_Denied(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 
@@ -1557,7 +1575,8 @@ func TestJWTAuth_ContextContainsAllowedScopes(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope (* set eduid identity_mapping)))",
 	)
 
@@ -1596,7 +1615,8 @@ func TestJWTAuth_OmittedScope_Denied(t *testing.T) {
 	priv, set := testKeyPair(t)
 	srv, cache := jwksServer(t, set)
 
-	engine := buildEngine(t,
+	engine := buildEngine(
+		t,
 		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
 	)
 

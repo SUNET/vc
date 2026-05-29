@@ -62,19 +62,19 @@ func TestValidationIdentity(t *testing.T) {
 			name: "ok",
 			have: &model.Identity{
 				AuthenticSourcePersonID: "person-123",
-				FamilyName: "Doe",
-				GivenName:  "John",
-				BirthDate:  "1970-01-01",
+				FamilyName:              "Doe",
+				GivenName:               "John",
+				BirthDate:               "1970-01-01",
 			},
 			want: nil,
 		},
 		{
 			name: "wrong datetime format",
 			have: &model.Identity{
-					AuthenticSourcePersonID: "person-123",
-					FamilyName: "Doe",
-					GivenName:  "John",
-					BirthDate:  "1972-10-27 10:15:31.432635902 +0000 UTC",
+				AuthenticSourcePersonID: "person-123",
+				FamilyName:              "Doe",
+				GivenName:               "John",
+				BirthDate:               "1972-10-27 10:15:31.432635902 +0000 UTC",
 			},
 			want: &Error{
 				Title: "validation_error",
@@ -159,9 +159,9 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 				ID: []model.Identity{
 					{
 						AuthenticSourcePersonID: "person-123",
-						FamilyName: "Doe",
-						GivenName:  "John",
-						BirthDate:  "1972-10-27",
+						FamilyName:              "Doe",
+						GivenName:               "John",
+						BirthDate:               "1972-10-27",
 					},
 				},
 			},
@@ -173,21 +173,22 @@ func TestValidationArrayOfIdentity(t *testing.T) {
 				ID: []model.Identity{
 					{
 						AuthenticSourcePersonID: "person-123",
-						FamilyName: "Doe",
-						GivenName:  "John",
-						BirthDate:  "1972-10-27 10:15:31.432635902 +0000 UTC",
+						FamilyName:              "Doe",
+						GivenName:               "John",
+						BirthDate:               "1972-10-27 10:15:31.432635902 +0000 UTC",
 					},
 				},
 			},
 			want: &Error{
 				Title: "validation_error",
-				Err: []map[string]any{{
-					"field":           "birth_date",
-					"namespace":       "ID[0].birth_date",
-					"type":            "string",
-					"validation":      "datetime",
-					"validationParam": "2006-01-02",
-				},
+				Err: []map[string]any{
+					{
+						"field":           "birth_date",
+						"namespace":       "ID[0].birth_date",
+						"type":            "string",
+						"validation":      "datetime",
+						"validationParam": "2006-01-02",
+					},
 				},
 			},
 		},
@@ -446,7 +447,7 @@ func TestImagePNGValidator(t *testing.T) {
 		var buf bytes.Buffer
 		require.NoError(t, png.Encode(&buf, img))
 		p := filepath.Join(t.TempDir(), "img.png")
-		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0644)) // #nosec G306
+		require.NoError(t, os.WriteFile(p, buf.Bytes(), 0o644)) // #nosec G306
 		return p
 	}
 
@@ -464,14 +465,14 @@ func TestImagePNGValidator(t *testing.T) {
 
 	t.Run("not a PNG", func(t *testing.T) {
 		p := filepath.Join(t.TempDir(), "text.png")
-		require.NoError(t, os.WriteFile(p, []byte("hello"), 0644)) // #nosec G306
+		require.NoError(t, os.WriteFile(p, []byte("hello"), 0o644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 
 	t.Run("JPEG is rejected", func(t *testing.T) {
 		// JPEG magic bytes
 		p := filepath.Join(t.TempDir(), "fake.png")
-		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0644)) // #nosec G306
+		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0o644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
 	})
 }

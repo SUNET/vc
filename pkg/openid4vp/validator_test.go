@@ -84,7 +84,7 @@ func TestVPTokenValidator_Validate_ValidToken(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: false, // Skip actual signature verification
+		ValidateFormat:  false, // Skip actual signature verification
 		CheckRevocation: false,
 	}
 
@@ -135,7 +135,7 @@ func TestVPTokenValidator_Validate_MissingHolderBinding(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: false,
 	}
 
@@ -154,7 +154,7 @@ func TestVPTokenValidator_Validate_NonceMismatch(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: false,
 	}
 
@@ -173,7 +173,7 @@ func TestVPTokenValidator_Validate_AudienceMismatch(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: false,
 	}
 
@@ -191,7 +191,7 @@ func TestVPTokenValidator_Validate_WithoutNonceValidation(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           "", // Empty nonce means skip nonce validation
 		ClientID:        clientID,
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: false,
 	}
 
@@ -208,7 +208,7 @@ func TestVPTokenValidator_Validate_WithoutClientIDValidation(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        "", // Empty clientID means skip audience validation
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: false,
 	}
 
@@ -225,7 +225,7 @@ func TestVPTokenValidator_Validate_WithSignatureVerification(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: true, // Enable signature verification
+		ValidateFormat:  true, // Enable signature verification
 		CheckRevocation: false,
 	}
 
@@ -243,7 +243,7 @@ func TestVPTokenValidator_Validate_WithRevocationCheck(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: true, // Enable revocation check
 	}
 
@@ -273,7 +273,7 @@ func TestVPTokenValidator_Validate_WithDCQLQuery(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		ValidateFormat: false,
+		ValidateFormat:  false,
 		CheckRevocation: false,
 		DCQLQuery:       dcqlQuery,
 	}

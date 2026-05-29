@@ -7,10 +7,11 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"github.com/fxamacker/cbor/v2"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -108,28 +109,28 @@ func createTestDSCert(t *testing.T, dsKey *ecdsa.PrivateKey, iacaCert *x509.Cert
 	return dsCert
 }
 
-// getEffectiveLength returns the length of the data regardless of its 
+// getEffectiveLength returns the length of the data regardless of its
 // container (raw bytes, any slice, or CBOR tag).
 func getEffectiveLength(v any) int {
-    if v == nil {
-        return 0
-    }
+	if v == nil {
+		return 0
+	}
 
-    switch val := v.(type) {
-    case []byte:
-        return len(val)
-    case []any:
-        return len(val)
-    case cbor.Tag:
-        // If it's a tag, we check the length of its content
-        if content, ok := val.Content.([]byte); ok {
-            return len(content)
-        }
-        if content, ok := val.Content.([]any); ok {
-            return len(content)
-        }
-    }
-    return 0
+	switch val := v.(type) {
+	case []byte:
+		return len(val)
+	case []any:
+		return len(val)
+	case cbor.Tag:
+		// If it's a tag, we check the length of its content
+		if content, ok := val.Content.([]byte); ok {
+			return len(content)
+		}
+		if content, ok := val.Content.([]any); ok {
+			return len(content)
+		}
+	}
+	return 0
 }
 
 func TestNewDeviceAuthBuilder(t *testing.T) {
@@ -245,40 +246,40 @@ func TestDeviceAuthBuilder_Build_Signature(t *testing.T) {
 	if deviceSigned.DeviceAuth.DeviceMac != nil {
 		t.Error("DeviceMac should be nil for signature-based auth")
 	}
-    if getEffectiveLength(deviceSigned.NameSpaces) == 0 {
-        t.Error("NameSpaces should be set and contain data")
-    }
+	if getEffectiveLength(deviceSigned.NameSpaces) == 0 {
+		t.Error("NameSpaces should be set and contain data")
+	}
 }
 
 func TestDeviceAuthBuilder_Build_MAC(t *testing.T) {
-    sessionKey := make([]byte, 32)
-    rand.Read(sessionKey)
+	sessionKey := make([]byte, 32)
+	rand.Read(sessionKey)
 
-    transcript := []byte("test session transcript")
+	transcript := []byte("test session transcript")
 
-    builder := NewDeviceAuthBuilder(DocType).
-        WithSessionTranscript(transcript).
-        WithSessionKey(sessionKey)
+	builder := NewDeviceAuthBuilder(DocType).
+		WithSessionTranscript(transcript).
+		WithSessionKey(sessionKey)
 
-    deviceSigned, err := builder.Build()
-    if err != nil {
-        t.Fatalf("Build() error = %v", err)
-    }
+	deviceSigned, err := builder.Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
 
-    if deviceSigned == nil {
-        t.Fatal("Build() returned nil")
-    }
+	if deviceSigned == nil {
+		t.Fatal("Build() returned nil")
+	}
 
-    // 1. DeviceMac is []byte: Use standard len()
-    if len(deviceSigned.DeviceAuth.DeviceMac) == 0 {
-        t.Error("DeviceMac should be set for MAC-based auth")
-    }
+	// 1. DeviceMac is []byte: Use standard len()
+	if len(deviceSigned.DeviceAuth.DeviceMac) == 0 {
+		t.Error("DeviceMac should be set for MAC-based auth")
+	}
 
-    // 2. DeviceSignature is any: Check for nil
-    // A nil interface means the field was not populated.
-    if deviceSigned.DeviceAuth.DeviceSignature != nil {
-        t.Errorf("DeviceSignature should be nil for MAC-based auth, got %T", deviceSigned.DeviceAuth.DeviceSignature)
-    }
+	// 2. DeviceSignature is any: Check for nil
+	// A nil interface means the field was not populated.
+	if deviceSigned.DeviceAuth.DeviceSignature != nil {
+		t.Errorf("DeviceSignature should be nil for MAC-based auth, got %T", deviceSigned.DeviceAuth.DeviceSignature)
+	}
 }
 
 func TestDeviceAuthBuilder_Build_MissingTranscript(t *testing.T) {
@@ -993,7 +994,7 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 
 	// Should fail - invalid device key in MSO
 	err := verifier.VerifyDeviceAuth(doc, mso, transcript)
-	
+
 	if err == nil {
 		t.Error("VerifyDeviceAuth() should fail with invalid device key")
 	}

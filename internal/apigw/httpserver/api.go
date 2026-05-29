@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
-	cache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	cache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"

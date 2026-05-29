@@ -142,7 +142,6 @@ func TestRegister_Success(t *testing.T) {
 	// Perform registration
 	ctx := t.Context()
 	resp, err := s.dynamicClientRegistration(ctx, mockServer.URL, req, "")
-
 	if err != nil {
 		t.Fatalf("Registration failed: %v", err)
 	}
@@ -201,7 +200,6 @@ func TestRegister_WithInitialAccessToken(t *testing.T) {
 	// Perform registration with initial access token
 	ctx := t.Context()
 	resp, err := s.dynamicClientRegistration(ctx, mockServer.URL, req, expectedToken)
-
 	if err != nil {
 		t.Fatalf("Registration failed: %v", err)
 	}

@@ -72,12 +72,12 @@ func TestNewCOSEKeyFromEd25519(t *testing.T) {
 
 func TestNewCOSEKeyFromCoordinates(t *testing.T) {
 	tests := []struct {
-		name     string
-		kty      string
-		crv      string
-		wantKty  int64
-		wantCrv  int64
-		wantErr  bool
+		name    string
+		kty     string
+		crv     string
+		wantKty int64
+		wantCrv int64
+		wantErr bool
 	}{
 		{"P-256", "EC", "P-256", KeyTypeEC2, CurveP256, false},
 		{"P-384", "EC", "P-384", KeyTypeEC2, CurveP384, false},

@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"os"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"

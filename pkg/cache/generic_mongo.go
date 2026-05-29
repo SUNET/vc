@@ -34,7 +34,7 @@ type MongoCache[V any] struct {
 	coll       *mongo.Collection
 	log        Logger
 	collection string
-	ttl        time.Duration            // collection-level TTL used by the TTL index
+	ttl        time.Duration           // collection-level TTL used by the TTL index
 	decode     func([]byte) (V, error) // optional custom JSON decoder
 }
 
@@ -94,7 +94,8 @@ func (m *MongoCache[V]) Get(ctx context.Context, key string) (V, bool) {
 	err := m.coll.FindOne(ctx, bson.M{"_id": key}).Decode(&entry)
 	if err != nil {
 		if !errors.Is(err, mongo.ErrNoDocuments) {
-			m.log.Error(err, "mongo cache get: operational error treated as miss",
+			m.log.Error(
+				err, "mongo cache get: operational error treated as miss",
 				"cache", m.collection, "key", key,
 			)
 		}
@@ -109,7 +110,8 @@ func (m *MongoCache[V]) Get(ctx context.Context, key string) (V, bool) {
 		err = json.Unmarshal(entry.JSONValue, &v)
 	}
 	if err != nil {
-		m.log.Error(err, "mongo cache get: failed to unmarshal JSON value",
+		m.log.Error(
+			err, "mongo cache get: failed to unmarshal JSON value",
 			"cache", m.collection, "key", key,
 		)
 		var zero V
@@ -158,7 +160,8 @@ func (m *MongoCache[V]) SetWithTTL(ctx context.Context, key string, value V, ttl
 // Delete removes a value by key.
 func (m *MongoCache[V]) Delete(ctx context.Context, key string) {
 	if _, err := m.coll.DeleteOne(ctx, bson.M{"_id": key}); err != nil {
-		m.log.Error(err, "mongo cache delete failed",
+		m.log.Error(
+			err, "mongo cache delete failed",
 			"cache", m.collection, "key", key,
 		)
 	}
@@ -181,7 +184,8 @@ func (m *MongoCache[V]) upsert(ctx context.Context, key string, value V) {
 func (m *MongoCache[V]) upsertAt(ctx context.Context, key string, value V, createdAt time.Time) {
 	entry, err := m.marshalEntry(key, value, createdAt)
 	if err != nil {
-		m.log.Error(err, "mongo cache upsert marshal failed",
+		m.log.Error(
+			err, "mongo cache upsert marshal failed",
 			"cache", m.collection, "key", key,
 		)
 		return
@@ -189,7 +193,8 @@ func (m *MongoCache[V]) upsertAt(ctx context.Context, key string, value V, creat
 
 	opts := options.Replace().SetUpsert(true)
 	if _, err := m.coll.ReplaceOne(ctx, bson.M{"_id": key}, entry, opts); err != nil {
-		m.log.Error(err, "mongo cache upsert failed",
+		m.log.Error(
+			err, "mongo cache upsert failed",
 			"cache", m.collection, "key", key,
 		)
 	}

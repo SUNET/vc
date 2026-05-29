@@ -68,7 +68,8 @@ func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	if allowedFingerprints != nil || allowedDNs != nil {
 		interceptor := clientAuthUnaryInterceptor(allowedFingerprints, allowedDNs)
 		streamInterceptor := clientAuthStreamInterceptor(allowedFingerprints, allowedDNs)
-		opts = append(opts,
+		opts = append(
+			opts,
 			grpc.UnaryInterceptor(interceptor),
 			grpc.StreamInterceptor(streamInterceptor),
 		)

@@ -445,16 +445,16 @@ func TestVerifyDigest(t *testing.T) {
 
 	issuerSignedNS := issuerNameSpaces
 	for _, taggedItem := range issuerSignedNS[Namespace] {
-        var item IssuerSignedItem
-        encodedBytes, _ := taggedItem.Content.([]byte)
-        if err := encoder.Unmarshal(encodedBytes, &item); err != nil {
-            t.Fatalf("Unmarshal error = %v", err)
-        }
-        err := VerifyDigest(mso, Namespace, taggedItem) 
-        if err != nil {
-            t.Errorf("VerifyDigest() for %s error = %v", item.ElementIdentifier, err)
-        }
-    }
+		var item IssuerSignedItem
+		encodedBytes, _ := taggedItem.Content.([]byte)
+		if err := encoder.Unmarshal(encodedBytes, &item); err != nil {
+			t.Fatalf("Unmarshal error = %v", err)
+		}
+		err := VerifyDigest(mso, Namespace, taggedItem)
+		if err != nil {
+			t.Errorf("VerifyDigest() for %s error = %v", item.ElementIdentifier, err)
+		}
+	}
 }
 
 func TestVerifyDigest_InvalidItem(t *testing.T) {

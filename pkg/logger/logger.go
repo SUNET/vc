@@ -19,7 +19,6 @@ type Log struct {
 
 // New creates a default logger based on what kind of environment is used.
 func New(name, logPath string, production bool) (*Log, error) {
-
 	var zc zap.Config
 
 	switch production {

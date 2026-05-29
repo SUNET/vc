@@ -31,7 +31,7 @@ func createTestECKey(t *testing.T) string {
 
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "test_ec_key.pem")
-	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0o600))
 
 	return keyPath
 }
@@ -53,7 +53,7 @@ func createTestECKeyPKCS8(t *testing.T) string {
 
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "test_ec_key_pkcs8.pem")
-	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0o600))
 
 	return keyPath
 }
@@ -74,7 +74,7 @@ func createTestRSAKey(t *testing.T) string {
 
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "test_rsa_key.pem")
-	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0o600))
 
 	return keyPath
 }
@@ -96,7 +96,7 @@ func createTestRSAKeyPKCS8(t *testing.T) string {
 
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "test_rsa_key_pkcs8.pem")
-	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0o600))
 
 	return keyPath
 }
@@ -107,7 +107,7 @@ func createInvalidKeyFile(t *testing.T) string {
 
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "invalid_key.pem")
-	require.NoError(t, os.WriteFile(keyPath, []byte("not a valid key"), 0600))
+	require.NoError(t, os.WriteFile(keyPath, []byte("not a valid key"), 0o600))
 
 	return keyPath
 }

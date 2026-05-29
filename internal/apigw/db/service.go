@@ -14,10 +14,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var (
-	// ErrNoDocuments is returned when no documents are found
-	ErrNoDocuments = errors.New("no documents in result")
-)
+// ErrNoDocuments is returned when no documents are found
+var ErrNoDocuments = errors.New("no documents in result")
 
 // Service is the database service
 type Service struct {

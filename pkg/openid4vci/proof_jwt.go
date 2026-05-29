@@ -288,7 +288,6 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 
 		return publicKey, nil
 	})
-
 	if err != nil {
 		return err
 	}

@@ -9,12 +9,13 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"fmt"
-	"github.com/fxamacker/cbor/v2"
 	"hash"
 	"maps"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // DigestAlgorithm represents the hash algorithm used for digests.
@@ -318,7 +319,7 @@ func VerifyDigest(mso *MobileSecurityObject, namespace string, anyItem any) erro
 	if !ok {
 		return fmt.Errorf("expected cbor.Tag, got %T", anyItem)
 	}
-	if tag.Number !=TagEncodedCBOR {
+	if tag.Number != TagEncodedCBOR {
 		return fmt.Errorf("expected 24, got %d", tag.Number)
 	}
 	var item IssuerSignedItem
@@ -348,20 +349,20 @@ func VerifyDigest(mso *MobileSecurityObject, namespace string, anyItem any) erro
 		return fmt.Errorf("failed to marshal tagged item: %w", err)
 	}
 
-    var actualDigest []byte
-    switch DigestAlgorithm(mso.DigestAlgorithm) {
-    case DigestAlgorithmSHA256:
-        h := sha256.Sum256(encodedFullItem)
-        actualDigest = h[:]
-    case DigestAlgorithmSHA384:
-        h := sha512.Sum384(encodedFullItem)
-        actualDigest = h[:]
-    case DigestAlgorithmSHA512:
-        h := sha512.Sum512(encodedFullItem)
-        actualDigest = h[:]
-    default:
-        return fmt.Errorf("unsupported digest algorithm: %s", mso.DigestAlgorithm)
-    }
+	var actualDigest []byte
+	switch DigestAlgorithm(mso.DigestAlgorithm) {
+	case DigestAlgorithmSHA256:
+		h := sha256.Sum256(encodedFullItem)
+		actualDigest = h[:]
+	case DigestAlgorithmSHA384:
+		h := sha512.Sum384(encodedFullItem)
+		actualDigest = h[:]
+	case DigestAlgorithmSHA512:
+		h := sha512.Sum512(encodedFullItem)
+		actualDigest = h[:]
+	default:
+		return fmt.Errorf("unsupported digest algorithm: %s", mso.DigestAlgorithm)
+	}
 
 	if !bytes.Equal(actualDigest, expectedDigest) {
 		return fmt.Errorf("digest mismatch for %s (ID %d)", item.ElementIdentifier, item.DigestID)

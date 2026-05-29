@@ -153,77 +153,77 @@ const mdocNamespace = "org.iso.18013.5.1"
 
 // extractMDocClaimsFromToken extracts claims from an mdoc VP token without full verification.
 func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
-    data, err := base64.RawURLEncoding.DecodeString(vpToken)
-    if err != nil {
-        data, err = base64.StdEncoding.DecodeString(vpToken)
-        if err != nil {
-            return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
-        }
-    }
+	data, err := base64.RawURLEncoding.DecodeString(vpToken)
+	if err != nil {
+		data, err = base64.StdEncoding.DecodeString(vpToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
+		}
+	}
 
-    // Local anonymous structural schema definition matching your production format
-    var deviceResponse struct {
-        Documents []struct {
-            DocType      string `cbor:"docType"`
-            IssuerSigned struct {
-                NameSpaces map[string][]any `cbor:"nameSpaces"`
-            } `cbor:"issuerSigned"`
-        } `cbor:"documents"`
-    }
+	// Local anonymous structural schema definition matching your production format
+	var deviceResponse struct {
+		Documents []struct {
+			DocType      string `cbor:"docType"`
+			IssuerSigned struct {
+				NameSpaces map[string][]any `cbor:"nameSpaces"`
+			} `cbor:"issuerSigned"`
+		} `cbor:"documents"`
+	}
 
-    if err := cbor.Unmarshal(data, &deviceResponse); err != nil {
-        return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
-    }
+	if err := cbor.Unmarshal(data, &deviceResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse DeviceResponse: %w", err)
+	}
 
-    if len(deviceResponse.Documents) == 0 {
-        return nil, fmt.Errorf("no documents in DeviceResponse")
-    }
+	if len(deviceResponse.Documents) == 0 {
+		return nil, fmt.Errorf("no documents in DeviceResponse")
+	}
 
-    claims := make(map[string]any)
-    for _, doc := range deviceResponse.Documents {
-        for ns, items := range doc.IssuerSigned.NameSpaces {
-            for _, anyItem := range items {
-                var elementID string
-                var elementVal any
-                found := false
+	claims := make(map[string]any)
+	for _, doc := range deviceResponse.Documents {
+		for ns, items := range doc.IssuerSigned.NameSpaces {
+			for _, anyItem := range items {
+				var elementID string
+				var elementVal any
+				found := false
 
-                // Dynamically unpack based on how the item is wrapped on the wire
-                switch v := anyItem.(type) {
-                case cbor.Tag:
-                    // If it's a Tag 24 item, extract the nested serialized byte slice
-                    if content, ok := v.Content.([]byte); ok {
-                        var item struct {
-                            ElementIdentifier string `cbor:"elementIdentifier"`
-                            ElementValue      any    `cbor:"elementValue"`
-                        }
-                        if err := cbor.Unmarshal(content, &item); err == nil {
-                            elementID = item.ElementIdentifier
-                            elementVal = item.ElementValue
-                            found = true
-                        }
-                    }
-                case map[any]any:
-                    // Fallback if the map is already unmarshaled into generic maps
-                    if id, ok := v["elementIdentifier"].(string); ok {
-                        elementID = id
-                        elementVal = v["elementValue"]
-                        found = true
-                    }
-                }
+				// Dynamically unpack based on how the item is wrapped on the wire
+				switch v := anyItem.(type) {
+				case cbor.Tag:
+					// If it's a Tag 24 item, extract the nested serialized byte slice
+					if content, ok := v.Content.([]byte); ok {
+						var item struct {
+							ElementIdentifier string `cbor:"elementIdentifier"`
+							ElementValue      any    `cbor:"elementValue"`
+						}
+						if err := cbor.Unmarshal(content, &item); err == nil {
+							elementID = item.ElementIdentifier
+							elementVal = item.ElementValue
+							found = true
+						}
+					}
+				case map[any]any:
+					// Fallback if the map is already unmarshaled into generic maps
+					if id, ok := v["elementIdentifier"].(string); ok {
+						elementID = id
+						elementVal = v["elementValue"]
+						found = true
+					}
+				}
 
-                if found {
-                    qualifiedKey := fmt.Sprintf("%s.%s", ns, elementID)
-                    claims[qualifiedKey] = elementVal
-                    
-                    if ns == mdocNamespace {
-                        claims[elementID] = elementVal
-                    }
-                }
-            }
-        }
-    }
+				if found {
+					qualifiedKey := fmt.Sprintf("%s.%s", ns, elementID)
+					claims[qualifiedKey] = elementVal
 
-    return claims, nil
+					if ns == mdocNamespace {
+						claims[elementID] = elementVal
+					}
+				}
+			}
+		}
+	}
+
+	return claims, nil
 }
 
 // MapClaimsToOIDC maps VP claims to OIDC claims using the template's claim mappings

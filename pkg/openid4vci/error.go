@@ -94,7 +94,7 @@ const (
 
 // Notification errors
 const (
-	//InvalidNotificationID  invalid_notification_id: The notification_id in the Notification Request was invalid.
+	// InvalidNotificationID  invalid_notification_id: The notification_id in the Notification Request was invalid.
 	InvalidNotificationID = "invalid_notification_id"
 
 	// InvalidNotificationRequest invalid_notification_request: The Notification Request is missing a required parameter, includes an unsupported parameter or parameter value, repeats the same parameter, or is otherwise malformed.
