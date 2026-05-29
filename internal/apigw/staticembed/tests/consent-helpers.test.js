@@ -9,6 +9,7 @@ import {
     base64ToUtf8,
     detectBase64Image,
     escapeHtml,
+    flattenClaims,
     IMAGE_PLACEHOLDERS,
     keyToLabel,
     renderClaimValueHtml,
@@ -16,6 +17,8 @@ import {
     utf8ToBase64,
     valueForSvgPlaceholder,
 } from "../consent-helpers.js";
+
+import * as v from "../valibot.min.js";
 
 describe("keyToLabel", () => {
     it("capitalizes and spaces a snake_case key", () => {
@@ -291,5 +294,223 @@ describe("renderClaimValueHtml", () => {
         // Valid base64 but no known image prefix → text.
         const text = "SGVsbG8sIHdvcmxkIQ==";
         assert.equal(renderClaimValueHtml(text), "SGVsbG8sIHdvcmxkIQ==");
+    });
+});
+
+describe("flattenClaims", () => {
+    it("flattens leaf claims into simple rows", () => {
+        const claims = {
+            given_name: { label: "Given name", value: "Alice" },
+            family_name: { label: "Family name", value: "Smith" },
+        };
+        assert.deepEqual(flattenClaims(claims), [
+            { label: "Given name", value: "Alice" },
+            { label: "Family name", value: "Smith" },
+        ]);
+    });
+
+    it("flattens a parent with children into header + indented rows", () => {
+        const claims = {
+            address: {
+                label: "Address",
+                children: {
+                    street: { label: "Street", value: "123 Main St" },
+                    city: { label: "City", value: "Springfield" },
+                },
+            },
+        };
+        const rows = flattenClaims(claims);
+        assert.deepEqual(rows, [
+            { label: "Address", isHeader: true },
+            { label: "Street", value: "123 Main St", indent: true },
+            { label: "City", value: "Springfield", indent: true },
+        ]);
+    });
+
+    it("interleaves parents and leaves in declaration order", () => {
+        const claims = {
+            given_name: { label: "Given name", value: "Bob" },
+            address: {
+                label: "Address",
+                children: {
+                    city: { label: "City", value: "Lund" },
+                },
+            },
+            birthdate: { label: "Birthdate", value: "2000-01-01" },
+        };
+        const rows = flattenClaims(claims);
+        assert.equal(rows.length, 4);
+        assert.equal(rows[0].label, "Given name");
+        assert.equal(rows[1].label, "Address");
+        assert.equal(rows[1].isHeader, true);
+        assert.equal(rows[2].label, "City");
+        assert.equal(rows[2].indent, true);
+        assert.equal(rows[3].label, "Birthdate");
+    });
+
+    it("returns an empty array for empty claims", () => {
+        assert.deepEqual(flattenClaims({}), []);
+    });
+
+    it("PID-realistic: address, place_of_birth, nationalities, flat leaves", () => {
+        // This is the exact structure Presentation() produces for the PID VCTM.
+        const claims = {
+            family_name:   { label: "Last name",      value: "Sansen" },
+            given_name:    { label: "First name",     value: "Helen" },
+            birthdate:     { label: "Date of birth",  value: "1990-01-15" },
+            personal_administrative_number: { label: "Personal ID", value: "199001152386" },
+            sex:           { label: "Sex",            value: "0" },
+            address: {
+                label: "Address",
+                children: {
+                    house_number:   { label: "Residence number",    value: "11" },
+                    street_address: { label: "Residence street",    value: "Tulegatan" },
+                    locality:       { label: "City of residence",   value: "Stockholm" },
+                    region:         { label: "State of residence",  value: "Stockholm" },
+                    postal_code:    { label: "Residence ZIP",       value: "11353" },
+                    country:        { label: "Country of residence", value: "SE" },
+                    formatted:      { label: "Full address",        value: "Tulegatan 11, 11353 Stockholm, SE" },
+                },
+            },
+            place_of_birth: {
+                label: "Place of birth",
+                children: {
+                    locality: { label: "City of birth",    value: "Lund" },
+                    region:   { label: "Region of birth",  value: "Skåne" },
+                    country:  { label: "Country of birth", value: "SE" },
+                },
+            },
+            nationalities: { label: "Nationalities", value: ["SE"] },
+        };
+
+        const rows = flattenClaims(claims);
+
+        // Flat leaves appear as simple rows.
+        assert.deepEqual(rows[0], { label: "Last name",     value: "Sansen" });
+        assert.deepEqual(rows[1], { label: "First name",    value: "Helen" });
+        assert.deepEqual(rows[2], { label: "Date of birth", value: "1990-01-15" });
+        assert.deepEqual(rows[3], { label: "Personal ID",   value: "199001152386" });
+        assert.deepEqual(rows[4], { label: "Sex",           value: "0" });
+
+        // Address: header row followed by 7 indented children.
+        assert.deepEqual(rows[5], { label: "Address", isHeader: true });
+        assert.equal(rows[6].label, "Residence number");
+        assert.equal(rows[6].value, "11");
+        assert.equal(rows[6].indent, true);
+        assert.equal(rows[7].value, "Tulegatan");
+        assert.equal(rows[8].value, "Stockholm");   // locality
+        assert.equal(rows[9].value, "Stockholm");   // region
+        assert.equal(rows[10].value, "11353");       // postal_code
+        assert.equal(rows[11].value, "SE");          // country
+        assert.equal(rows[12].value, "Tulegatan 11, 11353 Stockholm, SE"); // formatted
+
+        // Place of birth: header + 3 children.
+        assert.deepEqual(rows[13], { label: "Place of birth", isHeader: true });
+        assert.equal(rows[14].label, "City of birth");
+        assert.equal(rows[14].value, "Lund");
+        assert.equal(rows[14].indent, true);
+        assert.equal(rows[15].value, "Skåne");
+        assert.equal(rows[16].value, "SE");
+
+        // Nationalities: leaf with array value.
+        assert.deepEqual(rows[17], { label: "Nationalities", value: ["SE"] });
+
+        assert.equal(rows.length, 18);
+    });
+});
+
+describe("PID end-to-end: Valibot schema + flattenClaims + renderClaimValueHtml", () => {
+    // Reproduce the exact JSON the Go backend sends for a PID user lookup.
+    const pidResponse = {
+        svg_template_claims: {
+            family_name: { label: "Last name", value: "Sansen" },
+            given_name:  { label: "First name", value: "Helen" },
+            birth_date:  { label: "Date of birth", value: "1990-01-15" },
+            personal_administrative_number: { label: "Personal ID", value: "199001152386" },
+            expiry_date: { label: "Expiry date", value: "2030-12-31" },
+            issuing_country: { label: "Issuing country", value: "SE" },
+            document_number: { label: "Document number", value: "DOC-001" },
+        },
+        presentation_claims: {
+            family_name: { label: "Last name", value: "Sansen" },
+            given_name:  { label: "First name", value: "Helen" },
+            birthdate:   { label: "Date of birth", value: "1990-01-15" },
+            personal_administrative_number: { label: "Personal ID", value: "199001152386" },
+            sex:         { label: "Sex", value: "0" },
+            address: {
+                label: "Address",
+                children: {
+                    house_number:   { label: "Residence number",     value: "11" },
+                    street_address: { label: "Residence street",     value: "Tulegatan" },
+                    locality:       { label: "City of residence",    value: "Stockholm" },
+                    region:         { label: "State of residence",   value: "Stockholm" },
+                    postal_code:    { label: "Residence ZIP",        value: "11353" },
+                    country:        { label: "Country of residence", value: "SE" },
+                    formatted:      { label: "Full address",         value: "Tulegatan 11, 11353 Stockholm, SE" },
+                },
+            },
+            place_of_birth: {
+                label: "Place of birth",
+                children: {
+                    locality: { label: "City of birth",   value: "Lund" },
+                    region:   { label: "Region of birth", value: "Skåne" },
+                    country:  { label: "Country of birth", value: "SE" },
+                },
+            },
+            nationalities: { label: "Nationalities", value: ["SE"] },
+        },
+        redirect_url: "https://example.com/callback?code=abc&state=xyz",
+    };
+
+    // Rebuild the same Valibot schemas from consent.js.
+    const ClaimValueSchema = v.lazy(() => v.union([
+        v.string(), v.number(), v.boolean(), v.null(),
+        v.array(ClaimValueSchema),
+        v.record(v.string(), ClaimValueSchema),
+    ]));
+    const LeafClaimSchema = v.object({ label: v.string(), value: ClaimValueSchema });
+    const ParentClaimSchema = v.object({
+        label: v.string(),
+        children: v.record(v.string(), v.object({ label: v.string(), value: ClaimValueSchema })),
+    });
+    const PresentationClaimSchema = v.union([LeafClaimSchema, ParentClaimSchema]);
+    const UserDataSchema = v.required(v.object({
+        svg_template_claims: v.record(v.string(), v.object({ label: v.string(), value: ClaimValueSchema })),
+        presentation_claims: v.record(v.string(), PresentationClaimSchema),
+        redirect_url: v.string(),
+    }));
+
+    it("Valibot accepts the full PID response", () => {
+        const parsed = v.parse(UserDataSchema, pidResponse);
+        assert.equal(parsed.redirect_url, pidResponse.redirect_url);
+        assert.deepEqual(Object.keys(parsed.presentation_claims).sort(),
+            Object.keys(pidResponse.presentation_claims).sort());
+    });
+
+    it("flattenClaims produces correct rows from validated data", () => {
+        const parsed = v.parse(UserDataSchema, pidResponse);
+        const rows = flattenClaims(parsed.presentation_claims);
+
+        // Collect labels for quick structural checks.
+        const headers = rows.filter(r => r.isHeader).map(r => r.label);
+        const indented = rows.filter(r => r.indent).map(r => r.label);
+        const leaves  = rows.filter(r => !r.isHeader && !r.indent).map(r => r.label);
+
+        assert.deepEqual(headers, ["Address", "Place of birth"]);
+        assert.equal(indented.length, 10); // 7 address + 3 place_of_birth
+        assert.ok(leaves.includes("Last name"));
+        assert.ok(leaves.includes("Nationalities"));
+        assert.ok(leaves.includes("Sex"));
+    });
+
+    it("renderClaimValueHtml handles every PID value type", () => {
+        // String leaf.
+        assert.equal(renderClaimValueHtml("Sansen"), "Sansen");
+        // Numeric-string value for sex.
+        assert.equal(renderClaimValueHtml("0"), "0");
+        // Array (nationalities).
+        const html = renderClaimValueHtml(["SE"]);
+        assert.ok(html.includes("SE"), "array element rendered");
+        assert.ok(html.includes("0"), "array index rendered");
     });
 });

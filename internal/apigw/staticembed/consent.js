@@ -4,17 +4,23 @@ import * as v from "valibot";
 import {
     base64ToUtf8,
     escapeHtml,
+    flattenClaims,
     renderClaimValueHtml,
     utf8ToBase64,
     valueForSvgPlaceholder,
 } from "./consent-helpers.js";
 
 /**
+ * A single claim entry — either a leaf with a value, or a parent with children.
+ * @typedef {{ label: string; value: unknown; children?: undefined } | { label: string; children: Record<string, { label: string; value: unknown }>; value?: undefined }} ClaimEntry
+ */
+
+/**
  * @typedef {Object} Credential
  * @property {string} vct
  * @property {string} name
  * @property {string} svg
- * @property {Record<string, { label: string; value: unknown; }>} claims
+ * @property {Record<string, ClaimEntry>} claims
  */
 
 /**
@@ -44,11 +50,30 @@ const ClaimValueSchema = v.lazy(() => v.union([
 /**
  * @typedef {v.InferOutput<typeof UserDataSchema>} UserData
  */
+/** Schema for a leaf claim entry: { label, value }. */
+const LeafClaimSchema = v.object({
+    label: v.string(),
+    value: ClaimValueSchema,
+});
+
+/** Schema for a parent claim entry: { label, children: { key: leaf } }. */
+const ParentClaimSchema = v.object({
+    label: v.string(),
+    children: v.record(v.string(), v.object({
+        label: v.string(),
+        value: ClaimValueSchema,
+    })),
+});
+
+/** A presentation claim is either a leaf or a parent with children. */
+const PresentationClaimSchema = v.union([LeafClaimSchema, ParentClaimSchema]);
+
 const UserDataSchema = v.required(v.object({
     svg_template_claims: v.record(v.string(), v.object({
         label: v.string(),
         value: ClaimValueSchema,
     })),
+    presentation_claims: v.record(v.string(), PresentationClaimSchema),
     redirect_url: v.string(),
 }));
 
@@ -240,7 +265,12 @@ Alpine.data("app", () => ({
         try {
             const res = await this.fetchData(url.toString(), options);
 
+            console.log("[consent] raw /user/lookup response:", JSON.stringify(res, null, 2));
+
             const data = v.parse(UserDataSchema, res);
+
+            console.log("[consent] presentation_claims keys:", Object.keys(data.presentation_claims));
+            console.log("[consent] presentation_claims:", JSON.stringify(data.presentation_claims, null, 2));
 
             this.redirectUrl = data.redirect_url;
 
@@ -257,7 +287,7 @@ Alpine.data("app", () => ({
                 vct: "N/A",
                 name: "PID",
                 svg,
-                claims: data.svg_template_claims,
+                claims: data.presentation_claims,
             });
 
             const givenName = data.svg_template_claims.given_name?.value;
@@ -353,6 +383,15 @@ Alpine.data("app", () => ({
      */
     renderClaimValue(value) {
         return renderClaimValueHtml(value);
+    },
+
+    /**
+     * Flatten presentation claims into table rows for rendering.
+     * @param {Record<string, ClaimEntry>} claims
+     * @returns {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>}
+     */
+    flattenClaims(claims) {
+        return flattenClaims(claims);
     },
 
     /** @param {string} url */

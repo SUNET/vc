@@ -244,9 +244,10 @@ func TestVCTMPresentation(t *testing.T) {
 		}
 		result := v.Presentation(data)
 
-		assert.Len(t, result, 2)
-		assert.Equal(t, "SE", result["country"].(map[string]any)["value"])
-		assert.Equal(t, "Tulegatan", result["street"].(map[string]any)["value"])
+		assert.Len(t, result, 1)
+		addr := result["address"].(map[string]any)
+		assert.Equal(t, "SE", addr["country"].(map[string]any)["value"])
+		assert.Equal(t, "Tulegatan", addr["street"].(map[string]any)["value"])
 	})
 
 	t.Run("nil data returns nil", func(t *testing.T) {
@@ -289,10 +290,8 @@ func TestVCTMPresentation(t *testing.T) {
 		}
 		assert.NotPanics(t, func() {
 			result := v.Presentation(data)
-			// The array wildcard claim should resolve using the first path segment.
-			nat := result["nationalities"].(map[string]any)
-			assert.Equal(t, "Nationalities", nat["label"])
-			assert.Equal(t, []any{"DE", "SE"}, nat["value"])
+			// Wildcard-only orphan (no parent claim) is skipped — last segment is nil.
+			assert.Nil(t, result["nationalities"])
 			// Normal leaf still works.
 			gn := result["given_name"].(map[string]any)
 			assert.Equal(t, "Helen", gn["value"])
@@ -348,6 +347,158 @@ func TestVCTMPresentation(t *testing.T) {
 			assert.Len(t, result, 1)
 			assert.Equal(t, "Helen", result["given_name"].(map[string]any)["value"])
 		})
+	})
+	t.Run("multi-segment leaves nest under first path segment", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				// No displayable parent for address or birth — both are orphaned leaves.
+				{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Address Country"}}},
+				{Path: []*string{new("birth"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Birth Country"}}},
+			},
+		}
+		data := map[string]any{
+			"address": map[string]any{"country": "SE"},
+			"birth":   map[string]any{"country": "DE"},
+		}
+		result := v.Presentation(data)
+		assert.Len(t, result, 2)
+		addr := result["address"].(map[string]any)
+		assert.Equal(t, "SE", addr["country"].(map[string]any)["value"])
+		birth := result["birth"].(map[string]any)
+		assert.Equal(t, "DE", birth["country"].(map[string]any)["value"])
+	})
+}
+
+func TestVCTMPresentationPIDRealistic(t *testing.T) {
+	// Mirror the real PID VCTM: flat claims, address with 7 children,
+	// place_of_birth with 3 children, nationalities with array wildcard.
+	vctm := &VCTM{
+		Claims: []Claim{
+			// --- flat leaves (some with svg_id, some without) ---
+			{Path: []*string{new("family_name")}, SVGID: "family_name", Display: []ClaimDisplay{{Locale: "en-US", Label: "Last name"}}},
+			{Path: []*string{new("given_name")}, SVGID: "given_name", Display: []ClaimDisplay{{Locale: "en-US", Label: "First name"}}},
+			{Path: []*string{new("birthdate")}, SVGID: "birth_date", Display: []ClaimDisplay{{Locale: "en-US", Label: "Date of birth"}}},
+			{Path: []*string{new("personal_administrative_number")}, SVGID: "personal_administrative_number", Display: []ClaimDisplay{{Locale: "en-US", Label: "Personal ID"}}},
+			{Path: []*string{new("sex")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Sex"}}},
+			// --- address parent + children ---
+			{Path: []*string{new("address")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Address"}}},
+			{Path: []*string{new("address"), new("house_number")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence number"}}},
+			{Path: []*string{new("address"), new("street_address")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence street"}}},
+			{Path: []*string{new("address"), new("locality")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "City of residence"}}},
+			{Path: []*string{new("address"), new("region")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "State of residence"}}},
+			{Path: []*string{new("address"), new("postal_code")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Residence ZIP"}}},
+			{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Country of residence"}}},
+			{Path: []*string{new("address"), new("formatted")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Full address"}}},
+			// --- place_of_birth parent + children ---
+			{Path: []*string{new("place_of_birth")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Place of birth"}}},
+			{Path: []*string{new("place_of_birth"), new("locality")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "City of birth"}}},
+			{Path: []*string{new("place_of_birth"), new("region")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Region of birth"}}},
+			{Path: []*string{new("place_of_birth"), new("country")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Country of birth"}}},
+			// --- nationalities parent + array wildcard child ---
+			{Path: []*string{new("nationalities")}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Nationalities"}}},
+			{Path: []*string{new("nationalities"), nil}, Display: []ClaimDisplay{{Locale: "en-US", Label: "Nationality"}}},
+			// --- metadata without display (should be excluded) ---
+			{Path: []*string{new("iss")}, Display: nil},
+			{Path: []*string{new("vct")}, Display: nil},
+		},
+	}
+
+	data := map[string]any{
+		"iss":                            "https://issuer.example.com",
+		"vct":                            "urn:eu.europa.ec.eudi:pid:1",
+		"family_name":                    "Sansen",
+		"given_name":                     "Helen",
+		"birthdate":                      "1990-01-15",
+		"personal_administrative_number": "199001152386",
+		"sex":                            "0",
+		"address": map[string]any{
+			"house_number":   "11",
+			"street_address": "Tulegatan",
+			"locality":       "Stockholm",
+			"region":         "Stockholm",
+			"postal_code":    "11353",
+			"country":        "SE",
+			"formatted":      "Tulegatan 11, 11353 Stockholm, SE",
+		},
+		"place_of_birth": map[string]any{
+			"locality": "Lund",
+			"region":   "Skåne",
+			"country":  "SE",
+		},
+		"nationalities": []any{"SE"},
+	}
+
+	result := vctm.Presentation(data)
+
+	// --- flat leaves ---
+	t.Run("flat leaves", func(t *testing.T) {
+		fn := result["family_name"].(map[string]any)
+		assert.Equal(t, "Last name", fn["label"])
+		assert.Equal(t, "Sansen", fn["value"])
+
+		gn := result["given_name"].(map[string]any)
+		assert.Equal(t, "First name", gn["label"])
+		assert.Equal(t, "Helen", gn["value"])
+
+		bd := result["birthdate"].(map[string]any)
+		assert.Equal(t, "Date of birth", bd["label"])
+		assert.Equal(t, "1990-01-15", bd["value"])
+
+		pan := result["personal_administrative_number"].(map[string]any)
+		assert.Equal(t, "Personal ID", pan["label"])
+		assert.Equal(t, "199001152386", pan["value"])
+
+		sex := result["sex"].(map[string]any)
+		assert.Equal(t, "Sex", sex["label"])
+		assert.Equal(t, "0", sex["value"])
+	})
+
+	// --- address parent with children ---
+	t.Run("address parent with children", func(t *testing.T) {
+		addr := result["address"].(map[string]any)
+		assert.Equal(t, "Address", addr["label"])
+		assert.Nil(t, addr["value"], "parent should not have a value")
+
+		children := addr["children"].(map[string]any)
+		assert.Len(t, children, 7)
+
+		assert.Equal(t, "11", children["house_number"].(map[string]any)["value"])
+		assert.Equal(t, "Residence number", children["house_number"].(map[string]any)["label"])
+
+		assert.Equal(t, "Tulegatan", children["street_address"].(map[string]any)["value"])
+		assert.Equal(t, "Stockholm", children["locality"].(map[string]any)["value"])
+		assert.Equal(t, "Stockholm", children["region"].(map[string]any)["value"])
+		assert.Equal(t, "11353", children["postal_code"].(map[string]any)["value"])
+		assert.Equal(t, "SE", children["country"].(map[string]any)["value"])
+		assert.Equal(t, "Tulegatan 11, 11353 Stockholm, SE", children["formatted"].(map[string]any)["value"])
+	})
+
+	// --- place_of_birth parent with children ---
+	t.Run("place_of_birth parent with children", func(t *testing.T) {
+		pob := result["place_of_birth"].(map[string]any)
+		assert.Equal(t, "Place of birth", pob["label"])
+
+		children := pob["children"].(map[string]any)
+		assert.Len(t, children, 3)
+
+		assert.Equal(t, "Lund", children["locality"].(map[string]any)["value"])
+		assert.Equal(t, "City of birth", children["locality"].(map[string]any)["label"])
+		assert.Equal(t, "Skåne", children["region"].(map[string]any)["value"])
+		assert.Equal(t, "SE", children["country"].(map[string]any)["value"])
+	})
+
+	// --- nationalities: parent with array-wildcard child → leaf with value ---
+	t.Run("nationalities emits as leaf with array value", func(t *testing.T) {
+		nat := result["nationalities"].(map[string]any)
+		assert.Equal(t, "Nationalities", nat["label"])
+		assert.Equal(t, []any{"SE"}, nat["value"])
+		assert.Nil(t, nat["children"], "wildcard-only parent should not have children")
+	})
+
+	// --- metadata claims without display are excluded ---
+	t.Run("non-displayable claims excluded", func(t *testing.T) {
+		assert.Nil(t, result["iss"])
+		assert.Nil(t, result["vct"])
 	})
 }
 

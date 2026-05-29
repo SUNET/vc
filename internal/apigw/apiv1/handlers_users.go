@@ -9,6 +9,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vcclient"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // UserAuthenticSourceLookup resolves which authentic sources are available for a session,
@@ -131,6 +132,12 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthProvider)
 	}
 
+	// Normalize bson.D/bson.A values to map[string]any/[]any so that
+	// Presentation() and SVGValues() can traverse nested documents.
+	for k, v := range doc.DocumentData {
+		doc.DocumentData[k] = normalizeBSONValue(v)
+	}
+
 	presentationClaims = req.VCTM.Presentation(doc.DocumentData)
 	svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
 
@@ -169,4 +176,38 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 		return doc, nil
 	}
 	return nil, fmt.Errorf("no documents in cache")
+}
+
+// normalizeBSONValue recursively converts bson.D values to map[string]any
+// so that downstream code (e.g. walkPath in VCTM.Presentation) can traverse
+// nested documents with plain Go type assertions.
+// The MongoDB driver v2 decodes nested BSON documents inside any-typed fields
+// as bson.D rather than map[string]any.
+func normalizeBSONValue(v any) any {
+	switch val := v.(type) {
+	case bson.D:
+		m := make(map[string]any, len(val))
+		for _, e := range val {
+			m[e.Key] = normalizeBSONValue(e.Value)
+		}
+		return m
+	case map[string]any:
+		for k, elem := range val {
+			val[k] = normalizeBSONValue(elem)
+		}
+		return val
+	case []any:
+		for i, elem := range val {
+			val[i] = normalizeBSONValue(elem)
+		}
+		return val
+	case bson.A:
+		m := make([]any, len(val))
+		for i, elem := range val {
+			m[i] = normalizeBSONValue(elem)
+		}
+		return m
+	default:
+		return v
+	}
 }

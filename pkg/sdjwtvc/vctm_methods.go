@@ -116,8 +116,9 @@ func (v *VCTM) ClaimJSONPath() (*VCTMJSONPath, error) {
 //
 // The returned map is keyed by claim name. For single-segment claims and
 // displayable parents, the key is the first path element. For multi-segment
-// leaf claims without a displayable parent, the key is the last path segment
-// (e.g. a claim with path ["address", "country"] is keyed as "country").
+// leaf claims without a displayable parent, entries are nested under the
+// first path segment as a map (e.g. path ["address","country"] produces
+// result["address"]["country"]).
 //
 // Each entry is a map[string]any with "label" and either "value" (leaf claims)
 // or "children" (parent claims whose children are also defined in the VCTM
@@ -214,17 +215,30 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 			if value == nil {
 				continue
 			}
-			var key string
-			if len(c.Path) > 1 && c.Path[len(c.Path)-1] != nil {
-				key = *c.Path[len(c.Path)-1]
-			} else if c.Path[0] != nil {
-				key = *c.Path[0]
-			} else {
+			if c.Path[0] == nil {
 				continue // no usable key segment
 			}
-			result[key] = map[string]any{
-				"label": label,
-				"value": value,
+			if len(c.Path) > 1 {
+				// Multi-segment orphan: nest under the first path segment.
+				topKey := *c.Path[0]
+				lastSeg := c.Path[len(c.Path)-1]
+				if lastSeg == nil {
+					continue
+				}
+				nested, _ := result[topKey].(map[string]any)
+				if nested == nil {
+					nested = map[string]any{}
+					result[topKey] = nested
+				}
+				nested[*lastSeg] = map[string]any{
+					"label": label,
+					"value": value,
+				}
+			} else {
+				result[*c.Path[0]] = map[string]any{
+					"label": label,
+					"value": value,
+				}
 			}
 		}
 	}

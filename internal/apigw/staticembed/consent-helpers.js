@@ -210,3 +210,26 @@ export function renderClaimValueHtml(value, depth = 0) {
 
     return escapeHtml(String(value));
 }
+
+/**
+ * Flatten presentation claims into an ordered array of table rows.
+ * Parent claims with `children` produce a header row followed by indented
+ * child rows. Leaf claims produce a single row.
+ *
+ * @param {Record<string, { label: string; value?: unknown; children?: Record<string, { label: string; value: unknown }> }>} claims
+ * @returns {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>}
+ */
+export function flattenClaims(claims) {
+    const rows = [];
+    for (const [, claim] of Object.entries(claims)) {
+        if (claim.children) {
+            rows.push({ label: claim.label, isHeader: true });
+            for (const [, child] of Object.entries(claim.children)) {
+                rows.push({ label: child.label, value: child.value, indent: true });
+            }
+        } else {
+            rows.push({ label: claim.label, value: claim.value });
+        }
+    }
+    return rows;
+}
