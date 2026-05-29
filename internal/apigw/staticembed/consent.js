@@ -264,13 +264,7 @@ Alpine.data("app", () => ({
 
         try {
             const res = await this.fetchData(url.toString(), options);
-
-            console.log("[consent] raw /user/lookup response:", JSON.stringify(res, null, 2));
-
             const data = v.parse(UserDataSchema, res);
-
-            console.log("[consent] presentation_claims keys:", Object.keys(data.presentation_claims));
-            console.log("[consent] presentation_claims:", JSON.stringify(data.presentation_claims, null, 2));
 
             this.redirectUrl = data.redirect_url;
 

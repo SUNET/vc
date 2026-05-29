@@ -148,7 +148,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		presentationClaims = map[string]any{}
 	}
 
-	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims, "presentationClaims", presentationClaims)
+	c.log.Debug("lookupUser", "svgTemplateClaimCount", len(svgTemplateClaims), "presentationClaimCount", len(presentationClaims))
 
 	if err := c.cacheService.AuthContext.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
 		c.log.Error(err, "failed to consent for user")
@@ -160,8 +160,6 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		PresentationClaims: presentationClaims,
 		RedirectURL:        redirectURL.String(),
 	}
-
-	c.log.Debug("userlookup", "reply", reply)
 
 	return reply, nil
 }
