@@ -1,0 +1,376 @@
+package sdjwtvc
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestClaimJSONPath(t *testing.T) {
+	tts := []struct {
+		name  string
+		claim Claim
+		want  string
+	}{
+		{
+			name:  "single path element",
+			claim: Claim{Path: []*string{new("given_name")}},
+			want:  "$.given_name",
+		},
+		{
+			name:  "nested path",
+			claim: Claim{Path: []*string{new("address"), new("country")}},
+			want:  "$.address.country",
+		},
+		{
+			name:  "nil element is wildcard",
+			claim: Claim{Path: []*string{new("items"), nil, new("name")}},
+			want:  "$.items[*].name",
+		},
+		{
+			name:  "nil path returns empty",
+			claim: Claim{Path: nil},
+			want:  "",
+		},
+		{
+			name:  "empty path returns root",
+			claim: Claim{Path: []*string{}},
+			want:  "$",
+		},
+		{
+			name:  "nil claim returns empty",
+			claim: Claim{},
+			want:  "",
+		},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.claim.JSONPath()
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestVCTMSRIIntegrity(t *testing.T) {
+	v := &VCTM{VCT: "https://example.com/credential/test"}
+
+	t.Run("from marshalled JSON", func(t *testing.T) {
+		sri, err := v.SRIIntegrity(nil)
+		assert.NoError(t, err)
+		assert.Contains(t, sri, "sha256-")
+		assert.Len(t, sri, len("sha256-")+44) // base64 of sha256 is 44 chars
+	})
+
+	t.Run("from raw bytes", func(t *testing.T) {
+		raw := []byte(`{"vct":"https://example.com/credential/test"}`)
+		sri, err := v.SRIIntegrity(raw)
+		assert.NoError(t, err)
+		assert.Contains(t, sri, "sha256-")
+	})
+
+	t.Run("same bytes produce same hash", func(t *testing.T) {
+		raw := []byte(`{"vct":"test"}`)
+		sri1, _ := v.SRIIntegrity(raw)
+		sri2, _ := v.SRIIntegrity(raw)
+		assert.Equal(t, sri1, sri2)
+	})
+}
+
+func TestVCTMAttributes(t *testing.T) {
+	v := &VCTM{
+		Claims: []Claim{
+			{
+				Path:    []*string{new("given_name")},
+				Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}},
+			},
+			{
+				Path:    []*string{new("family_name")},
+				Display: []ClaimDisplay{{Locale: "en", Label: "Last Name"}, {Locale: "sv", Label: "Efternamn"}},
+			},
+			{
+				Path:    []*string{new("address"), new("country")},
+				Display: []ClaimDisplay{{Locale: "en", Label: "Country"}},
+			},
+			{
+				Path:    []*string{new("no_display")},
+				Display: nil,
+			},
+		},
+	}
+
+	attrs := v.Attributes()
+
+	t.Run("english locale", func(t *testing.T) {
+		en := attrs["en"]
+		assert.Equal(t, []string{"given_name"}, en["First Name"])
+		assert.Equal(t, []string{"family_name"}, en["Last Name"])
+		assert.Equal(t, []string{"address", "country"}, en["Country"])
+	})
+
+	t.Run("swedish locale", func(t *testing.T) {
+		sv := attrs["sv"]
+		assert.Equal(t, []string{"family_name"}, sv["Efternamn"])
+	})
+
+	t.Run("claims without display are excluded", func(t *testing.T) {
+		for _, locale := range attrs {
+			for label := range locale {
+				assert.NotEqual(t, "no_display", label)
+			}
+		}
+	})
+}
+
+func TestVCTMAttributesWithoutObjects(t *testing.T) {
+	v := &VCTM{
+		Claims: []Claim{
+			{
+				Path:    []*string{new("given_name")},
+				Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}},
+			},
+			{
+				Path:    []*string{new("address"), new("country")},
+				Display: []ClaimDisplay{{Locale: "en", Label: "Country"}},
+			},
+			{
+				Path:    []*string{new("no_display")},
+				Display: nil,
+			},
+		},
+	}
+
+	attrs := v.AttributesWithoutObjects()
+
+	t.Run("single-path claims included", func(t *testing.T) {
+		assert.Equal(t, []string{"given_name"}, attrs["en"]["First Name"])
+	})
+
+	t.Run("multi-path claims excluded", func(t *testing.T) {
+		_, exists := attrs["en"]["Country"]
+		assert.False(t, exists)
+	})
+
+	t.Run("claims without display excluded", func(t *testing.T) {
+		_, exists := attrs["en"]["no_display"]
+		assert.False(t, exists)
+	})
+}
+
+func TestVCTMClaimJSONPath(t *testing.T) {
+	v := &VCTM{
+		Claims: []Claim{
+			{
+				Path:  []*string{new("given_name")},
+				SVGID: "first_name",
+			},
+			{
+				Path:  []*string{new("address"), new("country")},
+				SVGID: "",
+			},
+			{
+				Path:  []*string{new("items"), nil},
+				SVGID: "all_items",
+			},
+		},
+	}
+
+	t.Run("returns paths and displayable map", func(t *testing.T) {
+		jp, err := v.ClaimJSONPath()
+		assert.NoError(t, err)
+		assert.Equal(t, "$.given_name", jp.Displayable["first_name"])
+		assert.Equal(t, "$.items[*]", jp.Displayable["all_items"])
+		_, exists := jp.Displayable[""]
+		assert.False(t, exists, "empty SVGID should not be in displayable map")
+
+		assert.Equal(t, []string{"$.given_name", "$.address.country", "$.items[*]"}, jp.AllClaims)
+	})
+
+	t.Run("nil claims returns error", func(t *testing.T) {
+		empty := &VCTM{}
+		_, err := empty.ClaimJSONPath()
+		assert.Error(t, err)
+	})
+}
+
+func TestVCTMPresentation(t *testing.T) {
+	t.Run("leaf claims resolved from data", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: []*string{new("hidden")}, Display: nil},
+			},
+		}
+		data := map[string]any{"given_name": "Helen", "hidden": "secret"}
+		result := v.Presentation(data)
+
+		assert.Len(t, result, 1)
+		entry := result["given_name"].(map[string]any)
+		assert.Equal(t, "First Name", entry["label"])
+		assert.Equal(t, "Helen", entry["value"])
+	})
+
+	t.Run("parent with children", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{new("address")}, Display: []ClaimDisplay{{Locale: "en", Label: "Address"}}},
+				{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
+				{Path: []*string{new("address"), new("street")}, Display: []ClaimDisplay{{Locale: "en", Label: "Street"}}},
+			},
+		}
+		data := map[string]any{
+			"address": map[string]any{"country": "SE", "street": "Tulegatan"},
+		}
+		result := v.Presentation(data)
+
+		assert.Len(t, result, 1)
+		addr := result["address"].(map[string]any)
+		assert.Equal(t, "Address", addr["label"])
+		children := addr["children"].(map[string]any)
+		assert.Equal(t, "SE", children["country"].(map[string]any)["value"])
+		assert.Equal(t, "Tulegatan", children["street"].(map[string]any)["value"])
+	})
+
+	t.Run("children without displayable parent are leaf claims", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{new("address")}, Display: nil},
+				{Path: []*string{new("address"), new("country")}, Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
+				{Path: []*string{new("address"), new("street")}, Display: []ClaimDisplay{{Locale: "en", Label: "Street"}}},
+			},
+		}
+		data := map[string]any{
+			"address": map[string]any{"country": "SE", "street": "Tulegatan"},
+		}
+		result := v.Presentation(data)
+
+		assert.Len(t, result, 2)
+		assert.Equal(t, "SE", result["country"].(map[string]any)["value"])
+		assert.Equal(t, "Tulegatan", result["street"].(map[string]any)["value"])
+	})
+
+	t.Run("nil data returns nil", func(t *testing.T) {
+		v := &VCTM{Claims: []Claim{
+			{Path: []*string{new("x")}, Display: []ClaimDisplay{{Locale: "en", Label: "X"}}},
+		}}
+		assert.Nil(t, v.Presentation(nil))
+	})
+
+	t.Run("empty claims returns nil", func(t *testing.T) {
+		v := &VCTM{Claims: []Claim{}}
+		result := v.Presentation(map[string]any{"x": "y"})
+		assert.Nil(t, result)
+	})
+
+	t.Run("missing data values are skipped", func(t *testing.T) {
+		v := &VCTM{
+			Claims: []Claim{
+				{Path: []*string{new("given_name")}, Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+				{Path: []*string{new("missing")}, Display: []ClaimDisplay{{Locale: "en", Label: "Missing"}}},
+			},
+		}
+		data := map[string]any{"given_name": "Helen"}
+		result := v.Presentation(data)
+
+		assert.Len(t, result, 1)
+		assert.NotNil(t, result["given_name"])
+	})
+}
+
+func TestVCTMSVGValues(t *testing.T) {
+	v := &VCTM{
+		Claims: []Claim{
+			{Path: []*string{new("given_name")}, SVGID: "first_name", Display: []ClaimDisplay{{Locale: "en", Label: "First Name"}}},
+			{Path: []*string{new("family_name")}, SVGID: "last_name", Display: []ClaimDisplay{{Locale: "en", Label: "Last Name"}}},
+			{Path: []*string{new("address"), new("country")}, SVGID: "country", Display: []ClaimDisplay{{Locale: "en", Label: "Country"}}},
+			{Path: []*string{new("no_svg")}, SVGID: "", Display: []ClaimDisplay{{Locale: "en", Label: "No SVG"}}},
+		},
+	}
+
+	data := map[string]any{
+		"given_name":  "Helen",
+		"family_name": "Mirren",
+		"address":     map[string]any{"country": "SE"},
+	}
+
+	t.Run("returns svg_id keyed values", func(t *testing.T) {
+		result := v.SVGValues(data)
+		assert.Len(t, result, 3)
+		assert.Equal(t, SVGValue{Label: "First Name", Value: "Helen"}, result["first_name"])
+		assert.Equal(t, SVGValue{Label: "Last Name", Value: "Mirren"}, result["last_name"])
+		assert.Equal(t, SVGValue{Label: "Country", Value: "SE"}, result["country"])
+	})
+
+	t.Run("skips claims without svg_id", func(t *testing.T) {
+		result := v.SVGValues(data)
+		_, exists := result["no_svg"]
+		assert.False(t, exists)
+	})
+
+	t.Run("nil data returns nil", func(t *testing.T) {
+		assert.Nil(t, v.SVGValues(nil))
+	})
+
+	t.Run("missing values are skipped", func(t *testing.T) {
+		sparse := map[string]any{"given_name": "Helen"}
+		result := v.SVGValues(sparse)
+		assert.Len(t, result, 1)
+		assert.Equal(t, "Helen", result["first_name"].Value)
+	})
+}
+
+func TestIsChildOfDisplayableParent(t *testing.T) {
+	parents := map[string]bool{
+		"$.address": true,
+		"$.items":   true,
+	}
+
+	tts := []struct {
+		name string
+		path []*string
+		want bool
+	}{
+		{
+			name: "child of displayable parent",
+			path: []*string{new("address"), new("country")},
+			want: true,
+		},
+		{
+			name: "not a child",
+			path: []*string{new("given_name")},
+			want: false,
+		},
+		{
+			name: "single element is never a child",
+			path: []*string{new("address")},
+			want: false,
+		},
+		{
+			name: "nil path element (array wildcard)",
+			path: []*string{new("items"), nil, new("name")},
+			want: true,
+		},
+		{
+			name: "empty path",
+			path: []*string{},
+			want: false,
+		},
+		{
+			name: "nil path",
+			path: nil,
+			want: false,
+		},
+		{
+			name: "unrelated nested path",
+			path: []*string{new("other"), new("field")},
+			want: false,
+		},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isChildOfDisplayableParent(tt.path, parents)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

@@ -79,7 +79,9 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 	redirectURL.RawQuery = url.Values{"code": {authorizationContext.Code}, "state": {authorizationContext.State}}.Encode()
 
-	svgTemplateClaims := map[string]vcclient.SVGClaim{}
+	var svgTemplateClaims map[string]sdjwtvc.SVGValue
+	var presentationClaims map[string]any
+	var doc *model.CompleteDocument
 
 	switch req.AuthProvider {
 	case model.AuthProviderOpenID4VP:
@@ -97,50 +99,12 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		c.log.Debug("userLookup - retrieved docs from cache", "session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		doc, err := firstDocument(docs)
+		doc, err = firstDocument(docs)
 		if err != nil {
 			c.log.Error(err, "no usable document in cache")
 			return nil, err
 		}
 		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource, "docs", docs)
-
-		jsonPaths, err := req.VCTM.ClaimJSONPath()
-		if err != nil {
-			c.log.Error(err, "failed to get JSON paths from VCTM claims")
-			return nil, err
-		}
-
-		c.log.Debug("userLookup", "doc", doc, "jsonPath", jsonPaths)
-
-		claimValues, err := sdjwtvc.ExtractClaimsByJSONPath(doc.DocumentData, jsonPaths.Displayable)
-		if err != nil {
-			c.log.Error(err, "failed to extract claim values from document data", "json_paths", jsonPaths.Displayable, "document_data", doc.DocumentData)
-			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
-		}
-
-		c.log.Debug("extracted claim values", "extracted_count", len(claimValues), "requested_count", len(jsonPaths.Displayable), "claims", claimValues)
-
-		for _, claim := range req.VCTM.Claims {
-			if claim.SVGID != "" {
-				value := normalizeEmpty(claimValues[claim.SVGID])
-				if value == nil {
-					continue
-				}
-				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
-					Label: claim.Display[0].Label,
-					Value: value,
-				}
-			} else if len(claim.Display) > 0 {
-				// No svg_id — fall back to extracting claim value from document data by path
-				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != nil {
-					svgTemplateClaims[key] = vcclient.SVGClaim{
-						Label: claim.Display[0].Label,
-						Value: value,
-					}
-				}
-			}
-		}
 
 	case model.AuthProviderSAML, model.AuthProviderOIDC:
 		// For SAML/OIDC, documents are stored in the VCI session cache by the
@@ -156,77 +120,21 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		c.log.Debug("userLookup - retrieved SAML/OIDC docs from cache",
 			"session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		doc, err := firstDocument(docs)
+		var err error
+		doc, err = firstDocument(docs)
 		if err != nil {
 			c.log.Error(err, "no usable document in cache for SAML/OIDC session")
 			return nil, err
-		}
-
-		jsonPaths, err := req.VCTM.ClaimJSONPath()
-		if err != nil {
-			c.log.Error(err, "failed to get JSON paths from VCTM claims")
-			return nil, err
-		}
-
-		claimValues, err := sdjwtvc.ExtractClaimsByJSONPath(doc.DocumentData, jsonPaths.Displayable)
-		if err != nil {
-			c.log.Error(err, "failed to extract claim values from document data",
-				"json_paths", jsonPaths.Displayable, "document_data", doc.DocumentData)
-			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
-		}
-
-		if len(claimValues) == 0 && len(jsonPaths.Displayable) > 0 {
-			// Log diagnostic info when JSONPath extraction finds nothing.
-			// This typically means the attribute_mappings don't produce the
-			// claim keys expected by the VCTM (check svg_id / path alignment).
-			docKeys := make([]string, 0, len(doc.DocumentData))
-			for k := range doc.DocumentData {
-				docKeys = append(docKeys, k)
-			}
-			c.log.Warn("no claims extracted: document data keys do not match VCTM JSONPaths",
-				"document_data_keys", docKeys,
-				"json_paths", jsonPaths.Displayable)
-		} else {
-			c.log.Debug("extracted claim values",
-				"extracted_count", len(claimValues),
-				"requested_count", len(jsonPaths.Displayable),
-				"claims", claimValues)
-		}
-
-		for _, claim := range req.VCTM.Claims {
-			if claim.SVGID != "" {
-				value := normalizeEmpty(claimValues[claim.SVGID])
-				if value == nil {
-					// JSONPath extraction missed this claim — try direct lookup as fallback.
-					if v := findValueByName(doc.DocumentData, claim.Path); v != nil {
-						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
-							Label: claim.Display[0].Label,
-							Value: v,
-						}
-					}
-					continue
-				}
-				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
-					Label: claim.Display[0].Label,
-					Value: value,
-				}
-			} else if len(claim.Display) > 0 {
-				// No svg_id — fall back to extracting claim value from document data by path
-				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != nil {
-					svgTemplateClaims[key] = vcclient.SVGClaim{
-						Label: claim.Display[0].Label,
-						Value: value,
-					}
-				}
-			}
 		}
 
 	default:
 		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthProvider)
 	}
 
-	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims)
+	presentationClaims = req.VCTM.Presentation(doc.DocumentData)
+	svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
+
+	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims, "presentationClaims", presentationClaims)
 
 	if err := c.cacheService.AuthContext.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
 		c.log.Error(err, "failed to consent for user")
@@ -234,8 +142,9 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	}
 
 	reply := &vcclient.UserLookupReply{
-		SVGTemplateClaims: svgTemplateClaims,
-		RedirectURL:       redirectURL.String(),
+		SVGTemplateClaims:  svgTemplateClaims,
+		PresentationClaims: presentationClaims,
+		RedirectURL:        redirectURL.String(),
 	}
 
 	c.log.Debug("userlookup", "reply", reply)
@@ -253,89 +162,4 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 		return doc, nil
 	}
 	return nil, fmt.Errorf("no documents in cache")
-}
-
-// findValueByName searches the document data for a claim value matching
-// the VCTM claim path. It first tries an exact JSONPath-style lookup,
-// then falls back to searching recursively by the leaf key name.
-// Returns the raw value (string, map, slice, ...) so that the consent UI
-// can render nested structures as a tree. Returns nil if not found.
-func findValueByName(data map[string]any, path []*string) any {
-	if len(path) == 0 {
-		return nil
-	}
-
-	// Walk the path through nested maps
-	var current any = data
-	for _, p := range path {
-		if p == nil {
-			break
-		}
-		m, ok := current.(map[string]any)
-		if !ok {
-			break
-		}
-		current, ok = m[*p]
-		if !ok {
-			// Exact path failed — try recursive search by the last named
-			// path segment. Paths can end with a nil element (array
-			// wildcard, e.g. ["nationalities", null]); skip nil segments
-			// when picking the leaf key, and bail if there isn't one.
-			leafKey := lastNamedSegment(path)
-			if leafKey == "" {
-				return nil
-			}
-			return normalizeEmpty(findValueRecursive(data, leafKey))
-		}
-	}
-
-	return normalizeEmpty(current)
-}
-
-// normalizeEmpty returns nil for values that are semantically empty
-// (empty strings, empty maps, empty slices) so that callers checking
-// for != nil continue to suppress blank consent-preview rows.
-func normalizeEmpty(v any) any {
-	switch val := v.(type) {
-	case string:
-		if val == "" {
-			return nil
-		}
-	case map[string]any:
-		if len(val) == 0 {
-			return nil
-		}
-	case []any:
-		if len(val) == 0 {
-			return nil
-		}
-	}
-	return v
-}
-
-// lastNamedSegment returns the value of the last non-nil entry in a VCTM
-// claim path, or "" if every segment is a nil wildcard.
-func lastNamedSegment(path []*string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] != nil {
-			return *path[i]
-		}
-	}
-	return ""
-}
-
-// findValueRecursive searches a nested map for the first value matching key.
-// Returns nil if not found.
-func findValueRecursive(data map[string]any, key string) any {
-	if v, ok := data[key]; ok {
-		return v
-	}
-	for _, v := range data {
-		if nested, ok := v.(map[string]any); ok {
-			if result := findValueRecursive(nested, key); result != nil {
-				return result
-			}
-		}
-	}
-	return nil
 }
