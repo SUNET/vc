@@ -38,7 +38,7 @@ describe("escapeHtml", () => {
         assert.equal(escapeHtml(`<>&"'`), "&lt;&gt;&amp;&quot;&#39;");
     });
 
-    it("escapes ampersand before other entities (no double-escape)", () => {
+    it("escapes existing entities by encoding their leading ampersand", () => {
         assert.equal(escapeHtml("&amp;"), "&amp;amp;");
     });
 

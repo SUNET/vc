@@ -160,18 +160,31 @@ export function valueForSvgPlaceholder(svgId, value) {
  * Render a claim value as HTML. Primitives become escaped text; objects and
  * arrays become nested <div> rows of indented key:value pairs. Base64 image
  * data is rendered as an inline preview. Used via `x-html` in consent.html.
+ *
+ * A depth guard prevents stack overflows / stalled rendering on deeply nested
+ * or very large claim structures — once the limit is reached, remaining
+ * nesting is shown as "…".
+ */
+const MAX_RENDER_DEPTH = 10;
+
+/**
  * @param {unknown} value
+ * @param {number} [depth=0]
  * @returns {string}
  */
-export function renderClaimValueHtml(value) {
+export function renderClaimValueHtml(value, depth = 0) {
     if (value === null || value === undefined) {
         return "";
+    }
+
+    if (depth >= MAX_RENDER_DEPTH) {
+        return escapeHtml("…");
     }
 
     if (Array.isArray(value)) {
         if (value.length === 0) return "";
         const items = value
-            .map((v, i) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(String(i))}</span><div class="min-w-0 break-words">${renderClaimValueHtml(v)}</div></div>`)
+            .map((v, i) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(String(i))}</span><div class="min-w-0 break-words">${renderClaimValueHtml(v, depth + 1)}</div></div>`)
             .join("");
         return `<div class="pl-3 space-y-0.5">${items}</div>`;
     }
@@ -180,7 +193,7 @@ export function renderClaimValueHtml(value) {
         const entries = Object.entries(/** @type {Record<string, unknown>} */(value));
         if (entries.length === 0) return "";
         const items = entries
-            .map(([k, v]) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(keyToLabel(k))}:</span><div class="min-w-0 break-words">${renderClaimValueHtml(v)}</div></div>`)
+            .map(([k, v]) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(keyToLabel(k))}:</span><div class="min-w-0 break-words">${renderClaimValueHtml(v, depth + 1)}</div></div>`)
             .join("");
         return `<div class="pl-3 space-y-0.5">${items}</div>`;
     }

@@ -122,8 +122,8 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID]
-				if !ok || value == nil {
+				value := normalizeEmpty(claimValues[claim.SVGID])
+				if value == nil {
 					continue
 				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
@@ -195,8 +195,8 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID]
-				if !ok || value == nil {
+				value := normalizeEmpty(claimValues[claim.SVGID])
+				if value == nil {
 					// JSONPath extraction missed this claim — try direct lookup as fallback.
 					if v := findValueByName(doc.DocumentData, claim.Path); v != nil {
 						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
