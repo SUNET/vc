@@ -270,11 +270,17 @@ func (c *Claim) JSONPath() string {
 }
 
 // walkPath resolves a claim path against nested document data.
+// Returns nil for empty paths, paths that don't resolve, and semantically
+// empty values (empty string, empty slice, empty map) so callers can
+// uniformly skip absent data with a nil check.
 func walkPath(data map[string]any, path []*string) any {
+	if len(path) == 0 || path[0] == nil {
+		return nil
+	}
 	var current any = data
 	for _, seg := range path {
 		if seg == nil {
-			return current // array wildcard — return the array as-is
+			return normalizeEmpty(current) // array wildcard — return the array as-is
 		}
 		m, ok := current.(map[string]any)
 		if !ok {
@@ -285,7 +291,27 @@ func walkPath(data map[string]any, path []*string) any {
 			return nil
 		}
 	}
-	return current
+	return normalizeEmpty(current)
+}
+
+// normalizeEmpty returns nil for semantically empty values (empty string,
+// empty slice, empty map) so that consent rows with blank data are skipped.
+func normalizeEmpty(v any) any {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return nil
+		}
+	case []any:
+		if len(val) == 0 {
+			return nil
+		}
+	case map[string]any:
+		if len(val) == 0 {
+			return nil
+		}
+	}
+	return v
 }
 
 // jsonPathFromSegments builds a JSONPath string from path segments.

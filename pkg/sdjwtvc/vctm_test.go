@@ -355,6 +355,63 @@ func TestVCTMSVGValues(t *testing.T) {
 	})
 }
 
+func TestWalkPath(t *testing.T) {
+	data := map[string]any{
+		"name":     "Helen",
+		"empty_s":  "",
+		"empty_a":  []any{},
+		"empty_m":  map[string]any{},
+		"items":    []any{"a", "b"},
+		"nested":   map[string]any{"key": "val"},
+		"zero_int": 0,
+		"falsy":    false,
+	}
+
+	t.Run("empty path returns nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, []*string{}))
+	})
+
+	t.Run("nil-only path returns nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, []*string{nil}))
+	})
+
+	t.Run("resolves normal key", func(t *testing.T) {
+		assert.Equal(t, "Helen", walkPath(data, []*string{new("name")}))
+	})
+
+	t.Run("empty string normalized to nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, []*string{new("empty_s")}))
+	})
+
+	t.Run("empty slice normalized to nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, []*string{new("empty_a")}))
+	})
+
+	t.Run("empty map normalized to nil", func(t *testing.T) {
+		assert.Nil(t, walkPath(data, []*string{new("empty_m")}))
+	})
+
+	t.Run("non-empty slice preserved", func(t *testing.T) {
+		assert.Equal(t, []any{"a", "b"}, walkPath(data, []*string{new("items")}))
+	})
+
+	t.Run("non-empty map preserved", func(t *testing.T) {
+		assert.Equal(t, map[string]any{"key": "val"}, walkPath(data, []*string{new("nested")}))
+	})
+
+	t.Run("zero int preserved", func(t *testing.T) {
+		assert.Equal(t, 0, walkPath(data, []*string{new("zero_int")}))
+	})
+
+	t.Run("false bool preserved", func(t *testing.T) {
+		assert.Equal(t, false, walkPath(data, []*string{new("falsy")}))
+	})
+
+	t.Run("array wildcard returns parent value", func(t *testing.T) {
+		assert.Equal(t, []any{"a", "b"}, walkPath(data, []*string{new("items"), nil}))
+	})
+}
+
 func TestIsChildOfDisplayableParent(t *testing.T) {
 	parents := map[string]bool{
 		"$.address": true,
