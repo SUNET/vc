@@ -210,12 +210,18 @@ describe("valueForSvgPlaceholder", () => {
         );
     });
 
-    it("returns null for non-string values in text placeholders", () => {
-        // null tells the caller to skip the substitution, leaving the
-        // literal `{{name}}` rather than producing "[object Object]".
+    it("stringifies numbers and booleans for text placeholders", () => {
+        assert.equal(valueForSvgPlaceholder("score", 42), "42");
+        assert.equal(valueForSvgPlaceholder("score", 7.5), "7.5");
+        assert.equal(valueForSvgPlaceholder("valid", true), "true");
+        assert.equal(valueForSvgPlaceholder("valid", false), "false");
+    });
+
+    it("returns null for non-scalar values in text placeholders", () => {
         assert.equal(valueForSvgPlaceholder("given_name", null), null);
+        assert.equal(valueForSvgPlaceholder("given_name", undefined), null);
         assert.equal(valueForSvgPlaceholder("given_name", { foo: "bar" }), null);
-        assert.equal(valueForSvgPlaceholder("given_name", 42), null);
+        assert.equal(valueForSvgPlaceholder("given_name", [1, 2]), null);
     });
 });
 

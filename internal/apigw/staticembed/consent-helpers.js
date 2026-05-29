@@ -139,9 +139,10 @@ export function detectBase64Image(s) {
  * URL, otherwise an empty string is returned so the rendered SVG won't fetch
  * arbitrary remote URLs from the consent page.
  *
- * Text placeholders pass scalar strings through unchanged; non-string values
- * return null so the loop can keep the placeholder rather than producing
- * "[object Object]".
+ * Text placeholders pass strings through unchanged and stringify other
+ * scalar JSON primitives (numbers, booleans) so they can be substituted
+ * into the SVG template. Non-scalar values (objects, arrays) and
+ * null/undefined return null so the caller skips the substitution.
  *
  * @param {string} svgId
  * @param {unknown} value
@@ -152,8 +153,9 @@ export function valueForSvgPlaceholder(svgId, value) {
         if (typeof value !== "string") return "";
         return detectBase64Image(value) ?? "";
     }
-    if (typeof value !== "string") return null;
-    return value;
+    if (value === null || value === undefined) return null;
+    if (typeof value === "object") return null;
+    return String(value);
 }
 
 /**
