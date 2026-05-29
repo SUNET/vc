@@ -1,12 +1,20 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
 
+import {
+    base64ToUtf8,
+    escapeHtml,
+    renderClaimValueHtml,
+    utf8ToBase64,
+    valueForSvgPlaceholder,
+} from "./consent-helpers.js";
+
 /**
  * @typedef {Object} Credential
  * @property {string} vct
  * @property {string} name
  * @property {string} svg
- * @property {Record<string, { label: string; value: string; }>} claims
+ * @property {Record<string, { label: string; value: unknown; }>} claims
  */
 
 /**
@@ -18,31 +26,31 @@ const SvgTemplateResponseSchema = v.required(v.object({
 }));
 
 /**
+ * Recursive JSON-value schema for claim values. Claim values are always
+ * delivered as JSON (string, number, boolean, null, or a nested object/array
+ * of the same), so anything outside that set is rejected at parse time and
+ * the consumer can rely on `typeof` checks at use sites.
+ * @type {import('valibot').GenericSchema<unknown>}
+ */
+const ClaimValueSchema = v.lazy(() => v.union([
+    v.string(),
+    v.number(),
+    v.boolean(),
+    v.null(),
+    v.array(ClaimValueSchema),
+    v.record(v.string(), ClaimValueSchema),
+]));
+
+/**
  * @typedef {v.InferOutput<typeof UserDataSchema>} UserData
  */
 const UserDataSchema = v.required(v.object({
     svg_template_claims: v.record(v.string(), v.object({
         label: v.string(),
-        value: v.string(),
+        value: ClaimValueSchema,
     })),
     redirect_url: v.string(),
 }));
-
-/**
- * @param {string} key 
- * @returns {string}
- */
-function keyToLabel(key) {
-    if (key.includes("_")) {
-        let parts = key.split("_");
-
-        parts[0] = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-
-        key = parts.join(" ");
-    }
-
-    return key;
-}
 
 /**
  * Due to bfcache some state will persist across
@@ -252,8 +260,9 @@ Alpine.data("app", () => ({
                 claims: data.svg_template_claims,
             });
 
-            if (data.svg_template_claims.given_name?.value) {
-                this.$refs.title.innerText = `Welcome, ${data.svg_template_claims.given_name.value}!`
+            const givenName = data.svg_template_claims.given_name?.value;
+            if (typeof givenName === "string" && givenName.length > 0) {
+                this.$refs.title.innerText = `Welcome, ${givenName}!`;
             }
         } catch (err) {
             if (err instanceof v.ValiError) {
@@ -302,7 +311,7 @@ Alpine.data("app", () => ({
     },
 
     /**
-     * @param {Record<string, { label: string; value: string; }>} claims
+     * @param {Record<string, { label: string; value: unknown; }>} claims
      * @returns {Promise<string>}
      */
     async createCredentialSvgImageUri(claims) {
@@ -311,13 +320,39 @@ Alpine.data("app", () => ({
         /** @type {SvgTemplateResponse} */
         const data = await this.fetchData(url.toString(), {});
 
-        let svg = atob(data.template);
+        // Decode the template as UTF-8 — `atob` alone returns a Latin-1 byte
+        // string, which would corrupt any non-ASCII characters in the SVG
+        // when re-encoded with utf8ToBase64 below.
+        let svg = base64ToUtf8(data.template);
 
         for (const [svg_id, claim] of Object.entries(claims)) {
-            svg = svg.replaceAll(`{{${svg_id}}}`, claim.value);
+            // valueForSvgPlaceholder decides what (if anything) is safe to
+            // substitute for this placeholder. Image-bearing slots only
+            // accept validated data: URLs — arbitrary strings are coerced
+            // to "" so the consent page can't be made to fetch external
+            // URLs at render time. Text slots pass scalar strings through.
+            const resolved = valueForSvgPlaceholder(svg_id, claim.value);
+            if (resolved === null) continue;
+            // Escape for XML text/attribute contexts. Without this, a value
+            // like O'Brien & Co. or "</text>..." would break SVG parsing or
+            // alter its structure. Base64 data: URLs only use characters
+            // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
+            svg = svg.replaceAll(`{{${svg_id}}}`, escapeHtml(resolved));
         }
 
-        return `data:image/svg+xml;base64,${btoa(svg)}`;
+        return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
+    },
+
+    /**
+     * Renders a claim value as HTML. Primitive values become escaped text;
+     * objects and arrays become nested <div> rows of indented key:value pairs.
+     * Returned HTML is safe to set via x-html: all user-supplied strings are
+     * passed through escapeHtml first.
+     * @param {unknown} value
+     * @returns {string}
+     */
+    renderClaimValue(value) {
+        return renderClaimValueHtml(value);
     },
 
     /** @param {string} url */

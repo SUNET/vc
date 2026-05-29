@@ -122,8 +122,8 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID].(string)
-				if !ok {
+				value := normalizeEmpty(claimValues[claim.SVGID])
+				if value == nil {
 					continue
 				}
 				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
@@ -133,7 +133,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			} else if len(claim.Display) > 0 {
 				// No svg_id — fall back to extracting claim value from document data by path
 				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+				if value := findValueByName(doc.DocumentData, claim.Path); value != nil {
 					svgTemplateClaims[key] = vcclient.SVGClaim{
 						Label: claim.Display[0].Label,
 						Value: value,
@@ -195,13 +195,13 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		for _, claim := range req.VCTM.Claims {
 			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID].(string)
-				if !ok {
-					// JSONPath extraction missed this claim — try direct lookup as fallback
-					if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+				value := normalizeEmpty(claimValues[claim.SVGID])
+				if value == nil {
+					// JSONPath extraction missed this claim — try direct lookup as fallback.
+					if v := findValueByName(doc.DocumentData, claim.Path); v != nil {
 						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
 							Label: claim.Display[0].Label,
-							Value: value,
+							Value: v,
 						}
 					}
 					continue
@@ -213,7 +213,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 			} else if len(claim.Display) > 0 {
 				// No svg_id — fall back to extracting claim value from document data by path
 				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
+				if value := findValueByName(doc.DocumentData, claim.Path); value != nil {
 					svgTemplateClaims[key] = vcclient.SVGClaim{
 						Label: claim.Display[0].Label,
 						Value: value,
@@ -258,9 +258,11 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 // findValueByName searches the document data for a claim value matching
 // the VCTM claim path. It first tries an exact JSONPath-style lookup,
 // then falls back to searching recursively by the leaf key name.
-func findValueByName(data map[string]any, path []*string) string {
+// Returns the raw value (string, map, slice, ...) so that the consent UI
+// can render nested structures as a tree. Returns nil if not found.
+func findValueByName(data map[string]any, path []*string) any {
 	if len(path) == 0 {
-		return ""
+		return nil
 	}
 
 	// Walk the path through nested maps
@@ -275,32 +277,65 @@ func findValueByName(data map[string]any, path []*string) string {
 		}
 		current, ok = m[*p]
 		if !ok {
-			// Exact path failed — try recursive search by leaf key name
-			leafKey := *path[len(path)-1]
-			return findValueRecursive(data, leafKey)
+			// Exact path failed — try recursive search by the last named
+			// path segment. Paths can end with a nil element (array
+			// wildcard, e.g. ["nationalities", null]); skip nil segments
+			// when picking the leaf key, and bail if there isn't one.
+			leafKey := lastNamedSegment(path)
+			if leafKey == "" {
+				return nil
+			}
+			return normalizeEmpty(findValueRecursive(data, leafKey))
 		}
 	}
 
-	if s, ok := current.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", current)
+	return normalizeEmpty(current)
 }
 
-// findValueRecursive searches a nested map for the first string value matching key.
-func findValueRecursive(data map[string]any, key string) string {
-	if v, ok := data[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
+// normalizeEmpty returns nil for values that are semantically empty
+// (empty strings, empty maps, empty slices) so that callers checking
+// for != nil continue to suppress blank consent-preview rows.
+func normalizeEmpty(v any) any {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return nil
 		}
-		return fmt.Sprintf("%v", v)
+	case map[string]any:
+		if len(val) == 0 {
+			return nil
+		}
+	case []any:
+		if len(val) == 0 {
+			return nil
+		}
+	}
+	return v
+}
+
+// lastNamedSegment returns the value of the last non-nil entry in a VCTM
+// claim path, or "" if every segment is a nil wildcard.
+func lastNamedSegment(path []*string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] != nil {
+			return *path[i]
+		}
+	}
+	return ""
+}
+
+// findValueRecursive searches a nested map for the first value matching key.
+// Returns nil if not found.
+func findValueRecursive(data map[string]any, key string) any {
+	if v, ok := data[key]; ok {
+		return v
 	}
 	for _, v := range data {
 		if nested, ok := v.(map[string]any); ok {
-			if result := findValueRecursive(nested, key); result != "" {
+			if result := findValueRecursive(nested, key); result != nil {
 				return result
 			}
 		}
 	}
-	return ""
+	return nil
 }

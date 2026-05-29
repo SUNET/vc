@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +18,18 @@ import (
 
 	"gopkg.in/yaml.v2"
 )
+
+// genericFacePNGBytes is a placeholder head-and-shoulders avatar used as the
+// "picture" claim for every bootstrapped test person. Not an actual portrait
+// of anyone — just a recognizable face so the credential card has something
+// to render in its photo frame.
+//
+//go:embed generic_face.png
+var genericFacePNGBytes []byte
+
+// genericFacePNG is genericFacePNGBytes base64-encoded for use as a JWT
+// claim value (and for substitution into the SVG card template).
+var genericFacePNG = base64.StdEncoding.EncodeToString(genericFacePNGBytes)
 
 // InputFile is the top-level YAML structure.
 type InputFile struct {
@@ -175,7 +189,7 @@ func genPID(pids []string, input *InputFile) map[string]*vcclient.UploadRequest 
 			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
 			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-pid-%s", pid)),
 			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
-			"picture":                        minPNG,
+			"picture":                        genericFacePNG,
 			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
 			"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
 			"sex":                            or_(pidExt.Sex, "0"),
@@ -238,7 +252,7 @@ func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadReques
 			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
 			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-eduid-%s", pid)),
 			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
-			"picture":                        minPNG,
+			"picture":                        genericFacePNG,
 			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
 			"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
 			"sex":                            or_(pidExt.Sex, "0"),
@@ -500,8 +514,6 @@ func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.Id
 }
 
 // --- Helpers ---
-
-const minPNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVQYV2P8z8DwHwYGBgZGMAEADigBCCGZkB0AAAAASUVORK5CYII="
 
 func calcAge(birthDate string) int {
 	bd, err := time.Parse("2006-01-02", birthDate)

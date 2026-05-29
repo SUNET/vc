@@ -281,6 +281,7 @@
       "path": ["personal_administrative_number"],
       "mandatory": false,
       "sd": "always",
+      "svg_id": "personal_administrative_number",
       "display": [
         {
           "locale": "en-US",
@@ -391,6 +392,7 @@
       "path": ["issuing_country"],
       "mandatory": true,
       "sd": "always",
+      "svg_id": "issuing_country",
       "display": [
         {
           "locale": "en-US",
@@ -403,6 +405,7 @@
       "path": ["document_number"],
       "mandatory": false,
       "sd": "always",
+      "svg_id": "document_number",
       "display": [
         {
           "locale": "en-US",

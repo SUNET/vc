@@ -119,8 +119,8 @@
                                                 <tbody>
                                                     <template x-for="[svg_id, claim] of Object.entries(credential.claims)">
                                                         <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
-                                                            <th class="p-2 text-sm text-left" x-text="claim.label"></th>
-                                                            <td class="p-2 text-sm text-left" x-text="claim.value"></td>
+                                                            <th class="p-2 text-sm text-left align-top" x-text="claim.label"></th>
+                                                            <td class="p-2 text-sm text-left align-top" x-html="renderClaimValue(claim.value)"></td>
                                                         </tr>
                                                     </template>
                                                 </tbody>
