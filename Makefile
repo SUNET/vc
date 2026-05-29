@@ -184,7 +184,7 @@ test-env: ## Set up test environment
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
-	@node --test $(APIGW_STATIC)/tests/
+	@node --test $(APIGW_STATIC)/tests/*.test.js
 
 # Test targets with build tags
 test-pkcs11: ## Test with PKCS#11 build tag
