@@ -113,27 +113,29 @@ func (v *VCTM) ClaimJSONPath() (*VCTMJSONPath, error) {
 	return reply, nil
 }
 
-// Presentation resolves VCTM claims against document data and returns a nested
+// Presentation resolves VCTM claims against document data and returns a flat
 // map suitable for the consent preview UI.
 //
-// The returned map is keyed by claim name. For single-segment claims and
-// displayable parents, the key is the first path element. For multi-segment
-// leaf claims without a displayable parent, entries are nested under the
-// first path segment as a map (e.g. path ["address","country"] produces
-// result["address"]["country"]).
+// Every top-level entry is a map[string]any with "label" and either "value"
+// (leaf/orphan claims) or "children" (parent claims whose children are also
+// defined in the VCTM with display info).
 //
-// Each entry is a map[string]any with "label" and either "value" (leaf claims)
-// or "children" (parent claims whose children are also defined in the VCTM
-// with display info).
+// Keys:
+//   - Single-segment claims: the path element itself (e.g. "given_name").
+//   - Displayable parents: the first path element (e.g. "address").
+//   - Multi-segment orphan leaves (no displayable parent): joined path
+//     segments (e.g. path ["credentialSubject","givenName","und"] →
+//     key "credentialSubject.givenName.und").
 //
 // Example output:
 //
 //	{
-//	  "given_name": {"label": "First Name", "value": "Helen"},
-//	  "address": {"label": "Address", "children": {
+//	  "given_name":    {"label": "First Name", "value": "Helen"},
+//	  "address":       {"label": "Address", "children": {
 //	    "street_address": {"label": "Residence street", "value": "Tulegatan"},
-//	    "country": {"label": "Country of residence", "value": "SE"},
-//	  }}
+//	    "country":        {"label": "Country of residence", "value": "SE"},
+//	  }},
+//	  "credentialSubject.givenName.und": {"label": "Given name", "value": "Helen"},
 //	}
 func (v *VCTM) Presentation(data map[string]any) map[string]any {
 	if data == nil || len(v.Claims) == 0 {
