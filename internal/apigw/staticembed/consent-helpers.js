@@ -185,6 +185,11 @@ export function renderClaimValueHtml(value, depth = 0) {
 
     if (Array.isArray(value)) {
         if (value.length === 0) return "";
+        // Simple arrays of primitives (strings, numbers) — render as
+        // comma-separated list without index labels.
+        if (value.every(v => typeof v !== "object" || v === null)) {
+            return escapeHtml(value.map(String).join(", "));
+        }
         const items = value
             .map((v, i) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(String(i))}</span><div class="min-w-0 break-words">${renderClaimValueHtml(v, depth + 1)}</div></div>`)
             .join("");

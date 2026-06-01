@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -218,27 +220,17 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 			if c.Path[0] == nil {
 				continue // no usable key segment
 			}
+			// Use the first path segment as key for single-segment claims,
+			// or the full JSONPath (without "$." prefix) for multi-segment
+			// orphans to avoid collisions and keep the result flat and
+			// compatible with the consent UI schema ({label,value}).
+			key := *c.Path[0]
 			if len(c.Path) > 1 {
-				// Multi-segment orphan: nest under the first path segment.
-				topKey := *c.Path[0]
-				lastSeg := c.Path[len(c.Path)-1]
-				if lastSeg == nil {
-					continue
-				}
-				nested, _ := result[topKey].(map[string]any)
-				if nested == nil {
-					nested = map[string]any{}
-					result[topKey] = nested
-				}
-				nested[*lastSeg] = map[string]any{
-					"label": label,
-					"value": value,
-				}
-			} else {
-				result[*c.Path[0]] = map[string]any{
-					"label": label,
-					"value": value,
-				}
+				key = c.claimKey()
+			}
+			result[key] = map[string]any{
+				"label": label,
+				"value": value,
 			}
 		}
 	}
@@ -294,10 +286,27 @@ func (c *Claim) JSONPath() string {
 	return reply
 }
 
+// claimKey returns a stable, unique key for a claim suitable for use in
+// the Presentation() result map. For multi-segment paths (e.g.
+// ["credentialSubject","givenName","und"]) it joins all non-nil segments
+// with "." (e.g. "credentialSubject.givenName.und") to avoid collisions.
+func (c *Claim) claimKey() string {
+	parts := make([]string, 0, len(c.Path))
+	for _, seg := range c.Path {
+		if seg != nil {
+			parts = append(parts, *seg)
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
 // walkPath resolves a claim path against nested document data.
 // Returns nil for empty paths, paths that don't resolve, and semantically
 // empty values (empty string, empty slice, empty map) so callers can
 // uniformly skip absent data with a nil check.
+//
+// Path segments may contain bracket-index notation (e.g. "hasClaim[0]")
+// to select an element from an array-typed field.
 func walkPath(data map[string]any, path []*string) any {
 	if len(path) == 0 || path[0] == nil {
 		return nil
@@ -311,12 +320,35 @@ func walkPath(data map[string]any, path []*string) any {
 		if !ok {
 			return nil
 		}
-		current, ok = m[*seg]
+		key, idx := parseBracketIndex(*seg)
+		current, ok = m[key]
 		if !ok {
 			return nil
 		}
+		if idx >= 0 {
+			arr, ok := current.([]any)
+			if !ok || idx >= len(arr) {
+				return nil
+			}
+			current = arr[idx]
+		}
 	}
 	return normalizeEmpty(current)
+}
+
+// parseBracketIndex splits a segment like "hasClaim[0]" into ("hasClaim", 0).
+// If no bracket-index is present, it returns (seg, -1).
+func parseBracketIndex(seg string) (string, int) {
+	bracket := strings.IndexByte(seg, '[')
+	if bracket < 0 || !strings.HasSuffix(seg, "]") {
+		return seg, -1
+	}
+	idxStr := seg[bracket+1 : len(seg)-1]
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil || idx < 0 {
+		return seg, -1
+	}
+	return seg[:bracket], idx
 }
 
 // normalizeEmpty returns nil for semantically empty values (empty string,

@@ -263,13 +263,15 @@ describe("renderClaimValueHtml", () => {
         assert.ok(html.includes("Tulegatan"));
     });
 
-    it("renders an array using indices as keys", () => {
-        const html = renderClaimValueHtml(["SE", "NO"]);
+    it("renders a primitive array as comma-separated values", () => {
+        assert.equal(renderClaimValueHtml(["SE", "NO"]), "SE, NO");
+    });
+
+    it("renders an array of objects using indices as keys", () => {
+        const html = renderClaimValueHtml([{ name: "a" }, { name: "b" }]);
         assert.match(html, /^<div class="pl-3 space-y-0\.5">/);
         assert.ok(html.includes(">0<"));
         assert.ok(html.includes(">1<"));
-        assert.ok(html.includes("SE"));
-        assert.ok(html.includes("NO"));
     });
 
     it("renders nested structures recursively", () => {
@@ -508,9 +510,11 @@ describe("PID end-to-end: Valibot schema + flattenClaims + renderClaimValueHtml"
         assert.equal(renderClaimValueHtml("Sansen"), "Sansen");
         // Numeric-string value for sex.
         assert.equal(renderClaimValueHtml("0"), "0");
-        // Array (nationalities).
-        const html = renderClaimValueHtml(["SE"]);
-        assert.ok(html.includes("SE"), "array element rendered");
-        assert.ok(html.includes("0"), "array index rendered");
+        // Array of primitives (nationalities) — comma-separated, no indices.
+        assert.equal(renderClaimValueHtml(["SE"]), "SE");
+        assert.equal(renderClaimValueHtml(["SE", "DE"]), "SE, DE");
+        // Array of objects — indexed layout preserved.
+        const objHtml = renderClaimValueHtml([{ name: "a" }]);
+        assert.ok(objHtml.includes("0"), "array of objects shows index");
     });
 });
