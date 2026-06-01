@@ -62,6 +62,21 @@ func getKeys(ctx context.Context, url string, c JWKSCache, log func(string, ...a
 	return set, nil
 }
 
+// getKeysFromFile reads a JWKS JSON file from disk and returns the parsed keyset.
+func getKeysFromFile(filePath string) (jwk.Set, error) {
+	raw, err := os.ReadFile(filepath.Clean(filePath))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JWKS file %s: %w", filePath, err)
+	}
+
+	set, err := jwk.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JWKS file %s: %w", filePath, err)
+	}
+
+	return set, nil
+}
+
 // SafeEngine wraps a SPOCP AdaptiveEngine with a sync.RWMutex so that
 // concurrent request handlers can safely call QueryElement while still
 // allowing future rule hot-reloading under a write lock.
@@ -544,9 +559,15 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 		}
 		tokenStr := parts[1]
 
-		keys, err := getKeys(c.Request.Context(), cfg.JWKSURL, jwksCache, func(msg string, args ...any) {
-			log.Info(msg, args...)
-		})
+		var keys jwk.Set
+		var err error
+		if cfg.JWKSFilePath != "" {
+			keys, err = getKeysFromFile(cfg.JWKSFilePath)
+		} else {
+			keys, err = getKeys(c.Request.Context(), cfg.JWKSURL, jwksCache, func(msg string, args ...any) {
+				log.Info(msg, args...)
+			})
+		}
 		if err != nil {
 			log.Error(err, "jwks_fetch_error")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to validate token"})
@@ -628,13 +649,21 @@ func (m *middlewareHandler) APIAuth(ctx context.Context, service string, apiAuth
 
 	switch {
 	case apiAuth.JWKS.Enable:
-		if jwksCache == nil {
-			return nil, fmt.Errorf("api_auth: jwks.enable is true but no JWKS cache was provided")
-		}
-		if engine != nil {
-			m.log.Info("api_auth_mode", "mode", "jwks+spocp", "jwks_url", apiAuth.JWKS.JWKSURL, "rules", engine.RuleCount())
+		if apiAuth.JWKS.JWKSFilePath != "" {
+			if engine != nil {
+				m.log.Info("api_auth_mode", "mode", "jwks_file+spocp", "jwks_file_path", apiAuth.JWKS.JWKSFilePath, "rules", engine.RuleCount())
+			} else {
+				m.log.Info("api_auth_mode", "mode", "jwks_file", "jwks_file_path", apiAuth.JWKS.JWKSFilePath)
+			}
 		} else {
-			m.log.Info("api_auth_mode", "mode", "jwks", "jwks_url", apiAuth.JWKS.JWKSURL)
+			if jwksCache == nil {
+				return nil, fmt.Errorf("api_auth: jwks.enable is true but no JWKS cache was provided")
+			}
+			if engine != nil {
+				m.log.Info("api_auth_mode", "mode", "jwks+spocp", "jwks_url", apiAuth.JWKS.JWKSURL, "rules", engine.RuleCount())
+			} else {
+				m.log.Info("api_auth_mode", "mode", "jwks", "jwks_url", apiAuth.JWKS.JWKSURL)
+			}
 		}
 		return m.JWKSAuth(ctx, service, apiAuth.JWKS, jwksCache, engine), nil
 
