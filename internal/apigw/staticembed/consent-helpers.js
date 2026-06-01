@@ -185,6 +185,11 @@ export function renderClaimValueHtml(value, depth = 0) {
 
     if (Array.isArray(value)) {
         if (value.length === 0) return "";
+        // Simple arrays of primitives (strings, numbers) — render as
+        // comma-separated list without index labels.
+        if (value.every(v => typeof v !== "object" || v === null)) {
+            return escapeHtml(value.map(String).join(", "));
+        }
         const items = value
             .map((v, i) => `<div class="flex gap-2"><span class="text-xs opacity-60 shrink-0 pt-0.5">${escapeHtml(String(i))}</span><div class="min-w-0 break-words">${renderClaimValueHtml(v, depth + 1)}</div></div>`)
             .join("");
@@ -209,4 +214,27 @@ export function renderClaimValueHtml(value, depth = 0) {
     }
 
     return escapeHtml(String(value));
+}
+
+/**
+ * Flatten presentation claims into an ordered array of table rows.
+ * Parent claims with `children` produce a header row followed by indented
+ * child rows. Leaf claims produce a single row.
+ *
+ * @param {Record<string, { label: string; value?: unknown; children?: Record<string, { label: string; value: unknown }> }>} claims
+ * @returns {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>}
+ */
+export function flattenClaims(claims) {
+    const rows = [];
+    for (const [, claim] of Object.entries(claims)) {
+        if (claim.children) {
+            rows.push({ label: claim.label, isHeader: true });
+            for (const [, child] of Object.entries(claim.children)) {
+                rows.push({ label: child.label, value: child.value, indent: true });
+            }
+        } else {
+            rows.push({ label: claim.label, value: claim.value });
+        }
+    }
+    return rows;
 }

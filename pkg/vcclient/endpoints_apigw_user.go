@@ -20,22 +20,17 @@ type UserLookupRequest struct {
 	VCTM         *sdjwtvc.VCTM `json:"-"`
 }
 
-type SVGClaim struct {
-	Label string `json:"label"`
-	// Value is the displayable claim value. Typically a string, but may be a
-	// nested map/array when the claim itself is structured (e.g. an address).
-	// The consent UI renders structured values as a tree.
-	Value any `json:"value"`
-}
-
 // SVGTemplateReply holds SVG template data.
 type SVGTemplateReply struct {
 	Template string `json:"template"`
 }
 
 type UserLookupReply struct {
-	SVGTemplateClaims map[string]SVGClaim `json:"svg_template_claims"`
-	RedirectURL       string              `json:"redirect_url,omitempty"`
+	// SVGTemplateClaims is keyed by svg_id — flat values for SVG template placeholder substitution.
+	SVGTemplateClaims map[string]sdjwtvc.SVGValue `json:"svg_template_claims"`
+	// PresentationClaims is keyed by claim name — nested parent/children structure for the consent page.
+	PresentationClaims map[string]any `json:"presentation_claims"`
+	RedirectURL        string         `json:"redirect_url,omitempty"`
 }
 
 type UserAuthenticSourceLookupRequest struct {

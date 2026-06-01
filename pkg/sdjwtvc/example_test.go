@@ -69,8 +69,8 @@ func ExampleVCTM() {
 				Name:        "Identity Credential",
 				Description: "Official identity document",
 				Rendering: &sdjwtvc.Rendering{
-					Simple: sdjwtvc.SimpleRendering{
-						Logo: sdjwtvc.Logo{
+					Simple: &sdjwtvc.SimpleRendering{
+						Logo: &sdjwtvc.Logo{
 							URI:     "https://example.com/logo.png",
 							AltText: "Logo",
 						},
