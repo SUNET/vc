@@ -18,10 +18,10 @@ make release-jwt-issuer BUMP=patch   # or minor, major
 
 ```bash
 # Generate with defaults (token.jwt + jwks.json)
-./jwt_issuer
+./bin/jwt_issuer
 
 # Custom issuer/audience/subject
-./jwt_issuer \
+./bin/jwt_issuer \
   -issuer "https://my-issuer.example.com" \
   -audience "https://apigw.example.com" \
   -subject "alice@example.com" \
@@ -29,7 +29,7 @@ make release-jwt-issuer BUMP=patch   # or minor, major
   -expiry 24h
 
 # Custom output files + export private key
-./jwt_issuer \
+./bin/jwt_issuer \
   -jwt-out my-token.jwt \
   -jwk-out my-jwks.json \
   -priv-out my-private.jwk

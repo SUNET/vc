@@ -242,13 +242,13 @@ When no rules are configured, any valid Bearer JWT grants access.
 
 > **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`
 
-| Field            | Type     | Description                                                                                           | Example                                            | Default | Required         |
-| ---------------- | -------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ---------------- |
-| `enable`         | `bool`   | Static JWKS Bearer token authentication                                                               | -                                                  | `false` | No               |
-| `jwks_url`       | `string` | URL of the JSON Web Key Set used to validate token signatures Mutually exclusive with JWKSFilePath    | `"https://auth.example.com/.well-known/jwks.json"` | -       | Yes (if enabled) |
-| `jwks_file_path` | `string` | Local file path to a JWKS JSON file used to validate token signatures Mutually exclusive with JWKSURL | -                                                  | -       | Yes (if enabled) |
-| `issuer`         | `string` | Expected "iss" claim. Tokens with a different issuer are rejected                                     | -                                                  | -       | Yes (if enabled) |
-| `audience`       | `string` | Expected "aud" claim. Tokens that do not contain this audience are rejected                           | -                                                  | -       | Yes (if enabled) |
+| Field            | Type     | Description                                                                                             | Example                                            | Default | Required                                    |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ------------------------------------------- |
+| `enable`         | `bool`   | Static JWKS Bearer token authentication                                                                 | -                                                  | `false` | No                                          |
+| `jwks_url`       | `string` | URL of the JSON Web Key Set used to validate token signatures. Mutually exclusive with jwks_file_path   | `"https://auth.example.com/.well-known/jwks.json"` | -       | Yes (if enabled and jwks_file_path not set) |
+| `jwks_file_path` | `string` | Local file path to a JWKS JSON file used to validate token signatures. Mutually exclusive with jwks_url | -                                                  | -       | Yes (if enabled and jwks_url not set)       |
+| `issuer`         | `string` | Expected "iss" claim. Tokens with a different issuer are rejected                                       | -                                                  | -       | Yes (if enabled)                            |
+| `audience`       | `string` | Expected "aud" claim. Tokens that do not contain this audience are rejected                             | -                                                  | -       | Yes (if enabled)                            |
 
 ### `oidc`
 

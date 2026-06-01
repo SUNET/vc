@@ -104,7 +104,7 @@ func main() {
 	mustSet(builder, jwt.SubjectKey, *subject)
 	mustSet(builder, jwt.IssuedAtKey, now)
 	mustSet(builder, jwt.ExpirationKey, now.Add(*expiry))
-	mustSet(builder, jwt.NotBeforeKey, now)
+	mustSet(builder, jwt.NotBeforeKey, now.Add(-1*time.Minute))
 	mustSet(builder, "email", *email)
 	if *eppn != "" {
 		mustSet(builder, "eppn", *eppn)
