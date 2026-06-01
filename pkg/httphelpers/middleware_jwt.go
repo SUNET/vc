@@ -688,6 +688,11 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 		}
 		log.Info("jwks_provider_ready", "source", "url", "url", cfg.JWKSURL, "key_count", p.set.Len())
 		keyProvider = p
+	default:
+		log.Error(nil, "jwks_no_source_configured", "hint", "set jwks_url or jwks_file_path")
+		return func(c *gin.Context) {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "JWKS authentication not configured"})
+		}
 	}
 
 	return func(c *gin.Context) {

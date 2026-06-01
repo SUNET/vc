@@ -1704,3 +1704,180 @@ func TestDiscoverJWKSURL_MissingJWKSURI(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discovery document has no jwks_uri")
 }
+
+// ---------- File-based JWKS tests ----------
+
+// writeJWKSFile serializes the given keyset to a JSON file and returns the path.
+func writeJWKSFile(t *testing.T, dir string, set jwk.Set) string {
+	t.Helper()
+	raw, err := json.Marshal(set)
+	require.NoError(t, err)
+	path := filepath.Join(dir, "jwks.json")
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+	return path
+}
+
+func TestJWKSAuth_FilePath_ValidToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+
+	dir := t.TempDir()
+	jwksPath := writeJWKSFile(t, dir, set)
+
+	cfg := model.APIAuthJWKS{
+		Enable:       true,
+		JWKSFilePath: jwksPath,
+		Issuer:       "test-issuer",
+		Audience:     "test-aud",
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, nil, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"sub": c.GetString("jwt_subject")})
+	})
+
+	token := signJWT(t, priv, "user@example.com", "test-issuer", "test-aud")
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestJWKSAuth_FilePath_InvalidToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	_, set := testKeyPair(t)
+
+	dir := t.TempDir()
+	jwksPath := writeJWKSFile(t, dir, set)
+
+	cfg := model.APIAuthJWKS{
+		Enable:       true,
+		JWKSFilePath: jwksPath,
+		Issuer:       "test-issuer",
+		Audience:     "test-aud",
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, nil, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer invalid.token.here",
+	})
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestJWKSAuth_FilePath_ReloadOnChange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+
+	// Generate two independent key pairs.
+	priv1, set1 := testKeyPair(t)
+	priv2, set2 := testKeyPair(t)
+
+	dir := t.TempDir()
+	jwksPath := writeJWKSFile(t, dir, set1)
+
+	cfg := model.APIAuthJWKS{
+		Enable:       true,
+		JWKSFilePath: jwksPath,
+		Issuer:       "test-issuer",
+		Audience:     "test-aud",
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, nil, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// Token signed with key1 should succeed.
+	token1 := signJWT(t, priv1, "user1", "test-issuer", "test-aud")
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token1,
+	})
+	assert.Equal(t, http.StatusOK, w.Code, "key1 token should be accepted with key1 JWKS")
+
+	// Token signed with key2 should fail (key2 not in JWKS yet).
+	token2 := signJWT(t, priv2, "user2", "test-issuer", "test-aud")
+	w = performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token2,
+	})
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "key2 token should be rejected before file update")
+
+	// Overwrite the JWKS file with key2. Advance mtime to guarantee detection.
+	raw2, err := json.Marshal(set2)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(jwksPath, raw2, 0o600))
+	// Ensure mtime differs (some filesystems have 1s granularity).
+	future := time.Now().Add(2 * time.Second)
+	require.NoError(t, os.Chtimes(jwksPath, future, future))
+
+	// Now token2 should succeed (file reloaded) and token1 should fail.
+	w = performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token2,
+	})
+	assert.Equal(t, http.StatusOK, w.Code, "key2 token should be accepted after file update")
+
+	w = performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token1,
+	})
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "key1 token should be rejected after file update")
+}
+
+func TestJWKSAuth_FilePath_MissingFile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+
+	cfg := model.APIAuthJWKS{
+		Enable:       true,
+		JWKSFilePath: "/nonexistent/path/jwks.json",
+		Issuer:       "test-issuer",
+		Audience:     "test-aud",
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, nil, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// The handler returned should be an error handler since the file doesn't exist.
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer anything",
+	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestJWKSAuth_NoSourceConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+
+	cfg := model.APIAuthJWKS{
+		Enable:   true,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
+		// Neither JWKSURL nor JWKSFilePath set
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, nil, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer anything",
+	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
