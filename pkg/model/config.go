@@ -590,12 +590,11 @@ type OIDCOP struct {
 	SubjectSalt string `yaml:"subject_salt" validate:"required"`
 	// EnableUserInfo controls whether the verifier-OP advertises a userinfo_endpoint
 	// in its discovery metadata and issues access tokens that can be used there.
-	// When false (default), the verifier-OP omits userinfo_endpoint from discovery
+	// When false, the verifier-OP omits userinfo_endpoint from discovery
 	// and does not return access/refresh tokens in the token response, since the
 	// verifier has no persistent user sessions. This prevents standard RP libraries
 	// from attempting to call a non-functional UserInfo endpoint.
-	// Set to true only when the OP supports real UserInfo sessions.
-	EnableUserInfo bool `yaml:"enable_userinfo" default:"false"`
+	EnableUserInfo bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
