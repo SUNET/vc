@@ -117,10 +117,12 @@
                                             <img x-show="credential.svg" class="vc-credential-card mb-2" width="829" height="504" :src="credential.svg" alt="">
                                             <table class="table-auto w-full">
                                                 <tbody>
-                                                    <template x-for="[svg_id, claim] of Object.entries(credential.claims)">
+                                                    <template x-for="row of flattenClaims(credential.claims)">
                                                         <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
-                                                            <th class="p-2 text-sm text-left align-top" x-text="claim.label"></th>
-                                                            <td class="p-2 text-sm text-left align-top" x-html="renderClaimValue(claim.value)"></td>
+                                                            <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top' : 'p-2 text-sm text-left align-top')"
+                                                                x-text="row.label"
+                                                                :colspan="row.isHeader ? 2 : 1"></th>
+                                                            <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top" x-html="renderClaimValue(row.value)"></td>
                                                         </tr>
                                                     </template>
                                                 </tbody>

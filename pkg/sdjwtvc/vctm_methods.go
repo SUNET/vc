@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -112,21 +113,29 @@ func (v *VCTM) ClaimJSONPath() (*VCTMJSONPath, error) {
 	return reply, nil
 }
 
-// Presentation resolves VCTM claims against document data and returns a nested
+// Presentation resolves VCTM claims against document data and returns a flat
 // map suitable for the consent preview UI.
 //
-// The returned map is keyed by the top-level path element. Each entry is a
-// map[string]any with "label" and either "value" (leaf claims) or "children"
-// (parent claims whose children are also defined in the VCTM with display info).
+// Every top-level entry is a map[string]any with "label" and either "value"
+// (leaf/orphan claims) or "children" (parent claims whose children are also
+// defined in the VCTM with display info).
+//
+// Keys:
+//   - Single-segment claims: the path element itself (e.g. "given_name").
+//   - Displayable parents: the first path element (e.g. "address").
+//   - Multi-segment orphan leaves (no displayable parent): joined path
+//     segments (e.g. path ["credentialSubject","givenName","und"] →
+//     key "credentialSubject.givenName.und").
 //
 // Example output:
 //
 //	{
-//	  "given_name": {"label": "First Name", "value": "Helen"},
-//	  "address": {"label": "Address", "children": {
+//	  "given_name":    {"label": "First Name", "value": "Helen"},
+//	  "address":       {"label": "Address", "children": {
 //	    "street_address": {"label": "Residence street", "value": "Tulegatan"},
-//	    "country": {"label": "Country of residence", "value": "SE"},
-//	  }}
+//	    "country":        {"label": "Country of residence", "value": "SE"},
+//	  }},
+//	  "credentialSubject.givenName.und": {"label": "Given name", "value": "Helen"},
 //	}
 func (v *VCTM) Presentation(data map[string]any) map[string]any {
 	if data == nil || len(v.Claims) == 0 {
@@ -153,7 +162,7 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 	result := map[string]any{}
 
 	for _, c := range v.Claims {
-		if len(c.Display) == 0 {
+		if len(c.Display) == 0 || len(c.Path) == 0 {
 			continue
 		}
 
@@ -163,6 +172,7 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 		if parentPaths[jp] {
 			// This is a parent claim — collect its children.
 			children := map[string]any{}
+			var wildcardValue any
 			for _, child := range v.Claims {
 				if len(child.Display) == 0 || len(child.Path) <= 1 {
 					continue
@@ -175,16 +185,32 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 				if childValue == nil {
 					continue
 				}
-				childKey := *child.Path[len(child.Path)-1]
-				children[childKey] = map[string]any{
+				lastSeg := child.Path[len(child.Path)-1]
+				if lastSeg == nil {
+					// Array wildcard child — remember the resolved value
+					// so the parent can fall back to a leaf entry.
+					wildcardValue = childValue
+					continue
+				}
+				children[*lastSeg] = map[string]any{
 					"label": child.Display[0].Label,
 					"value": childValue,
 				}
+			}
+			if c.Path[0] == nil {
+				continue // no usable key for parent node
 			}
 			if len(children) > 0 {
 				result[*c.Path[0]] = map[string]any{
 					"label":    label,
 					"children": children,
+				}
+			} else if wildcardValue != nil {
+				// All children were array wildcards — emit the parent as
+				// a leaf with the resolved array value.
+				result[*c.Path[0]] = map[string]any{
+					"label": label,
+					"value": wildcardValue,
 				}
 			}
 		} else if !isChildOfDisplayableParent(c.Path, parentPaths) {
@@ -193,9 +219,16 @@ func (v *VCTM) Presentation(data map[string]any) map[string]any {
 			if value == nil {
 				continue
 			}
+			if c.Path[0] == nil {
+				continue // no usable key segment
+			}
+			// Use the first path segment as key for single-segment claims,
+			// or the full JSONPath (without "$." prefix) for multi-segment
+			// orphans to avoid collisions and keep the result flat and
+			// compatible with the consent UI schema ({label,value}).
 			key := *c.Path[0]
 			if len(c.Path) > 1 {
-				key = *c.Path[len(c.Path)-1]
+				key = c.claimKey()
 			}
 			result[key] = map[string]any{
 				"label": label,
@@ -256,23 +289,89 @@ func (c *Claim) JSONPath() string {
 	return reply.String()
 }
 
+// claimKey returns a stable, unique key for a claim suitable for use in
+// the Presentation() result map. For multi-segment paths (e.g.
+// ["credentialSubject","givenName","und"]) it joins all non-nil segments
+// with "." (e.g. "credentialSubject.givenName.und") to avoid collisions.
+func (c *Claim) claimKey() string {
+	parts := make([]string, 0, len(c.Path))
+	for _, seg := range c.Path {
+		if seg != nil {
+			parts = append(parts, *seg)
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
 // walkPath resolves a claim path against nested document data.
+// Returns nil for empty paths, paths that don't resolve, and semantically
+// empty values (empty string, empty slice, empty map) so callers can
+// uniformly skip absent data with a nil check.
+//
+// Path segments may contain bracket-index notation (e.g. "hasClaim[0]")
+// to select an element from an array-typed field.
 func walkPath(data map[string]any, path []*string) any {
+	if len(path) == 0 || path[0] == nil {
+		return nil
+	}
 	var current any = data
 	for _, seg := range path {
 		if seg == nil {
-			return current // array wildcard — return the array as-is
+			return normalizeEmpty(current) // array wildcard — return the array as-is
 		}
 		m, ok := current.(map[string]any)
 		if !ok {
 			return nil
 		}
-		current, ok = m[*seg]
+		key, idx := parseBracketIndex(*seg)
+		current, ok = m[key]
 		if !ok {
 			return nil
 		}
+		if idx >= 0 {
+			arr, ok := current.([]any)
+			if !ok || idx >= len(arr) {
+				return nil
+			}
+			current = arr[idx]
+		}
 	}
-	return current
+	return normalizeEmpty(current)
+}
+
+// parseBracketIndex splits a segment like "hasClaim[0]" into ("hasClaim", 0).
+// If no bracket-index is present, it returns (seg, -1).
+func parseBracketIndex(seg string) (string, int) {
+	bracket := strings.IndexByte(seg, '[')
+	if bracket < 0 || !strings.HasSuffix(seg, "]") {
+		return seg, -1
+	}
+	idxStr := seg[bracket+1 : len(seg)-1]
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil || idx < 0 {
+		return seg, -1
+	}
+	return seg[:bracket], idx
+}
+
+// normalizeEmpty returns nil for semantically empty values (empty string,
+// empty slice, empty map) so that consent rows with blank data are skipped.
+func normalizeEmpty(v any) any {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return nil
+		}
+	case []any:
+		if len(val) == 0 {
+			return nil
+		}
+	case map[string]any:
+		if len(val) == 0 {
+			return nil
+		}
+	}
+	return v
 }
 
 // jsonPathFromSegments builds a JSONPath string from path segments.
