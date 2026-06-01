@@ -62,19 +62,137 @@ func getKeys(ctx context.Context, url string, c JWKSCache, log func(string, ...a
 	return set, nil
 }
 
-// getKeysFromFile reads a JWKS JSON file from disk and returns the parsed keyset.
-func getKeysFromFile(filePath string) (jwk.Set, error) {
-	raw, err := os.ReadFile(filepath.Clean(filePath))
+// KeySetProvider provides a parsed JWKS keyset. Implementations handle
+// caching, refresh, and the underlying source (URL or file) transparently.
+type KeySetProvider interface {
+	GetKeySet(ctx context.Context) (jwk.Set, error)
+}
+
+// jwksRefreshInterval is how often the URL-based JWKS cache re-fetches keys.
+const jwksRefreshInterval = 5 * time.Minute
+
+// urlKeySetProvider caches a parsed jwk.Set fetched from a URL and periodically
+// refreshes it to pick up key rotations.
+type urlKeySetProvider struct {
+	mu        sync.RWMutex
+	url       string
+	set       jwk.Set
+	fetchedAt time.Time
+	rawCache  JWKSCache
+	log       func(string, ...any)
+}
+
+// newURLKeySetProvider creates a provider that eagerly loads the JWKS from the URL.
+func newURLKeySetProvider(ctx context.Context, url string, rawCache JWKSCache, log func(string, ...any)) (*urlKeySetProvider, error) {
+	p := &urlKeySetProvider{url: url, rawCache: rawCache, log: log}
+	set, err := getKeys(ctx, url, rawCache, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read JWKS file %s: %w", filePath, err)
+		return nil, err
+	}
+	p.set = set
+	p.fetchedAt = time.Now()
+	return p, nil
+}
+
+// GetKeySet returns the cached keyset. If the TTL has expired it refreshes in the
+// foreground (under write lock) to pick up key rotations. On refresh failure
+// the stale set is returned to avoid breaking in-flight traffic.
+func (p *urlKeySetProvider) GetKeySet(ctx context.Context) (jwk.Set, error) {
+	p.mu.RLock()
+	if time.Since(p.fetchedAt) < jwksRefreshInterval {
+		defer p.mu.RUnlock()
+		return p.set, nil
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check after acquiring write lock.
+	if time.Since(p.fetchedAt) < jwksRefreshInterval {
+		return p.set, nil
 	}
 
+	set, err := getKeys(ctx, p.url, p.rawCache, p.log)
+	if err != nil {
+		// Return stale keys rather than failing the request.
+		p.log("jwks_refresh_failed_using_stale", "error", err, "url", p.url)
+		return p.set, nil
+	}
+	p.set = set
+	p.fetchedAt = time.Now()
+	return p.set, nil
+}
+
+// fileKeySetProvider caches a parsed JWKS loaded from a local file and refreshes
+// it only when the file's modification time changes.
+type fileKeySetProvider struct {
+	mu      sync.RWMutex
+	path    string
+	set     jwk.Set
+	modTime time.Time
+}
+
+// newFileKeySetProvider creates a provider that loads and watches the given JWKS file.
+func newFileKeySetProvider(path string) (*fileKeySetProvider, error) {
+	p := &fileKeySetProvider{path: filepath.Clean(path)}
+	if err := p.refresh(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// GetKeySet returns the cached keyset, re-reading from disk only if the file changed.
+func (p *fileKeySetProvider) GetKeySet(_ context.Context) (jwk.Set, error) {
+	info, err := os.Stat(p.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat JWKS file %s: %w", p.path, err)
+	}
+
+	p.mu.RLock()
+	if p.set != nil && info.ModTime().Equal(p.modTime) {
+		defer p.mu.RUnlock()
+		return p.set, nil
+	}
+	p.mu.RUnlock()
+
+	// File changed — reload under write lock.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check after acquiring write lock.
+	if p.set != nil && info.ModTime().Equal(p.modTime) {
+		return p.set, nil
+	}
+
+	if err := p.refreshLocked(info.ModTime()); err != nil {
+		return nil, err
+	}
+	return p.set, nil
+}
+
+func (p *fileKeySetProvider) refresh() error {
+	info, err := os.Stat(p.path)
+	if err != nil {
+		return fmt.Errorf("failed to stat JWKS file %s: %w", p.path, err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.refreshLocked(info.ModTime())
+}
+
+func (p *fileKeySetProvider) refreshLocked(modTime time.Time) error {
+	raw, err := os.ReadFile(p.path)
+	if err != nil {
+		return fmt.Errorf("failed to read JWKS file %s: %w", p.path, err)
+	}
 	set, err := jwk.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse JWKS file %s: %w", filePath, err)
+		return fmt.Errorf("failed to parse JWKS file %s: %w", p.path, err)
 	}
-
-	return set, nil
+	p.set = set
+	p.modTime = modTime
+	return nil
 }
 
 // SafeEngine wraps a SPOCP AdaptiveEngine with a sync.RWMutex so that
@@ -545,6 +663,33 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 
 	log := m.log.New("jwks_auth")
 
+	// Build a KeySetProvider based on the configured source.
+	var keyProvider KeySetProvider
+	switch {
+	case cfg.JWKSFilePath != "":
+		p, err := newFileKeySetProvider(cfg.JWKSFilePath)
+		if err != nil {
+			log.Error(err, "jwks_provider_init_failed", "source", "file")
+			return func(c *gin.Context) {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to validate token"})
+			}
+		}
+		log.Info("jwks_provider_ready", "source", "file", "path", cfg.JWKSFilePath, "key_count", p.set.Len())
+		keyProvider = p
+	case cfg.JWKSURL != "":
+		p, err := newURLKeySetProvider(ctx, cfg.JWKSURL, jwksCache, func(msg string, args ...any) {
+			log.Info(msg, args...)
+		})
+		if err != nil {
+			log.Error(err, "jwks_provider_init_failed", "source", "url")
+			return func(c *gin.Context) {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to validate token"})
+			}
+		}
+		log.Info("jwks_provider_ready", "source", "url", "url", cfg.JWKSURL, "key_count", p.set.Len())
+		keyProvider = p
+	}
+
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -559,15 +704,7 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 		}
 		tokenStr := parts[1]
 
-		var keys jwk.Set
-		var err error
-		if cfg.JWKSFilePath != "" {
-			keys, err = getKeysFromFile(cfg.JWKSFilePath)
-		} else {
-			keys, err = getKeys(c.Request.Context(), cfg.JWKSURL, jwksCache, func(msg string, args ...any) {
-				log.Info(msg, args...)
-			})
-		}
+		keys, err := keyProvider.GetKeySet(c.Request.Context())
 		if err != nil {
 			log.Error(err, "jwks_fetch_error")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to validate token"})
