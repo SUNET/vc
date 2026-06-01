@@ -309,7 +309,8 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.APIAuth{})
 
-	// Register struct-level validation for APIAuthJWKS: exactly one of JWKSURL/JWKSFilePath when enabled
+	// Register struct-level validation for APIAuthJWKS: at least one of JWKSURL/JWKSFilePath when enabled
+	// (mutual exclusivity is enforced by the excluded_with field tags)
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.APIAuthJWKS)
 		if !cfg.Enable {
