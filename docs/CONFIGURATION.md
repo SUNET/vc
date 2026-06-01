@@ -242,13 +242,13 @@ When no rules are configured, any valid Bearer JWT grants access.
 
 > **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`
 
-| Field            | Type     | Description                                                                                             | Example                                            | Default | Required                                    |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ------------------------------------------- |
-| `enable`         | `bool`   | Static JWKS Bearer token authentication                                                                 | -                                                  | `false` | No                                          |
-| `jwks_url`       | `string` | URL of the JSON Web Key Set used to validate token signatures. Mutually exclusive with jwks_file_path   | `"https://auth.example.com/.well-known/jwks.json"` | -       | Yes (if enabled and jwks_file_path not set) |
-| `jwks_file_path` | `string` | Local file path to a JWKS JSON file used to validate token signatures. Mutually exclusive with jwks_url | -                                                  | -       | Yes (if enabled and jwks_url not set)       |
-| `issuer`         | `string` | Expected "iss" claim. Tokens with a different issuer are rejected                                       | -                                                  | -       | Yes (if enabled)                            |
-| `audience`       | `string` | Expected "aud" claim. Tokens that do not contain this audience are rejected                             | -                                                  | -       | Yes (if enabled)                            |
+| Field            | Type     | Description                                                                                                                                          | Example                                            | Default | Required                                    |
+| ---------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ------------------------------------------- |
+| `enable`         | `bool`   | Static JWKS Bearer token authentication                                                                                                              | -                                                  | `false` | No                                          |
+| `jwks_url`       | `string` | URL of the JSON Web Key Set used to validate token signatures. Mutually exclusive with jwks_file_path; exactly one must be set when enable is true   | `"https://auth.example.com/.well-known/jwks.json"` | -       | No (mutually exclusive with jwks_file_path) |
+| `jwks_file_path` | `string` | Local file path to a JWKS JSON file used to validate token signatures. Mutually exclusive with jwks_url; exactly one must be set when enable is true | -                                                  | -       | No (mutually exclusive with jwks_url)       |
+| `issuer`         | `string` | Expected "iss" claim. Tokens with a different issuer are rejected                                                                                    | -                                                  | -       | Yes (if enabled)                            |
+| `audience`       | `string` | Expected "aud" claim. Tokens that do not contain this audience are rejected                                                                          | -                                                  | -       | Yes (if enabled)                            |
 
 ### `oidc`
 
@@ -428,11 +428,11 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers.saml.static_idp_metadata`
 
-| Field           | Type     | Description                                                                   | Example | Default | Required                      |
-| --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | ----------------------------- |
-| `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                           |
-| `metadata_path` | `string` | File path to IdP metadata XML (mutually exclusive with MetadataURL)           | -       | -       | Yes (if metadata_url not set) |
-| `metadata_url`  | `string` | HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath) | -       | -       | No                            |
+| Field           | Type     | Description                                                                   | Example | Default | Required                                          |
+| --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | ------------------------------------------------- |
+| `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                                               |
+| `metadata_path` | `string` | File path to IdP metadata XML (mutually exclusive with MetadataURL)           | -       | -       | Yes (if metadata_url not set; mutually exclusive) |
+| `metadata_url`  | `string` | HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath) | -       | -       | No                                                |
 
 ### `oidc`
 
@@ -460,10 +460,10 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 Exactly one of Preconfigured or Dynamic must be set.
 
-| Field           | Type     | Description                                                                                                                  | Example | Default | Required                       |
-| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------------ |
-| `preconfigured` | `object` | Preconfigured uses pre-registered client credentials. Set this when the client is already registered with the OIDC Provider. | -       | -       | Yes (if dynamic not set)       |
-| `dynamic`       | `object` | Dynamic uses RFC 7591 dynamic client registration. Set this when the client should register itself at startup.               | -       | -       | Yes (if preconfigured not set) |
+| Field           | Type     | Description                                                                                                                  | Example | Default | Required                                           |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------------------------------------------------- |
+| `preconfigured` | `object` | Preconfigured uses pre-registered client credentials. Set this when the client is already registered with the OIDC Provider. | -       | -       | Yes (if dynamic not set; mutually exclusive)       |
+| `dynamic`       | `object` | Dynamic uses RFC 7591 dynamic client registration. Set this when the client should register itself at startup.               | -       | -       | Yes (if preconfigured not set; mutually exclusive) |
 
 ### `preconfigured`
 

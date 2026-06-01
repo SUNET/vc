@@ -344,17 +344,21 @@ func determineRequired(tag TagInfo) string {
 	if v == "" {
 		return "No"
 	}
-	// Compound required_if: required_if=Enable true OtherField ''
-	// means "required when enabled AND the other field is empty"
-	reCompound := regexp.MustCompile(`required_if=Enable true (\w+) ''`)
-	if m := reCompound.FindStringSubmatch(v); len(m) > 1 {
-		return fmt.Sprintf("Yes (if enabled and %s not set)", camelToSnake(m[1]))
-	}
+
 	if strings.Contains(v, "required_if=Enable true") {
+		// Check for excluded_with to annotate mutual exclusivity
+		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+		if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+			return fmt.Sprintf("Yes (if enabled; mutually exclusive with %s)", camelToSnake(m[1]))
+		}
 		return "Yes (if enabled)"
 	}
 	re := regexp.MustCompile(`required_without=(\w+)`)
 	if m := re.FindStringSubmatch(v); len(m) > 1 {
+		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+		if m2 := reExcluded.FindStringSubmatch(v); len(m2) > 1 {
+			return fmt.Sprintf("Yes (if %s not set; mutually exclusive)", camelToSnake(m[1]))
+		}
 		return fmt.Sprintf("Yes (if %s not set)", camelToSnake(m[1]))
 	}
 	for r := range strings.SplitSeq(v, ",") {
@@ -367,6 +371,11 @@ func determineRequired(tag TagInfo) string {
 			}
 			return "Yes"
 		}
+	}
+	// Standalone excluded_with without a required_* tag
+	reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+	if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+		return fmt.Sprintf("No (mutually exclusive with %s)", camelToSnake(m[1]))
 	}
 	return "No"
 }
@@ -535,8 +544,8 @@ var knownTerms = []struct {
 func camelToSnake(s string) string {
 	// Split input into segments: known terms (output directly) and gaps (delegate to strcase).
 	type segment struct {
-		text    string
-		isTerm  bool
+		text   string
+		isTerm bool
 	}
 
 	var segments []segment

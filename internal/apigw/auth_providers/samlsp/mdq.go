@@ -177,7 +177,10 @@ func (m *MDQClient) retryStaticMetadataFetch() error {
 	}
 
 	if err := m.validateAndSetMetadata(metadata, m.log); err != nil {
-		return err
+		m.retryBackoff = min(m.retryBackoff*2, mdqRetryMax)
+		m.retryAfter = time.Now().Add(m.retryBackoff)
+		m.log.Error(err, "static_idp_metadata_validation_failed", "url", m.staticMetadataURL, "next_retry_in", m.retryBackoff.String())
+		return fmt.Errorf("validation failed: %w", err)
 	}
 
 	m.retryBackoff = 0

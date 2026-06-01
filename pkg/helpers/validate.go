@@ -309,6 +309,17 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.APIAuth{})
 
+	// Register struct-level validation for APIAuthJWKS: exactly one of JWKSURL/JWKSFilePath when enabled
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.APIAuthJWKS)
+		if !cfg.Enable {
+			return
+		}
+		if cfg.JWKSURL == "" && cfg.JWKSFilePath == "" {
+			sl.ReportError(cfg.JWKSURL, "JWKSURL", "JWKSURL", "jwks_source_required", "")
+		}
+	}, model.APIAuthJWKS{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)
