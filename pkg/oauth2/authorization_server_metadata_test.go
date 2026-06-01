@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -55,19 +56,19 @@ func TestMarshalMetadata(t *testing.T) {
 
 func TestAuthorizationServerMetadata_Marshal(t *testing.T) {
 	tests := []struct {
-		name string
+		name     string
 		metadata *AuthorizationServerMetadata
-		wantErr bool
+		wantErr  bool
 	}{
 		{
-			name: "complete metadata",
+			name:     "complete metadata",
 			metadata: mockAuthorizationServerMetadata,
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
 			name: "minimal metadata",
 			metadata: &AuthorizationServerMetadata{ // #nosec G101
-				Issuer: "https://issuer.example.com",
+				Issuer:        "https://issuer.example.com",
 				TokenEndpoint: "https://issuer.example.com/token",
 			},
 			wantErr: false,
@@ -75,15 +76,15 @@ func TestAuthorizationServerMetadata_Marshal(t *testing.T) {
 		{
 			name: "with all optional fields",
 			metadata: &AuthorizationServerMetadata{ // #nosec G101
-				Issuer: "https://full.example.com",
-				AuthorizationEndpoint: "https://full.example.com/authorize",
-				TokenEndpoint: "https://full.example.com/token",
-				ResponseTypesSupported: []string{"code", "token"},
-				TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "none"},
-				CodeChallengeMethodsSupported: []string{"S256", "plain"},
-				PushedAuthorizationRequestEndpoint: "https://full.example.com/par",
-				RequiredPushedAuthorizationRequests: true,
-				DPOPSigningALGValuesSupported: []string{"ES256", "RS256"},
+				Issuer:                                     "https://full.example.com",
+				AuthorizationEndpoint:                      "https://full.example.com/authorize",
+				TokenEndpoint:                              "https://full.example.com/token",
+				ResponseTypesSupported:                     []string{"code", "token"},
+				TokenEndpointAuthMethodsSupported:          []string{"client_secret_basic", "none"},
+				CodeChallengeMethodsSupported:              []string{"S256", "plain"},
+				PushedAuthorizationRequestEndpoint:         "https://full.example.com/par",
+				RequiredPushedAuthorizationRequests:        true,
+				DPOPSigningALGValuesSupported:              []string{"ES256", "RS256"},
 				PreAuthorizedGrantAnonymousAccessSupported: true,
 			},
 			wantErr: false,
@@ -99,10 +100,10 @@ func TestAuthorizationServerMetadata_Marshal(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.NotNil(t, claims)
-			
+
 			// Verify issuer is in claims
 			assert.Equal(t, tt.metadata.Issuer, claims["issuer"])
-			
+
 			// Verify token endpoint
 			if tt.metadata.TokenEndpoint != "" {
 				assert.Equal(t, tt.metadata.TokenEndpoint, claims["token_endpoint"])
@@ -147,12 +148,12 @@ func TestSignMetadata(t *testing.T) {
 			assert.NoError(t, err)
 
 			metadataWithSignature, err := metadata.Sign(context.Background(), signer, []string{tt.cert})
-			
+
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
-			
+
 			assert.NoError(t, err)
 			assert.NotEmpty(t, metadataWithSignature)
 

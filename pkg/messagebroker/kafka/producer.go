@@ -49,7 +49,7 @@ func NewSyncProducerClient(ctx context.Context, saramaConfig *sarama.Config, cfg
 
 // CommonProducerConfig returns a new Kafka producer configuration instance with sane defaults for vc.
 func CommonProducerConfig(cfg *model.Cfg) *sarama.Config {
-	//TODO(mk): set cfg from file - is now hardcoded
+	// TODO(mk): set cfg from file - is now hardcoded
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Producer.Return.Successes = true
 	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
@@ -57,7 +57,7 @@ func CommonProducerConfig(cfg *model.Cfg) *sarama.Config {
 	saramaConfig.Net.MaxOpenRequests = 1
 	saramaConfig.Producer.Retry.Max = 3
 	saramaConfig.Net.SASL.Enable = false
-	//TODO(mk): enable and configure security when publishing to Kafka
+	// TODO(mk): enable and configure security when publishing to Kafka
 	return saramaConfig
 }
 
@@ -74,7 +74,7 @@ func (c *SyncProducerClient) Close(ctx context.Context) error {
 
 // PublishMessage publish a message to a Kafka topic
 func (c *SyncProducerClient) PublishMessage(topic string, key string, json []byte, headers []sarama.RecordHeader) error {
-	//TODO(mk): create header data in this func, ie change func def.
+	// TODO(mk): create header data in this func, ie change func def.
 	message := &sarama.ProducerMessage{
 		Topic:   topic,
 		Key:     sarama.StringEncoder(key),

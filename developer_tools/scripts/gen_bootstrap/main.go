@@ -136,7 +136,7 @@ func main() {
 	}
 
 	cleanOutputDir := filepath.Clean(outputDir)
-	if err := os.MkdirAll(cleanOutputDir, 0750); err != nil {
+	if err := os.MkdirAll(cleanOutputDir, 0o750); err != nil {
 		fatal("create output dir: %v", err)
 	}
 
@@ -425,7 +425,6 @@ func genELM(pids []string, input *InputFile) map[string]*model.CompleteDocument 
 	exampleData := loadExampleJSON("standards/elm_3_2.json")
 	result := make(map[string]*model.CompleteDocument, len(pids))
 	for _, pid := range pids {
-
 		result[pid] = &model.CompleteDocument{
 			DocumentData: exampleData,
 			Meta: &model.MetaData{
@@ -445,7 +444,6 @@ func genDiploma(pids []string, input *InputFile) map[string]*vcclient.UploadRequ
 	exampleData := loadExampleJSON("standards/education_credential/diploma/HE-diploma-9ad88a95-2f9a-4a1d-9e08-a61e213a3eac-degreeHBO-M.xml.json")
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	for _, pid := range pids {
-
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: exampleData,
 			Meta: &model.MetaData{
@@ -465,7 +463,6 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 	exampleData := loadExampleJSON("standards/education_credential/micro_credential/uvh_fvhz_microcredential_full.json")
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	for _, pid := range pids {
-
 		result[pid] = &vcclient.UploadRequest{
 			DocumentData: exampleData,
 			Meta: &model.MetaData{
@@ -581,7 +578,7 @@ func writeJSON(dir, filename string, v any) {
 	// Append newline for consistent file formatting
 	b = append(b, '\n')
 	path := filepath.Join(filepath.Clean(dir), filepath.Clean(filename))
-	if err := os.WriteFile(path, b, 0600); err != nil {
+	if err := os.WriteFile(path, b, 0o600); err != nil {
 		fatal("write %s: %v", path, err)
 	}
 	fmt.Printf("  wrote %s (%d bytes)\n", filename, len(b))

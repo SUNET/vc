@@ -344,6 +344,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 	})
 	return nil, nil
 }
+
 func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context, c *gin.Context) (any, error) {
 	session := sessions.Default(c)
 

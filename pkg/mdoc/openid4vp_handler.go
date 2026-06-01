@@ -5,8 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/fxamacker/cbor/v2"
 	"strings"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/pkg/trust"
 )
@@ -64,59 +65,59 @@ func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 
 // VerifyAndExtract verifies an mdoc VP token and extracts the disclosed claims.
 func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MDocVerificationResult, error) {
-    // Decode the VP token (base64url-encoded DeviceResponse)
-    data, err := base64.RawURLEncoding.DecodeString(vpToken)
-    if err != nil {
-        data, err = base64.StdEncoding.DecodeString(vpToken)
-        if err != nil {
-            return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
-        }
-    }
+	// Decode the VP token (base64url-encoded DeviceResponse)
+	data, err := base64.RawURLEncoding.DecodeString(vpToken)
+	if err != nil {
+		data, err = base64.StdEncoding.DecodeString(vpToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
+		}
+	}
 
-    encoder, err := NewCBOREncoder()
-    if err != nil {
-        return nil, err
-    }
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		return nil, err
+	}
 
-    // Since you changed the struct to use concrete types, 
-    // Unmarshal will now correctly populate the Documents slice.
-    var deviceResponse DeviceResponseMdoc
-    if err := encoder.Unmarshal(data, &deviceResponse); err != nil {
-        return nil, fmt.Errorf("failed to unmarshal device response: %w", err)
-    }
+	// Since you changed the struct to use concrete types,
+	// Unmarshal will now correctly populate the Documents slice.
+	var deviceResponse DeviceResponseMdoc
+	if err := encoder.Unmarshal(data, &deviceResponse); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal device response: %w", err)
+	}
 
-    // Verify the device response
-    verifyResult := h.verifier.VerifyDeviceResponse(&deviceResponse)
+	// Verify the device response
+	verifyResult := h.verifier.VerifyDeviceResponse(&deviceResponse)
 
-    if !verifyResult.Valid {
-        errMsgs := make([]string, 0, len(verifyResult.Errors))
-        for _, e := range verifyResult.Errors {
-            errMsgs = append(errMsgs, e.Error())
-        }
-        return nil, fmt.Errorf("mdoc verification failed: %s", strings.Join(errMsgs, "; "))
-    }
+	if !verifyResult.Valid {
+		errMsgs := make([]string, 0, len(verifyResult.Errors))
+		for _, e := range verifyResult.Errors {
+			errMsgs = append(errMsgs, e.Error())
+		}
+		return nil, fmt.Errorf("mdoc verification failed: %s", strings.Join(errMsgs, "; "))
+	}
 
-    result := &MDocVerificationResult{
-        Valid:     true,
-        Documents: make(map[string]*MDocDocumentClaims),
-    }
+	result := &MDocVerificationResult{
+		Valid:     true,
+		Documents: make(map[string]*MDocDocumentClaims),
+	}
 
-    // i is the index, deviceResponse.Documents[i] is now a concrete DocumentMdoc
-    for i := range deviceResponse.Documents {
-        // No type assertion needed anymore! 
-        // We just take the address of the document in the slice.
-        doc := &deviceResponse.Documents[i]
+	// i is the index, deviceResponse.Documents[i] is now a concrete DocumentMdoc
+	for i := range deviceResponse.Documents {
+		// No type assertion needed anymore!
+		// We just take the address of the document in the slice.
+		doc := &deviceResponse.Documents[i]
 
-        claims, err := h.extractDocumentClaims(doc)
-        if err != nil {
-            // Use doc.DocType safely as it's now a concrete field
-            return nil, fmt.Errorf("failed to extract claims from %s: %w", doc.DocType, err)
-        }
+		claims, err := h.extractDocumentClaims(doc)
+		if err != nil {
+			// Use doc.DocType safely as it's now a concrete field
+			return nil, fmt.Errorf("failed to extract claims from %s: %w", doc.DocType, err)
+		}
 
-        result.Documents[doc.DocType] = claims
-    }
+		result.Documents[doc.DocType] = claims
+	}
 
-    return result, nil
+	return result, nil
 }
 
 // MDocVerificationResult contains the result of mdoc verification and claim extraction.
@@ -161,7 +162,7 @@ func (h *MDocHandler) extractDocumentClaims(doc *DocumentMdoc) (*MDocDocumentCla
 		for _, anyItem := range items {
 			var item IssuerSignedItem
 			var found bool
-		
+
 			switch v := anyItem.(type) {
 			case IssuerSignedItem:
 				item = v
@@ -182,11 +183,11 @@ func (h *MDocHandler) extractDocumentClaims(doc *DocumentMdoc) (*MDocDocumentCla
 					found = true
 				}
 			}
-		
+
 			if !found {
 				continue
 			}
-		
+
 			nsClaims[item.ElementIdentifier] = item.ElementValue
 		}
 		claims.Namespaces[ns] = nsClaims
@@ -225,62 +226,65 @@ func IsMDocFormat(vpToken string) bool {
 
 // ExtractMDocClaims extracts claims from an mdoc VP token without full verification.
 func ExtractMDocClaims(vpToken string) (map[string]any, error) {
-    data, err := base64.RawURLEncoding.DecodeString(vpToken)
-    if err != nil {
-        // Fallback to standard encoding if RawURL fails
-        data, err = base64.StdEncoding.DecodeString(vpToken)
-        if err != nil {
-            return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
-        }
-    }
+	data, err := base64.RawURLEncoding.DecodeString(vpToken)
+	if err != nil {
+		// Fallback to standard encoding if RawURL fails
+		data, err = base64.StdEncoding.DecodeString(vpToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode mdoc VP token: %w", err)
+		}
+	}
 
-    deviceResponse, err := DecodeDeviceResponse(data)
-    if err != nil {
-        return nil, fmt.Errorf("failed to decode device response: %w", err)
-    }
+	deviceResponse, err := DecodeDeviceResponse(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode device response: %w", err)
+	}
 
 	if len(deviceResponse.Documents) == 0 {
-        return nil, errors.New("invalid mdoc VP token: device response contains no documents")
-    }
+		return nil, errors.New("invalid mdoc VP token: device response contains no documents")
+	}
 
-    claims := make(map[string]any)
+	claims := make(map[string]any)
 
-    for _, doc := range deviceResponse.Documents {
-        for ns, items := range doc.IssuerSigned.NameSpaces {
-            for _, anyItem := range items {
-                var item IssuerSignedItem
-                switch v := anyItem.(type) {
-                case IssuerSignedItem:
-                    item = v
-                case *IssuerSignedItem:
-                    if v != nil { item = *v }
-                case cbor.Tag:
-                    // Unwrap Tag 24
-                    content, ok := v.Content.([]byte)
-                    if !ok {
-                        continue
-                    }
-                    if err := cbor.Unmarshal(content, &item); err != nil {
-                        continue
-                    }
-                case []byte:
-                    if err := cbor.Unmarshal(v, &item); err != nil {
-                        continue
-                    }
-                default:
-                    continue
-                }
+	for _, doc := range deviceResponse.Documents {
+		for ns, items := range doc.IssuerSigned.NameSpaces {
+			for _, anyItem := range items {
+				var item IssuerSignedItem
+				switch v := anyItem.(type) {
+				case IssuerSignedItem:
+					item = v
+				case *IssuerSignedItem:
+					if v != nil {
+						item = *v
+					}
+				case cbor.Tag:
+					// Unwrap Tag 24
+					content, ok := v.Content.([]byte)
+					if !ok {
+						continue
+					}
+					if err := cbor.Unmarshal(content, &item); err != nil {
+						continue
+					}
+				case []byte:
+					if err := cbor.Unmarshal(v, &item); err != nil {
+						continue
+					}
+				default:
+					continue
+				}
 
-                claims[fmt.Sprintf("%s.%s", ns, item.ElementIdentifier)] = item.ElementValue
-                
-                if ns == "org.iso.18013.5.1" {
-                    claims[item.ElementIdentifier] = item.ElementValue
-                }
-            }
-        }
-    }
-    return claims, nil
+				claims[fmt.Sprintf("%s.%s", ns, item.ElementIdentifier)] = item.ElementValue
+
+				if ns == "org.iso.18013.5.1" {
+					claims[item.ElementIdentifier] = item.ElementValue
+				}
+			}
+		}
+	}
+	return claims, nil
 }
+
 // MDocClaimMapping provides standard mappings from mdoc claims to OIDC claims.
 var MDocClaimMapping = map[string]string{
 	// ISO 18013-5 mDL to OIDC mapping

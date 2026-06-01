@@ -100,7 +100,8 @@ func newNoOpExporter() (sdktrace.SpanExporter, error) {
 }
 
 func newExporter(ctx context.Context, cfg *model.Cfg) (sdktrace.SpanExporter, error) {
-	return otlptracehttp.New(ctx,
+	return otlptracehttp.New(
+		ctx,
 		otlptracehttp.WithEndpoint(cfg.Common.Tracing.Addr),
 		otlptracehttp.WithInsecure(),
 		otlptracehttp.WithTimeout(time.Duration(cfg.Common.Tracing.Timeout)*time.Second),

@@ -9,22 +9,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var mockJWT_1 = `eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7ImNydiI6IlAtMjU2Iiwia3R5IjoiRUMiLCJ4IjoiZXdpYlNCaC1uVDgwdVJuQ0lfX0t6bkVXOXN6b0RhMDI3YU1kdjJOb3RRcyIsInkiOiJIUlpyYml0dmZmNTk3WXBUV0F1d2d5ZHk3cWpsTGRaNjNuMHFwaW5PbGxFIn19.eyJqdGkiOiI4NGJiMzI2NmNjZDZhYmY4IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vdmMtaW50ZXJvcC0zLnN1bmV0LnNlL3Rva2VuIiwiaWF0IjoxNzQ4MzM1NTU0fQ.HuAKEiFm6CGFLTWJvf0Ll8Cj9vcltsJ1ThgBqhttuV3diE1lkeJO6QzO-h_F0fes1rm6HqRhDLwhW34SxXK4Eg`
-var mockJWK_1 = `{
+var (
+	mockJWT_1 = `eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7ImNydiI6IlAtMjU2Iiwia3R5IjoiRUMiLCJ4IjoiZXdpYlNCaC1uVDgwdVJuQ0lfX0t6bkVXOXN6b0RhMDI3YU1kdjJOb3RRcyIsInkiOiJIUlpyYml0dmZmNTk3WXBUV0F1d2d5ZHk3cWpsTGRaNjNuMHFwaW5PbGxFIn19.eyJqdGkiOiI4NGJiMzI2NmNjZDZhYmY4IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vdmMtaW50ZXJvcC0zLnN1bmV0LnNlL3Rva2VuIiwiaWF0IjoxNzQ4MzM1NTU0fQ.HuAKEiFm6CGFLTWJvf0Ll8Cj9vcltsJ1ThgBqhttuV3diE1lkeJO6QzO-h_F0fes1rm6HqRhDLwhW34SxXK4Eg`
+	mockJWK_1 = `{
     "kty": "EC",
     "crv": "P-256",
     "x": "ewibSBh-nT80uRnCI__KznEW9szoDa027aMdv2NotQs",
     "y": "HRZrbitvff597YpTWAuwgydy7qjlLdZ63n0qpinOllE",
 	"kid": "key-1"
   }`
+)
 
-var mockJWT_2 = `eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7ImNydiI6IlAtMjU2Iiwia3R5IjoiRUMiLCJ4IjoiVl9DSjdmckhmNWlITU1rclI0TDlPVzhRbEFYOE5Ibnk2ZFgxSWxqcloyOCIsInkiOiJ0R3ByVWE1SFg4aERzQlZXd1RIcEhjc3hjZDFqaGN0Ql9ULTZtZzRXLU5nIn19.eyJqdGkiOiJiN2JlNmNkYThkNDIwNjk5IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vdmMtaW50ZXJvcC0zLnN1bmV0LnNlL3Rva2VuIiwiaWF0IjoxNzQ4MzUzNDgyfQ.MTldxLq3g1g8yzLikj74n_HldPSfwbw_A-9Ut1mf_IIjqqj0SAkTAdlyOqXu9AuPlH5Baz4ZAS5mK_RxGdN4Tg`
-var mockJWK_2 = `{
+var (
+	mockJWT_2 = `eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7ImNydiI6IlAtMjU2Iiwia3R5IjoiRUMiLCJ4IjoiVl9DSjdmckhmNWlITU1rclI0TDlPVzhRbEFYOE5Ibnk2ZFgxSWxqcloyOCIsInkiOiJ0R3ByVWE1SFg4aERzQlZXd1RIcEhjc3hjZDFqaGN0Ql9ULTZtZzRXLU5nIn19.eyJqdGkiOiJiN2JlNmNkYThkNDIwNjk5IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vdmMtaW50ZXJvcC0zLnN1bmV0LnNlL3Rva2VuIiwiaWF0IjoxNzQ4MzUzNDgyfQ.MTldxLq3g1g8yzLikj74n_HldPSfwbw_A-9Ut1mf_IIjqqj0SAkTAdlyOqXu9AuPlH5Baz4ZAS5mK_RxGdN4Tg`
+	mockJWK_2 = `{
     "crv": "P-256",
     "kty": "EC",
     "x": "V_CJ7frHf5iHMMkrR4L9OW8QlAX8NHny6dX1IljrZ28",
     "y": "tGprUa5HX8hDsBVWwTHpHcsxcd1jhctB_T-6mg4W-Ng"
   }`
+)
 
 func TestIsAccessTokenDPoP(t *testing.T) {
 	// Compute ATH as base64url(SHA-256(token)) per RFC 9449 §4.2

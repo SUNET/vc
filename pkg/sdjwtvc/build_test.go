@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/jose"
 
 	"github.com/stretchr/testify/assert"

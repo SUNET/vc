@@ -25,5 +25,7 @@ type TokenStatusListMetadataStore interface {
 }
 
 // Ensure concrete types implement the interfaces
-var _ TokenStatusListStore = (*TokenStatusListColl)(nil)
-var _ TokenStatusListMetadataStore = (*TokenStatusListMetadataColl)(nil)
+var (
+	_ TokenStatusListStore         = (*TokenStatusListColl)(nil)
+	_ TokenStatusListMetadataStore = (*TokenStatusListMetadataColl)(nil)
+)

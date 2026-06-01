@@ -199,5 +199,4 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 			}
 		}
 	}
-
 }

@@ -22,7 +22,7 @@ type RequestObject struct {
 	// REQUIRED. Defined in [RFC6749]. This specification defines additional requirements to enable the use of Client Identifier Prefixes as described in Section 5.9. The Client Identifier can be created by parties other than the Wallet and it is considered unique within the context of the Wallet when used in combination with the Client Identifier Prefix.
 	ClientID string `json:"client_id" uri:"client_id" validate:"required"`
 
-	//RedirectURI OPTIONAL.  As described in Section 3.1.2.
+	// RedirectURI OPTIONAL.  As described in Section 3.1.2.
 	RedirectURI string `json:"redirect_uri,omitempty" uri:"redirect_uri" validate:"omitempty,url"`
 
 	// Scope OPTIONAL.  The scope of the access request as described by Section 3.3.
@@ -37,15 +37,15 @@ type RequestObject struct {
 	// ResponseMode REQUIRED. Defined in [OAuth.Responses]. This parameter can be used (through the new Response Mode direct_post) to ask the Wallet to send the response to the Verifier via an HTTPS connection (see Section 8.2 for more details). It can also be used to request that the resulting response be encrypted (see Section 8.3 for more details).
 	ResponseMode string `json:"response_mode,omitempty" uri:"response_mode" validate:"omitempty,oneof=form_post direct_post direct_post.jwt dc_api.jwt"`
 
-	//dcql_query
+	// dcql_query
 	DCQLQuery *DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty" validate:"omitempty,dive"`
 
-	//PresentationDefinition *PresentationDefinitionParameter `json:"presentation_definition,omitempty" bson:"presentation_definition,omitempty" validate:"omitempty,dive"`
+	// PresentationDefinition *PresentationDefinitionParameter `json:"presentation_definition,omitempty" bson:"presentation_definition,omitempty" validate:"omitempty,dive"`
 
 	// ClientMetadata OPTIONAL. A JSON object containing the Verifier metadata values. It MUST be UTF-8 encoded.
 	ClientMetadata *ClientMetadata `json:"client_metadata,omitempty" validate:"omitempty"`
 
-	//RequestURIMethod: OPTIONAL. A string determining the HTTP method to be used when the request_uri parameter is included in the same request. Two case-sensitive valid values are defined in this specification: get and post. If request_uri_method value is get, the Wallet MUST send the request to retrieve the Request Object using the HTTP GET method, i.e., as defined in [RFC9101]. If request_uri_method value is post, a supporting Wallet MUST send the request using the HTTP POST method as detailed in Section 5.10. If the request_uri_method parameter is not present, the Wallet MUST process the request_uri parameter as defined in [RFC9101]. Wallets not supporting the post method will send a GET request to the Request URI (default behavior as defined in [RFC9101]). request_uri_method parameter MUST NOT be present if a request_uri parameter is not present. If the Verifier set the request_uri_method parameter value to post and there is no other means to convey its capabilities to the Wallet, it SHOULD add the client_metadata parameter to the Authorization Request. This enables the Wallet to assess the Verifier's capabilities, allowing it to transmit only the relevant capabilities through the wallet_metadata parameter in the Request URI POST request.
+	// RequestURIMethod: OPTIONAL. A string determining the HTTP method to be used when the request_uri parameter is included in the same request. Two case-sensitive valid values are defined in this specification: get and post. If request_uri_method value is get, the Wallet MUST send the request to retrieve the Request Object using the HTTP GET method, i.e., as defined in [RFC9101]. If request_uri_method value is post, a supporting Wallet MUST send the request using the HTTP POST method as detailed in Section 5.10. If the request_uri_method parameter is not present, the Wallet MUST process the request_uri parameter as defined in [RFC9101]. Wallets not supporting the post method will send a GET request to the Request URI (default behavior as defined in [RFC9101]). request_uri_method parameter MUST NOT be present if a request_uri parameter is not present. If the Verifier set the request_uri_method parameter value to post and there is no other means to convey its capabilities to the Wallet, it SHOULD add the client_metadata parameter to the Authorization Request. This enables the Wallet to assess the Verifier's capabilities, allowing it to transmit only the relevant capabilities through the wallet_metadata parameter in the Request URI POST request.
 	RequestURIMethod string `json:"request_uri_method,omitempty" bson:"request_uri_method,omitempty" validate:"omitempty,oneof=get post"`
 
 	// TransactionData OPTIONAL. Non-empty array of strings, where each string is a base64url-encoded JSON object that contains a typed parameter set with details about the transaction that the Verifier is requesting the End-User to authorize. See Section 8.4 for details. The Wallet MUST return an error if a request contains even one unrecognized transaction data type or transaction data not conforming to the respective type definition
@@ -73,10 +73,10 @@ type ClientMetadata struct {
 	// JWKS OPTIONAL. A JSON Web Key Set, as defined in [RFC7591], that contains one or more public keys, such as those used by the Wallet as an input to a key agreement that may be used for encryption of the Authorization Response (see Section 8.3), or where the Wallet will require the public key of the Verifier to generate a Verifiable Presentation. This allows the Verifier to pass ephemeral keys specific to this Authorization Request. Public keys included in this parameter MUST NOT be used to verify the signature of signed Authorization Requests. Each JWK in the set MUST have a kid (Key ID) parameter that uniquely identifies the key within the context of the request.
 	JWKS *Keys `json:"jwks,omitempty" bson:"jwks,omitempty" validate:"omitempty"`
 
-	//encrypted_response_enc_values_supported: OPTIONAL. Non-empty array of strings, where each string is a JWE [RFC7516] enc algorithm that can be used as the content encryption algorithm for encrypting the Response. When a response_mode requiring encryption of the Response (such as dc_api.jwt or direct_post.jwt) is specified, this MUST be present for anything other than the default single value of A128GCM. Otherwise, this SHOULD be absent.
+	// encrypted_response_enc_values_supported: OPTIONAL. Non-empty array of strings, where each string is a JWE [RFC7516] enc algorithm that can be used as the content encryption algorithm for encrypting the Response. When a response_mode requiring encryption of the Response (such as dc_api.jwt or direct_post.jwt) is specified, this MUST be present for anything other than the default single value of A128GCM. Otherwise, this SHOULD be absent.
 	EncryptedResponseEncValuesSupported []string `json:"encrypted_response_enc_values_supported,omitempty" bson:"encrypted_response_enc_values_supported,omitempty" validate:"omitempty,dive,oneof=A128CBC-HS256 A256CBC-HS512 A128GCM A256GCM"`
 
-	//vp_formats_supported: REQUIRED when not available to the Wallet via another mechanism. As defined in Section 11.1.
+	// vp_formats_supported: REQUIRED when not available to the Wallet via another mechanism. As defined in Section 11.1.
 	// Per OpenID4VP spec, this is the properly formatted field for client_metadata in authorization requests
 	VPFormatsSupported *VPFormatsSupported `json:"vp_formats_supported,omitempty" bson:"vp_formats_supported,omitempty"`
 

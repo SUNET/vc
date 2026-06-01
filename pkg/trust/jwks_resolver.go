@@ -294,7 +294,8 @@ func (r *JWKSKeyResolver) tryOAuthMetadata(ctx context.Context, metadataURL, exp
 // extractJWKSFromMetadata returns raw JWK keys from inline jwks or jwks_uri.
 func (r *JWKSKeyResolver) extractJWKSFromMetadata(ctx context.Context, jwks *struct {
 	Keys []json.RawMessage `json:"keys"`
-}, jwksURI string) ([]json.RawMessage, error) {
+}, jwksURI string,
+) ([]json.RawMessage, error) {
 	if jwks != nil && len(jwks.Keys) > 0 {
 		return jwks.Keys, nil
 	}

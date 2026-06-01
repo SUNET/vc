@@ -33,10 +33,10 @@ func generateEHICDocument(t *testing.T) map[string]any {
 			"id":   "1231231",
 			"name": "SUNET",
 		},
-		"issuing_country": "SE",
-		"date_of_expiry":  "2038-01-19",
+		"issuing_country":  "SE",
+		"date_of_expiry":   "2038-01-19",
 		"date_of_issuance": "2021-01-19",
-		"document_number": "123123123",
+		"document_number":  "123123123",
 		"authentic_source": map[string]any{
 			"id":   "SE-EHIC-001",
 			"name": "Swedish Social Insurance Agency",
@@ -85,7 +85,6 @@ func TestEHICSchemaValidation(t *testing.T) {
 			got := helpers.ValidateDocumentData(ctx, tt.payload, logger.NewSimple("test"))
 
 			assert.Equal(t, tt.want, got)
-
 		})
 	}
 }

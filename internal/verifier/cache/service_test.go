@@ -92,7 +92,7 @@ func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
 	}
 
 	return client, func() {
-		client.Disconnect(ctx) // #nosec G104
+		client.Disconnect(ctx)   // #nosec G104
 		container.Terminate(ctx) // #nosec G104
 		cancel()
 	}

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/auth_providers/samlsp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
@@ -180,7 +181,7 @@ func setupTestEnvironment(t *testing.T) *testEnvironment {
 // createTestSAMLConfig creates a test SAML configuration
 func createTestSAMLConfig(mdqURL, idpSSOURL, idpEntityID, certPath, keyPath string) *model.SAMLSP {
 	return &model.SAMLSP{
-		Enable:          true,
+		Enable:           true,
 		EntityID:         "https://issuer.example.com/saml",
 		ACSEndpoint:      "https://issuer.example.com/saml/acs",
 		MetadataURL:      "https://issuer.example.com/saml/metadata",

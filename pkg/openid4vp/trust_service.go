@@ -9,8 +9,7 @@ import (
 	"github.com/sirosfoundation/go-cryptoutil"
 )
 
-type TrustService struct {
-}
+type TrustService struct{}
 
 //func (ts *TrustService) ExtractPublicKeyFromCnfMap(cnf map[string]any) (any, error) {
 //	jwkMap, ok := cnf["jwk"]

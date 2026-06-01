@@ -53,7 +53,7 @@ BUILD_CONFIGS           := \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
-	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update \
+	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
@@ -707,7 +707,15 @@ vscode: test-env ## Set up VS Code development environment
 	go install golang.org/x/tools/cmd/deadcode@latest && \
 	go install github.com/securego/gosec/v2/cmd/gosec@latest && \
 	go install golang.org/x/vuln/cmd/govulncheck@latest && \
-	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install honnef.co/go/tools/cmd/staticcheck@latest && \
+	go install mvdan.cc/gofumpt@latest
+
+# ==============================================================================
+# Formatting
+# ==============================================================================
+
+formatting: ## Format Go code with gofumpt
+	gofumpt -l -w .
 
 # ==============================================================================
 # GitHub Actions Testing

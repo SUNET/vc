@@ -104,7 +104,8 @@ type testStruct struct {
 
 func TestMemoryCache_Struct(t *testing.T) {
 	c := NewMemoryCache[testStruct](5 * time.Minute)
-	runGenericCacheContractTests(t, c,
+	runGenericCacheContractTests(
+		t, c,
 		testStruct{Name: "alice", Value: 1},
 		testStruct{Name: "bob", Value: 2},
 	)
@@ -112,7 +113,8 @@ func TestMemoryCache_Struct(t *testing.T) {
 
 func TestMemoryCache_StructPtr(t *testing.T) {
 	c := NewMemoryCache[*testStruct](5 * time.Minute)
-	runGenericCacheContractTests(t, c,
+	runGenericCacheContractTests(
+		t, c,
 		&testStruct{Name: "alice", Value: 1},
 		&testStruct{Name: "bob", Value: 2},
 	)
@@ -136,18 +138,22 @@ func TestMemoryCache_Stop(t *testing.T) {
 
 // --- Compile-time interface checks ---
 
-var _ Cache[string] = (*MemoryCache[string])(nil)
-var _ Cache[bool] = (*MemoryCache[bool])(nil)
-var _ Cache[int] = (*MemoryCache[int])(nil)
-var _ Cache[[]byte] = (*MemoryCache[[]byte])(nil)
-var _ Cache[testStruct] = (*MemoryCache[testStruct])(nil)
-var _ Cache[*testStruct] = (*MemoryCache[*testStruct])(nil)
+var (
+	_ Cache[string]      = (*MemoryCache[string])(nil)
+	_ Cache[bool]        = (*MemoryCache[bool])(nil)
+	_ Cache[int]         = (*MemoryCache[int])(nil)
+	_ Cache[[]byte]      = (*MemoryCache[[]byte])(nil)
+	_ Cache[testStruct]  = (*MemoryCache[testStruct])(nil)
+	_ Cache[*testStruct] = (*MemoryCache[*testStruct])(nil)
+)
 
 // Mongo compile-time checks
-var _ Cache[string] = (*MongoCache[string])(nil)
-var _ Cache[bool] = (*MongoCache[bool])(nil)
-var _ Cache[int] = (*MongoCache[int])(nil)
-var _ Cache[testStruct] = (*MongoCache[testStruct])(nil)
+var (
+	_ Cache[string]     = (*MongoCache[string])(nil)
+	_ Cache[bool]       = (*MongoCache[bool])(nil)
+	_ Cache[int]        = (*MongoCache[int])(nil)
+	_ Cache[testStruct] = (*MongoCache[testStruct])(nil)
+)
 
 // --- MongoCache tests (require Docker) ---
 
@@ -184,7 +190,8 @@ func TestMongoCache_Struct(t *testing.T) {
 
 	c, err := NewMongoCache[testStruct](t.Context(), client, "test_generic", "cache_struct", 10*time.Minute, nil)
 	require.NoError(t, err)
-	runGenericCacheContractTests(t, c,
+	runGenericCacheContractTests(
+		t, c,
 		testStruct{Name: "alice", Value: 1},
 		testStruct{Name: "bob", Value: 2},
 	)

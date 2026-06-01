@@ -24,7 +24,7 @@ type CreateCredentialRequest struct {
 
 // CreateCredentialReply is the reply for Credential
 type CreateCredentialReply struct {
-	//Data *sdjwt.PresentationFlat `json:"data"`
+	// Data *sdjwt.PresentationFlat `json:"data"`
 	Data                   []*apiv1_issuer.Credential `json:"data"`
 	TokenStatusListSection int64                      `json:"token_status_list_section"`
 	TokenStatusListIndex   int64                      `json:"token_status_list_index"`

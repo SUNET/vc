@@ -22,7 +22,7 @@ func TestCustomBranding_ServesCustomLogo(t *testing.T) {
 
 	dir := t.TempDir()
 	logoPath := filepath.Join(dir, "logo.png")
-	require.NoError(t, os.WriteFile(logoPath, []byte("fake-logo"), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(logoPath, []byte("fake-logo"), 0o644)) // #nosec G306
 
 	branding := model.Branding{LogoPath: logoPath}
 	handler := m.CustomBranding(branding)
@@ -44,7 +44,7 @@ func TestCustomBranding_ServesCustomFavicon(t *testing.T) {
 
 	dir := t.TempDir()
 	faviconPath := filepath.Join(dir, "favicon.png")
-	require.NoError(t, os.WriteFile(faviconPath, []byte("fake-favicon"), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(faviconPath, []byte("fake-favicon"), 0o644)) // #nosec G306
 
 	branding := model.Branding{FaviconPath: faviconPath}
 	handler := m.CustomBranding(branding)
@@ -124,7 +124,7 @@ func TestCustomBranding_FallsBackWhenFileUnreadable(t *testing.T) {
 
 	dir := t.TempDir()
 	logoPath := filepath.Join(dir, "logo.png")
-	require.NoError(t, os.WriteFile(logoPath, []byte("secret"), 0000))
+	require.NoError(t, os.WriteFile(logoPath, []byte("secret"), 0o000))
 
 	branding := model.Branding{LogoPath: logoPath}
 	handler := m.CustomBranding(branding)
@@ -146,7 +146,7 @@ func TestCustomBranding_PassesThroughUnrelatedPaths(t *testing.T) {
 
 	dir := t.TempDir()
 	logoPath := filepath.Join(dir, "logo.png")
-	require.NoError(t, os.WriteFile(logoPath, []byte("fake-logo"), 0644)) // #nosec G306
+	require.NoError(t, os.WriteFile(logoPath, []byte("fake-logo"), 0o644)) // #nosec G306
 
 	branding := model.Branding{LogoPath: logoPath}
 	handler := m.CustomBranding(branding)

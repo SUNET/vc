@@ -22,7 +22,7 @@ import (
 
 type VerificationRequestObjectRequest struct {
 	ID string `json:"-" form:"id" uri:"id" validate:"required,max=128,printascii"`
-	//SessionID string `json:"-"`
+	// SessionID string `json:"-"`
 }
 
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {

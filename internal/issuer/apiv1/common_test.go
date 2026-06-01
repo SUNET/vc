@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"testing"
+
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
 	"github.com/SUNET/vc/pkg/logger"

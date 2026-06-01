@@ -69,7 +69,6 @@ func TestGenerateQR(t *testing.T) {
 				assert.Equal(t, tt.want.qrReply.URI, got.URI)
 				assert.Equal(t, tt.want.qrReply.Base64Image, got.Base64Image)
 			}
-
 		})
 	}
 }

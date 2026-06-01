@@ -103,7 +103,7 @@ func (s *testSuite) generateSigningKey() {
 		s.t.Fatalf("Failed to encode private key: %v", err)
 	}
 
-	if err := os.WriteFile(s.keyPath, keyBytes, 0600); err != nil {
+	if err := os.WriteFile(s.keyPath, keyBytes, 0o600); err != nil {
 		s.t.Fatalf("Failed to write key file: %v", err)
 	}
 }
@@ -143,7 +143,7 @@ func generateRSAKeyFile(t *testing.T) string {
 		Bytes: derBytes,
 	}
 
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0600); err != nil {
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0o600); err != nil {
 		t.Fatalf("Failed to write RSA key file: %v", err)
 	}
 

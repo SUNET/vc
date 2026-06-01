@@ -148,7 +148,6 @@ func TestIssuer_Issue(t *testing.T) {
 	}
 	if issued.DocumentMdoc.Documents == nil {
 		t.Error("Documents is nil")
-
 	}
 	if issued.SignedMSO == nil {
 		t.Error("SignedMSO is nil")

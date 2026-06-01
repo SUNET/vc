@@ -186,15 +186,29 @@ func main() {
 
 		switch key.Kty {
 		case "EC":
-			if key.Crv == "" { missing = append(missing, "crv") }
-			if key.X == "" { missing = append(missing, "x") }
-			if key.Y == "" { missing = append(missing, "y") }
+			if key.Crv == "" {
+				missing = append(missing, "crv")
+			}
+			if key.X == "" {
+				missing = append(missing, "x")
+			}
+			if key.Y == "" {
+				missing = append(missing, "y")
+			}
 		case "RSA":
-			if key.N == "" { missing = append(missing, "n") }
-			if key.E == "" { missing = append(missing, "e") }
+			if key.N == "" {
+				missing = append(missing, "n")
+			}
+			if key.E == "" {
+				missing = append(missing, "e")
+			}
 		case "OKP":
-			if key.Crv == "" { missing = append(missing, "crv") }
-			if key.X == "" { missing = append(missing, "x") }
+			if key.Crv == "" {
+				missing = append(missing, "crv")
+			}
+			if key.X == "" {
+				missing = append(missing, "x")
+			}
 		case "":
 			// already reported
 		default:
@@ -209,12 +223,24 @@ func main() {
 		}
 
 		var privFields []string
-		if key.D != "" { privFields = append(privFields, "d") }
-		if key.P != "" { privFields = append(privFields, "p") }
-		if key.Q != "" { privFields = append(privFields, "q") }
-		if key.DP != "" { privFields = append(privFields, "dp") }
-		if key.DQ != "" { privFields = append(privFields, "dq") }
-		if key.QI != "" { privFields = append(privFields, "qi") }
+		if key.D != "" {
+			privFields = append(privFields, "d")
+		}
+		if key.P != "" {
+			privFields = append(privFields, "p")
+		}
+		if key.Q != "" {
+			privFields = append(privFields, "q")
+		}
+		if key.DP != "" {
+			privFields = append(privFields, "dp")
+		}
+		if key.DQ != "" {
+			privFields = append(privFields, "dq")
+		}
+		if key.QI != "" {
+			privFields = append(privFields, "qi")
+		}
 		if len(privFields) > 0 {
 			fmt.Printf("  %s PRIVATE KEY EXPOSED! Fields present: %s\n", c.fail, strings.Join(privFields, ", "))
 			failures = append(failures, fmt.Sprintf("key %d: private key exposed", i+1))

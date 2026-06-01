@@ -368,7 +368,7 @@ dcql:
 claim_mappings:
   a: "b"
 `
-	if err := os.WriteFile(filepath.Join(dir, "t1.yaml"), []byte(content), 0644); err != nil { // #nosec G306
+	if err := os.WriteFile(filepath.Join(dir, "t1.yaml"), []byte(content), 0o644); err != nil { // #nosec G306
 		t.Fatal(err)
 	}
 	cfg, err := LoadPresentationRequests(context.Background(), dir)
@@ -392,8 +392,8 @@ dcql:
 claim_mappings:
   a: "b"
 `
-	os.WriteFile(filepath.Join(dir, "t1.yaml"), []byte(strings.Replace(tmpl, "%s", "s1", 1)), 0644) // #nosec G104 G306
-	os.WriteFile(filepath.Join(dir, "t2.yaml"), []byte(strings.Replace(tmpl, "%s", "s2", 1)), 0644) // #nosec G104 G306
+	os.WriteFile(filepath.Join(dir, "t1.yaml"), []byte(strings.Replace(tmpl, "%s", "s1", 1)), 0o644) // #nosec G104 G306
+	os.WriteFile(filepath.Join(dir, "t2.yaml"), []byte(strings.Replace(tmpl, "%s", "s2", 1)), 0o644) // #nosec G104 G306
 
 	_, err := LoadPresentationRequests(context.Background(), dir)
 	if err == nil {
@@ -426,8 +426,8 @@ dcql:
 claim_mappings:
   a: "b"
 `
-	os.WriteFile(filepath.Join(dir, "t1.yaml"), []byte(t1), 0644) // #nosec G104 G306
-	os.WriteFile(filepath.Join(dir, "t2.yaml"), []byte(t2), 0644) // #nosec G104 G306
+	os.WriteFile(filepath.Join(dir, "t1.yaml"), []byte(t1), 0o644) // #nosec G104 G306
+	os.WriteFile(filepath.Join(dir, "t2.yaml"), []byte(t2), 0o644) // #nosec G104 G306
 
 	_, err := LoadPresentationRequests(context.Background(), dir)
 	if err == nil {
@@ -440,7 +440,7 @@ claim_mappings:
 
 func TestLoadPresentationRequests_InvalidFile(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte("{{invalid"), 0644) // #nosec G104 G306
+	os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte("{{invalid"), 0o644) // #nosec G104 G306
 
 	_, err := LoadPresentationRequests(context.Background(), dir)
 	if err == nil {
@@ -496,7 +496,7 @@ func TestLoadPresentationRequestsFromFile_DuplicateIDs(t *testing.T) {
       c: "d"
 `
 	p := filepath.Join(dir, "dup.yaml")
-	os.WriteFile(p, []byte(content), 0644) // #nosec G104 G306
+	os.WriteFile(p, []byte(content), 0o644) // #nosec G104 G306
 
 	_, err := LoadPresentationRequestsFromFile(context.Background(), p)
 	if err == nil {
@@ -519,7 +519,7 @@ func TestLoadPresentationRequestsFromFile_DuplicateScopes(t *testing.T) {
       c: "d"
 `
 	p := filepath.Join(dir, "dup_scope.yaml")
-	os.WriteFile(p, []byte(content), 0644) // #nosec G104 G306
+	os.WriteFile(p, []byte(content), 0o644) // #nosec G104 G306
 
 	_, err := LoadPresentationRequestsFromFile(context.Background(), p)
 	if err == nil {

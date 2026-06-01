@@ -4,11 +4,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"github.com/fxamacker/cbor/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
@@ -80,7 +81,8 @@ func TestNewStatusChecker_NilCache(t *testing.T) {
 func TestNewStatusChecker_WithOptions(t *testing.T) {
 	customClient := &http.Client{Timeout: 10 * time.Second}
 
-	sc := newTestStatusChecker(t,
+	sc := newTestStatusChecker(
+		t,
 		WithHTTPClient(customClient),
 		WithCacheExpiry(10*time.Minute),
 	)
@@ -424,7 +426,7 @@ func TestExtractStatusReference_NoStatus(t *testing.T) {
 		issuerSignedNS[ns] = anyItems
 	}
 
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 	doc := &DocumentMdoc{
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
@@ -459,7 +461,7 @@ func TestExtractStatusReference_WithStatus(t *testing.T) {
 		IssuerSigned: IssuerSignedMdoc{
 			// Change the slice type in the map literal to []any
 			NameSpaces: map[string][]any{
-				Namespace: []any{
+				Namespace: {
 					IssuerSignedItem{
 						ElementIdentifier: "status",
 						ElementValue:      statusValue,
@@ -569,7 +571,8 @@ func TestStatusChecker_CacheExpiry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sc := newTestStatusChecker(t,
+	sc := newTestStatusChecker(
+		t,
 		WithCacheExpiry(time.Hour),
 		WithKeyFunc(func(token *jwt.Token) (any, error) {
 			return publicKey, nil
@@ -627,11 +630,10 @@ func TestVerifierStatusCheck_CheckDocumentStatus_NoStatusReference(t *testing.T)
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: map[string][]any{
-				Namespace: []any{
+				Namespace: {
 					IssuerSignedItem{
 						ElementIdentifier: "family_name",
-						ElementValue: "Test",
-
+						ElementValue:      "Test",
 					},
 				},
 			},
@@ -686,7 +688,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Valid(t *testing.T) {
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: map[string][]any{
-				Namespace: []any{
+				Namespace: {
 					IssuerSignedItem{
 						ElementIdentifier: "status",
 						ElementValue:      statusValue,
@@ -746,7 +748,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Revoked(t *testing.T) {
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: map[string][]any{
-				Namespace: []any{
+				Namespace: {
 					IssuerSignedItem{
 						ElementIdentifier: "status",
 						ElementValue:      statusValue,
@@ -802,7 +804,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_Suspended(t *testing.T) {
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: map[string][]any{
-				Namespace: []any{
+				Namespace: {
 					IssuerSignedItem{
 						ElementIdentifier: "status",
 						ElementValue:      statusValue,
@@ -857,7 +859,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_IntegrationWithIssuer(t *testin
 		issuerSignedNS[ns] = anyItems
 	}
 
-	emptyMapBytes, _ := cbor.Marshal(map[string]interface{}{})
+	emptyMapBytes, _ := cbor.Marshal(map[string]any{})
 	doc := &DocumentMdoc{
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
@@ -1139,7 +1141,7 @@ func TestVerifierStatusCheck_CheckDocumentStatus_CWT(t *testing.T) {
 		DocType: DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: map[string][]any{
-				Namespace: []any{
+				Namespace: {
 					IssuerSignedItem{
 						ElementIdentifier: "status",
 						ElementValue:      statusValue,

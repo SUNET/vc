@@ -409,7 +409,6 @@ func TestPack_SignThenEncrypt(t *testing.T) {
 		EncryptionMode:    "anoncrypt",
 		RecipientKeys:     []jwk.Key{recipientPublicKey},
 	})
-
 	if err != nil {
 		t.Fatalf("Pack() error = %v", err)
 	}

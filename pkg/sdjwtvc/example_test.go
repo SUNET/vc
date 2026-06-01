@@ -56,8 +56,6 @@ func ExampleCombineWithKeyBinding() {
 	// eyJhbGciOiJFUzI1NiJ9.eyJ2Y3QiOiJpZCJ9.c2ln~ZGlzYzE~ZGlzYzI~eyJ0eXAiOiJrYitqd3QifQ.eyJub25jZSI6Im4ifQ.a2JzaWc
 }
 
-func strPtr(s string) *string { return &s }
-
 func ExampleVCTM() {
 	vctm := &sdjwtvc.VCTM{
 		VCT:         "https://example.com/credentials/identity",
@@ -82,7 +80,7 @@ func ExampleVCTM() {
 		},
 		Claims: []sdjwtvc.Claim{
 			{
-				Path: []*string{strPtr("given_name")},
+				Path: []*string{new("given_name")},
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Given Name"},
 				},
@@ -90,7 +88,7 @@ func ExampleVCTM() {
 				Mandatory: true,
 			},
 			{
-				Path: []*string{strPtr("family_name")},
+				Path: []*string{new("family_name")},
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Family Name"},
 				},
@@ -114,7 +112,7 @@ func ExampleVCTM_Attributes() {
 		VCT: "https://example.com/credentials/identity",
 		Claims: []sdjwtvc.Claim{
 			{
-				Path: []*string{strPtr("given_name")},
+				Path: []*string{new("given_name")},
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Given Name"},
 					{Locale: "sv-SE", Label: "Förnamn"},

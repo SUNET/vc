@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/stretchr/testify/assert"

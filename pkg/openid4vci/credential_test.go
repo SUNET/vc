@@ -2,6 +2,7 @@ package openid4vci
 
 import (
 	"testing"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	"github.com/stretchr/testify/assert"
@@ -274,7 +275,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 			errContains: "unknown credential_configuration_id",
 		},
 		{
-			name: "error when neither credential_configuration_id nor credential_identifier provided",
+			name:    "error when neither credential_configuration_id nor credential_identifier provided",
 			request: &CredentialRequest{
 				// Both fields empty
 			},

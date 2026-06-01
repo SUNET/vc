@@ -58,7 +58,7 @@ func TestRoutingForwardMessage(t *testing.T) {
 		// Compare as JSON (key order may vary)
 		var original, extracted map[string]any
 		json.Unmarshal(innerMessage, &original) // #nosec G104
-		json.Unmarshal(wrapped, &extracted) // #nosec G104
+		json.Unmarshal(wrapped, &extracted)     // #nosec G104
 
 		if original["protected"] != extracted["protected"] {
 			t.Errorf("wrapped message mismatch")

@@ -223,7 +223,7 @@ func TestNewClientConn_TLS_InvalidCAPEM(t *testing.T) {
 
 	// Write invalid PEM content
 	caPath := filepath.Join(tmpDir, "invalid-ca.pem")
-	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0600)
+	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0o600)
 	require.NoError(t, err)
 
 	cfg := model.GRPCClientTLS{
@@ -305,7 +305,7 @@ func TestNewServerOptions_InvalidClientCAPEM(t *testing.T) {
 
 	// Write invalid PEM content
 	caPath := filepath.Join(tmpDir, "invalid-ca.pem")
-	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0600)
+	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0o600)
 	require.NoError(t, err)
 
 	cfg := model.GRPCServer{
@@ -1704,7 +1704,6 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	defer cancel()
 
 	err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
-
 	// The unknown handler returns nil but doesn't send a response message,
 	// so we get an "Internal" error about no response. But that's OK -
 	// the important thing is we DIDN'T get PermissionDenied, meaning fingerprint passed.

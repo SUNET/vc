@@ -53,13 +53,13 @@ func createTestKeyPair(t *testing.T, keyPath, certPath string) {
 		t.Fatalf("failed to marshal key: %v", err)
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
 		t.Fatalf("failed to write key: %v", err)
 	}
 
 	// Write certificate
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	if err := os.WriteFile(certPath, certPEM, 0644); err != nil { // #nosec G306
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil { // #nosec G306
 		t.Fatalf("failed to write certificate: %v", err)
 	}
 }

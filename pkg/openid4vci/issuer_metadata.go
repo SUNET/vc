@@ -103,7 +103,7 @@ type MetadataCredentialResponseEncryption struct {
 }
 
 type BatchCredentialIssuance struct {
-	//BatchSize: REQUIRED. Integer value specifying the maximum array size for the proofs parameter in a Credential Request.
+	// BatchSize: REQUIRED. Integer value specifying the maximum array size for the proofs parameter in a Credential Request.
 	BatchSize int `json:"batch_size" yaml:"batch_size" validate:"required"`
 }
 
@@ -112,7 +112,7 @@ type MetadataDisplay struct {
 	// Name: OPTIONAL. String value of a display name for the Credential Issuer.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
-	//Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. There MUST be only one object for each language identifier.
+	// Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. There MUST be only one object for each language identifier.
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 
 	// Logo: OPTIONAL. Object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:
@@ -121,7 +121,7 @@ type MetadataDisplay struct {
 
 // MetadataLogo object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:
 type MetadataLogo struct {
-	//URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc.
+	// URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc.
 	URI string `json:"uri" yaml:"uri" validate:"required"`
 
 	// AltText: OPTIONAL. String value of the alternative text for the logo image.
@@ -168,7 +168,7 @@ type CredentialConfigurationsSupported struct {
 
 // ProofsTypesSupported Object that describes specifics of the key proof(s) that the Credential Issuer supports.
 type ProofsTypesSupported struct {
-	//ProofSigningAlgValuesSupported: REQUIRED. Array of case sensitive strings that identify the algorithms that the Issuer supports for this proof type. The Wallet uses one of them to sign the proof. Algorithm names used are determined by the key proof type and are defined in Section 7.2.1.
+	// ProofSigningAlgValuesSupported: REQUIRED. Array of case sensitive strings that identify the algorithms that the Issuer supports for this proof type. The Wallet uses one of them to sign the proof. Algorithm names used are determined by the key proof type and are defined in Section 7.2.1.
 	ProofSigningAlgValuesSupported []string `json:"proof_signing_alg_values_supported" yaml:"proof_signing_alg_values_supported" validate:"required"`
 }
 

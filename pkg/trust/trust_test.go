@@ -98,7 +98,6 @@ func TestLocalTrustEvaluator_X5C(t *testing.T) {
 				Role:      RoleIssuer,
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -117,7 +116,6 @@ func TestLocalTrustEvaluator_X5C(t *testing.T) {
 				Key:       untrustedChain,
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -134,7 +132,6 @@ func TestLocalTrustEvaluator_X5C(t *testing.T) {
 				Key:       chain,
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -182,7 +179,6 @@ func TestLocalTrustEvaluator_ExpiredCert(t *testing.T) {
 			Key:     []*x509.Certificate{leafCert, rootCert},
 		},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -213,7 +209,6 @@ func TestLocalTrustEvaluator_RoleRestriction(t *testing.T) {
 				Role:      RoleIssuer,
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -231,7 +226,6 @@ func TestLocalTrustEvaluator_RoleRestriction(t *testing.T) {
 				Role:      RoleVerifier, // Not in allowed roles
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -261,7 +255,6 @@ func TestCompositeEvaluator_FirstSuccess(t *testing.T) {
 			Key:       chain,
 		},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -286,7 +279,6 @@ func TestCompositeEvaluator_Fallback(t *testing.T) {
 			Key:       chain,
 		},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -551,7 +543,6 @@ func TestLocalTrustEvaluator_EmptyCertChain(t *testing.T) {
 			Key:     []*x509.Certificate{},
 		},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -603,7 +594,6 @@ func TestLocalTrustEvaluator_CertificateMatchesSubject(t *testing.T) {
 					Key:       chain,
 				},
 			})
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -631,7 +621,6 @@ func TestLocalTrustEvaluator_X5CCertChainType(t *testing.T) {
 			Key:       certChain,
 		},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -693,7 +682,6 @@ func TestCompositeEvaluator_AllMustSucceed(t *testing.T) {
 				Key:       chain,
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -719,7 +707,6 @@ func TestCompositeEvaluator_AllMustSucceed(t *testing.T) {
 				Key:       chain,
 			},
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

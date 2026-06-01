@@ -277,15 +277,16 @@ func (c *Claim) JSONPath() string {
 		return ""
 	}
 
-	reply := "$"
+	var reply strings.Builder
+	reply.WriteString("$")
 	for _, path := range c.Path {
 		if path == nil {
-			reply += "[*]"
+			reply.WriteString("[*]")
 			continue
 		}
-		reply += "." + *path
+		reply.WriteString("." + *path)
 	}
-	return reply
+	return reply.String()
 }
 
 // claimKey returns a stable, unique key for a claim suitable for use in
@@ -375,15 +376,16 @@ func normalizeEmpty(v any) any {
 
 // jsonPathFromSegments builds a JSONPath string from path segments.
 func jsonPathFromSegments(path []*string) string {
-	jp := "$"
+	var jp strings.Builder
+	jp.WriteString("$")
 	for _, p := range path {
 		if p == nil {
-			jp += "[*]"
+			jp.WriteString("[*]")
 		} else {
-			jp += "." + *p
+			jp.WriteString("." + *p)
 		}
 	}
-	return jp
+	return jp.String()
 }
 
 // isChildOfDisplayableParent reports whether any strict prefix of path is
@@ -392,17 +394,18 @@ func isChildOfDisplayableParent(path []*string, parents map[string]bool) bool {
 	if len(path) <= 1 {
 		return false
 	}
-	prefix := "$"
+	var prefix strings.Builder
+	prefix.WriteString("$")
 	for i, p := range path {
 		if i == len(path)-1 {
 			break // don't check the full path — only strict prefixes
 		}
 		if p == nil {
-			prefix += "[*]"
+			prefix.WriteString("[*]")
 		} else {
-			prefix += "." + *p
+			prefix.WriteString("." + *p)
 		}
-		if parents[prefix] {
+		if parents[prefix.String()] {
 			return true
 		}
 	}

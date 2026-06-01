@@ -171,7 +171,6 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 					CredentialType: credentialType,
 				},
 			})
-
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Errorf("trust evaluation failed: %w", err))
 				return result, err
@@ -308,7 +307,6 @@ func (c *Client) verifyJWTSignature(tokenString string, publicKey any) (*jwt.Tok
 		}
 		return publicKey, nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}

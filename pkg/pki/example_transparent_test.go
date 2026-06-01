@@ -7,6 +7,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"fmt"
+
 	"github.com/SUNET/vc/pkg/pki"
 )
 
@@ -46,8 +47,8 @@ func Example_transparentKeyLoading() {
 	// Scenario 1: Development with file-based keys
 	fmt.Println("=== Development (File-based keys) ===")
 	devConfig := &pki.KeyConfig{
-		PrivateKeyPath:  "/path/to/dev/key.pem",
-		ChainPath: "/path/to/dev/chain.pem",
+		PrivateKeyPath: "/path/to/dev/key.pem",
+		ChainPath:      "/path/to/dev/chain.pem",
 	}
 	devService := &SigningService{
 		keyLoader: keyLoader,
@@ -86,8 +87,8 @@ func Example_transparentKeyLoading() {
 	// Scenario 3: Fallback configuration (try HSM first, fall back to file)
 	fmt.Println("=== Fallback (HSM → File) ===")
 	fallbackConfig := &pki.KeyConfig{
-		PrivateKeyPath:  "/backup/key.pem",
-		ChainPath: "/backup/chain.pem",
+		PrivateKeyPath: "/backup/key.pem",
+		ChainPath:      "/backup/chain.pem",
 		PKCS11: &pki.PKCS11Config{
 			ModulePath: "/usr/lib/softhsm/libsofthsm2.so",
 			SlotID:     0,

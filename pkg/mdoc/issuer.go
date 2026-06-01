@@ -9,8 +9,9 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
-	"github.com/fxamacker/cbor/v2"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // Issuer handles the creation and signing of mDL documents.
@@ -120,67 +121,63 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	// Accumulator for document errors instead of throwing hard Go app errors
 	var documentErrors []DocumentError
 	var documents []DocumentMdoc
-    if req.DevicePublicKey == nil {
-        return nil, fmt.Errorf("device public key is required")
-    }
-    if req.MDoc == nil {
-        return nil, fmt.Errorf("mDL data is required")
-    }
+	if req.DevicePublicKey == nil {
+		return nil, fmt.Errorf("device public key is required")
+	}
+	if req.MDoc == nil {
+		return nil, fmt.Errorf("mDL data is required")
+	}
 
-    // Convert device public key to COSE key
-    deviceKey, err := publicKeyToCOSEKey(req.DevicePublicKey)
-    if err != nil {
-        return nil, fmt.Errorf("failed to convert device key: %w", err)
-    }
+	// Convert device public key to COSE key
+	deviceKey, err := publicKeyToCOSEKey(req.DevicePublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert device key: %w", err)
+	}
 
-    // Determine validity period
-    validFrom := time.Now().UTC()
-    if req.ValidFrom != nil {
-        validFrom = req.ValidFrom.UTC()
-    }
-    validUntil := validFrom.Add(i.defaultValidity)
-    if req.ValidUntil != nil {
-        validUntil = req.ValidUntil.UTC()
-    }
+	// Determine validity period
+	validFrom := time.Now().UTC()
+	if req.ValidFrom != nil {
+		validFrom = req.ValidFrom.UTC()
+	}
+	validUntil := validFrom.Add(i.defaultValidity)
+	if req.ValidUntil != nil {
+		validUntil = req.ValidUntil.UTC()
+	}
 
-    // Build the MSO
-    builder := NewMSOBuilder(DocType).
-        WithDigestAlgorithm(i.digestAlgorithm).
-        WithValidity(validFrom, validUntil).
-        WithDeviceKey(deviceKey).
-        WithSigner(i.signerKey, i.certChain)
+	// Build the MSO
+	builder := NewMSOBuilder(DocType).
+		WithDigestAlgorithm(i.digestAlgorithm).
+		WithValidity(validFrom, validUntil).
+		WithDeviceKey(deviceKey).
+		WithSigner(i.signerKey, i.certChain)
 
-    // Add all mandatory data elements
-    if err := i.addMandatoryElements(builder, req.MDoc); err != nil {
-	   return nil, fmt.Errorf("add mandatory elements: %w", err)
-    }
+	// Add all mandatory data elements
+	if err := i.addMandatoryElements(builder, req.MDoc); err != nil {
+		return nil, fmt.Errorf("add mandatory elements: %w", err)
+	}
 
-    // Add optional data elements
-    if err := i.addOptionalElements(builder, req.MDoc); err != nil {
+	// Add optional data elements
+	if err := i.addOptionalElements(builder, req.MDoc); err != nil {
 		return nil, fmt.Errorf("add optional elements: %w", err)
-    }
+	}
 
-    // Add driving privileges
-    if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
+	// Add driving privileges
+	if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
 		return nil, fmt.Errorf("add driving privileges: %w", err)
+	}
 
-    }
+	// Build and sign the MSO
+	signedMSO, issuerNameSpaces, err := builder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("build signed MSO: %w", err)
+	}
 
-    // Build and sign the MSO
-    signedMSO, issuerNameSpaces, err := builder.Build()
-    if err != nil {
-	   return nil, fmt.Errorf("build signed MSO: %w", err)
-    }
-
-
-
-    // Encode the signed MSO elements
-    encoder, err := NewCBOREncoder()
-    if err != nil {
-        // Code 0 = Data Not Available / Generation Failure
+	// Encode the signed MSO elements
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		// Code 0 = Data Not Available / Generation Failure
 		return nil, fmt.Errorf("create CBOR encoder: %w", err)
-
-    }
+	}
 
 	emptyMapBytes, err := encoder.Marshal(map[string]any{})
 	if err != nil {
@@ -188,65 +185,65 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	}
 
 	issuerSignedNS := make(map[string][]any)
-    for ns, items := range issuerNameSpaces {
-        anyItems := make([]any, len(items))
-        for idx, item := range items {
-            anyItems[idx] = item
-        }
-        issuerSignedNS[ns] = anyItems
-    }
-    issuerAuthArray := []any{
-        signedMSO.Protected,
-        signedMSO.Unprotected,
-        signedMSO.Payload,
-        signedMSO.Signature,
-    }
-    // Everything encoded successfully: build response containing the document
-    innerDoc := DocumentMdoc{
-        DocType: DocType,
-        IssuerSigned: IssuerSignedMdoc{
-            NameSpaces: issuerSignedNS,
-            IssuerAuth: issuerAuthArray,
-        },
-        DeviceSigned: DeviceSignedMdoc{
-            NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
-            DeviceAuth: DeviceAuthMdoc{
-                DeviceSignature: []byte{0xD2}, // Dynamic wallet signature placeholder
-            },
-        },
-    }
-    documents = append(documents, innerDoc)
-    
+	for ns, items := range issuerNameSpaces {
+		anyItems := make([]any, len(items))
+		for idx, item := range items {
+			anyItems[idx] = item
+		}
+		issuerSignedNS[ns] = anyItems
+	}
+	issuerAuthArray := []any{
+		signedMSO.Protected,
+		signedMSO.Unprotected,
+		signedMSO.Payload,
+		signedMSO.Signature,
+	}
+	// Everything encoded successfully: build response containing the document
+	innerDoc := DocumentMdoc{
+		DocType: DocType,
+		IssuerSigned: IssuerSignedMdoc{
+			NameSpaces: issuerSignedNS,
+			IssuerAuth: issuerAuthArray,
+		},
+		DeviceSigned: DeviceSignedMdoc{
+			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
+			DeviceAuth: DeviceAuthMdoc{
+				DeviceSignature: []byte{0xD2}, // Dynamic wallet signature placeholder
+			},
+		},
+	}
+	documents = append(documents, innerDoc)
+
 	if len(documents) == 0 {
 		documentErrors = append(documentErrors, DocumentError{DocType: 0})
 
-        response := &DeviceResponseMdoc{
-            Version:        "1.0",
-            DocumentErrors: documentErrors,
-            Status:         0,
-        }
+		response := &DeviceResponseMdoc{
+			Version:        "1.0",
+			DocumentErrors: documentErrors,
+			Status:         0,
+		}
 
-        return &IssuedDocumentMdoc{
-            DocumentMdoc: response,
-            SignedMSO:    nil,
-            ValidFrom:    validFrom,
-            ValidUntil:   validUntil,
-        }, nil
-    }
-    response := &DeviceResponseMdoc{
-        Version:   "1.0",
-        Documents: documents,
-        Status:    0,
-        // documentErrors remains nil/empty and is cleanly dropped by omitempty tags
-    }
+		return &IssuedDocumentMdoc{
+			DocumentMdoc: response,
+			SignedMSO:    nil,
+			ValidFrom:    validFrom,
+			ValidUntil:   validUntil,
+		}, nil
+	}
+	response := &DeviceResponseMdoc{
+		Version:   "1.0",
+		Documents: documents,
+		Status:    0,
+		// documentErrors remains nil/empty and is cleanly dropped by omitempty tags
+	}
 
-    issuedDoc := &IssuedDocumentMdoc{
-        DocumentMdoc: response,
-        SignedMSO:    signedMSO,
-        ValidFrom:    validFrom,
-        ValidUntil:   validUntil,
-    }
-    return issuedDoc, nil
+	issuedDoc := &IssuedDocumentMdoc{
+		DocumentMdoc: response,
+		SignedMSO:    signedMSO,
+		ValidFrom:    validFrom,
+		ValidUntil:   validUntil,
+	}
+	return issuedDoc, nil
 }
 
 // addMandatoryElements adds all mandatory data elements to the builder.

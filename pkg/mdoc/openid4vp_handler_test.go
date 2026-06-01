@@ -119,23 +119,23 @@ func wrapItem(id uint, key string, value any) cbor.Tag {
 
 func TestExtractMDocClaims_ValidToken(t *testing.T) {
 	deviceResponse := DeviceResponseMdoc{
-        Version: "1.0",
-        Status:  0,
-        Documents: []DocumentMdoc{
-            {
-                DocType: "org.iso.18013.5.1.mDL",
-                IssuerSigned: IssuerSignedMdoc{
-                    NameSpaces: map[string][]any{
-                        "org.iso.18013.5.1": {
-                            wrapItem(0, "family_name", "Doe"),
-                            wrapItem(1, "given_name", "John"),
-                            wrapItem(2, "birth_date", "1990-01-15"),
-                        },
-                    },
-                },
-            },
-        },
-    }
+		Version: "1.0",
+		Status:  0,
+		Documents: []DocumentMdoc{
+			{
+				DocType: "org.iso.18013.5.1.mDL",
+				IssuerSigned: IssuerSignedMdoc{
+					NameSpaces: map[string][]any{
+						"org.iso.18013.5.1": {
+							wrapItem(0, "family_name", "Doe"),
+							wrapItem(1, "given_name", "John"),
+							wrapItem(2, "birth_date", "1990-01-15"),
+						},
+					},
+				},
+			},
+		},
+	}
 
 	// Encode to CBOR
 	data, err := cbor.Marshal(deviceResponse)

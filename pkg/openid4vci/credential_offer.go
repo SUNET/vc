@@ -183,7 +183,6 @@ func (c *CredentialOffer) QR(recoveryLevel, size int, walletURL string) (*QR, er
 	}
 
 	return qr, nil
-
 }
 
 // CredentialOfferURI https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-sending-credential-offer-by-uri

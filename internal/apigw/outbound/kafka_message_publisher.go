@@ -29,7 +29,6 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	}
 
 	return &kafkaMessageProducer{client: client}, nil
-
 }
 
 // Upload publish a UploadRequest message to a Kafka topic
@@ -43,7 +42,7 @@ func (s *kafkaMessageProducer) Upload(uploadRequest *vcclient.UploadRequest) err
 		return err
 	}
 
-	//TODO(mk): make header code below including in other kafka publisher generic and move to kafka client
+	// TODO(mk): make header code below including in other kafka publisher generic and move to kafka client
 	paramType := reflect.TypeFor[vcclient.UploadRequest]().Name()
 	typeHeader := []byte(paramType)
 	headers := []sarama.RecordHeader{

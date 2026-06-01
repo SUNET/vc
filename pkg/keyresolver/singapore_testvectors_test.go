@@ -44,12 +44,12 @@ const testVectorDir = "../../testdata/sg-test-vectors"
 // SGCredential represents a parsed Singapore test vector credential
 type SGCredential struct {
 	Context           any            `json:"@context"`
-	ID                string                 `json:"id"`
+	ID                string         `json:"id"`
 	Type              any            `json:"type"`
 	Issuer            any            `json:"issuer"`
 	CredentialSubject map[string]any `json:"credentialSubject"`
-	ValidFrom         string                 `json:"validFrom,omitempty"`
-	ValidUntil        string                 `json:"validUntil,omitempty"`
+	ValidFrom         string         `json:"validFrom,omitempty"`
+	ValidUntil        string         `json:"validUntil,omitempty"`
 	Proof             any            `json:"proof"`
 }
 

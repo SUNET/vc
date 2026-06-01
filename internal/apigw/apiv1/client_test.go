@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -251,7 +252,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 		cfg: &model.Cfg{
 			Common: &model.Common{
 				CredentialMetadata: map[string]*model.CredentialMetadata{
-					"diploma":      diplomaCC,
+					"diploma": diplomaCC,
 					"broken_scope": {
 						VCTMFilePath: "nonexistent.json",
 						// VCTM not loaded

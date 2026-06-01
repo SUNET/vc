@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 
 	"github.com/stretchr/testify/assert"

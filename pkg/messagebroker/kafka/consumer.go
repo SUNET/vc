@@ -53,12 +53,12 @@ func NewConsumerClient(ctx context.Context, cfg *model.Cfg, brokers []string, lo
 
 // commonConsumerConfig returns a new Kafka consumer configuration instance with sane defaults for vc.
 func commonConsumerConfig(cfg *model.Cfg) *sarama.Config {
-	//TODO: set cfg from file - is now hardcoded
+	// TODO: set cfg from file - is now hardcoded
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
 	saramaConfig.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRange()}
 	saramaConfig.Net.SASL.Enable = false
-	//TODO: enable and configure security when consuming from Kafka
+	// TODO: enable and configure security when consuming from Kafka
 	return saramaConfig
 }
 
@@ -86,7 +86,7 @@ func (c *MessageConsumerClient) Start(ctx context.Context, handlerFactory func(s
 				handler := handlerFactory(topic)
 				if err := group.Consume(cancelCtx, []string{topic}, handler); err != nil {
 					c.log.Error(err, "Error on consumer group", "group", handlerConfig.ConsumerGroup)
-					//TODO: use more advanced backoff algorithm?
+					// TODO: use more advanced backoff algorithm?
 					time.Sleep(1 * time.Second)
 				}
 
@@ -142,11 +142,12 @@ func (cgh *ConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSessio
 
 		if err := handler.HandleMessage(session.Context(), message); err != nil {
 			cgh.Log.Error(err, "Error handling message", "topic", claim.Topic())
-			//TODO: more advanced retry/error handling including send to error topic if not OK after X number of retries
+			// TODO: more advanced retry/error handling including send to error topic if not OK after X number of retries
 			errMessage = fmt.Sprintf("error handling message: %v", err)
 		}
 
-		info := fmt.Sprintf("message consumed by handler type: %s, topic: %s, partition: %d, offset: %d",
+		info := fmt.Sprintf(
+			"message consumed by handler type: %s, topic: %s, partition: %d, offset: %d",
 			handlerType,
 			claim.Topic(),
 			message.Partition,

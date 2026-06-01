@@ -27,8 +27,7 @@ const (
 )
 
 // SdSuite implements the ECDSA Selective Disclosure Cryptosuite v1.0
-type SdSuite struct {
-}
+type SdSuite struct{}
 
 // NewSdSuite creates a new ECDSA SD cryptosuite
 func NewSdSuite() *SdSuite {

@@ -26,7 +26,7 @@ const (
 	w3cSecretKeyMultibase = "z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq" // #nosec G101
 
 	// Common W3C @context URLs
-	w3cCredentialsContextV2  = "https://www.w3.org/ns/credentials/v2" // #nosec G101
+	w3cCredentialsContextV2  = "https://www.w3.org/ns/credentials/v2"          // #nosec G101
 	w3cCredentialsExamplesV2 = "https://www.w3.org/ns/credentials/examples/v2" // #nosec G101
 
 	// W3C test vector values

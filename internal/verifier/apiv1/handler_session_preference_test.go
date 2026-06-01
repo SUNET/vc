@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/cache"
 
 	"github.com/stretchr/testify/assert"

@@ -686,7 +686,6 @@ func testOIDCCredentialTypeFlow(t *testing.T, env *oidcTestEnvironment, credenti
 	t.Logf("Created session for %s: state=%s", credentialType, authReq.State)
 }
 
-
 // testInvalidState tests that an invalid state parameter returns an error
 func testInvalidState(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()

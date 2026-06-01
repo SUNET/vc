@@ -1,5 +1,7 @@
 package eduapi
 
+import "maps"
+
 import "strings"
 
 // Flatten converts a Person into a flat map suitable for claim transformation.
@@ -129,12 +131,10 @@ func (r *Result) Flatten() map[string]any {
 }
 
 // MergeMaps merges multiple flat maps into one. Later maps override earlier ones.
-func MergeMaps(maps ...map[string]any) map[string]any {
+func MergeMaps(sources ...map[string]any) map[string]any {
 	result := make(map[string]any)
-	for _, m := range maps {
-		for k, v := range m {
-			result[k] = v
-		}
+	for _, src := range sources {
+		maps.Copy(result, src)
 	}
 	return result
 }

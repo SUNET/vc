@@ -50,7 +50,7 @@ func setupLocalSoftHSM2(t *testing.T) *softhsmInstance {
 	require.NoError(t, err)
 
 	tokensDir := filepath.Join(tmpDir, "tokens")
-	require.NoError(t, os.MkdirAll(tokensDir, 0755))
+	require.NoError(t, os.MkdirAll(tokensDir, 0o755))
 
 	// Create SoftHSM2 configuration file
 	configContent := fmt.Sprintf(`# SoftHSM v2 configuration file
@@ -60,7 +60,7 @@ log.level = INFO
 slots.removable = false
 `, tokensDir)
 	configPath := filepath.Join(tmpDir, "softhsm2.conf")
-	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
 
 	// Find SoftHSM2 module path
 	modulePath := findSoftHSM2Module(t)
@@ -154,11 +154,15 @@ func (s *softhsmInstance) generateKeyPair(t *testing.T, keyType string, keyLabel
 	var args []string
 	switch keyType {
 	case "RSA":
-		args = []string{"--module", s.modulePath, "--login", "--pin", s.userPIN,
-			"--keypairgen", "--key-type", "rsa:2048", "--label", keyLabel}
+		args = []string{
+			"--module", s.modulePath, "--login", "--pin", s.userPIN,
+			"--keypairgen", "--key-type", "rsa:2048", "--label", keyLabel,
+		}
 	case "EC":
-		args = []string{"--module", s.modulePath, "--login", "--pin", s.userPIN,
-			"--keypairgen", "--key-type", "EC:prime256v1", "--label", keyLabel}
+		args = []string{
+			"--module", s.modulePath, "--login", "--pin", s.userPIN,
+			"--keypairgen", "--key-type", "EC:prime256v1", "--label", keyLabel,
+		}
 	default:
 		t.Fatalf("Unsupported key type: %s", keyType)
 	}
@@ -437,10 +441,10 @@ func TestPKCS11Signer_Sign(t *testing.T) {
 	// Test signing operation using crypto.Signer interface
 	message := []byte("test message to sign")
 	hash := sha256.Sum256(message)
-	
+
 	signer, ok := km.PrivateKey.(crypto.Signer)
 	require.True(t, ok, "Expected crypto.Signer interface")
-	
+
 	signature, err := signer.Sign(nil, hash[:], crypto.SHA256)
 	require.NoError(t, err)
 	require.NotEmpty(t, signature)

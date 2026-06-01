@@ -16,9 +16,9 @@ import (
 type QRReply struct {
 	Base64Image string `json:"base64_image" bson:"base64_image" validate:"required"`
 	URI         string `json:"uri" bson:"uri" validate:"required"`
-	//RequestURI  string `json:"request_uri" bson:"request_uri" validate:"required"`
-	//ClientID    string `json:"client_id" bson:"client_id" validate:"required"`
-	//SessionID   string `json:"session_id" bson:"session_id" validate:"required"`
+	// RequestURI  string `json:"request_uri" bson:"request_uri" validate:"required"`
+	// ClientID    string `json:"client_id" bson:"client_id" validate:"required"`
+	// SessionID   string `json:"session_id" bson:"session_id" validate:"required"`
 }
 
 func GenerateQR(uri *url.URL, recoveryLevel qrcode.RecoveryLevel, size int) (*QRReply, error) {

@@ -20,8 +20,7 @@ const (
 )
 
 // Suite implements the EdDSA Cryptosuite v1.0 (eddsa-rdfc-2022)
-type Suite struct {
-}
+type Suite struct{}
 
 // NewSuite creates a new EdDSA cryptosuite
 func NewSuite() *Suite {

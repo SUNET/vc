@@ -168,7 +168,6 @@ func (c *DatastoreColl) Delete(ctx context.Context, doc *model.MetaData) error {
 		return err
 	}
 	return nil
-
 }
 
 // Get return matching document if any, or error

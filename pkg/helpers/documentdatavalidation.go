@@ -26,5 +26,4 @@ func getValidationSchema(schemaRef string, compiler *jsonschema.Compiler) (*json
 	}
 
 	return nil, nil
-
 }

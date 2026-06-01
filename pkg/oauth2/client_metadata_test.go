@@ -3,6 +3,7 @@ package oauth2
 import (
 	"context"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/pki"
 

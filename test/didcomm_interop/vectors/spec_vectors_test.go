@@ -479,7 +479,8 @@ func TestSpecKeyRoundTrip(t *testing.T) {
 			// Encrypt a message using the public key
 			plaintext := []byte(SpecPlaintext)
 
-			encrypted, err := jwe.Encrypt(plaintext,
+			encrypted, err := jwe.Encrypt(
+				plaintext,
 				jwe.WithKey(tc.keyAlg, publicKey),
 				jwe.WithContentEncryption(tc.contentAlg),
 			)

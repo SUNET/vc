@@ -11,6 +11,7 @@ import (
 	"hash"
 	"strings"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/jose"
 )
 

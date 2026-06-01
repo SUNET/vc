@@ -36,11 +36,11 @@ type OIDCRPCallbackRequest struct {
 
 // OIDCRPCallbackResponse represents the credential issuance response
 type OIDCRPCallbackResponse struct {
-	Status          string                           `json:"status"`
-	CredentialType  string                           `json:"credential_type"`
-	Credential      string                           `json:"credential,omitempty"`
+	Status          string                            `json:"status"`
+	CredentialType  string                            `json:"credential_type"`
+	Credential      string                            `json:"credential,omitempty"`
 	CredentialOffer *openid4vci.CredentialOfferResult `json:"credential_offer,omitempty"`
-	Message         string                           `json:"message"`
+	Message         string                            `json:"message"`
 
 	// VCIRedirectURL is set when the callback is part of a VCI consent flow.
 	// The httpserver should redirect the browser to this URL instead of returning JSON.
@@ -288,15 +288,15 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	authCtx := &cache.AuthorizationContext{
-		SessionID: preAuthCode,
-		Code:      preAuthCode,
-		Status:    "code_issued",
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:    []string{session.CredentialType},
-		Nonce:     nonce,
-		AuthProvider:   model.AuthProviderOIDC,
-		Identifier:     identifier,
+		SessionID:    preAuthCode,
+		Code:         preAuthCode,
+		Status:       "code_issued",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:       []string{session.CredentialType},
+		Nonce:        nonce,
+		AuthProvider: model.AuthProviderOIDC,
+		Identifier:   identifier,
 		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
 			{
 				Type:                      "openid_credential",
