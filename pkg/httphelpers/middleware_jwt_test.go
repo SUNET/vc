@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1880,4 +1881,155 @@ func TestJWKSAuth_NoSourceConfigured(t *testing.T) {
 		"Authorization": "Bearer anything",
 	})
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ---------- Lazy-init / retry tests ----------
+
+func TestJWKSAuth_URL_LazyRetryAfterInitFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+
+	// Start with a server that returns errors.
+	requestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		if requestCount <= 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		raw, _ := json.Marshal(set)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(raw) // #nosec G104
+	}))
+	defer srv.Close()
+
+	cache := newStubCache()
+	cfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token := signJWT(t, priv, "user@example.com", "test-issuer", "test-aud")
+
+	// First request: provider not yet initialized, retry backoff not yet elapsed → 503.
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, "should return 503 during backoff")
+}
+
+func TestJWKSAuth_URL_RecoverAfterInitFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+
+	// Server always returns valid JWKS.
+	raw, err := json.Marshal(set)
+	require.NoError(t, err)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(raw) // #nosec G104
+	}))
+	defer srv.Close()
+
+	// Use an unreachable URL for initial construction to force lazy mode.
+	cache := newStubCache()
+	cfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  "http://127.0.0.1:1", // connection refused → init fails
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
+	}
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
+
+	r := gin.New()
+	r.GET("/api/v1/resource", handler, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token := signJWT(t, priv, "user@example.com", "test-issuer", "test-aud")
+
+	// First request fails because we're in backoff.
+	w := performRequest(r, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	// Now point the provider at the working server by creating a new handler.
+	cfg.JWKSURL = srv.URL
+	handler2 := m.JWKSAuth(context.Background(), "test-svc", cfg, cache, nil)
+
+	r2 := gin.New()
+	r2.GET("/api/v1/resource", handler2, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// This should succeed immediately (eager init works with a reachable server).
+	w = performRequest(r2, "GET", "/api/v1/resource", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestOIDCKeySetProvider_LazyDiscovery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	_, set := testKeyPair(t)
+	raw, err := json.Marshal(set)
+	require.NoError(t, err)
+
+	// Simulate an IdP that is initially down then comes up.
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if strings.Contains(r.URL.Path, ".well-known") {
+			// Discovery endpoint
+			doc := fmt.Sprintf(`{"issuer":"http://%s","jwks_uri":"http://%s/jwks"}`, r.Host, r.Host)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(doc)) // #nosec G104
+			return
+		}
+		// JWKS endpoint
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(raw) // #nosec G104
+	}))
+	defer srv.Close()
+
+	cache := newStubCache()
+	logFn := func(msg string, args ...any) {}
+
+	// Provider with a reachable server should succeed eagerly.
+	p := newOIDCKeySetProvider(context.Background(), srv.URL, cache, logFn)
+	assert.NotNil(t, p.set, "should have loaded keys eagerly")
+
+	keys, err := p.GetKeySet(context.Background())
+	require.NoError(t, err)
+	assert.Greater(t, keys.Len(), 0)
+}
+
+func TestOIDCKeySetProvider_FailedDiscoveryReturnsServiceUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cache := newStubCache()
+	logFn := func(msg string, args ...any) {}
+
+	// Provider with unreachable IdP.
+	p := newOIDCKeySetProvider(context.Background(), "http://127.0.0.1:1", cache, logFn)
+	assert.Nil(t, p.set, "should not have loaded keys")
+
+	// GetKeySet should return error (backoff not elapsed yet).
+	_, err := p.GetKeySet(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "OIDC JWKS not available")
 }

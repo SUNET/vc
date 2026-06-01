@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
@@ -31,6 +32,12 @@ type MDQClient struct {
 	staticMetadata *saml.EntityDescriptor // For single static IdP mode
 	staticEntityID string                 // EntityID of static IdP
 	signingCert    *x509.Certificate      // Optional: federation metadata signing cert
+
+	// Lazy-init state for URL-based static metadata
+	mu                sync.RWMutex
+	staticMetadataURL string        // Non-empty when metadata should be fetched from URL
+	retryAfter        time.Time     // Earliest time to retry after a failure
+	retryBackoff      time.Duration // Current backoff duration
 }
 
 // NewMDQClient creates a new MDQ client
@@ -54,7 +61,14 @@ func NewMDQClient(serverURL string, cacheTTL int, signingCert *x509.Certificate,
 	}
 }
 
-// NewStaticMDQClient creates a new MDQ client with static IdP metadata
+const (
+	mdqRetryBase = 5 * time.Second
+	mdqRetryMax  = 2 * time.Minute
+)
+
+// NewStaticMDQClient creates a new MDQ client with static IdP metadata.
+// For URL-based metadata, if the initial fetch fails (e.g. IdP unreachable),
+// the client is still returned and will retry lazily on GetIDPMetadata calls.
 func NewStaticMDQClient(metadataSource, entityID string, isURL bool, signingCert *x509.Certificate, log *logger.Log) (*MDQClient, error) {
 	client := &MDQClient{
 		staticEntityID: entityID,
@@ -73,10 +87,15 @@ func NewStaticMDQClient(metadataSource, entityID string, isURL bool, signingCert
 		log.Debug("fetching static IdP metadata from URL", "url", metadataSource)
 		metadataXML, err = client.fetchMetadataFromURL(metadataSource)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch metadata from URL: %w", err)
+			// Defer to lazy init — store URL and retry on first GetIDPMetadata call.
+			log.Error(err, "static_idp_metadata_fetch_failed_will_retry", "url", metadataSource)
+			client.staticMetadataURL = metadataSource
+			client.retryBackoff = mdqRetryBase
+			client.retryAfter = time.Now().Add(client.retryBackoff)
+			return client, nil
 		}
 	} else {
-		// Read metadata from file
+		// Read metadata from file — files must exist at startup.
 		log.Debug("loading static IdP metadata from file", "path", metadataSource)
 		metadataXML, err = os.ReadFile(filepath.Clean(metadataSource))
 		if err != nil {
@@ -89,29 +108,81 @@ func NewStaticMDQClient(metadataSource, entityID string, isURL bool, signingCert
 		return nil, err
 	}
 
-	// Validate metadata structure
+	if err := client.validateAndSetMetadata(metadata, log); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// validateAndSetMetadata checks that the metadata has required fields and stores it.
+func (m *MDQClient) validateAndSetMetadata(metadata *saml.EntityDescriptor, log *logger.Log) error {
 	if len(metadata.IDPSSODescriptors) == 0 {
-		return nil, fmt.Errorf("metadata does not contain IdP SSO descriptor")
+		return fmt.Errorf("metadata does not contain IdP SSO descriptor")
 	}
 
 	if len(metadata.IDPSSODescriptors[0].SingleSignOnServices) == 0 {
-		return nil, fmt.Errorf("IdP metadata does not contain SSO service endpoint")
+		return fmt.Errorf("IdP metadata does not contain SSO service endpoint")
 	}
 
-	// Verify entityID matches if specified in metadata
-	if metadata.EntityID != "" && metadata.EntityID != entityID {
+	if metadata.EntityID != "" && metadata.EntityID != m.staticEntityID {
 		log.Info("configured entityID differs from metadata entityID",
-			"configured", entityID,
+			"configured", m.staticEntityID,
 			"metadata", metadata.EntityID)
 	}
 
-	client.staticMetadata = metadata
+	m.staticMetadata = metadata
 
 	log.Info("static IdP metadata loaded",
-		"entity_id", entityID,
+		"entity_id", m.staticEntityID,
 		"sso_location", metadata.IDPSSODescriptors[0].SingleSignOnServices[0].Location)
 
-	return client, nil
+	return nil
+}
+
+// retryStaticMetadataFetch retries fetching URL-based static metadata with exponential backoff.
+func (m *MDQClient) retryStaticMetadataFetch() error {
+	m.mu.RLock()
+	if m.staticMetadata != nil {
+		m.mu.RUnlock()
+		return nil
+	}
+	m.mu.RUnlock()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Double-check after lock.
+	if m.staticMetadata != nil {
+		return nil
+	}
+
+	if time.Now().Before(m.retryAfter) {
+		return fmt.Errorf("next retry at %s", m.retryAfter.Format(time.RFC3339))
+	}
+
+	metadataXML, err := m.fetchMetadataFromURL(m.staticMetadataURL)
+	if err != nil {
+		m.retryBackoff = min(m.retryBackoff*2, mdqRetryMax)
+		m.retryAfter = time.Now().Add(m.retryBackoff)
+		m.log.Error(err, "static_idp_metadata_retry_failed", "url", m.staticMetadataURL, "next_retry_in", m.retryBackoff.String())
+		return fmt.Errorf("fetch failed: %w", err)
+	}
+
+	metadata, err := m.parseAndVerifyMetadata(metadataXML)
+	if err != nil {
+		m.retryBackoff = min(m.retryBackoff*2, mdqRetryMax)
+		m.retryAfter = time.Now().Add(m.retryBackoff)
+		return fmt.Errorf("parse failed: %w", err)
+	}
+
+	if err := m.validateAndSetMetadata(metadata, m.log); err != nil {
+		return err
+	}
+
+	m.retryBackoff = 0
+	m.staticMetadataURL = "" // Clear to stop retrying
+	return nil
 }
 
 // fetchMetadataFromURL fetches metadata from an HTTP(S) URL
@@ -145,6 +216,15 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 			m.log.Info("requested entityID differs from static IdP",
 				"requested", entityID,
 				"static", m.staticEntityID)
+		}
+		m.log.Debug("returning static IdP metadata", "entity_id", m.staticEntityID)
+		return m.staticMetadata, nil
+	}
+
+	// Lazy retry for URL-based static metadata that failed at startup.
+	if m.staticMetadataURL != "" {
+		if err := m.retryStaticMetadataFetch(); err != nil {
+			return nil, fmt.Errorf("static IdP metadata not available: %w", err)
 		}
 		m.log.Debug("returning static IdP metadata", "entity_id", m.staticEntityID)
 		return m.staticMetadata, nil
@@ -226,7 +306,7 @@ func (m *MDQClient) GetStaticEntityID() string {
 
 // IsStaticMode returns true if client is configured for static IdP mode
 func (m *MDQClient) IsStaticMode() bool {
-	return m.staticMetadata != nil
+	return m.staticMetadata != nil || m.staticMetadataURL != ""
 }
 
 // parseAndVerifyMetadata parses metadata XML and, when a signing certificate is

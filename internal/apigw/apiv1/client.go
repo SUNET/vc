@@ -23,9 +23,7 @@ import (
 	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/trust"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/lestrrat-go/jwx/v3/jwk"
-	xoauth2 "golang.org/x/oauth2"
 )
 
 //	@title		Datastore API
@@ -62,10 +60,7 @@ type Client struct {
 	cacheService *cache.Service
 
 	// Admin OIDC (when api_auth.oidc is enabled)
-	adminOIDCConfig             *xoauth2.Config
-	adminOIDCVerifier           *oidc.IDTokenVerifier
-	adminOIDCEndSessionURL      string
-	adminOIDCPostLogoutRedirect string
+	adminOIDC *lazyOIDCProvider
 
 	// Trust evaluation
 	jwtTrustVerifier *trust.JWTTrustVerifier
@@ -126,39 +121,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	// Initialize OIDC provider for admin UI login (if configured).
 	if cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
 		oidcCfg := cfg.APIGW.APIServer.APIAuth.OIDC
-		provider, err := oidc.NewProvider(ctx, oidcCfg.IssuerURL)
-		if err != nil {
-			return nil, fmt.Errorf("admin OIDC discovery failed for %s: %w", oidcCfg.IssuerURL, err)
-		}
-		scopes := oidcCfg.Scopes
-		if len(scopes) == 0 {
-			scopes = []string{"openid"}
-		}
-		c.adminOIDCConfig = &xoauth2.Config{
-			ClientID:     oidcCfg.ClientID,
-			ClientSecret: oidcCfg.ClientSecret,
-			RedirectURL:  oidcCfg.RedirectURI,
-			Endpoint:     provider.Endpoint(),
-			Scopes:       scopes,
-		}
-		c.adminOIDCVerifier = provider.Verifier(&oidc.Config{
-			ClientID: oidcCfg.ClientID,
-		})
-
-		// Discover end_session_endpoint for RP-initiated logout
-		var providerClaims struct {
-			EndSessionEndpoint string `json:"end_session_endpoint"`
-		}
-		if err := provider.Claims(&providerClaims); err == nil && providerClaims.EndSessionEndpoint != "" {
-			c.adminOIDCEndSessionURL = providerClaims.EndSessionEndpoint
-		}
-		// Derive post-logout redirect from the redirect_uri (strip the /callback path)
-		c.adminOIDCPostLogoutRedirect = oidcCfg.RedirectURI
-		if idx := len(c.adminOIDCPostLogoutRedirect) - len("/callback"); idx > 0 && c.adminOIDCPostLogoutRedirect[idx:] == "/callback" {
-			c.adminOIDCPostLogoutRedirect = c.adminOIDCPostLogoutRedirect[:idx]
-		}
-
-		c.log.Info("admin OIDC provider initialized", "issuer", oidcCfg.IssuerURL)
+		c.adminOIDC = newLazyOIDCProvider(ctx, oidcCfg, c.log)
 	}
 
 	// Initialize trust evaluator for VP credential validation

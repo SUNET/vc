@@ -252,6 +252,6 @@ func (s *Service) endpointAdminLogout(ctx context.Context, c *gin.Context) (any,
 	session.Clear()
 	_ = session.Save()
 
-	logoutURL := s.apiv1.AdminLogoutURL(idToken)
+	logoutURL := s.apiv1.AdminLogoutURL(c.Request.Context(), idToken)
 	return gin.H{"ok": true, "logout_url": logoutURL}, nil
 }

@@ -87,7 +87,7 @@ type Apiv1 interface {
 	// admin UI endpoints
 	AdminLoginURL(ctx context.Context) (*apiv1.AdminLoginURLReply, error)
 	AdminCallback(ctx context.Context, req *apiv1.AdminCallbackRequest) (*apiv1.AdminCallbackReply, error)
-	AdminLogoutURL(idTokenHint string) string
+	AdminLogoutURL(ctx context.Context, idTokenHint string) string
 	ListAuthenticSources(ctx context.Context) ([]string, error)
 
 	// health
