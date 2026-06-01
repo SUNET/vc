@@ -210,24 +210,36 @@ func (m *MDQClient) fetchMetadataFromURL(metadataURL string) ([]byte, error) {
 
 // GetIDPMetadata retrieves IdP metadata from MDQ server or returns static metadata
 func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.EntityDescriptor, error) {
+	// Snapshot fields that may be mutated by retryStaticMetadataFetch.
+	m.mu.RLock()
+	staticMeta := m.staticMetadata
+	staticURL := m.staticMetadataURL
+	staticEntity := m.staticEntityID
+	m.mu.RUnlock()
+
 	// If we have static metadata, return it (ignoring entityID parameter)
-	if m.staticMetadata != nil {
-		if entityID != "" && entityID != m.staticEntityID {
+	if staticMeta != nil {
+		if entityID != "" && entityID != staticEntity {
 			m.log.Info("requested entityID differs from static IdP",
 				"requested", entityID,
-				"static", m.staticEntityID)
+				"static", staticEntity)
 		}
-		m.log.Debug("returning static IdP metadata", "entity_id", m.staticEntityID)
-		return m.staticMetadata, nil
+		m.log.Debug("returning static IdP metadata", "entity_id", staticEntity)
+		return staticMeta, nil
 	}
 
 	// Lazy retry for URL-based static metadata that failed at startup.
-	if m.staticMetadataURL != "" {
+	if staticURL != "" {
 		if err := m.retryStaticMetadataFetch(); err != nil {
 			return nil, fmt.Errorf("static IdP metadata not available: %w", err)
 		}
-		m.log.Debug("returning static IdP metadata", "entity_id", m.staticEntityID)
-		return m.staticMetadata, nil
+		// Re-read under lock after successful retry.
+		m.mu.RLock()
+		staticMeta = m.staticMetadata
+		staticEntity = m.staticEntityID
+		m.mu.RUnlock()
+		m.log.Debug("returning static IdP metadata", "entity_id", staticEntity)
+		return staticMeta, nil
 	}
 
 	// Otherwise use MDQ
@@ -306,6 +318,8 @@ func (m *MDQClient) GetStaticEntityID() string {
 
 // IsStaticMode returns true if client is configured for static IdP mode
 func (m *MDQClient) IsStaticMode() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.staticMetadata != nil || m.staticMetadataURL != ""
 }
 

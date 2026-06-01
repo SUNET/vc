@@ -806,6 +806,12 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 		log.Info("jwks_provider_ready", "source", "file", "path", cfg.JWKSFilePath, "key_count", p.set.Len())
 		keyProvider = p
 	case cfg.JWKSURL != "":
+		if jwksCache == nil {
+			log.Error(nil, "jwks_cache_nil", "hint", "jwks_url requires a cache instance")
+			return func(c *gin.Context) {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "JWKS authentication misconfigured"})
+			}
+		}
 		p := newURLKeySetProvider(ctx, cfg.JWKSURL, jwksCache, func(msg string, args ...any) {
 			log.Info(msg, args...)
 		})
