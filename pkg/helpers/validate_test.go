@@ -534,3 +534,81 @@ func TestAPIAuth_RulesRequireAuth(t *testing.T) {
 		assert.Contains(t, err.Error(), "api_auth_jwks_oidc_exclusive")
 	})
 }
+
+func TestAPIAuthJWKS_SourceValidation(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	t.Run("enabled with jwks_url is valid", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable:   true,
+			JWKSURL:  "https://auth.example.com/.well-known/jwks.json",
+			Issuer:   "https://auth.example.com",
+			Audience: "my-api",
+		}
+		assert.NoError(t, validate.Struct(cfg))
+	})
+
+	t.Run("enabled with jwks_file_path is valid", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable:       true,
+			JWKSFilePath: "/etc/jwks/keys.json",
+			Issuer:       "https://auth.example.com",
+			Audience:     "my-api",
+		}
+		assert.NoError(t, validate.Struct(cfg))
+	})
+
+	t.Run("enabled with neither source fails", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable:   true,
+			Issuer:   "https://auth.example.com",
+			Audience: "my-api",
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "jwks_source_required")
+	})
+
+	t.Run("enabled with both sources fails", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable:       true,
+			JWKSURL:      "https://auth.example.com/.well-known/jwks.json",
+			JWKSFilePath: "/etc/jwks/keys.json",
+			Issuer:       "https://auth.example.com",
+			Audience:     "my-api",
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "excluded_with")
+	})
+
+	t.Run("disabled with no sources is valid", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable: false,
+		}
+		assert.NoError(t, validate.Struct(cfg))
+	})
+
+	t.Run("enabled without issuer fails", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable:   true,
+			JWKSURL:  "https://auth.example.com/.well-known/jwks.json",
+			Audience: "my-api",
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required_if")
+	})
+
+	t.Run("enabled without audience fails", func(t *testing.T) {
+		cfg := model.APIAuthJWKS{
+			Enable:  true,
+			JWKSURL: "https://auth.example.com/.well-known/jwks.json",
+			Issuer:  "https://auth.example.com",
+		}
+		err := validate.Struct(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required_if")
+	})
+}

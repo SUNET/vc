@@ -3,6 +3,7 @@ package samlsp
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -180,10 +181,10 @@ func TestMDQClient_GetIDPMetadata_NoIDPDescriptor(t *testing.T) {
 }
 
 func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		requestCount.Add(1)
 		// Simulate slow response
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/samlmetadata+xml")
@@ -217,5 +218,5 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 
 	// Due to caching, we expect at most all 5 to hit before caching kicks in
 	// This is a race condition test, so be lenient
-	assert.LessOrEqual(t, requestCount, 5, "Concurrent requests should use cache once populated")
+	assert.LessOrEqual(t, requestCount.Load(), int32(5), "Concurrent requests should use cache once populated")
 }

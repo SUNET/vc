@@ -764,8 +764,12 @@ type APIAuth struct {
 type APIAuthJWKS struct {
 	// Enable enables static JWKS Bearer token authentication
 	Enable bool `yaml:"enable" default:"false"`
-	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures
-	JWKSURL string `yaml:"jwks_url" validate:"required_if=Enable true,omitempty,url" doc_example:"\"https://auth.example.com/.well-known/jwks.json\""`
+	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures.
+	// Mutually exclusive with jwks_file_path; exactly one must be set when enable is true
+	JWKSURL string `yaml:"jwks_url" validate:"excluded_with=JWKSFilePath,omitempty,url" doc_example:"\"https://auth.example.com/.well-known/jwks.json\""`
+	// JWKSFilePath is a local file path to a JWKS JSON file used to validate token signatures.
+	// Mutually exclusive with jwks_url; exactly one must be set when enable is true
+	JWKSFilePath string `yaml:"jwks_file_path" validate:"excluded_with=JWKSURL,omitempty"`
 	// Issuer is the expected "iss" claim. Tokens with a different issuer are rejected
 	Issuer string `yaml:"issuer" validate:"required_if=Enable true"`
 	// Audience is the expected "aud" claim. Tokens that do not contain this audience are rejected

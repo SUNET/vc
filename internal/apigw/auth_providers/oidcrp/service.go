@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
@@ -17,6 +18,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const (
+	oidcRPRetryBase = 5 * time.Second
+	oidcRPRetryMax  = 2 * time.Minute
+)
+
 // Service provides OIDC Relying Party functionality
 type Service struct {
 	cfg          *model.OIDCRP
@@ -27,6 +33,12 @@ type Service struct {
 	dbService    *db.Service
 	httpClient   *http.Client
 	log          *logger.Log
+
+	// Lazy-init state
+	mu           sync.RWMutex
+	ready        bool
+	retryAfter   time.Time
+	retryBackoff time.Duration
 }
 
 // New creates a new OIDC RP service
@@ -44,29 +56,40 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 		log:          log.New("oidcrp"),
 	}
 
-	// Initialize OIDC Provider (performs discovery)
-	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
+	// Attempt eager initialization; if the IdP is unreachable, defer to lazy retry.
+	if err := s.initialize(ctx); err != nil {
+		s.log.Error(err, "oidcrp_init_failed_will_retry", "issuer", cfg.IssuerURL)
+		s.retryBackoff = oidcRPRetryBase
+		s.retryAfter = time.Now().Add(s.retryBackoff)
+	}
+
+	return s, nil
+}
+
+// initialize performs OIDC discovery and sets up the oauth2 config and verifier.
+func (s *Service) initialize(ctx context.Context) error {
+	provider, err := oidc.NewProvider(ctx, s.cfg.IssuerURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover OIDC provider at %s: %w", cfg.IssuerURL, err)
+		return fmt.Errorf("failed to discover OIDC provider at %s: %w", s.cfg.IssuerURL, err)
 	}
 	s.provider = provider
 
 	// Resolve client credentials based on registration method
 	var clientID, clientSecret string
 
-	if cfg.Registration.Preconfigured != nil && cfg.Registration.Preconfigured.Enable {
-		clientID = cfg.Registration.Preconfigured.ClientID
-		clientSecret = cfg.Registration.Preconfigured.ClientSecret
-	} else if cfg.Registration.Dynamic != nil && cfg.Registration.Dynamic.Enable {
-		log.Info("Dynamic client registration enabled, attempting registration")
+	if s.cfg.Registration.Preconfigured != nil && s.cfg.Registration.Preconfigured.Enable {
+		clientID = s.cfg.Registration.Preconfigured.ClientID
+		clientSecret = s.cfg.Registration.Preconfigured.ClientSecret
+	} else if s.cfg.Registration.Dynamic != nil && s.cfg.Registration.Dynamic.Enable {
+		s.log.Info("Dynamic client registration enabled, attempting registration")
 
 		// Check if we have stored credentials
 		storedCreds, err := s.dbService.DynamicRegistrationColl.Get(ctx)
 		if err != nil {
-			log.Info("Failed to load dynamic registration credentials", "error", err)
+			s.log.Info("Failed to load dynamic registration credentials", "error", err)
 		}
 		if storedCreds != nil {
-			log.Info("Using stored dynamic registration credentials", "client_id", storedCreds.ClientID)
+			s.log.Info("Using stored dynamic registration credentials", "client_id", storedCreds.ClientID)
 			clientID = storedCreds.ClientID
 			clientSecret = storedCreds.ClientSecret
 		} else {
@@ -78,22 +101,22 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 				RegistrationEndpoint string `json:"registration_endpoint"`
 			}
 			if err := provider.Claims(&providerJSON); err != nil {
-				return nil, fmt.Errorf("failed to get provider metadata: %w", err)
+				return fmt.Errorf("failed to get provider metadata: %w", err)
 			}
 
 			if providerJSON.RegistrationEndpoint == "" {
-				return nil, fmt.Errorf("OIDC provider does not support dynamic client registration (no registration_endpoint in metadata)")
+				return fmt.Errorf("OIDC provider does not support dynamic client registration (no registration_endpoint in metadata)")
 			}
 
-			regResp, err := s.dynamicClientRegistration(ctx, providerJSON.RegistrationEndpoint, regReq, cfg.Registration.Dynamic.InitialAccessToken)
+			regResp, err := s.dynamicClientRegistration(ctx, providerJSON.RegistrationEndpoint, regReq, s.cfg.Registration.Dynamic.InitialAccessToken)
 			if err != nil {
-				return nil, fmt.Errorf("dynamic client registration failed: %w", err)
+				return fmt.Errorf("dynamic client registration failed: %w", err)
 			}
 
 			clientID = regResp.ClientID
 			clientSecret = regResp.ClientSecret
 
-			log.Info("Dynamic client registration successful",
+			s.log.Info("Dynamic client registration successful",
 				"client_id", clientID,
 				"registration_access_token_present", regResp.RegistrationAccessToken != "")
 
@@ -105,7 +128,7 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 				RegistrationClientURI:   regResp.RegistrationClientURI,
 				ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
 			}); err != nil {
-				log.Info("Failed to persist dynamic registration credentials", "error", err)
+				s.log.Info("Failed to persist dynamic registration credentials", "error", err)
 			}
 		}
 	}
@@ -119,18 +142,50 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 	s.oauth2Config = &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-		RedirectURL:  cfg.RedirectURI,
+		RedirectURL:  s.cfg.RedirectURI,
 		Endpoint:     provider.Endpoint(),
-		Scopes:       cfg.Scopes,
+		Scopes:       s.cfg.Scopes,
 	}
 
-	s.log.Info("OIDC RP service initialized",
-		"issuer", cfg.IssuerURL,
-		"client_id", clientID,
-		"redirect_uri", cfg.RedirectURI,
-		"dynamic_registration", cfg.Registration.Dynamic != nil && cfg.Registration.Dynamic.Enable)
+	s.ready = true
+	s.retryBackoff = 0
 
-	return s, nil
+	s.log.Info("OIDC RP service initialized",
+		"issuer", s.cfg.IssuerURL,
+		"client_id", clientID,
+		"redirect_uri", s.cfg.RedirectURI,
+		"dynamic_registration", s.cfg.Registration.Dynamic != nil && s.cfg.Registration.Dynamic.Enable)
+
+	return nil
+}
+
+// ensureReady checks if the service is initialized and retries discovery if not.
+func (s *Service) ensureReady(ctx context.Context) error {
+	s.mu.RLock()
+	if s.ready {
+		s.mu.RUnlock()
+		return nil
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.ready {
+		return nil
+	}
+
+	if time.Now().Before(s.retryAfter) {
+		return fmt.Errorf("OIDC RP not available, next retry at %s", s.retryAfter.Format(time.RFC3339))
+	}
+
+	if err := s.initialize(ctx); err != nil {
+		s.retryBackoff = min(s.retryBackoff*2, oidcRPRetryMax)
+		s.retryAfter = time.Now().Add(s.retryBackoff)
+		s.log.Error(err, "oidcrp_retry_failed", "issuer", s.cfg.IssuerURL, "next_retry_in", s.retryBackoff.String())
+		return err
+	}
+	return nil
 }
 
 // AuthRequest represents an OIDC authentication request
@@ -141,6 +196,10 @@ type AuthRequest struct {
 
 // InitiateAuth initiates an OIDC authentication flow
 func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*AuthRequest, error) {
+	if err := s.ensureReady(ctx); err != nil {
+		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
+	}
+
 	s.log.Debug("Initiating OIDC auth",
 		"credential_type", credentialType)
 
@@ -209,6 +268,10 @@ type AuthResponse struct {
 
 // ProcessCallback processes the OIDC provider callback
 func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*AuthResponse, error) {
+	if err := s.ensureReady(ctx); err != nil {
+		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
+	}
+
 	s.log.Debug("ProcessCallback", "state", state)
 
 	// Retrieve and validate session
@@ -349,6 +412,10 @@ func (s *Service) deleteSession(ctx context.Context, state string) {
 
 // GetUserInfo fetches additional claims from the UserInfo endpoint
 func (s *Service) GetUserInfo(ctx context.Context, accessToken string) (map[string]any, error) {
+	if err := s.ensureReady(ctx); err != nil {
+		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
+	}
+
 	userInfo, err := s.provider.UserInfo(ctx, oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: accessToken},
 	))

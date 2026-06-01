@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/iancoleman/strcase"
 )
 
 // ---- Data types ----
@@ -342,11 +344,21 @@ func determineRequired(tag TagInfo) string {
 	if v == "" {
 		return "No"
 	}
+
 	if strings.Contains(v, "required_if=Enable true") {
+		// Check for excluded_with to annotate mutual exclusivity
+		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+		if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+			return fmt.Sprintf("Yes (if enabled; mutually exclusive with %s)", camelToSnake(m[1]))
+		}
 		return "Yes (if enabled)"
 	}
 	re := regexp.MustCompile(`required_without=(\w+)`)
 	if m := re.FindStringSubmatch(v); len(m) > 1 {
+		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+		if m2 := reExcluded.FindStringSubmatch(v); len(m2) > 1 {
+			return fmt.Sprintf("Yes (if %s not set; mutually exclusive)", camelToSnake(m[1]))
+		}
 		return fmt.Sprintf("Yes (if %s not set)", camelToSnake(m[1]))
 	}
 	for r := range strings.SplitSeq(v, ",") {
@@ -359,6 +371,11 @@ func determineRequired(tag TagInfo) string {
 			}
 			return "Yes"
 		}
+	}
+	// Standalone excluded_with without a required_* tag
+	reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+	if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+		return fmt.Sprintf("No (mutually exclusive with %s)", camelToSnake(m[1]))
 	}
 	return "No"
 }
@@ -501,22 +518,71 @@ func structDescriptionExtra(def *StructDef) string {
 	return strings.TrimSpace(strings.Join(extra, "\n"))
 }
 
+// knownTerms maps Go identifier fragments to their desired snake_case output.
+// Longer keys must come first to ensure greedy matching.
+// This handles acronyms (JWKS, URL), digit-containing terms (PKCS11, VCTM),
+// and consecutive acronym sequences (JWKSURL → jwks_url).
+var knownTerms = []struct {
+	match string
+	snake string
+}{
+	{"PKCS11", "pkcs11"},
+	{"JWKS", "jwks"},
+	{"OIDC", "oidc"},
+	{"SAML", "saml"},
+	{"GRPC", "grpc"},
+	{"HTTP", "http"},
+	{"VCTM", "vctm"},
+	{"URL", "url"},
+	{"URI", "uri"},
+	{"TLS", "tls"},
+	{"PKI", "pki"},
+	{"CSS", "css"},
+	{"JWT", "jwt"},
+}
+
 func camelToSnake(s string) string {
-	runes := []rune(s)
-	var b strings.Builder
-	for i, r := range runes {
-		if unicode.IsUpper(r) && i > 0 {
-			// Only insert underscore if previous char is lowercase
-			// or if next char is lowercase (end of acronym)
-			prevLower := unicode.IsLower(runes[i-1])
-			nextLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
-			if prevLower || nextLower {
-				b.WriteByte('_')
+	// Split input into segments: known terms (output directly) and gaps (delegate to strcase).
+	type segment struct {
+		text   string
+		isTerm bool
+	}
+
+	var segments []segment
+	i := 0
+	for i < len(s) {
+		matched := false
+		for _, t := range knownTerms {
+			if strings.HasPrefix(s[i:], t.match) {
+				segments = append(segments, segment{text: t.snake, isTerm: true})
+				i += len(t.match)
+				matched = true
+				break
 			}
 		}
-		b.WriteRune(unicode.ToLower(r))
+		if !matched {
+			// Accumulate non-term characters into a gap
+			if len(segments) > 0 && !segments[len(segments)-1].isTerm {
+				segments[len(segments)-1].text += string(s[i])
+			} else {
+				segments = append(segments, segment{text: string(s[i]), isTerm: false})
+			}
+			i++
+		}
 	}
-	return b.String()
+
+	// Build result: convert gaps with strcase, join all with underscores
+	var parts []string
+	for _, seg := range segments {
+		if seg.isTerm {
+			parts = append(parts, seg.text)
+		} else {
+			converted := strcase.ToSnake(seg.text)
+			parts = append(parts, converted)
+		}
+	}
+
+	return strings.Join(parts, "_")
 }
 
 func titleFromGoName(name string) string {

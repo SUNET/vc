@@ -66,7 +66,8 @@ BUILD_CONFIGS           := \
 	oidc-conformance-status \
 	_check-reserved-tag \
 	release release-prod release-demo check_current_branch \
-	release-check-issuer-jwks
+	release-check-issuer-jwks \
+	release-jwt-issuer build-jwt-issuer
 
 # ==============================================================================
 # Help Target
@@ -302,11 +303,19 @@ build-wallet: ## Build wallet test tool
 
 build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
 	$(info Building check_issuer_jwks)
-	$(eval CHECK_ISSUER_JWKS_VERSION := $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//' || echo "dev"))
+	$(eval CHECK_ISSUER_JWKS_VERSION := $(or $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//'),dev))
 	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		$(BUILD_FLAGS) -o ./bin/check_issuer_jwks \
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(CHECK_ISSUER_JWKS_VERSION)" \
 		./developer_tools/scripts/check_issuer_jwks/
+
+build-jwt-issuer: ## Build jwt_issuer developer tool
+	$(info Building jwt_issuer)
+	$(eval JWT_ISSUER_VERSION := $(or $(shell git tag -l "jwt-issuer-v*" --sort=-v:refname | head -n1 | sed 's/^jwt-issuer-//'),dev))
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/jwt_issuer \
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(JWT_ISSUER_VERSION)" \
+		./developer_tools/scripts/jwt_issuer/
 
 release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
 	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
@@ -339,6 +348,39 @@ release-check-issuer-jwks: check_current_branch ## Tag and push a release for ch
 	git push origin "$$NEW_TAG"; \
 	echo ""; \
 	echo "==> $$NEW_TAG pushed. GitHub Actions will build check_issuer_jwks binaries."; \
+	echo ""
+
+release-jwt-issuer: check_current_branch ## Tag and push a release for jwt_issuer (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "jwt-issuer-v*" --sort=-v:refname | grep -E '^jwt-issuer-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing jwt-issuer tags found, starting at jwt-issuer-v0.0.0"; \
+		LATEST="jwt-issuer-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^jwt-issuer-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="jwt-issuer-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed."; \
 	echo ""
 
 docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test tool

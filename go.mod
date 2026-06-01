@@ -27,6 +27,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/sessions v1.4.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/iancoleman/strcase v0.3.0
 	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/kaptinlin/jsonschema v0.7.14
 	github.com/kelseyhightower/envconfig v1.4.0
