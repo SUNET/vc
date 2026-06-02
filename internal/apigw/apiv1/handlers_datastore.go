@@ -28,7 +28,7 @@ type DatastoreUploadReply struct {
 //	@Success		200	{object}	DatastoreUploadReply	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
-//	@Router			/api/v1/datastore/ [post]
+//	@Router			/api/v1/datastore [post]
 func (c *Client) DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*DatastoreUploadReply, error) {
 	if req.Meta.DocumentID == "" {
 		id, err := uuid.NewV7()
@@ -242,7 +242,6 @@ type DatastoreDeleteRequest struct {
 //	@Success		204	"No Content"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreDeleteRequest	true	" "
-//	@Router			/api/v1/datastore [delete]
 func (c *Client) DatastoreDelete(ctx context.Context, req *DatastoreDeleteRequest) error {
 	err := c.datastoreStore.Delete(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
@@ -279,7 +278,6 @@ type DatastoreGetReply struct {
 //	@Success		200	{object}	DatastoreGetReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		DatastoreGetRequest		true	" "
-//	@Router			/api/v1/datastore [post]
 func (c *Client) DatastoreGet(ctx context.Context, req *DatastoreGetRequest) (*DatastoreGetReply, error) {
 	doc, err := c.datastoreStore.Get(ctx, &model.MetaData{
 		AuthenticSource: req.AuthenticSource,
@@ -366,7 +364,7 @@ type DatastoreGetByKeyReply struct {
 //	@Param			authentic_source	query		string					true	"Authentic source"
 //	@Param			scope				query		string					true	"Scope"
 //	@Param			document_id			query		string					true	"Document ID"
-//	@Router			/api/v1/datastore/ [get]
+//	@Router			/api/v1/datastore [get]
 func (c *Client) DatastoreGetByKey(ctx context.Context, req *DatastoreGetByKeyRequest) (*DatastoreGetByKeyReply, error) {
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
@@ -449,7 +447,7 @@ type DatastoreDeleteByKeyRequest struct {
 //	@Success		204	"No Content"
 //	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
 //	@Param			req	body		DatastoreDeleteByKeyRequest	true	" "
-//	@Router			/api/v1/datastore/ [delete]
+//	@Router			/api/v1/datastore [delete]
 func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteByKeyRequest) error {
 	return c.datastoreStore.DeleteByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 }
@@ -465,7 +463,7 @@ func (c *Client) DatastoreDeleteByKey(ctx context.Context, req *DatastoreDeleteB
 //	@Success		200	"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse	"Bad Request"
 //	@Param			req	body		vcclient.UploadRequest	true	" "
-//	@Router			/api/v1/datastore/ [put]
+//	@Router			/api/v1/datastore [put]
 func (c *Client) DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error {
 	upload := &model.CompleteDocument{
 		Meta:               req.Meta,
