@@ -333,13 +333,16 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 //	@Success		200	{object}	oauth2.AuthorizationServerMetadata	"Success"
 //	@Router			/.well-known/oauth-authorization-server [get]
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
-	// Sign metadata via the issuer's own key (the key in JWKS) so that
-	// signed_metadata is verifiable by looking up the kid in /jwks.
-	signedMetadata, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
+	// Use cached signed metadata (refreshed by background ticker every 55 min).
+	// signed_metadata is OPTIONAL per RFC 8414 — if signing fails
+	// (issuer unreachable, not configured, etc.) return unsigned metadata.
+	signedMetadata, err := c.getOrRefreshSignedMetadata(ctx, signedMetadataKeyOAuth2, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
 	if err != nil {
-		return nil, err
+		c.log.Error(err, "signed_metadata unavailable, serving unsigned metadata")
+		c.oauth2Metadata.SignedMetadata = ""
+	} else {
+		c.oauth2Metadata.SignedMetadata = signedMetadata
 	}
-	c.oauth2Metadata.SignedMetadata = signedMetadata
 
 	if err := helpers.Check(ctx, c.cfg, c.oauth2Metadata, c.log); err != nil {
 		c.log.Error(err, "metadata check error")

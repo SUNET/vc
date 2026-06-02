@@ -96,6 +96,9 @@ func main() {
 		panic(err)
 	}
 
+	// Start background refresher for signed metadata (issuer-signed, cached with 1h TTL)
+	apiv1Client.StartSignedMetadataRefresher(ctx)
+
 	// Initialize auth providers (SAML, OIDC)
 	authProvidersSvc, err := authproviders.New(ctx, &cfg.APIGW.AuthProviders, cacheService.SAMLSession, cacheService.OIDCRPSession, dbService, mainLog)
 	if err != nil {
