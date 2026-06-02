@@ -333,17 +333,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 //	@Success		200	{object}	oauth2.AuthorizationServerMetadata	"Success"
 //	@Router			/.well-known/oauth-authorization-server [get]
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
-	reply, err := c.oauth2Metadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+	// Sign metadata via the issuer's own key (the key in JWKS) so that
+	// signed_metadata is verifiable by looking up the kid in /jwks.
+	signedMetadata, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
 	if err != nil {
 		return nil, err
 	}
+	c.oauth2Metadata.SignedMetadata = signedMetadata
 
-	if err := helpers.Check(ctx, c.cfg, reply, c.log); err != nil {
+	if err := helpers.Check(ctx, c.cfg, c.oauth2Metadata, c.log); err != nil {
 		c.log.Error(err, "metadata check error")
 		return nil, err
 	}
 
-	return reply, nil
+	return c.oauth2Metadata, nil
 }
 
 // JWKSResponse represents a JSON Web Key Set (RFC 7517 §5).

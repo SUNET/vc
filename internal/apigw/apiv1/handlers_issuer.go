@@ -581,14 +581,14 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 		return nil, err
 	}
 
-	if c.pkiSigner != nil {
-		reply, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
-		if err != nil {
-			c.log.Error(err, "failed to sign metadata")
-			return nil, err
-		}
-		return reply, nil
+	// Sign metadata via the issuer's own key (the key in JWKS) so that
+	// signed_metadata is verifiable by looking up the kid in /jwks.
+	signedMetadata, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "openidvci-issuer-metadata+jwt", c.issuerMetadata.CredentialIssuer)
+	if err != nil {
+		c.log.Error(err, "failed to sign metadata via issuer")
+		return nil, err
 	}
+	c.issuerMetadata.SignedMetadata = signedMetadata
 
 	return c.issuerMetadata, nil
 }

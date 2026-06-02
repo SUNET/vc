@@ -33,7 +33,8 @@ type Client struct {
 	tracer         *trace.Tracer
 	auditLog       *auditlog.Service
 	signer         pki.Signer
-	privateKey     any // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
+	signerChain    []string // Base64-encoded DER x5c certificate chain (optional)
+	privateKey     any      // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
 	jwkProto       *apiv1_issuer.Jwk
 	registryConn   *grpc.ClientConn
 	registryClient apiv1_registry.RegistryServiceClient
@@ -81,11 +82,12 @@ func (c *Client) initSigner(ctx context.Context) error {
 
 	// Create signer from key material
 	c.signer = pki.NewKeyMaterialSigner(km)
+	c.signerChain = km.Chain
 
 	// Store private key for mDL issuer and VC 2.0 Data Integrity signing
 	c.privateKey = km.PrivateKey
 
-	c.log.Info("Initialized signing key", "algorithm", c.signer.Algorithm(), "keyID", c.signer.KeyID())
+	c.log.Info("Initialized signing key", "algorithm", c.signer.Algorithm(), "keyID", c.signer.KeyID(), "x5c_certs", len(km.Chain))
 
 	if err := c.createJWK(ctx); err != nil {
 		return err

@@ -12,6 +12,20 @@ service IssuerService {
     rpc MakeMDoc (MakeMDocRequest) returns (MakeMDocReply) {}
     rpc MakeVC20 (MakeVC20Request) returns (MakeVC20Reply) {}
     rpc JWKS (Empty) returns (JwksReply) {}
+    rpc SignMetadata (SignMetadataRequest) returns (SignMetadataReply) {}
+}
+
+// SignMetadataRequest asks the issuer to sign metadata JSON with its own key
+// (the same key advertised in JWKS), so that signed_metadata is verifiable.
+message SignMetadataRequest {
+    bytes metadata_json = 1;  // Raw JSON of the metadata to sign
+    string typ = 2;           // JWT typ header (e.g., "openidvci-issuer-metadata+jwt")
+    string iss = 3;           // Issuer claim (iss)
+    string sub = 4;           // Subject claim (sub)
+}
+
+message SignMetadataReply {
+    string signed_metadata = 1; // The resulting signed JWT
 }
 
 message MakeSDJWTRequest {
