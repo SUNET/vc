@@ -41,8 +41,10 @@ func (c *Client) signMetadataViaIssuer(ctx context.Context, metadata any, typ st
 	return reply.GetSignedMetadata(), nil
 }
 
-// getOrRefreshSignedMetadata returns cached signed metadata, or fetches and caches it.
-func (c *Client) getOrRefreshSignedMetadata(ctx context.Context, cacheKey string, metadata any, typ string, issuer string) (string, error) {
+// getOrSignMetadata returns cached signed metadata on hit, or signs via the
+// issuer gRPC on cache miss and stores the result. Freshness is provided by
+// the background ticker (StartSignedMetadataRefresher), not by this function.
+func (c *Client) getOrSignMetadata(ctx context.Context, cacheKey string, metadata any, typ string, issuer string) (string, error) {
 	// Try cache first
 	if cached, ok := c.cacheService.SignedMetadata.Get(ctx, cacheKey); ok {
 		return cached, nil
@@ -91,21 +93,25 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 // writes atomically; the first writer wins via SetNX, others simply overwrite
 // on the next cycle when the TTL has expired.
 func (c *Client) refreshSignedMetadata(ctx context.Context) {
+	// Guard against a stuck issuer gRPC call blocking the refresher indefinitely.
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	// Refresh VCI metadata
-	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "openidvci-issuer-metadata+jwt", c.issuerMetadata.CredentialIssuer)
+	vci, err := c.signMetadataViaIssuer(refreshCtx, c.issuerMetadata, "openidvci-issuer-metadata+jwt", c.issuerMetadata.CredentialIssuer)
 	if err != nil {
 		c.log.Error(err, "failed to refresh VCI signed metadata")
 	} else {
-		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyVCI, vci)
+		c.cacheService.SignedMetadata.Set(refreshCtx, signedMetadataKeyVCI, vci)
 		c.log.Debug("refreshed VCI signed metadata")
 	}
 
 	// Refresh OAuth2 metadata
-	oauth2Signed, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
+	oauth2Signed, err := c.signMetadataViaIssuer(refreshCtx, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
 	if err != nil {
 		c.log.Error(err, "failed to refresh OAuth2 signed metadata")
 	} else {
-		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyOAuth2, oauth2Signed)
+		c.cacheService.SignedMetadata.Set(refreshCtx, signedMetadataKeyOAuth2, oauth2Signed)
 		c.log.Debug("refreshed OAuth2 signed metadata")
 	}
 }

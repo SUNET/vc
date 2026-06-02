@@ -333,23 +333,26 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 //	@Success		200	{object}	oauth2.AuthorizationServerMetadata	"Success"
 //	@Router			/.well-known/oauth-authorization-server [get]
 func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error) {
+	// Shallow-copy to avoid mutating the shared struct concurrently.
+	metadata := *c.oauth2Metadata
+
 	// Use cached signed metadata (refreshed by background ticker every 55 min).
 	// signed_metadata is OPTIONAL per RFC 8414 — if signing fails
 	// (issuer unreachable, not configured, etc.) return unsigned metadata.
-	signedMetadata, err := c.getOrRefreshSignedMetadata(ctx, signedMetadataKeyOAuth2, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
+	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyOAuth2, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
 	if err != nil {
 		c.log.Error(err, "signed_metadata unavailable, serving unsigned metadata")
-		c.oauth2Metadata.SignedMetadata = ""
+		metadata.SignedMetadata = ""
 	} else {
-		c.oauth2Metadata.SignedMetadata = signedMetadata
+		metadata.SignedMetadata = signedMetadata
 	}
 
-	if err := helpers.Check(ctx, c.cfg, c.oauth2Metadata, c.log); err != nil {
+	if err := helpers.Check(ctx, c.cfg, &metadata, c.log); err != nil {
 		c.log.Error(err, "metadata check error")
 		return nil, err
 	}
 
-	return c.oauth2Metadata, nil
+	return &metadata, nil
 }
 
 // JWKSResponse represents a JSON Web Key Set (RFC 7517 §5).
