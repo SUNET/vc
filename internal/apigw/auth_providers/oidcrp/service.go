@@ -61,6 +61,7 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 		s.log.Error(err, "oidcrp_init_failed_will_retry", "issuer", cfg.IssuerURL)
 		s.retryBackoff = oidcRPRetryBase
 		s.retryAfter = time.Now().Add(s.retryBackoff)
+		go s.backgroundDiscovery(ctx)
 	}
 
 	return s, nil
@@ -186,6 +187,43 @@ func (s *Service) ensureReady(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// backgroundDiscovery retries OIDC discovery in the background with exponential
+// backoff until the OP becomes reachable, then exits.
+func (s *Service) backgroundDiscovery(ctx context.Context) {
+	backoff := oidcRPRetryBase
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		s.mu.RLock()
+		if s.ready {
+			s.mu.RUnlock()
+			return
+		}
+		s.mu.RUnlock()
+
+		s.mu.Lock()
+		if s.ready {
+			s.mu.Unlock()
+			return
+		}
+		if err := s.initialize(ctx); err != nil {
+			backoff = min(backoff*2, oidcRPRetryMax)
+			s.retryBackoff = backoff
+			s.retryAfter = time.Now().Add(backoff)
+			s.mu.Unlock()
+			s.log.Info("oidcrp_background_discovery_retry", "issuer", s.cfg.IssuerURL, "next_retry_in", backoff.String())
+			continue
+		}
+		s.mu.Unlock()
+		s.log.Info("OIDC OP is now reachable", "issuer", s.cfg.IssuerURL)
+		return
+	}
 }
 
 // AuthRequest represents an OIDC authentication request
