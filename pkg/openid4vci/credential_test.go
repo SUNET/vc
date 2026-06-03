@@ -201,6 +201,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		name        string
 		request     *CredentialRequest
 		metadata    *CredentialIssuerMetadataParameters
+		authDetails []AuthorizationDetailsParameter
 		wantFormat  string
 		wantErr     bool
 		errContains string
@@ -233,6 +234,28 @@ func TestResolveCredentialFormat(t *testing.T) {
 				},
 			},
 			wantFormat: "mso_mdoc",
+			wantErr:    false,
+		},
+		{
+			name: "resolve credential_identifier via authorization_details mapping",
+			request: &CredentialRequest{ // #nosec G101
+				CredentialIdentifier: "f08b0aa2-d7aa-4334-8ab0-d6845a972e19",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+					"pid_config": {
+						Format: "dc+sd-jwt",
+					},
+				},
+			},
+			authDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "pid_config",
+					CredentialIdentifiers:     []string{"f08b0aa2-d7aa-4334-8ab0-d6845a972e19"},
+				},
+			},
+			wantFormat: "dc+sd-jwt",
 			wantErr:    false,
 		},
 		{
@@ -323,7 +346,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			format, err := tt.request.ResolveCredentialFormat(tt.metadata)
+			format, err := tt.request.ResolveCredentialFormat(tt.metadata, tt.authDetails...)
 
 			if tt.wantErr {
 				assert.Error(t, err)

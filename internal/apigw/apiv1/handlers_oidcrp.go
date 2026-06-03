@@ -296,6 +296,12 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		Scopes:       []string{session.CredentialType},
 		Nonce:        nonce,
 		AuthProvider: model.AuthProviderOIDC,
+		// Standalone OIDC RP trusts the IdP claims and stores them directly as the
+		// credential document (see StoreVCIDocuments below), i.e. assertion-based
+		// issuance. Mark the data source accordingly so the credential endpoint treats
+		// the registry identifier as best-effort (ResolveIdentifier above is allowed to
+		// fail with NO_IDENTITY_FOUND for subjects without an identity mapping).
+		DataSource:   string(model.DataSourceAssertion),
 		Identifier:   identifier,
 		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
 			{

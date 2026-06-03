@@ -308,7 +308,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := req.ResolveCredentialFormat(c.issuerMetadata)
+	format, err := req.ResolveCredentialFormat(c.issuerMetadata, authContext.AuthorizationDetails...)
 	if err != nil {
 		c.log.Error(err, "failed to resolve credential format")
 		return nil, err

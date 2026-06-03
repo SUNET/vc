@@ -308,6 +308,17 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
 		}
 		reply.AuthorizationDetails = responseDetails
+
+		// Persist the generated credential_identifiers onto the authorization context so the
+		// Credential Endpoint can validate the credential_identifier the wallet echoes back
+		// (CredentialRequest.Validate checks membership in authContext.AuthorizationDetails).
+		// Without this the response advertises identifiers that are never stored, so every
+		// credential request fails with "credential_identifier ... not found".
+		authorizationContext.AuthorizationDetails = responseDetails
+		if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+			c.log.Error(err, "failed to persist credential_identifiers onto authorization context")
+			return nil, err
+		}
 	}
 
 	tokenDoc := &cache.Token{
