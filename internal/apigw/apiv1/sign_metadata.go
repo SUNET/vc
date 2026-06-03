@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
@@ -19,10 +18,6 @@ const (
 	// Slightly shorter than the 1-hour cache TTL to ensure continuity.
 	signedMetadataRefreshInterval = 55 * time.Minute
 )
-
-// issuerReachable tracks whether the issuer gRPC was reachable on the last refresh.
-// Used to log state transitions (down→up, up→down) at Info level.
-var issuerReachable atomic.Bool
 
 // signMetadataViaIssuer delegates metadata signing to the issuer service via gRPC.
 // The issuer signs with its own key (the key advertised in /jwks), ensuring that
@@ -83,7 +78,7 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 		// Retry loop: wait for the issuer to become reachable.
 		for {
 			c.refreshSignedMetadata(ctx)
-			if issuerReachable.Load() {
+			if c.issuerReachable.Load() {
 				break
 			}
 			select {
@@ -137,12 +132,12 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 
 	// Log state transitions at Info level so operators notice when the issuer
 	// becomes reachable or goes away.
-	wasReachable := issuerReachable.Load()
+	wasReachable := c.issuerReachable.Load()
 	if !failed && !wasReachable {
 		c.log.Info("issuer signing service is now reachable, signed metadata cached")
-		issuerReachable.Store(true)
+		c.issuerReachable.Store(true)
 	} else if failed && wasReachable {
 		c.log.Info("issuer signing service became unreachable")
-		issuerReachable.Store(false)
+		c.issuerReachable.Store(false)
 	}
 }

@@ -13,14 +13,43 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 )
 
+// defaultServiceConfig is a gRPC service config that enables transparent
+// retries for transient failures (UNAVAILABLE — e.g. connection refused,
+// DNS resolution failures, brief network blips).  The policy applies to
+// every unary RPC on every service.
+//
+// maxAttempts=5 with very short backoff (20 ms → 40 ms → 80 ms → 100 ms)
+// keeps total added latency under ~250 ms so synchronous flows like
+// credential issuance stay responsive for the waiting user.
+const defaultServiceConfig = `{
+	"methodConfig": [{
+		"name": [{"service": ""}],
+		"retryPolicy": {
+			"maxAttempts": 5,
+			"initialBackoff": "0.02s",
+			"maxBackoff": "0.1s",
+			"backoffMultiplier": 2.0,
+			"retryableStatusCodes": ["UNAVAILABLE"]
+		}
+	}]
+}`
+
 // NewClientConn creates a gRPC client connection with optional mTLS support.
 // If TLS is disabled, returns an insecure connection.
 // If TLS is enabled without client certs, uses server-only TLS.
 // If TLS is enabled with client certs, uses mutual TLS (mTLS).
+//
+// All connections are configured with a default retry policy that
+// transparently retries UNAVAILABLE errors with exponential backoff.
 func NewClientConn(cfg model.GRPCClientTLS) (*grpc.ClientConn, error) {
+	opts := []grpc.DialOption{
+		grpc.WithDefaultServiceConfig(defaultServiceConfig),
+	}
+
 	if !cfg.TLS {
 		// Insecure connection
-		return grpc.NewClient(cfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient(cfg.Addr, opts...)
 	}
 
 	// Build TLS config
@@ -57,7 +86,9 @@ func NewClientConn(cfg model.GRPCClientTLS) (*grpc.ClientConn, error) {
 	}
 
 	creds := credentials.NewTLS(tlsConfig)
-	conn, err := grpc.NewClient(cfg.Addr, grpc.WithTransportCredentials(creds))
+	opts = append(opts, grpc.WithTransportCredentials(creds))
+
+	conn, err := grpc.NewClient(cfg.Addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client connection: %w", err)
 	}

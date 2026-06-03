@@ -60,10 +60,10 @@ func (s *Service) GenerateStatusListTokenCWT(ctx context.Context, cfg TokenConfi
 		return nil, fmt.Errorf("signer must be a *pki.KeyMaterialSigner, got %T", s.signer)
 	}
 
-	// Generate CWT using tokenstatuslist package
+	// Generate CWT using tokenstatuslist package.
+	// Algorithm is auto-detected from the key type (ES256 for ECDSA, PS256 for RSA).
 	cwtCfg := tokenstatuslist.CWTSigningConfig{
 		SigningKey: kmSigner.PrivateKey(),
-		Algorithm:  tokenstatuslist.CoseAlgES256,
 	}
 
 	return sl.GenerateCWT(cwtCfg)

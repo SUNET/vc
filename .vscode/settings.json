@@ -133,6 +133,8 @@
         "Retag",
         "retags",
         "rpcclient",
+        "RSAPSS",
+        "RSASSA",
         "SAMLACS",
         "samlmetadata",
         "samlsp",
