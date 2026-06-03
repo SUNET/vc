@@ -55,7 +55,7 @@ type ClientMetadata struct {
 }
 
 // Marshal converts ClientMetadata to JWT claims
-func (c *ClientMetadata) Marshal() (jwt.MapClaims, error) {
+func (c *ClientMetadata) MarshalJWTClaims() (jwt.MapClaims, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (c *ClientMetadata) Marshal() (jwt.MapClaims, error) {
 // Sign creates a signed JWT of the client metadata using pki.Signer.
 // The pki.Signer interface supports both software keys and HSM.
 func (c *ClientMetadata) Sign(ctx context.Context, signer pki.Signer, chain []string) (string, error) {
-	claims, err := c.Marshal()
+	claims, err := c.MarshalJWTClaims()
 	if err != nil {
 		return "", err
 	}

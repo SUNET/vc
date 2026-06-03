@@ -95,7 +95,7 @@ type AuthorizationServerMetadata struct {
 	// More attributes MAY be present, such as https://openid.net/specs/openid-connect-discovery-1_0.html
 }
 
-func (c *AuthorizationServerMetadata) Marshal() (jwt.MapClaims, error) {
+func (c *AuthorizationServerMetadata) MarshalJWTClaims() (jwt.MapClaims, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (c *AuthorizationServerMetadata) Sign(ctx context.Context, signer pki.Signe
 	// ensure that signed_metadata is empty
 	c.SignedMetadata = ""
 
-	body, err := c.Marshal()
+	body, err := c.MarshalJWTClaims()
 	if err != nil {
 		return nil, err
 	}

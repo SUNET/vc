@@ -118,7 +118,7 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	var unreachable bool
 
 	// Refresh VCI metadata
-	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "openidvci-issuer-metadata+jwt", c.issuerMetadata.CredentialIssuer)
+	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
 	if err != nil {
 		c.log.Error(err, "failed to refresh VCI signed metadata")
 		if isGRPCUnavailable(err) {
@@ -129,7 +129,7 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	}
 
 	// Refresh OAuth2 metadata
-	oauth2Signed, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
+	oauth2Signed, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "oauth2-authorization-server", c.oauth2Metadata.Issuer)
 	if err != nil {
 		c.log.Error(err, "failed to refresh OAuth2 signed metadata")
 		if isGRPCUnavailable(err) {

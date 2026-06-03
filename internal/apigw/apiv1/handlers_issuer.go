@@ -587,7 +587,7 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	// Use cached signed metadata (refreshed by background ticker every 55 min).
 	// signed_metadata is OPTIONAL per OID4VCI §12.2.4 — if signing fails
 	// (issuer unreachable, not configured, etc.) return unsigned metadata.
-	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyVCI, c.issuerMetadata, "openidvci-issuer-metadata+jwt", c.issuerMetadata.CredentialIssuer)
+	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyVCI, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
 	if err != nil {
 		c.log.Error(err, "signed_metadata unavailable, serving unsigned metadata")
 		metadata.SignedMetadata = ""

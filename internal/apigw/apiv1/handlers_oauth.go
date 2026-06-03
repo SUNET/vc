@@ -339,7 +339,7 @@ func (c *Client) OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServer
 	// Use cached signed metadata (refreshed by background ticker every 55 min).
 	// signed_metadata is OPTIONAL per RFC 8414 — if signing fails
 	// (issuer unreachable, not configured, etc.) return unsigned metadata.
-	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyOAuth2, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
+	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyOAuth2, c.oauth2Metadata, "oauth2-authorization-server", c.oauth2Metadata.Issuer)
 	if err != nil {
 		c.log.Error(err, "signed_metadata unavailable, serving unsigned metadata")
 		metadata.SignedMetadata = ""
