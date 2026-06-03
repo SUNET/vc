@@ -24,8 +24,17 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	if len(req.GetMetadataJson()) == 0 {
 		return nil, fmt.Errorf("metadata_json is required")
 	}
+	if len(req.GetMetadataJson()) > 64*1024 {
+		return nil, fmt.Errorf("metadata_json is too large")
+	}
 	if req.GetTyp() == "" {
 		return nil, fmt.Errorf("typ is required")
+	}
+	if req.GetTyp() != "openidvci-issuer-metadata+jwt" && req.GetTyp() != "JWT" {
+		return nil, fmt.Errorf("unsupported typ: %q", req.GetTyp())
+	}
+	if req.GetIss() != c.cfg.Issuer.IssuerURL {
+		return nil, fmt.Errorf("iss must equal configured issuer_url")
 	}
 
 	header := jwt.MapClaims{
