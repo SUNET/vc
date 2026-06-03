@@ -65,8 +65,8 @@ type CWTSigningConfig struct {
 	SigningKey crypto.PrivateKey
 
 	// Algorithm specifies the COSE algorithm.
-	// Use 0 to auto-detect from the key type (defaults to ES256 for
-	// ECDSA keys and PS256 for RSA keys).
+	// Use 0 to auto-detect from the key type and curve (ES256 for P-256,
+	// ES384 for P-384, ES512 for P-521, PS256 for RSA keys).
 	Algorithm int
 }
 
@@ -274,11 +274,20 @@ func signRSAPSS(data []byte, key crypto.PrivateKey, hashAlg crypto.Hash) ([]byte
 	})
 }
 
-// detectCOSEAlgorithm picks a default COSE algorithm based on the key type.
+// detectCOSEAlgorithm picks a default COSE algorithm based on the key type and curve.
 func detectCOSEAlgorithm(key crypto.PrivateKey) (int, error) {
-	switch key.(type) {
+	switch k := key.(type) {
 	case *ecdsa.PrivateKey:
-		return CoseAlgES256, nil
+		switch k.Curve.Params().BitSize {
+		case 256:
+			return CoseAlgES256, nil
+		case 384:
+			return CoseAlgES384, nil
+		case 521:
+			return CoseAlgES512, nil
+		default:
+			return 0, fmt.Errorf("unsupported ECDSA curve bit size: %d", k.Curve.Params().BitSize)
+		}
 	case *rsa.PrivateKey:
 		return CoseAlgPS256, nil
 	default:
