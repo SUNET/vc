@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 )
 
@@ -110,13 +113,15 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 // In HA mode, multiple nodes may race — each signs and writes; the first writer
 // wins via SetNX, others simply overwrite on the next cycle when the TTL has expired.
 func (c *Client) refreshSignedMetadata(ctx context.Context) {
-	var failed bool
+	var unreachable bool
 
 	// Refresh VCI metadata
 	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "openidvci-issuer-metadata+jwt", c.issuerMetadata.CredentialIssuer)
 	if err != nil {
 		c.log.Error(err, "failed to refresh VCI signed metadata")
-		failed = true
+		if isGRPCUnavailable(err) {
+			unreachable = true
+		}
 	} else {
 		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyVCI, vci)
 	}
@@ -125,19 +130,33 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	oauth2Signed, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "JWT", c.oauth2Metadata.Issuer)
 	if err != nil {
 		c.log.Error(err, "failed to refresh OAuth2 signed metadata")
-		failed = true
+		if isGRPCUnavailable(err) {
+			unreachable = true
+		}
 	} else {
 		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyOAuth2, oauth2Signed)
 	}
 
 	// Log state transitions at Info level so operators notice when the issuer
-	// becomes reachable or goes away.
+	// becomes reachable or goes away. Only gRPC UNAVAILABLE (transport-level
+	// failures) flips the reachability flag; application-level errors (e.g.
+	// invalid metadata, signing failures) are logged above but do not affect
+	// the reachability state.
 	wasReachable := c.issuerReachable.Load()
-	if !failed && !wasReachable {
+	if !unreachable && !wasReachable {
 		c.log.Info("issuer signing service is now reachable, signed metadata cached")
 		c.issuerReachable.Store(true)
-	} else if failed && wasReachable {
+	} else if unreachable && wasReachable {
 		c.log.Info("issuer signing service became unreachable")
 		c.issuerReachable.Store(false)
 	}
+}
+
+// isGRPCUnavailable reports whether err is a gRPC UNAVAILABLE error,
+// indicating a transport-level connectivity failure.
+func isGRPCUnavailable(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.Unavailable
+	}
+	return false
 }
