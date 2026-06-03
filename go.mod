@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	filippo.io/edwards25519 v1.2.0
-	github.com/IBM/sarama v1.49.0
+	github.com/IBM/sarama v1.50.1
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.6.0
 	github.com/biter777/countries v1.7.5
@@ -92,7 +92,6 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/eapache/go-resiliency v1.7.0 // indirect
-	github.com/eapache/queue v1.1.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
