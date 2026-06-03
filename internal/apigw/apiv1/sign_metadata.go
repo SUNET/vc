@@ -111,8 +111,9 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 
 // refreshSignedMetadata fetches fresh signed metadata from the issuer and
 // updates the cache. Each gRPC call has its own 30s timeout (in signMetadataViaIssuer).
-// In HA mode, multiple nodes may race — each signs and writes; the first writer
-// wins via SetNX, others simply overwrite on the next cycle when the TTL has expired.
+// In HA mode, multiple nodes may race — each signs and writes with Set (last writer
+// wins). This is acceptable because all nodes sign identical metadata with the same
+// key, so any value is equally valid.
 func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	var unreachable bool
 
