@@ -98,7 +98,7 @@ func main() {
 	fmt.Printf("Host: %s%s%s\n\n", c.cyan, hostURL, c.reset)
 
 	// Step 1: Fetch issuer metadata
-	wellKnownURL := hostURL + "/.well-known/openid-credential-issuer"
+	wellKnownURL := hostURL + "/.well-known/openid-credential-issuer/"
 	fmt.Printf("%s[1] Fetching %s%s\n", c.heading, wellKnownURL, c.reset)
 
 	body, err := httpGet(wellKnownURL)

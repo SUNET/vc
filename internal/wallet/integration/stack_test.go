@@ -268,7 +268,7 @@ func TestStack_Health(t *testing.T) {
 // ---------- VCI: Well-Known Metadata ----------
 
 func TestStack_VCI_IssuerMetadata(t *testing.T) {
-	resp, err := http.Get(apigwURL + "/.well-known/openid-credential-issuer")
+	resp, err := http.Get(apigwURL + "/.well-known/openid-credential-issuer/")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -1117,7 +1117,7 @@ type oauth2ServerMeta struct {
 
 func fetchIssuerMetadata(t *testing.T, baseURL string) *openid4vci.CredentialIssuerMetadataParameters {
 	t.Helper()
-	resp, err := http.Get(baseURL + "/.well-known/openid-credential-issuer")
+	resp, err := http.Get(baseURL + "/.well-known/openid-credential-issuer/")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

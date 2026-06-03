@@ -44,7 +44,7 @@ func (s *oauthHandler) IssuerMetadata(ctx context.Context) (*openid4vci.Credenti
 	s.log.Info("IssuerMetadata")
 
 	reply := &openid4vci.CredentialIssuerMetadataParameters{}
-	resp, err := s.client.call(ctx, http.MethodGet, "/.well-known/openid-credential-issuer", s.defaultContentType, nil, reply, false, s.baseURL)
+	resp, err := s.client.call(ctx, http.MethodGet, "/.well-known/openid-credential-issuer/", s.defaultContentType, nil, reply, false, s.baseURL)
 	if err != nil {
 		return nil, resp, err
 	}

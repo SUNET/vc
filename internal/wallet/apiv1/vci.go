@@ -374,7 +374,7 @@ func (c *Client) fetchCredentialOffer(ctx context.Context, offerURI string) (*op
 }
 
 func (c *Client) fetchIssuerMetadata(ctx context.Context, issuerURL string) (*openid4vci.CredentialIssuerMetadataParameters, error) {
-	metaURL := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-credential-issuer"
+	metaURL := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-credential-issuer/"
 	resp, err := c.httpClient.Get(metaURL)
 	if err != nil {
 		return nil, err

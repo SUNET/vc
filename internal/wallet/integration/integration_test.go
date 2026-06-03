@@ -120,7 +120,7 @@ func (env *testEnvironment) setupIssuerServer() {
 	mux := http.NewServeMux()
 
 	// Credential issuer metadata
-	mux.HandleFunc("GET /.well-known/openid-credential-issuer", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /.well-known/openid-credential-issuer/", func(w http.ResponseWriter, r *http.Request) {
 		meta := openid4vci.CredentialIssuerMetadataParameters{
 			CredentialIssuer:           env.issuerServer.URL,
 			AuthorizationServers:       []string{env.oauth2Server.URL},

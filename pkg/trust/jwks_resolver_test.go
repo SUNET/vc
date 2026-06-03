@@ -255,7 +255,7 @@ func TestJWKSKeyResolverFallbackOAuthAS(t *testing.T) {
 	var serverURL string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/.well-known/openid-credential-issuer":
+		case "/.well-known/openid-credential-issuer/":
 			meta := map[string]any{
 				"credential_issuer": serverURL,
 				// no authorization_servers → defaults to issuer itself
@@ -374,7 +374,7 @@ func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
 	var serverURL string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/.well-known/openid-credential-issuer":
+		case "/.well-known/openid-credential-issuer/":
 			meta := map[string]any{
 				"credential_issuer":     serverURL,
 				"authorization_servers": []string{serverURL + "/auth"},
