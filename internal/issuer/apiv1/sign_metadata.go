@@ -88,6 +88,16 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	// Remove signed_metadata to avoid self-referencing in the JWT payload.
 	delete(body, "signed_metadata")
 
+	// Always override standard claims to prevent caller-supplied metadata_json
+	// from injecting arbitrary iss/sub/iat values into the signed JWT.
+	body["iat"] = time.Now().Unix()
+	body["iss"] = req.GetIss()
+	sub := req.GetSub()
+	if sub == "" {
+		sub = req.GetIss()
+	}
+	body["sub"] = sub
+
 	header := jwt.MapClaims{
 		"typ": jwtTyp,
 	}
@@ -95,14 +105,6 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	// Include x5c certificate chain if the issuer has one configured
 	if len(c.signerChain) > 0 {
 		header["x5c"] = c.signerChain
-	}
-
-	body["iat"] = time.Now().Unix()
-	if req.GetIss() != "" {
-		body["iss"] = req.GetIss()
-	}
-	if req.GetSub() != "" {
-		body["sub"] = req.GetSub()
 	}
 
 	signed, err := jose.MakeJWT(ctx, header, body, c.signer)
