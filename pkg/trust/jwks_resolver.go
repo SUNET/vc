@@ -247,7 +247,7 @@ func (r *JWKSKeyResolver) tryJWTVCIssuerMetadata(ctx context.Context, baseURL, i
 // authorization_servers to find an OAuth AS with a jwks_uri.
 func (r *JWKSKeyResolver) tryCredentialIssuerMetadata(ctx context.Context, baseURL string) ([]json.RawMessage, error) {
 	var ciMeta credentialIssuerMetadata
-	if _, err := r.fetchJSON(ctx, baseURL+"/.well-known/openid-credential-issuer/", &ciMeta); err != nil {
+	if _, err := r.fetchJSON(ctx, baseURL+"/.well-known/openid-credential-issuer", &ciMeta); err != nil {
 		return nil, err
 	}
 
