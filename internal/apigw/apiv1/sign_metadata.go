@@ -75,8 +75,11 @@ func (c *Client) getOrSignMetadata(ctx context.Context, cacheKey string, metadat
 }
 
 // StartSignedMetadataRefresher starts a background goroutine that keeps
-// signed metadata warm in the cache. On startup it retries every 5 seconds
-// until the issuer is reachable, then switches to 55-minute steady-state refreshes.
+// signed metadata warm in the cache. On startup it retries with a 5-second
+// pause between attempts until the issuer is reachable, then switches to
+// 55-minute steady-state refreshes. Note: each attempt calls refreshSignedMetadata
+// which makes two gRPC calls (VCI + OAuth2), each with a 30-second timeout, so a
+// single retry iteration can take over 60 seconds when the issuer is unresponsive.
 func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 	go func() {
 		// Retry loop: wait for the issuer to become reachable.
@@ -120,9 +123,11 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	// Refresh VCI metadata
 	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
 	if err != nil {
-		c.log.Error(err, "failed to refresh VCI signed metadata")
 		if isGRPCUnavailable(err) {
 			unreachable = true
+			c.log.Debug("failed to refresh VCI signed metadata", "error", err)
+		} else {
+			c.log.Error(err, "failed to refresh VCI signed metadata")
 		}
 	} else {
 		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyVCI, vci)
@@ -131,9 +136,11 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	// Refresh OAuth2 metadata
 	oauth2Signed, err := c.signMetadataViaIssuer(ctx, c.oauth2Metadata, "oauth2-authorization-server", c.oauth2Metadata.Issuer)
 	if err != nil {
-		c.log.Error(err, "failed to refresh OAuth2 signed metadata")
 		if isGRPCUnavailable(err) {
 			unreachable = true
+			c.log.Debug("failed to refresh OAuth2 signed metadata", "error", err)
+		} else {
+			c.log.Error(err, "failed to refresh OAuth2 signed metadata")
 		}
 	} else {
 		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyOAuth2, oauth2Signed)
