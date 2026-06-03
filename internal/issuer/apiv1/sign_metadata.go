@@ -26,6 +26,9 @@ const (
 // validated and marshalled into JWT claims.
 type signableMetadata interface {
 	MarshalJWTClaims() (jwt.MapClaims, error)
+	// MetadataIssuer returns the issuer identifier embedded in the metadata
+	// (e.g. credential_issuer or issuer), so we can verify it matches req.iss.
+	MetadataIssuer() string
 }
 
 // SignMetadata signs the provided metadata JSON with the issuer's own key
@@ -39,7 +42,7 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	ctx, span := c.tracer.Start(ctx, "apiv1:SignMetadata")
 	defer span.End()
 
-	c.log.Debug("SignMetadata", "typ", req.GetTyp(), "iss", req.GetIss())
+	c.log.Debug("SignMetadata", "metadata_type", req.GetMetadataType(), "iss", req.GetIss())
 
 	if !c.signMetadataRL.Allow() {
 		return nil, fmt.Errorf("SignMetadata rate limit exceeded")
@@ -61,7 +64,7 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 		metadata signableMetadata
 		jwtTyp   string
 	)
-	switch req.GetTyp() {
+	switch req.GetMetadataType() {
 	case MetadataTypeVCIIssuer:
 		metadata = &openid4vci.CredentialIssuerMetadataParameters{}
 		jwtTyp = "openidvci-issuer-metadata+jwt"
@@ -69,7 +72,7 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 		metadata = &oauth2.AuthorizationServerMetadata{}
 		jwtTyp = "JWT"
 	default:
-		return nil, fmt.Errorf("unsupported metadata type: %q", req.GetTyp())
+		return nil, fmt.Errorf("unsupported metadata type: %q", req.GetMetadataType())
 	}
 
 	if err := json.Unmarshal(req.GetMetadataJson(), metadata); err != nil {
@@ -78,6 +81,12 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 
 	if err := helpers.CheckSimple(metadata); err != nil {
 		return nil, fmt.Errorf("metadata validation failed: %w", err)
+	}
+
+	// Verify the metadata's own issuer identifier matches req.iss to prevent
+	// signing metadata that points to attacker-controlled endpoints.
+	if metaIss := metadata.MetadataIssuer(); metaIss != req.GetIss() {
+		return nil, fmt.Errorf("metadata issuer %q does not match request iss %q", metaIss, req.GetIss())
 	}
 
 	body, err := metadata.MarshalJWTClaims()

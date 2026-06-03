@@ -18,10 +18,10 @@ service IssuerService {
 // SignMetadataRequest asks the issuer to sign metadata JSON with its own key
 // (the same key advertised in JWKS), so that signed_metadata is verifiable.
 message SignMetadataRequest {
-    bytes metadata_json = 1;  // Raw JSON of the metadata to sign
-    string typ = 2;           // JWT typ header (e.g., "openidvci-issuer-metadata+jwt")
-    string iss = 3;           // Issuer claim (iss)
-    string sub = 4;           // Subject claim (sub)
+    bytes metadata_json = 1;    // Raw JSON of the metadata to sign
+    string metadata_type = 2;   // Metadata type selector (e.g., "vci-issuer", "oauth2-authorization-server")
+    string iss = 3;             // Issuer claim (iss)
+    string sub = 4;             // Subject claim (sub)
 }
 
 message SignMetadataReply {

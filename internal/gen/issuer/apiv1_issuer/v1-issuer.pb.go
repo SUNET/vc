@@ -26,7 +26,7 @@ const (
 type SignMetadataRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MetadataJson  []byte                 `protobuf:"bytes,1,opt,name=metadata_json,json=metadataJson,proto3" json:"metadata_json,omitempty"` // Raw JSON of the metadata to sign
-	Typ           string                 `protobuf:"bytes,2,opt,name=typ,proto3" json:"typ,omitempty"`                                       // JWT typ header (e.g., "openidvci-issuer-metadata+jwt")
+	MetadataType  string                 `protobuf:"bytes,2,opt,name=metadata_type,json=metadataType,proto3" json:"metadata_type,omitempty"` // Metadata type selector (e.g., "vci-issuer", "oauth2-authorization-server")
 	Iss           string                 `protobuf:"bytes,3,opt,name=iss,proto3" json:"iss,omitempty"`                                       // Issuer claim (iss)
 	Sub           string                 `protobuf:"bytes,4,opt,name=sub,proto3" json:"sub,omitempty"`                                       // Subject claim (sub)
 	unknownFields protoimpl.UnknownFields
@@ -70,9 +70,9 @@ func (x *SignMetadataRequest) GetMetadataJson() []byte {
 	return nil
 }
 
-func (x *SignMetadataRequest) GetTyp() string {
+func (x *SignMetadataRequest) GetMetadataType() string {
 	if x != nil {
-		return x.Typ
+		return x.MetadataType
 	}
 	return ""
 }
@@ -907,10 +907,10 @@ var File_v1_issuer_proto protoreflect.FileDescriptor
 
 const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
-	"\x0fv1-issuer.proto\x12\tv1.issuer\"p\n" +
+	"\x0fv1-issuer.proto\x12\tv1.issuer\"\x83\x01\n" +
 	"\x13SignMetadataRequest\x12#\n" +
-	"\rmetadata_json\x18\x01 \x01(\fR\fmetadataJson\x12\x10\n" +
-	"\x03typ\x18\x02 \x01(\tR\x03typ\x12\x10\n" +
+	"\rmetadata_json\x18\x01 \x01(\fR\fmetadataJson\x12#\n" +
+	"\rmetadata_type\x18\x02 \x01(\tR\fmetadataType\x12\x10\n" +
 	"\x03iss\x18\x03 \x01(\tR\x03iss\x12\x10\n" +
 	"\x03sub\x18\x04 \x01(\tR\x03sub\"<\n" +
 	"\x11SignMetadataReply\x12'\n" +
