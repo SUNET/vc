@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -154,9 +155,13 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 
 // isGRPCUnavailable reports whether err is a gRPC UNAVAILABLE error,
 // indicating a transport-level connectivity failure.
+// It unwraps the error chain so it works even when the gRPC status has
+// been wrapped with fmt.Errorf.
 func isGRPCUnavailable(err error) bool {
-	if s, ok := status.FromError(err); ok {
-		return s.Code() == codes.Unavailable
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if s, ok := status.FromError(e); ok {
+			return s.Code() == codes.Unavailable
+		}
 	}
 	return false
 }
