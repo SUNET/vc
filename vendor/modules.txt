@@ -404,10 +404,10 @@ github.com/json-iterator/go
 # github.com/kaptinlin/go-i18n v0.4.9
 ## explicit; go 1.26.3
 github.com/kaptinlin/go-i18n
-# github.com/kaptinlin/jsonpointer v0.4.24
+# github.com/kaptinlin/jsonpointer v0.4.25
 ## explicit; go 1.26.3
 github.com/kaptinlin/jsonpointer
-# github.com/kaptinlin/jsonschema v0.7.14
+# github.com/kaptinlin/jsonschema v0.7.15
 ## explicit; go 1.26.3
 github.com/kaptinlin/jsonschema
 github.com/kaptinlin/jsonschema/pkg/tagparser

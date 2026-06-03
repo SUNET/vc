@@ -29,7 +29,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/iancoleman/strcase v0.3.0
 	github.com/jellydator/ttlcache/v3 v3.4.0
-	github.com/kaptinlin/jsonschema v0.7.14
+	github.com/kaptinlin/jsonschema v0.7.15
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/lithammer/shortuuid/v4 v4.2.0
@@ -130,7 +130,7 @@ require (
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kaptinlin/go-i18n v0.4.9 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.24 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.25 // indirect
 	github.com/kaptinlin/messageformat-go v0.6.4 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect

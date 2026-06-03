@@ -206,10 +206,10 @@ github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnr
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
 github.com/kaptinlin/go-i18n v0.4.9 h1:kxYNfExb1GG241BIPnQaD3YOvWkP7poHwfj8ctwIpkw=
 github.com/kaptinlin/go-i18n v0.4.9/go.mod h1:15vHHYLhwo1stIdztJatujSttIY6sRFt+7v8K1ik1AA=
-github.com/kaptinlin/jsonpointer v0.4.24 h1:cHAiQXWzRYagJmtvURLmCdUM06rQy/3Lji+q6b58Fxo=
-github.com/kaptinlin/jsonpointer v0.4.24/go.mod h1:wVOBaXGGnP42YsMb6zev/3W5POTvspdNfh8DXzf8XS8=
-github.com/kaptinlin/jsonschema v0.7.14 h1:6grzaTJiRuLXlIGEdlGX5HEII3Za2tV+xxGpW3Kg4Rc=
-github.com/kaptinlin/jsonschema v0.7.14/go.mod h1:9WFuBzJjrvNkXVjo0L2Ujl1T/yqAGurwgbx4JWgF5C8=
+github.com/kaptinlin/jsonpointer v0.4.25 h1:iJ197e8n+WwqaqBsa53FqG3rPJCg5oijyFXEXNWWC3E=
+github.com/kaptinlin/jsonpointer v0.4.25/go.mod h1:wVOBaXGGnP42YsMb6zev/3W5POTvspdNfh8DXzf8XS8=
+github.com/kaptinlin/jsonschema v0.7.15 h1:5v9TBnGOm/DV4EEsC13dfR0UXid/3OcR7yAnpRlruE0=
+github.com/kaptinlin/jsonschema v0.7.15/go.mod h1:5njr9isKoP9FnqZrFV1Iygx7QqjN3SBZ/AkgBl4Elug=
 github.com/kaptinlin/messageformat-go v0.6.4 h1:6nC70fsqEn2xxg/Xoby2+Dk2r77kvxa3QNnYL/hsNcM=
 github.com/kaptinlin/messageformat-go v0.6.4/go.mod h1:553UGZ1x5jmGtyH4pQKYwLGMyPm71deCoZICjq1DtR8=
 github.com/kelseyhightower/envconfig v1.4.0 h1:Im6hONhd3pLkfDFsbRgu68RDNkGF1r3dvMUtDTo2cv8=
