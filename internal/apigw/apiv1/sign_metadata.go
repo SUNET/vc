@@ -119,6 +119,7 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 // key, so any value is equally valid.
 func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	var unreachable bool
+	var cached int
 
 	// Refresh VCI metadata
 	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
@@ -131,6 +132,7 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 		}
 	} else {
 		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyVCI, vci)
+		cached++
 	}
 
 	// Refresh OAuth2 metadata
@@ -144,6 +146,7 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 		}
 	} else {
 		c.cacheService.SignedMetadata.Set(ctx, signedMetadataKeyOAuth2, oauth2Signed)
+		cached++
 	}
 
 	// Log state transitions at Info level so operators notice when the issuer
@@ -153,8 +156,12 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 	// the reachability state.
 	wasReachable := c.issuerReachable.Load()
 	if !unreachable && !wasReachable {
-		c.log.Info("issuer signing service is now reachable, signed metadata cached")
 		c.issuerReachable.Store(true)
+		if cached > 0 {
+			c.log.Info("issuer signing service is now reachable, signed metadata cached", "cached", cached)
+		} else {
+			c.log.Info("issuer signing service is now reachable, but no metadata was cached (check application errors above)")
+		}
 	} else if unreachable && wasReachable {
 		c.log.Info("issuer signing service became unreachable")
 		c.issuerReachable.Store(false)
