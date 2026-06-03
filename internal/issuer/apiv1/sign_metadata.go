@@ -21,6 +21,10 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 
 	c.log.Debug("SignMetadata", "typ", req.GetTyp(), "iss", req.GetIss())
 
+	if !c.signMetadataRL.Allow() {
+		return nil, fmt.Errorf("SignMetadata rate limit exceeded")
+	}
+
 	if len(req.GetMetadataJson()) == 0 {
 		return nil, fmt.Errorf("metadata_json is required")
 	}

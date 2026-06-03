@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
@@ -39,6 +42,7 @@ type Client struct {
 	registryConn   *grpc.ClientConn
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
+	signMetadataRL *rate.Limiter
 }
 
 // New creates a new instance of the public api
@@ -47,8 +51,9 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		cfg:      cfg,
 		log:      log.New("apiv1"),
 		tracer:   tracer,
-		auditLog: auditLog,
-		jwkProto: &apiv1_issuer.Jwk{},
+		auditLog:       auditLog,
+		jwkProto:       &apiv1_issuer.Jwk{},
+		signMetadataRL: rate.NewLimiter(rate.Every(30*time.Second), 5),
 	}
 
 	if err := c.initSigner(ctx); err != nil {

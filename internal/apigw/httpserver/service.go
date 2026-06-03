@@ -173,6 +173,12 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "credential-offer/:credential_offer_uuid", http.StatusOK, s.endpointVCICredentialOfferURI)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "deferred_credential", http.StatusOK, s.endpointVCIDeferredCredential)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "notification", http.StatusNoContent, s.endpointVCINotification)
+	// Register both with and without trailing slash so that wallets using either
+	// form get a direct 200 response instead of a 301 redirect.
+	// The spec (OID4VCI §12.2.2) defines the path without a trailing slash.
+	// The trailing-slash variant is kept for compatibility with the Siros
+	// Foundation wwWallet which requests the path with a trailing slash.
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer", http.StatusOK, s.endpointVCIMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/openid-credential-issuer/", http.StatusOK, s.endpointVCIMetadata)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
