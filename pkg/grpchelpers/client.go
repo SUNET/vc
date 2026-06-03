@@ -13,38 +13,19 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 )
 
-// defaultServiceConfig is a gRPC service config that enables transparent
-// retries for transient failures (UNAVAILABLE — e.g. connection refused,
-// DNS resolution failures, brief network blips).  The policy applies to
-// every unary RPC on every service.
-//
-// maxAttempts=5 with very short backoff (20 ms → 40 ms → 80 ms → 100 ms)
-// keeps total added latency under ~250 ms so synchronous flows like
-// credential issuance stay responsive for the waiting user.
-const defaultServiceConfig = `{
-	"methodConfig": [{
-		"name": [{"service": ""}],
-		"retryPolicy": {
-			"maxAttempts": 5,
-			"initialBackoff": "0.02s",
-			"maxBackoff": "0.1s",
-			"backoffMultiplier": 2.0,
-			"retryableStatusCodes": ["UNAVAILABLE"]
-		}
-	}]
-}`
-
 // NewClientConn creates a gRPC client connection with optional mTLS support.
 // If TLS is disabled, returns an insecure connection.
 // If TLS is enabled without client certs, uses server-only TLS.
 // If TLS is enabled with client certs, uses mutual TLS (mTLS).
 //
-// All connections are configured with a default retry policy that
-// transparently retries UNAVAILABLE errors with exponential backoff.
+// No automatic retry policy is configured because several services exposed
+// over these connections are non-idempotent (e.g. MakeSDJWT, MakeMDoc,
+// TokenStatusListAddStatus). Retrying UNAVAILABLE after the server has
+// already processed a request would risk duplicating credentials or status
+// list entries. Callers that need retries for specific idempotent RPCs
+// should implement them at the application level.
 func NewClientConn(cfg model.GRPCClientTLS) (*grpc.ClientConn, error) {
-	opts := []grpc.DialOption{
-		grpc.WithDefaultServiceConfig(defaultServiceConfig),
-	}
+	opts := []grpc.DialOption{}
 
 	if !cfg.TLS {
 		// Insecure connection
