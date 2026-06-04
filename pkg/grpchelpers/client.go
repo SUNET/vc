@@ -17,10 +17,20 @@ import (
 // If TLS is disabled, returns an insecure connection.
 // If TLS is enabled without client certs, uses server-only TLS.
 // If TLS is enabled with client certs, uses mutual TLS (mTLS).
+//
+// No automatic retry policy is configured because several services exposed
+// over these connections are non-idempotent (e.g. MakeSDJWT, MakeMDoc,
+// TokenStatusListAddStatus). Retrying UNAVAILABLE after the server has
+// already processed a request would risk duplicating credentials or status
+// list entries. Callers that need retries for specific idempotent RPCs
+// should implement them at the application level.
 func NewClientConn(cfg model.GRPCClientTLS) (*grpc.ClientConn, error) {
+	opts := []grpc.DialOption{}
+
 	if !cfg.TLS {
 		// Insecure connection
-		return grpc.NewClient(cfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient(cfg.Addr, opts...)
 	}
 
 	// Build TLS config
@@ -57,7 +67,9 @@ func NewClientConn(cfg model.GRPCClientTLS) (*grpc.ClientConn, error) {
 	}
 
 	creds := credentials.NewTLS(tlsConfig)
-	conn, err := grpc.NewClient(cfg.Addr, grpc.WithTransportCredentials(creds))
+	opts = append(opts, grpc.WithTransportCredentials(creds))
+
+	conn, err := grpc.NewClient(cfg.Addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client connection: %w", err)
 	}

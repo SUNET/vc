@@ -252,9 +252,10 @@ Alpine.data("app", () => ({
     async handleIsLoggedIn() {
         this.loading = true;
 
-        const url = new URL("/user/lookup", baseUrl);
+        const lookupUrl = new URL("/user/lookup", baseUrl);
+        const svgUrl = new URL("/authorization/consent/svg-template", baseUrl);
 
-        const options = {
+        const lookupOptions = {
             method: "GET", 
             headers: {
                 "Accept": "application/json", 
@@ -263,18 +264,38 @@ Alpine.data("app", () => ({
         };
 
         try {
-            const res = await this.fetchData(url.toString(), options);
+            // Fire user lookup and SVG template fetch in parallel.
+            // The template itself is independent of user data; only the
+            // placeholder substitution needs both.
+            const [res, svgTemplateResult] = await Promise.all([
+                this.fetchData(lookupUrl.toString(), lookupOptions),
+                this.fetchData(svgUrl.toString(), {}).catch((err) => {
+                    // fetchData flips loggedIn to false on 401 before throwing.
+                    // Re-throw so the outer catch block can redirect to login.
+                    // All other errors (404, 5xx, network) are treated as
+                    // "no template available" so the page still renders claims
+                    // without a card image.
+                    if (!this.loggedIn) {
+                        throw err;
+                    }
+                    return null;
+                }),
+            ]);
+
             const data = v.parse(UserDataSchema, res);
 
             this.redirectUrl = data.redirect_url;
 
             let svg = null;
-            try {
-                svg = await this.createCredentialSvgImageUri(
-                    data.svg_template_claims,
-                );
-            } catch (_) {
-                // VCTM has no SVG template — display claims without card image
+            if (svgTemplateResult) {
+                try {
+                    svg = this.applyClaimsToSvgTemplate(
+                        svgTemplateResult,
+                        data.svg_template_claims,
+                    );
+                } catch (_) {
+                    // VCTM has no SVG template — display claims without card image
+                }
             }
 
             this.credentials.push({
@@ -335,19 +356,16 @@ Alpine.data("app", () => ({
     },
 
     /**
+     * Apply claim values to a pre-fetched SVG template and return a data URI.
+     * @param {SvgTemplateResponse} svgData - Pre-fetched SVG template response
      * @param {Record<string, { label: string; value: unknown; }>} claims
-     * @returns {Promise<string>}
+     * @returns {string}
      */
-    async createCredentialSvgImageUri(claims) {
-        const url = new URL('/authorization/consent/svg-template', baseUrl);
-
-        /** @type {SvgTemplateResponse} */
-        const data = await this.fetchData(url.toString(), {});
-
+    applyClaimsToSvgTemplate(svgData, claims) {
         // Decode the template as UTF-8 — `atob` alone returns a Latin-1 byte
         // string, which would corrupt any non-ASCII characters in the SVG
         // when re-encoded with utf8ToBase64 below.
-        let svg = base64ToUtf8(data.template);
+        let svg = base64ToUtf8(svgData.template);
 
         for (const [svg_id, claim] of Object.entries(claims)) {
             // valueForSvgPlaceholder decides what (if anything) is safe to

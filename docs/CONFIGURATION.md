@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-06-01
+**Generated:** 2026-06-04
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -648,16 +648,17 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 > **Path:** `.issuer`
 
-| Field             | Type     | Description                            | Example                     | Default | Required |
-| ----------------- | -------- | -------------------------------------- | --------------------------- | ------- | -------- |
-| `api_server`      | `object` | HTTP API server configuration          | -                           | -       | Yes      |
-| `grpc_server`     | `object` | GRPC server configuration              | -                           | -       | Yes      |
-| `key_config`      | `object` | Signing key configuration              | -                           | -       | Yes      |
-| `jwt_attribute`   | `object` | JWT credential attribute configuration | -                           | -       | Yes      |
-| `issuer_url`      | `string` | Issuer identifier URL                  | `"https://issuer.sunet.se"` | -       | Yes      |
-| `registry_client` | `object` | Registry gRPC client config            | -                           | -       | No       |
-| `mdoc`            | `object` | MDL/mdoc configuration                 | -                           | -       | No       |
-| `audit_log`       | `object` | Audit log configuration                | -                           | -       | No       |
+| Field                      | Type     | Description                                                                                                                                                                                                       | Example                     | Default | Required |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
+| `api_server`               | `object` | HTTP API server configuration                                                                                                                                                                                     | -                           | -       | Yes      |
+| `grpc_server`              | `object` | GRPC server configuration                                                                                                                                                                                         | -                           | -       | Yes      |
+| `key_config`               | `object` | Signing key configuration                                                                                                                                                                                         | -                           | -       | Yes      |
+| `jwt_attribute`            | `object` | JWT credential attribute configuration                                                                                                                                                                            | -                           | -       | Yes      |
+| `issuer_url`               | `string` | Issuer identifier URL                                                                                                                                                                                             | `"https://issuer.sunet.se"` | -       | Yes      |
+| `registry_client`          | `object` | Registry gRPC client config                                                                                                                                                                                       | -                           | -       | No       |
+| `mdoc`                     | `object` | MDL/mdoc configuration                                                                                                                                                                                            | -                           | -       | No       |
+| `audit_log`                | `object` | Audit log configuration                                                                                                                                                                                           | -                           | -       | No       |
+| `sign_metadata_rate_limit` | `object` | The rate limiter for the SignMetadata gRPC endpoint. In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults should accommodate the expected cluster size. Default: 2 req/s, burst 20. | -                           | -       | No       |
 
 ### `grpc_server`
 
@@ -716,6 +717,15 @@ In a later state this should be placed under authentic source in order to issue 
 | `enable`             | `bool`     | Audit logging                                                                                                                                                                                                                                               | -                                                                    | `false` | No               |
 | `destinations`       | `[]string` | List of log destinations (console/stdout, file path, or HTTP URL)                                                                                                                                                                                           | `["stdout", "/var/log/audit.log", "https://audit.sunet.se/webhook"]` | -       | Yes (if enabled) |
 | `file_sync_interval` | `duration` | Fsync behavior for file destinations. 0 = fsync after every write (strict durability, lower throughput). >0 = periodic batched fsync at the given interval (better throughput, bounded data-loss window). Has no effect on console or webhook destinations. | -                                                                    | `5s`    | No               |
+
+### `sign_metadata_rate_limit`
+
+> **Path:** `.issuer.sign_metadata_rate_limit`
+
+| Field                 | Type      | Description                                                       | Example | Default | Required |
+| --------------------- | --------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
+| `requests_per_second` | `float64` | Sustained rate limit in requests per second. Default: 2           | -       | `2`     | No       |
+| `burst`               | `int`     | Maximum number of requests allowed in a single burst. Default: 20 | -       | `20`    | No       |
 
 ## `verifier` (Top-level)
 

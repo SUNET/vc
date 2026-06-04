@@ -13,6 +13,7 @@ type Apiv1 interface {
 	MakeSDJWT(ctx context.Context, req *apiv1.CreateCredentialRequest) (*apiv1.CreateCredentialReply, error)
 	MakeMDoc(ctx context.Context, req *apiv1.CreateMDocRequest) (*apiv1.CreateMDocReply, error)
 	JWKS(ctx context.Context, req *apiv1_issuer.Empty) (*apiv1_issuer.JwksReply, error)
+	SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadataRequest) (*apiv1_issuer.SignMetadataReply, error)
 
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
 }

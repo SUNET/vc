@@ -184,7 +184,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// store the transformed claims as a document in the VCI session cache and signal
 	// the httpserver to redirect back to the consent page.
 	if session.VCISessionID != "" {
-		c.log.Info("OIDC callback: VCI mode detected",
+		c.log.Debug("OIDCRPCallback: VCI mode",
 			"vci_session_id", session.VCISessionID,
 			"credential_type", session.CredentialType)
 

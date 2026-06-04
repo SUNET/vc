@@ -66,7 +66,7 @@ func TestClientMetadata_Marshal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			claims, err := tt.metadata.Marshal()
+			claims, err := tt.metadata.MarshalJWTClaims()
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

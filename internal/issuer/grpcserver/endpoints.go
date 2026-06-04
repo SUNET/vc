@@ -61,3 +61,8 @@ func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest
 		ValidUntil:        reply.ValidUntil,
 	}, nil
 }
+
+// SignMetadata signs metadata JSON with the issuer's own key (the key in JWKS)
+func (s *Service) SignMetadata(ctx context.Context, in *apiv1_issuer.SignMetadataRequest) (*apiv1_issuer.SignMetadataReply, error) {
+	return s.apiv1.SignMetadata(ctx, in)
+}

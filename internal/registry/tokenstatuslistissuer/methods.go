@@ -60,10 +60,10 @@ func (s *Service) GenerateStatusListTokenCWT(ctx context.Context, cfg TokenConfi
 		return nil, fmt.Errorf("signer must be a *pki.KeyMaterialSigner, got %T", s.signer)
 	}
 
-	// Generate CWT using tokenstatuslist package
+	// Generate CWT using tokenstatuslist package.
+	// Algorithm is auto-detected from the key type (ES256 for ECDSA, PS256 for RSA).
 	cwtCfg := tokenstatuslist.CWTSigningConfig{
 		SigningKey: kmSigner.PrivateKey(),
-		Algorithm:  tokenstatuslist.CoseAlgES256,
 	}
 
 	return sl.GenerateCWT(cwtCfg)
@@ -86,7 +86,9 @@ func (s *Service) CreateNewSectionIfNeeded(ctx context.Context) (int64, error) {
 		"section": currentSection,
 		"decoy":   true,
 	}
-	numberOfDecoyDocs, err := s.tokenStatusListColl.CountDocs(ctx, countFilter)
+	// Use limited count: we only need to know if decoys > 1000, not the exact total.
+	// With 1M+ documents, an unlimited CountDocuments takes ~670ms; with limit 1001 it returns in <1ms.
+	numberOfDecoyDocs, err := s.tokenStatusListColl.CountDocsWithLimit(ctx, countFilter, 1001)
 	if err != nil {
 		return 0, err
 	}

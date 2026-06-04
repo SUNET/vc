@@ -58,6 +58,11 @@ type Service struct {
 	// reference that is kept in the cookie session instead of the full token.
 	AdminIDToken Cache[string]
 
+	// SignedMetadata caches signed_metadata JWTs produced by the issuer.
+	// Key is the metadata type (e.g. "vci", "oauth2"); value is the signed JWT string.
+	// TTL is 1 hour; a background ticker refreshes every 55 minutes.
+	SignedMetadata Cache[string]
+
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
 	// SessionEncKey is the AES encryption key for session cookies, shared across HA instances.
@@ -108,6 +113,10 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.AdminIDToken, err = pkgcache.NewGenericCache[string](cs, ctx, "apigw_admin_id_tokens", 1*time.Hour); err != nil {
 		return nil, fmt.Errorf("cache: admin_id_tokens: %w", err)
+	}
+
+	if s.SignedMetadata, err = pkgcache.NewGenericCache[string](cs, ctx, "apigw_signed_metadata", 1*time.Hour); err != nil {
+		return nil, fmt.Errorf("cache: signed_metadata: %w", err)
 	}
 
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).

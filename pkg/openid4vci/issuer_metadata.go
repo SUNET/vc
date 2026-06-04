@@ -47,7 +47,13 @@ type CredentialIssuerMetadataParameters struct {
 	CredentialConfigurationsSupported map[string]CredentialConfigurationsSupported `json:"credential_configurations_supported" yaml:"credential_configurations_supported" validate:"required"`
 }
 
-func (c *CredentialIssuerMetadataParameters) Marshal() (jwt.MapClaims, error) {
+// MetadataIssuer returns the issuer identifier embedded in the metadata
+// (credential_issuer), used to verify it matches the request's iss claim.
+func (c *CredentialIssuerMetadataParameters) MetadataIssuer() string {
+	return c.CredentialIssuer
+}
+
+func (c *CredentialIssuerMetadataParameters) MarshalJWTClaims() (jwt.MapClaims, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -68,7 +74,7 @@ func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pk
 		"x5c": x5c,
 	}
 
-	body, err := c.Marshal()
+	body, err := c.MarshalJWTClaims()
 	if err != nil {
 		return nil, err
 	}

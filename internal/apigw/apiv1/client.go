@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/cache"
@@ -64,6 +65,10 @@ type Client struct {
 
 	// Trust evaluation
 	jwtTrustVerifier *trust.JWTTrustVerifier
+
+	// issuerReachable tracks whether the issuer gRPC was reachable on the last refresh.
+	// Used to log state transitions (down→up, up→down) at Info level.
+	issuerReachable atomic.Bool
 }
 
 // New creates a new instance of the public api

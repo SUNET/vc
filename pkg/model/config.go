@@ -374,6 +374,18 @@ type Issuer struct {
 	MDoc *MDocConfig `yaml:"mdoc" validate:"omitempty"`
 	// AuditLog holds audit log configuration
 	AuditLog *AuditLog `yaml:"audit_log" validate:"omitempty"`
+	// SignMetadataRateLimit configures the rate limiter for the SignMetadata gRPC endpoint.
+	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
+	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
+	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
+}
+
+// SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.
+type SignMetadataRateLimitConfig struct {
+	// RequestsPerSecond is the sustained rate limit in requests per second. Default: 2
+	RequestsPerSecond float64 `yaml:"requests_per_second" default:"2" validate:"gt=0"`
+	// Burst is the maximum number of requests allowed in a single burst. Default: 20
+	Burst int `yaml:"burst" default:"20" validate:"gt=0"`
 }
 
 // AuditLog holds audit log configuration for multiple destinations

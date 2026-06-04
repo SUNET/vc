@@ -581,14 +581,19 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 		return nil, err
 	}
 
-	if c.pkiSigner != nil {
-		reply, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
-		if err != nil {
-			c.log.Error(err, "failed to sign metadata")
-			return nil, err
-		}
-		return reply, nil
+	// Shallow-copy to avoid mutating the shared struct concurrently.
+	metadata := *c.issuerMetadata
+
+	// Use cached signed metadata (refreshed by background ticker every 55 min).
+	// signed_metadata is OPTIONAL per OID4VCI §12.2.4 — if signing fails
+	// (issuer unreachable, not configured, etc.) return unsigned metadata.
+	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyVCI, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
+	if err != nil {
+		c.log.Error(err, "signed_metadata unavailable, serving unsigned metadata")
+		metadata.SignedMetadata = ""
+	} else {
+		metadata.SignedMetadata = signedMetadata
 	}
 
-	return c.issuerMetadata, nil
+	return &metadata, nil
 }
