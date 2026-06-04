@@ -21,6 +21,11 @@ const (
 	// signedMetadataRefreshInterval is how often the background ticker refreshes.
 	// Slightly shorter than the 1-hour cache TTL to ensure continuity.
 	signedMetadataRefreshInterval = 55 * time.Minute
+
+	// signedMetadataDocCount is the number of signed metadata documents the
+	// refresher maintains (VCI + OAuth2). The startup loop keeps retrying until
+	// all of them are cached.
+	signedMetadataDocCount = 2
 )
 
 // signMetadataViaIssuer delegates metadata signing to the issuer service via gRPC.
@@ -76,16 +81,19 @@ func (c *Client) getOrSignMetadata(ctx context.Context, cacheKey string, metadat
 
 // StartSignedMetadataRefresher starts a background goroutine that keeps
 // signed metadata warm in the cache. On startup it retries with a 5-second
-// pause between attempts until the issuer is reachable, then switches to
-// 55-minute steady-state refreshes. Note: each attempt calls refreshSignedMetadata
+// pause between attempts until all metadata documents are cached, then switches
+// to 55-minute steady-state refreshes. Note: each attempt calls refreshSignedMetadata
 // which makes two gRPC calls (VCI + OAuth2), each with a 30-second timeout, so a
 // single retry iteration can take over 60 seconds when the issuer is unresponsive.
 func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 	go func() {
-		// Retry loop: wait for the issuer to become reachable.
+		// Retry loop: keep going until the cache is actually warm. We gate on the
+		// number of documents cached rather than issuerReachable, because the issuer
+		// can be reachable yet still fail to sign (e.g. rate-limit or validation
+		// errors, which are not gRPC UNAVAILABLE). Breaking on reachability alone
+		// could leave the cache empty until the first 55-minute tick.
 		for {
-			c.refreshSignedMetadata(ctx)
-			if c.issuerReachable.Load() {
+			if c.refreshSignedMetadata(ctx) == signedMetadataDocCount {
 				break
 			}
 			select {
@@ -117,9 +125,12 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 // In HA mode, multiple nodes may race — each signs and writes with Set (last writer
 // wins). This is acceptable because all nodes sign identical metadata with the same
 // key, so any value is equally valid.
-func (c *Client) refreshSignedMetadata(ctx context.Context) {
+//
+// It returns the number of metadata documents successfully signed and cached during
+// this invocation (0..signedMetadataDocCount), so the startup loop can keep retrying
+// until the cache is warm.
+func (c *Client) refreshSignedMetadata(ctx context.Context) (cached int) {
 	var unreachable bool
-	var cached int
 
 	// Refresh VCI metadata
 	vci, err := c.signMetadataViaIssuer(ctx, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
@@ -166,6 +177,8 @@ func (c *Client) refreshSignedMetadata(ctx context.Context) {
 		c.log.Info("issuer signing service became unreachable")
 		c.issuerReachable.Store(false)
 	}
+
+	return cached
 }
 
 // isGRPCUnavailable reports whether err is a gRPC UNAVAILABLE error,
