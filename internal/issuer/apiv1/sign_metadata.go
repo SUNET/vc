@@ -99,13 +99,14 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 
 	// Always override standard claims to prevent caller-supplied metadata_json
 	// from injecting arbitrary iss/sub/iat values into the signed JWT.
+	// For issuer/authorization-server metadata the subject must be the issuer
+	// itself (RFC 8414 §2, OID4VCI §11.2.1). Reject any other value.
+	if sub := req.GetSub(); sub != "" && sub != req.GetIss() {
+		return nil, fmt.Errorf("sub must be empty or equal to iss")
+	}
 	body["iat"] = time.Now().Unix()
 	body["iss"] = req.GetIss()
-	sub := req.GetSub()
-	if sub == "" {
-		sub = req.GetIss()
-	}
-	body["sub"] = sub
+	body["sub"] = req.GetIss()
 
 	header := jwt.MapClaims{
 		"typ": jwtTyp,

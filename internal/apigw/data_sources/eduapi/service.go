@@ -70,6 +70,8 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 		"vci_session_id", vciSessionID)
 
 	// Fetch person and enrollments in parallel — they are independent calls.
+	// Use a derived context so that if GetPerson fails quickly we can cancel
+	// the (potentially slow) enrollments request instead of blocking on it.
 	var (
 		person      *eduapi.Person
 		enrollments []eduapi.Enrollment
@@ -78,14 +80,20 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 		wg          sync.WaitGroup
 	)
 
+	fetchCtx, fetchCancel := context.WithCancel(ctx)
+	defer fetchCancel()
+
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		person, personErr = s.client.GetPerson(ctx, personID)
+		person, personErr = s.client.GetPerson(fetchCtx, personID)
+		if personErr != nil {
+			fetchCancel()
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		enrollments, enrollErr = s.client.GetEnrollmentsForPerson(ctx, personID)
+		enrollments, enrollErr = s.client.GetEnrollmentsForPerson(fetchCtx, personID)
 	}()
 	wg.Wait()
 
