@@ -269,7 +269,12 @@ Alpine.data("app", () => ({
             // placeholder substitution needs both.
             const [res, svgTemplateResult] = await Promise.all([
                 this.fetchData(lookupUrl.toString(), lookupOptions),
-                this.fetchData(svgUrl.toString(), {}).catch(() => null),
+                this.fetchData(svgUrl.toString(), {}).catch((err) => {
+                    if (err instanceof Error && err.message.includes("status: 404")) {
+                        return null;
+                    }
+                    throw err;
+                }),
             ]);
 
             const data = v.parse(UserDataSchema, res);

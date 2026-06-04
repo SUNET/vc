@@ -26,6 +26,11 @@ const (
 	// refresher maintains (VCI + OAuth2). The startup loop keeps retrying until
 	// all of them are cached.
 	signedMetadataDocCount = 2
+
+	// Exponential backoff parameters for the startup retry loop.
+	signedMetadataInitialBackoff = 5 * time.Second
+	signedMetadataMaxBackoff     = 5 * time.Minute
+	signedMetadataMaxRetryWindow = 30 * time.Minute
 )
 
 // signMetadataViaIssuer delegates metadata signing to the issuer service via gRPC.
@@ -92,14 +97,30 @@ func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 		// can be reachable yet still fail to sign (e.g. rate-limit or validation
 		// errors, which are not gRPC UNAVAILABLE). Breaking on reachability alone
 		// could leave the cache empty until the first 55-minute tick.
+		//
+		// Uses exponential backoff (5s → 5m cap) with a maximum retry window to
+		// avoid sustained load and log spam when the issuer has a persistent
+		// application-level error.
+		backoff := signedMetadataInitialBackoff
+		startTime := time.Now()
 		for {
 			if c.refreshSignedMetadata(ctx) == signedMetadataDocCount {
+				break
+			}
+			if time.Since(startTime) >= signedMetadataMaxRetryWindow {
+				c.log.Error(nil, "signed metadata startup retries exhausted; falling back to steady-state refresh interval",
+					"retryWindow", signedMetadataMaxRetryWindow)
 				break
 			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(backoff):
+			}
+			// Exponential backoff: double each iteration, capped at max.
+			backoff *= 2
+			if backoff > signedMetadataMaxBackoff {
+				backoff = signedMetadataMaxBackoff
 			}
 		}
 

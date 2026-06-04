@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -45,17 +48,17 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	c.log.Debug("SignMetadata", "metadata_type", req.GetMetadataType(), "iss", req.GetIss())
 
 	if !c.signMetadataRL.Allow() {
-		return nil, fmt.Errorf("SignMetadata rate limit exceeded")
+		return nil, grpcstatus.Error(codes.ResourceExhausted, "SignMetadata rate limit exceeded")
 	}
 
 	if len(req.GetMetadataJson()) == 0 {
-		return nil, fmt.Errorf("metadata_json is required")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "metadata_json is required")
 	}
 	if len(req.GetMetadataJson()) > 64*1024 {
-		return nil, fmt.Errorf("metadata_json is too large")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "metadata_json is too large")
 	}
 	if req.GetIss() != c.cfg.Issuer.IssuerURL {
-		return nil, fmt.Errorf("iss must equal configured issuer_url")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "iss must equal configured issuer_url")
 	}
 
 	// Pick the concrete struct and JWT typ for this metadata type.
@@ -72,21 +75,21 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 		metadata = &oauth2.AuthorizationServerMetadata{}
 		jwtTyp = "JWT"
 	default:
-		return nil, fmt.Errorf("unsupported metadata type: %q", req.GetMetadataType())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unsupported metadata type: %q", req.GetMetadataType())
 	}
 
 	if err := json.Unmarshal(req.GetMetadataJson(), metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "failed to parse metadata: %v", err)
 	}
 
 	if err := helpers.CheckSimple(metadata); err != nil {
-		return nil, fmt.Errorf("metadata validation failed: %w", err)
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "metadata validation failed: %v", err)
 	}
 
 	// Verify the metadata's own issuer identifier matches req.iss to prevent
 	// signing metadata that points to attacker-controlled endpoints.
 	if metaIss := metadata.MetadataIssuer(); metaIss != req.GetIss() {
-		return nil, fmt.Errorf("metadata issuer %q does not match request iss %q", metaIss, req.GetIss())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "metadata issuer %q does not match request iss %q", metaIss, req.GetIss())
 	}
 
 	body, err := metadata.MarshalJWTClaims()
@@ -102,7 +105,7 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	// For issuer/authorization-server metadata the subject must be the issuer
 	// itself (RFC 8414 §2, OID4VCI §11.2.1). Reject any other value.
 	if sub := req.GetSub(); sub != "" && sub != req.GetIss() {
-		return nil, fmt.Errorf("sub must be empty or equal to iss")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "sub must be empty or equal to iss")
 	}
 	body["iat"] = time.Now().Unix()
 	body["iss"] = req.GetIss()
