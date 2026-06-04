@@ -3,6 +3,7 @@ package tokenstatuslist
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -278,15 +279,15 @@ func signRSAPSS(data []byte, key crypto.PrivateKey, hashAlg crypto.Hash) ([]byte
 func detectCOSEAlgorithm(key crypto.PrivateKey) (int, error) {
 	switch k := key.(type) {
 	case *ecdsa.PrivateKey:
-		switch k.Curve.Params().BitSize {
-		case 256:
+		switch k.Curve {
+		case elliptic.P256():
 			return CoseAlgES256, nil
-		case 384:
+		case elliptic.P384():
 			return CoseAlgES384, nil
-		case 521:
+		case elliptic.P521():
 			return CoseAlgES512, nil
 		default:
-			return 0, fmt.Errorf("unsupported ECDSA curve bit size: %d", k.Curve.Params().BitSize)
+			return 0, fmt.Errorf("unsupported ECDSA curve: %s", k.Curve.Params().Name)
 		}
 	case *rsa.PrivateKey:
 		return CoseAlgPS256, nil

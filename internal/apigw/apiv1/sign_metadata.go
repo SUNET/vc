@@ -85,11 +85,12 @@ func (c *Client) getOrSignMetadata(ctx context.Context, cacheKey string, metadat
 }
 
 // StartSignedMetadataRefresher starts a background goroutine that keeps
-// signed metadata warm in the cache. On startup it retries with a 5-second
-// pause between attempts until all metadata documents are cached, then switches
-// to 55-minute steady-state refreshes. Note: each attempt calls refreshSignedMetadata
-// which makes two gRPC calls (VCI + OAuth2), each with a 30-second timeout, so a
-// single retry iteration can take over 60 seconds when the issuer is unresponsive.
+// signed metadata warm in the cache. On startup it retries with exponential
+// backoff (5s initial, doubling up to 5m cap, 30m maximum retry window) until
+// all metadata documents are cached, then switches to 55-minute steady-state
+// refreshes. Note: each attempt calls refreshSignedMetadata which makes two
+// gRPC calls (VCI + OAuth2), each with a 30-second timeout, so a single retry
+// iteration can take over 60 seconds when the issuer is unresponsive.
 func (c *Client) StartSignedMetadataRefresher(ctx context.Context) {
 	go func() {
 		// Retry loop: keep going until the cache is actually warm. We gate on the

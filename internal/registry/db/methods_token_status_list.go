@@ -101,10 +101,10 @@ func (c *TokenStatusListColl) createIndex(ctx context.Context) error {
 
 	indexUniq := mongo.IndexModel{
 		Keys: bson.D{
-			bson.E{Key: "index", Value: 1},
 			bson.E{Key: "section", Value: 1},
+			bson.E{Key: "index", Value: 1},
 		},
-		Options: options.Index().SetName("index_uniq").SetUnique(true),
+		Options: options.Index().SetName("section_index_uniq").SetUnique(true),
 	}
 	indexDecoyLookup := mongo.IndexModel{
 		Keys: bson.D{
@@ -113,16 +113,7 @@ func (c *TokenStatusListColl) createIndex(ctx context.Context) error {
 		},
 		Options: options.Index().SetName("decoy_lookup"),
 	}
-	// Covers GetAllStatusesForSection (filter section + sort by index),
-	// UpdateStatus, and FindOne({section, index}) queries.
-	indexSectionIndex := mongo.IndexModel{
-		Keys: bson.D{
-			bson.E{Key: "section", Value: 1},
-			bson.E{Key: "index", Value: 1},
-		},
-		Options: options.Index().SetName("section_index_lookup"),
-	}
-	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUniq, indexDecoyLookup, indexSectionIndex})
+	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUniq, indexDecoyLookup})
 	if err != nil {
 		return err
 	}
