@@ -36,7 +36,20 @@ func (c *IdentityMappingsColl) createIndex(ctx context.Context) error {
 		Options: options.Index().SetName("identity_unique").SetUnique(true),
 	}
 
-	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUnique})
+	// Compound index for ResolveMapping queries that filter on
+	// authentic_source + attributes (given_name, family_name, birth_date).
+	// Without this index, every identity resolution does a collection scan.
+	indexAttributeLookup := mongo.IndexModel{
+		Keys: bson.D{
+			bson.E{Key: "authentic_source", Value: 1},
+			bson.E{Key: "attributes.family_name", Value: 1},
+			bson.E{Key: "attributes.given_name", Value: 1},
+			bson.E{Key: "attributes.birth_date", Value: 1},
+		},
+		Options: options.Index().SetName("attribute_lookup"),
+	}
+
+	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUnique, indexAttributeLookup})
 	if err != nil {
 		return err
 	}

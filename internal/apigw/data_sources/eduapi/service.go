@@ -6,6 +6,7 @@ package eduapi
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/credential"
@@ -68,19 +69,36 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 		"credential_type", credentialType,
 		"vci_session_id", vciSessionID)
 
-	// Fetch person data
-	person, err := s.client.GetPerson(ctx, personID)
-	if err != nil {
-		return fmt.Errorf("eduapi: fetch person %s: %w", personID, err)
+	// Fetch person and enrollments in parallel — they are independent calls.
+	var (
+		person      *eduapi.Person
+		enrollments []eduapi.Enrollment
+		personErr   error
+		enrollErr   error
+		wg          sync.WaitGroup
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		person, personErr = s.client.GetPerson(ctx, personID)
+	}()
+	go func() {
+		defer wg.Done()
+		enrollments, enrollErr = s.client.GetEnrollmentsForPerson(ctx, personID)
+	}()
+	wg.Wait()
+
+	if personErr != nil {
+		return fmt.Errorf("eduapi: fetch person %s: %w", personID, personErr)
 	}
 
 	// Flatten person data
 	claims := person.Flatten()
 
-	// Fetch enrollments and merge
-	enrollments, err := s.client.GetEnrollmentsForPerson(ctx, personID)
-	if err != nil {
-		s.log.Info("Could not fetch enrollments, continuing without", "error", err)
+	// Merge enrollments
+	if enrollErr != nil {
+		s.log.Info("Could not fetch enrollments, continuing without", "error", enrollErr)
 	} else if len(enrollments) > 0 {
 		// Flatten first active enrollment and its course offering
 		for _, e := range enrollments {
@@ -123,6 +141,7 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 	// Apply claim transformer if configured for this credential type
 	var transformedClaims map[string]any
 	if t, ok := s.transformers[credentialType]; ok {
+		var err error
 		transformedClaims, err = t.TransformClaims(claims)
 		if err != nil {
 			return fmt.Errorf("eduapi: transform claims: %w", err)

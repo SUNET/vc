@@ -139,6 +139,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	//   s.gin.Static("/static", "./staticembed")
 	//   s.gin.LoadHTMLGlob("./staticembed/*.html")
 
+	// Set Cache-Control on static assets. These are embedded at build time and
+	// only change on redeployment, so a 24-hour cache avoids re-downloading
+	// ~1 MB of CSS/JS on every page load.
+	s.gin.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
+			c.Header("Cache-Control", "public, max-age=86400")
+		}
+		c.Next()
+	})
+
 	s.gin.StaticFS("/static", http.FS(staticembed.FS))
 
 	tmpl := template.New("").Funcs(template.FuncMap{

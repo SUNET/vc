@@ -362,7 +362,8 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 
 	s.log.Info("OIDC authentication successful",
 		"subject", idToken.Subject,
-		"issuer", idToken.Issuer)
+		"issuer", idToken.Issuer,
+	)
 
 	return &AuthResponse{
 		IDToken:      idToken,

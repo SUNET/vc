@@ -320,6 +320,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		return nil, err
 	}
 
+	c.log.Info("OAuthToken complete")
 	return reply, nil
 }
 

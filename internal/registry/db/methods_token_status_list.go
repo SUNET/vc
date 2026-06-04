@@ -113,7 +113,16 @@ func (c *TokenStatusListColl) createIndex(ctx context.Context) error {
 		},
 		Options: options.Index().SetName("decoy_lookup"),
 	}
-	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUniq, indexDecoyLookup})
+	// Covers GetAllStatusesForSection (filter section + sort by index),
+	// UpdateStatus, and FindOne({section, index}) queries.
+	indexSectionIndex := mongo.IndexModel{
+		Keys: bson.D{
+			bson.E{Key: "section", Value: 1},
+			bson.E{Key: "index", Value: 1},
+		},
+		Options: options.Index().SetName("section_index_lookup"),
+	}
+	_, err := c.Coll.Indexes().CreateMany(ctx, []mongo.IndexModel{indexUniq, indexDecoyLookup, indexSectionIndex})
 	if err != nil {
 		return err
 	}
@@ -127,6 +136,22 @@ func (c *TokenStatusListColl) CountDocs(ctx context.Context, filter bson.M) (int
 	defer span.End()
 
 	count, err := c.Coll.CountDocuments(ctx, filter)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// CountDocsWithLimit counts documents matching the filter, stopping early once limit is reached.
+// This is much faster than CountDocs when only a threshold check is needed (e.g. "are there more than N?").
+func (c *TokenStatusListColl) CountDocsWithLimit(ctx context.Context, filter bson.M, limit int64) (int64, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:countDocsWithLimit")
+	defer span.End()
+
+	opts := options.Count().SetLimit(limit)
+	count, err := c.Coll.CountDocuments(ctx, filter, opts)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return 0, err
@@ -290,7 +315,9 @@ func (c *TokenStatusListColl) GetAllStatusesForSection(ctx context.Context, sect
 	defer span.End()
 
 	filter := bson.M{"section": section}
-	opts := options.Find().SetSort(bson.D{{Key: "index", Value: 1}})
+	opts := options.Find().
+		SetSort(bson.D{{Key: "index", Value: 1}}).
+		SetProjection(bson.D{{Key: "index", Value: 1}, {Key: "status", Value: 1}})
 
 	cursor, err := c.Coll.Find(ctx, filter, opts)
 	if err != nil {

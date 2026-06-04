@@ -9,6 +9,7 @@ import (
 // TokenStatusListStore defines the interface for token status list operations
 type TokenStatusListStore interface {
 	CountDocs(ctx context.Context, filter bson.M) (int64, error)
+	CountDocsWithLimit(ctx context.Context, filter bson.M, limit int64) (int64, error)
 	CreateNewSection(ctx context.Context, section int64, sectionSize int64) error
 	Add(ctx context.Context, section int64, status uint8) (int64, error)
 	UpdateStatus(ctx context.Context, section int64, index int64, status uint8) error
