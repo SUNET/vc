@@ -9,6 +9,8 @@ import (
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"golang.org/x/time/rate"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -56,6 +58,11 @@ func newSignMetadataClient(t *testing.T) *Client {
 	log := logger.NewSimple("test")
 	client := mockNewClient(t.Context(), t, "", log)
 	client.cfg.Issuer.IssuerURL = testIssuerURL
+	client.cfg.Issuer.SignMetadataRateLimit = model.SignMetadataRateLimitConfig{
+		RequestsPerSecond: 2,
+		Burst:             20,
+	}
+	client.signMetadataRL = rate.NewLimiter(rate.Limit(client.cfg.Issuer.SignMetadataRateLimit.RequestsPerSecond), client.cfg.Issuer.SignMetadataRateLimit.Burst)
 	return client
 }
 
@@ -384,9 +391,15 @@ func TestSignMetadata_PayloadSanitization(t *testing.T) {
 
 func TestSignMetadata_RateLimitExhausted(t *testing.T) {
 	client := newSignMetadataClient(t)
+	// Use a tight rate limiter for testing (burst=2).
+	client.cfg.Issuer.SignMetadataRateLimit = model.SignMetadataRateLimitConfig{
+		RequestsPerSecond: 0.01,
+		Burst:             2,
+	}
+	client.signMetadataRL = rate.NewLimiter(rate.Limit(client.cfg.Issuer.SignMetadataRateLimit.RequestsPerSecond), client.cfg.Issuer.SignMetadataRateLimit.Burst)
 
-	// Exhaust the rate limiter (burst=5 by default).
-	for i := range 5 {
+	// Exhaust the rate limiter (burst=2).
+	for i := range 2 {
 		_, err := client.SignMetadata(t.Context(), &apiv1_issuer.SignMetadataRequest{
 			MetadataJson: validVCIMetadataJSON(t),
 			MetadataType: MetadataTypeVCIIssuer,

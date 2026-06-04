@@ -47,10 +47,6 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 
 	c.log.Debug("SignMetadata", "metadata_type", req.GetMetadataType(), "iss", req.GetIss())
 
-	if !c.signMetadataRL.Allow() {
-		return nil, grpcstatus.Error(codes.ResourceExhausted, "SignMetadata rate limit exceeded")
-	}
-
 	if len(req.GetMetadataJson()) == 0 {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "metadata_json is required")
 	}
@@ -59,6 +55,11 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	}
 	if req.GetIss() != c.cfg.Issuer.IssuerURL {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "iss must equal configured issuer_url")
+	}
+
+	// Rate-limit after cheap validations so malformed requests don't consume tokens.
+	if !c.signMetadataRL.Allow() {
+		return nil, grpcstatus.Error(codes.ResourceExhausted, "SignMetadata rate limit exceeded")
 	}
 
 	// Pick the concrete struct and JWT typ for this metadata type.

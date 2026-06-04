@@ -270,10 +270,15 @@ Alpine.data("app", () => ({
             const [res, svgTemplateResult] = await Promise.all([
                 this.fetchData(lookupUrl.toString(), lookupOptions),
                 this.fetchData(svgUrl.toString(), {}).catch((err) => {
-                    if (err instanceof Error && err.message.includes("status: 404")) {
-                        return null;
+                    // Only let 401 (Unauthorized) propagate — it flips auth
+                    // state in fetchData and must reach the outer catch block.
+                    // All other errors (404, 5xx, network) are treated as
+                    // "no template available" so the page still renders claims
+                    // without a card image.
+                    if (err instanceof Error && err.message.includes("Unauthorized")) {
+                        throw err;
                     }
-                    throw err;
+                    return null;
                 }),
             ]);
 

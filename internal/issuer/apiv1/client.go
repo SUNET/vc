@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"golang.org/x/time/rate"
 
@@ -53,7 +52,7 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		tracer:   tracer,
 		auditLog:       auditLog,
 		jwkProto:       &apiv1_issuer.Jwk{},
-		signMetadataRL: rate.NewLimiter(rate.Every(30*time.Second), 5),
+		signMetadataRL: rate.NewLimiter(rate.Limit(cfg.Issuer.SignMetadataRateLimit.RequestsPerSecond), cfg.Issuer.SignMetadataRateLimit.Burst),
 	}
 
 	if err := c.initSigner(ctx); err != nil {

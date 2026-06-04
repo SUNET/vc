@@ -134,3 +134,17 @@ func TestDigitalCredentialsDefaults(t *testing.T) {
 	assert.False(t, dc.UseJAR,
 		"UseJAR should default to false")
 }
+
+func TestSignMetadataRateLimitDefaults(t *testing.T) {
+	cfg := &model.Cfg{
+		Issuer: &model.Issuer{},
+	}
+	require.NoError(t, defaults.Set(cfg))
+
+	rl := cfg.Issuer.SignMetadataRateLimit
+
+	assert.Equal(t, 2.0, rl.RequestsPerSecond,
+		"RequestsPerSecond should default to 2")
+	assert.Equal(t, 20, rl.Burst,
+		"Burst should default to 20")
+}
