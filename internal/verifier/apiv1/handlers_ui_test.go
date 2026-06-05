@@ -268,7 +268,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
 			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().AddDate(-25, 0, 0).Format("2006-01-02")}}},
+				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")}}},
 				{Claims: []sdjwtvc.Discloser{{ClaimName: "card_number", Value: "12345"}}},
 			},
 			wantErr: false,
@@ -280,7 +280,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
 			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().AddDate(-16, 0, 0).Format("2006-01-02")}}},
+				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")}}},
 				{Claims: []sdjwtvc.Discloser{{ClaimName: "card_number", Value: "12345"}}},
 			},
 			wantErr:     true,
@@ -293,7 +293,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
 			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().AddDate(-20, 0, 0).Format("2006-01-02")}}},
+				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")}}},
 				{Claims: []sdjwtvc.Discloser{{ClaimName: "card_number", Value: "12345"}}}, // no birthdate — would fail if validated
 			},
 			wantErr: false,
@@ -315,7 +315,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			},
 			credentials: []sdjwtvc.CredentialCache{
 				{Claims: []sdjwtvc.Discloser{{ClaimName: "given_name", Value: "John"}}},
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().AddDate(-30, 0, 0).Format("2006-01-02")}}},
+				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-30, 0, 0).Format("2006-01-02")}}},
 			},
 			wantErr: false,
 		},

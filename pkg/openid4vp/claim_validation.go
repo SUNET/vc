@@ -65,7 +65,7 @@ func validateAgeOver(claims map[string]any, path []string, threshold any) error 
 	age := computeAge(birthdate, now)
 
 	if age < thresholdAge {
-		return fmt.Errorf("age_over validation failed: age %d is less than required %d", age, thresholdAge)
+		return fmt.Errorf("age_over validation failed: subject does not meet minimum age requirement of %d", thresholdAge)
 	}
 
 	return nil
@@ -103,12 +103,23 @@ func toInt(v any) (int, bool) {
 	case int:
 		return n, true
 	case int64:
+		if n > int64(maxSafeInt) || n < int64(-maxSafeInt) {
+			return 0, false
+		}
 		return int(n), true
 	case float64:
+		if n != float64(int(n)) || n > float64(maxSafeInt) || n < float64(-maxSafeInt) {
+			return 0, false
+		}
 		return int(n), true
 	case float32:
+		if n != float32(int(n)) || n > float32(maxSafeInt) || n < float32(-maxSafeInt) {
+			return 0, false
+		}
 		return int(n), true
 	default:
 		return 0, false
 	}
 }
+
+const maxSafeInt = 1 << 53 // max integer exactly representable in float64

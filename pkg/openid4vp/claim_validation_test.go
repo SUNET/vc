@@ -14,7 +14,7 @@ func TestValidateClaims(t *testing.T) {
 	}{
 		{
 			name:   "age_over_pass",
-			claims: map[string]any{"birthdate": time.Now().AddDate(-20, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")},
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -22,7 +22,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "age_over_fail",
-			claims: map[string]any{"birthdate": time.Now().AddDate(-16, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")},
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -30,7 +30,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "age_over_exactly_18",
-			claims: map[string]any{"birthdate": time.Now().AddDate(-18, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-18, 0, 0).Format("2006-01-02")},
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -38,7 +38,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "age_over_birthday_tomorrow",
-			claims: map[string]any{"birthdate": time.Now().AddDate(-18, 0, 1).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-18, 0, 1).Format("2006-01-02")},
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -76,7 +76,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "float64_threshold",
-			claims: map[string]any{"birthdate": time.Now().AddDate(-20, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")},
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: float64(18)},
 			},
