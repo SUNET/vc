@@ -249,6 +249,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		}
 	}
 
+	// Apply claim validations if configured (e.g., age_over checks)
+	if len(authCtx.Validations) > 0 {
+		for _, cc := range credentialCaches {
+			// Build a flat claims map from selective disclosures
+			claimsMap := make(map[string]any, len(cc.Claims))
+			for _, d := range cc.Claims {
+				if d.ClaimName != "" {
+					claimsMap[d.ClaimName] = d.Value
+				}
+			}
+			if err := openid4vp.ValidateClaims(claimsMap, authCtx.Validations); err != nil {
+				c.log.Error(err, "claim validation failed")
+				return nil, fmt.Errorf("claim validation failed: %w", err)
+			}
+		}
+	}
+
 	// Cache validated credentials
 	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
 

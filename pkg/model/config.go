@@ -467,6 +467,28 @@ type AdminGUI struct {
 	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
+// VerificationPreset is a map of scope name to optional credential query overrides.
+// The preset's map key (in the parent Presets map) serves as the human-readable label.
+// Each key in this map references a credential_metadata scope (e.g., "pid", "ehic").
+// A nil value means "request all VCTM claims with no overrides".
+type VerificationPreset map[string]*VerificationPresetScope
+
+// VerificationPresetScope defines optional overrides for a credential query within a preset.
+type VerificationPresetScope struct {
+	// Claims lists specific claims to request. If empty, all VCTM claims are used.
+	Claims []VerificationPresetClaim `yaml:"claims,omitempty"`
+	// ExcludeClaims lists claims to exclude from the DCQL query.
+	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty"`
+	// Validations are optional rules applied server-side after claims extraction
+	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty"`
+}
+
+// VerificationPresetClaim defines a claim path to request within a credential.
+type VerificationPresetClaim struct {
+	// Path is the claim path segments
+	Path []string `yaml:"path" validate:"required,min=1" doc_example:"[\"birthdate\"], [\"address\", \"locality\"]"`
+}
+
 // VerifierInbound groups inbound credential verification configuration
 type VerifierInbound struct {
 	// OpenID4VP holds the OpenID4VP configuration for accepting wallet presentations
@@ -503,6 +525,11 @@ type Verifier struct {
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// Presets holds predefined verification request presets shown in the UI.
+	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
+	// Each preset maps credential_metadata scopes to optional claim overrides.
+	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
+	Presets map[string]VerificationPreset `yaml:"presets,omitempty" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
