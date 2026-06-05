@@ -34,12 +34,12 @@ const metadataResponseSchema = v.object({
             claims: v.optional(v.array(v.object({
                 path: v.array(v.string()),
             }))),
+            validations: v.optional(v.array(v.object({
+                rule: v.string(),
+                path: v.array(v.string()),
+                value: v.any(),
+            }))),
         })),
-        validations: v.optional(v.array(v.object({
-            rule: v.string(),
-            path: v.array(v.string()),
-            value: v.any(),
-        }))),
     }))),
 })
 
@@ -152,14 +152,14 @@ Alpine.data("app", () => ({
     credentialAttributes: null,
 
     /** 
-     * @type {Record<string,  DCQLQuery & { label: string; validations?: Array<{rule: string, path: string[], value: any}>; }>} 
+     * @type {Record<string, object>} 
      */
     predefinedPresentationDefinitions: {},
 
     /** @type {DCQLQuery | null} */
     dcqlQuery: null,
 
-    /** @type {Array<{rule: string, path: string[], value: any}> | null} */
+    /** @type {Record<string, Array<{rule: string, path: string[], value: any}>> | null} */
     validations: null,
 
     /** @type {PresentationDefinition | null} */
@@ -214,7 +214,18 @@ Alpine.data("app", () => ({
         this.credentialsList = {};
 
         this.dcqlQuery = result.output;
-        this.validations = this.predefinedPresentationDefinitions[id].validations || null;
+
+        // Build per-scope validations map from credential-level validations
+        const preset = this.predefinedPresentationDefinitions[id];
+        const valMap = {};
+        if (preset.credentials) {
+            for (const cred of preset.credentials) {
+                if (cred.validations && cred.validations.length > 0) {
+                    valMap[cred.id] = cred.validations;
+                }
+            }
+        }
+        this.validations = Object.keys(valMap).length > 0 ? valMap : null;
 
         await this.sendDcqlQuery();
 

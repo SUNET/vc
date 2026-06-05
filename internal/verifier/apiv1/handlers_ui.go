@@ -26,15 +26,15 @@ type UICredentialInfo struct {
 type UIPreset struct {
 	Label       string                      `json:"label"`
 	Credentials []UIPresetCredential        `json:"credentials"`
-	Validations []openid4vp.ClaimValidation `json:"validations,omitempty"`
 }
 
 // UIPresetCredential is a credential query within a preset.
 type UIPresetCredential struct {
-	ID     string            `json:"id"`
-	Format string            `json:"format"`
-	Meta   UIPresetMeta      `json:"meta"`
-	Claims []UIPresetClaim   `json:"claims,omitempty"`
+	ID          string                      `json:"id"`
+	Format      string                      `json:"format"`
+	Meta        UIPresetMeta                `json:"meta"`
+	Claims      []UIPresetClaim             `json:"claims,omitempty"`
+	Validations []openid4vp.ClaimValidation `json:"validations,omitempty"`
 }
 
 // UIPresetMeta holds credential metadata for the preset.
@@ -106,8 +106,8 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					for _, ex := range scopeCfg.ExcludeClaims {
 						excludeSet[claimPathKey(ex.Path)] = true
 					}
-					// Collect validations from each scope
-					uiPreset.Validations = append(uiPreset.Validations, scopeCfg.Validations...)
+					// Attach validations to this credential
+					uiCred.Validations = scopeCfg.Validations
 				}
 
 				// Resolve claims: use explicit claims, or fall back to VCTM claims
@@ -163,8 +163,8 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 }
 
 type UIInteractionRequest struct {
-	DCQLQuery    *openid4vp.DCQL              `json:"dcql_query" validate:"required"`
-	Validations  []openid4vp.ClaimValidation   `json:"validations,omitempty"`
+	DCQLQuery    *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
+	Validations  map[string][]openid4vp.ClaimValidation  `json:"validations,omitempty"`
 
 	// SessionID from http server endpoint
 	SessionID string `json:"-"`
