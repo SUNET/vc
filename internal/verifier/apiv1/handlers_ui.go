@@ -301,3 +301,5 @@ var jwtRegisteredClaims = map[string]bool{
 func jwtRegisteredClaim(name string) bool {
 	return jwtRegisteredClaims[name]
 }
+
+

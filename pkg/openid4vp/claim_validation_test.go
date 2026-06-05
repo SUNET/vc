@@ -82,6 +82,14 @@ func TestValidateClaims(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name:   "non_integer_float_threshold_rejected",
+			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")},
+			validations: []ClaimValidation{
+				{Rule: "age_over", Path: []string{"birthdate"}, Value: float64(18.9)},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

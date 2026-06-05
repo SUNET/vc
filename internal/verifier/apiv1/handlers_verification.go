@@ -131,7 +131,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})
 
 	// Process all VP tokens for the requested scopes
-	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
+	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
 
 	for _, scope := range authCtx.Scopes {
 		vpTokens, ok := vpResponse.VPToken[scope]
@@ -201,8 +201,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, err
 			}
 
-			// Add to credential cache array
-			credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
+			// Add to per-scope credential cache
+			scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 				Credential: parsed.Claims,
 				Claims:     selectiveDisclosureClaims,
 			})
@@ -234,7 +234,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			for docType, docClaims := range mdocResult.Documents {
 				// Convert map claims to []Discloser format
 				disclosers := mapToDisclosers(docClaims.GetClaims())
-				credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
+				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 					Credential: map[string]any{
 						"docType":    docType,
 						"namespaces": docClaims.Namespaces,
@@ -251,26 +251,32 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Apply claim validations if configured (e.g., age_over checks)
 	if len(authCtx.Validations) > 0 {
-		for i, scope := range authCtx.Scopes {
+		for _, scope := range authCtx.Scopes {
 			scopeValidations := authCtx.Validations[scope]
 			if len(scopeValidations) == 0 {
 				continue
 			}
-			if i >= len(credentialCaches) {
-				break
-			}
-			// Build a flat claims map from selective disclosures
-			claimsMap := make(map[string]any, len(credentialCaches[i].Claims))
-			for _, d := range credentialCaches[i].Claims {
-				if d.ClaimName != "" {
-					claimsMap[d.ClaimName] = d.Value
+			entries := scopeCredentials[scope]
+			for _, cc := range entries {
+				// Build a flat claims map from selective disclosures
+				claimsMap := make(map[string]any, len(cc.Claims))
+				for _, d := range cc.Claims {
+					if d.ClaimName != "" {
+						claimsMap[d.ClaimName] = d.Value
+					}
+				}
+				if err := openid4vp.ValidateClaims(claimsMap, scopeValidations); err != nil {
+					c.log.Error(err, "claim validation failed", "scope", scope)
+					return nil, fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
 				}
 			}
-			if err := openid4vp.ValidateClaims(claimsMap, scopeValidations); err != nil {
-				c.log.Error(err, "claim validation failed", "scope", scope)
-				return nil, fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
-			}
 		}
+	}
+
+	// Flatten per-scope credentials into ordered slice for caching
+	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
+	for _, scope := range authCtx.Scopes {
+		credentialCaches = append(credentialCaches, scopeCredentials[scope]...)
 	}
 
 	// Cache validated credentials

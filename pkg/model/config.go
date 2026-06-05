@@ -476,11 +476,11 @@ type VerificationPreset map[string]*VerificationPresetScope
 // VerificationPresetScope defines optional overrides for a credential query within a preset.
 type VerificationPresetScope struct {
 	// Claims lists specific claims to request. If empty, all VCTM claims are used.
-	Claims []VerificationPresetClaim `yaml:"claims,omitempty"`
+	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
 	// ExcludeClaims lists claims to exclude from the DCQL query.
-	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty"`
+	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
 	// Validations are optional rules applied server-side after claims extraction
-	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty"`
+	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
 }
 
 // VerificationPresetClaim defines a claim path to request within a credential.
@@ -1068,7 +1068,7 @@ type CredentialMetadata struct {
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 	// Format is the credential format to issue
-	Format string `yaml:"format" json:"format" validate:"required" doc_example:"\"vc+sd-jwt\""`
+	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 

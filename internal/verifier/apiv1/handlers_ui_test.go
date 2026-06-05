@@ -248,6 +248,42 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 	})
 }
 
+// TestUIMetadataPresetFormatFromMetadata verifies that the preset credential
+// format is taken from credential_metadata (which is normalized at load time).
+func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
+	ctx := t.Context()
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format: openid4vp.FormatSDJWTVC, // already normalized by LoadVCTMetadata
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{
+			Presets: map[string]model.VerificationPreset{
+				"PID": {
+					"pid": nil,
+				},
+			},
+		},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	preset := reply.Presets["PID"]
+	require.NotNil(t, preset)
+	require.Len(t, preset.Credentials, 1)
+	assert.Equal(t, openid4vp.FormatSDJWTVC, preset.Credentials[0].Format)
+}
+
 // TestPerScopeValidationApplication tests that the verification handler
 // applies validations only to the credential that matches the scope.
 func TestPerScopeValidationApplication(t *testing.T) {
