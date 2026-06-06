@@ -234,7 +234,9 @@ type CredentialResponseEncryption struct {
 // ResolveCredentialFormat determines the credential format from the request.
 // According to OpenID4VCI spec, the format is derived from the credential_configuration_id
 // which maps to a credential configuration in the issuer metadata.
-func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuerMetadataParameters) (string, error) {
+// When credential_identifier is used, the authorizationDetails from the token response
+// are needed to map the identifier to a credential_configuration_id.
+func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
 	if metadata == nil {
 		return "", fmt.Errorf("metadata is required")
 	}
@@ -249,18 +251,21 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 		return "", fmt.Errorf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)
 	}
 
-	// Use credential_identifier to look up the format
-	// The credential_identifier maps to a credential configuration via authorization_details from the token response
-	// For now, we'll attempt to find a matching configuration by identifier
+	// Use credential_identifier to look up the format via authorization_details.
+	// The credential_identifier maps to a credential_configuration_id in the
+	// authorization_details that were returned in the token response.
 	if req.CredentialIdentifier != "" {
-		if metadata.CredentialConfigurationsSupported != nil {
-			// Try to match by credential identifier (may be same as configuration ID in some cases)
-			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialIdentifier]; ok {
-				return config.Format, nil
+		for _, ad := range authorizationDetails {
+			if slices.Contains(ad.CredentialIdentifiers, req.CredentialIdentifier) {
+				if metadata.CredentialConfigurationsSupported != nil {
+					if config, ok := metadata.CredentialConfigurationsSupported[ad.CredentialConfigurationID]; ok {
+						return config.Format, nil
+					}
+				}
+				return "", fmt.Errorf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)
 			}
-			return "", fmt.Errorf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)
 		}
-		return "", fmt.Errorf("unknown credential_identifier: %s", req.CredentialIdentifier)
+		return "", fmt.Errorf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)
 	}
 
 	return "", fmt.Errorf("either credential_configuration_id or credential_identifier must be provided")

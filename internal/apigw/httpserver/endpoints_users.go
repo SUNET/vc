@@ -149,7 +149,7 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 		return nil, err
 	}
 
-	c.Redirect(http.StatusSeeOther, client.RedirectURI)
+	c.Redirect(http.StatusSeeOther, client.RedirectURIs[0])
 
 	return nil, nil
 }
