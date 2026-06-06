@@ -308,6 +308,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
 		}
 		reply.AuthorizationDetails = responseDetails
+
+		// Persist credential_identifiers back so the credential endpoint can
+		// match them when the client presents the access token.
+		authorizationContext.AuthorizationDetails = responseDetails
 	}
 
 	tokenDoc := &cache.Token{
