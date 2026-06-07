@@ -212,6 +212,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	// Validate DPoP BEFORE consuming the authorization code (RFC 9449 §4).
 	// This ensures a stolen code cannot be consumed without a valid DPoP proof.
+	var dpopThumbprint string
 	if req.DPOP != "" {
 		dpop, dpopErr := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
 		if dpopErr != nil {
@@ -244,6 +245,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 
 		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
+		dpopThumbprint = dpop.Thumbprint
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
@@ -333,8 +335,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	tokenDoc := &cache.Token{
-		AccessToken: accessToken,
-		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
+		AccessToken:    accessToken,
+		ExpiresAt:      time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
+		DPoPThumbprint: dpopThumbprint,
 	}
 
 	// Set the token on the in-memory struct so that Update() persists it
