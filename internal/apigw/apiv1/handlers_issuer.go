@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -295,16 +296,39 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		jwk, err = req.Proof.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proof")
-			return nil, err
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 	} else if req.Proofs != nil {
 		jwk, err = req.Proofs.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proofs")
-			return nil, err
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 	} else {
-		return nil, errors.New("no proof found in credential request")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "proof or proofs parameter is required"}
+	}
+
+	// Verify proof of possession per OID4VCI Appendix F.4
+	pubKey, err := jwkProtoToPublicKey(jwk)
+	if err != nil {
+		c.log.Error(err, "failed to convert proof JWK to public key")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "invalid key in proof"}
+	}
+	verifyOpts := &openid4vci.VerifyProofOptions{
+		CNonce:   authContext.Nonce,
+		Audience: c.issuerMetadata.CredentialIssuer,
+	}
+	if req.Proof != nil && req.Proof.ProofType == "jwt" {
+		proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
+		if err := proofJWT.Verify(pubKey, verifyOpts); err != nil {
+			c.log.Error(err, "proof JWT verification failed")
+			return nil, err
+		}
+	} else if req.Proofs != nil {
+		if err := req.VerifyProofWithOptions(pubKey, verifyOpts); err != nil {
+			c.log.Error(err, "proofs verification failed")
+			return nil, err
+		}
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
@@ -596,4 +620,31 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	}
 
 	return &metadata, nil
+}
+
+// jwkProtoToPublicKey converts a protobuf Jwk to a crypto.PublicKey for proof verification.
+func jwkProtoToPublicKey(jwk *apiv1_issuer.Jwk) (any, error) {
+	// Build a standard JWK map and use jose.ParseJWKToPublicKey
+	jwkMap := map[string]any{
+		"kty": jwk.Kty,
+	}
+	if jwk.Crv != "" {
+		jwkMap["crv"] = jwk.Crv
+	}
+	if jwk.X != "" {
+		jwkMap["x"] = jwk.X
+	}
+	if jwk.Y != "" {
+		jwkMap["y"] = jwk.Y
+	}
+	if jwk.N != "" {
+		jwkMap["n"] = jwk.N
+	}
+	if jwk.E != "" {
+		jwkMap["e"] = jwk.E
+	}
+	if jwk.Kid != "" {
+		jwkMap["kid"] = jwk.Kid
+	}
+	return jose.ParseJWKToPublicKey(jwkMap)
 }
