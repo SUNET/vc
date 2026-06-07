@@ -248,7 +248,7 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 				return config.Format, nil
 			}
 		}
-		return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
+		return "", &Error{Err: ErrUnknownCredentialConfiguration, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
 	}
 
 	// Use credential_identifier to look up the format via authorization_details.
@@ -265,7 +265,7 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 				return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)}
 			}
 		}
-		return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
+		return "", &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
 	}
 
 	return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
