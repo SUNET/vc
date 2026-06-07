@@ -43,7 +43,7 @@ func TestCredentialOffer(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": &GrantPreAuthorizedCode{
 						PreAuthorizedCode: "oaKazRN8I0IbtZ0C7JuMn5",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "numeric",
 							Length:      4,
 							Description: "Please provide the one-time code that was sent via e-mail",
@@ -177,7 +177,7 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": GrantPreAuthorizedCode{
 						PreAuthorizedCode: "test-pre-auth-code-123",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "numeric",
 							Length:      6,
 							Description: "Enter the 6-digit code",
@@ -363,7 +363,7 @@ func TestCredentialOfferParameters_CredentialOffer_RoundTrip(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": GrantPreAuthorizedCode{
 						PreAuthorizedCode: "test-code-xyz",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "text",
 							Length:      8,
 							Description: "Enter the code",
@@ -409,7 +409,7 @@ func TestParseCredentialOffer(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": &GrantPreAuthorizedCode{
 						PreAuthorizedCode:   "d270fee1-9185-4e60-9901-d291e1338d7a",
-						TXCode:              TXCode{},
+						TXCode:              nil,
 						AuthorizationServer: "",
 					},
 				},
