@@ -48,7 +48,7 @@ func ExampleError_Error() {
 
 	fmt.Println(err.Error())
 	// Output:
-	// invalid_proof
+	// invalid_proof: proof JWT is expired
 }
 
 func ExampleStatusCode() {

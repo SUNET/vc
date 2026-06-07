@@ -1,6 +1,9 @@
 package openid4vci
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 // Error is the error response
 type Error struct {
@@ -9,6 +12,9 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
+	if e.ErrorDescription != nil {
+		return fmt.Sprintf("%s: %v", e.Err, e.ErrorDescription)
+	}
 	return e.Err
 }
 
