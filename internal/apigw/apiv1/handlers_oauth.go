@@ -181,10 +181,23 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	// Look up the client to enforce type-specific requirements (client_id is optional for pre-auth flow)
+	// When client_assertion is provided (private_key_jwt auth), extract client_id from the assertion's sub claim.
+	clientID := req.ClientID
+	if clientID == "" && req.ClientAssertion != "" && req.ClientAssertionType == "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+		sub, err := oauth2.ExtractClientIDFromAssertion(req.ClientAssertion)
+		if err != nil {
+			c.log.Error(err, "failed to extract client_id from client_assertion")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+				"Invalid client assertion", 401, err)
+		}
+		clientID = sub
+		c.log.Debug("OAuthToken: resolved client_id from client_assertion", "client_id", clientID)
+	}
+
 	var oauthClient *oauth2.Client
-	if req.ClientID != "" {
+	if clientID != "" {
 		var err error
-		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(req.ClientID)
+		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(clientID)
 		if err != nil {
 			c.log.Error(err, "client validation failed")
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
@@ -244,7 +257,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 				"Authorization code is invalid or has already been used", 400, err)
 		}
-		if preCheck.WalletClientID != "" && req.ClientID != preCheck.WalletClientID {
+		if preCheck.WalletClientID != "" && clientID != preCheck.WalletClientID {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 				"client_id does not match the authorization request", 400)
 		}
@@ -308,6 +321,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
 		}
 		reply.AuthorizationDetails = responseDetails
+
+		// Persist credential_identifiers back so the credential endpoint can
+		// match them when the client presents the access token.
+		authorizationContext.AuthorizationDetails = responseDetails
 	}
 
 	tokenDoc := &cache.Token{
@@ -315,8 +332,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
 	}
 
-	if err := c.cacheService.AuthContext.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
-		c.log.Error(err, "failed to add token")
+	// Set the token on the in-memory struct so that Update() persists it
+	// alongside any updated AuthorizationDetails (credential_identifiers).
+	// Using Update() instead of AddToken() avoids a race where AddToken
+	// writes the token and a subsequent Update() overwrites it with nil.
+	authorizationContext.Token = tokenDoc
+	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+		c.log.Error(err, "failed to persist token and authorization details")
 		return nil, err
 	}
 

@@ -78,7 +78,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		return nil, fmt.Errorf("failed to parse redirect URI %s: %w", authorizationContext.WalletURI, err)
 	}
 
-	redirectURL.RawQuery = url.Values{"code": {authorizationContext.Code}, "state": {authorizationContext.State}}.Encode()
+	redirectURL.RawQuery = url.Values{"code": {authorizationContext.Code}, "state": {authorizationContext.State}, "iss": {c.cfg.APIGW.PublicURL}}.Encode()
 
 	var svgTemplateClaims map[string]sdjwtvc.SVGValue
 	var presentationClaims map[string]any
