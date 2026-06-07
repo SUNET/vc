@@ -312,6 +312,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		CNonceExpiresIn: 3600,
 	}
 
+	// Store the c_nonce in the nonce cache so proof verification can find it
+	if c.cacheService.VCINonce != nil {
+		c.cacheService.VCINonce.Set(ctx, authorizationContext.Nonce, true)
+	}
+
 	// Per OID4VCI 1.0 Section 6.2: authorization_details is REQUIRED in the Token Response when
 	// authorization_details was used in the Authorization Request, with credential_identifiers added.
 	if len(authorizationContext.AuthorizationDetails) > 0 {

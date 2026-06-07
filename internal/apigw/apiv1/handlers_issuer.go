@@ -185,6 +185,10 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 	if err != nil {
 		return nil, err
 	}
+	// Store the nonce in cache so the credential endpoint can validate proofs
+	if c.cacheService != nil && c.cacheService.VCINonce != nil {
+		c.cacheService.VCINonce.Set(ctx, nonce, true)
+	}
 	reply := &openid4vci.NonceResponse{
 		CNonce: nonce,
 	}
@@ -314,21 +318,46 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.log.Error(err, "failed to convert proof JWK to public key")
 		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "invalid key in proof"}
 	}
+
+	// Resolve the expected c_nonce: extract nonce from the proof and check if
+	// it was issued by us (via token response or nonce endpoint).
+	var proofNonce string
+	if req.Proof != nil && req.Proof.ProofType == "jwt" {
+		proofNonce = openid4vci.ProofJWTToken(req.Proof.JWT).ExtractNonce()
+	} else if req.Proofs != nil && len(req.Proofs.JWT) > 0 {
+		proofNonce = req.Proofs.JWT[0].ExtractNonce()
+	}
+
+	// Determine which nonce to validate against: prefer matching from our cache
+	expectedNonce := authContext.Nonce
+	if proofNonce != "" && proofNonce != expectedNonce {
+		if c.cacheService.VCINonce != nil {
+			if _, ok := c.cacheService.VCINonce.Get(ctx, proofNonce); ok {
+				expectedNonce = proofNonce
+			}
+		}
+	}
+
 	verifyOpts := &openid4vci.VerifyProofOptions{
-		CNonce:   authContext.Nonce,
+		CNonce:   expectedNonce,
 		Audience: c.issuerMetadata.CredentialIssuer,
 	}
 	if req.Proof != nil && req.Proof.ProofType == "jwt" {
 		proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
-		if err := proofJWT.Verify(pubKey, verifyOpts); err != nil {
-			c.log.Error(err, "proof JWT verification failed")
-			return nil, err
+		if verifyErr := proofJWT.Verify(pubKey, verifyOpts); verifyErr != nil {
+			c.log.Error(verifyErr, "proof JWT verification failed")
+			return nil, verifyErr
 		}
 	} else if req.Proofs != nil {
 		if err := req.VerifyProofWithOptions(pubKey, verifyOpts); err != nil {
 			c.log.Error(err, "proofs verification failed")
 			return nil, err
 		}
+	}
+
+	// Consume the nonce after successful verification (one-time use)
+	if proofNonce != "" && c.cacheService.VCINonce != nil {
+		c.cacheService.VCINonce.Delete(ctx, proofNonce)
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
