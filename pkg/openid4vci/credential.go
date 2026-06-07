@@ -68,32 +68,33 @@ func (c *CredentialRequest) IsAccessTokenDPoP() bool {
 func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails []AuthorizationDetailsParameter) error {
 	hasAuthDetails := len(authorizationDetails) > 0
 
-	if hasAuthDetails {
-		// authorization_details flow: credential_identifier is REQUIRED
-		if c.CredentialIdentifier == "" {
+	// Neither identifier nor configuration ID provided
+	if c.CredentialIdentifier == "" && c.CredentialConfigurationID == "" {
+		if hasAuthDetails {
 			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_identifier is required when authorization_details was returned in the Token Response"}
 		}
-		if c.CredentialConfigurationID != "" {
-			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_configuration_id must not be present when credential_identifier is used"}
-		}
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_configuration_id is required when authorization_details was not returned in the Token Response"}
+	}
 
-		// Verify credential_identifier matches one returned in the Token Response
+	// Both provided simultaneously
+	if c.CredentialIdentifier != "" && c.CredentialConfigurationID != "" {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_identifier and credential_configuration_id must not both be present"}
+	}
+
+	// credential_identifier provided: verify it matches the Token Response
+	if c.CredentialIdentifier != "" {
+		if !hasAuthDetails {
+			return &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("credential_identifier %q cannot be resolved: no authorization_details in Token Response", c.CredentialIdentifier)}
+		}
 		for _, ad := range authorizationDetails {
 			if slices.Contains(ad.CredentialIdentifiers, c.CredentialIdentifier) {
 				return nil
 			}
 		}
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_identifier %q not found in Token Response authorization_details", c.CredentialIdentifier)}
+		return &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("credential_identifier %q not found in Token Response authorization_details", c.CredentialIdentifier)}
 	}
 
-	// scope-based flow: credential_configuration_id is REQUIRED
-	if c.CredentialConfigurationID == "" {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_configuration_id is required when authorization_details was not returned in the Token Response"}
-	}
-	if c.CredentialIdentifier != "" {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_identifier must not be present when credential_configuration_id is used"}
-	}
-
+	// credential_configuration_id provided: let ResolveCredentialFormat validate it
 	return nil
 }
 

@@ -56,7 +56,7 @@ func TestCredentialValidation(t *testing.T) {
 			errContains: "not found in Token Response",
 		},
 		{
-			name: "authorization_details flow without credential_identifier",
+			name: "authorization_details flow with credential_configuration_id only",
 			credentialRequest: &CredentialRequest{
 				CredentialConfigurationID: "vc+ldp",
 			},
@@ -67,8 +67,7 @@ func TestCredentialValidation(t *testing.T) {
 					CredentialIdentifiers:     []string{"cred-id-1"},
 				},
 			},
-			wantErr:     true,
-			errContains: "credential_identifier is required",
+			wantErr: false,
 		},
 		{
 			name: "authorization_details flow with both identifier and configuration_id",
@@ -84,16 +83,16 @@ func TestCredentialValidation(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: "credential_configuration_id must not be present",
+			errContains: "must not both be present",
 		},
 		{
-			name: "scope-based flow without credential_configuration_id",
+			name: "scope-based flow with unknown credential_identifier",
 			credentialRequest: &CredentialRequest{
 				CredentialIdentifier: "some-id",
 			},
 			authorizationDetails: nil,
 			wantErr:              true,
-			errContains:          "credential_configuration_id is required",
+			errContains:          "cannot be resolved",
 		},
 		{
 			name: "scope-based flow with both identifier and configuration_id",
@@ -103,7 +102,7 @@ func TestCredentialValidation(t *testing.T) {
 			},
 			authorizationDetails: nil,
 			wantErr:              true,
-			errContains:          "credential_identifier must not be present",
+			errContains:          "must not both be present",
 		},
 		{
 			name: "credential_identifier matches second authorization_details entry",

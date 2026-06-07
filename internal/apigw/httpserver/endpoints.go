@@ -92,7 +92,7 @@ func (s *Service) endpointVCICredential(ctx context.Context, c *gin.Context) (an
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
-		return nil, err
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
 	}
 
 	reply, err := s.apiv1.VCICredential(ctx, request)
