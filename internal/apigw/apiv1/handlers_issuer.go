@@ -245,6 +245,17 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// Verify DPoP key binding: the proof's public key must match the one used
+	// at token issuance (RFC 9449 §4.3).
+	if authContext.Token != nil && authContext.Token.DPoPThumbprint != "" {
+		if dpop.Thumbprint != authContext.Token.DPoPThumbprint {
+			return nil, &openid4vci.Error{
+				Err:              openid4vci.ErrInvalidCredentialRequest,
+				ErrorDescription: "DPoP key does not match the key bound to the access token",
+			}
+		}
+	}
+
 	// Validate credential request against authorization details per OID4VCI 1.0 Section 7.1
 	if err := req.Validate(ctx, authContext.AuthorizationDetails); err != nil {
 		c.log.Error(err, "credential request validation failed")
