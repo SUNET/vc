@@ -56,6 +56,10 @@ func isOIDCEndpoint(path string) bool {
 		"/oidcrp/",
 		"/samlsp/",
 		"/op/par",
+		"/nonce",
+		"/credential",
+		"/deferred_credential",
+		"/notification",
 	}
 
 	for _, indicator := range oidcIndicators {
