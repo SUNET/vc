@@ -61,6 +61,7 @@ func (s *Service) endpointVCINonce(ctx context.Context, c *gin.Context) (any, er
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	c.Header("Cache-Control", "no-store")
 	return reply, nil
 }
 
