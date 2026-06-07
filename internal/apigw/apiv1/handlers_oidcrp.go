@@ -287,6 +287,14 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		c.log.Debug("standalone OIDC: could not resolve identifier", "error", resolveErr)
 	}
 
+	// Resolve the data source for this credential type so that the credential
+	// endpoint knows whether the identity is assertion-based (and can skip
+	// the identifier requirement).
+	credSource, credSourceErr := c.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, string(model.AuthProviderOIDC))
+	if credSourceErr != nil {
+		c.log.Debug("standalone OIDC: could not resolve data source", "error", credSourceErr)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,
@@ -303,6 +311,9 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				CredentialConfigurationID: session.CredentialType,
 			},
 		},
+	}
+	if credSourceErr == nil {
+		authCtx.DataSource = string(credSource.DataSource)
 	}
 	if saveErr := c.cacheService.AuthContext.Save(ctx, authCtx); saveErr != nil {
 		span.SetStatus(codes.Error, "pre-auth code persistence failed")

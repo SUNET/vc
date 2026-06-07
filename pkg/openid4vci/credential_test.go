@@ -198,12 +198,13 @@ func TestExtractJWK(t *testing.T) {
 
 func TestResolveCredentialFormat(t *testing.T) {
 	tests := []struct {
-		name        string
-		request     *CredentialRequest
-		metadata    *CredentialIssuerMetadataParameters
-		wantFormat  string
-		wantErr     bool
-		errContains string
+		name                 string
+		request              *CredentialRequest
+		metadata             *CredentialIssuerMetadataParameters
+		authorizationDetails []AuthorizationDetailsParameter
+		wantFormat           string
+		wantErr              bool
+		errContains          string
 	}{
 		{
 			name: "resolve by credential_configuration_id",
@@ -221,15 +222,22 @@ func TestResolveCredentialFormat(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "resolve by credential_identifier",
+			name: "resolve by credential_identifier via authorization_details",
 			request: &CredentialRequest{ // #nosec G101
 				CredentialIdentifier: "ehic_identifier",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
 				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
-					"ehic_identifier": {
+					"ehic_config": {
 						Format: "mso_mdoc",
 					},
+				},
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "ehic_config",
+					CredentialIdentifiers:     []string{"ehic_identifier"},
 				},
 			},
 			wantFormat: "mso_mdoc",
@@ -245,6 +253,13 @@ func TestResolveCredentialFormat(t *testing.T) {
 					"pid_config": {
 						Format: "dc+sd-jwt",
 					},
+				},
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "pid_config",
+					CredentialIdentifiers:     []string{"other_identifier"},
 				},
 			},
 			wantErr:     true,
@@ -323,7 +338,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			format, err := tt.request.ResolveCredentialFormat(tt.metadata)
+			format, err := tt.request.ResolveCredentialFormat(tt.metadata, tt.authorizationDetails)
 
 			if tt.wantErr {
 				assert.Error(t, err)
