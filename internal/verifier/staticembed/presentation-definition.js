@@ -46,9 +46,7 @@ const metadataResponseSchema = v.object({
 /** @typedef {v.InferOutput<typeof dcqlQueryCredentialSchema>} DCQLQueryCredential */
 const dcqlQueryCredentialSchema = v.object({
     id: v.string(),
-    format: v.union([
-        v.literal("dc+sd-jwt"),
-    ]),
+    format: v.optional(v.string(), "dc+sd-jwt"),
     meta: v.intersect([
         v.object({
             vct_values: v.array(v.string()),

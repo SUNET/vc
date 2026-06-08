@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -118,6 +119,9 @@ func toInt(v any) (int, bool) {
 		if n > int64(maxSafeInt) || n < -int64(maxSafeInt) {
 			return 0, false
 		}
+		if n > math.MaxInt || n < math.MinInt {
+			return 0, false
+		}
 		return int(n), true
 	case float64:
 		if n > float64(maxSafeInt) || n < -float64(maxSafeInt) {
@@ -127,6 +131,9 @@ func toInt(v any) (int, bool) {
 		if float64(i) != n {
 			return 0, false
 		}
+		if i > math.MaxInt || i < math.MinInt {
+			return 0, false
+		}
 		return int(i), true
 	case float32:
 		if n > float32(maxSafeInt) || n < -float32(maxSafeInt) {
@@ -134,6 +141,9 @@ func toInt(v any) (int, bool) {
 		}
 		i := int64(n)
 		if float32(i) != n {
+			return 0, false
+		}
+		if i > math.MaxInt || i < math.MinInt {
 			return 0, false
 		}
 		return int(i), true

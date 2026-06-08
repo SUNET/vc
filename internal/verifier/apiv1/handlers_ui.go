@@ -25,8 +25,8 @@ type UICredentialInfo struct {
 
 // UIPreset is a verification preset served to the UI.
 type UIPreset struct {
-	Label       string                      `json:"label"`
-	Credentials []UIPresetCredential        `json:"credentials"`
+	Label       string               `json:"label"`
+	Credentials []UIPresetCredential `json:"credentials"`
 }
 
 // UIPresetCredential is a credential query within a preset.
@@ -51,7 +51,7 @@ type UIPresetClaim struct {
 type UIMetadataReply struct {
 	Credentials      map[string]*UICredentialInfo `json:"credentials"`
 	SupportedWallets map[string]string            `json:"supported_wallets"`
-	Presets          map[string]*UIPreset          `json:"presets,omitempty"`
+	Presets          map[string]*UIPreset         `json:"presets,omitempty"`
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
@@ -176,8 +176,8 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 }
 
 type UIInteractionRequest struct {
-	DCQLQuery    *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
-	Validations  map[string][]openid4vp.ClaimValidation  `json:"validations,omitempty" validate:"omitempty,dive,dive"`
+	DCQLQuery   *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
+	Validations map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" validate:"omitempty,dive,dive"`
 
 	// SessionID from http server endpoint
 	SessionID string `json:"-"`
@@ -315,5 +315,3 @@ var jwtRegisteredClaims = map[string]bool{
 func jwtRegisteredClaim(name string) bool {
 	return jwtRegisteredClaims[name]
 }
-
-
