@@ -529,7 +529,7 @@ type Verifier struct {
 	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
 	// Each preset maps credential_metadata scopes to optional claim overrides.
 	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
-	Presets map[string]VerificationPreset `yaml:"presets,omitempty" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
+	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.

@@ -202,6 +202,11 @@ Alpine.data("app", () => ({
         this.loading = true;
         
         const preset = /** @type {any} */ (this.predefinedPresentationDefinitions[id]);
+        if (!preset) {
+            this.error = `Unknown preset "${id}"`;
+            this.loading = false;
+            return;
+        }
 
         // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
         const dcqlInput = {
