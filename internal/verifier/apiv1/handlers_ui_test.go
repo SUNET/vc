@@ -290,12 +290,12 @@ func TestPerScopeValidationApplication(t *testing.T) {
 	// Simulate: PID credential has birthdate, EHIC does not.
 	// age_over validation is scoped to PID only — should pass/fail based on PID claims only.
 	tests := []struct {
-		name        string
-		scopes      []string
-		validations map[string][]openid4vp.ClaimValidation
-		credentials []sdjwtvc.CredentialCache
-		wantErr     bool
-		errContains string
+		name             string
+		scopes           []string
+		validations      map[string][]openid4vp.ClaimValidation
+		scopeCredentials map[string][]sdjwtvc.CredentialCache
+		wantErr          bool
+		errContains      string
 	}{
 		{
 			name:   "validation passes for matching scope",
@@ -303,9 +303,9 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			validations: map[string][]openid4vp.ClaimValidation{
 				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
-			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")}}},
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "card_number", Value: "12345"}}},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid":  {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")}}},
+				"ehic": {{Credential: map[string]any{"card_number": "12345"}}},
 			},
 			wantErr: false,
 		},
@@ -315,9 +315,9 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			validations: map[string][]openid4vp.ClaimValidation{
 				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
-			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")}}},
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "card_number", Value: "12345"}}},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid":  {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")}}},
+				"ehic": {{Credential: map[string]any{"card_number": "12345"}}},
 			},
 			wantErr:     true,
 			errContains: "scope pid",
@@ -328,9 +328,9 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			validations: map[string][]openid4vp.ClaimValidation{
 				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
-			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")}}},
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "card_number", Value: "12345"}}}, // no birthdate — would fail if validated
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid":  {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")}}},
+				"ehic": {{Credential: map[string]any{"card_number": "12345"}}}, // no birthdate — would fail if validated
 			},
 			wantErr: false,
 		},
@@ -338,8 +338,8 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			name:        "empty validations map does nothing",
 			scopes:      []string{"pid"},
 			validations: map[string][]openid4vp.ClaimValidation{},
-			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: "not-a-date"}}},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid": {{Credential: map[string]any{"birthdate": "not-a-date"}}},
 			},
 			wantErr: false,
 		},
@@ -349,9 +349,56 @@ func TestPerScopeValidationApplication(t *testing.T) {
 			validations: map[string][]openid4vp.ClaimValidation{
 				"ehic": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
 			},
-			credentials: []sdjwtvc.CredentialCache{
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "given_name", Value: "John"}}},
-				{Claims: []sdjwtvc.Discloser{{ClaimName: "birthdate", Value: time.Now().UTC().AddDate(-30, 0, 0).Format("2006-01-02")}}},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid":  {{Credential: map[string]any{"given_name": "John"}}},
+				"ehic": {{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-30, 0, 0).Format("2006-01-02")}}},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "multiple credentials per scope all pass",
+			scopes: []string{"pid"},
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+			},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid": {
+					{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")}},
+					{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-30, 0, 0).Format("2006-01-02")}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "multiple credentials per scope second fails",
+			scopes: []string{"pid"},
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+			},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid": {
+					{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-25, 0, 0).Format("2006-01-02")}},
+					{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-10, 0, 0).Format("2006-01-02")}},
+				},
+			},
+			wantErr:     true,
+			errContains: "scope pid",
+		},
+		{
+			name:   "multiple credentials per scope validation scoped correctly",
+			scopes: []string{"pid", "ehic"},
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+			},
+			scopeCredentials: map[string][]sdjwtvc.CredentialCache{
+				"pid": {
+					{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")}},
+					{Credential: map[string]any{"birthdate": time.Now().UTC().AddDate(-40, 0, 0).Format("2006-01-02")}},
+				},
+				"ehic": {
+					{Credential: map[string]any{"card_number": "111"}},
+					{Credential: map[string]any{"card_number": "222"}},
+				},
 			},
 			wantErr: false,
 		},
@@ -359,7 +406,7 @@ func TestPerScopeValidationApplication(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := applyPerScopeValidations(tt.scopes, tt.validations, tt.credentials)
+			err := applyPerScopeValidations(tt.scopes, tt.validations, tt.scopeCredentials)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errContains != "" {
@@ -372,28 +419,24 @@ func TestPerScopeValidationApplication(t *testing.T) {
 	}
 }
 
-// applyPerScopeValidations replicates the verification handler's per-scope validation logic
-// for isolated unit testing without needing a full client setup.
-func applyPerScopeValidations(scopes []string, validations map[string][]openid4vp.ClaimValidation, credentials []sdjwtvc.CredentialCache) error {
+// applyPerScopeValidations mirrors the verification handler's per-scope validation loop
+// (handlers_verification.go) for isolated unit testing without a full client setup.
+// Each scope maps to zero or more credentials; validations are applied against the verified
+// credential claims (cc.Credential), not raw disclosures which may contain decoy entries.
+func applyPerScopeValidations(scopes []string, validations map[string][]openid4vp.ClaimValidation, scopeCredentials map[string][]sdjwtvc.CredentialCache) error {
 	if len(validations) == 0 {
 		return nil
 	}
-	for i, scope := range scopes {
+	for _, scope := range scopes {
 		scopeValidations := validations[scope]
 		if len(scopeValidations) == 0 {
 			continue
 		}
-		if i >= len(credentials) {
-			break
-		}
-		claimsMap := make(map[string]any, len(credentials[i].Claims))
-		for _, d := range credentials[i].Claims {
-			if d.ClaimName != "" {
-				claimsMap[d.ClaimName] = d.Value
+		entries := scopeCredentials[scope]
+		for _, cc := range entries {
+			if err := openid4vp.ValidateClaims(cc.Credential, scopeValidations); err != nil {
+				return fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
 			}
-		}
-		if err := openid4vp.ValidateClaims(claimsMap, scopeValidations); err != nil {
-			return fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
 		}
 	}
 	return nil

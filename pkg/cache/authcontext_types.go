@@ -88,7 +88,7 @@ type AuthorizationContext struct {
 	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
 	DCQLQuery                *openid4vp.DCQL                         `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
-	Validations              map[string][]openid4vp.ClaimValidation   `json:"validations,omitempty" bson:"validations,omitempty"`
+	Validations              map[string][]openid4vp.ClaimValidation   `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
 	WalletID                 string                                  `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 

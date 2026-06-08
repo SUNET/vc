@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -384,16 +385,122 @@ func TestVerificationDirectPost(t *testing.T) {
 	}
 }
 
+// TestVerificationDirectPostDecoyDisclosure verifies that a decoy disclosure
+// (not referenced in _sd) is ignored during claim validation. A fake birthdate
+// decoy should NOT satisfy age_over validation when the real credential lacks it.
+func TestVerificationDirectPostDecoyDisclosure(t *testing.T) {
+	ctx := t.Context()
+
+	sigKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	client, _ := CreateTestClientWithMock(nil)
+	log := logger.NewSimple("test")
+	notifyService, _ := notify.New(ctx, client.cfg, log)
+	client.notify = notifyService
+
+	openid4vpClient, _ := openid4vp.New(ctx, &openid4vp.Config{})
+	client.openid4vp = openid4vpClient
+
+	client.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator: trust.NewAllowAllEvaluator(),
+		JWKSResolver:   trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+		ParseX5C:       func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:       jose.ParseJWKToPublicKey,
+		Log:            log,
+	})
+
+	kid := "test-ephemeral-kid"
+	_, ephemeralPubJWK, err := client.openid4vp.EphemeralKeyCache.GenerateAndStore(kid)
+	require.NoError(t, err)
+
+	state := "test-state-decoy"
+	nonce := "test-nonce-decoy"
+	authCtx := &cache.AuthorizationContext{
+		SessionID:                "test-session-decoy",
+		State:                    state,
+		Nonce:                    nonce,
+		ClientID:                 "x509_san_dns:verifier.example.com",
+		Scopes:                   []string{"pid"},
+		EphemeralEncryptionKeyID: kid,
+		Validations: map[string][]openid4vp.ClaimValidation{
+			"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+		},
+	}
+	require.NoError(t, client.cacheService.AuthContext.Save(ctx, authCtx))
+
+	// Real claims do NOT include birthdate; decoy disclosure provides a fake one.
+	// If decoys are incorrectly used for validation, this would pass.
+	realClaims := map[string]any{"given_name": "John"}
+	decoyClaims := map[string]any{"birthdate": time.Now().UTC().AddDate(-30, 0, 0).Format("2006-01-02")}
+
+	vpToken := createTestSDJWTWithDecoys(t, sigKey, realClaims, decoyClaims, nonce, authCtx.ClientID)
+
+	vpResponse := openid4vp.VPResponse{
+		VPToken: map[string][]string{"pid": {vpToken}},
+		State:   state,
+	}
+	vpResponseBytes, err := json.Marshal(vpResponse)
+	require.NoError(t, err)
+
+	encrypted, err := jwe.Encrypt(vpResponseBytes,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	req := &VerificationDirectPostRequest{Response: string(encrypted)}
+	_, err = client.VerificationDirectPost(ctx, req)
+
+	// Validation must fail: the real credential has no birthdate,
+	// the decoy disclosure is unbound and must be ignored.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "claim validation failed for scope pid")
+	assert.Contains(t, err.Error(), "birthdate")
+}
+
 // createTestSDJWT creates a minimal SD-JWT VP token for testing.
 // Format: <issuer-jwt>~<disclosure1>~...~<kb-jwt>
 func createTestSDJWT(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, nonce, audience string) string {
 	t.Helper()
+	return createTestSDJWTWithDecoys(t, key, claims, nil, nonce, audience)
+}
+
+// createTestSDJWTWithDecoys creates an SD-JWT VP token that includes decoy disclosures
+// (disclosures not referenced in the _sd array). These should be ignored during validation.
+func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, decoys map[string]any, nonce, audience string) string {
+	t.Helper()
+
+	// Build selective disclosures: [salt, claim_name, value]
+	// and compute their hashes for the _sd array
+	var disclosures []string
+	var sdHashes []string
+	for name, value := range claims {
+		disclosure := []any{"salt_" + name, name, value}
+		discBytes, _ := json.Marshal(disclosure)
+		encoded := base64.RawURLEncoding.EncodeToString(discBytes)
+		disclosures = append(disclosures, encoded)
+
+		// Compute SHA-256 hash of the raw encoded disclosure (before decoding)
+		hash := sha256.Sum256([]byte(encoded))
+		sdHashes = append(sdHashes, base64.RawURLEncoding.EncodeToString(hash[:]))
+	}
+
+	// Add decoy disclosures (not referenced in _sd)
+	for name, value := range decoys {
+		disclosure := []any{"decoy_salt_" + name, name, value}
+		discBytes, _ := json.Marshal(disclosure)
+		encoded := base64.RawURLEncoding.EncodeToString(discBytes)
+		disclosures = append(disclosures, encoded)
+		// Intentionally NOT adding hash to sdHashes — this is a decoy
+	}
 
 	// Build issuer JWT with embedded JWK for trust verification
 	issuerClaims := jwt.MapClaims{
 		"iss": "https://issuer.example.com",
 		"iat": time.Now().Unix(),
 		"vct": "urn:test:credential",
+		"_sd": sdHashes,
 	}
 
 	issuerToken := jwt.NewWithClaims(jwt.SigningMethodES256, issuerClaims)
@@ -406,14 +513,6 @@ func createTestSDJWT(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any,
 	}
 	signedIssuerJWT, err := issuerToken.SignedString(key)
 	require.NoError(t, err)
-
-	// Build selective disclosures: [salt, claim_name, value]
-	var disclosures []string
-	for name, value := range claims {
-		disclosure := []any{"salt_" + name, name, value}
-		discBytes, _ := json.Marshal(disclosure)
-		disclosures = append(disclosures, base64.RawURLEncoding.EncodeToString(discBytes))
-	}
 
 	// Build key binding JWT (proves holder controls the wallet)
 	kbClaims := jwt.MapClaims{

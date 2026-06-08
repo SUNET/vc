@@ -234,12 +234,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			for docType, docClaims := range mdocResult.Documents {
 				// Convert map claims to []Discloser format
 				disclosers := mapToDisclosers(docClaims.GetClaims())
+				// Build verified claims map (flat) for validation and caching
+				verifiedClaims := docClaims.GetClaims()
+				verifiedClaims["docType"] = docType
+				verifiedClaims["namespaces"] = docClaims.Namespaces
 				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
-					Credential: map[string]any{
-						"docType":    docType,
-						"namespaces": docClaims.Namespaces,
-					},
-					Claims: disclosers,
+					Credential: verifiedClaims,
+					Claims:     disclosers,
 				})
 			}
 
@@ -258,14 +259,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 			entries := scopeCredentials[scope]
 			for _, cc := range entries {
-				// Build a flat claims map from selective disclosures
-				claimsMap := make(map[string]any, len(cc.Claims))
-				for _, d := range cc.Claims {
-					if d.ClaimName != "" {
-						claimsMap[d.ClaimName] = d.Value
-					}
-				}
-				if err := openid4vp.ValidateClaims(claimsMap, scopeValidations); err != nil {
+				// Validate against the verified credential claims (only disclosures
+				// referenced by _sd are included), not raw disclosures which may
+				// contain unbound/decoy entries.
+				if err := openid4vp.ValidateClaims(cc.Credential, scopeValidations); err != nil {
 					c.log.Error(err, "claim validation failed", "scope", scope)
 					return nil, fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
 				}

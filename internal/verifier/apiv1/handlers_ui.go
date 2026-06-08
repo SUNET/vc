@@ -164,7 +164,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 
 type UIInteractionRequest struct {
 	DCQLQuery    *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
-	Validations  map[string][]openid4vp.ClaimValidation  `json:"validations,omitempty"`
+	Validations  map[string][]openid4vp.ClaimValidation  `json:"validations,omitempty" validate:"omitempty,dive,dive"`
 
 	// SessionID from http server endpoint
 	SessionID string `json:"-"`
@@ -281,8 +281,9 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 }
 
 // claimPathKey returns a string key for a claim path for use in exclusion sets.
+// Uses a null byte separator to avoid ambiguity when segments contain dots.
 func claimPathKey(path []string) string {
-	return strings.Join(path, ".")
+	return strings.Join(path, "\x00")
 }
 
 // jwtRegisteredClaims are standard JWT/SD-JWT claims that should not appear in DCQL queries.
