@@ -68,6 +68,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization for user", "request_uri", req.RequestURI)
+		return nil, fmt.Errorf("failed to get authorization context: %w", err)
 	}
 
 	c.log.Debug("UserLookup", "auth", authorizationContext)
