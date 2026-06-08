@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -718,4 +719,102 @@ func TestUpdateIndices(t *testing.T) {
 	result, err = cache.Get(ctx, &AuthorizationContext{RequestURI: "https://example.com/updated"})
 	require.NoError(t, err)
 	assert.Equal(t, "session-update", result.SessionID)
+}
+
+func TestSave_ValidationsFieldValidation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	tests := []struct {
+		name        string
+		validations map[string][]openid4vp.ClaimValidation
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid validations pass",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+			},
+			wantErr: false,
+		},
+		{
+			name:        "nil validations pass",
+			validations: nil,
+			wantErr:     false,
+		},
+		{
+			name: "empty rule rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "", Path: []string{"birthdate"}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "rule",
+		},
+		{
+			name: "unknown rule rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "unknown_rule", Path: []string{"birthdate"}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "rule",
+		},
+		{
+			name: "empty path rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "path",
+		},
+		{
+			name: "nil path rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: nil, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "path",
+		},
+		{
+			name: "nil value rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: nil}},
+			},
+			wantErr:     true,
+			errContains: "value",
+		},
+		{
+			name: "multiple scopes validated independently",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid":  {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"ehic": {{Rule: "", Path: []string{"x"}, Value: 1}}, // invalid
+			},
+			wantErr:     true,
+			errContains: "rule",
+		},
+		{
+			name: "path element empty string rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{""}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "path",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := &AuthorizationContext{
+				SessionID:   "session-val-test",
+				Validations: tt.validations,
+			}
+			err := store.Save(ctx, doc)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

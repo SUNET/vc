@@ -23,14 +23,30 @@ const credentialsList = v.record(
 const metadataResponseSchema = v.object({
     credentials: credentialsList,
     supported_wallets: v.record(v.string(), v.string()),
+    presets: v.optional(v.record(v.string(), v.object({
+        label: v.string(),
+        credentials: v.array(v.object({
+            id: v.string(),
+            format: v.string(),
+            meta: v.object({
+                vct_values: v.array(v.string()),
+            }),
+            claims: v.optional(v.array(v.object({
+                path: v.array(v.string()),
+            }))),
+            validations: v.optional(v.array(v.object({
+                rule: v.string(),
+                path: v.array(v.string()),
+                value: v.any(),
+            }))),
+        })),
+    }))),
 })
 
 /** @typedef {v.InferOutput<typeof dcqlQueryCredentialSchema>} DCQLQueryCredential */
 const dcqlQueryCredentialSchema = v.object({
     id: v.string(),
-    format: v.union([
-        v.literal("dc+sd-jwt"),
-    ]),
+    format: v.optional(v.string(), "dc+sd-jwt"),
     meta: v.intersect([
         v.object({
             vct_values: v.array(v.string()),
@@ -134,101 +150,15 @@ Alpine.data("app", () => ({
     credentialAttributes: null,
 
     /** 
-     * TODO: Fix this.
-     * @type {Record<string,  DCQLQuery & { label: string; }>} 
+     * @type {Record<string, object>} 
      */
-    predefinedPresentationDefinitions: {
-        pid: {
-            label: "PID",
-            credentials: [
-                {
-                    id: "pid",
-                    format: "dc+sd-jwt",
-                    meta: {
-                        vct_values: [],
-                    },
-                    claims: [
-                        { path: ["age_in_years"] },
-                        { path: ["age_over_14"] },
-                        { path: ["age_over_16"] },
-                        { path: ["age_over_18"] },
-                        { path: ["age_over_21"] },
-                        { path: ["age_over_65"] },
-                        { path: ["birth_given_name"] },
-                        { path: ["birth_family_name"] },
-                        { path: ["age_birth_year"] },
-                        { path: ["resident_city"] },
-                        { path: ["resident_country"] },
-                        { path: ["birthdate"] },
-                        { path: ["document_number"] },
-                        { path: ["email_address"] },
-                        { path: ["expiry_date"] },
-                        { path: ["given_name"] },
-                        { path: ["resident_address"] },
-                        { path: ["issuance_date"] },
-                        { path: ["issuing_authority"] },
-                        { path: ["issuing_country"] },
-                        { path: ["issuing_jurisdiction"] },
-                        { path: ["family_name"] },
-                        { path: ["mobile_phone_number"] },
-                        { path: ["nationality"] },
-                        { path: ["personal_administrative_number"] },
-                        { path: ["picture"] },
-                        { path: ["birth_place"] },
-                        { path: ["resident_postal_code"] },
-                        { path: ["resident_house_number"] },
-                        { path: ["resident_street_address"] },
-                        { path: ["sex"] },
-                        { path: ["resident_state"] },
-                        { path: ["trust_anchor"] },
-                    ],
-                },
-            ],
-        },
-        ehic: {
-            label: "EHIC",
-            credentials: [
-                {
-                id: "ehic",
-                format: "dc+sd-jwt",
-                meta: {
-                    vct_values: [],
-                },
-                claims: [
-                    { path: ["document_number"] },
-                    { path: ["ending_date"] },
-                    { path: ["date_of_expiry"] },
-                    { path: ["date_of_issuance"] },
-                    { path: ["issuing_country"] },
-                    { path: ["personal_administrative_number"] },
-                    { path: ["starting_date"] },
-                ],
-                },
-            ],
-        },
-        pid_age_over_18: {
-            label: "PID Age Over 18",
-            credentials: [
-                {
-                    id: "pid",
-                    format: "dc+sd-jwt",
-                    meta: {
-                        vct_values: [],
-                    },
-                    claims: [
-                        { path: ["age_over_18"] },
-                    ],
-                },
-            ],
-        },
-        pid_ehic: {
-            label: "PID + EHIC",
-            credentials: [],
-        },
-    },
+    predefinedPresentationDefinitions: {},
 
     /** @type {DCQLQuery | null} */
     dcqlQuery: null,
+
+    /** @type {Record<string, Array<{rule: string, path: string[], value: any}>> | null} */
+    validations: null,
 
     /** @type {PresentationDefinition | null} */
     presentationDefinition: null,
@@ -241,22 +171,6 @@ Alpine.data("app", () => ({
 
     async init() {
         await this.lookupCredentialsList();
-
-        // Populate vct_values dynamically from backend metadata (/ui/metadata)
-        // instead of hardcoding them, so presets stay in sync with the configured VCTs.
-        for (const def of Object.values(this.predefinedPresentationDefinitions)) {
-            for (const cred of def.credentials) {
-                const meta = this.credentialsList?.[cred.id];
-                if (meta?.vct) {
-                    cred.meta.vct_values = [meta.vct];
-                }
-            }
-        }
-
-        this.predefinedPresentationDefinitions.pid_ehic.credentials = [
-            ...this.predefinedPresentationDefinitions.pid.credentials,
-            ...this.predefinedPresentationDefinitions.ehic.credentials,
-        ];
 
         this.loading = false;
 
@@ -275,6 +189,11 @@ Alpine.data("app", () => ({
 
         this.credentialsList = data.credentials;
         this.walletInstances = data.supported_wallets;
+
+        // Load presets from backend config
+        if (data.presets) {
+            this.predefinedPresentationDefinitions = data.presets;
+        }
     },
 
     /** @param {string} id */
@@ -282,9 +201,27 @@ Alpine.data("app", () => ({
         this.error = null;
         this.loading = true;
         
-        const result = v.safeParse(dcqlQuerySchema, this.predefinedPresentationDefinitions[id]);
+        const preset = /** @type {any} */ (this.predefinedPresentationDefinitions[id]);
+        if (!preset) {
+            this.error = `Unknown preset "${id}"`;
+            this.loading = false;
+            return;
+        }
+
+        // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
+        const dcqlInput = {
+            credentials: (preset.credentials || []).map((/** @type {any} */ cred) => {
+                /** @type {any} */
+                const c = { id: cred.id, format: cred.format, meta: cred.meta };
+                if (cred.claims) c.claims = cred.claims;
+                return c;
+            }),
+        };
+
+        const result = v.safeParse(dcqlQuerySchema, dcqlInput);
         if (!result.success) {
             this.error = "Malformed predefined DCQL query";
+            this.loading = false;
             return;
         }
 
@@ -293,6 +230,18 @@ Alpine.data("app", () => ({
         this.credentialsList = {};
 
         this.dcqlQuery = result.output;
+
+        // Build per-scope validations map from credential-level validations
+        /** @type {Record<string, any>} */
+        const valMap = {};
+        if (preset.credentials) {
+            for (const cred of preset.credentials) {
+                if (cred.validations && cred.validations.length > 0) {
+                    valMap[cred.id] = cred.validations;
+                }
+            }
+        }
+        this.validations = Object.keys(valMap).length > 0 ? valMap : null;
 
         await this.sendDcqlQuery();
 
@@ -446,6 +395,7 @@ Alpine.data("app", () => ({
                     },
                     body: JSON.stringify({
                         dcql_query: this.dcqlQuery,
+                        ...(this.validations ? { validations: this.validations } : {}),
                     })
                 },
             );
