@@ -53,7 +53,7 @@ type GrantPreAuthorizedCode struct {
 
 // TXCode Transaction Code
 type TXCode struct {
-	InputMode   string `json:"input_mode,omitempty" bson:"input_mode" validate:"oneof=numeric text"`
+	InputMode   string `json:"input_mode,omitempty" bson:"input_mode,omitempty" validate:"omitempty,oneof=numeric text"`
 	Length      int    `json:"length,omitempty" bson:"length,omitempty"`
 	Description string `json:"description,omitempty" bson:"description,omitempty"`
 }
