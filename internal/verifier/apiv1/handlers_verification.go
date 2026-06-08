@@ -238,7 +238,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				disclosers := mapToDisclosers(verifiedClaims)
 				// Augment verified claims map for validation and caching
 				verifiedClaims["docType"] = docType
-				verifiedClaims["namespaces"] = docClaims.Namespaces
+				// Convert map[string]map[string]any to map[string]any so resolvePath can traverse it
+				nsMap := make(map[string]any, len(docClaims.Namespaces))
+				for ns, items := range docClaims.Namespaces {
+					nsMap[ns] = items
+				}
+				verifiedClaims["namespaces"] = nsMap
 				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 					Credential: verifiedClaims,
 					Claims:     disclosers,
