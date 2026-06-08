@@ -309,12 +309,14 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 	if code == "" {
 		return nil, errors.New("code cannot be empty")
 	}
+	if dpopThumbprint == "" {
+		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
+	}
 
-	filter := bson.M{"code": code}
-
-	// If a thumbprint is provided, ensure it hasn't already redeemed
-	if dpopThumbprint != "" {
-		filter["redeemed_by"] = bson.M{"$ne": dpopThumbprint}
+	filter := bson.M{
+		"code":        code,
+		"forfeited":   bson.M{"$ne": true},
+		"redeemed_by": bson.M{"$ne": dpopThumbprint},
 	}
 
 	update := bson.M{"$addToSet": bson.M{"redeemed_by": dpopThumbprint}}
@@ -324,10 +326,17 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 	err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			// Could be code not found or same client replay
+			// Distinguish: code not found, forfeited, or already-redeemed client
 			var existing AuthorizationContext
-			if findErr := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&existing); findErr != nil {
-				return nil, ErrNoDocuments
+			findErr := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&existing)
+			if findErr != nil {
+				if errors.Is(findErr, mongo.ErrNoDocuments) {
+					return nil, ErrNoDocuments
+				}
+				return nil, fmt.Errorf("failed to look up pre-authorized code: %w", findErr)
+			}
+			if existing.Forfeited {
+				return nil, errors.New("pre-authorized code has been forfeited")
 			}
 			return nil, errors.New("pre-authorized code already redeemed by this client")
 		}

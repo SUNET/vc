@@ -323,13 +323,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// Now consume the authorization code (after DPoP and client binding are validated)
 	var authorizationContext *cache.AuthorizationContext
 	var err error
-	if isPreAuthFlow {
-		// Pre-authorized codes can be redeemed by multiple distinct clients
-		// (each identified by a unique DPoP key). This supports the OID4VCI
-		// happy-flow-multiple-clients scenario where one credential offer
-		// serves multiple wallets.
+	if isPreAuthFlow && dpopThumbprint != "" {
+		// Pre-authorized codes with DPoP can be redeemed by multiple distinct
+		// clients (each identified by a unique DPoP key). This supports the
+		// OID4VCI happy-flow-multiple-clients scenario where one credential
+		// offer serves multiple wallets.
 		authorizationContext, err = c.cacheService.AuthContext.RedeemPreAuthorizedCode(ctx, code, dpopThumbprint)
 	} else {
+		// Without DPoP, pre-authorized codes are single-use (standard forfeit).
 		authorizationContext, err = c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
 			Code: code,
 		})
@@ -382,8 +383,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	// Per OID4VCI 1.0 Section 6.2: authorization_details is REQUIRED in the Token Response when
 	// authorization_details was used in the Authorization Request, with credential_identifiers added.
+	var responseDetails []openid4vci.AuthorizationDetailsParameter
 	if len(authorizationContext.AuthorizationDetails) > 0 {
-		responseDetails := make([]openid4vci.AuthorizationDetailsParameter, len(authorizationContext.AuthorizationDetails))
+		responseDetails = make([]openid4vci.AuthorizationDetailsParameter, len(authorizationContext.AuthorizationDetails))
 		for i, ad := range authorizationContext.AuthorizationDetails {
 			responseDetails[i] = ad
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
@@ -411,12 +413,12 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		childSession := &cache.AuthorizationContext{
 			SessionID:            childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
-			Status:               "token_issued",
+			Status:               cache.SessionStatusTokenIssued,
 			CreatedAt:            time.Now(),
-			ExpiresAt:            authorizationContext.ExpiresAt,
+			ExpiresAt:            tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
 			Scopes:               authorizationContext.Scopes,
 			Nonce:                authorizationContext.Nonce,
-			AuthorizationDetails: authorizationContext.AuthorizationDetails,
+			AuthorizationDetails: responseDetails, // Use details with credential_identifiers from token response
 			AuthProvider:         authorizationContext.AuthProvider,
 			Identifier:           authorizationContext.Identifier,
 			DataSource:           authorizationContext.DataSource,
@@ -435,6 +437,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
 			c.log.Error(err, "failed to persist token and authorization details")
 			return nil, err
+		}
+		// Persist credential_identifiers so VCICredential can validate them later.
+		if len(responseDetails) > 0 {
+			authorizationContext.AuthorizationDetails = responseDetails
+			if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+				c.log.Error(err, "failed to update authorization_details with credential_identifiers")
+				return nil, err
+			}
 		}
 	}
 

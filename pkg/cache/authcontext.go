@@ -226,6 +226,9 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 	if code == "" {
 		return nil, errors.New("code cannot be empty")
 	}
+	if dpopThumbprint == "" {
+		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -243,18 +246,24 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 
 	doc := item.Value()
 
+	// Reject redemption if the code was forfeited (e.g. non-DPoP redemption
+	// already consumed it via ForfeitAuthorizationCode).
+	if doc.Forfeited {
+		return nil, errors.New("pre-authorized code has been forfeited")
+	}
+
 	// Check if this specific client (DPoP thumbprint) already redeemed the code
-	if dpopThumbprint != "" {
-		for _, tp := range doc.RedeemedBy {
-			if tp == dpopThumbprint {
-				return nil, errors.New("pre-authorized code already redeemed by this client")
-			}
+	for _, tp := range doc.RedeemedBy {
+		if tp == dpopThumbprint {
+			return nil, errors.New("pre-authorized code already redeemed by this client")
 		}
 	}
 
-	// Record this client as having redeemed the code
+	// Record this client as having redeemed the code.
+	// Use PreviousOrDefaultTTL to preserve the original TTL — repeated redemptions
+	// by different clients must not extend the code's lifetime.
 	doc.RedeemedBy = append(doc.RedeemedBy, dpopThumbprint)
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
 
 	return doc, nil
 }

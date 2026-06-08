@@ -448,6 +448,39 @@ func TestRedeemPreAuthorizedCode_EmptyCode(t *testing.T) {
 	assert.Contains(t, err.Error(), "code cannot be empty")
 }
 
+func TestRedeemPreAuthorizedCode_EmptyThumbprint(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "some-code", "")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "dpop thumbprint is required")
+}
+
+func TestRedeemPreAuthorizedCode_ForfeitedCode(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	doc := &AuthorizationContext{
+		SessionID: "session-forfeited",
+		Code:      "forfeited-code",
+		Forfeited: false,
+	}
+	err := store.Save(ctx, doc)
+	require.NoError(t, err)
+
+	// Forfeit the code
+	err = store.MarkCodeAsForfeited(ctx, "session-forfeited")
+	require.NoError(t, err)
+
+	// Attempt to redeem a forfeited code
+	result, err := store.RedeemPreAuthorizedCode(ctx, "forfeited-code", "thumbprint-1")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "forfeited")
+}
+
 func TestConsent_Success(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)

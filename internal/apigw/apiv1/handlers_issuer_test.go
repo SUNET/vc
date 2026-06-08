@@ -449,3 +449,28 @@ func TestDPoPThumbprintBinding(t *testing.T) {
 		})
 	}
 }
+
+// TestChildSessionDocLookup verifies that child sessions (created in the
+// pre-auth multi-client flow) use SourceSessionID for document lookup,
+// while regular sessions use their own SessionID.
+func TestDocLookupSessionID(t *testing.T) {
+	tests := []struct {
+		name             string
+		sessionID        string
+		sourceSessionID  string
+		wantDocSessionID string
+	}{
+		{"regular session uses own SessionID", "session-abc", "", "session-abc"},
+		{"child session uses SourceSessionID", "child-session-xyz", "parent-session-abc", "parent-session-abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authCtx := &cache.AuthorizationContext{
+				SessionID:       tt.sessionID,
+				SourceSessionID: tt.sourceSessionID,
+			}
+			assert.Equal(t, tt.wantDocSessionID, docLookupSessionID(authCtx))
+		})
+	}
+}

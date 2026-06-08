@@ -273,10 +273,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	// For child sessions created in the pre-auth multi-client flow, use the
 	// source session ID (the original pre-auth code) for document lookup.
-	docSessionID := authContext.SessionID
-	if authContext.SourceSessionID != "" {
-		docSessionID = authContext.SourceSessionID
-	}
+	docSessionID := docLookupSessionID(authContext)
 
 	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID, "doc_session_id", docSessionID)
 	// Retrieve credential data based on the auth provider used during authorization
@@ -296,7 +293,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 			break
 		}
 		if document == nil || document.DocumentData == nil {
-			return nil, errors.New("cached document is empty for session " + authContext.SessionID)
+			return nil, errors.New("cached document is empty for session " + docSessionID)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
@@ -729,4 +726,14 @@ func verifyDPoPKeyBinding(proofThumbprint string, token *cache.Token) error {
 		)
 	}
 	return nil
+}
+
+// docLookupSessionID returns the session ID to use for document lookup.
+// For child sessions created in the pre-auth multi-client flow, the source
+// session ID (original pre-auth code) is used instead of the child's own ID.
+func docLookupSessionID(authContext *cache.AuthorizationContext) string {
+	if authContext.SourceSessionID != "" {
+		return authContext.SourceSessionID
+	}
+	return authContext.SessionID
 }
