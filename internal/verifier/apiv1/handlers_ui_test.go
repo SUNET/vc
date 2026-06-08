@@ -433,6 +433,9 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 			continue
 		}
 		entries := scopeCredentials[scope]
+		if len(entries) == 0 {
+			return fmt.Errorf("validations configured for scope %s but no credentials were extracted", scope)
+		}
 		for _, cc := range entries {
 			if err := openid4vp.ValidateClaims(cc.Credential, scopeValidations); err != nil {
 				return fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
