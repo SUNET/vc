@@ -7,9 +7,10 @@ import (
 
 func TestValidateClaims(t *testing.T) {
 	// Fix the clock to 2026-06-08 so boundary tests are deterministic.
+	origNowFunc := nowFunc
 	fixed := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 	nowFunc = func() time.Time { return fixed }
-	t.Cleanup(func() { nowFunc = func() time.Time { return time.Now().UTC() } })
+	t.Cleanup(func() { nowFunc = origNowFunc })
 
 	tests := []struct {
 		name        string
@@ -119,6 +120,14 @@ func TestValidateClaims(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name:   "negative_threshold_rejected",
+			claims: map[string]any{"birthdate": "2006-01-01"},
+			validations: []ClaimValidation{
+				{Rule: "age_over", Path: []string{"birthdate"}, Value: -1},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -155,4 +164,31 @@ func TestComputeAge(t *testing.T) {
 			}
 		})
 	}
+}
+
+func FuzzValidateAgeOver(f *testing.F) {
+	// Seed corpus
+	f.Add("2000-01-01", 18)
+	f.Add("2010-06-09", 0)
+	f.Add("1990-12-31", 100)
+	f.Add("not-a-date", 18)
+	f.Add("2000-01-01", -1)
+
+	// Fix the clock for deterministic fuzzing.
+	origNowFunc := nowFunc
+	nowFunc = func() time.Time { return time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC) }
+	f.Cleanup(func() { nowFunc = origNowFunc })
+
+	f.Fuzz(func(t *testing.T, birthdate string, threshold int) {
+		claims := map[string]any{"birthdate": birthdate}
+		validations := []ClaimValidation{
+			{Rule: "age_over", Path: []string{"birthdate"}, Value: threshold},
+		}
+		err := ValidateClaims(claims, validations)
+
+		// Negative thresholds must always be rejected.
+		if threshold < 0 && err == nil {
+			t.Errorf("expected error for negative threshold %d, got nil", threshold)
+		}
+	})
 }

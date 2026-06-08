@@ -47,6 +47,9 @@ func validateAgeOver(claims map[string]any, path []string, threshold any) error 
 	if !ok {
 		return fmt.Errorf("age_over validation: threshold must be an integer, got %T", threshold)
 	}
+	if thresholdAge < 0 {
+		return fmt.Errorf("age_over validation: threshold must be non-negative, got %d", thresholdAge)
+	}
 
 	// Resolve the claim value from the path
 	val, ok := resolvePath(claims, path)
