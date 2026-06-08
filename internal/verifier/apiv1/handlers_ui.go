@@ -81,6 +81,9 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			}
 			for scope, scopeCfg := range preset {
 				meta := c.cfg.Common.CredentialMetadata[scope]
+				if meta == nil {
+					return nil, fmt.Errorf("preset %q references scope %q which has no entry in credential_metadata", label, scope)
+				}
 
 				uiCred := UIPresetCredential{
 					ID:   scope,

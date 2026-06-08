@@ -232,10 +232,11 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 			// Convert mDOC claims to credential cache format
 			for docType, docClaims := range mdocResult.Documents {
-				// Convert map claims to []Discloser format
-				disclosers := mapToDisclosers(docClaims.GetClaims())
-				// Build verified claims map (flat) for validation and caching
+				// Reuse a single GetClaims() result for consistency
 				verifiedClaims := docClaims.GetClaims()
+				// Convert map claims to []Discloser format
+				disclosers := mapToDisclosers(verifiedClaims)
+				// Augment verified claims map for validation and caching
 				verifiedClaims["docType"] = docType
 				verifiedClaims["namespaces"] = docClaims.Namespaces
 				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
@@ -258,6 +259,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				continue
 			}
 			entries := scopeCredentials[scope]
+			if len(entries) == 0 {
+				c.log.Error(nil, "validations configured but no credentials extracted", "scope", scope)
+				return nil, fmt.Errorf("validations configured for scope %s but no credentials were extracted", scope)
+			}
 			for _, cc := range entries {
 				// Validate against the verified credential claims (only disclosures
 				// referenced by _sd are included), not raw disclosures which may
