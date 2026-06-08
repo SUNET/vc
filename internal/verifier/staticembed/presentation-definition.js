@@ -203,7 +203,19 @@ Alpine.data("app", () => ({
         this.error = null;
         this.loading = true;
         
-        const result = v.safeParse(dcqlQuerySchema, this.predefinedPresentationDefinitions[id]);
+        const preset = /** @type {any} */ (this.predefinedPresentationDefinitions[id]);
+
+        // Extract only DCQL-relevant fields from the preset, stripping UI/validation extras
+        const dcqlInput = {
+            credentials: (preset.credentials || []).map((/** @type {any} */ cred) => {
+                /** @type {any} */
+                const c = { id: cred.id, format: cred.format, meta: cred.meta };
+                if (cred.claims) c.claims = cred.claims;
+                return c;
+            }),
+        };
+
+        const result = v.safeParse(dcqlQuerySchema, dcqlInput);
         if (!result.success) {
             this.error = "Malformed predefined DCQL query";
             return;
@@ -216,7 +228,7 @@ Alpine.data("app", () => ({
         this.dcqlQuery = result.output;
 
         // Build per-scope validations map from credential-level validations
-        const preset = this.predefinedPresentationDefinitions[id];
+        /** @type {Record<string, any>} */
         const valMap = {};
         if (preset.credentials) {
             for (const cred of preset.credentials) {
