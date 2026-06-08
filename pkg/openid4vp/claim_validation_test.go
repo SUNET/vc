@@ -6,6 +6,11 @@ import (
 )
 
 func TestValidateClaims(t *testing.T) {
+	// Fix the clock to 2026-06-08 so boundary tests are deterministic.
+	fixed := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return fixed }
+	t.Cleanup(func() { nowFunc = func() time.Time { return time.Now().UTC() } })
+
 	tests := []struct {
 		name        string
 		claims      map[string]any
@@ -14,7 +19,7 @@ func TestValidateClaims(t *testing.T) {
 	}{
 		{
 			name:   "age_over_pass",
-			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": "2006-01-01"}, // 20 years old on 2026-06-08
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -22,7 +27,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "age_over_fail",
-			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-16, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": "2010-01-01"}, // 16 years old on 2026-06-08
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -30,7 +35,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "age_over_exactly_18",
-			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-18, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": "2008-06-08"}, // exactly 18 on 2026-06-08
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -38,7 +43,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "age_over_birthday_tomorrow",
-			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-18, 0, 1).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": "2008-06-09"}, // turns 18 tomorrow
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 			},
@@ -76,7 +81,7 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "float64_threshold",
-			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": "2006-01-01"}, // 20 years old
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: float64(18)},
 			},
@@ -84,11 +89,35 @@ func TestValidateClaims(t *testing.T) {
 		},
 		{
 			name:   "non_integer_float_threshold_rejected",
-			claims: map[string]any{"birthdate": time.Now().UTC().AddDate(-20, 0, 0).Format("2006-01-02")},
+			claims: map[string]any{"birthdate": "2006-01-01"},
 			validations: []ClaimValidation{
 				{Rule: "age_over", Path: []string{"birthdate"}, Value: float64(18.9)},
 			},
 			wantErr: true,
+		},
+		{
+			name:   "int32_threshold_from_bson",
+			claims: map[string]any{"birthdate": "2006-01-01"},
+			validations: []ClaimValidation{
+				{Rule: "age_over", Path: []string{"birthdate"}, Value: int32(18)},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "int16_threshold",
+			claims: map[string]any{"birthdate": "2006-01-01"},
+			validations: []ClaimValidation{
+				{Rule: "age_over", Path: []string{"birthdate"}, Value: int16(18)},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "int8_threshold",
+			claims: map[string]any{"birthdate": "2006-01-01"},
+			validations: []ClaimValidation{
+				{Rule: "age_over", Path: []string{"birthdate"}, Value: int8(18)},
+			},
+			wantErr: false,
 		},
 	}
 

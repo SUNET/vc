@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// nowFunc is the clock used by validation logic. Override in tests to avoid flakiness.
+var nowFunc = func() time.Time { return time.Now().UTC() }
+
 // ClaimValidation defines a validation rule to apply against extracted credential claims.
 type ClaimValidation struct {
 	// Rule is the validation rule to apply, e.g., "age_over".
@@ -61,7 +64,7 @@ func validateAgeOver(claims map[string]any, path []string, threshold any) error 
 		return fmt.Errorf("age_over validation: invalid date format for %v: %w", path, err)
 	}
 
-	now := time.Now().UTC()
+	now := nowFunc()
 	age := computeAge(birthdate, now)
 
 	if age < thresholdAge {
@@ -102,6 +105,12 @@ func toInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
 		return n, true
+	case int8:
+		return int(n), true
+	case int16:
+		return int(n), true
+	case int32:
+		return int(n), true
 	case int64:
 		if n > int64(maxSafeInt) || n < -int64(maxSafeInt) {
 			return 0, false

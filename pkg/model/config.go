@@ -486,7 +486,7 @@ type VerificationPresetScope struct {
 // VerificationPresetClaim defines a claim path to request within a credential.
 type VerificationPresetClaim struct {
 	// Path is the claim path segments
-	Path []string `yaml:"path" validate:"required,min=1" doc_example:"[\"birthdate\"], [\"address\", \"locality\"]"`
+	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"birthdate\"], [\"address\", \"locality\"]"`
 }
 
 // VerifierInbound groups inbound credential verification configuration
