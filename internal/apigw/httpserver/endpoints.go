@@ -56,12 +56,14 @@ func (s *Service) endpointVCINonce(ctx context.Context, c *gin.Context) (any, er
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointNonce")
 	defer span.End()
 
+	// Set Cache-Control unconditionally per spec requirement
+	c.Header("Cache-Control", "no-store")
+
 	reply, err := s.apiv1.VCINonce(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	c.Header("Cache-Control", "no-store")
 	return reply, nil
 }
 
