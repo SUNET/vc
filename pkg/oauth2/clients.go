@@ -139,6 +139,9 @@ func (c *Clients) Allow(clientID, redirectURI, scope string) (*Client, error) {
 		return nil, errors.New("client not found in config")
 	}
 
+	if len(client.RedirectURIs) == 0 {
+		return nil, errors.New("no redirect_uri configured for client")
+	}
 	if !client.RedirectURIs.Contains(redirectURI) {
 		return nil, errors.New("redirect_uri does not match any allowed URI")
 	}

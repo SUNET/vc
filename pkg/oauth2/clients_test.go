@@ -136,6 +136,12 @@ func TestRedirectURIsContains(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "wildcard path traversal via dot-segments",
+			uris:     RedirectURIs{"https://example.com/test/a/*"},
+			check:    "https://example.com/test/a/../evil",
+			expected: false,
+		},
+		{
 			name:     "multiple uris first matches",
 			uris:     RedirectURIs{"https://example.com/cb", "https://other.com/cb"},
 			check:    "https://example.com/cb",
