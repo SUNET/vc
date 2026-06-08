@@ -302,6 +302,41 @@ func (s *MongoStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 	return nil
 }
 
+// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
+// distinct clients (identified by DPoP thumbprint). Uses an atomic $addToSet with
+// a condition that the thumbprint is not already present.
+func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+
+	filter := bson.M{"code": code}
+
+	// If a thumbprint is provided, ensure it hasn't already redeemed
+	if dpopThumbprint != "" {
+		filter["redeemed_by"] = bson.M{"$ne": dpopThumbprint}
+	}
+
+	update := bson.M{"$addToSet": bson.M{"redeemed_by": dpopThumbprint}}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	var result AuthorizationContext
+	err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&result)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Could be code not found or same client replay
+			var existing AuthorizationContext
+			if findErr := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&existing); findErr != nil {
+				return nil, ErrNoDocuments
+			}
+			return nil, errors.New("pre-authorized code already redeemed by this client")
+		}
+		return nil, fmt.Errorf("failed to redeem pre-authorized code: %w", err)
+	}
+
+	return &result, nil
+}
+
 // Consent marks an authorization context as consented.
 func (s *MongoStore) Consent(ctx context.Context, query *AuthorizationContext) error {
 	if query == nil || query.RequestURI == "" {

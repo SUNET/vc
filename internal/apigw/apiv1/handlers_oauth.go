@@ -262,6 +262,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				dpopErr.Error(), 400, dpopErr)
 		}
 
+		dpopThumbprint = dpop.Thumbprint
+
 		unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
 		if err != nil {
 			c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
@@ -319,9 +321,19 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	// Now consume the authorization code (after DPoP and client binding are validated)
-	authorizationContext, err := c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
-		Code: code,
-	})
+	var authorizationContext *cache.AuthorizationContext
+	var err error
+	if isPreAuthFlow {
+		// Pre-authorized codes can be redeemed by multiple distinct clients
+		// (each identified by a unique DPoP key). This supports the OID4VCI
+		// happy-flow-multiple-clients scenario where one credential offer
+		// serves multiple wallets.
+		authorizationContext, err = c.cacheService.AuthContext.RedeemPreAuthorizedCode(ctx, code, dpopThumbprint)
+	} else {
+		authorizationContext, err = c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
+			Code: code,
+		})
+	}
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
@@ -389,17 +401,41 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		DPoPThumbprint: dpopThumbprint,
 	}
 
-	// Set the token on the in-memory struct so that Update() persists it
-	// alongside any updated AuthorizationDetails (credential_identifiers).
-	// Using Update() instead of AddToken() avoids a race where AddToken
-	// writes the token and a subsequent Update() overwrites it with nil.
-	// NOTE: Update() uses ReplaceOne which could clobber concurrent writes,
-	// but this is safe here: only one token exchange runs per authorization code
-	// (the code is consumed atomically above), so there are no concurrent writers.
-	authorizationContext.Token = tokenDoc
-	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
-		c.log.Error(err, "failed to persist token and authorization details")
-		return nil, err
+	if isPreAuthFlow {
+		// Pre-auth flow: create an independent child session for this client.
+		// The shared auth context remains intact so other clients can also redeem.
+		childSessionID, genErr := crypto.GenerateSecureToken(0, 32)
+		if genErr != nil {
+			return nil, fmt.Errorf("failed to generate child session ID: %w", genErr)
+		}
+		childSession := &cache.AuthorizationContext{
+			SessionID:            childSessionID,
+			SourceSessionID:      authorizationContext.SessionID,
+			Status:               "token_issued",
+			CreatedAt:            time.Now(),
+			ExpiresAt:            authorizationContext.ExpiresAt,
+			Scopes:               authorizationContext.Scopes,
+			Nonce:                authorizationContext.Nonce,
+			AuthorizationDetails: authorizationContext.AuthorizationDetails,
+			AuthProvider:         authorizationContext.AuthProvider,
+			Identifier:           authorizationContext.Identifier,
+			DataSource:           authorizationContext.DataSource,
+			Token:                tokenDoc,
+		}
+		if err := c.cacheService.AuthContext.Save(ctx, childSession); err != nil {
+			c.log.Error(err, "failed to save child session for pre-auth client")
+			return nil, err
+		}
+	} else {
+		// Set the token on the in-memory struct so that Update() persists it
+		// alongside any updated AuthorizationDetails (credential_identifiers).
+		// Using Update() instead of AddToken() avoids a race where AddToken
+		// writes the token and a subsequent Update() overwrites it with nil.
+		authorizationContext.Token = tokenDoc
+		if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+			c.log.Error(err, "failed to persist token and authorization details")
+			return nil, err
+		}
 	}
 
 	c.log.Debug("OAuthToken complete")

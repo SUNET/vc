@@ -397,6 +397,57 @@ func TestForfeitAuthorizationCode_AlreadyUsed(t *testing.T) {
 	assert.True(t, retrieved.Forfeited, "Context should remain marked as forfeited")
 }
 
+func TestRedeemPreAuthorizedCode_MultipleClients(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	doc := &AuthorizationContext{
+		SessionID: "preauth-session",
+		Code:      "preauth-code-123",
+		Scopes:    []string{"openid"},
+		ExpiresAt: time.Now().Add(5 * time.Minute).Unix(),
+	}
+	require.NoError(t, cache.Save(ctx, doc))
+
+	// First client redeems successfully
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-1")
+	require.NoError(t, err)
+	assert.Equal(t, "preauth-session", result.SessionID)
+	assert.Contains(t, result.RedeemedBy, "thumbprint-client-1")
+
+	// Second client also redeems successfully
+	result2, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-2")
+	require.NoError(t, err)
+	assert.Equal(t, "preauth-session", result2.SessionID)
+	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-1")
+	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-2")
+
+	// Same client trying again is rejected
+	result3, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-1")
+	assert.Error(t, err)
+	assert.Nil(t, result3)
+	assert.Contains(t, err.Error(), "already redeemed by this client")
+}
+
+func TestRedeemPreAuthorizedCode_NotFound(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "nonexistent-code", "thumbprint-1")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestRedeemPreAuthorizedCode_EmptyCode(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "", "thumbprint-1")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "code cannot be empty")
+}
+
 func TestConsent_Success(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
