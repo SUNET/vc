@@ -128,9 +128,6 @@ func toInt(v any) (int, bool) {
 	case int32:
 		return int(n), true
 	case int64:
-		if n > int64(maxSafeInt) || n < -int64(maxSafeInt) {
-			return 0, false
-		}
 		if n > math.MaxInt || n < math.MinInt {
 			return 0, false
 		}

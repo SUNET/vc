@@ -395,7 +395,7 @@ Alpine.data("app", () => ({
                     },
                     body: JSON.stringify({
                         dcql_query: this.dcqlQuery,
-                        ...(this.validations && { validations: this.validations }),
+                        ...(this.validations ? { validations: this.validations } : {}),
                     })
                 },
             );
