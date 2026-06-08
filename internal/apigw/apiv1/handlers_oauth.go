@@ -236,6 +236,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
+	// NOTE: For pre-authorized_code flow, DPoP is optional per OID4VCI §4.1.1.
+	// When DPoP is absent, dpopThumbprint remains empty. The credential endpoint
+	// (verifyDPoPKeyBinding) skips key-binding verification when the stored
+	// thumbprint is empty — see handlers_issuer.go verifyDPoPKeyBinding().
+	// Security: the one-time pre-authorized code and (optionally) tx_code provide
+	// the primary security mechanism for this flow.
+	// TODO: Consider requiring DPoP for pre-auth flow to achieve sender-constrained
+	// tokens across all flows (RFC 9449).
 
 	// Verify client_id and redirect_uri BEFORE consuming the authorization code
 	// (RFC 6749 §4.1.3). A mismatched client_id must not burn the code, otherwise
