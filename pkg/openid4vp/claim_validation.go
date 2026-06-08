@@ -1,8 +1,10 @@
 package openid4vp
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -104,9 +106,19 @@ func resolvePath(claims map[string]any, path []string) (any, bool) {
 	return current, true
 }
 
-// toInt converts a numeric value to int (handles JSON number types).
+// toInt converts a numeric value to int (handles Go numeric types, float64 from standard
+// JSON decoding, and json.Number from decoders using UseNumber).
 func toInt(v any) (int, bool) {
 	switch n := v.(type) {
+	case json.Number:
+		i, err := strconv.ParseInt(n.String(), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		if i > math.MaxInt || i < math.MinInt {
+			return 0, false
+		}
+		return int(i), true
 	case int:
 		return n, true
 	case int8:

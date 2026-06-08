@@ -221,6 +221,7 @@ Alpine.data("app", () => ({
         const result = v.safeParse(dcqlQuerySchema, dcqlInput);
         if (!result.success) {
             this.error = "Malformed predefined DCQL query";
+            this.loading = false;
             return;
         }
 
