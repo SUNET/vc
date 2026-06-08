@@ -204,11 +204,12 @@ func TestVerifyJWTSignatureInvalidSignature(t *testing.T) {
 		"iss": "test-issuer",
 	})
 	// Embed key2's public key as jwk so extractJWTKeyMaterial uses key2
+	key2X, key2Y := ecCoordinates(t, &key2.PublicKey)
 	token.Header["jwk"] = map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(key2.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(key2.PublicKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(key2X),
+		"y":   base64.RawURLEncoding.EncodeToString(key2Y),
 	}
 	signedJWT, err := token.SignedString(key1)
 	require.NoError(t, err)
@@ -505,11 +506,12 @@ func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[s
 
 	issuerToken := jwt.NewWithClaims(jwt.SigningMethodES256, issuerClaims)
 	// Embed public key as JWK so the trust verifier can extract it
+	keyX, keyY := ecCoordinates(t, &key.PublicKey)
 	issuerToken.Header["jwk"] = map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(keyX),
+		"y":   base64.RawURLEncoding.EncodeToString(keyY),
 	}
 	signedIssuerJWT, err := issuerToken.SignedString(key)
 	require.NoError(t, err)
@@ -533,3 +535,17 @@ func createTestSDJWTWithDecoys(t *testing.T, key *ecdsa.PrivateKey, claims map[s
 
 	return parts
 }
+
+// ecCoordinates extracts the X and Y coordinates from a P-256 public key
+// using ECDH(), avoiding the deprecated X/Y big.Int fields.
+func ecCoordinates(t *testing.T, pub *ecdsa.PublicKey) (x, y []byte) {
+	t.Helper()
+	ecdhKey, err := pub.ECDH()
+	require.NoError(t, err)
+	// Uncompressed point: 0x04 || X (32 bytes) || Y (32 bytes)
+	raw := ecdhKey.Bytes()
+	require.Equal(t, 65, len(raw), "unexpected uncompressed P-256 point length")
+	return raw[1:33], raw[33:65]
+}
+
+

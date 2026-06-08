@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,12 +75,24 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	// Convert config presets to UI presets, resolving VCT values from credential metadata
 	if len(c.cfg.Verifier.Presets) > 0 {
 		reply.Presets = make(map[string]*UIPreset, len(c.cfg.Verifier.Presets))
-		for label, preset := range c.cfg.Verifier.Presets {
+		presetLabels := make([]string, 0, len(c.cfg.Verifier.Presets))
+		for label := range c.cfg.Verifier.Presets {
+			presetLabels = append(presetLabels, label)
+		}
+		sort.Strings(presetLabels)
+		for _, label := range presetLabels {
+			preset := c.cfg.Verifier.Presets[label]
 			uiPreset := &UIPreset{
 				Label:       label,
 				Credentials: make([]UIPresetCredential, 0, len(preset)),
 			}
-			for scope, scopeCfg := range preset {
+			scopeKeys := make([]string, 0, len(preset))
+			for scope := range preset {
+				scopeKeys = append(scopeKeys, scope)
+			}
+			sort.Strings(scopeKeys)
+			for _, scope := range scopeKeys {
+				scopeCfg := preset[scope]
 				meta := c.cfg.Common.CredentialMetadata[scope]
 				if meta == nil {
 					return nil, fmt.Errorf("preset %q references scope %q which has no entry in credential_metadata", label, scope)
@@ -132,14 +145,11 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 								allPaths = append(allPaths, path)
 							}
 						}
-						// Build set of parent prefixes (paths that are a prefix of another path)
+						// Build set of parent prefixes: for each path, mark all its proper prefixes
 						parentSet := make(map[string]bool)
 						for _, p := range allPaths {
-							for _, q := range allPaths {
-								if len(q) > len(p) && claimPathKey(q[:len(p)]) == claimPathKey(p) {
-									parentSet[claimPathKey(p)] = true
-									break
-								}
+							for i := 1; i < len(p); i++ {
+								parentSet[claimPathKey(p[:i])] = true
 							}
 						}
 						// Second pass: only include non-parent claims
