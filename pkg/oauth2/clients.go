@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"path"
 	"reflect"
 	"slices"
 	"strings"
@@ -23,7 +24,7 @@ type Client struct {
 	Type string `json:"type" yaml:"type" validate:"required,oneof=public confidential" default:"public"`
 	// RedirectURIs is the list of allowed redirect URIs for the client.
 	// Accepts either a single string or an array of strings in YAML/JSON.
-	RedirectURIs RedirectURIs `json:"redirect_uri" yaml:"redirect_uri" validate:"required" doc_example:"\"https://example.com/callback\""`
+	RedirectURIs RedirectURIs `json:"redirect_uri" yaml:"redirect_uri" validate:"required,min=1,dive,url" doc_example:"\"https://example.com/callback\""`
 	// Scopes is the list of OAuth2 scopes allowed for the client
 	Scopes []string `json:"scopes" yaml:"scopes" validate:"required"`
 }
@@ -68,6 +69,10 @@ func (r RedirectURIs) Contains(uri string) bool {
 	if err != nil {
 		return false
 	}
+	// Reject URIs with fragments per RFC 6749 §3.1.2
+	if parsed.Fragment != "" {
+		return false
+	}
 	for _, allowed := range r {
 		if strings.HasSuffix(allowed, "/*") {
 			prefix := strings.TrimSuffix(allowed, "*")
@@ -75,9 +80,19 @@ func (r RedirectURIs) Contains(uri string) bool {
 			if err != nil {
 				continue
 			}
+			// Clean paths to prevent traversal via dot-segments (e.g. /a/../evil)
+			cleanedPath := path.Clean(parsed.Path)
+			cleanedPrefix := path.Clean(prefixParsed.Path)
 			if parsed.Scheme == prefixParsed.Scheme &&
 				parsed.Host == prefixParsed.Host &&
-				strings.HasPrefix(parsed.Path, prefixParsed.Path) {
+				cleanedPath != cleanedPrefix &&
+				strings.HasPrefix(cleanedPath, cleanedPrefix+"/") {
+				return true
+			}
+			// Handle root wildcard: https://host/* matches any path including /
+			if parsed.Scheme == prefixParsed.Scheme &&
+				parsed.Host == prefixParsed.Host &&
+				cleanedPrefix == "/" {
 				return true
 			}
 			continue
@@ -91,6 +106,17 @@ func (r RedirectURIs) Contains(uri string) bool {
 		}
 	}
 	return false
+}
+
+// FirstConcreteURI returns the first non-wildcard redirect URI suitable for
+// use as a cancel/error redirect target. If none exists, it returns an empty string.
+func (r RedirectURIs) FirstConcreteURI() string {
+	for _, uri := range r {
+		if !strings.HasSuffix(uri, "/*") {
+			return uri
+		}
+	}
+	return ""
 }
 
 // Clients maps client IDs to their OAuth2 client configuration

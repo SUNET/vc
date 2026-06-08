@@ -67,7 +67,8 @@ func TestCredentialValidation(t *testing.T) {
 					CredentialIdentifiers:     []string{"cred-id-1"},
 				},
 			},
-			wantErr: false,
+			wantErr:     true,
+			errContains: "credential_configuration_id must not be used when authorization_details",
 		},
 		{
 			name: "authorization_details flow with both identifier and configuration_id",

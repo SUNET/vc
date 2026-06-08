@@ -149,7 +149,21 @@ func (s *Service) endpointUserCancel(ctx context.Context, c *gin.Context) (any, 
 		return nil, err
 	}
 
-	c.Redirect(http.StatusSeeOther, client.RedirectURIs[0])
+	if len(client.RedirectURIs) == 0 {
+		err := errors.New("no redirect_uri configured for client")
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	// NOTE: The original redirect_uri from the authorization request is not stored in the session,
+	// so we fall back to the first concrete (non-wildcard) URI. This is safe because all registered
+	// redirect URIs belong to the same client and the cancel response carries no authorization data.
+	cancelURI := client.RedirectURIs.FirstConcreteURI()
+	if cancelURI == "" {
+		err := errors.New("no concrete redirect_uri configured for client")
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	c.Redirect(http.StatusSeeOther, cancelURI)
 
 	return nil, nil
 }

@@ -94,7 +94,10 @@ func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails [
 		return &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("credential_identifier %q not found in Token Response authorization_details", c.CredentialIdentifier)}
 	}
 
-	// credential_configuration_id provided: let ResolveCredentialFormat validate it
+	// credential_configuration_id provided without authorization_details: allowed
+	if hasAuthDetails {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_configuration_id must not be used when authorization_details was returned in the Token Response; use credential_identifier instead"}
+	}
 	return nil
 }
 

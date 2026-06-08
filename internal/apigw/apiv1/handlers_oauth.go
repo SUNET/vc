@@ -182,16 +182,34 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	// Look up the client to enforce type-specific requirements (client_id is optional for pre-auth flow)
 	// When client_assertion is provided (private_key_jwt auth), extract client_id from the assertion's sub claim.
+	// SECURITY: ExtractClientIDFromAssertion only decodes the JWT payload — it does NOT verify the signature.
+	// The extracted client_id is used for both client config lookup (Clients.Get) AND client binding
+	// verification (WalletClientID check). Without signature verification, an attacker could forge
+	// the sub claim to impersonate another client.
+	// Full JWT assertion verification (signature, aud, exp, jti) is NOT yet implemented.
+	// TODO(security): Implement RFC 7523 private_key_jwt assertion verification
+	// (signature, aud, exp, jti) before enabling client_assertion in production.
 	clientID := req.ClientID
-	if clientID == "" && req.ClientAssertion != "" && req.ClientAssertionType == "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+	if req.ClientAssertion != "" {
+		if req.ClientAssertionType != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				fmt.Sprintf("unsupported client_assertion_type %q; expected urn:ietf:params:oauth:client-assertion-type:jwt-bearer", req.ClientAssertionType), 400)
+		}
 		sub, err := oauth2.ExtractClientIDFromAssertion(req.ClientAssertion)
 		if err != nil {
 			c.log.Error(err, "failed to extract client_id from client_assertion")
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
 				"Invalid client assertion", 401, err)
 		}
+		if clientID != "" && clientID != sub {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
+				"client_id does not match assertion subject", 401)
+		}
 		clientID = sub
 		c.log.Debug("OAuthToken: resolved client_id from client_assertion", "client_id", clientID)
+	} else if req.ClientAssertionType != "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"client_assertion_type provided without client_assertion", 400)
 	}
 
 	var oauthClient *oauth2.Client

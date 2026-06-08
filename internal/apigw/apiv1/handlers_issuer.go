@@ -339,14 +339,26 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		proofNonce = req.Proofs.JWT[0].ExtractNonce()
 	}
 
-	// Determine which nonce to validate against: prefer matching from our cache
-	expectedNonce := authContext.Nonce
-	if proofNonce != "" && proofNonce != expectedNonce {
-		if c.cacheService.VCINonce != nil {
+	// Determine which nonce to validate against.
+	// Atomically consume the nonce (GetAndDelete) to enforce one-time use and
+	// prevent TOCTOU races where parallel requests both pass the existence check.
+	expectedNonce := ""
+	if c.cacheService.VCINonce != nil {
+		// First try the nonce from the proof JWT (non-destructive lookup)
+		if proofNonce != "" {
 			if _, ok := c.cacheService.VCINonce.Get(ctx, proofNonce); ok {
 				expectedNonce = proofNonce
 			}
 		}
+		// Fall back to the nonce stored in the auth context
+		if expectedNonce == "" && authContext.Nonce != "" {
+			if _, ok := c.cacheService.VCINonce.Get(ctx, authContext.Nonce); ok {
+				expectedNonce = authContext.Nonce
+			}
+		}
+	}
+	if expectedNonce == "" {
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce is missing or already consumed"}
 	}
 
 	verifyOpts := &openid4vci.VerifyProofOptions{
@@ -366,9 +378,12 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 	}
 
-	// Consume the nonce after successful verification (one-time use)
-	if proofNonce != "" && c.cacheService.VCINonce != nil {
-		c.cacheService.VCINonce.Delete(ctx, proofNonce)
+	// Consume nonce atomically after successful proof verification.
+	// If another request consumed it concurrently, fail with invalid_nonce.
+	if c.cacheService.VCINonce != nil {
+		if _, ok := c.cacheService.VCINonce.GetAndDelete(ctx, expectedNonce); !ok {
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce was consumed concurrently"}
+		}
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier

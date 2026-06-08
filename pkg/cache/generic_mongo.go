@@ -167,6 +167,38 @@ func (m *MongoCache[V]) Delete(ctx context.Context, key string) {
 	}
 }
 
+// GetAndDelete atomically retrieves and removes a value by key.
+func (m *MongoCache[V]) GetAndDelete(ctx context.Context, key string) (V, bool) {
+	var entry mongoCacheEntry
+	err := m.coll.FindOneAndDelete(ctx, bson.M{"_id": key}).Decode(&entry)
+	if err != nil {
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			m.log.Error(
+				err, "mongo cache get-and-delete: operational error treated as miss",
+				"cache", m.collection, "key", key,
+			)
+		}
+		var zero V
+		return zero, false
+	}
+
+	var v V
+	if m.decode != nil {
+		v, err = m.decode(entry.JSONValue)
+	} else {
+		err = json.Unmarshal(entry.JSONValue, &v)
+	}
+	if err != nil {
+		m.log.Error(
+			err, "mongo cache get-and-delete: failed to unmarshal JSON value",
+			"cache", m.collection, "key", key,
+		)
+		var zero V
+		return zero, false
+	}
+	return v, true
+}
+
 // Len returns the estimated number of items in the cache.
 func (m *MongoCache[V]) Len() int {
 	count, err := m.coll.EstimatedDocumentCount(context.Background())
