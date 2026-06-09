@@ -467,6 +467,28 @@ type AdminGUI struct {
 	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
+// VerificationPreset is a map of scope name to optional credential query overrides.
+// The preset's map key (in the parent Presets map) serves as the human-readable label.
+// Each key in this map references a credential_metadata scope (e.g., "pid", "ehic").
+// A nil value means "request all VCTM claims with no overrides".
+type VerificationPreset map[string]*VerificationPresetScope
+
+// VerificationPresetScope defines optional overrides for a credential query within a preset.
+type VerificationPresetScope struct {
+	// Claims lists specific claims to request. If empty, all VCTM claims are used.
+	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
+	// ExcludeClaims lists claims to exclude from the DCQL query.
+	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
+	// Validations are optional rules applied server-side after claims extraction
+	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
+}
+
+// VerificationPresetClaim defines a claim path to request within a credential.
+type VerificationPresetClaim struct {
+	// Path is the claim path segments
+	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"birthdate\"], [\"address\", \"locality\"]"`
+}
+
 // VerifierInbound groups inbound credential verification configuration
 type VerifierInbound struct {
 	// OpenID4VP holds the OpenID4VP configuration for accepting wallet presentations
@@ -503,6 +525,11 @@ type Verifier struct {
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// Presets holds predefined verification request presets shown in the UI.
+	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
+	// Each preset maps credential_metadata scopes to optional claim overrides.
+	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
+	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
@@ -1041,7 +1068,7 @@ type CredentialMetadata struct {
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 	// Format is the credential format to issue
-	Format string `yaml:"format" json:"format" validate:"required" doc_example:"\"vc+sd-jwt\""`
+	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
@@ -1260,7 +1287,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				}
 
 				// Map rendering information from VCTM to OpenID4VCI format
-				if vctmDisplay.Rendering != nil {
+				if vctmDisplay.Rendering != nil && vctmDisplay.Rendering.Simple != nil {
 					simple := vctmDisplay.Rendering.Simple
 					if simple.BackgroundColor != "" {
 						display.BackgroundColor = simple.BackgroundColor
@@ -1268,7 +1295,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					if simple.TextColor != "" {
 						display.TextColor = simple.TextColor
 					}
-					if simple.Logo.URI != "" {
+					if simple.Logo != nil && simple.Logo.URI != "" {
 						display.Logo = &openid4vci.MetadataLogo{
 							URI:     simple.Logo.URI,
 							AltText: simple.Logo.AltText,

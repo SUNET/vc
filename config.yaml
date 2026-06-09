@@ -71,6 +71,28 @@ verifier:
         - vct: "urn:eudi:ehic:1"
           scopes:
             - "ehic"
+  presets:
+    "PID":
+      pid:
+        exclude_claims:
+          - path: ["trust_anchor"]
+          - path: ["attestation_legal_category"]
+    "EHIC":
+      ehic:
+    "PID Age Over 18":
+      pid:
+        claims:
+          - path: ["birthdate"]
+        validations:
+          - rule: "age_over"
+            path: ["birthdate"]
+            value: 18
+    "PID + EHIC":
+      pid:
+        exclude_claims:
+          - path: ["trust_anchor"]
+          - path: ["attestation_legal_category"]
+      ehic:
 
 registry:
   api_server:

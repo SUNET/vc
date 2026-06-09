@@ -28,7 +28,8 @@ var (
 	// if (pointer.length > 1024) throw new Error('POINTER_TOO_LONG');
 	ErrPointerTooLong = errors.New("pointer too long")
 
-	// ErrInvalidPath is returned when a path is not an array.
+	// ErrInvalidPath is a TypeScript-compatibility sentinel for invalid path values.
+	// Current Go APIs do not return it because Path is typed as []string.
 	// TypeScript original code from validate.ts:
 	// if (!isArray(path)) throw new Error('Invalid path.');
 	ErrInvalidPath = errors.New("invalid path")
@@ -38,7 +39,8 @@ var (
 	// if (path.length > 256) throw new Error('Path too long.');
 	ErrPathTooLong = errors.New("path too long")
 
-	// ErrInvalidPathStep is returned when a path step is not string or number.
+	// ErrInvalidPathStep is a TypeScript-compatibility sentinel for invalid path steps.
+	// Current Go APIs do not return it because Path steps are already strings.
 	// TypeScript original code from validate.ts:
 	// throw new Error('Invalid path step.');
 	ErrInvalidPathStep = errors.New("invalid path step")

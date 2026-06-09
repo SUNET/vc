@@ -731,3 +731,18 @@ func TestNewCredentialOffer(t *testing.T) {
 		assert.NotEqual(t, r1.ID, r2.ID, "each offer must have a unique token")
 	})
 }
+
+func TestGrantPreAuthorizedCode_TXCodeOmitted(t *testing.T) {
+	grant := &GrantPreAuthorizedCode{
+		PreAuthorizedCode: "test-code",
+		TXCode:            nil,
+	}
+	data, err := json.Marshal(grant)
+	assert.NoError(t, err)
+
+	var decoded map[string]any
+	err = json.Unmarshal(data, &decoded)
+	assert.NoError(t, err)
+	_, hasTXCode := decoded["tx_code"]
+	assert.False(t, hasTXCode, "tx_code key must be absent from JSON when TXCode is nil")
+}

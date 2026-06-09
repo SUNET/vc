@@ -44,11 +44,11 @@ func getStructFields(t reflect.Type) structFields {
 			continue
 		}
 
-		name := getFieldName(&field)
-		if name == "-" {
+		if field.Tag.Get("json") == "-" {
 			continue
 		}
 
+		name := getFieldName(&field)
 		fields[name] = field.Index[0]
 	}
 

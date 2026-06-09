@@ -131,7 +131,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})
 
 	// Process all VP tokens for the requested scopes
-	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
+	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
 
 	for _, scope := range authCtx.Scopes {
 		vpTokens, ok := vpResponse.VPToken[scope]
@@ -201,8 +201,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, err
 			}
 
-			// Add to credential cache array
-			credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
+			// Add to per-scope credential cache
+			scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 				Credential: parsed.Claims,
 				Claims:     selectiveDisclosureClaims,
 			})
@@ -232,14 +232,21 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 			// Convert mDOC claims to credential cache format
 			for docType, docClaims := range mdocResult.Documents {
+				// Reuse a single GetClaims() result for consistency
+				verifiedClaims := docClaims.GetClaims()
 				// Convert map claims to []Discloser format
-				disclosers := mapToDisclosers(docClaims.GetClaims())
-				credentialCaches = append(credentialCaches, sdjwtvc.CredentialCache{
-					Credential: map[string]any{
-						"docType":    docType,
-						"namespaces": docClaims.Namespaces,
-					},
-					Claims: disclosers,
+				disclosers := mapToDisclosers(verifiedClaims)
+				// Augment verified claims map for validation and caching
+				verifiedClaims["docType"] = docType
+				// Convert map[string]map[string]any to map[string]any so resolvePath can traverse it
+				nsMap := make(map[string]any, len(docClaims.Namespaces))
+				for ns, items := range docClaims.Namespaces {
+					nsMap[ns] = items
+				}
+				verifiedClaims["namespaces"] = nsMap
+				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
+					Credential: verifiedClaims,
+					Claims:     disclosers,
 				})
 			}
 
@@ -247,6 +254,36 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
 			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
 		}
+	}
+
+	// Apply claim validations if configured (e.g., age_over checks)
+	if len(authCtx.Validations) > 0 {
+		for _, scope := range authCtx.Scopes {
+			scopeValidations := authCtx.Validations[scope]
+			if len(scopeValidations) == 0 {
+				continue
+			}
+			entries := scopeCredentials[scope]
+			if len(entries) == 0 {
+				c.log.Error(nil, "validations configured but no credentials extracted", "scope", scope)
+				return nil, fmt.Errorf("validations configured for scope %s but no credentials were extracted", scope)
+			}
+			for _, cc := range entries {
+				// Validate against the verified credential claims (only disclosures
+				// referenced by _sd are included), not raw disclosures which may
+				// contain unbound/decoy entries.
+				if err := openid4vp.ValidateClaims(cc.Credential, scopeValidations); err != nil {
+					c.log.Error(err, "claim validation failed", "scope", scope)
+					return nil, fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
+				}
+			}
+		}
+	}
+
+	// Flatten per-scope credentials into ordered slice for caching
+	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
+	for _, scope := range authCtx.Scopes {
+		credentialCaches = append(credentialCaches, scopeCredentials[scope]...)
 	}
 
 	// Cache validated credentials

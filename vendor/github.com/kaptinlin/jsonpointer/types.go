@@ -1,9 +1,6 @@
 package jsonpointer
 
-import (
-	"reflect"
-	"strconv"
-)
+import "reflect"
 
 // Path represents a JSON Pointer path as array of string tokens.
 type Path []string
@@ -50,12 +47,11 @@ type ObjectReference[T any] struct {
 //	isArray(ref.obj) && typeof ref.key === 'number';
 func IsArrayReference(ref Reference) bool {
 	objType, ok := referenceObjectType(ref)
-	if !ok || objType.Kind() != reflect.Slice {
+	if !ok || (objType.Kind() != reflect.Slice && objType.Kind() != reflect.Array) {
 		return false
 	}
 
-	_, err := strconv.Atoi(ref.Key)
-	return err == nil
+	return fastAtoi(ref.Key) >= 0
 }
 
 // IsObjectReference checks if a Reference points to an object property.
@@ -69,8 +65,20 @@ func IsObjectReference(ref Reference) bool {
 }
 
 func referenceObjectType(ref Reference) (reflect.Type, bool) {
-	if ref.Obj == nil || ref.Key == "" {
+	if ref.Obj == nil {
 		return nil, false
 	}
-	return reflect.TypeOf(ref.Obj), true
+
+	obj := reflect.ValueOf(ref.Obj)
+	for {
+		switch obj.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if obj.IsNil() {
+				return nil, false
+			}
+			obj = obj.Elem()
+		default:
+			return obj.Type(), true
+		}
+	}
 }

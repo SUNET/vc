@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-06-04
+**Generated:** 2026-06-05
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -735,19 +735,20 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 
 > **Path:** `.verifier`
 
-| Field                    | Type     | Description                                                  | Example                       | Default | Required |
-| ------------------------ | -------- | ------------------------------------------------------------ | ----------------------------- | ------- | -------- |
-| `api_server`             | `object` | HTTP API server configuration                                | -                             | -       | Yes      |
-| `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)    | `"https://verifier.sunet.se"` | -       | Yes      |
-| `key_config`             | `object` | Signing key configuration                                    | -                             | -       | Yes      |
-| `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets | -                             | -       | No       |
-| `supported_wallets`      | `object` | Supported wallet configurations                              | -                             | -       | No       |
-| `inbound`                | `object` | Inbound groups inbound credential verification               | -                             | -       | No       |
-| `outbound`               | `object` | Outbound groups outbound identity assertion                  | -                             | -       | No       |
-| `digital_credentials`    | `object` | W3C Digital Credentials API configuration                    | -                             | -       | No       |
-| `authorization_page_css` | `object` | Authorization page styling configuration                     | -                             | -       | No       |
-| `credential_display`     | `object` | Credential display settings                                  | -                             | -       | No       |
-| `trust`                  | `object` | Trust evaluation configuration                               | -                             | -       | No       |
+| Field                    | Type     | Description                                                                                                                                                                                                                                                                             | Example                                                    | Default | Required |
+| ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
+| `api_server`             | `object` | HTTP API server configuration                                                                                                                                                                                                                                                           | -                                                          | -       | Yes      |
+| `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                                                                                                                                                                                                                               | `"https://verifier.sunet.se"`                              | -       | Yes      |
+| `key_config`             | `object` | Signing key configuration                                                                                                                                                                                                                                                               | -                                                          | -       | Yes      |
+| `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets                                                                                                                                                                                                                            | -                                                          | -       | No       |
+| `supported_wallets`      | `object` | Supported wallet configurations                                                                                                                                                                                                                                                         | -                                                          | -       | No       |
+| `inbound`                | `object` | Inbound groups inbound credential verification                                                                                                                                                                                                                                          | -                                                          | -       | No       |
+| `outbound`               | `object` | Outbound groups outbound identity assertion                                                                                                                                                                                                                                             | -                                                          | -       | No       |
+| `digital_credentials`    | `object` | W3C Digital Credentials API configuration                                                                                                                                                                                                                                               | -                                                          | -       | No       |
+| `authorization_page_css` | `object` | Authorization page styling configuration                                                                                                                                                                                                                                                | -                                                          | -       | No       |
+| `credential_display`     | `object` | Credential display settings                                                                                                                                                                                                                                                             | -                                                          | -       | No       |
+| `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -       | No       |
+| `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -       | No       |
 
 ### `preferred_vp_formats`
 
@@ -912,6 +913,34 @@ These clients are checked in addition to dynamically registered clients stored i
 | `show_raw_credential`  | `bool` | The raw VP token/credential in the display page Useful for debugging and technical users                                                 | -       | `false` | No       |
 | `show_claims`          | `bool` | The parsed claims that will be sent to the RP Recommended for transparency and user consent                                              | -       | `true`  | No       |
 | `allow_edit`           | `bool` | Users to redact certain claims before sending to RP (future feature) Currently not implemented                                           | -       | `false` | No       |
+
+### `presets` entry
+
+> **Path:** `.verifier.presets.<preset label>.<scope>`
+
+| Field            | Type    | Description                                                     | Example | Default | Required |
+| ---------------- | ------- | --------------------------------------------------------------- | ------- | ------- | -------- |
+| `claims`         | `array` | Specific claims to request. If empty, all VCTM claims are used. | -       | -       | No       |
+| `exclude_claims` | `array` | Claims to exclude from the DCQL query.                          | -       | -       | No       |
+| `validations`    | `array` | Optional rules applied server-side after claims extraction      | -       | -       | No       |
+
+### `claims` entry
+
+> **Path:** `.verifier.presets.<preset label>.<scope>.claims[]`, `.verifier.presets.<preset label>.<scope>.exclude_claims[]`
+
+| Field  | Type       | Description         | Example                                  | Default | Required |
+| ------ | ---------- | ------------------- | ---------------------------------------- | ------- | -------- |
+| `path` | `[]string` | Claim path segments | `["birthdate"], ["address", "locality"]` | -       | Yes      |
+
+### `validations` entry
+
+> **Path:** `.verifier.presets.<preset label>.<scope>.validations[]`
+
+| Field   | Type       | Description                                     | Example         | Default | Required |
+| ------- | ---------- | ----------------------------------------------- | --------------- | ------- | -------- |
+| `rule`  | `string`   | Validation rule to apply, e.g., "age_over".     | `"age_over"`    | -       | Yes      |
+| `path`  | `[]string` | Claim path to validate, e.g., ["birthdate"].    | `["birthdate"]` | -       | Yes      |
+| `value` | `object`   | Threshold or expected value for the validation. | `18`            | -       | Yes      |
 
 ## `registry` (Top-level)
 
