@@ -42,6 +42,10 @@ type Cache[V any] interface {
 	// Delete removes a value by key.
 	Delete(ctx context.Context, key string)
 
+	// GetAndDelete atomically retrieves and removes a value by key.
+	// Returns the value and true if found, or the zero value and false if not.
+	GetAndDelete(ctx context.Context, key string) (V, bool)
+
 	// Len returns the number of items currently in the cache.
 	Len() int
 }

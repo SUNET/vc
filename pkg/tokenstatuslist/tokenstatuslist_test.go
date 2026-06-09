@@ -235,6 +235,70 @@ func TestGenerateJWT(t *testing.T) {
 	assert.NotEmpty(t, statusList["lst"])
 }
 
+func TestGenerateJWTWithJWKHeader(t *testing.T) {
+	t.Run("EC P-256", func(t *testing.T) {
+		privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		sl := &StatusList{statuses: []uint8{0, 1}, Issuer: "https://example.com", Subject: "https://example.com/sl/1", KeyID: "k1"}
+		tokenString, err := sl.GenerateJWT(JWTSigningConfig{
+			SigningKey: privateKey, SigningMethod: jwt.SigningMethodES256, PublicKey: &privateKey.PublicKey,
+		})
+		require.NoError(t, err)
+
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) { return &privateKey.PublicKey, nil })
+		require.NoError(t, err)
+
+		jwkRaw, ok := token.Header["jwk"]
+		require.True(t, ok, "jwk header must be present")
+		jwk, ok := jwkRaw.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "EC", jwk["kty"])
+		assert.Equal(t, "P-256", jwk["crv"])
+		assert.NotEmpty(t, jwk["x"])
+		assert.NotEmpty(t, jwk["y"])
+	})
+
+	t.Run("RSA", func(t *testing.T) {
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+
+		sl := &StatusList{statuses: []uint8{0, 1}, Issuer: "https://example.com", Subject: "https://example.com/sl/2", KeyID: "k2"}
+		tokenString, err := sl.GenerateJWT(JWTSigningConfig{
+			SigningKey: privateKey, SigningMethod: jwt.SigningMethodRS256, PublicKey: &privateKey.PublicKey,
+		})
+		require.NoError(t, err)
+
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) { return &privateKey.PublicKey, nil })
+		require.NoError(t, err)
+
+		jwkRaw, ok := token.Header["jwk"]
+		require.True(t, ok, "jwk header must be present")
+		jwk, ok := jwkRaw.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "RSA", jwk["kty"])
+		assert.NotEmpty(t, jwk["n"])
+		assert.NotEmpty(t, jwk["e"])
+	})
+
+	t.Run("absent when PublicKey is nil", func(t *testing.T) {
+		privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		sl := &StatusList{statuses: []uint8{0, 1}, Issuer: "https://example.com", Subject: "https://example.com/sl/3", KeyID: "k3"}
+		tokenString, err := sl.GenerateJWT(JWTSigningConfig{
+			SigningKey: privateKey, SigningMethod: jwt.SigningMethodES256,
+		})
+		require.NoError(t, err)
+
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) { return &privateKey.PublicKey, nil })
+		require.NoError(t, err)
+
+		_, ok := token.Header["jwk"]
+		assert.False(t, ok, "jwk header must not be present when PublicKey is nil")
+	})
+}
+
 func TestGenerateJWTMissingKey(t *testing.T) {
 	cfg := JWTConfig{
 		TokenConfig: TokenConfig{
