@@ -136,8 +136,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	for _, scope := range authCtx.Scopes {
 		vpTokens, ok := vpResponse.VPToken[scope]
 		if !ok || len(vpTokens) == 0 {
-			c.log.Error(nil, "VP token not found for scope", "scope", scope)
-			return nil, fmt.Errorf("VP token not found for scope: %s", scope)
+			// Fallback: wallet sent vp_token as a plain string (single credential)
+			vpTokens, ok = vpResponse.VPToken["_default"]
+			if !ok || len(vpTokens) == 0 {
+				c.log.Error(nil, "VP token not found for scope", "scope", scope)
+				return nil, fmt.Errorf("VP token not found for scope: %s", scope)
+			}
 		}
 		if len(vpTokens) > 1 {
 			c.log.Info("multiple VP tokens received for scope, using first", "scope", scope, "count", len(vpTokens))
@@ -182,29 +186,28 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 
 			// Parse SD-JWT credential
-			_, _, _, selectiveDisclosure, _, err := sdjwtvc.Token(responseParams.VPToken).Split()
-			if err != nil {
-				c.log.Error(err, "failed to split sd-jwt", "scope", scope)
-				return nil, err
-			}
-
-			// Parse credential claims
+			// Parse credential claims (recursively resolves nested _sd disclosures)
 			parsed, err := sdjwtvc.Token(responseParams.VPToken).Parse()
 			if err != nil {
 				c.log.Error(err, "failed to parse sd-jwt credential", "scope", scope)
 				return nil, err
 			}
 
-			selectiveDisclosureClaims, err := sdjwtvc.ParseSelectiveDisclosure(selectiveDisclosure)
-			if err != nil {
-				c.log.Error(err, "failed to parse selective disclosures", "scope", scope)
-				return nil, err
-			}
+			c.log.Debug("Parsed SD-JWT credential",
+				"scope", scope,
+				"disclosures_count", len(parsed.Disclosures),
+				"claims_keys", claimKeys(parsed.Claims),
+			)
+
+			// Build display claims from the resolved credential map.
+			// This ensures nested disclosures (place_of_birth, address, etc.)
+			// are shown with their resolved values rather than raw _sd hashes.
+			displayClaims := credentialToDisclosers(parsed.Claims)
 
 			// Add to per-scope credential cache
 			scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
 				Credential: parsed.Claims,
-				Claims:     selectiveDisclosureClaims,
+				Claims:     displayClaims,
 			})
 
 		case FormatMDoc:
@@ -392,4 +395,64 @@ func mapToDisclosers(claims map[string]any) []sdjwtvc.Discloser {
 		})
 	}
 	return disclosers
+}
+
+// credentialToDisclosers converts a resolved credential claims map into a flat
+// []Discloser suitable for display. Nested maps are flattened using dot notation
+// (e.g., "address.street_address"). JWT metadata claims (iss, iat, exp, etc.) are
+// excluded since they are not user-facing credential attributes.
+func credentialToDisclosers(claims map[string]any) []sdjwtvc.Discloser {
+	result := make([]sdjwtvc.Discloser, 0)
+	flattenCredentialClaims(&result, "", claims)
+	return result
+}
+
+// jwtMetadataClaims contains claim names that are JWT/SD-JWT infrastructure
+// and should not be displayed as credential attributes.
+var jwtMetadataClaims = map[string]bool{
+	"iss":            true,
+	"sub":            true,
+	"iat":            true,
+	"exp":            true,
+	"nbf":            true,
+	"jti":            true,
+	"cnf":            true,
+	"vct":            true,
+	"vct#integrity":  true,
+	"status":         true,
+	"_sd":            true,
+	"_sd_alg":        true,
+}
+
+func flattenCredentialClaims(result *[]sdjwtvc.Discloser, prefix string, m map[string]any) {
+	for key, value := range m {
+		// Skip JWT metadata at top level
+		if prefix == "" && jwtMetadataClaims[key] {
+			continue
+		}
+
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		switch v := value.(type) {
+		case map[string]any:
+			// Recurse into nested objects
+			flattenCredentialClaims(result, fullKey, v)
+		default:
+			*result = append(*result, sdjwtvc.Discloser{
+				ClaimName: fullKey,
+				Value:     value,
+			})
+		}
+	}
+}
+
+func claimKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

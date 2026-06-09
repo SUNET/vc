@@ -1,6 +1,9 @@
 package openid4vp
 
-import "slices"
+import (
+	"encoding/json"
+	"slices"
+)
 
 type DCQL struct {
 	// Credentials REQUIRED. A non-empty array of Credential Queries as defined in Section 6.1 that specify the requested Credentials.
@@ -134,8 +137,88 @@ type TrustedAuthority struct {
 }
 
 type ClaimQuery struct {
-	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer that specifies the path to a claim within the Credential, as defined in Section 7.
-	Path []string `json:"path" yaml:"path" validate:"required,min=1,dive,required"`
+	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer
+	// that specifies the path to a claim within the Credential, as defined in Section 7.
+	// Elements are strings (object keys) or nil (representing null for array element access).
+	Path []*string `json:"-" yaml:"-" validate:"required,min=1"`
+}
+
+// MarshalJSON implements custom JSON marshaling for ClaimQuery.
+// Nil path elements are serialized as JSON null (for DCQL array element access).
+func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
+	path := make([]any, len(cq.Path))
+	for i, p := range cq.Path {
+		if p == nil {
+			path[i] = nil
+		} else {
+			path[i] = *p
+		}
+	}
+	return json.Marshal(struct {
+		Path []any `json:"path"`
+	}{Path: path})
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
+// JSON null path elements are deserialized as nil pointers.
+func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Path []any `json:"path"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	cq.Path = make([]*string, len(raw.Path))
+	for i, v := range raw.Path {
+		if v == nil {
+			cq.Path[i] = nil
+		} else if s, ok := v.(string); ok {
+			cq.Path[i] = &s
+		}
+	}
+	return nil
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for ClaimQuery.
+func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Path []interface{} `yaml:"path"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	cq.Path = make([]*string, len(raw.Path))
+	for i, v := range raw.Path {
+		if v == nil {
+			cq.Path[i] = nil
+		} else if s, ok := v.(string); ok {
+			cq.Path[i] = &s
+		}
+	}
+	return nil
+}
+
+// StringPath creates a []*string path from string arguments.
+// This is a convenience for constructing ClaimQuery paths.
+func StringPath(parts ...string) []*string {
+	path := make([]*string, len(parts))
+	for i := range parts {
+		s := parts[i]
+		path[i] = &s
+	}
+	return path
+}
+
+// ArrayElementPath creates a []*string path ending with nil (null) for array element access.
+// Example: ArrayElementPath("nationalities") → ["nationalities", null]
+func ArrayElementPath(parts ...string) []*string {
+	path := make([]*string, len(parts)+1)
+	for i := range parts {
+		s := parts[i]
+		path[i] = &s
+	}
+	path[len(parts)] = nil // null for array element access
+	return path
 }
 
 //type ClaimQuery struct {

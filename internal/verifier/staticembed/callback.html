@@ -6,14 +6,6 @@
     <title>Verifier</title>
     <link rel="stylesheet" href="/static/bulma.min.css">
     <link rel="stylesheet" href="/static/styles.css">
-    <script type="importmap">
-    {
-        "imports": {
-            "@andypf/json-viewer": "/static/json-viewer.esm.js"
-        }
-    }
-    </script>
-    <script src="/static/callback.js" type="module"></script>
     <link rel="icon" href="/static/favicon.png" type="image/png">
 </head>
 <body>
@@ -36,13 +28,11 @@
                     {{end}}
                 </div>
                 {{if .}}
-                    {{range .CredentialData}}
+                    {{range $idx, $cred := .CredentialData}}
                         <hr>
                         <div class="block">
                             <h2 class="title is-size-5 mb-2">Credential claims</h2>
-                            {{if eq (len .Claims) 0}}
-                                <p><em>No claims available.</em></p>
-                            {{else}}
+                            {{if $cred.Credential}}
                                 <div class="table-container">
                                     <table class="table is-fullwidth is-hoverable">
                                         <thead>
@@ -51,30 +41,18 @@
                                                 <th>Value</th>
                                             </tr>
                                         </thead>
-                                        {{range .Claims}}
-                                        <tr>
-                                            <td>{{.ClaimName}}</td>
-                                            <td><code>{{.Value}}</code></td>
-                                        </tr>
-                                        {{end}}
+                                        <tbody>
+                                        {{claimsTree $cred.Credential}}
+                                        </tbody>
                                     </table>
                                 </div>
+                            {{else}}
+                                <p><em>No claims available.</em></p>
                             {{end}}
                         </div>
                         <div class="block">
                             <h2 class="title is-size-5 mb-2">Credential data</h2>
-                            <div class="has-border-radius is-overflow-hidden">
-                                <andypf-json-viewer 
-                                    indent="2"
-                                    expanded="false"
-                                    theme="google-dark"
-                                    show-data-types="true"
-                                    show-toolbar="false"
-                                    expand-icon-type="arrow"
-                                    show-copy="true"
-                                    show-size="true"
-                                >{{toJSON .Credential}}</andypf-json-viewer>
-                            </div>
+                            <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;"><code>{{toJSON $cred.Credential}}</code></pre>
                         </div>
                     {{end}}
                 {{end}}

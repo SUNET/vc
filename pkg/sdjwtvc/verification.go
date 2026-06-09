@@ -423,17 +423,79 @@ func (c *Client) verifyDisclosureHash(claims jwt.MapClaims, hash string) error {
 	return fmt.Errorf("disclosure hash %s not found in _sd array", hash)
 }
 
-// reconstructClaims adds disclosed claims back into the claims map
+// reconstructClaims adds disclosed claims back into the claims map, including nested _sd arrays.
 func (c *Client) reconstructClaims(claims map[string]any, disclosures []Disclosure) error {
-	for _, disclosure := range disclosures {
-		claims[disclosure.Claim] = disclosure.Value
+	// Build a hash -> Disclosure lookup
+	disclosureMap := make(map[string]*Disclosure, len(disclosures))
+	for i := range disclosures {
+		disclosureMap[disclosures[i].Hash] = &disclosures[i]
 	}
 
-	// Remove _sd and _sd_alg from final claims
-	delete(claims, "_sd")
-	delete(claims, "_sd_alg")
-
+	reconstructNode(claims, disclosureMap)
 	return nil
+}
+
+// reconstructNode resolves _sd arrays at this level and recurses into nested maps.
+func reconstructNode(node map[string]any, disclosureMap map[string]*Disclosure) {
+	if sdField, ok := node["_sd"]; ok {
+		if sdArray, ok := sdField.([]any); ok {
+			for _, h := range sdArray {
+				hashStr, ok := h.(string)
+				if !ok {
+					continue
+				}
+				if d, found := disclosureMap[hashStr]; found && d.Claim != "" {
+					node[d.Claim] = d.Value
+				}
+			}
+		}
+	}
+
+	delete(node, "_sd")
+	delete(node, "_sd_alg")
+
+	// Collect keys first to ensure newly-added claims from _sd resolution are included.
+	keys := make([]string, 0, len(node))
+	for k := range node {
+		keys = append(keys, k)
+	}
+
+	for _, key := range keys {
+		value := node[key]
+		switch v := value.(type) {
+		case map[string]any:
+			reconstructNode(v, disclosureMap)
+		case []any:
+			node[key] = reconstructArrayNode(v, disclosureMap)
+		}
+	}
+}
+
+// reconstructArrayNode resolves array element disclosures ({"...": hash}) and recurses.
+func reconstructArrayNode(arr []any, disclosureMap map[string]*Disclosure) []any {
+	result := make([]any, 0, len(arr))
+	for _, elem := range arr {
+		switch v := elem.(type) {
+		case map[string]any:
+			if len(v) == 1 {
+				if hashVal, ok := v["..."]; ok {
+					if hashStr, ok := hashVal.(string); ok {
+						if d, found := disclosureMap[hashStr]; found {
+							result = append(result, d.Value)
+							continue
+						}
+					}
+				}
+			}
+			reconstructNode(v, disclosureMap)
+			result = append(result, v)
+		case []any:
+			result = append(result, reconstructArrayNode(v, disclosureMap))
+		default:
+			result = append(result, elem)
+		}
+	}
+	return result
 }
 
 // verifyKeyBindingJWT verifies a Key Binding JWT per draft-22 §4.3

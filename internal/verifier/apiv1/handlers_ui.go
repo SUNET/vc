@@ -208,6 +208,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		scopes = append(scopes, credential.ID)
 	}
 
+	// Augment DCQL with child paths from VCTM (array null paths and nested
+	// object sub-paths). The UI only sends top-level string paths; we expand
+	// them using the VCTM so wallets disclose nested content correctly.
+	c.augmentDCQLFromVCTM(req.DCQLQuery)
+
 	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
@@ -314,4 +319,110 @@ var jwtRegisteredClaims = map[string]bool{
 // jwtRegisteredClaim reports whether name is a standard JWT/SD-JWT claim.
 func jwtRegisteredClaim(name string) bool {
 	return jwtRegisteredClaims[name]
+}
+
+// augmentDCQLFromVCTM enriches the DCQL query using VCTM metadata.
+// It adds:
+//   - Array element paths (["claim", null]) for claims with per-element SD (Section 7.1)
+//   - Nested object sub-paths (["address", "street_address"]) when only the parent is requested
+//
+// This ensures wallets can properly disclose nested/array content even when the
+// frontend only sends top-level path selections.
+func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
+	if dcql == nil {
+		return
+	}
+	for i, cred := range dcql.Credentials {
+		meta := c.cfg.Common.CredentialMetadata[cred.ID]
+		if meta == nil || meta.VCTM == nil {
+			continue
+		}
+
+		// Collect VCTM paths by category:
+		// - arrayPaths: paths ending with nil (array element disclosure)
+		// - childPaths: paths with len>=2 where all elements are non-nil (nested object fields)
+		arrayPaths := make(map[string][]*string)   // parentKey -> full path with nil
+		childPaths := make(map[string][][]*string)  // parentKey -> list of child paths
+		for _, vc := range meta.VCTM.Claims {
+			if len(vc.Path) >= 2 && vc.Path[len(vc.Path)-1] == nil {
+				key := claimPtrPathKey(vc.Path[:len(vc.Path)-1])
+				arrayPaths[key] = vc.Path
+			} else if len(vc.Path) >= 2 && vc.Path[0] != nil {
+				// Nested object sub-path (e.g., ["address", "street_address"])
+				parentKey := claimPtrPathKey(vc.Path[:1])
+				childPaths[parentKey] = append(childPaths[parentKey], vc.Path)
+			}
+		}
+
+		if len(arrayPaths) == 0 && len(childPaths) == 0 {
+			continue
+		}
+
+		// Build set of existing claim paths
+		existing := make(map[string]bool, len(cred.Claims))
+		for _, claim := range cred.Claims {
+			existing[claimPtrPathKey(claim.Path)] = true
+		}
+
+		// Add missing array element paths
+		for _, claim := range cred.Claims {
+			parentKey := claimPtrPathKey(claim.Path)
+			if arrPath, ok := arrayPaths[parentKey]; ok {
+				arrKey := claimPtrPathKey(arrPath)
+				if !existing[arrKey] {
+					dcql.Credentials[i].Claims = append(dcql.Credentials[i].Claims, openid4vp.ClaimQuery{Path: arrPath})
+					existing[arrKey] = true
+				}
+			}
+		}
+
+		// Replace parent object paths with their nested sub-paths.
+		// Sending both ["address"] and ["address", "house_number"] causes wallets
+		// to crash (they mark the parent as disclosed=true, then can't set children).
+		// We replace the parent with explicit sub-paths so the wallet discloses each field.
+		parentsToRemove := make(map[string]bool)
+		for _, claim := range cred.Claims {
+			if len(claim.Path) != 1 || claim.Path[0] == nil {
+				continue
+			}
+			parentKey := claimPtrPathKey(claim.Path)
+			children, ok := childPaths[parentKey]
+			if !ok {
+				continue
+			}
+			parentsToRemove[parentKey] = true
+			for _, childPath := range children {
+				childKey := claimPtrPathKey(childPath)
+				if !existing[childKey] {
+					dcql.Credentials[i].Claims = append(dcql.Credentials[i].Claims, openid4vp.ClaimQuery{Path: childPath})
+					existing[childKey] = true
+				}
+			}
+		}
+
+		// Remove parent paths that were expanded into sub-paths
+		if len(parentsToRemove) > 0 {
+			filtered := make([]openid4vp.ClaimQuery, 0, len(dcql.Credentials[i].Claims))
+			for _, claim := range dcql.Credentials[i].Claims {
+				key := claimPtrPathKey(claim.Path)
+				if !parentsToRemove[key] {
+					filtered = append(filtered, claim)
+				}
+			}
+			dcql.Credentials[i].Claims = filtered
+		}
+	}
+}
+
+// claimPtrPathKey returns a string key for a []*string path.
+func claimPtrPathKey(path []*string) string {
+	parts := make([]string, len(path))
+	for i, p := range path {
+		if p == nil {
+			parts[i] = "\x01" // sentinel for null
+		} else {
+			parts[i] = *p
+		}
+	}
+	return strings.Join(parts, "\x00")
 }

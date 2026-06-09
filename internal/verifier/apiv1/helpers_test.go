@@ -56,8 +56,8 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 						VCTValues: []string{"https://example.com/test"},
 					},
 					Claims: []openid4vp.ClaimQuery{
-						{Path: []string{"given_name"}},
-						{Path: []string{"family_name"}},
+						{Path: openid4vp.StringPath("given_name")},
+						{Path: openid4vp.StringPath("family_name")},
 					},
 				},
 			},

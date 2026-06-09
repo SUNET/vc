@@ -333,12 +333,11 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 		// Add claims from VCTM claim paths
 		if credInfo.VCTM != nil {
 			for _, claim := range credInfo.VCTM.Claims {
-				// Skip object claims (nested paths) — only leaf claims
-				if len(claim.Path) != 1 || claim.Path[0] == nil {
+				if len(claim.Path) == 0 {
 					continue
 				}
 				cred.Claims = append(cred.Claims, openid4vp.ClaimQuery{
-					Path: []string{*claim.Path[0]},
+					Path: claim.Path,
 				})
 			}
 		}

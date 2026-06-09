@@ -180,7 +180,7 @@ func copyDCQL(src *DCQL) *DCQL {
 			dst.Credentials[i].Claims = make([]ClaimQuery, len(cred.Claims))
 			for j, claim := range cred.Claims {
 				dst.Credentials[i].Claims[j] = ClaimQuery{
-					Path: append([]string{}, claim.Path...),
+					Path: append([]*string{}, claim.Path...),
 				}
 			}
 		}
