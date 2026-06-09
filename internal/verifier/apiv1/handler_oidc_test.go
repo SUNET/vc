@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -2809,6 +2810,54 @@ func TestMatchRedirectURI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := client.matchRedirectURI(tt.registered, tt.reqURI)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBuildOpenID4VPAuthzRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		publicURL string
+		sessionID string
+		wantErr   bool
+	}{
+		{
+			name:      "standard URL",
+			publicURL: "https://verifier.example.com",
+			sessionID: "session-abc-123",
+		},
+		{
+			name:      "URL with trailing slash",
+			publicURL: "https://verifier.example.com/",
+			sessionID: "session-xyz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _, err := buildOpenID4VPAuthzRequest(tt.publicURL, tt.sessionID)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			assert.True(t, strings.HasPrefix(result, "openid4vp://cb?"),
+				"must use openid4vp:// scheme")
+
+			parsed, err := url.Parse(result)
+			require.NoError(t, err)
+
+			requestURI := parsed.Query().Get("request_uri")
+			assert.True(t, strings.HasSuffix(requestURI,
+				"/verification/request-object/"+tt.sessionID),
+				"request_uri must use path-param format, got: %s", requestURI)
+			assert.NotContains(t, requestURI, "?id=",
+				"request_uri must not use query-param format")
+
+			clientID := parsed.Query().Get("client_id")
+			assert.True(t, strings.HasPrefix(clientID, "x509_san_dns:"),
+				"client_id must use x509_san_dns prefix")
 		})
 	}
 }
