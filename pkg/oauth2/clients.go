@@ -24,7 +24,7 @@ type Client struct {
 	Type string `json:"type" yaml:"type" validate:"required,oneof=public confidential" default:"public"`
 	// RedirectURIs is the list of allowed redirect URIs for the client.
 	// Accepts either a single string or an array of strings in YAML/JSON.
-	RedirectURIs RedirectURIs `json:"redirect_uri" yaml:"redirect_uri" validate:"required,min=1,dive,url" doc_example:"\"https://example.com/callback\""`
+	RedirectURIs RedirectURIs `json:"redirect_uri" yaml:"redirect_uri" validate:"required,min=1,dive,required" doc_example:"\"https://example.com/callback\""`
 	// Scopes is the list of OAuth2 scopes allowed for the client
 	Scopes []string `json:"scopes" yaml:"scopes" validate:"required"`
 }
@@ -85,14 +85,9 @@ func (r RedirectURIs) Contains(uri string) bool {
 			cleanedPrefix := path.Clean(prefixParsed.Path)
 			if parsed.Scheme == prefixParsed.Scheme &&
 				parsed.Host == prefixParsed.Host &&
-				cleanedPath != cleanedPrefix &&
-				strings.HasPrefix(cleanedPath, cleanedPrefix+"/") {
-				return true
-			}
-			// Handle root wildcard: https://host/* matches any path including /
-			if parsed.Scheme == prefixParsed.Scheme &&
-				parsed.Host == prefixParsed.Host &&
-				cleanedPrefix == "/" {
+				(cleanedPath == cleanedPrefix ||
+					strings.HasPrefix(cleanedPath, cleanedPrefix+"/") ||
+					cleanedPrefix == "/") {
 				return true
 			}
 			continue
@@ -109,12 +104,17 @@ func (r RedirectURIs) Contains(uri string) bool {
 }
 
 // FirstConcreteURI returns the first non-wildcard redirect URI suitable for
-// use as a cancel/error redirect target. If none exists, it returns an empty string.
+// use as a cancel/error redirect target. If no concrete URI exists, it derives
+// one from the first wildcard entry by trimming the trailing "*".
 func (r RedirectURIs) FirstConcreteURI() string {
 	for _, uri := range r {
 		if !strings.HasSuffix(uri, "/*") {
 			return uri
 		}
+	}
+	// Fallback: derive a concrete URI from the first wildcard pattern
+	if len(r) > 0 && strings.HasSuffix(r[0], "/*") {
+		return strings.TrimSuffix(r[0], "*")
 	}
 	return ""
 }

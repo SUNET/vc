@@ -59,6 +59,21 @@ func runGenericCacheContractTests[V comparable](t *testing.T, c Cache[V], val1, 
 		assert.Equal(t, val1, got)
 	})
 
+	t.Run("GetAndDeleteHit", func(t *testing.T) {
+		c.Set(ctx, "key-gad", val1)
+		got, ok := c.GetAndDelete(ctx, "key-gad")
+		require.True(t, ok)
+		assert.Equal(t, val1, got)
+		// Value must be removed after GetAndDelete
+		_, ok = c.Get(ctx, "key-gad")
+		assert.False(t, ok, "key should be removed after GetAndDelete")
+	})
+
+	t.Run("GetAndDeleteMiss", func(t *testing.T) {
+		_, ok := c.GetAndDelete(ctx, "no-such-key-gad")
+		assert.False(t, ok)
+	})
+
 	t.Run("Len", func(t *testing.T) {
 		fresh := c.Len()
 		assert.GreaterOrEqual(t, fresh, 0)

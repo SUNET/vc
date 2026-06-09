@@ -3,7 +3,6 @@ package tokenstatuslist
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
@@ -184,12 +183,12 @@ func publicKeyToJWK(pub crypto.PublicKey) (map[string]any, error) {
 	switch key := pub.(type) {
 	case *ecdsa.PublicKey:
 		var crv string
-		switch key.Curve {
-		case elliptic.P256():
+		switch key.Curve.Params().Name {
+		case "P-256":
 			crv = "P-256"
-		case elliptic.P384():
+		case "P-384":
 			crv = "P-384"
-		case elliptic.P521():
+		case "P-521":
 			crv = "P-521"
 		default:
 			return nil, fmt.Errorf("unsupported EC curve: %v", key.Curve.Params().Name)

@@ -147,6 +147,48 @@ func TestRedirectURIsContains(t *testing.T) {
 			check:    "https://other.com/cb",
 			expected: true,
 		},
+		{
+			name:     "fragment in URI rejected",
+			uris:     RedirectURIs{"https://example.com/callback"},
+			check:    "https://example.com/callback#frag",
+			expected: false,
+		},
+		{
+			name:     "fragment in wildcard URI rejected",
+			uris:     RedirectURIs{"https://example.com/test/a/*"},
+			check:    "https://example.com/test/a/cb#frag",
+			expected: false,
+		},
+		{
+			name:     "root wildcard matches deep path",
+			uris:     RedirectURIs{"https://example.com/*"},
+			check:    "https://example.com/any/path/here",
+			expected: true,
+		},
+		{
+			name:     "root wildcard matches root",
+			uris:     RedirectURIs{"https://example.com/*"},
+			check:    "https://example.com/",
+			expected: true,
+		},
+		{
+			name:     "wildcard path traversal rejected",
+			uris:     RedirectURIs{"https://example.com/test/a/*"},
+			check:    "https://example.com/test/a/../evil",
+			expected: false,
+		},
+		{
+			name:     "wildcard matches exact prefix path",
+			uris:     RedirectURIs{"https://example.com/app/*"},
+			check:    "https://example.com/app/",
+			expected: true,
+		},
+		{
+			name:     "wildcard matches prefix without trailing slash",
+			uris:     RedirectURIs{"https://example.com/app/*"},
+			check:    "https://example.com/app",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tts {
