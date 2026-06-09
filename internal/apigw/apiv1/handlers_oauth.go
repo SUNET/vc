@@ -169,7 +169,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 //	@Failure		400		{object}	helpers.ErrorResponse		"Bad Request"
 //	@Router			/token [post]
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
-	c.log.Debug("OAuthToken", "req", req)
+	c.log.Debug("OAuthToken", "grant_type", req.GrantType)
 
 	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
@@ -181,10 +181,64 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	// Look up the client to enforce type-specific requirements (client_id is optional for pre-auth flow)
+	// When client_assertion is provided (private_key_jwt auth), extract client_id from the assertion's sub claim.
+	// SECURITY: ExtractClientIDFromAssertion only decodes the JWT payload — it does NOT verify the signature.
+	// The extracted client_id is used for both client config lookup (Clients.Get) AND client binding
+	// verification (WalletClientID check). Without signature verification, an attacker could forge
+	// the sub claim to impersonate another client.
+	// Full JWT assertion verification (signature, aud, exp, jti) is NOT yet implemented.
+	// TODO(security): Implement RFC 7523 private_key_jwt assertion verification
+	// (signature, aud, exp, jti) before enabling client_assertion in production.
+	// Tracked as a known risk — see risk register SID-RISK-CLIENT-ASSERTION.
+	clientID := req.ClientID
+	if req.ClientAssertion != "" {
+		// SECURITY: client_assertion signature is NOT verified — only the payload is decoded.
+		// Reject unless explicitly opted in via allow_unverified_client_assertion config flag.
+		// Full RFC 7523 verification (signature, aud, exp, jti) must be implemented before
+		// removing this flag. Tracked in risk register SID-RISK-CLIENT-ASSERTION.
+		if !c.cfg.APIGW.Delivery.OpenID4VCI.AllowUnverifiedClientAssertion {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				"client_assertion is not supported (RFC 7523 verification not implemented)", 400)
+		}
+		c.log.Warn("accepting unverified client_assertion (allow_unverified_client_assertion is enabled) — signature verification not implemented",
+			"client_assertion_type", req.ClientAssertionType)
+		if req.ClientAssertionType == "" {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				"client_assertion_type is required when client_assertion is provided", 400)
+		}
+		if req.ClientAssertionType != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				fmt.Sprintf("unsupported client_assertion_type %q; expected urn:ietf:params:oauth:client-assertion-type:jwt-bearer", req.ClientAssertionType), 400)
+		}
+		sub, err := oauth2.ExtractClientIDFromAssertion(req.ClientAssertion)
+		if err != nil {
+			c.log.Error(err, "failed to extract client_id from client_assertion")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+				"Invalid client assertion", 401, err)
+		}
+		if clientID != "" && clientID != sub {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
+				"client_id does not match assertion subject", 401)
+		}
+		clientID = sub
+		c.log.Debug("OAuthToken: resolved client_id from client_assertion", "client_id", clientID)
+	} else if req.ClientAssertionType != "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"client_assertion_type provided without client_assertion", 400)
+	}
+
+	c.log.Debug("OAuthToken", "client_id", clientID, "grant_type", req.GrantType)
+
+	// authorization_code flow requires client identification via client_id or client_assertion (RFC 6749 §4.1.3).
+	if !isPreAuthFlow && clientID == "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"authorization_code grant requires client_id or client_assertion", 400)
+	}
+
 	var oauthClient *oauth2.Client
-	if req.ClientID != "" {
+	if clientID != "" {
 		var err error
-		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(req.ClientID)
+		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(clientID)
 		if err != nil {
 			c.log.Error(err, "client validation failed")
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
@@ -254,7 +308,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 				"Authorization code is invalid or has already been used", 400, err)
 		}
-		if preCheck.WalletClientID != "" && req.ClientID != preCheck.WalletClientID {
+		if preCheck.WalletClientID != "" && clientID != preCheck.WalletClientID {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 				"client_id does not match the authorization request", 400)
 		}
@@ -334,6 +388,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// alongside any updated AuthorizationDetails (credential_identifiers).
 	// Using Update() instead of AddToken() avoids a race where AddToken
 	// writes the token and a subsequent Update() overwrites it with nil.
+	// NOTE: Update() uses ReplaceOne which could clobber concurrent writes,
+	// but this is safe here: only one token exchange runs per authorization code
+	// (the code is consumed atomically above), so there are no concurrent writers.
 	authorizationContext.Token = tokenDoc
 	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
 		c.log.Error(err, "failed to persist token and authorization details")

@@ -18,12 +18,19 @@ type TokenRequest struct {
 	// RedirectURI REQUIRED for authorization_code grant, if the "redirect_uri" parameter was included in the authorization request.
 	RedirectURI string `form:"redirect_uri" json:"redirect_uri"`
 
-	// ClientID REQUIRED for authorization_code grant (RFC 6749 §4.1.3).
+	// ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).
+	// When using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's "sub" claim.
 	// OPTIONAL for pre-authorized_code grant.
-	ClientID string `form:"client_id" json:"client_id" validate:"required_if=GrantType authorization_code"`
+	ClientID string `form:"client_id" json:"client_id" validate:"omitempty,max=128,printascii"`
 
 	// CodeVerifier OPTIONAL (required for public clients using authorization_code grant)
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`
+
+	// ClientAssertionType OPTIONAL. The type of client assertion. For private_key_jwt: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer".
+	ClientAssertionType string `form:"client_assertion_type" json:"client_assertion_type" validate:"omitempty,max=256,printascii"`
+
+	// ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt or client_secret_jwt authentication.
+	ClientAssertion string `form:"client_assertion" json:"client_assertion" validate:"omitempty,max=8192,printascii"`
 
 	// Pre-Authorized Code Flow fields
 
