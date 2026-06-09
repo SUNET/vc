@@ -187,15 +187,15 @@ func (s *Service) endpointUserInfo(ctx context.Context, c *gin.Context) (any, er
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Info("UserInfo binding failed", "error", err)
 		c.Header("WWW-Authenticate", "Bearer")
-		return nil, oauth2.NewOAuthError("invalid_token", "missing or invalid Authorization header", http.StatusUnauthorized)
+		return nil, oauth2.NewOAuthError("invalid_request", "missing or invalid Authorization header", http.StatusUnauthorized)
 	}
 
-	// Extract bearer token from Authorization header
+	// Extract bearer token from Authorization header (RFC 7235: scheme is case-insensitive)
 	parts := strings.SplitN(request.Authorization, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 		span.SetStatus(codes.Error, "Invalid Authorization header")
 		c.Header("WWW-Authenticate", "Bearer")
-		return nil, oauth2.NewOAuthError("invalid_token", "invalid Authorization header format", http.StatusUnauthorized)
+		return nil, oauth2.NewOAuthError("invalid_request", "invalid Authorization header format", http.StatusUnauthorized)
 	}
 	request.AccessToken = parts[1]
 

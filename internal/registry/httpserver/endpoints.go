@@ -38,10 +38,9 @@ func (s *Service) endpointStatusLists(ctx context.Context, c *gin.Context) (any,
 		return nil, err
 	}
 
-	// Set Content-Type header (application/statuslist+jwt or application/statuslist+cwt)
-	c.Header("Content-Type", reply.ContentType)
-
-	return reply, nil
+	// Return raw token with correct Content-Type per draft-ietf-oauth-status-list §6.2
+	c.Data(http.StatusOK, reply.ContentType, reply.Token)
+	return nil, nil
 }
 
 // endpointTokenStatusListAggregation handles GET /.well-known/statuslist-aggregation

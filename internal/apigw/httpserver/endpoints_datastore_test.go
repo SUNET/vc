@@ -386,7 +386,7 @@ func (u unimplementedApiv1) AdminCallback(context.Context, *apiv1.AdminCallbackR
 	panic("not implemented")
 }
 
-func (u unimplementedApiv1) AdminLogoutURL(string) string {
+func (u unimplementedApiv1) AdminLogoutURL(context.Context, string) string {
 	panic("not implemented")
 }
 

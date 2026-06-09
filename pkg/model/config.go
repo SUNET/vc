@@ -374,6 +374,18 @@ type Issuer struct {
 	MDoc *MDocConfig `yaml:"mdoc" validate:"omitempty"`
 	// AuditLog holds audit log configuration
 	AuditLog *AuditLog `yaml:"audit_log" validate:"omitempty"`
+	// SignMetadataRateLimit configures the rate limiter for the SignMetadata gRPC endpoint.
+	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
+	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
+	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
+}
+
+// SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.
+type SignMetadataRateLimitConfig struct {
+	// RequestsPerSecond is the sustained rate limit in requests per second. Default: 2
+	RequestsPerSecond float64 `yaml:"requests_per_second" default:"2" validate:"gt=0"`
+	// Burst is the maximum number of requests allowed in a single burst. Default: 20
+	Burst int `yaml:"burst" default:"20" validate:"gt=0"`
 }
 
 // AuditLog holds audit log configuration for multiple destinations
@@ -455,6 +467,28 @@ type AdminGUI struct {
 	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
+// VerificationPreset is a map of scope name to optional credential query overrides.
+// The preset's map key (in the parent Presets map) serves as the human-readable label.
+// Each key in this map references a credential_metadata scope (e.g., "pid", "ehic").
+// A nil value means "request all VCTM claims with no overrides".
+type VerificationPreset map[string]*VerificationPresetScope
+
+// VerificationPresetScope defines optional overrides for a credential query within a preset.
+type VerificationPresetScope struct {
+	// Claims lists specific claims to request. If empty, all VCTM claims are used.
+	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
+	// ExcludeClaims lists claims to exclude from the DCQL query.
+	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
+	// Validations are optional rules applied server-side after claims extraction
+	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
+}
+
+// VerificationPresetClaim defines a claim path to request within a credential.
+type VerificationPresetClaim struct {
+	// Path is the claim path segments
+	Path []string `yaml:"path" validate:"required,min=1,dive,required" doc_example:"[\"birthdate\"], [\"address\", \"locality\"]"`
+}
+
 // VerifierInbound groups inbound credential verification configuration
 type VerifierInbound struct {
 	// OpenID4VP holds the OpenID4VP configuration for accepting wallet presentations
@@ -491,6 +525,11 @@ type Verifier struct {
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// Presets holds predefined verification request presets shown in the UI.
+	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
+	// Each preset maps credential_metadata scopes to optional claim overrides.
+	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
+	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
@@ -591,10 +630,9 @@ type OIDCOP struct {
 	// EnableUserInfo controls whether the verifier-OP advertises a userinfo_endpoint
 	// in its discovery metadata and issues JWT access tokens (RFC 9068 at+jwt).
 	// When true (default), the OP advertises userinfo_endpoint in discovery and
-	// returns access/refresh tokens alongside the ID token. The userinfo endpoint
+	// returns an access token alongside the ID token. The userinfo endpoint
 	// is stateless: it validates the JWT signature and returns the embedded claims.
-	// When false, only ID tokens are returned — no access_token, refresh_token,
-	// or userinfo endpoint.
+	// When false, only ID tokens are returned — no access_token or userinfo endpoint.
 	EnableUserInfo bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
@@ -764,8 +802,12 @@ type APIAuth struct {
 type APIAuthJWKS struct {
 	// Enable enables static JWKS Bearer token authentication
 	Enable bool `yaml:"enable" default:"false"`
-	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures
-	JWKSURL string `yaml:"jwks_url" validate:"required_if=Enable true,omitempty,url" doc_example:"\"https://auth.example.com/.well-known/jwks.json\""`
+	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures.
+	// Mutually exclusive with jwks_file_path; exactly one must be set when enable is true
+	JWKSURL string `yaml:"jwks_url" validate:"excluded_with=JWKSFilePath,omitempty,url" doc_example:"\"https://auth.example.com/.well-known/jwks.json\""`
+	// JWKSFilePath is a local file path to a JWKS JSON file used to validate token signatures.
+	// Mutually exclusive with jwks_url; exactly one must be set when enable is true
+	JWKSFilePath string `yaml:"jwks_file_path" validate:"excluded_with=JWKSURL,omitempty"`
 	// Issuer is the expected "iss" claim. Tokens with a different issuer are rejected
 	Issuer string `yaml:"issuer" validate:"required_if=Enable true"`
 	// Audience is the expected "aud" claim. Tokens that do not contain this audience are rejected
@@ -919,6 +961,11 @@ type OAuthServer struct {
 	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
 	// Clients holds the OAuth2 client configurations
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
+	// AllowUnverifiedClientAssertion enables accepting client_assertion (private_key_jwt)
+	// WITHOUT signature verification. This is INSECURE and only intended for conformance
+	// testing environments. When false (default), client_assertion is rejected.
+	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
+	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
 }
 
 // Cfg is the main configuration structure for this application
@@ -1025,7 +1072,7 @@ type CredentialMetadata struct {
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 	// Format is the credential format to issue
-	Format string `yaml:"format" json:"format" validate:"required" doc_example:"\"vc+sd-jwt\""`
+	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
@@ -1244,7 +1291,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				}
 
 				// Map rendering information from VCTM to OpenID4VCI format
-				if vctmDisplay.Rendering != nil {
+				if vctmDisplay.Rendering != nil && vctmDisplay.Rendering.Simple != nil {
 					simple := vctmDisplay.Rendering.Simple
 					if simple.BackgroundColor != "" {
 						display.BackgroundColor = simple.BackgroundColor
@@ -1252,7 +1299,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					if simple.TextColor != "" {
 						display.TextColor = simple.TextColor
 					}
-					if simple.Logo.URI != "" {
+					if simple.Logo != nil && simple.Logo.URI != "" {
 						display.Logo = &openid4vci.MetadataLogo{
 							URI:     simple.Logo.URI,
 							AltText: simple.Logo.AltText,

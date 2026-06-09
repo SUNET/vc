@@ -68,32 +68,36 @@ func (c *CredentialRequest) IsAccessTokenDPoP() bool {
 func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails []AuthorizationDetailsParameter) error {
 	hasAuthDetails := len(authorizationDetails) > 0
 
-	if hasAuthDetails {
-		// authorization_details flow: credential_identifier is REQUIRED
-		if c.CredentialIdentifier == "" {
-			return fmt.Errorf("credential_identifier is required when authorization_details was returned in the Token Response")
+	// Neither identifier nor configuration ID provided
+	if c.CredentialIdentifier == "" && c.CredentialConfigurationID == "" {
+		if hasAuthDetails {
+			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_identifier is required when authorization_details was returned in the Token Response"}
 		}
-		if c.CredentialConfigurationID != "" {
-			return fmt.Errorf("credential_configuration_id must not be present when credential_identifier is used")
-		}
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_configuration_id is required when authorization_details was not returned in the Token Response"}
+	}
 
-		// Verify credential_identifier matches one returned in the Token Response
+	// Both provided simultaneously
+	if c.CredentialIdentifier != "" && c.CredentialConfigurationID != "" {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_identifier and credential_configuration_id must not both be present"}
+	}
+
+	// credential_identifier provided: verify it matches the Token Response
+	if c.CredentialIdentifier != "" {
+		if !hasAuthDetails {
+			return &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("credential_identifier %q cannot be resolved: no authorization_details in Token Response", c.CredentialIdentifier)}
+		}
 		for _, ad := range authorizationDetails {
 			if slices.Contains(ad.CredentialIdentifiers, c.CredentialIdentifier) {
 				return nil
 			}
 		}
-		return fmt.Errorf("credential_identifier %q not found in Token Response authorization_details", c.CredentialIdentifier)
+		return &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("credential_identifier %q not found in Token Response authorization_details", c.CredentialIdentifier)}
 	}
 
-	// scope-based flow: credential_configuration_id is REQUIRED
-	if c.CredentialConfigurationID == "" {
-		return fmt.Errorf("credential_configuration_id is required when authorization_details was not returned in the Token Response")
+	// credential_configuration_id provided without authorization_details: allowed
+	if hasAuthDetails {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "credential_configuration_id must not be used when authorization_details was returned in the Token Response; use credential_identifier instead"}
 	}
-	if c.CredentialIdentifier != "" {
-		return fmt.Errorf("credential_identifier must not be present when credential_configuration_id is used")
-	}
-
 	return nil
 }
 
@@ -234,7 +238,16 @@ type CredentialResponseEncryption struct {
 // ResolveCredentialFormat determines the credential format from the request.
 // According to OpenID4VCI spec, the format is derived from the credential_configuration_id
 // which maps to a credential configuration in the issuer metadata.
+//
+// Deprecated: Use ResolveCredentialFormatWithAuthDetails for credential_identifier support.
 func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuerMetadataParameters) (string, error) {
+	return req.ResolveCredentialFormatWithAuthDetails(metadata, nil)
+}
+
+// ResolveCredentialFormatWithAuthDetails determines the credential format from the request.
+// When credential_identifier is used, the authorizationDetails from the token response
+// are needed to map the identifier to a credential_configuration_id.
+func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
 	if metadata == nil {
 		return "", fmt.Errorf("metadata is required")
 	}
@@ -246,22 +259,30 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 				return config.Format, nil
 			}
 		}
-		return "", fmt.Errorf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)
+		return "", &Error{Err: ErrUnknownCredentialConfiguration, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
 	}
 
-	// Use credential_identifier to look up the format
-	// The credential_identifier maps to a credential configuration via authorization_details from the token response
-	// For now, we'll attempt to find a matching configuration by identifier
+	// Use credential_identifier to look up the format via authorization_details.
+	// The credential_identifier maps to a credential_configuration_id in the
+	// authorization_details that were returned in the token response.
 	if req.CredentialIdentifier != "" {
-		if metadata.CredentialConfigurationsSupported != nil {
-			// Try to match by credential identifier (may be same as configuration ID in some cases)
-			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialIdentifier]; ok {
-				return config.Format, nil
+		for _, ad := range authorizationDetails {
+			if slices.Contains(ad.CredentialIdentifiers, req.CredentialIdentifier) {
+				// Format-based authorization_details: the entry carries Format directly
+				// instead of CredentialConfigurationID (OID4VCI §5.1.1).
+				if ad.CredentialConfigurationID == "" && ad.Format != "" {
+					return ad.Format, nil
+				}
+				if metadata.CredentialConfigurationsSupported != nil {
+					if config, ok := metadata.CredentialConfigurationsSupported[ad.CredentialConfigurationID]; ok {
+						return config.Format, nil
+					}
+				}
+				return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)}
 			}
-			return "", fmt.Errorf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)
 		}
-		return "", fmt.Errorf("unknown credential_identifier: %s", req.CredentialIdentifier)
+		return "", &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
 	}
 
-	return "", fmt.Errorf("either credential_configuration_id or credential_identifier must be provided")
+	return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
 }

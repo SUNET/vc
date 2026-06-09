@@ -1,6 +1,7 @@
 package samlsp
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -157,10 +158,15 @@ func TestNewStaticMDQClient_URLFetchError(t *testing.T) {
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
 
-	// Try to fetch from invalid URL
-	_, err = NewStaticMDQClient("http://nonexistent.invalid/metadata", "https://idp.example.com", true, nil, log)
+	// Unreachable URL — client should be created (lazy mode) but GetIDPMetadata should fail.
+	client, err := NewStaticMDQClient("http://nonexistent.invalid/metadata", "https://idp.example.com", true, nil, log)
+	require.NoError(t, err, "client should be created even when URL is unreachable")
+	assert.True(t, client.IsStaticMode(), "should still report static mode")
+	assert.Nil(t, client.staticMetadata, "metadata should not be loaded yet")
+
+	_, err = client.GetIDPMetadata(context.Background(), "https://idp.example.com")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to fetch metadata from URL")
+	assert.Contains(t, err.Error(), "static IdP metadata not available")
 }
 
 func TestNewStaticMDQClient_EntityIDMismatch(t *testing.T) {

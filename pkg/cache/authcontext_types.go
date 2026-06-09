@@ -26,8 +26,9 @@ const (
 
 // Token represents an access token with expiration
 type Token struct {
-	AccessToken string `json:"access_token" bson:"access_token" validate:"required,max=4096,printascii"`
-	ExpiresAt   int64  `json:"expires_at" bson:"expires_at" validate:"required"`
+	AccessToken    string `json:"access_token" bson:"access_token" validate:"required,max=4096,printascii"`
+	ExpiresAt      int64  `json:"expires_at" bson:"expires_at" validate:"required"`
+	DPoPThumbprint string `json:"dpop_thumbprint,omitempty" bson:"dpop_thumbprint,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // AuthorizationContext is the unified model for OIDC/OpenID4VP sessions
@@ -87,8 +88,9 @@ type AuthorizationContext struct {
 	VerifierResponseCode     string          `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
 	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
-	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
-	WalletID                 string          `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
+	DCQLQuery                *openid4vp.DCQL                         `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	Validations              map[string][]openid4vp.ClaimValidation   `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
+	WalletID                 string                                  `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // Validate checks the AuthorizationContext against its struct validation tags.

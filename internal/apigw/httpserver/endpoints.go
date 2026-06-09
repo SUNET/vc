@@ -56,11 +56,15 @@ func (s *Service) endpointVCINonce(ctx context.Context, c *gin.Context) (any, er
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointNonce")
 	defer span.End()
 
+	// Set Cache-Control unconditionally per spec requirement
+	c.Header("Cache-Control", "no-store")
+
 	reply, err := s.apiv1.VCINonce(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	c.Header("Cache-Control", "no-store")
 	return reply, nil
 }
 
@@ -91,7 +95,7 @@ func (s *Service) endpointVCICredential(ctx context.Context, c *gin.Context) (an
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
-		return nil, err
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
 	}
 
 	reply, err := s.apiv1.VCICredential(ctx, request)

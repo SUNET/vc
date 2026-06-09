@@ -309,6 +309,18 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.APIAuth{})
 
+	// Register struct-level validation for APIAuthJWKS: at least one of JWKSURL/JWKSFilePath when enabled
+	// (mutual exclusivity is enforced by the excluded_with field tags)
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.APIAuthJWKS)
+		if !cfg.Enable {
+			return
+		}
+		if cfg.JWKSURL == "" && cfg.JWKSFilePath == "" {
+			sl.ReportError(cfg.JWKSURL, "JWKSURL", "JWKSURL", "jwks_source_required", "")
+		}
+	}, model.APIAuthJWKS{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)

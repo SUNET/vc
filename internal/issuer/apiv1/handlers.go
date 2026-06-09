@@ -35,8 +35,6 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	ctx, span := c.tracer.Start(ctx, "apiv1:CreateCredential")
 	defer span.End()
 
-	c.log.Debug("MakeSDJWT", "req", req)
-
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
 		return nil, err

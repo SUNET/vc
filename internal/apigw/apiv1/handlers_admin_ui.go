@@ -17,9 +17,14 @@ type AdminLoginURLReply struct {
 // AdminLoginURL generates an OIDC authorization URL and a random state value.
 // When OIDC is not configured, it returns an empty AuthURL to signal that
 // login should proceed without authentication
-func (c *Client) AdminLoginURL(_ context.Context) (*AdminLoginURLReply, error) {
-	if c.adminOIDCConfig == nil {
+func (c *Client) AdminLoginURL(ctx context.Context) (*AdminLoginURLReply, error) {
+	if c.adminOIDC == nil {
 		return &AdminLoginURLReply{}, nil
+	}
+
+	oauthCfg, err := c.adminOIDC.Config(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC provider not ready: %w", err)
 	}
 
 	state, err := crypto.GenerateSecureToken(32, 0)
@@ -27,7 +32,7 @@ func (c *Client) AdminLoginURL(_ context.Context) (*AdminLoginURLReply, error) {
 		return nil, fmt.Errorf("failed to generate state: %w", err)
 	}
 
-	authURL := c.adminOIDCConfig.AuthCodeURL(state)
+	authURL := oauthCfg.AuthCodeURL(state)
 
 	reply := &AdminLoginURLReply{
 		AuthURL: authURL,
@@ -54,7 +59,7 @@ type AdminCallbackReply struct {
 // AdminCallback exchanges the authorization code for tokens, validates the
 // ID token, resolves authorized resources, and returns the result.
 func (c *Client) AdminCallback(ctx context.Context, req *AdminCallbackRequest) (*AdminCallbackReply, error) {
-	if c.adminOIDCConfig == nil {
+	if c.adminOIDC == nil {
 		return nil, fmt.Errorf("OIDC authentication is not configured")
 	}
 
@@ -66,7 +71,12 @@ func (c *Client) AdminCallback(ctx context.Context, req *AdminCallbackRequest) (
 		return nil, fmt.Errorf("missing authorization code")
 	}
 
-	token, err := c.adminOIDCConfig.Exchange(ctx, req.Code)
+	oauthCfg, err := c.adminOIDC.Config(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC provider not ready: %w", err)
+	}
+
+	token, err := oauthCfg.Exchange(ctx, req.Code)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
@@ -76,7 +86,12 @@ func (c *Client) AdminCallback(ctx context.Context, req *AdminCallbackRequest) (
 		return nil, fmt.Errorf("no id_token in token response")
 	}
 
-	idToken, err := c.adminOIDCVerifier.Verify(ctx, rawIDToken)
+	verifier, err := c.adminOIDC.Verifier(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC provider not ready: %w", err)
+	}
+
+	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return nil, fmt.Errorf("id_token verification failed: %w", err)
 	}
@@ -110,17 +125,25 @@ func (c *Client) AdminCallback(ctx context.Context, req *AdminCallbackRequest) (
 
 // AdminLogoutURL returns the OIDC end_session_endpoint URL for RP-initiated
 // logout, or empty string if the provider does not advertise one
-func (c *Client) AdminLogoutURL(idTokenHint string) string {
-	if c.adminOIDCEndSessionURL == "" {
+func (c *Client) AdminLogoutURL(ctx context.Context, idTokenHint string) string {
+	if c.adminOIDC == nil {
+		return ""
+	}
+	endSessionURL := c.adminOIDC.EndSessionURL(ctx)
+	if endSessionURL == "" {
+		return ""
+	}
+	oauthCfg, err := c.adminOIDC.Config(ctx)
+	if err != nil {
 		return ""
 	}
 	v := url.Values{}
 	if idTokenHint != "" {
 		v.Set("id_token_hint", idTokenHint)
 	}
-	v.Set("client_id", c.adminOIDCConfig.ClientID)
-	v.Set("post_logout_redirect_uri", c.adminOIDCPostLogoutRedirect)
-	return c.adminOIDCEndSessionURL + "?" + v.Encode()
+	v.Set("client_id", oauthCfg.ClientID)
+	v.Set("post_logout_redirect_uri", c.adminOIDC.PostLogoutRedirect(ctx))
+	return endSessionURL + "?" + v.Encode()
 }
 
 // ListAuthenticSources returns all unique authentic source names from the datastore

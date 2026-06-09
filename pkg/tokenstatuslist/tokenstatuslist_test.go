@@ -1,9 +1,13 @@
 package tokenstatuslist
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 	"strings"
 	"testing"
@@ -229,6 +233,70 @@ func TestGenerateJWT(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, float64(Bits), statusList["bits"])
 	assert.NotEmpty(t, statusList["lst"])
+}
+
+func TestGenerateJWTWithJWKHeader(t *testing.T) {
+	t.Run("EC P-256", func(t *testing.T) {
+		privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		sl := &StatusList{statuses: []uint8{0, 1}, Issuer: "https://example.com", Subject: "https://example.com/sl/1", KeyID: "k1"}
+		tokenString, err := sl.GenerateJWT(JWTSigningConfig{
+			SigningKey: privateKey, SigningMethod: jwt.SigningMethodES256, PublicKey: &privateKey.PublicKey,
+		})
+		require.NoError(t, err)
+
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) { return &privateKey.PublicKey, nil })
+		require.NoError(t, err)
+
+		jwkRaw, ok := token.Header["jwk"]
+		require.True(t, ok, "jwk header must be present")
+		jwk, ok := jwkRaw.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "EC", jwk["kty"])
+		assert.Equal(t, "P-256", jwk["crv"])
+		assert.NotEmpty(t, jwk["x"])
+		assert.NotEmpty(t, jwk["y"])
+	})
+
+	t.Run("RSA", func(t *testing.T) {
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+
+		sl := &StatusList{statuses: []uint8{0, 1}, Issuer: "https://example.com", Subject: "https://example.com/sl/2", KeyID: "k2"}
+		tokenString, err := sl.GenerateJWT(JWTSigningConfig{
+			SigningKey: privateKey, SigningMethod: jwt.SigningMethodRS256, PublicKey: &privateKey.PublicKey,
+		})
+		require.NoError(t, err)
+
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) { return &privateKey.PublicKey, nil })
+		require.NoError(t, err)
+
+		jwkRaw, ok := token.Header["jwk"]
+		require.True(t, ok, "jwk header must be present")
+		jwk, ok := jwkRaw.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "RSA", jwk["kty"])
+		assert.NotEmpty(t, jwk["n"])
+		assert.NotEmpty(t, jwk["e"])
+	})
+
+	t.Run("absent when PublicKey is nil", func(t *testing.T) {
+		privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		sl := &StatusList{statuses: []uint8{0, 1}, Issuer: "https://example.com", Subject: "https://example.com/sl/3", KeyID: "k3"}
+		tokenString, err := sl.GenerateJWT(JWTSigningConfig{
+			SigningKey: privateKey, SigningMethod: jwt.SigningMethodES256,
+		})
+		require.NoError(t, err)
+
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) { return &privateKey.PublicKey, nil })
+		require.NoError(t, err)
+
+		_, ok := token.Header["jwk"]
+		assert.False(t, ok, "jwk header must not be present when PublicKey is nil")
+	})
 }
 
 func TestGenerateJWTMissingKey(t *testing.T) {
@@ -587,4 +655,220 @@ func FuzzDecodeAndDecompress(f *testing.F) {
 	f.Fuzz(func(t *testing.T, encoded string) {
 		_, _ = DecodeAndDecompress(encoded)
 	})
+}
+
+// TestGenerateCWT_RSA_AutoDetect verifies that GenerateCWT with an RSA key and
+// Algorithm=0 auto-detects PS256 and produces a valid COSE_Sign1 whose
+// signature can be verified with the corresponding public key.
+func TestGenerateCWT_RSA_AutoDetect(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	statuses := []uint8{0, 1, 2, 1, 0, 3, 2, 1}
+
+	sl := New(statuses)
+	sl.Issuer = "https://example.com"
+	sl.Subject = "https://example.com/statuslists/1"
+	sl.ExpiresIn = 24 * time.Hour
+	sl.TTL = 43200
+	sl.KeyID = "rsa-key-1"
+
+	cwtBytes, err := sl.GenerateCWT(CWTSigningConfig{
+		SigningKey: rsaKey,
+		Algorithm:  0, // auto-detect → PS256
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, cwtBytes)
+
+	// Parse and verify claims
+	claims, err := ParseCWT(cwtBytes)
+	require.NoError(t, err)
+	assert.Equal(t, sl.Issuer, claims[cwtClaimIss])
+	assert.Equal(t, sl.Subject, claims[cwtClaimSub])
+	assert.NotNil(t, claims[cwtClaimIat])
+	assert.NotNil(t, claims[cwtClaimExp])
+	assert.NotNil(t, claims[cwtClaimStatusList])
+
+	// Verify protected header contains PS256 algorithm
+	protectedBytes, signature := extractCOSESign1Parts(t, cwtBytes)
+	var protectedHeader map[int]any
+	require.NoError(t, cbor.Unmarshal(protectedBytes, &protectedHeader))
+
+	// Algorithm should be PS256 (-37) when auto-detected from RSA key
+	algValue, ok := protectedHeader[coseHeaderAlg]
+	require.True(t, ok, "protected header must contain alg")
+	assert.Equal(t, int64(CoseAlgPS256), algValue)
+
+	// Verify typ header
+	assert.Equal(t, CWTTypHeader, protectedHeader[coseHeaderTyp])
+
+	// Verify kid header
+	assert.Equal(t, "rsa-key-1", protectedHeader[coseHeaderKid])
+
+	// Verify the RSA-PSS signature
+	verifyCOSESignature(t, cwtBytes, &rsaKey.PublicKey, crypto.SHA256)
+
+	// Verify status round-trip
+	for i, expected := range statuses {
+		got, err := GetStatusFromCWT(claims, i)
+		require.NoError(t, err)
+		assert.Equal(t, expected, got, "status mismatch at index %d", i)
+	}
+
+	_ = signature // already verified above
+}
+
+// TestGenerateCWT_RSA_ExplicitAlgorithms tests each explicit PS* algorithm
+// (PS256, PS384, PS512) to ensure the correct COSE alg header is set and the
+// signature verifies with the matching hash.
+func TestGenerateCWT_RSA_ExplicitAlgorithms(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	statuses := []uint8{5, 10, 15, 20, 25}
+
+	tests := []struct {
+		name     string
+		alg      int
+		hashAlg  crypto.Hash
+		expected int64
+	}{
+		{"PS256", CoseAlgPS256, crypto.SHA256, int64(CoseAlgPS256)},
+		{"PS384", CoseAlgPS384, crypto.SHA384, int64(CoseAlgPS384)},
+		{"PS512", CoseAlgPS512, crypto.SHA512, int64(CoseAlgPS512)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sl := New(statuses)
+			sl.Issuer = "https://example.com"
+			sl.Subject = "https://example.com/statuslists/1"
+
+			cwtBytes, err := sl.GenerateCWT(CWTSigningConfig{
+				SigningKey: rsaKey,
+				Algorithm:  tt.alg,
+			})
+			require.NoError(t, err)
+			assert.NotEmpty(t, cwtBytes)
+
+			// Verify the protected header has the correct algorithm
+			protectedBytes, _ := extractCOSESign1Parts(t, cwtBytes)
+			var protectedHeader map[int]any
+			require.NoError(t, cbor.Unmarshal(protectedBytes, &protectedHeader))
+			assert.Equal(t, tt.expected, protectedHeader[coseHeaderAlg])
+
+			// Verify the signature with the correct hash
+			verifyCOSESignature(t, cwtBytes, &rsaKey.PublicKey, tt.hashAlg)
+
+			// Verify claims round-trip
+			claims, err := ParseCWT(cwtBytes)
+			require.NoError(t, err)
+			for i, expected := range statuses {
+				got, err := GetStatusFromCWT(claims, i)
+				require.NoError(t, err)
+				assert.Equal(t, expected, got)
+			}
+		})
+	}
+}
+
+// TestGenerateCWT_RSA_WrongKeyType verifies that using an ECDSA key with an
+// explicit PS* algorithm fails with an appropriate error.
+func TestGenerateCWT_RSA_WrongKeyType(t *testing.T) {
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	sl := New([]uint8{1, 2, 3})
+	sl.Issuer = "https://example.com"
+	sl.Subject = "https://example.com/statuslists/1"
+
+	_, err = sl.GenerateCWT(CWTSigningConfig{
+		SigningKey: ecKey,
+		Algorithm:  CoseAlgPS256, // ECDSA key with RSA algorithm
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "rsa.PrivateKey")
+}
+
+// TestDetectCOSEAlgorithm_RSA verifies auto-detection returns PS256 for RSA keys.
+func TestDetectCOSEAlgorithm_RSA(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	alg, err := detectCOSEAlgorithm(rsaKey)
+	require.NoError(t, err)
+	assert.Equal(t, CoseAlgPS256, alg)
+}
+
+// extractCOSESign1Parts decodes a COSE_Sign1 and returns the protected header
+// bytes and the signature bytes.
+func extractCOSESign1Parts(t *testing.T, cwtBytes []byte) (protectedBytes, signature []byte) {
+	t.Helper()
+
+	var tag cbor.Tag
+	require.NoError(t, cbor.Unmarshal(cwtBytes, &tag))
+	require.Equal(t, uint64(18), tag.Number)
+
+	components, ok := tag.Content.([]any)
+	require.True(t, ok)
+	require.Len(t, components, 4)
+
+	protectedBytes, ok = components[0].([]byte)
+	require.True(t, ok)
+
+	signature, ok = components[3].([]byte)
+	require.True(t, ok)
+
+	return protectedBytes, signature
+}
+
+// verifyCOSESignature rebuilds the COSE Sig_structure from the CWT bytes and
+// verifies the RSA-PSS signature with the given public key and hash algorithm.
+func verifyCOSESignature(t *testing.T, cwtBytes []byte, pub *rsa.PublicKey, hashAlg crypto.Hash) {
+	t.Helper()
+
+	var tag cbor.Tag
+	require.NoError(t, cbor.Unmarshal(cwtBytes, &tag))
+
+	components, ok := tag.Content.([]any)
+	require.True(t, ok)
+	require.Len(t, components, 4)
+
+	protectedBytes, ok := components[0].([]byte)
+	require.True(t, ok)
+	payloadBytes, ok := components[2].([]byte)
+	require.True(t, ok)
+	signature, ok := components[3].([]byte)
+	require.True(t, ok)
+
+	// Rebuild Sig_structure = ["Signature1", protected, external_aad, payload]
+	sigStructure := []any{
+		"Signature1",
+		protectedBytes,
+		[]byte{},
+		payloadBytes,
+	}
+	sigStructureBytes, err := cbor.Marshal(sigStructure)
+	require.NoError(t, err)
+
+	// Hash and verify
+	var digest []byte
+	switch hashAlg {
+	case crypto.SHA256:
+		d := sha256.Sum256(sigStructureBytes)
+		digest = d[:]
+	case crypto.SHA384:
+		d := sha512.Sum384(sigStructureBytes)
+		digest = d[:]
+	case crypto.SHA512:
+		d := sha512.Sum512(sigStructureBytes)
+		digest = d[:]
+	default:
+		t.Fatalf("unsupported hash algorithm: %v", hashAlg)
+	}
+
+	err = rsa.VerifyPSS(pub, hashAlg, digest, signature, &rsa.PSSOptions{
+		SaltLength: rsa.PSSSaltLengthEqualsHash,
+	})
+	require.NoError(t, err, "RSA-PSS signature verification failed")
 }

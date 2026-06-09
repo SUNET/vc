@@ -1,6 +1,9 @@
 package openid4vci
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 // Error is the error response
 type Error struct {
@@ -9,6 +12,9 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
+	if e.ErrorDescription != nil {
+		return fmt.Sprintf("%s: %v", e.Err, e.ErrorDescription)
+	}
 	return e.Err
 }
 
@@ -31,6 +37,12 @@ const (
 
 	// ErrInvalidEncryptionParameters This error occurs when the encryption parameters in the Credential Request are either invalid or missing. In the latter case, it indicates that the Credential Issuer requires the Credential Response to be sent encrypted, but the Credential Request does not contain the necessary encryption parameters.
 	ErrInvalidEncryptionParameters = "invalid_encryption_parameters"
+
+	// ErrUnknownCredentialConfiguration The credential_configuration_id in the Credential Request is not recognized by the Credential Issuer.
+	ErrUnknownCredentialConfiguration = "unknown_credential_configuration"
+
+	// ErrUnknownCredentialIdentifier The credential_identifier in the Credential Request is not recognized by the Credential Issuer.
+	ErrUnknownCredentialIdentifier = "unknown_credential_identifier"
 
 	// ErrCredentialRequestDenied The Credential Request has not been accepted by the Credential Issuer.
 	ErrCredentialRequestDenied = "credential_request_denied" // #nosec G101
@@ -104,7 +116,7 @@ const (
 // StatusCode returns the HTTP status code for the error
 func StatusCode(err *Error) int {
 	switch err.Err {
-	case ErrInvalidScope, ErrUnsupportedResponseType, ErrInvalidCredentialRequest, ErrUnsupportedCredentialType, ErrUnsupportedCredentialFormat, ErrInvalidProof, ErrInvalidNonce, ErrInvalidEncryptionParameters, ErrInvalidRequest, ErrCredentialRequestDenied, InvalidNotificationID:
+	case ErrInvalidScope, ErrUnsupportedResponseType, ErrInvalidCredentialRequest, ErrUnsupportedCredentialType, ErrUnsupportedCredentialFormat, ErrInvalidProof, ErrInvalidNonce, ErrInvalidEncryptionParameters, ErrInvalidRequest, ErrCredentialRequestDenied, InvalidNotificationID, ErrUnknownCredentialConfiguration, ErrUnknownCredentialIdentifier:
 		return http.StatusBadRequest
 	case ErrUnauthorizedClient:
 		return http.StatusUnauthorized

@@ -11,6 +11,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -60,6 +61,12 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 					c.Header("WWW-Authenticate", "Bearer")
 				}
 				c.JSON(oauthErr.HTTPStatus, oauthErr)
+				return
+			}
+
+			// OpenID4VCI structured error response per OID4VCI §7.3
+			if vciErr, ok := errors.AsType[*openid4vci.Error](err); ok {
+				c.JSON(openid4vci.StatusCode(vciErr), vciErr)
 				return
 			}
 

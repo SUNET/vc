@@ -18,7 +18,6 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/oauth2"
-	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/skip2/go-qrcode"
@@ -159,24 +158,11 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Generate OpenID4VP authorization request
-	requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", sessionID)
+	authzReqURL, authzParams, err := buildOpenID4VPAuthzRequest(c.cfg.Verifier.PublicURL, sessionID)
 	if err != nil {
-		c.log.Error(err, "Failed to construct request object path")
+		c.log.Error(err, "Failed to build OpenID4VP authorization request")
 		return nil, ErrServerError
 	}
-
-	// Construct OpenID4VP authorization request URL with query parameters
-	// Use x509_san_dns: prefix so wallets know how to verify the client identity
-	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
-	if err != nil {
-		c.log.Error(err, "Failed to extract host from PublicURL")
-		return nil, ErrServerError
-	}
-	oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", host)
-	q := url.Values{}
-	q.Set("client_id", oidc4vpClientID)
-	q.Set("request_uri", requestObjectPath)
-	authzReqURL := "openid4vp://cb?" + q.Encode()
 
 	qrCodeImageURL, err := url.JoinPath("/qr", sessionID)
 	if err != nil {
@@ -202,7 +188,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	// Build wallet links from supported_wallets config
 	// Each wallet URL gets the same client_id + request_uri params appended
 	for name, walletBaseURL := range c.cfg.Verifier.SupportedWallets {
-		walletLink := walletBaseURL + "?" + q.Encode()
+		walletLink := walletBaseURL + "?" + authzParams.Encode()
 
 		// Build QR code image URL for cross-device flow
 		walletQRURL, err := url.JoinPath("/qr", sessionID)
@@ -876,7 +862,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 		}
 
 		// Build the web wallet URL with the same authorization params
-		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", req.SessionID)
+		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "request-object", req.SessionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to construct request object path: %w", err)
 		}
@@ -897,13 +883,19 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 			return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 		}
 
-		requestObject := &openid4vp.RequestObject{
-			ClientID: fmt.Sprintf("x509_san_dns:%s", host),
-		}
-		qrData, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
+		// Construct request_uri with path parameter (matching the OIDC
+		// request-object/:session_id endpoint), not the query-param format
+		// used by the UI flow.
+		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "request-object", req.SessionID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+			return nil, fmt.Errorf("failed to construct request object path: %w", err)
 		}
+
+		oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", host)
+		q := url.Values{}
+		q.Set("client_id", oidc4vpClientID)
+		q.Set("request_uri", requestObjectPath)
+		qrData = "openid4vp://cb?" + q.Encode()
 	}
 
 	// Generate QR code
@@ -1043,4 +1035,24 @@ func (c *Client) matchRedirectURI(registered []string, reqURI string) bool {
 		}
 	}
 	return false
+}
+
+// buildOpenID4VPAuthzRequest constructs an OpenID4VP authorization request URL
+// with a request_uri pointing to the request-object endpoint as a path parameter.
+// It returns the full authorization request URL and the query parameters used.
+func buildOpenID4VPAuthzRequest(publicURL, sessionID string) (string, url.Values, error) {
+	requestObjectPath, err := url.JoinPath(publicURL, "verification", "request-object", sessionID)
+	if err != nil {
+		return "", nil, fmt.Errorf("construct request object path: %w", err)
+	}
+
+	host, err := helpers.HostFromURL(publicURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("extract host from PublicURL: %w", err)
+	}
+
+	q := url.Values{}
+	q.Set("client_id", fmt.Sprintf("x509_san_dns:%s", host))
+	q.Set("request_uri", requestObjectPath)
+	return "openid4vp://cb?" + q.Encode(), q, nil
 }

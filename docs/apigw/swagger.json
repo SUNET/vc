@@ -50,83 +50,6 @@
             }
         },
         "/api/v1/datastore": {
-            "post": {
-                "description": "Get document endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "DatastoreGet",
-                "operationId": "get-document",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DatastoreGetRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DatastoreGetReply"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "delete one document endpoint",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vc-platform"
-                ],
-                "summary": "DatastoreDelete",
-                "operationId": "delete-document",
-                "parameters": [
-                    {
-                        "description": " ",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/apiv1.DatastoreDeleteRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/helpers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/datastore/": {
             "get": {
                 "description": "Get a document by authentic_source, scope, and document_id",
                 "consumes": [
@@ -1375,8 +1298,7 @@
                     "type": "string"
                 },
                 "credential_offer": {
-                    "type": "object",
-                    "additionalProperties": {}
+                    "$ref": "#/definitions/openid4vci.CredentialOfferResult"
                 },
                 "credential_type": {
                     "type": "string"
@@ -1437,10 +1359,16 @@
         "apiv1_issuer.Jwk": {
             "type": "object",
             "properties": {
+                "alg": {
+                    "type": "string"
+                },
                 "crv": {
                     "type": "string"
                 },
                 "d": {
+                    "type": "string"
+                },
+                "e": {
                     "type": "string"
                 },
                 "ext": {
@@ -1456,6 +1384,12 @@
                     "type": "string"
                 },
                 "kty": {
+                    "type": "string"
+                },
+                "n": {
+                    "type": "string"
+                },
+                "use": {
                     "type": "string"
                 },
                 "x": {
@@ -1602,7 +1536,7 @@
                     "maxLength": 128
                 },
                 "document_id": {
-                    "description": "required: true\nexample: 5e7a981c-c03f-11ee-b116-9b12c59362b9",
+                    "description": "required: false\nexample: 5e7a981c-c03f-11ee-b116-9b12c59362b9",
                     "type": "string",
                     "maxLength": 128
                 },
@@ -1809,6 +1743,28 @@
                 "vct": {
                     "description": "VCT REQUIRED. String as defined in Appendix A.3.2. This claim contains the type values the Wallet requests authorization for at the Credential Issuer. It MUST only be present if the format claim is present. It MUST not be present otherwise.",
                     "type": "string"
+                }
+            }
+        },
+        "openid4vci.CredentialOfferResult": {
+            "type": "object",
+            "required": [
+                "credential_configuration_ids",
+                "credential_issuer"
+            ],
+            "properties": {
+                "credential_configuration_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "credential_issuer": {
+                    "type": "string"
+                },
+                "grants": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },
@@ -2143,24 +2099,31 @@
         "openid4vci.TokenRequest": {
             "type": "object",
             "required": [
-                "client_id",
-                "code",
-                "dpop",
-                "grant_type",
-                "redirect_uri"
+                "grant_type"
             ],
             "properties": {
+                "client_assertion": {
+                    "description": "ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt or client_secret_jwt authentication.",
+                    "type": "string",
+                    "maxLength": 8192
+                },
+                "client_assertion_type": {
+                    "description": "ClientAssertionType OPTIONAL. The type of client assertion. For private_key_jwt: \"urn:ietf:params:oauth:client-assertion-type:jwt-bearer\".",
+                    "type": "string",
+                    "maxLength": 256
+                },
                 "client_id": {
-                    "description": "ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.",
-                    "type": "string"
+                    "description": "ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).\nWhen using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's \"sub\" claim.\nOPTIONAL for pre-authorized_code grant.",
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "code": {
-                    "description": "Code REQUIRED.  The authorization code received from the authorization server.",
+                    "description": "Code REQUIRED for authorization_code grant. The authorization code received from the authorization server.",
                     "type": "string",
                     "maxLength": 128
                 },
                 "code_verifier": {
-                    "description": "CodeVerifier OPTIONAL (required for public clients)",
+                    "description": "CodeVerifier OPTIONAL (required for public clients using authorization_code grant)",
                     "type": "string"
                 },
                 "dpop": {
@@ -2168,14 +2131,24 @@
                     "type": "string"
                 },
                 "grant_type": {
-                    "description": "// Authorization Code Flow\nGrantType REQUIRED.  Value MUST be set to \"authorization_code\".",
+                    "description": "GrantType REQUIRED. \"authorization_code\" or \"urn:ietf:params:oauth:grant-type:pre-authorized_code\".",
                     "type": "string",
                     "enum": [
-                        "authorization_code"
+                        "authorization_code",
+                        "urn:ietf:params:oauth:grant-type:pre-authorized_code"
                     ]
                 },
+                "pre-authorized_code": {
+                    "description": "PreAuthorizedCode REQUIRED for pre-authorized_code grant. The code representing the authorization to obtain Credentials.",
+                    "type": "string",
+                    "maxLength": 128
+                },
                 "redirect_uri": {
-                    "description": "RedirectURI\tREQUIRED, if the \"redirect_uri\" parameter was included in the authorization request as described in Section 4.1.1, and their values MUST be identical.",
+                    "description": "RedirectURI REQUIRED for authorization_code grant, if the \"redirect_uri\" parameter was included in the authorization request.",
+                    "type": "string"
+                },
+                "tx_code": {
+                    "description": "TXCode OPTIONAL. String value containing a Transaction Code.",
                     "type": "string"
                 }
             }

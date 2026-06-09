@@ -95,6 +95,74 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 	assert.Equal(t, "VCTM Description", credConfig.CredentialMetadata.Display[0].Description)
 }
 
+func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {
+	tests := []struct {
+		name            string
+		rendering       *sdjwtvc.Rendering
+		wantBgColor     string
+		wantTextColor   string
+		wantLogoNil     bool
+	}{
+		{
+			name: "simple rendering without logo",
+			rendering: &sdjwtvc.Rendering{
+				Simple: &sdjwtvc.SimpleRendering{
+					BackgroundColor: "#1a365d",
+					TextColor:       "#ffffff",
+				},
+			},
+			wantBgColor:   "#1a365d",
+			wantTextColor: "#ffffff",
+			wantLogoNil:   true,
+		},
+		{
+			name: "nil simple with svg_templates only",
+			rendering: &sdjwtvc.Rendering{
+				SVGTemplates: []sdjwtvc.SVGTemplates{
+					{URI: "data:image/svg+xml;base64,abc"},
+				},
+			},
+			wantBgColor:   "",
+			wantTextColor: "",
+			wantLogoNil:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &IssuerMetadata{}
+			mockVCTM := &sdjwtvc.VCTM{
+				VCT:  "urn:demo:1",
+				Name: "Demo",
+				Display: []sdjwtvc.VCTMDisplay{
+					{
+						Locale:    "en-US",
+						Name:      "Demo",
+						Rendering: tt.rendering,
+					},
+				},
+			}
+			credMeta := map[string]*CredentialMetadata{
+				"demo": {VCTM: mockVCTM},
+			}
+			ctx := context.Background()
+			metadata, err := cfg.Generate(ctx, "https://issuer.example.com", credMeta)
+			require.NoError(t, err)
+			require.NotNil(t, metadata)
+
+			credConfig, exists := metadata.CredentialConfigurationsSupported["demo"]
+			require.True(t, exists)
+			require.NotNil(t, credConfig.CredentialMetadata)
+			require.Len(t, credConfig.CredentialMetadata.Display, 1)
+			assert.Equal(t, tt.wantBgColor, credConfig.CredentialMetadata.Display[0].BackgroundColor)
+			assert.Equal(t, tt.wantTextColor, credConfig.CredentialMetadata.Display[0].TextColor)
+			if tt.wantLogoNil {
+				assert.Nil(t, credConfig.CredentialMetadata.Display[0].Logo)
+			}
+		})
+	}
+}
+
 func TestIssuerMetadata_Generate_CustomCryptoBindingMethods(t *testing.T) {
 	cfg := &IssuerMetadata{
 		CryptographicBindingMethodsSupported: []string{"jwk", "did:key"},
