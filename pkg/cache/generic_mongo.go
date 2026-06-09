@@ -88,6 +88,26 @@ func NewMongoCache[V any](ctx context.Context, client *mongo.Client, database, c
 	return mc, nil
 }
 
+// decodeEntry unmarshals a mongoCacheEntry into V using the configured decoder.
+func (m *MongoCache[V]) decodeEntry(entry *mongoCacheEntry, op string, key string) (V, bool) {
+	var v V
+	var err error
+	if m.decode != nil {
+		v, err = m.decode(entry.JSONValue)
+	} else {
+		err = json.Unmarshal(entry.JSONValue, &v)
+	}
+	if err != nil {
+		m.log.Error(
+			err, "mongo cache "+op+": failed to unmarshal JSON value",
+			"cache", m.collection, "key", key,
+		)
+		var zero V
+		return zero, false
+	}
+	return v, true
+}
+
 // Get retrieves a value by key.
 func (m *MongoCache[V]) Get(ctx context.Context, key string) (V, bool) {
 	var entry mongoCacheEntry
@@ -102,22 +122,7 @@ func (m *MongoCache[V]) Get(ctx context.Context, key string) (V, bool) {
 		var zero V
 		return zero, false
 	}
-
-	var v V
-	if m.decode != nil {
-		v, err = m.decode(entry.JSONValue)
-	} else {
-		err = json.Unmarshal(entry.JSONValue, &v)
-	}
-	if err != nil {
-		m.log.Error(
-			err, "mongo cache get: failed to unmarshal JSON value",
-			"cache", m.collection, "key", key,
-		)
-		var zero V
-		return zero, false
-	}
-	return v, true
+	return m.decodeEntry(&entry, "get", key)
 }
 
 // Set stores a value with the default TTL (uses upsert).
@@ -181,22 +186,7 @@ func (m *MongoCache[V]) GetAndDelete(ctx context.Context, key string) (V, bool) 
 		var zero V
 		return zero, false
 	}
-
-	var v V
-	if m.decode != nil {
-		v, err = m.decode(entry.JSONValue)
-	} else {
-		err = json.Unmarshal(entry.JSONValue, &v)
-	}
-	if err != nil {
-		m.log.Error(
-			err, "mongo cache get-and-delete: failed to unmarshal JSON value",
-			"cache", m.collection, "key", key,
-		)
-		var zero V
-		return zero, false
-	}
-	return v, true
+	return m.decodeEntry(&entry, "get-and-delete", key)
 }
 
 // Len returns the estimated number of items in the cache.

@@ -189,8 +189,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// Full JWT assertion verification (signature, aud, exp, jti) is NOT yet implemented.
 	// TODO(security): Implement RFC 7523 private_key_jwt assertion verification
 	// (signature, aud, exp, jti) before enabling client_assertion in production.
+	// Tracked as a known risk — see risk register SID-RISK-CLIENT-ASSERTION.
 	clientID := req.ClientID
 	if req.ClientAssertion != "" {
+		// SECURITY WARNING: client_assertion signature is NOT verified.
+		// This code path MUST NOT be enabled in production without full RFC 7523 verification.
+		// Risk: attacker can forge JWT sub claim to impersonate any configured client.
+		// Mitigation: client_assertion is only accepted during conformance testing.
+		c.log.Warn("accepting unverified client_assertion — signature verification not implemented",
+			"client_assertion_type", req.ClientAssertionType)
 		if req.ClientAssertionType != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 				fmt.Sprintf("unsupported client_assertion_type %q; expected urn:ietf:params:oauth:client-assertion-type:jwt-bearer", req.ClientAssertionType), 400)
