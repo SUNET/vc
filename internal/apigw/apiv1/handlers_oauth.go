@@ -308,6 +308,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
 		}
 		reply.AuthorizationDetails = responseDetails
+
+		// Persist credential_identifiers back so the credential endpoint can
+		// match them when the client presents the access token.
+		authorizationContext.AuthorizationDetails = responseDetails
 	}
 
 	tokenDoc := &cache.Token{
@@ -315,8 +319,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
 	}
 
-	if err := c.cacheService.AuthContext.AddToken(ctx, authorizationContext.Code, tokenDoc); err != nil {
-		c.log.Error(err, "failed to add token")
+	// Set the token on the in-memory struct so that Update() persists it
+	// alongside any updated AuthorizationDetails (credential_identifiers).
+	// Using Update() instead of AddToken() avoids a race where AddToken
+	// writes the token and a subsequent Update() overwrites it with nil.
+	authorizationContext.Token = tokenDoc
+	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+		c.log.Error(err, "failed to persist token and authorization details")
 		return nil, err
 	}
 
