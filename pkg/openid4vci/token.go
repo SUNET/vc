@@ -27,10 +27,10 @@ type TokenRequest struct {
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`
 
 	// ClientAssertionType OPTIONAL. The type of client assertion. For private_key_jwt: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer".
-	ClientAssertionType string `form:"client_assertion_type" json:"client_assertion_type"`
+	ClientAssertionType string `form:"client_assertion_type" json:"client_assertion_type" validate:"omitempty,max=256,printascii"`
 
 	// ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt or client_secret_jwt authentication.
-	ClientAssertion string `form:"client_assertion" json:"client_assertion"`
+	ClientAssertion string `form:"client_assertion" json:"client_assertion" validate:"omitempty,max=8192,printascii"`
 
 	// Pre-Authorized Code Flow fields
 

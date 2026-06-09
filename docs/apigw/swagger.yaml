@@ -998,10 +998,22 @@ definitions:
     type: object
   openid4vci.TokenRequest:
     properties:
+      client_assertion:
+        description: ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt
+          or client_secret_jwt authentication.
+        maxLength: 8192
+        type: string
+      client_assertion_type:
+        description: 'ClientAssertionType OPTIONAL. The type of client assertion.
+          For private_key_jwt: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer".'
+        maxLength: 256
+        type: string
       client_id:
         description: |-
-          ClientID REQUIRED for authorization_code grant (RFC 6749 §4.1.3).
+          ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).
+          When using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's "sub" claim.
           OPTIONAL for pre-authorized_code grant.
+        maxLength: 128
         type: string
       code:
         description: Code REQUIRED for authorization_code grant. The authorization

@@ -44,7 +44,7 @@ type Service struct {
 	Document               Cache[map[string]*model.CompleteDocument]
 	DPopJTI                Cache[bool]
 
-	// VCINonce caches c_nonce values issued by the nonce endpoint.
+	// VCINonce caches c_nonce values issued by the nonce endpoint and the token response.
 	// Key is the nonce value; value is true. TTL matches c_nonce_expires_in.
 	VCINonce Cache[bool]
 

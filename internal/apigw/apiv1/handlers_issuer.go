@@ -321,8 +321,13 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	// Verify proof of possession per OID4VCI Appendix F.4
 	pubKey, err := jwkProtoToPublicKey(jwk)
 	if err != nil {
+		desc := "invalid key in proof"
+		// Detect kid-only references that lack embedded key material
+		if jwk.X == "" && jwk.Y == "" && jwk.N == "" && jwk.E == "" && jwk.Kid != "" {
+			desc = "proof contains only a key reference (kid) without embedded key material; key resolution is not supported"
+		}
 		c.log.Error(err, "failed to convert proof JWK to public key")
-		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "invalid key in proof"}
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: desc}
 	}
 
 	// Resolve the expected c_nonce: extract nonce from the proof and check if

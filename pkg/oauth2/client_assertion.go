@@ -20,7 +20,8 @@ import (
 // the extracted client_id against a trusted client registry before granting access.
 // The handler enforces this via Clients.Get() lookup immediately after extraction.
 func ExtractClientIDFromAssertion(assertion string) (string, error) {
-	parts := strings.Split(assertion, ".")
+	assertion = strings.TrimSpace(assertion)
+	parts := strings.SplitN(assertion, ".", 4)
 	if len(parts) != 3 {
 		return "", fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
 	}

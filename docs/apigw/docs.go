@@ -2110,9 +2110,20 @@ const docTemplate = `{
                 "grant_type"
             ],
             "properties": {
+                "client_assertion": {
+                    "description": "ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt or client_secret_jwt authentication.",
+                    "type": "string",
+                    "maxLength": 8192
+                },
+                "client_assertion_type": {
+                    "description": "ClientAssertionType OPTIONAL. The type of client assertion. For private_key_jwt: \"urn:ietf:params:oauth:client-assertion-type:jwt-bearer\".",
+                    "type": "string",
+                    "maxLength": 256
+                },
                 "client_id": {
-                    "description": "ClientID REQUIRED for authorization_code grant (RFC 6749 §4.1.3).\nOPTIONAL for pre-authorized_code grant.",
-                    "type": "string"
+                    "description": "ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).\nWhen using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's \"sub\" claim.\nOPTIONAL for pre-authorized_code grant.",
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "code": {
                     "description": "Code REQUIRED for authorization_code grant. The authorization code received from the authorization server.",

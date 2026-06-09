@@ -169,7 +169,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 //	@Failure		400		{object}	helpers.ErrorResponse		"Bad Request"
 //	@Router			/token [post]
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
-	c.log.Debug("OAuthToken", "req", req)
+	c.log.Debug("OAuthToken", "grant_type", req.GrantType)
 
 	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
@@ -200,8 +200,12 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 				"client_assertion is not supported (RFC 7523 verification not implemented)", 400)
 		}
-		c.log.Warn("accepting unverified client_assertion — signature verification not implemented",
+		c.log.Warn("accepting unverified client_assertion (allow_unverified_client_assertion is enabled) — signature verification not implemented",
 			"client_assertion_type", req.ClientAssertionType)
+		if req.ClientAssertionType == "" {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				"client_assertion_type is required when client_assertion is provided", 400)
+		}
 		if req.ClientAssertionType != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 				fmt.Sprintf("unsupported client_assertion_type %q; expected urn:ietf:params:oauth:client-assertion-type:jwt-bearer", req.ClientAssertionType), 400)
@@ -223,6 +227,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			"client_assertion_type provided without client_assertion", 400)
 	}
 
+	c.log.Debug("OAuthToken", "client_id", clientID, "grant_type", req.GrantType)
+
+	// authorization_code flow requires client identification via client_id or client_assertion (RFC 6749 §4.1.3).
+	if !isPreAuthFlow && clientID == "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"authorization_code grant requires client_id or client_assertion", 400)
+	}
+
 	var oauthClient *oauth2.Client
 	if clientID != "" {
 		var err error
@@ -232,13 +244,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
 				"Client authentication failed", 401, err)
 		}
-	}
-
-	// RFC 6749 §4.1.3: authorization_code grant MUST include client_id.
-	// Pre-authorized code flow may omit it when DPoP binding is used instead.
-	if !isPreAuthFlow && clientID == "" {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-			"client_id is required for authorization_code grant", 400)
 	}
 
 	// Public clients (wallets) MUST use PKCE per RFC 6749 Section 2.1 — but only for authorization_code grant
@@ -388,6 +393,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// alongside any updated AuthorizationDetails (credential_identifiers).
 	// Using Update() instead of AddToken() avoids a race where AddToken
 	// writes the token and a subsequent Update() overwrites it with nil.
+	// NOTE: Update() uses ReplaceOne which could clobber concurrent writes,
+	// but this is safe here: only one token exchange runs per authorization code
+	// (the code is consumed atomically above), so there are no concurrent writers.
 	authorizationContext.Token = tokenDoc
 	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
 		c.log.Error(err, "failed to persist token and authorization details")
