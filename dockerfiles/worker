@@ -31,15 +31,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     -X vc/pkg/model.BuildVersion=$(echo $BUILDTAG) \
     -w -s --extldflags '-static'" ./cmd/$SERVICE_NAME
 
-# Deploy
-FROM debian:13-slim
+# Deploy — Alpine for minimal CVE surface (binary is statically linked)
+FROM alpine:3.23
 
 ARG SERVICE_NAME
 
 WORKDIR /
 
-RUN apt-get update && apt-get upgrade -y && apt-get install -y curl procps iputils-ping less netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates curl
 
 COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
 COPY --from=builder /go/src/app/docs /docs
