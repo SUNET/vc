@@ -196,7 +196,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		// In production mode, reject unverified assertions to prevent client impersonation.
 		// Full RFC 7523 verification (signature, aud, exp, jti) must be implemented before
 		// removing this gate. Tracked in risk register SID-RISK-CLIENT-ASSERTION.
-		if c.cfg.Common.Production != nil && *c.cfg.Common.Production {
+		// NOTE: Common.Production defaults to true when unset (nil), so nil is treated as production.
+		if c.cfg.Common.Production == nil || *c.cfg.Common.Production {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 				"client_assertion is not supported in production mode (RFC 7523 verification not implemented)", 400)
 		}
