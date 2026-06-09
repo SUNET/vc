@@ -1287,7 +1287,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				}
 
 				// Map rendering information from VCTM to OpenID4VCI format
-				if vctmDisplay.Rendering != nil {
+				if vctmDisplay.Rendering != nil && vctmDisplay.Rendering.Simple != nil {
 					simple := vctmDisplay.Rendering.Simple
 					if simple.BackgroundColor != "" {
 						display.BackgroundColor = simple.BackgroundColor
@@ -1295,7 +1295,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					if simple.TextColor != "" {
 						display.TextColor = simple.TextColor
 					}
-					if simple.Logo.URI != "" {
+					if simple.Logo != nil && simple.Logo.URI != "" {
 						display.Logo = &openid4vci.MetadataLogo{
 							URI:     simple.Logo.URI,
 							AltText: simple.Logo.AltText,
