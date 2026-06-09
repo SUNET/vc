@@ -245,6 +245,12 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// Verify DPoP key binding: the proof's public key must match the one used
+	// at token issuance (RFC 9449 §4.3).
+	if err := verifyDPoPKeyBinding(dpop.Thumbprint, authContext.Token); err != nil {
+		return nil, err
+	}
+
 	// Validate credential request against authorization details per OID4VCI 1.0 Section 7.1
 	if err := req.Validate(ctx, authContext.AuthorizationDetails); err != nil {
 		c.log.Error(err, "credential request validation failed")
@@ -596,4 +602,23 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	}
 
 	return &metadata, nil
+}
+
+// verifyDPoPKeyBinding checks that the DPoP proof's JWK thumbprint matches the
+// thumbprint bound to the access token at issuance time (RFC 9449 §4.3).
+// When the token was issued without DPoP binding (e.g. pre-authorized_code flow
+// where the client did not present DPoP), the stored thumbprint is empty and the
+// check is skipped — the token was not bound to a specific key.
+func verifyDPoPKeyBinding(proofThumbprint string, token *cache.Token) error {
+	if token == nil || token.DPoPThumbprint == "" {
+		return nil
+	}
+	if proofThumbprint != token.DPoPThumbprint {
+		return oauth2.NewOAuthError(
+			oauth2.ErrCodeInvalidDPoPProof,
+			"DPoP key does not match the key bound to the access token",
+			400,
+		)
+	}
+	return nil
 }

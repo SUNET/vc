@@ -10,6 +10,7 @@ import (
 // ExtractClientIDFromAssertion extracts the "sub" claim from a client_assertion JWT
 // without verifying the signature. The sub claim contains the client_id per RFC 7523 §3.
 func ExtractClientIDFromAssertion(assertion string) (string, error) {
+	assertion = strings.TrimSpace(assertion)
 	parts := strings.SplitN(assertion, ".", 4)
 	if len(parts) != 3 {
 		return "", fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))

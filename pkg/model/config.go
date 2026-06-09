@@ -962,6 +962,11 @@ type OAuthServer struct {
 	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
 	// Clients holds the OAuth2 client configurations
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
+	// AllowUnverifiedClientAssertion enables accepting client_assertion (private_key_jwt)
+	// WITHOUT signature verification. This is INSECURE and only intended for conformance
+	// testing environments. When false (default), client_assertion is rejected.
+	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
+	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
 }
 
 // Cfg is the main configuration structure for this application

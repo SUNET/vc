@@ -169,7 +169,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 //	@Failure		400		{object}	helpers.ErrorResponse		"Bad Request"
 //	@Router			/token [post]
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
-	c.log.Debug("OAuthToken", "grant_type", req.GrantType, "client_id", req.ClientID)
+	c.log.Debug("OAuthToken", "grant_type", req.GrantType)
 
 	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
@@ -193,15 +193,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	clientID := req.ClientID
 	if req.ClientAssertion != "" {
 		// SECURITY: client_assertion signature is NOT verified — only the payload is decoded.
-		// In production mode, reject unverified assertions to prevent client impersonation.
+		// Reject unless explicitly opted in via allow_unverified_client_assertion config flag.
 		// Full RFC 7523 verification (signature, aud, exp, jti) must be implemented before
-		// removing this gate. Tracked in risk register SID-RISK-CLIENT-ASSERTION.
-		// NOTE: Common.Production defaults to true when unset (nil), so nil is treated as production.
-		if c.cfg.Common.Production == nil || *c.cfg.Common.Production {
+		// removing this flag. Tracked in risk register SID-RISK-CLIENT-ASSERTION.
+		if !c.cfg.APIGW.Delivery.OpenID4VCI.AllowUnverifiedClientAssertion {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-				"client_assertion is not supported in production mode (RFC 7523 verification not implemented)", 400)
+				"client_assertion is not supported (RFC 7523 verification not implemented)", 400)
 		}
-		c.log.Warn("accepting unverified client_assertion in non-production mode — signature verification not implemented",
+		c.log.Warn("accepting unverified client_assertion (allow_unverified_client_assertion is enabled) — signature verification not implemented",
 			"client_assertion_type", req.ClientAssertionType)
 		if req.ClientAssertionType == "" {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
@@ -228,6 +227,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			"client_assertion_type provided without client_assertion", 400)
 	}
 
+	c.log.Debug("OAuthToken", "client_id", clientID, "grant_type", req.GrantType)
+
 	// authorization_code flow requires client identification via client_id or client_assertion (RFC 6749 §4.1.3).
 	if !isPreAuthFlow && clientID == "" {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
@@ -252,6 +253,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	// Validate DPoP BEFORE consuming the authorization code (RFC 9449 §4).
 	// This ensures a stolen code cannot be consumed without a valid DPoP proof.
+	var dpopThumbprint string
 	if req.DPOP != "" {
 		dpop, dpopErr := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
 		if dpopErr != nil {
@@ -284,9 +286,18 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 
 		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
+		dpopThumbprint = dpop.Thumbprint
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
+	// NOTE: For pre-authorized_code flow, DPoP is optional per OID4VCI §4.1.1.
+	// When DPoP is absent, dpopThumbprint remains empty. The credential endpoint
+	// (verifyDPoPKeyBinding) skips key-binding verification when the stored
+	// thumbprint is empty — see handlers_issuer.go verifyDPoPKeyBinding().
+	// Security: the one-time pre-authorized code and (optionally) tx_code provide
+	// the primary security mechanism for this flow.
+	// TODO: Consider requiring DPoP for pre-auth flow to achieve sender-constrained
+	// tokens across all flows (RFC 9449).
 
 	// Verify client_id and redirect_uri BEFORE consuming the authorization code
 	// (RFC 6749 §4.1.3). A mismatched client_id must not burn the code, otherwise
@@ -368,8 +379,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	tokenDoc := &cache.Token{
-		AccessToken: accessToken,
-		ExpiresAt:   time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
+		AccessToken:    accessToken,
+		ExpiresAt:      time.Now().Add(time.Duration(reply.ExpiresIn) * time.Second).Unix(),
+		DPoPThumbprint: dpopThumbprint,
 	}
 
 	// Set the token on the in-memory struct so that Update() persists it

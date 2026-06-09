@@ -68,18 +68,16 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization for user", "request_uri", req.RequestURI)
-		return nil, fmt.Errorf("failed to get authorization context: %w", err)
+		return nil, err
 	}
 
 	c.log.Debug("UserLookup", "auth", authorizationContext)
 
-	redirectURL, err := url.Parse(authorizationContext.WalletURI)
+	redirectResult, err := buildAuthorizationRedirectURL(authorizationContext.WalletURI, authorizationContext.Code, authorizationContext.State, c.cfg.APIGW.PublicURL)
 	if err != nil {
-		c.log.Error(err, "failed to parse redirect URI", "redirect_uri", authorizationContext.WalletURI)
-		return nil, fmt.Errorf("failed to parse redirect URI %s: %w", authorizationContext.WalletURI, err)
+		c.log.Error(err, "failed to build redirect URL", "redirect_uri", authorizationContext.WalletURI)
+		return nil, err
 	}
-
-	redirectURL.RawQuery = url.Values{"code": {authorizationContext.Code}, "state": {authorizationContext.State}, "iss": {c.cfg.APIGW.PublicURL}}.Encode()
 
 	var svgTemplateClaims map[string]sdjwtvc.SVGValue
 	var presentationClaims map[string]any
@@ -159,7 +157,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	reply := &vcclient.UserLookupReply{
 		SVGTemplateClaims:  svgTemplateClaims,
 		PresentationClaims: presentationClaims,
-		RedirectURL:        redirectURL.String(),
+		RedirectURL:        redirectResult,
 	}
 
 	return reply, nil
@@ -209,4 +207,23 @@ func normalizeBSONValue(v any) any {
 	default:
 		return v
 	}
+}
+
+// buildAuthorizationRedirectURL constructs the authorization response redirect URL
+// by preserving existing query parameters and appending code, state, and iss.
+func buildAuthorizationRedirectURL(walletURI, code, state, issuer string) (string, error) {
+	redirectURL, err := url.Parse(walletURI)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse redirect URI %s: %w", walletURI, err)
+	}
+
+	q, parseErr := url.ParseQuery(redirectURL.RawQuery)
+	if parseErr != nil {
+		return "", fmt.Errorf("malformed query in redirect URI: %w", parseErr)
+	}
+	q.Set("code", code)
+	q.Set("state", state)
+	q.Set("iss", issuer)
+	redirectURL.RawQuery = q.Encode()
+	return redirectURL.String(), nil
 }
