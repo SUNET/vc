@@ -71,7 +71,7 @@ func TestAllow(t *testing.T) {
 			redirectURI: "https://example.com/callback/",
 			scope:       "ehic",
 			clients:     mockClients,
-			want:        want{client: nil, err: errors.New("redirect_url do not match")},
+			want:        want{client: nil, err: errors.New("redirect_uri does not match any allowed URI")},
 		},
 	}
 

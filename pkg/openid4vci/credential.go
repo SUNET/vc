@@ -238,9 +238,16 @@ type CredentialResponseEncryption struct {
 // ResolveCredentialFormat determines the credential format from the request.
 // According to OpenID4VCI spec, the format is derived from the credential_configuration_id
 // which maps to a credential configuration in the issuer metadata.
+//
+// Deprecated: Use ResolveCredentialFormatWithAuthDetails for credential_identifier support.
+func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuerMetadataParameters) (string, error) {
+	return req.ResolveCredentialFormatWithAuthDetails(metadata, nil)
+}
+
+// ResolveCredentialFormatWithAuthDetails determines the credential format from the request.
 // When credential_identifier is used, the authorizationDetails from the token response
 // are needed to map the identifier to a credential_configuration_id.
-func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
+func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
 	if metadata == nil {
 		return "", fmt.Errorf("metadata is required")
 	}
@@ -261,6 +268,11 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 	if req.CredentialIdentifier != "" {
 		for _, ad := range authorizationDetails {
 			if slices.Contains(ad.CredentialIdentifiers, req.CredentialIdentifier) {
+				// Format-based authorization_details: the entry carries Format directly
+				// instead of CredentialConfigurationID (OID4VCI §5.1.1).
+				if ad.CredentialConfigurationID == "" && ad.Format != "" {
+					return ad.Format, nil
+				}
 				if metadata.CredentialConfigurationsSupported != nil {
 					if config, ok := metadata.CredentialConfigurationsSupported[ad.CredentialConfigurationID]; ok {
 						return config.Format, nil

@@ -340,8 +340,9 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Determine which nonce to validate against.
-	// Atomically consume the nonce (GetAndDelete) to enforce one-time use and
-	// prevent TOCTOU races where parallel requests both pass the existence check.
+	// Non-destructive lookup (Get) finds the expected nonce without consuming it.
+	// The nonce is consumed (GetAndDelete) only after successful proof verification
+	// to enforce one-time use while avoiding false rejections on verification failure.
 	expectedNonce := ""
 	if c.cacheService.VCINonce != nil {
 		// First try the nonce from the proof JWT (non-destructive lookup)
@@ -387,7 +388,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := req.ResolveCredentialFormat(c.issuerMetadata, authContext.AuthorizationDetails)
+	format, err := req.ResolveCredentialFormatWithAuthDetails(c.issuerMetadata, authContext.AuthorizationDetails)
 	if err != nil {
 		c.log.Error(err, "failed to resolve credential format")
 		return nil, err

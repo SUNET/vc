@@ -295,6 +295,19 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		c.log.Debug("standalone OIDC: could not resolve data source", "error", credSourceErr)
 	}
 
+	// Fail fast if we have neither an identifier nor a resolved data source —
+	// a credential offer created without either cannot be redeemed.
+	if identifier == "" && credSourceErr != nil {
+		span.SetStatus(codes.Error, "cannot create credential offer without identifier or data source")
+		return nil, fmt.Errorf("failed to resolve data source for credential type %q: %w (identifier error: %v)", session.CredentialType, credSourceErr, resolveErr)
+	}
+
+	// Fail fast if the data source requires an identifier but none was resolved.
+	if identifier == "" && credSourceErr == nil && credSource.DataSource != model.DataSourceAssertion {
+		span.SetStatus(codes.Error, "data source requires identifier but none was resolved")
+		return nil, fmt.Errorf("data source %q for credential type %q requires an identifier", credSource.DataSource, session.CredentialType)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,

@@ -334,11 +334,30 @@ func TestResolveCredentialFormat(t *testing.T) {
 			wantFormat: "ldp_vc",
 			wantErr:    false,
 		},
+		{
+			name: "resolve by credential_identifier via format-based authorization_details",
+			request: &CredentialRequest{
+				CredentialIdentifier: "format_based_id",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{},
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                  "openid_credential",
+					Format:                "vc+sd-jwt",
+					VCT:                   "VerifiablePortableDocumentA1",
+					CredentialIdentifiers: []string{"format_based_id"},
+				},
+			},
+			wantFormat: "vc+sd-jwt",
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			format, err := tt.request.ResolveCredentialFormat(tt.metadata, tt.authorizationDetails)
+			format, err := tt.request.ResolveCredentialFormatWithAuthDetails(tt.metadata, tt.authorizationDetails)
 
 			if tt.wantErr {
 				assert.Error(t, err)

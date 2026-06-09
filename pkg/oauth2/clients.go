@@ -140,7 +140,7 @@ func (c *Clients) Allow(clientID, redirectURI, scope string) (*Client, error) {
 	}
 
 	if !client.RedirectURIs.Contains(redirectURI) {
-		return nil, errors.New("redirect_url do not match")
+		return nil, errors.New("redirect_uri does not match any allowed URI")
 	}
 
 	if !slices.Contains(client.Scopes, scope) {
