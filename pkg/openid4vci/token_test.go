@@ -17,7 +17,7 @@ func TestTokenRequestValidationCredentialOfferRequest(t *testing.T) {
 				Grants: map[string]any{
 					"ietf:params:oauth:grant-type:pre-authorized_code": GrantPreAuthorizedCode{
 						PreAuthorizedCode: "",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "numeric",
 							Length:      1234,
 							Description: "Pincode for the transaction",
