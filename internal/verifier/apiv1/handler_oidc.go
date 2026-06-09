@@ -961,7 +961,7 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 
 // UserInfoRequest represents a UserInfo endpoint request
 type UserInfoRequest struct {
-	Authorization string `json:"-" header:"Authorization" validate:"required,max=256,printascii"`
+	Authorization string `json:"-" header:"Authorization" validate:"required,max=8192,printascii"`
 	AccessToken   string `json:"-"` // Parsed from Authorization header
 }
 

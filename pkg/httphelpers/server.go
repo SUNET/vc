@@ -57,7 +57,7 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 			if oauthErr, ok := errors.AsType[*oauth2.OAuthError](err); ok {
 				c.Header("Cache-Control", "no-store")
 				c.Header("Pragma", "no-cache")
-				if oauthErr.HTTPStatus == http.StatusUnauthorized {
+				if oauthErr.HTTPStatus == http.StatusUnauthorized && c.Writer.Header().Get("WWW-Authenticate") == "" {
 					c.Header("WWW-Authenticate", "Bearer")
 				}
 				c.JSON(oauthErr.HTTPStatus, oauthErr)
