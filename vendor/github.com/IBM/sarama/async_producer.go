@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/eapache/go-resiliency/breaker"
-	"github.com/eapache/queue"
 	"github.com/rcrowley/go-metrics"
+
+	"github.com/IBM/sarama/internal/queue"
 )
 
 // ErrProducerRetryBufferOverflow is returned when the bridging retry buffer is full and OOM prevention needs to be applied.
@@ -81,8 +82,18 @@ type AsyncProducer interface {
 	// AddOffsetsToTxn add associated offsets to current transaction.
 	AddOffsetsToTxn(offsets map[string][]*PartitionOffsetMetadata, groupId string) error
 
+	// AddOffsetsToTxnWithGroupMetadata adds associated offsets to the current
+	// transaction, carrying the consumer group member metadata so the broker
+	// can fence stale members (KIP-447).
+	AddOffsetsToTxnWithGroupMetadata(offsets map[string][]*PartitionOffsetMetadata, groupMetadata *ConsumerGroupMetadata) error
+
 	// AddMessageToTxn add message offsets to current transaction.
 	AddMessageToTxn(msg *ConsumerMessage, groupId string, metadata *string) error
+
+	// AddMessageToTxnWithGroupMetadata adds the message offset to the current
+	// transaction, carrying the consumer group member metadata so the broker
+	// can fence stale members (KIP-447).
+	AddMessageToTxnWithGroupMetadata(msg *ConsumerMessage, groupMetadata *ConsumerGroupMetadata, metadata *string) error
 }
 
 type asyncProducer struct {
@@ -436,6 +447,10 @@ func (p *asyncProducer) IsTransactional() bool {
 }
 
 func (p *asyncProducer) AddMessageToTxn(msg *ConsumerMessage, groupId string, metadata *string) error {
+	return p.AddMessageToTxnWithGroupMetadata(msg, NewConsumerGroupMetadata(groupId), metadata)
+}
+
+func (p *asyncProducer) AddMessageToTxnWithGroupMetadata(msg *ConsumerMessage, groupMetadata *ConsumerGroupMetadata, metadata *string) error {
 	offsets := make(map[string][]*PartitionOffsetMetadata)
 	offsets[msg.Topic] = []*PartitionOffsetMetadata{
 		{
@@ -444,10 +459,14 @@ func (p *asyncProducer) AddMessageToTxn(msg *ConsumerMessage, groupId string, me
 			Metadata:  metadata,
 		},
 	}
-	return p.AddOffsetsToTxn(offsets, groupId)
+	return p.AddOffsetsToTxnWithGroupMetadata(offsets, groupMetadata)
 }
 
 func (p *asyncProducer) AddOffsetsToTxn(offsets map[string][]*PartitionOffsetMetadata, groupId string) error {
+	return p.AddOffsetsToTxnWithGroupMetadata(offsets, NewConsumerGroupMetadata(groupId))
+}
+
+func (p *asyncProducer) AddOffsetsToTxnWithGroupMetadata(offsets map[string][]*PartitionOffsetMetadata, groupMetadata *ConsumerGroupMetadata) error {
 	p.txLock.Lock()
 	defer p.txLock.Unlock()
 
@@ -457,7 +476,7 @@ func (p *asyncProducer) AddOffsetsToTxn(offsets map[string][]*PartitionOffsetMet
 	}
 
 	DebugLogger.Printf("producer/txnmgr [%s] add offsets to transaction\n", p.txnmgr.transactionalID)
-	return p.txnmgr.addOffsetsToTxn(offsets, groupId)
+	return p.txnmgr.addOffsetsToTxn(offsets, groupMetadata)
 }
 
 func (p *asyncProducer) TxnStatus() ProducerTxnStatusFlag {
@@ -1034,7 +1053,7 @@ func (p *asyncProducer) newBrokerProducer(broker *Broker) *brokerProducer {
 	// This is because the AsyncProduce callback inside the bridge is invoked from the broker
 	// responseReceiver goroutine and closing the broker requires such goroutine to be finished
 	go withRecover(func() {
-		buf := queue.New()
+		var buf queue.Queue[*brokerProducerResponse]
 		for {
 			if buf.Length() == 0 {
 				res, ok := <-pending
@@ -1047,7 +1066,7 @@ func (p *asyncProducer) newBrokerProducer(broker *Broker) *brokerProducer {
 			}
 			// Send the head pending response or buffer another one
 			// so that we never block the callback
-			headRes := buf.Peek().(*brokerProducerResponse)
+			headRes := buf.Peek()
 			select {
 			case res, ok := <-pending:
 				if !ok {
@@ -1570,7 +1589,7 @@ func (p *asyncProducer) retryHandler() {
 
 	var currentByteSize int64
 	var msg *ProducerMessage
-	buf := queue.New()
+	var buf queue.Queue[*ProducerMessage]
 
 	for {
 		if buf.Length() == 0 {
@@ -1578,8 +1597,8 @@ func (p *asyncProducer) retryHandler() {
 		} else {
 			select {
 			case msg = <-p.retries:
-			case p.input <- buf.Peek().(*ProducerMessage):
-				msgToRemove := buf.Remove().(*ProducerMessage)
+			case p.input <- buf.Peek():
+				msgToRemove := buf.Remove()
 				currentByteSize -= int64(msgToRemove.ByteSize(version))
 				continue
 			}
@@ -1596,7 +1615,7 @@ func (p *asyncProducer) retryHandler() {
 			continue
 		}
 
-		msgToHandle := buf.Peek().(*ProducerMessage)
+		msgToHandle := buf.Peek()
 		if msgToHandle.flags == 0 {
 			select {
 			case p.input <- msgToHandle:

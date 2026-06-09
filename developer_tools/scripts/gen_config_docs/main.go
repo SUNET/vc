@@ -26,12 +26,13 @@ import (
 // ---- Data types ----
 
 type TagInfo struct {
-	YAMLName   string
-	Omitempty  bool
-	Validate   string
-	Default    string
-	DocExample string
-	DocKey     string
+	YAMLName    string
+	Omitempty   bool
+	Validate    string
+	Default     string
+	DocExample  string
+	DocKey      string
+	DocValueKey string
 }
 
 type StructDef struct {
@@ -292,7 +293,8 @@ func parseStructTag(raw string) TagInfo {
 	def, _ := tag.Lookup("default")
 	docExample, _ := tag.Lookup("doc_example")
 	docKey, _ := tag.Lookup("doc_key")
-	return TagInfo{YAMLName: yamlName, Omitempty: omit, Validate: validate, Default: def, DocExample: docExample, DocKey: docKey}
+	docValueKey, _ := tag.Lookup("doc_value_key")
+	return TagInfo{YAMLName: yamlName, Omitempty: omit, Validate: validate, Default: def, DocExample: docExample, DocKey: docKey, DocValueKey: docValueKey}
 }
 
 // ---- Display helpers ----
@@ -902,13 +904,25 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 			expanded = true
 		}
 
-		// Map with struct value
+		// Map with struct value (or nested map alias value)
 		if !expanded {
 			if mt, ok := asMapType(f.TypeExpr); ok {
 				valName := resolveTypeName(mt.Value)
 				if valName != "" {
-					if valDef := reg.Lookup(valName); valDef != nil {
-						keyPH := mapKeyPlaceholder(f.Tag)
+					valDef := reg.Lookup(valName)
+					keyPH := mapKeyPlaceholder(f.Tag)
+					// If the map value is itself a named map alias, resolve one level deeper
+					if valDef == nil {
+						if innerDef := reg.LookupMapValueType(valName); innerDef != nil {
+							valDef = innerDef
+							innerKey := "<key>"
+							if f.Tag.DocValueKey != "" {
+								innerKey = "<" + f.Tag.DocValueKey + ">"
+							}
+							keyPH = keyPH + "." + innerKey
+						}
+					}
+					if valDef != nil {
 						if !documented[valDef.Name] {
 							documented[valDef.Name] = true
 							sub := buildStructSubSection(reg, valDef, childPath+"."+keyPH)

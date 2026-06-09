@@ -47,15 +47,15 @@ type GrantAuthorizationCode struct {
 // GrantPreAuthorizedCode authorization code grant
 type GrantPreAuthorizedCode struct {
 	PreAuthorizedCode   string `json:"pre-authorized_code" bson:"pre-authorized_code" validate:"required"`
-	TXCode              TXCode `json:"tx_code" bson:"tx_code,omitempty"`
-	AuthorizationServer string `json:"authorization_server,omitempty" bson:"authorization_server,omitempty"`
+	TXCode              *TXCode `json:"tx_code,omitempty" bson:"tx_code,omitempty"`
+	AuthorizationServer string  `json:"authorization_server,omitempty" bson:"authorization_server,omitempty"`
 }
 
 // TXCode Transaction Code
 type TXCode struct {
-	InputMode   string `json:"input_mode" bson:"input_mode" validate:"oneof=numeric text"`
-	Length      int    `json:"length"`
-	Description string `json:"description"`
+	InputMode   string `json:"input_mode,omitempty" bson:"input_mode,omitempty" validate:"omitempty,oneof=numeric text"`
+	Length      int    `json:"length,omitempty" bson:"length,omitempty"`
+	Description string `json:"description,omitempty" bson:"description,omitempty"`
 }
 
 type CredentialOfferURIRequest struct {

@@ -24,9 +24,11 @@ import (
 
 // mockApiv1 implements the Apiv1 interface for testing
 type mockApiv1 struct {
-	searchResult *apiv1.SearchPersonReply
-	searchErr    error
-	updateErr    error
+	searchResult      *apiv1.SearchPersonReply
+	searchErr         error
+	updateErr         error
+	statusListReply   *apiv1.TokenStatusListsResponse
+	statusListErr     error
 }
 
 func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
@@ -34,7 +36,10 @@ func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest)
 }
 
 func (m *mockApiv1) TokenStatusLists(ctx context.Context, req *apiv1.TokenStatusListsRequest) (*apiv1.TokenStatusListsResponse, error) {
-	return nil, nil
+	if m.statusListErr != nil {
+		return nil, m.statusListErr
+	}
+	return m.statusListReply, nil
 }
 
 func (m *mockApiv1) TokenStatusListAggregation(ctx context.Context) (*apiv1.TokenStatusListAggregationResponse, error) {
@@ -426,4 +431,27 @@ func TestStatusValues(t *testing.T) {
 			assert.Equal(t, tt.expected, statusText)
 		})
 	}
+}
+
+func TestEndpointStatusLists_RawToken(t *testing.T) {
+	s := setupTestService(t)
+	rawJWT := []byte("eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake-signature")
+
+	mock := s.apiv1.(*mockApiv1)
+	mock.statusListReply = &apiv1.TokenStatusListsResponse{
+		Token:       rawJWT,
+		ContentType: "application/statuslist+jwt",
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/statuslists/1", nil)
+	c.Params = gin.Params{{Key: "id", Value: "1"}}
+
+	_, err := s.endpointStatusLists(t.Context(), c)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/statuslist+jwt", w.Header().Get("Content-Type"))
+	assert.Equal(t, rawJWT, w.Body.Bytes(), "response body must be the raw token, not a JSON envelope")
 }
