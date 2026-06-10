@@ -262,6 +262,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				dpopErr.Error(), 400, dpopErr)
 		}
 
+		dpopThumbprint = dpop.Thumbprint
+
 		unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
 		if err != nil {
 			c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
@@ -286,7 +288,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 
 		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
-		dpopThumbprint = dpop.Thumbprint
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
@@ -319,9 +320,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	// Now consume the authorization code (after DPoP and client binding are validated)
-	authorizationContext, err := c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
-		Code: code,
-	})
+	var authorizationContext *cache.AuthorizationContext
+	var err error
+	if isPreAuthFlow && dpopThumbprint != "" {
+		// Pre-authorized codes with DPoP can be redeemed by multiple distinct
+		// clients (each identified by a unique DPoP key). This supports the
+		// OID4VCI happy-flow-multiple-clients scenario where one credential
+		// offer serves multiple wallets.
+		authorizationContext, err = c.cacheService.AuthContext.RedeemPreAuthorizedCode(ctx, code, dpopThumbprint)
+	} else {
+		// Without DPoP, pre-authorized codes are single-use (standard forfeit).
+		authorizationContext, err = c.cacheService.AuthContext.ForfeitAuthorizationCode(ctx, &cache.AuthorizationContext{
+			Code: code,
+		})
+	}
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
@@ -363,24 +375,30 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		CNonceExpiresIn: 3600,
 	}
 
-	// Store the c_nonce in the nonce cache so proof verification can find it
-	if c.cacheService.VCINonce != nil {
+	// Store the c_nonce in the nonce cache so proof verification can find it.
+	// For pre-auth flow, this is deferred to child session creation below
+	// (each client gets its own nonce).
+	if !isPreAuthFlow && c.cacheService.VCINonce != nil {
 		c.cacheService.VCINonce.Set(ctx, authorizationContext.Nonce, true)
 	}
 
 	// Per OID4VCI 1.0 Section 6.2: authorization_details is REQUIRED in the Token Response when
 	// authorization_details was used in the Authorization Request, with credential_identifiers added.
+	var responseDetails []openid4vci.AuthorizationDetailsParameter
 	if len(authorizationContext.AuthorizationDetails) > 0 {
-		responseDetails := make([]openid4vci.AuthorizationDetailsParameter, len(authorizationContext.AuthorizationDetails))
+		responseDetails = make([]openid4vci.AuthorizationDetailsParameter, len(authorizationContext.AuthorizationDetails))
 		for i, ad := range authorizationContext.AuthorizationDetails {
 			responseDetails[i] = ad
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
 		}
 		reply.AuthorizationDetails = responseDetails
-
-		// Persist credential_identifiers back so the credential endpoint can
-		// match them when the client presents the access token.
-		authorizationContext.AuthorizationDetails = responseDetails
+		// Do not mutate the shared parent authorizationContext here. The
+		// credential_identifiers are persisted per flow below: the pre-auth flow
+		// stores them on the independent child session, and the authorization_code
+		// flow assigns them before its Update() call. Mutating the parent here
+		// would persist implicitly in MemoryStore (shared pointer) but not in
+		// MongoStore (no Update), causing HA/non-HA inconsistency and unnecessary
+		// overwrites of the shared context across pre-auth clients.
 	}
 
 	tokenDoc := &cache.Token{
@@ -389,17 +407,56 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		DPoPThumbprint: dpopThumbprint,
 	}
 
-	// Set the token on the in-memory struct so that Update() persists it
-	// alongside any updated AuthorizationDetails (credential_identifiers).
-	// Using Update() instead of AddToken() avoids a race where AddToken
-	// writes the token and a subsequent Update() overwrites it with nil.
-	// NOTE: Update() uses ReplaceOne which could clobber concurrent writes,
-	// but this is safe here: only one token exchange runs per authorization code
-	// (the code is consumed atomically above), so there are no concurrent writers.
-	authorizationContext.Token = tokenDoc
-	if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
-		c.log.Error(err, "failed to persist token and authorization details")
-		return nil, err
+	if isPreAuthFlow {
+		// Pre-auth flow: create an independent child session for this client.
+		// The shared auth context remains intact so other clients can also redeem.
+		childSessionID, genErr := crypto.GenerateSecureToken(0, 32)
+		if genErr != nil {
+			return nil, fmt.Errorf("failed to generate child session ID: %w", genErr)
+		}
+		// Generate a fresh c_nonce for this child session so each client gets its
+		// own nonce. The parent's nonce is shared and would be consumed (GetAndDelete)
+		// by the first client to call /credential, breaking subsequent clients.
+		childNonce, nonceErr := crypto.GenerateSecureToken(0, 32)
+		if nonceErr != nil {
+			return nil, fmt.Errorf("failed to generate child c_nonce: %w", nonceErr)
+		}
+		if c.cacheService.VCINonce != nil {
+			c.cacheService.VCINonce.Set(ctx, childNonce, true)
+		}
+		reply.CNonce = childNonce
+
+		childSession := &cache.AuthorizationContext{
+			SessionID:            childSessionID,
+			SourceSessionID:      authorizationContext.SessionID,
+			Status:               cache.SessionStatusTokenIssued,
+			CreatedAt:            time.Now(),
+			ExpiresAt:            tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
+			Scopes:               authorizationContext.Scopes,
+			Nonce:                childNonce,
+			AuthorizationDetails: responseDetails, // Use details with credential_identifiers from token response
+			AuthProvider:         authorizationContext.AuthProvider,
+			Identifier:           authorizationContext.Identifier,
+			DataSource:           authorizationContext.DataSource,
+			Token:                tokenDoc,
+		}
+		if err := c.cacheService.AuthContext.Save(ctx, childSession); err != nil {
+			c.log.Error(err, "failed to save child session for pre-auth client")
+			return nil, err
+		}
+	} else {
+		// Set the token on the in-memory struct so that Update() persists it
+		// alongside any updated AuthorizationDetails (credential_identifiers).
+		// Using Update() instead of AddToken() avoids a race where AddToken
+		// writes the token and a subsequent Update() overwrites it with nil.
+		authorizationContext.Token = tokenDoc
+		if len(responseDetails) > 0 {
+			authorizationContext.AuthorizationDetails = responseDetails
+		}
+		if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
+			c.log.Error(err, "failed to persist token and authorization details")
+			return nil, err
+		}
 	}
 
 	c.log.Debug("OAuthToken complete")

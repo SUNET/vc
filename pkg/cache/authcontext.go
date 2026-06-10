@@ -217,6 +217,65 @@ func (c *MemoryStore) ForfeitAuthorizationCode(ctx context.Context, query *Autho
 	return doc, nil
 }
 
+// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by
+// multiple distinct clients (identified by DPoP thumbprint). Each client may
+// redeem the code only once. This implements OID4VCI §4.1.1 "single use" on a
+// per-client basis: the code is single-use for each wallet, but the same
+// credential offer can serve multiple wallets.
+func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+	if dpopThumbprint == "" {
+		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
+	}
+	if len(dpopThumbprint) > 128 {
+		return nil, errors.New("dpop thumbprint exceeds maximum length")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("code:%s", code)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	doc := item.Value()
+
+	// Reject redemption if the code was forfeited (e.g. non-DPoP redemption
+	// already consumed it via ForfeitAuthorizationCode).
+	if doc.Forfeited {
+		return nil, errors.New("pre-authorized code has been forfeited")
+	}
+
+	// Check if this specific client (DPoP thumbprint) already redeemed the code
+	for _, tp := range doc.RedeemedBy {
+		if tp == dpopThumbprint {
+			return nil, errors.New("pre-authorized code already redeemed by this client")
+		}
+	}
+
+	// Enforce maximum number of distinct redeemers to prevent unbounded growth
+	if len(doc.RedeemedBy) >= MaxPreAuthRedeemers {
+		return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")
+	}
+
+	// Record this client as having redeemed the code.
+	// Use PreviousOrDefaultTTL to preserve the original TTL — repeated redemptions
+	// by different clients must not extend the code's lifetime.
+	doc.RedeemedBy = append(doc.RedeemedBy, dpopThumbprint)
+	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+
+	return doc, nil
+}
+
 // Consent marks an authorization context as consented
 func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) error {
 	if query == nil || query.RequestURI == "" {
