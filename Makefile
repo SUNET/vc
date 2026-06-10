@@ -424,6 +424,7 @@ docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with P
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS=$(PKCS11_TAG) \
+		--build-arg CGO_ENABLED=1 \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
 		--file dockerfiles/worker .
 
