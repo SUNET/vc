@@ -392,10 +392,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			responseDetails[i].CredentialIdentifiers = []string{uuid.NewString()}
 		}
 		reply.AuthorizationDetails = responseDetails
-
-		// Persist credential_identifiers back so the credential endpoint can
-		// match them when the client presents the access token.
-		authorizationContext.AuthorizationDetails = responseDetails
+		// Do not mutate the shared parent authorizationContext here. The
+		// credential_identifiers are persisted per flow below: the pre-auth flow
+		// stores them on the independent child session, and the authorization_code
+		// flow assigns them before its Update() call. Mutating the parent here
+		// would persist implicitly in MemoryStore (shared pointer) but not in
+		// MongoStore (no Update), causing HA/non-HA inconsistency and unnecessary
+		// overwrites of the shared context across pre-auth clients.
 	}
 
 	tokenDoc := &cache.Token{
