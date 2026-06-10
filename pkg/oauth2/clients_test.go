@@ -87,6 +87,14 @@ func TestAllow(t *testing.T) {
 			},
 			want: want{client: nil, err: errors.New("no redirect_uri configured for client")},
 		},
+		{
+			name:        "nil client value in config",
+			clientID:    "client_nil",
+			redirectURI: "https://example.com/callback",
+			scope:       "ehic",
+			clients:     Clients{"client_nil": nil},
+			want:        want{client: nil, err: errors.New("client not found in config")},
+		},
 	}
 
 	for _, tt := range tts {
