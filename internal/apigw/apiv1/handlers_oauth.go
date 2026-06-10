@@ -34,7 +34,9 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	c.log.Debug("OAuthPar", "req", req)
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, err.Error(), 401, err)
+		c.log.Debug("OAuthPar client validation failed", "client_id", req.ClientID, "error", err)
+		// Use a generic description to avoid leaking internal configuration details.
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, err)
 	}
 
 	// Public clients MUST use PKCE (RFC 6749 Section 2.1)
