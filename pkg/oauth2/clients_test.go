@@ -18,6 +18,12 @@ var mockClients = Clients{
 		RedirectURIs: RedirectURIs{"https://example.com/callback"},
 		Scopes:       []string{"diploma", "elm"},
 	},
+	"client_no_redirect": {
+		Type:         "public",
+		RedirectURIs: RedirectURIs{},
+		Scopes:       []string{"ehic"},
+	},
+	"client_nil": nil,
 }
 
 func TestAllow(t *testing.T) {
@@ -78,21 +84,15 @@ func TestAllow(t *testing.T) {
 			clientID:    "client_no_redirect",
 			redirectURI: "https://example.com/callback",
 			scope:       "ehic",
-			clients: Clients{
-				"client_no_redirect": {
-					Type:         "public",
-					RedirectURIs: RedirectURIs{},
-					Scopes:       []string{"ehic"},
-				},
-			},
-			want: want{client: nil, err: errors.New("no redirect_uri configured for client")},
+			clients:     mockClients,
+			want:        want{client: nil, err: errors.New("no redirect_uri configured for client")},
 		},
 		{
 			name:        "nil client value in config",
 			clientID:    "client_nil",
 			redirectURI: "https://example.com/callback",
 			scope:       "ehic",
-			clients:     Clients{"client_nil": nil},
+			clients:     mockClients,
 			want:        want{client: nil, err: errors.New("client not found in config")},
 		},
 	}
