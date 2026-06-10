@@ -1,7 +1,6 @@
 package sdjwtvc
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -86,11 +85,22 @@ type sdParsedDisclosure struct {
 // It matches disclosure hashes against _sd arrays in nested objects and inserts the disclosed values.
 // After processing, all _sd and _sd_alg keys are removed from the claims tree.
 func resolveDisclosuresRecursive(claims map[string]any, disclosures []string) error {
+	// Determine hash algorithm from _sd_alg claim (default: sha-256 per spec)
+	sdAlg, _ := claims["_sd_alg"].(string)
+	if sdAlg == "" {
+		sdAlg = "sha-256"
+	}
+	hashMethod, err := getHashFromAlgorithm(sdAlg)
+	if err != nil {
+		return fmt.Errorf("unsupported _sd_alg %q: %w", sdAlg, err)
+	}
+
 	// Build a map of disclosure hash -> parsed disclosure for efficient lookup
 	disclosureMap := make(map[string]*sdParsedDisclosure, len(disclosures))
 	for _, disclosure := range disclosures {
-		hash := sha256.Sum256([]byte(disclosure))
-		hashB64 := base64.RawURLEncoding.EncodeToString(hash[:])
+		hashMethod.Reset()
+		hashMethod.Write([]byte(disclosure))
+		hashB64 := base64.RawURLEncoding.EncodeToString(hashMethod.Sum(nil))
 
 		disclosureBytes, err := base64.RawURLEncoding.DecodeString(disclosure)
 		if err != nil {

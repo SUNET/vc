@@ -252,7 +252,9 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 		}
 
 		result.Disclosures = append(result.Disclosures, *disclosure)
-		result.DisclosedClaims[disclosure.Claim] = disclosure.Value
+		if disclosure.Claim != "" {
+			result.DisclosedClaims[disclosure.Claim] = disclosure.Value
+		}
 
 		// Verify disclosure hash is in _sd array
 		if err := c.verifyDisclosureHash(claims, disclosure.Hash); err != nil {

@@ -186,7 +186,9 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 
 		// Only explicit claims should be included (birthdate), others excluded
 		require.Len(t, pidCred.Claims, 1)
-		assert.Equal(t, []*string{new("birthdate")}, pidCred.Claims[0].Path)
+		require.Len(t, pidCred.Claims[0].Path, 1)
+		require.NotNil(t, pidCred.Claims[0].Path[0])
+		assert.Equal(t, "birthdate", *pidCred.Claims[0].Path[0])
 	})
 
 	t.Run("multi scope preset scopes validations correctly", func(t *testing.T) {

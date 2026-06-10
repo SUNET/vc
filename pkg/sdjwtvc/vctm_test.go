@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClaimJSONPath(t *testing.T) {
@@ -103,19 +104,19 @@ func TestVCTMAttributes(t *testing.T) {
 
 	t.Run("english locale", func(t *testing.T) {
 		en := attrs["en"]
-		givenName := "given_name"
-		familyName := "family_name"
-		address := "address"
-		country := "country"
-		assert.Equal(t, []*string{&givenName}, en["First Name"])
-		assert.Equal(t, []*string{&familyName}, en["Last Name"])
-		assert.Equal(t, []*string{&address, &country}, en["Country"])
+		require.Len(t, en["First Name"], 1)
+		assert.Equal(t, "given_name", *en["First Name"][0])
+		require.Len(t, en["Last Name"], 1)
+		assert.Equal(t, "family_name", *en["Last Name"][0])
+		require.Len(t, en["Country"], 2)
+		assert.Equal(t, "address", *en["Country"][0])
+		assert.Equal(t, "country", *en["Country"][1])
 	})
 
 	t.Run("swedish locale", func(t *testing.T) {
 		sv := attrs["sv"]
-		familyName := "family_name"
-		assert.Equal(t, []*string{&familyName}, sv["Efternamn"])
+		require.Len(t, sv["Efternamn"], 1)
+		assert.Equal(t, "family_name", *sv["Efternamn"][0])
 	})
 
 	t.Run("claims without display are excluded", func(t *testing.T) {
@@ -148,8 +149,8 @@ func TestVCTMAttributesWithoutObjects(t *testing.T) {
 	attrs := v.AttributesWithoutObjects()
 
 	t.Run("single-path claims included", func(t *testing.T) {
-		givenName := "given_name"
-		assert.Equal(t, []*string{&givenName}, attrs["en"]["First Name"])
+		require.Len(t, attrs["en"]["First Name"], 1)
+		assert.Equal(t, "given_name", *attrs["en"]["First Name"][0])
 	})
 
 	t.Run("multi-path claims excluded", func(t *testing.T) {
