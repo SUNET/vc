@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -388,4 +389,63 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	t.Log("  1. Inject mock db collections (auth context, datastore)")
 	t.Log("  2. Inject mock gRPC client factory")
 	t.Log("  3. Then call client.VCICredential(ctx, req) and verify response")
+}
+
+// TestDPoPThumbprintBinding verifies the verifyDPoPKeyBinding helper:
+// - Matching thumbprints pass
+// - Mismatched thumbprints produce an invalid_dpop_proof error (400)
+// - Empty stored thumbprint (no DPoP binding) is skipped
+// - Nil token is skipped
+func TestDPoPThumbprintBinding(t *testing.T) {
+	tests := []struct {
+		name            string
+		token           *cache.Token
+		proofPrint      string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:       "matching thumbprints",
+			token:      &cache.Token{DPoPThumbprint: "abc123"},
+			proofPrint: "abc123",
+			wantErr:    false,
+		},
+		{
+			name:            "mismatched thumbprints",
+			token:           &cache.Token{DPoPThumbprint: "abc123"},
+			proofPrint:      "xyz789",
+			wantErr:         true,
+			wantErrContains: "DPoP key does not match",
+		},
+		{
+			name:       "empty stored thumbprint (no binding)",
+			token:      &cache.Token{DPoPThumbprint: ""},
+			proofPrint: "xyz789",
+			wantErr:    false,
+		},
+		{
+			name:       "nil token (no binding)",
+			token:      nil,
+			proofPrint: "xyz789",
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := verifyDPoPKeyBinding(tt.proofPrint, tt.token)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContains)
+				var oauthErr *oauth2.OAuthError
+				if assert.ErrorAs(t, err, &oauthErr) {
+					assert.Equal(t, 400, oauthErr.HTTPStatus)
+					assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

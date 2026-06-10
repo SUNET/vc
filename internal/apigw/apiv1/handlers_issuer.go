@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -184,6 +185,10 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 	if err != nil {
 		return nil, err
 	}
+	// Store the nonce in cache so the credential endpoint can validate proofs
+	if c.cacheService != nil && c.cacheService.VCINonce != nil {
+		c.cacheService.VCINonce.Set(ctx, nonce, true)
+	}
 	reply := &openid4vci.NonceResponse{
 		CNonce: nonce,
 	}
@@ -245,6 +250,12 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// Verify DPoP key binding: the proof's public key must match the one used
+	// at token issuance (RFC 9449 §4.3).
+	if err := verifyDPoPKeyBinding(dpop.Thumbprint, authContext.Token); err != nil {
+		return nil, err
+	}
+
 	// Validate credential request against authorization details per OID4VCI 1.0 Section 7.1
 	if err := req.Validate(ctx, authContext.AuthorizationDetails); err != nil {
 		c.log.Error(err, "credential request validation failed")
@@ -295,16 +306,85 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		jwk, err = req.Proof.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proof")
-			return nil, err
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 	} else if req.Proofs != nil {
 		jwk, err = req.Proofs.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proofs")
-			return nil, err
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 	} else {
-		return nil, errors.New("no proof found in credential request")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "proof or proofs parameter is required"}
+	}
+
+	// Verify proof of possession per OID4VCI Appendix F.4
+	pubKey, err := jwkProtoToPublicKey(jwk)
+	if err != nil {
+		desc := "invalid key in proof"
+		// Detect kid-only references that lack embedded key material
+		if jwk.X == "" && jwk.Y == "" && jwk.N == "" && jwk.E == "" && jwk.Kid != "" {
+			desc = "proof contains only a key reference (kid) without embedded key material; key resolution is not supported"
+		}
+		c.log.Error(err, "failed to convert proof JWK to public key")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: desc}
+	}
+
+	// Resolve the expected c_nonce: extract nonce from the proof and check if
+	// it was issued by us (via token response or nonce endpoint).
+	var proofNonce string
+	if req.Proof != nil && req.Proof.ProofType == "jwt" {
+		proofNonce = openid4vci.ProofJWTToken(req.Proof.JWT).ExtractNonce()
+	} else if req.Proofs != nil && len(req.Proofs.JWT) > 0 {
+		proofNonce = req.Proofs.JWT[0].ExtractNonce()
+	}
+
+	// Determine which nonce to validate against.
+	// Non-destructive lookup (Get) finds the expected nonce without consuming it.
+	// The nonce is consumed (GetAndDelete) only after successful proof verification
+	// to enforce one-time use while avoiding false rejections on verification failure.
+	expectedNonce := ""
+	if c.cacheService.VCINonce != nil {
+		// First try the nonce from the proof JWT (non-destructive lookup)
+		if proofNonce != "" {
+			if _, ok := c.cacheService.VCINonce.Get(ctx, proofNonce); ok {
+				expectedNonce = proofNonce
+			}
+		}
+		// Fall back to the nonce stored in the auth context
+		if expectedNonce == "" && authContext.Nonce != "" {
+			if _, ok := c.cacheService.VCINonce.Get(ctx, authContext.Nonce); ok {
+				expectedNonce = authContext.Nonce
+			}
+		}
+	}
+	if expectedNonce == "" {
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce is missing or already consumed"}
+	}
+
+	verifyOpts := &openid4vci.VerifyProofOptions{
+		CNonce:   expectedNonce,
+		Audience: c.issuerMetadata.CredentialIssuer,
+	}
+	if req.Proof != nil && req.Proof.ProofType == "jwt" {
+		proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
+		if verifyErr := proofJWT.Verify(pubKey, verifyOpts); verifyErr != nil {
+			c.log.Error(verifyErr, "proof JWT verification failed")
+			return nil, verifyErr
+		}
+	} else if req.Proofs != nil {
+		if err := req.VerifyProofWithOptions(pubKey, verifyOpts); err != nil {
+			c.log.Error(err, "proofs verification failed")
+			return nil, err
+		}
+	}
+
+	// Consume nonce atomically after successful proof verification.
+	// If another request consumed it concurrently, fail with invalid_nonce.
+	if c.cacheService.VCINonce != nil {
+		if _, ok := c.cacheService.VCINonce.GetAndDelete(ctx, expectedNonce); !ok {
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce was consumed concurrently"}
+		}
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
@@ -596,4 +676,50 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	}
 
 	return &metadata, nil
+}
+
+// jwkProtoToPublicKey converts a protobuf Jwk to a crypto.PublicKey for proof verification.
+func jwkProtoToPublicKey(jwk *apiv1_issuer.Jwk) (any, error) {
+	// Build a standard JWK map and use jose.ParseJWKToPublicKey
+	jwkMap := map[string]any{
+		"kty": jwk.Kty,
+	}
+	if jwk.Crv != "" {
+		jwkMap["crv"] = jwk.Crv
+	}
+	if jwk.X != "" {
+		jwkMap["x"] = jwk.X
+	}
+	if jwk.Y != "" {
+		jwkMap["y"] = jwk.Y
+	}
+	if jwk.N != "" {
+		jwkMap["n"] = jwk.N
+	}
+	if jwk.E != "" {
+		jwkMap["e"] = jwk.E
+	}
+	if jwk.Kid != "" {
+		jwkMap["kid"] = jwk.Kid
+	}
+	return jose.ParseJWKToPublicKey(jwkMap)
+}
+
+// verifyDPoPKeyBinding checks that the DPoP proof's JWK thumbprint matches the
+// thumbprint bound to the access token at issuance time (RFC 9449 §4.3).
+// When the token was issued without DPoP binding (e.g. pre-authorized_code flow
+// where the client did not present DPoP), the stored thumbprint is empty and the
+// check is skipped — the token was not bound to a specific key.
+func verifyDPoPKeyBinding(proofThumbprint string, token *cache.Token) error {
+	if token == nil || token.DPoPThumbprint == "" {
+		return nil
+	}
+	if proofThumbprint != token.DPoPThumbprint {
+		return oauth2.NewOAuthError(
+			oauth2.ErrCodeInvalidDPoPProof,
+			"DPoP key does not match the key bound to the access token",
+			400,
+		)
+	}
+	return nil
 }

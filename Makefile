@@ -525,7 +525,7 @@ swagger: swagger-registry swagger-verifier swagger-apigw swagger-issuer swagger-
 swagger-fmt: ## Format Swagger annotations
 	swag fmt
 
-SWAGGER_OPTS := --parseGoList=false --packageName docs
+SWAGGER_OPTS := --packageName docs
 
 # Catch-all for services without explicit swagger targets
 swagger-%:

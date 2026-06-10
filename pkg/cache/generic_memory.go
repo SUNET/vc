@@ -56,6 +56,16 @@ func (m *MemoryCache[V]) Delete(_ context.Context, key string) {
 	m.cache.Delete(key)
 }
 
+// GetAndDelete atomically retrieves and removes a value by key.
+func (m *MemoryCache[V]) GetAndDelete(_ context.Context, key string) (V, bool) {
+	item, ok := m.cache.GetAndDelete(key)
+	if !ok || item == nil {
+		var zero V
+		return zero, false
+	}
+	return item.Value(), true
+}
+
 // Len returns the number of items currently in the cache.
 func (m *MemoryCache[V]) Len() int {
 	return m.cache.Len()

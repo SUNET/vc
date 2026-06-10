@@ -44,6 +44,10 @@ type Service struct {
 	Document               Cache[map[string]*model.CompleteDocument]
 	DPopJTI                Cache[bool]
 
+	// VCINonce caches c_nonce values issued by the nonce endpoint and the token response.
+	// Key is the nonce value; value is true. TTL matches c_nonce_expires_in.
+	VCINonce Cache[bool]
+
 	// JWKS caches the raw JWKS JSON fetched from an identity provider's JWKS URL.
 	// The key is the JWKS URL; the value is the raw JSON response ([]byte).
 	JWKS Cache[[]byte]
@@ -97,6 +101,10 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.DPopJTI, err = pkgcache.NewGenericCache[bool](cs, ctx, "apigw_dpop_jti", 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("cache: dpop_jti: %w", err)
+	}
+
+	if s.VCINonce, err = pkgcache.NewGenericCache[bool](cs, ctx, "apigw_vci_nonce", 1*time.Hour); err != nil {
+		return nil, fmt.Errorf("cache: vci_nonce: %w", err)
 	}
 
 	if s.JWKS, err = pkgcache.NewGenericCache[[]byte](cs, ctx, "apigw_jwks", 15*time.Minute); err != nil {

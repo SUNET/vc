@@ -2,7 +2,11 @@ package tokenstatuslist
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"encoding/base64"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -30,6 +34,11 @@ type JWTSigningConfig struct {
 
 	// SigningMethod is the JWT signing method (e.g., jwt.SigningMethodES256) (REQUIRED)
 	SigningMethod jwt.SigningMethod
+
+	// PublicKey is the public key to embed as JWK in the JWT header (OPTIONAL).
+	// When set, the public key is serialized as a JWK and included in the "jwk" header parameter,
+	// allowing verifiers to validate the token signature without external key resolution.
+	PublicKey crypto.PublicKey
 }
 
 // JWTConfig holds JWT-specific configuration for generating a Status List Token.
@@ -100,6 +109,15 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 		token.Header["kid"] = sl.KeyID
 	}
 
+	// Embed the public key as JWK in the header if provided
+	if cfg.PublicKey != nil {
+		jwkMap, err := publicKeyToJWK(cfg.PublicKey)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert public key to JWK: %w", err)
+		}
+		token.Header["jwk"] = jwkMap
+	}
+
 	// Sign the token
 	signedToken, err := token.SignedString(cfg.SigningKey)
 	if err != nil {
@@ -158,4 +176,43 @@ func GetStatusFromJWT(claims *JWTClaims, index int) (uint8, error) {
 	}
 
 	return GetStatus(statuses, index)
+}
+
+// publicKeyToJWK converts a crypto.PublicKey to a JWK map for embedding in JWT headers.
+func publicKeyToJWK(pub crypto.PublicKey) (map[string]any, error) {
+	switch key := pub.(type) {
+	case *ecdsa.PublicKey:
+		var crv string
+		switch key.Curve.Params().Name {
+		case "P-256":
+			crv = "P-256"
+		case "P-384":
+			crv = "P-384"
+		case "P-521":
+			crv = "P-521"
+		default:
+			return nil, fmt.Errorf("unsupported EC curve: %v", key.Curve.Params().Name)
+		}
+		byteLen := (key.Curve.Params().BitSize + 7) / 8
+		xPadded := make([]byte, byteLen)
+		yPadded := make([]byte, byteLen)
+		xBytes := key.X.Bytes()
+		yBytes := key.Y.Bytes()
+		copy(xPadded[byteLen-len(xBytes):], xBytes)
+		copy(yPadded[byteLen-len(yBytes):], yBytes)
+		return map[string]any{
+			"kty": "EC",
+			"crv": crv,
+			"x":   base64.RawURLEncoding.EncodeToString(xPadded),
+			"y":   base64.RawURLEncoding.EncodeToString(yPadded),
+		}, nil
+	case *rsa.PublicKey:
+		return map[string]any{
+			"kty": "RSA",
+			"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported public key type: %T", pub)
+	}
 }

@@ -628,13 +628,12 @@ type OIDCOP struct {
 	// SubjectSalt is the salt for pairwise subject generation
 	SubjectSalt string `yaml:"subject_salt" validate:"required"`
 	// EnableUserInfo controls whether the verifier-OP advertises a userinfo_endpoint
-	// in its discovery metadata and issues access tokens that can be used there.
-	// When false (default), the verifier-OP omits userinfo_endpoint from discovery
-	// and does not return access/refresh tokens in the token response, since the
-	// verifier has no persistent user sessions. This prevents standard RP libraries
-	// from attempting to call a non-functional UserInfo endpoint.
-	// Set to true only when the OP supports real UserInfo sessions.
-	EnableUserInfo bool `yaml:"enable_userinfo" default:"false"`
+	// in its discovery metadata and issues JWT access tokens (RFC 9068 at+jwt).
+	// When true (default), the OP advertises userinfo_endpoint in discovery and
+	// returns an access token alongside the ID token. The userinfo endpoint
+	// is stateless: it validates the JWT signature and returns the embedded claims.
+	// When false, only ID tokens are returned — no access_token or userinfo endpoint.
+	EnableUserInfo bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
@@ -962,6 +961,11 @@ type OAuthServer struct {
 	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
 	// Clients holds the OAuth2 client configurations
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
+	// AllowUnverifiedClientAssertion enables accepting client_assertion (private_key_jwt)
+	// WITHOUT signature verification. This is INSECURE and only intended for conformance
+	// testing environments. When false (default), client_assertion is rejected.
+	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
+	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
 }
 
 // Cfg is the main configuration structure for this application

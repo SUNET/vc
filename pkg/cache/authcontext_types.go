@@ -26,8 +26,9 @@ const (
 
 // Token represents an access token with expiration
 type Token struct {
-	AccessToken string `json:"access_token" bson:"access_token" validate:"required,max=4096,printascii"`
-	ExpiresAt   int64  `json:"expires_at" bson:"expires_at" validate:"required"`
+	AccessToken    string `json:"access_token" bson:"access_token" validate:"required,max=4096,printascii"`
+	ExpiresAt      int64  `json:"expires_at" bson:"expires_at" validate:"required"`
+	DPoPThumbprint string `json:"dpop_thumbprint,omitempty" bson:"dpop_thumbprint,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // AuthorizationContext is the unified model for OIDC/OpenID4VP sessions
