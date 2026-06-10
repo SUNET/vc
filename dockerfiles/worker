@@ -20,9 +20,11 @@ RUN make proto-${SERVICE_NAME}
 
 # Build with caching for both build cache and module cache
 # GO_BUILD_TAGS is optional - if set, adds -tags flag
+# CGO is disabled for static builds; enabled when build tags (e.g. pkcs11) require it
+ARG CGO_ENABLED=0
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    GOOS=linux GOARCH=amd64 go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
+    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=amd64 go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
     "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
     -X vc/pkg/model.BuildVariableTimestamp=$(date +'%F:T%TZ') \
