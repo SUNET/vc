@@ -160,41 +160,30 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
-// JSON null path elements are deserialized as nil pointers.
+// JSON null path elements are deserialized as nil pointers; non-string/non-null
+// elements cause an unmarshal error (Go's json package rejects them for *string).
 func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Path []any `json:"path"`
+		Path []*string `json:"path"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	cq.Path = make([]*string, len(raw.Path))
-	for i, v := range raw.Path {
-		if v == nil {
-			cq.Path[i] = nil
-		} else if s, ok := v.(string); ok {
-			cq.Path[i] = &s
-		}
-	}
+	cq.Path = raw.Path
 	return nil
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for ClaimQuery.
-func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(interface{}) error) error {
+// YAML null path elements are deserialized as nil pointers; non-string/non-null
+// elements cause an unmarshal error.
+func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw struct {
-		Path []interface{} `yaml:"path"`
+		Path []*string `yaml:"path"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
-	cq.Path = make([]*string, len(raw.Path))
-	for i, v := range raw.Path {
-		if v == nil {
-			cq.Path[i] = nil
-		} else if s, ok := v.(string); ok {
-			cq.Path[i] = &s
-		}
-	}
+	cq.Path = raw.Path
 	return nil
 }
 

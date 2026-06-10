@@ -62,6 +62,10 @@ func (t Token) Parse() (*ParsedCredential, error) {
 		return nil, err
 	}
 
+	// Remove any unresolved array element markers {"...": hash} left behind
+	// when the wallet omits element disclosures from the token.
+	cleanUnresolvedMarkers(claims)
+
 	return &ParsedCredential{
 		Claims:      claims,
 		Disclosures: disclosures,
