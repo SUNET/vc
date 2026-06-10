@@ -73,6 +73,20 @@ func TestAllow(t *testing.T) {
 			clients:     mockClients,
 			want:        want{client: nil, err: errors.New("redirect_uri does not match any allowed URI")},
 		},
+		{
+			name:        "client with no redirect URIs configured",
+			clientID:    "client_no_redirect",
+			redirectURI: "https://example.com/callback",
+			scope:       "ehic",
+			clients: Clients{
+				"client_no_redirect": {
+					Type:         "public",
+					RedirectURIs: RedirectURIs{},
+					Scopes:       []string{"ehic"},
+				},
+			},
+			want: want{client: nil, err: errors.New("no redirect_uri configured for client")},
+		},
 	}
 
 	for _, tt := range tts {
@@ -136,9 +150,9 @@ func TestRedirectURIsContains(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "wildcard path traversal via dot-segments",
+			name:     "wildcard path traversal via percent-encoded dot-segments",
 			uris:     RedirectURIs{"https://example.com/test/a/*"},
-			check:    "https://example.com/test/a/../evil",
+			check:    "https://example.com/test/a/%2e%2e/evil",
 			expected: false,
 		},
 		{
