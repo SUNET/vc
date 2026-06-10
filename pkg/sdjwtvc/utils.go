@@ -94,29 +94,33 @@ func resolveDisclosuresRecursive(claims map[string]any, disclosures []string) er
 
 		disclosureBytes, err := base64.RawURLEncoding.DecodeString(disclosure)
 		if err != nil {
-			continue // Skip invalid disclosures
+			return fmt.Errorf("failed to base64url-decode disclosure: %w", err)
 		}
 
 		var disclosureArray []any
 		if err := json.Unmarshal(disclosureBytes, &disclosureArray); err != nil {
-			continue
+			return fmt.Errorf("failed to unmarshal disclosure JSON: %w", err)
 		}
 
-		if len(disclosureArray) == 2 {
+		switch len(disclosureArray) {
+		case 2:
 			// Array element disclosure: [salt, value]
 			disclosureMap[hashB64] = &sdParsedDisclosure{
 				claimValue: disclosureArray[1],
 				isArray:    true,
 			}
-		} else if len(disclosureArray) >= 3 {
+		case 3:
+			// Object property disclosure: [salt, claim_name, claim_value]
 			claimName, ok := disclosureArray[1].(string)
 			if !ok {
-				continue
+				return fmt.Errorf("invalid disclosure: claim name must be a string, got %T", disclosureArray[1])
 			}
 			disclosureMap[hashB64] = &sdParsedDisclosure{
 				claimName:  claimName,
 				claimValue: disclosureArray[2],
 			}
+		default:
+			return fmt.Errorf("invalid disclosure format: expected 2 or 3 elements, got %d", len(disclosureArray))
 		}
 	}
 

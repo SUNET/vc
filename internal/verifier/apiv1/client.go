@@ -104,7 +104,9 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	// Use full Attributes (including nested object/array claims) so the UI
 	// can render them as a tree and let users select individual sub-fields.
 	for _, credentialInfo := range cfg.Common.CredentialMetadata {
-		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
+		if vctm := credentialInfo.GetVCTM(); vctm != nil {
+			credentialInfo.Attributes = vctm.Attributes()
+		}
 	}
 
 	c.trustService = &openid4vp.TrustService{}

@@ -132,8 +132,8 @@ func TestToken_Parse(t *testing.T) {
 	}{
 		{ // #nosec G101
 			name: "valid SD-JWT with disclosures",
-			// This is a sample token - in real usage, this would be a valid SD-JWT
-			token:             "eyJhbGciOiJFUzI1NiIsInR5cCI6ImRjK3NkLWp3dCJ9.eyJfc2QiOlsiaGFzaDEiLCJoYXNoMiJdLCJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwidmN0IjoidXJuOmV4YW1wbGU6cGlkIn0.c2lnbmF0dXJl~disclosure1~disclosure2~",
+			// Valid SD-JWT with two properly-encoded disclosures and matching _sd hashes
+			token:             "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRjK3NkLWp3dCJ9.eyJfc2QiOiBbInpzMlZlaktUdWJRNHdlVHVBcUVmLUlmV1hGaHRTMXA0aFlIdE1VU183YmMiLCAiMEZYYjh2azRDSXJVN3EyaFpsUFhLdnlRaUs5N00ycUw4V3NieTEyMFl2VSJdLCAiaXNzIjogImh0dHBzOi8vZXhhbXBsZS5jb20iLCAidmN0IjogInVybjpleGFtcGxlOnBpZCJ9.c2lnbmF0dXJl~WyJzYWx0MSIsICJnaXZlbl9uYW1lIiwgIkpvaG4iXQ~WyJzYWx0MiIsICJmYW1pbHlfbmFtZSIsICJEb2UiXQ~",
 			wantErr:           false,
 			expectedDiscCount: 2,
 		},
