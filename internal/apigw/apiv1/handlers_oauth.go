@@ -288,7 +288,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 
 		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
-		dpopThumbprint = dpop.Thumbprint
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
@@ -376,8 +375,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		CNonceExpiresIn: 3600,
 	}
 
-	// Store the c_nonce in the nonce cache so proof verification can find it
-	if c.cacheService.VCINonce != nil {
+	// Store the c_nonce in the nonce cache so proof verification can find it.
+	// For pre-auth flow, this is deferred to child session creation below
+	// (each client gets its own nonce).
+	if !isPreAuthFlow && c.cacheService.VCINonce != nil {
 		c.cacheService.VCINonce.Set(ctx, authorizationContext.Nonce, true)
 	}
 

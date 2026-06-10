@@ -314,6 +314,9 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 	if dpopThumbprint == "" {
 		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
 	}
+	if len(dpopThumbprint) > 128 {
+		return nil, errors.New("dpop thumbprint exceeds maximum length")
+	}
 
 	filter := bson.M{
 		"code":        code,

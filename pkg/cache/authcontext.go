@@ -229,6 +229,9 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 	if dpopThumbprint == "" {
 		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
 	}
+	if len(dpopThumbprint) > 128 {
+		return nil, errors.New("dpop thumbprint exceeds maximum length")
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
