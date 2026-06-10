@@ -527,7 +527,17 @@ func reconstructArrayNode(arr []any, disclosureMap map[string]*Disclosure) []any
 				if hashVal, ok := v["..."]; ok {
 					if hashStr, ok := hashVal.(string); ok {
 						if d, found := disclosureMap[hashStr]; found {
-							result = append(result, d.Value)
+							// Recurse into the disclosed value in case it
+							// contains nested _sd or array markers.
+							switch dv := d.Value.(type) {
+							case map[string]any:
+								reconstructNode(dv, disclosureMap)
+								result = append(result, dv)
+							case []any:
+								result = append(result, reconstructArrayNode(dv, disclosureMap))
+							default:
+								result = append(result, d.Value)
+							}
 							continue
 						}
 					}

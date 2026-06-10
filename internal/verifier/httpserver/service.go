@@ -116,11 +116,6 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			b, _ := json.MarshalIndent(cleaned, "", "  ")
 			return string(b)
 		},
-		"toJSONSafe": func(v any) string {
-			// Sanitize booleans to strings to work around andypf-json-viewer v2.x bug
-			b, _ := json.MarshalIndent(sanitizeForJSONViewer(v), "", "  ")
-			return string(b)
-		},
 		"json": func(v any) (any, error) {
 			jsonBytes, err := json.Marshal(v)
 			if err != nil {

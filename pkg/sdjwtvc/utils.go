@@ -177,7 +177,17 @@ func resolveArrayNode(arr []any, disclosureMap map[string]*sdParsedDisclosure) [
 				if hashVal, ok := v["..."]; ok {
 					if hashStr, ok := hashVal.(string); ok {
 						if pd, found := disclosureMap[hashStr]; found && pd.isArray {
-							result = append(result, pd.claimValue)
+							// Recurse into the disclosed value in case it
+							// contains nested _sd or array markers.
+							switch dv := pd.claimValue.(type) {
+							case map[string]any:
+								resolveNode(dv, disclosureMap)
+								result = append(result, dv)
+							case []any:
+								result = append(result, resolveArrayNode(dv, disclosureMap))
+							default:
+								result = append(result, pd.claimValue)
+							}
 							continue
 						}
 					}
