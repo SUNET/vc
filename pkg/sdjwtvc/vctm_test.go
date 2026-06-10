@@ -103,14 +103,19 @@ func TestVCTMAttributes(t *testing.T) {
 
 	t.Run("english locale", func(t *testing.T) {
 		en := attrs["en"]
-		assert.Equal(t, []string{"given_name"}, en["First Name"])
-		assert.Equal(t, []string{"family_name"}, en["Last Name"])
-		assert.Equal(t, []string{"address", "country"}, en["Country"])
+		givenName := "given_name"
+		familyName := "family_name"
+		address := "address"
+		country := "country"
+		assert.Equal(t, []*string{&givenName}, en["First Name"])
+		assert.Equal(t, []*string{&familyName}, en["Last Name"])
+		assert.Equal(t, []*string{&address, &country}, en["Country"])
 	})
 
 	t.Run("swedish locale", func(t *testing.T) {
 		sv := attrs["sv"]
-		assert.Equal(t, []string{"family_name"}, sv["Efternamn"])
+		familyName := "family_name"
+		assert.Equal(t, []*string{&familyName}, sv["Efternamn"])
 	})
 
 	t.Run("claims without display are excluded", func(t *testing.T) {
@@ -143,7 +148,8 @@ func TestVCTMAttributesWithoutObjects(t *testing.T) {
 	attrs := v.AttributesWithoutObjects()
 
 	t.Run("single-path claims included", func(t *testing.T) {
-		assert.Equal(t, []string{"given_name"}, attrs["en"]["First Name"])
+		givenName := "given_name"
+		assert.Equal(t, []*string{&givenName}, attrs["en"]["First Name"])
 	})
 
 	t.Run("multi-path claims excluded", func(t *testing.T) {

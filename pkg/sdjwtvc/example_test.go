@@ -123,11 +123,20 @@ func ExampleVCTM_Attributes() {
 	}
 
 	attrs := vctm.Attributes()
-	fmt.Println("en-US Given Name path:", attrs["en-US"]["Given Name"])
-	fmt.Println("sv-SE Förnamn path:", attrs["sv-SE"]["Förnamn"])
+	// Print dereferenced path values
+	for _, p := range attrs["en-US"]["Given Name"] {
+		if p != nil {
+			fmt.Printf("en-US Given Name path: %s\n", *p)
+		}
+	}
+	for _, p := range attrs["sv-SE"]["Förnamn"] {
+		if p != nil {
+			fmt.Printf("sv-SE Förnamn path: %s\n", *p)
+		}
+	}
 	// Output:
-	// en-US Given Name path: [given_name]
-	// sv-SE Förnamn path: [given_name]
+	// en-US Given Name path: given_name
+	// sv-SE Förnamn path: given_name
 }
 
 func ExampleVCTM_SRIIntegrity() {

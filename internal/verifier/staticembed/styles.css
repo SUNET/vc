@@ -53,3 +53,35 @@
         padding: 1rem 0 0 0;
     }
 }
+
+.vc-claim-group {
+    margin: 0.25rem 0;
+}
+
+.vc-claim-group-summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.1rem 0;
+}
+
+.vc-claim-group-summary::-webkit-details-marker {
+    display: none;
+}
+
+.vc-claim-group-summary::before {
+    content: "▶ ";
+    font-size: 0.7em;
+    display: inline-block;
+    transition: transform 0.15s;
+}
+
+.vc-claim-group[open] > .vc-claim-group-summary::before {
+    transform: rotate(90deg);
+}
+
+.vc-claim-children {
+    padding-left: 1.25rem;
+    border-left: 2px solid var(--bulma-border, #ddd);
+    margin-left: 0.5rem;
+    margin-top: 0.15rem;
+}

@@ -101,10 +101,10 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	// Initialize claims extractor
 	c.claimsExtractor = openid4vp.NewClaimsExtractor()
 
-	// Override Attributes with filtered variant (excludes nested object claims)
-	// since verifier only exposes leaf-level attributes to the UI.
+	// Use full Attributes (including nested object/array claims) so the UI
+	// can render them as a tree and let users select individual sub-fields.
 	for _, credentialInfo := range cfg.Common.CredentialMetadata {
-		credentialInfo.Attributes = credentialInfo.VCTM.AttributesWithoutObjects()
+		credentialInfo.Attributes = credentialInfo.VCTM.Attributes()
 	}
 
 	c.trustService = &openid4vp.TrustService{}

@@ -308,10 +308,10 @@ func renderNode(sb *strings.Builder, name string, value any, depth int) {
 	switch v := value.(type) {
 	case map[string]any:
 		// Group header row
-		sb.WriteString(fmt.Sprintf(
+		fmt.Fprintf(sb,
 			`<tr><td style="padding-left:%dpx;font-weight:600;">%s</td><td></td></tr>`,
 			indent, template.HTMLEscapeString(name),
-		))
+		)
 		// Recurse into children
 		keys := sortedKeys(v)
 		for _, childKey := range keys {
@@ -323,41 +323,42 @@ func renderNode(sb *strings.Builder, name string, value any, depth int) {
 	case []any:
 		// Render array elements, handling unresolved SD-JWT markers {"...": hash}
 		parts := make([]string, 0, len(v))
-		hasUnresolved := false
 		for _, elem := range v {
 			if m, ok := elem.(map[string]any); ok {
 				if _, isMarker := m["..."]; isMarker && len(m) == 1 {
-					// Unresolved array element disclosure — wallet didn't include element disclosure
-					hasUnresolved = true
+					// Unresolved array element disclosure — wallet didn't include element disclosure.
+					// Skip the marker silently; we'll show whatever was actually disclosed.
 					continue
 				}
 			}
 			parts = append(parts, fmt.Sprintf("%v", elem))
 		}
 		if len(parts) > 0 {
-			sb.WriteString(fmt.Sprintf(
+			fmt.Fprintf(sb,
 				`<tr><td style="padding-left:%dpx;">%s</td><td><code>%s</code></td></tr>`,
 				indent, template.HTMLEscapeString(name), template.HTMLEscapeString(strings.Join(parts, ", ")),
-			))
-		} else if hasUnresolved {
-			sb.WriteString(fmt.Sprintf(
-				`<tr><td style="padding-left:%dpx;">%s</td><td><em>(elements not disclosed)</em></td></tr>`,
+			)
+		} else {
+			// Array was disclosed but contained only unresolved element markers.
+			// Show the claim name to confirm it was disclosed.
+			fmt.Fprintf(sb,
+				`<tr><td style="padding-left:%dpx;">%s</td><td><code>[]</code> <em>(element details not disclosed by wallet)</em></td></tr>`,
 				indent, template.HTMLEscapeString(name),
-			))
+			)
 		}
 	default:
 		valStr := fmt.Sprintf("%v", value)
 		// Render picture as image
 		if name == "picture" {
-			sb.WriteString(fmt.Sprintf(
+			fmt.Fprintf(sb,
 				`<tr><td style="padding-left:%dpx;">%s</td><td><img src="data:image/png;base64,%s" alt="Picture" style="max-width:120px;max-height:160px;border-radius:4px;"></td></tr>`,
 				indent, template.HTMLEscapeString(name), template.HTMLEscapeString(valStr),
-			))
+			)
 		} else {
-			sb.WriteString(fmt.Sprintf(
+			fmt.Fprintf(sb,
 				`<tr><td style="padding-left:%dpx;">%s</td><td><code>%s</code></td></tr>`,
 				indent, template.HTMLEscapeString(name), template.HTMLEscapeString(valStr),
-			))
+			)
 		}
 	}
 }

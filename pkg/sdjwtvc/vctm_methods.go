@@ -35,23 +35,21 @@ func (v *VCTM) SRIIntegrity(rawBytes []byte) (string, error) {
 	return "sha256-" + encoded, nil
 }
 
-// Attributes parse vctm claims and return a map of labels and their paths for each locale
-func (v *VCTM) Attributes() map[string]map[string][]string {
-	reply := map[string]map[string][]string{}
+// Attributes parse vctm claims and return a map of labels and their paths for each locale.
+// Path elements may be nil, representing JSON null (array element access per DCQL Section 7.1).
+func (v *VCTM) Attributes() map[string]map[string][]*string {
+	reply := map[string]map[string][]*string{}
 
 	for _, c := range v.Claims {
 		for _, d := range c.Display {
 			if _, ok := reply[d.Locale]; !ok {
-				reply[d.Locale] = map[string][]string{}
+				reply[d.Locale] = map[string][]*string{}
 			}
 
 			label := d.Label
-
-			for _, p := range c.Path {
-				if p != nil {
-					reply[d.Locale][label] = append(reply[d.Locale][label], *p)
-				}
-			}
+			path := make([]*string, len(c.Path))
+			copy(path, c.Path)
+			reply[d.Locale][label] = path
 		}
 	}
 
@@ -60,8 +58,8 @@ func (v *VCTM) Attributes() map[string]map[string][]string {
 
 // AttributesWithoutObjects parse vctm claims and return a map of labels and their paths for each locale,
 // excluding claims that represent objects (claims with nested paths)
-func (v *VCTM) AttributesWithoutObjects() map[string]map[string][]string {
-	reply := map[string]map[string][]string{}
+func (v *VCTM) AttributesWithoutObjects() map[string]map[string][]*string {
+	reply := map[string]map[string][]*string{}
 
 	for _, c := range v.Claims {
 		// Skip claims that are objects (have more than one path element)
@@ -76,16 +74,13 @@ func (v *VCTM) AttributesWithoutObjects() map[string]map[string][]string {
 
 		for _, d := range c.Display {
 			if _, ok := reply[d.Locale]; !ok {
-				reply[d.Locale] = map[string][]string{}
+				reply[d.Locale] = map[string][]*string{}
 			}
 
 			label := d.Label
-
-			for _, p := range c.Path {
-				if p != nil {
-					reply[d.Locale][label] = append(reply[d.Locale][label], *p)
-				}
-			}
+			path := make([]*string, len(c.Path))
+			copy(path, c.Path)
+			reply[d.Locale][label] = path
 		}
 	}
 

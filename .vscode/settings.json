@@ -18,6 +18,7 @@
         "cryptosuite",
         "datastoreclient",
         "DCQL",
+        "DCQLJSON",
         "deadcode",
         "deployers",
         "deviceauth",

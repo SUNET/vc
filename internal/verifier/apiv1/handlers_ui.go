@@ -19,8 +19,8 @@ import (
 
 // UICredentialInfo is a sanitized view of a credential for the UI.
 type UICredentialInfo struct {
-	VCT        string                         `json:"vct"`
-	Attributes map[string]map[string][]string `json:"attributes"`
+	VCT        string                          `json:"vct"`
+	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
 // UIPreset is a verification preset served to the UI.
@@ -45,7 +45,7 @@ type UIPresetMeta struct {
 
 // UIPresetClaim is a claim path within a preset credential.
 type UIPresetClaim struct {
-	Path []string `json:"path"`
+	Path []*string `json:"path"`
 }
 
 type UIMetadataReply struct {
@@ -129,33 +129,33 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// Resolve claims: use explicit claims, or fall back to VCTM claims
 				if len(claims) == 0 && meta != nil {
 					if vctm := meta.GetVCTM(); vctm != nil {
-						// First pass: collect all valid leaf paths
-						var allPaths [][]string
+						// First pass: collect all valid paths (including array-element paths with null)
+						var allPaths [][]*string
 						for _, vc := range vctm.Claims {
-							path := make([]string, 0, len(vc.Path))
-							isLeaf := true
-							for _, seg := range vc.Path {
-								if seg == nil {
-									isLeaf = false
-									break
-								}
-								path = append(path, *seg)
+							if len(vc.Path) == 0 {
+								continue
 							}
-							if isLeaf && len(path) > 0 && !jwtRegisteredClaim(path[0]) {
-								allPaths = append(allPaths, path)
+							// Skip claims whose first element is a JWT registered claim
+							if vc.Path[0] != nil && jwtRegisteredClaim(*vc.Path[0]) {
+								continue
 							}
+							path := make([]*string, len(vc.Path))
+							copy(path, vc.Path)
+							allPaths = append(allPaths, path)
 						}
-						// Build set of parent prefixes: for each path, mark all its proper prefixes
+						// Build set of parent prefixes: for each path, mark all its proper prefixes.
+						// Array-element paths (e.g. ["nationalities", nil]) supersede their parent
+						// (["nationalities"]), so mark the parent as a prefix to exclude.
 						parentSet := make(map[string]bool)
 						for _, p := range allPaths {
 							for i := 1; i < len(p); i++ {
-								parentSet[claimPathKey(p[:i])] = true
+								parentSet[claimPtrPathKey(p[:i])] = true
 							}
 						}
 						// Second pass: only include non-parent claims
 						for _, path := range allPaths {
-							if !parentSet[claimPathKey(path)] {
-								claims = append(claims, model.VerificationPresetClaim{Path: path})
+							if !parentSet[claimPtrPathKey(path)] {
+								claims = append(claims, model.VerificationPresetClaim{Path: ptrPathToStringPath(path)})
 							}
 						}
 					}
@@ -163,7 +163,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 
 				for _, claim := range claims {
 					if !excludeSet[claimPathKey(claim.Path)] {
-						uiCred.Claims = append(uiCred.Claims, UIPresetClaim{Path: claim.Path})
+						uiCred.Claims = append(uiCred.Claims, UIPresetClaim{Path: stringPathToPtrPath(claim.Path)})
 					}
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
@@ -321,13 +321,44 @@ func jwtRegisteredClaim(name string) bool {
 	return jwtRegisteredClaims[name]
 }
 
+// stringPathToPtrPath converts a []string path to a []*string path.
+// The sentinel string "null" is converted back to nil (representing JSON null
+// for DCQL array element access).
+func stringPathToPtrPath(path []string) []*string {
+	out := make([]*string, len(path))
+	for i := range path {
+		if path[i] == "null" {
+			out[i] = nil
+		} else {
+			out[i] = &path[i]
+		}
+	}
+	return out
+}
+
+// ptrPathToStringPath converts a []*string path to a []string path.
+// Nil elements are represented as the literal string "null" for use in
+// config-level structures (e.g. exclusion sets) that don't support nil.
+func ptrPathToStringPath(path []*string) []string {
+	out := make([]string, len(path))
+	for i, p := range path {
+		if p == nil {
+			out[i] = "null"
+		} else {
+			out[i] = *p
+		}
+	}
+	return out
+}
+
 // augmentDCQLFromVCTM enriches the DCQL query using VCTM metadata.
-// It adds:
-//   - Array element paths (["claim", null]) for claims with per-element SD (Section 7.1)
-//   - Nested object sub-paths (["address", "street_address"]) when only the parent is requested
-//
-// This ensures wallets can properly disclose nested/array content even when the
-// frontend only sends top-level path selections.
+// It:
+//   - Replaces parent object paths with their nested sub-paths when the VCTM
+//     defines children (e.g. ["address"] → ["address", "street_address"]).
+//   - Removes redundant parent paths when an array-element path is also present
+//     (e.g. removes ["nationalities"] when ["nationalities", null] exists),
+//     because sending both causes wallets to disclose only the parent array
+//     without including element-level disclosures.
 func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 	if dcql == nil {
 		return
@@ -338,24 +369,13 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 			continue
 		}
 
-		// Collect VCTM paths by category:
-		// - arrayPaths: paths ending with nil (array element disclosure)
-		// - childPaths: paths with len>=2 where all elements are non-nil (nested object fields)
-		arrayPaths := make(map[string][]*string)   // parentKey -> full path with nil
-		childPaths := make(map[string][][]*string)  // parentKey -> list of child paths
+		// Collect nested object sub-paths from VCTM (paths with len>=2 where all elements are non-nil)
+		childPaths := make(map[string][][]*string) // parentKey -> list of child paths
 		for _, vc := range meta.VCTM.Claims {
-			if len(vc.Path) >= 2 && vc.Path[len(vc.Path)-1] == nil {
-				key := claimPtrPathKey(vc.Path[:len(vc.Path)-1])
-				arrayPaths[key] = vc.Path
-			} else if len(vc.Path) >= 2 && vc.Path[0] != nil {
-				// Nested object sub-path (e.g., ["address", "street_address"])
+			if len(vc.Path) >= 2 && vc.Path[0] != nil && vc.Path[len(vc.Path)-1] != nil {
 				parentKey := claimPtrPathKey(vc.Path[:1])
 				childPaths[parentKey] = append(childPaths[parentKey], vc.Path)
 			}
-		}
-
-		if len(arrayPaths) == 0 && len(childPaths) == 0 {
-			continue
 		}
 
 		// Build set of existing claim paths
@@ -364,28 +384,27 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 			existing[claimPtrPathKey(claim.Path)] = true
 		}
 
-		// Add missing array element paths
-		for _, claim := range cred.Claims {
-			parentKey := claimPtrPathKey(claim.Path)
-			if arrPath, ok := arrayPaths[parentKey]; ok {
-				arrKey := claimPtrPathKey(arrPath)
-				if !existing[arrKey] {
-					dcql.Credentials[i].Claims = append(dcql.Credentials[i].Claims, openid4vp.ClaimQuery{Path: arrPath})
-					existing[arrKey] = true
-				}
-			}
-		}
-
-		// Replace parent object paths with their nested sub-paths.
-		// Sending both ["address"] and ["address", "house_number"] causes wallets
-		// to crash (they mark the parent as disclosed=true, then can't set children).
-		// We replace the parent with explicit sub-paths so the wallet discloses each field.
+		// Identify parent paths that should be removed:
+		// 1. Parents that have nested object sub-paths (replace with children)
+		// 2. Parents that have a corresponding array-element path ["x", null]
+		//    (the null path already implies element-level disclosure; keeping the
+		//    parent causes wallets to skip element disclosures)
 		parentsToRemove := make(map[string]bool)
 		for _, claim := range cred.Claims {
 			if len(claim.Path) != 1 || claim.Path[0] == nil {
 				continue
 			}
 			parentKey := claimPtrPathKey(claim.Path)
+
+			// Check for array-element path: if ["x", null] is also in the query,
+			// remove the parent ["x"]
+			arrayPath := []*string{claim.Path[0], nil}
+			if existing[claimPtrPathKey(arrayPath)] {
+				parentsToRemove[parentKey] = true
+				continue
+			}
+
+			// Check for nested object children from VCTM
 			children, ok := childPaths[parentKey]
 			if !ok {
 				continue
@@ -400,7 +419,7 @@ func (c *Client) augmentDCQLFromVCTM(dcql *openid4vp.DCQL) {
 			}
 		}
 
-		// Remove parent paths that were expanded into sub-paths
+		// Remove parent paths that were expanded or superseded
 		if len(parentsToRemove) > 0 {
 			filtered := make([]openid4vp.ClaimQuery, 0, len(dcql.Credentials[i].Claims))
 			for _, claim := range dcql.Credentials[i].Claims {
