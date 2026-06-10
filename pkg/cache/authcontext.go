@@ -259,6 +259,11 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 		}
 	}
 
+	// Enforce maximum number of distinct redeemers to prevent unbounded growth
+	if len(doc.RedeemedBy) >= MaxPreAuthRedeemers {
+		return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")
+	}
+
 	// Record this client as having redeemed the code.
 	// Use PreviousOrDefaultTTL to preserve the original TTL — repeated redemptions
 	// by different clients must not extend the code's lifetime.

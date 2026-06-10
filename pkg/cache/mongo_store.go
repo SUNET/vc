@@ -303,8 +303,10 @@ func (s *MongoStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 }
 
 // RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
-// distinct clients (identified by DPoP thumbprint). Uses an atomic $addToSet with
-// a condition that the thumbprint is not already present.
+// distinct clients (identified by DPoP thumbprint). Uses an atomic FindOneAndUpdate
+// with $addToSet and a condition that the thumbprint is not already present.
+// The $expr size guard is enforced atomically within the single-document
+// FindOneAndUpdate operation, so the max-redeemer bound is strict.
 func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error) {
 	if code == "" {
 		return nil, errors.New("code cannot be empty")
@@ -317,6 +319,13 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 		"code":        code,
 		"forfeited":   bson.M{"$ne": true},
 		"redeemed_by": bson.M{"$ne": dpopThumbprint},
+		// Enforce max redeemers atomically: reject if already at the cap
+		"$expr": bson.M{
+			"$lt": bson.A{
+				bson.M{"$size": bson.M{"$ifNull": bson.A{"$redeemed_by", bson.A{}}}},
+				MaxPreAuthRedeemers,
+			},
+		},
 	}
 
 	update := bson.M{"$addToSet": bson.M{"redeemed_by": dpopThumbprint}}
@@ -326,7 +335,7 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 	err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			// Distinguish: code not found, forfeited, or already-redeemed client
+			// Distinguish: code not found, forfeited, already-redeemed, or max reached
 			var existing AuthorizationContext
 			findErr := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&existing)
 			if findErr != nil {
@@ -338,7 +347,14 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 			if existing.Forfeited {
 				return nil, errors.New("pre-authorized code has been forfeited")
 			}
-			return nil, errors.New("pre-authorized code already redeemed by this client")
+			for _, tp := range existing.RedeemedBy {
+				if tp == dpopThumbprint {
+					return nil, errors.New("pre-authorized code already redeemed by this client")
+				}
+			}
+			if len(existing.RedeemedBy) >= MaxPreAuthRedeemers {
+				return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")
+			}
 		}
 		return nil, fmt.Errorf("failed to redeem pre-authorized code: %w", err)
 	}

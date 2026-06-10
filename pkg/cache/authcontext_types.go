@@ -22,6 +22,11 @@ const (
 	SessionStatusCompleted            SessionStatus = "completed"
 	SessionStatusExpired              SessionStatus = "expired"
 	SessionStatusError                SessionStatus = "error"
+
+	// MaxPreAuthRedeemers is the maximum number of distinct clients that can
+	// redeem a single pre-authorized code. This prevents unbounded growth of
+	// the RedeemedBy array and child sessions if a code leaks.
+	MaxPreAuthRedeemers = 10
 )
 
 // Token represents an access token with expiration

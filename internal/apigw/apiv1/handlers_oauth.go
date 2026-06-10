@@ -410,6 +410,18 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		if genErr != nil {
 			return nil, fmt.Errorf("failed to generate child session ID: %w", genErr)
 		}
+		// Generate a fresh c_nonce for this child session so each client gets its
+		// own nonce. The parent's nonce is shared and would be consumed (GetAndDelete)
+		// by the first client to call /credential, breaking subsequent clients.
+		childNonce, nonceErr := crypto.GenerateSecureToken(0, 32)
+		if nonceErr != nil {
+			return nil, fmt.Errorf("failed to generate child c_nonce: %w", nonceErr)
+		}
+		if c.cacheService.VCINonce != nil {
+			c.cacheService.VCINonce.Set(ctx, childNonce, true)
+		}
+		reply.CNonce = childNonce
+
 		childSession := &cache.AuthorizationContext{
 			SessionID:            childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
@@ -417,7 +429,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			CreatedAt:            time.Now(),
 			ExpiresAt:            tokenDoc.ExpiresAt, // Use token TTL, not parent code TTL
 			Scopes:               authorizationContext.Scopes,
-			Nonce:                authorizationContext.Nonce,
+			Nonce:                childNonce,
 			AuthorizationDetails: responseDetails, // Use details with credential_identifiers from token response
 			AuthProvider:         authorizationContext.AuthProvider,
 			Identifier:           authorizationContext.Identifier,
@@ -434,17 +446,12 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		// Using Update() instead of AddToken() avoids a race where AddToken
 		// writes the token and a subsequent Update() overwrites it with nil.
 		authorizationContext.Token = tokenDoc
+		if len(responseDetails) > 0 {
+			authorizationContext.AuthorizationDetails = responseDetails
+		}
 		if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
 			c.log.Error(err, "failed to persist token and authorization details")
 			return nil, err
-		}
-		// Persist credential_identifiers so VCICredential can validate them later.
-		if len(responseDetails) > 0 {
-			authorizationContext.AuthorizationDetails = responseDetails
-			if err := c.cacheService.AuthContext.Update(ctx, authorizationContext); err != nil {
-				c.log.Error(err, "failed to update authorization_details with credential_identifiers")
-				return nil, err
-			}
 		}
 	}
 
