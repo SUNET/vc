@@ -249,33 +249,6 @@ func (s *Service) handleOAuthError(c *gin.Context, err error) {
 	})
 }
 
-// sanitizeForJSONViewer recursively converts boolean values to strings
-// to work around a bug in andypf-json-viewer v2.x that crashes with
-// "Cannot create property '' on boolean 'true'".
-func sanitizeForJSONViewer(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		result := make(map[string]any, len(val))
-		for k, child := range val {
-			result[k] = sanitizeForJSONViewer(child)
-		}
-		return result
-	case []any:
-		result := make([]any, len(val))
-		for i, child := range val {
-			result[i] = sanitizeForJSONViewer(child)
-		}
-		return result
-	case bool:
-		if val {
-			return "true"
-		}
-		return "false"
-	default:
-		return v
-	}
-}
-
 // jwtMetadataClaims are JWT/SD-JWT infrastructure claims excluded from display.
 var jwtMetadataClaims = map[string]bool{
 	"iss": true, "sub": true, "iat": true, "exp": true, "nbf": true,

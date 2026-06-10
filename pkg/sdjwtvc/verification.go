@@ -363,7 +363,8 @@ func (c *Client) validateSDJWTVCStructure(header map[string]any, claims jwt.MapC
 }
 
 // parseDisclosure parses a disclosure string into a Disclosure struct
-// Per draft-22 §4.2: Disclosure format is [<salt>, <claim_name>, <claim_value>]
+// Per draft-22 §4.2: Object property disclosures have format [<salt>, <claim_name>, <claim_value>]
+// Per draft-22 §4.2.2: Array element disclosures have format [<salt>, <value>]
 func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*Disclosure, error) {
 	// Base64url decode
 	decoded, err := base64.RawURLEncoding.DecodeString(disclosureStr)
@@ -377,21 +378,34 @@ func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*D
 		return nil, fmt.Errorf("failed to unmarshal disclosure: %w", err)
 	}
 
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid disclosure format: expected 3 elements, got %d", len(parts))
-	}
+	var salt, claim string
+	var value any
 
-	salt, ok := parts[0].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid disclosure: salt must be string")
+	switch len(parts) {
+	case 3:
+		// Object property disclosure: [salt, claim_name, claim_value]
+		s, ok := parts[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid disclosure: salt must be string")
+		}
+		salt = s
+		c, ok := parts[1].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid disclosure: claim name must be string")
+		}
+		claim = c
+		value = parts[2]
+	case 2:
+		// Array element disclosure: [salt, value]
+		s, ok := parts[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid disclosure: salt must be string")
+		}
+		salt = s
+		value = parts[1]
+	default:
+		return nil, fmt.Errorf("invalid disclosure format: expected 2 or 3 elements, got %d", len(parts))
 	}
-
-	claim, ok := parts[1].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid disclosure: claim name must be string")
-	}
-
-	value := parts[2]
 
 	// Calculate hash
 	hashMethod.Reset()

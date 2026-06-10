@@ -334,13 +334,13 @@ func TestParseDisclosure_InvalidFormat(t *testing.T) {
 	}{
 		{
 			name:        "Too few elements",
-			disclosure:  []any{"salt", "claim"},
-			expectError: "expected 3 elements",
+			disclosure:  []any{"salt"},
+			expectError: "expected 2 or 3 elements",
 		},
 		{
 			name:        "Too many elements",
 			disclosure:  []any{"salt", "claim", "value", "extra"},
-			expectError: "expected 3 elements",
+			expectError: "expected 2 or 3 elements",
 		},
 		{
 			name:        "Invalid salt type",
