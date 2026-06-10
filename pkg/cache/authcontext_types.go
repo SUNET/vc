@@ -22,6 +22,11 @@ const (
 	SessionStatusCompleted            SessionStatus = "completed"
 	SessionStatusExpired              SessionStatus = "expired"
 	SessionStatusError                SessionStatus = "error"
+
+	// MaxPreAuthRedeemers is the maximum number of distinct clients that can
+	// redeem a single pre-authorized code. This prevents unbounded growth of
+	// the RedeemedBy array and child sessions if a code leaks.
+	MaxPreAuthRedeemers = 10
 )
 
 // Token represents an access token with expiration
@@ -40,6 +45,12 @@ type AuthorizationContext struct {
 	CreatedAt time.Time     `json:"created_at" bson:"created_at,omitempty"`
 	ExpiresAt int64         `json:"expires_at" bson:"expires_at"`
 
+	// SourceSessionID references the parent session from which this session was
+	// derived. Used in the pre-authorized code flow where each client redemption
+	// creates a new child session that still needs access to the original
+	// session's credential documents.
+	SourceSessionID string `json:"source_session_id,omitempty" bson:"source_session_id,omitempty" validate:"omitempty,max=128,printascii"`
+
 	// Client and authorization fields
 	ClientID            string   `json:"client_id" bson:"client_id" validate:"omitempty,max=128,printascii"`
 	WalletClientID      string   `json:"wallet_client_id,omitempty" bson:"wallet_client_id,omitempty" validate:"omitempty,max=128,printascii"`
@@ -52,6 +63,12 @@ type AuthorizationContext struct {
 	// Authorization code fields
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
+
+	// RedeemedBy tracks DPoP thumbprints that have redeemed a pre-authorized code.
+	// Pre-authorized codes may be redeemed by multiple distinct clients (each
+	// identified by a unique DPoP key), but a given client must not redeem
+	// the same code twice.
+	RedeemedBy []string `json:"redeemed_by,omitempty" bson:"redeemed_by,omitempty"`
 
 	// Token fields
 	Token       *Token `json:"token,omitempty" bson:"token,omitempty"`
@@ -84,13 +101,13 @@ type AuthorizationContext struct {
 	PresentationSubmission any            `json:"presentation_submission,omitempty" bson:"presentation_submission,omitempty"`
 
 	// OpenID4VP fields (wallet interaction)
-	EphemeralEncryptionKeyID string          `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
-	VerifierResponseCode     string          `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
-	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
-	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
-	DCQLQuery                *openid4vp.DCQL                         `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
-	Validations              map[string][]openid4vp.ClaimValidation   `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
-	WalletID                 string                                  `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
+	EphemeralEncryptionKeyID string                                 `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
+	VerifierResponseCode     string                                 `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
+	RequestObjectID          string                                 `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
+	RequestObjectNonce       string                                 `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
+	DCQLQuery                *openid4vp.DCQL                        `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	Validations              map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
+	WalletID                 string                                 `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // Validate checks the AuthorizationContext against its struct validation tags.

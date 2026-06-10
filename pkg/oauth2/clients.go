@@ -125,7 +125,7 @@ type Clients map[string]*Client
 // Get returns the Client for the given clientID, or an error if not found.
 func (c *Clients) Get(clientID string) (*Client, error) {
 	client, ok := (*c)[clientID]
-	if !ok {
+	if !ok || client == nil {
 		return nil, errors.New("client not found in config")
 	}
 	return client, nil
@@ -135,10 +135,13 @@ func (c *Clients) Get(clientID string) (*Client, error) {
 // The caller can inspect the returned Client (e.g. Type) to enforce additional constraints.
 func (c *Clients) Allow(clientID, redirectURI, scope string) (*Client, error) {
 	client, ok := (*c)[clientID]
-	if !ok {
+	if !ok || client == nil {
 		return nil, errors.New("client not found in config")
 	}
 
+	if len(client.RedirectURIs) == 0 {
+		return nil, errors.New("no redirect_uri configured for client")
+	}
 	if !client.RedirectURIs.Contains(redirectURI) {
 		return nil, errors.New("redirect_uri does not match any allowed URI")
 	}

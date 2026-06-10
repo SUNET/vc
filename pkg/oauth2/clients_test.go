@@ -18,6 +18,12 @@ var mockClients = Clients{
 		RedirectURIs: RedirectURIs{"https://example.com/callback"},
 		Scopes:       []string{"diploma", "elm"},
 	},
+	"client_no_redirect": {
+		Type:         "public",
+		RedirectURIs: RedirectURIs{},
+		Scopes:       []string{"ehic"},
+	},
+	"client_nil": nil,
 }
 
 func TestAllow(t *testing.T) {
@@ -72,6 +78,22 @@ func TestAllow(t *testing.T) {
 			scope:       "ehic",
 			clients:     mockClients,
 			want:        want{client: nil, err: errors.New("redirect_uri does not match any allowed URI")},
+		},
+		{
+			name:        "client with no redirect URIs configured",
+			clientID:    "client_no_redirect",
+			redirectURI: "https://example.com/callback",
+			scope:       "ehic",
+			clients:     mockClients,
+			want:        want{client: nil, err: errors.New("no redirect_uri configured for client")},
+		},
+		{
+			name:        "nil client value in config",
+			clientID:    "client_nil",
+			redirectURI: "https://example.com/callback",
+			scope:       "ehic",
+			clients:     mockClients,
+			want:        want{client: nil, err: errors.New("client not found in config")},
 		},
 	}
 
@@ -133,6 +155,12 @@ func TestRedirectURIsContains(t *testing.T) {
 			name:     "wildcard wrong scheme",
 			uris:     RedirectURIs{"https://example.com/test/a/*"},
 			check:    "http://example.com/test/a/some-alias/callback",
+			expected: false,
+		},
+		{
+			name:     "wildcard path traversal via percent-encoded dot-segments",
+			uris:     RedirectURIs{"https://example.com/test/a/*"},
+			check:    "https://example.com/test/a/%2e%2e/evil",
 			expected: false,
 		},
 		{
