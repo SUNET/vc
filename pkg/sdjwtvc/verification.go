@@ -409,18 +409,64 @@ func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*D
 
 // verifyDisclosureHash verifies that a disclosure hash exists in the _sd array
 func (c *Client) verifyDisclosureHash(claims jwt.MapClaims, hash string) error {
-	// Check top-level _sd array
-	if sd, ok := claims["_sd"].([]any); ok {
-		for _, h := range sd {
-			if hashStr, ok := h.(string); ok && hashStr == hash {
-				return nil // Found
+	if findHashInNode(map[string]any(claims), hash) {
+		return nil
+	}
+	return fmt.Errorf("disclosure hash %s not found in _sd array", hash)
+}
+
+// findHashInNode recursively searches for a disclosure hash in _sd arrays
+// and array element disclosure markers ({"...": hash}) throughout the claims tree.
+func findHashInNode(node map[string]any, hash string) bool {
+	// Check _sd array at this level
+	if sdField, ok := node["_sd"]; ok {
+		if sdArray, ok := sdField.([]any); ok {
+			for _, h := range sdArray {
+				if hashStr, ok := h.(string); ok && hashStr == hash {
+					return true
+				}
 			}
 		}
 	}
 
-	// TODO: Also check nested _sd arrays in objects
-	// For now, we accept if found at top level
-	return fmt.Errorf("disclosure hash %s not found in _sd array", hash)
+	// Recurse into nested objects and arrays
+	for k, v := range node {
+		if k == "_sd" {
+			continue
+		}
+		switch val := v.(type) {
+		case map[string]any:
+			if findHashInNode(val, hash) {
+				return true
+			}
+		case []any:
+			if findHashInArray(val, hash) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// findHashInArray searches for a disclosure hash in array element disclosures
+// ({"...": hash}) and recurses into nested objects.
+func findHashInArray(arr []any, hash string) bool {
+	for _, elem := range arr {
+		switch v := elem.(type) {
+		case map[string]any:
+			if len(v) == 1 {
+				if hashVal, ok := v["..."]; ok {
+					if hashStr, ok := hashVal.(string); ok && hashStr == hash {
+						return true
+					}
+				}
+			}
+			if findHashInNode(v, hash) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // reconstructClaims adds disclosed claims back into the claims map, including nested _sd arrays.
