@@ -1012,59 +1012,87 @@ func TestToken_RefreshTokenGrant(t *testing.T) {
 
 // TestGenerateIDToken tests ID token generation
 func TestGenerateIDToken(t *testing.T) {
-	ctx := t.Context()
-
-	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.Outbound.OIDCProvider.Issuer = "https://issuer.example.com"
-	client.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration = 3600
-	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
-	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
-
-	// Set up signing key
-	key := generateTestRSAKey(t)
-	require.NoError(t, client.SetSigningKeyForTesting(key))
-
-	authCtx := &cache.AuthorizationContext{
-		SessionID: "session-1",
-		ClientID:  "test-client",
-		Nonce:     "test-nonce-123",
-		WalletID:  "wallet-123",
-		VerifiedClaims: map[string]any{
-			"name":  "John Doe",
-			"email": "john@example.com",
+	tests := []struct {
+		name           string
+		nonce          string
+		verifiedClaims map[string]any
+		expectNonce    bool
+	}{
+		{
+			name:        "with nonce",
+			nonce:       "test-nonce-123",
+			expectNonce: true,
+			verifiedClaims: map[string]any{
+				"name":  "John Doe",
+				"email": "john@example.com",
+			},
+		},
+		{
+			name:        "without nonce",
+			nonce:       "",
+			expectNonce: false,
+			verifiedClaims: map[string]any{
+				"name": "John Doe",
+			},
 		},
 	}
 
-	dbClient := &db.Client{
-		ClientID: "test-client",
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+
+			client, _ := CreateTestClientWithMock(nil)
+			client.cfg.Verifier.Outbound.OIDCProvider.Issuer = "https://issuer.example.com"
+			client.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration = 3600
+			client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
+			client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
+
+			key := generateTestRSAKey(t)
+			require.NoError(t, client.SetSigningKeyForTesting(key))
+
+			authCtx := &cache.AuthorizationContext{
+				SessionID:      "session-1",
+				ClientID:       "test-client",
+				Nonce:          tt.nonce,
+				WalletID:       "wallet-123",
+				VerifiedClaims: tt.verifiedClaims,
+			}
+
+			dbClient := &db.Client{
+				ClientID: "test-client",
+			}
+
+			idToken, err := client.generateIDToken(ctx, authCtx, dbClient)
+			assert.NoError(t, err)
+			assert.NotEmpty(t, idToken)
+
+			token, err := jwt.Parse(idToken, func(token *jwt.Token) (any, error) {
+				return &key.PublicKey, nil
+			})
+			assert.NoError(t, err)
+			assert.True(t, token.Valid)
+
+			claims, ok := token.Claims.(jwt.MapClaims)
+			assert.True(t, ok)
+
+			assert.Equal(t, "https://issuer.example.com", claims["iss"])
+			assert.Equal(t, "test-client", claims["aud"])
+			assert.NotEmpty(t, claims["sub"])
+			assert.NotEmpty(t, claims["exp"])
+			assert.NotEmpty(t, claims["iat"])
+
+			if tt.expectNonce {
+				assert.Equal(t, tt.nonce, claims["nonce"])
+			} else {
+				_, nonceExists := claims["nonce"]
+				assert.False(t, nonceExists, "nonce claim should not be present when no nonce was provided")
+			}
+
+			for k, v := range tt.verifiedClaims {
+				assert.Equal(t, v, claims[k])
+			}
+		})
 	}
-
-	idToken, err := client.generateIDToken(ctx, authCtx, dbClient)
-
-	assert.NoError(t, err)
-	assert.NotEmpty(t, idToken)
-
-	// Parse and verify token
-	token, err := jwt.Parse(idToken, func(token *jwt.Token) (any, error) {
-		return &key.PublicKey, nil
-	})
-	assert.NoError(t, err)
-	assert.True(t, token.Valid)
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	assert.True(t, ok)
-
-	// Verify standard claims
-	assert.Equal(t, "https://issuer.example.com", claims["iss"])
-	assert.Equal(t, "test-client", claims["aud"])
-	assert.Equal(t, "test-nonce-123", claims["nonce"])
-	assert.NotEmpty(t, claims["sub"])
-	assert.NotEmpty(t, claims["exp"])
-	assert.NotEmpty(t, claims["iat"])
-
-	// Verify verified claims are included
-	assert.Equal(t, "John Doe", claims["name"])
-	assert.Equal(t, "john@example.com", claims["email"])
 }
 
 // TestAuthenticateOIDCClient tests client authentication
