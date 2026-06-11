@@ -199,6 +199,30 @@ func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid inline SPOCP rule #1")
 }
 
+func TestBuildSPOCPEngine_MissingRequiredParts(t *testing.T) {
+	// Rule with only the 4 original parts; missing authentic_source and scope.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "authentic_source")
+	assert.Contains(t, err.Error(), "scope")
+}
+
+func TestBuildSPOCPEngine_EmptyRequiredParts(t *testing.T) {
+	// All required parts present, but scope is empty (no elements).
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty required parts")
+	assert.Contains(t, err.Error(), "scope")
+}
+
 func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")

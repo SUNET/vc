@@ -351,7 +351,8 @@ func (s *SafeEngine) RuleCount() int {
 var requiredRuleParts = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
 
 // validateRuleElement checks that a parsed SPOCP rule element is a list with
-// tag "vc" and contains at least the required sub-lists (service, method, path, subject).
+// tag "vc" and contains all required sub-lists (service, method, path, subject,
+// authentic_source, scope).
 func validateRuleElement(elem sexp.Element, source string) error {
 	list, ok := elem.(*sexp.List)
 	if !ok {
@@ -361,21 +362,28 @@ func validateRuleElement(elem sexp.Element, source string) error {
 		return fmt.Errorf("%s: rule must have tag \"vc\", got %q", source, list.Tag)
 	}
 
-	present := make(map[string]bool)
+	present := make(map[string]int) // tag -> number of elements
 	for _, child := range list.Elements {
 		if cl, ok := child.(*sexp.List); ok {
-			present[cl.Tag] = true
+			present[cl.Tag] = len(cl.Elements)
 		}
 	}
 
 	var missing []string
+	var empty []string
 	for _, req := range requiredRuleParts {
-		if !present[req] {
+		count, ok := present[req]
+		if !ok {
 			missing = append(missing, req)
+		} else if count == 0 {
+			empty = append(empty, req)
 		}
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("%s: rule is missing required parts: %s", source, strings.Join(missing, ", "))
+	}
+	if len(empty) > 0 {
+		return fmt.Errorf("%s: rule has empty required parts (use * as wildcard): %s", source, strings.Join(empty, ", "))
 	}
 	return nil
 }

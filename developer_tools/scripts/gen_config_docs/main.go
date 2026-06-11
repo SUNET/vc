@@ -81,16 +81,18 @@ type TableRow struct {
 // ---- Type registry ----
 
 type TypeRegistry struct {
-	types      map[string]*StructDef
-	mapAliases map[string]string // named map type -> map value type name
-	fset       *token.FileSet
+	types        map[string]*StructDef
+	mapAliases   map[string]string // named map type -> map value type name
+	sliceAliases map[string]string // named slice type -> element type name (e.g. "RedirectURIs" -> "string")
+	fset         *token.FileSet
 }
 
 func NewTypeRegistry() *TypeRegistry {
 	return &TypeRegistry{
-		types:      make(map[string]*StructDef),
-		mapAliases: make(map[string]string),
-		fset:       token.NewFileSet(),
+		types:        make(map[string]*StructDef),
+		mapAliases:   make(map[string]string),
+		sliceAliases: make(map[string]string),
+		fset:         token.NewFileSet(),
 	}
 }
 
@@ -155,6 +157,13 @@ func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 					r.mapAliases[ts.Name.Name] = qualifiedValName
 					r.mapAliases[pkgName+"."+ts.Name.Name] = qualifiedValName
 				}
+			}
+
+			// Handle named slice types (e.g., type RedirectURIs []string)
+			if at, ok := ts.Type.(*ast.ArrayType); ok {
+				elemName := typeExprStr(at.Elt)
+				r.sliceAliases[ts.Name.Name] = elemName
+				r.sliceAliases[pkgName+"."+ts.Name.Name] = elemName
 			}
 		}
 	}
@@ -299,7 +308,7 @@ func parseStructTag(raw string) TagInfo {
 
 // ---- Display helpers ----
 
-func displayType(expr ast.Expr) string {
+func (r *TypeRegistry) displayType(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
 		switch t.Name {
@@ -314,10 +323,20 @@ func displayType(expr ast.Expr) string {
 		case "float64":
 			return "`float64`"
 		default:
+			// Resolve named slice aliases (e.g. RedirectURIs -> []string)
+			if elem, ok := r.sliceAliases[t.Name]; ok {
+				if elem == "string" {
+					return "`[]string`"
+				}
+				if elem == "int" {
+					return "`[]int`"
+				}
+				return "`array`"
+			}
 			return "`object`"
 		}
 	case *ast.StarExpr:
-		return displayType(t.X)
+		return r.displayType(t.X)
 	case *ast.ArrayType:
 		inner := typeExprStr(t.Elt)
 		if inner == "string" {
@@ -829,7 +848,7 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 		}
 		row := TableRow{
 			Field:    "`" + f.Tag.YAMLName + "`",
-			Type:     displayType(f.TypeExpr),
+			Type:     reg.displayType(f.TypeExpr),
 			Desc:     fieldDescription(f),
 			Example:  formatExample(fieldExample(f)),
 			Default:  formatDefault(f.Tag),
