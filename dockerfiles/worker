@@ -1,7 +1,10 @@
 # Build tools stage — installs protobuf compiler, swagger, and gRPC codegen.
 # Inlined from dockerfiles/gobuild so the Dockerfile is self-contained.
-# Use GOBUILD_IMAGE to override with a pre-built image for faster local builds:
+# Use GOBUILD_IMAGE to override with a pre-built image that already has tools:
 #   docker build --build-arg GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local ...
+# When overriding, the install-tools/clean-apt-cache steps are redundant but
+# harmless (make targets are idempotent). For a faster local build, use the
+# pre-built image directly as the builder stage via multi-stage FROM.
 ARG GOBUILD_IMAGE=golang:1.26.4
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
@@ -31,7 +34,8 @@ RUN make proto-${SERVICE_NAME}
 
 # Build with caching for both build cache and module cache
 # GO_BUILD_TAGS is optional - if set, adds -tags flag
-# CGO is disabled for static builds; enabled when build tags (e.g. pkcs11) require it
+# CGO defaults to disabled for static builds. Pass --build-arg CGO_ENABLED=1
+# for features that require CGO (e.g. pkcs11 HSM support).
 ARG CGO_ENABLED=0
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
