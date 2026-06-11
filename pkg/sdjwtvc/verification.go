@@ -256,8 +256,8 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 			result.DisclosedClaims[disclosure.Claim] = disclosure.Value
 		}
 
-		// Verify disclosure hash is in _sd array
-		if err := c.verifyDisclosureHash(claims, disclosure.Hash); err != nil {
+		// Verify disclosure hash is in _sd array or in a previously-disclosed array value
+		if err := c.verifyDisclosureHash(claims, disclosure.Hash, result.Disclosures); err != nil {
 			result.Errors = append(result.Errors, err)
 		}
 	}
@@ -424,11 +424,37 @@ func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*D
 }
 
 // verifyDisclosureHash verifies that a disclosure hash exists in the _sd array
-func (c *Client) verifyDisclosureHash(claims jwt.MapClaims, hash string) error {
+// of the issuer-signed claims tree, or within the value of a previously-parsed
+// disclosure (handles selectively-disclosed arrays whose element markers only
+// appear inside the parent disclosure value).
+func (c *Client) verifyDisclosureHash(claims jwt.MapClaims, hash string, disclosures []Disclosure) error {
 	if findHashInNode(map[string]any(claims), hash) {
 		return nil
 	}
+	// Check inside values of already-parsed disclosures (e.g. an array that
+	// was itself selectively disclosed and contains {"...": <hash>} markers).
+	for i := range disclosures {
+		if findHashInDisclosureValue(disclosures[i].Value, hash) {
+			return nil
+		}
+	}
 	return fmt.Errorf("disclosure hash %s not found in _sd array", hash)
+}
+
+// findHashInDisclosureValue searches for an array-element disclosure marker
+// ({"...": hash}) within a disclosure's value, which may be an array or nested object.
+func findHashInDisclosureValue(value any, hash string) bool {
+	switch v := value.(type) {
+	case []any:
+		if findHashInArray(v, hash) {
+			return true
+		}
+	case map[string]any:
+		if findHashInNode(v, hash) {
+			return true
+		}
+	}
+	return false
 }
 
 // findHashInNode recursively searches for a disclosure hash in _sd arrays

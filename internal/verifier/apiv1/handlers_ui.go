@@ -330,7 +330,8 @@ func stringPathToPtrPath(path []string) []*string {
 		if path[i] == "null" {
 			out[i] = nil
 		} else {
-			out[i] = &path[i]
+			s := path[i]
+			out[i] = &s
 		}
 	}
 	return out
