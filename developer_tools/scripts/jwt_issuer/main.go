@@ -29,6 +29,7 @@ func main() {
 	jwtFile := flag.String("jwt-out", "token.jwt", "output file for the signed JWT")
 	jwkFile := flag.String("jwk-out", "jwks.json", "output file for the JWKS (public keys)")
 	privFile := flag.String("priv-out", "", "output file for the private JWK (optional)")
+	privInFile := flag.String("priv-in", "", "input file for an existing private JWK (optional, generates new key if not set)")
 
 	flag.Parse()
 
@@ -41,17 +42,31 @@ func main() {
 		*email = *subject
 	}
 
-	// Generate ECDSA P-256 key pair
-	rawKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		fatal("generate key: %v", err)
+	var privJWK jwk.Key
+
+	if *privInFile != "" {
+		// Load existing private key from file
+		privJSON, err := os.ReadFile(*privInFile)
+		if err != nil {
+			fatal("read private key file: %v", err)
+		}
+		privJWK, err = jwk.ParseKey(privJSON)
+		if err != nil {
+			fatal("parse private key: %v", err)
+		}
+		fmt.Printf("Private key loaded from %s\n", *privInFile)
+	} else {
+		// Generate ECDSA P-256 key pair
+		rawKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			fatal("generate key: %v", err)
+		}
+		privJWK, err = jwk.Import(rawKey)
+		if err != nil {
+			fatal("import private key: %v", err)
+		}
 	}
 
-	// Build private JWK
-	privJWK, err := jwk.Import(rawKey)
-	if err != nil {
-		fatal("import private key: %v", err)
-	}
 	if err := privJWK.Set(jwk.KeyIDKey, *kid); err != nil {
 		fatal("set kid: %v", err)
 	}
