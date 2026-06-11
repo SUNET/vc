@@ -523,6 +523,8 @@ func collectHashesFromArrayInto(arr []any, hashes map[string]bool) {
 				}
 			}
 			collectHashesFromNodeInto(v, hashes)
+		case []any:
+			collectHashesFromArrayInto(v, hashes)
 		}
 	}
 }
