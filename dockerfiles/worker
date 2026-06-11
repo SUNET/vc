@@ -1,5 +1,16 @@
+# Build tools stage — installs protobuf compiler, swagger, and gRPC codegen.
+# Inlined from dockerfiles/gobuild so the Dockerfile is self-contained.
+# Use GOBUILD_IMAGE to override with a pre-built image for faster local builds:
+#   docker build --build-arg GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local ...
+ARG GOBUILD_IMAGE=golang:1.26.4
+FROM ${GOBUILD_IMAGE} AS gobuild
+WORKDIR /go/src/app
+COPY Makefile .
+RUN make install-tools
+RUN make clean-apt-cache
+
 # Compile
-FROM docker.sunet.se/iam_vc/gobuild:local AS builder
+FROM gobuild AS builder
 
 ARG SERVICE_NAME
 ARG BUILDTAG
