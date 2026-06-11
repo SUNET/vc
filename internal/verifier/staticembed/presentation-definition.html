@@ -77,12 +77,35 @@
                             </div>
                             <div class="vc-attributes-list">
                                 <ul x-ref="fieldsList">
-                                    <template x-for="[label, path] of Object.entries(credentialAttributes.claims)">
+                                    <template x-for="node of credentialAttributes.claimTree">
                                         <li>
-                                            <label class="checkbox">
-                                                <input type="checkbox" name="attribute[]" :value="label" />
-                                                <span x-text="label"></span>
-                                            </label>
+                                            <template x-if="node.children.length === 0">
+                                                <label class="checkbox">
+                                                    <input type="checkbox" name="attribute[]" :value="node.label" />
+                                                    <span x-text="node.label"></span>
+                                                </label>
+                                            </template>
+                                            <template x-if="node.children.length > 0">
+                                                <details class="vc-claim-group" open>
+                                                    <summary class="vc-claim-group-summary">
+                                                        <label class="checkbox" @click.stop>
+                                                            <input type="checkbox" 
+                                                                @change="$el.closest('.vc-claim-group').querySelectorAll(':scope > ul input[type=checkbox]').forEach(cb => cb.checked = $el.checked)" />
+                                                            <strong x-text="node.label"></strong>
+                                                        </label>
+                                                    </summary>
+                                                    <ul class="vc-claim-children">
+                                                        <template x-for="child of node.children">
+                                                            <li>
+                                                                <label class="checkbox">
+                                                                    <input type="checkbox" name="attribute[]" :value="child.label" />
+                                                                    <span x-text="child.label"></span>
+                                                                </label>
+                                                            </li>
+                                                        </template>
+                                                    </ul>
+                                                </details>
+                                            </template>
                                         </li>
                                     </template>
                                 </ul>

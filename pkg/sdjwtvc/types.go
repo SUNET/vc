@@ -56,6 +56,7 @@ func (d *Discloser) Hash(hasher hash.Hash) (string, string, []any, error) {
 
 // CredentialCache holds credential claims and data
 type CredentialCache struct {
+	Scope      string         `json:"scope"`
 	Claims     []Discloser    `json:"claims"`
 	Credential map[string]any `json:"credential"`
 }

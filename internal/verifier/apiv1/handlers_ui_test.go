@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -30,8 +31,8 @@ func TestUIMetadata(t *testing.T) {
 				"pid": {
 					VCTMFilePath: "/path/to/vctm",
 					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-					Attributes: map[string]map[string][]string{
-						"en-US": {"given_name": {"given_name"}},
+					Attributes: map[string]map[string][]*string{
+						"en-US": {"given_name": {new("given_name")}},
 					},
 				},
 				"diploma": {
@@ -185,7 +186,9 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 
 		// Only explicit claims should be included (birthdate), others excluded
 		require.Len(t, pidCred.Claims, 1)
-		assert.Equal(t, []string{"birthdate"}, pidCred.Claims[0].Path)
+		require.Len(t, pidCred.Claims[0].Path, 1)
+		require.NotNil(t, pidCred.Claims[0].Path[0])
+		assert.Equal(t, "birthdate", *pidCred.Claims[0].Path[0])
 	})
 
 	t.Run("multi scope preset scopes validations correctly", func(t *testing.T) {
@@ -232,7 +235,9 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 		// PID should exclude family_name, have given_name and birthdate
 		pidPaths := make([]string, 0, len(pidCred.Claims))
 		for _, c := range pidCred.Claims {
-			pidPaths = append(pidPaths, c.Path[0])
+			if c.Path[0] != nil {
+				pidPaths = append(pidPaths, *c.Path[0])
+			}
 		}
 		assert.Contains(t, pidPaths, "given_name")
 		assert.Contains(t, pidPaths, "birthdate")
@@ -241,7 +246,9 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 		// EHIC should have all its claims (no exclusions)
 		ehicPaths := make([]string, 0, len(ehicCred.Claims))
 		for _, c := range ehicCred.Claims {
-			ehicPaths = append(ehicPaths, c.Path[0])
+			if c.Path[0] != nil {
+				ehicPaths = append(ehicPaths, *c.Path[0])
+			}
 		}
 		assert.Contains(t, ehicPaths, "card_number")
 		assert.Contains(t, ehicPaths, "expiry_date")
@@ -282,6 +289,171 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 	require.NotNil(t, preset)
 	require.Len(t, preset.Credentials, 1)
 	assert.Equal(t, openid4vp.FormatSDJWTVC, preset.Credentials[0].Format)
+}
+
+// TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure verifies that augmentDCQLFromVCTM
+// removes the parent path when an array-element path (with null) is also present,
+// so the wallet discloses individual array elements instead of only the opaque parent.
+func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
+	tests := []struct {
+		name           string
+		vctmClaims     []sdjwtvc.Claim
+		inputClaims    []openid4vp.ClaimQuery
+		expectedPaths  [][]*string
+		removedPaths   [][]*string
+	}{
+		{
+			name: "parent removed when array-element path present",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("nationalities")}},
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("nationalities")}},
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			expectedPaths: [][]*string{
+				{new("nationalities"), nil},
+			},
+			removedPaths: [][]*string{
+				{new("nationalities")},
+			},
+		},
+		{
+			name: "array-element path only - no change",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("nationalities")}},
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			expectedPaths: [][]*string{
+				{new("nationalities"), nil},
+			},
+		},
+		{
+			name: "parent only without array-element path - no change",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("nationalities")}},
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("nationalities")}},
+			},
+			expectedPaths: [][]*string{
+				{new("nationalities")},
+			},
+		},
+		{
+			name: "nested object parent replaced with children",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("address")}},
+				{Path: []*string{new("address"), new("street")}},
+				{Path: []*string{new("address"), new("city")}},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("address")}},
+			},
+			expectedPaths: [][]*string{
+				{new("address"), new("street")},
+				{new("address"), new("city")},
+			},
+			removedPaths: [][]*string{
+				{new("address")},
+			},
+		},
+		{
+			name: "mixed: array and simple claims coexist",
+			vctmClaims: []sdjwtvc.Claim{
+				{Path: []*string{new("given_name")}},
+				{Path: []*string{new("nationalities")}},
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("given_name")}},
+				{Path: []*string{new("nationalities")}},
+				{Path: []*string{new("nationalities"), nil}},
+			},
+			expectedPaths: [][]*string{
+				{new("given_name")},
+				{new("nationalities"), nil},
+			},
+			removedPaths: [][]*string{
+				{new("nationalities")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &model.Cfg{
+				Common: &model.Common{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
+						"pid": {
+							VCTM: &sdjwtvc.VCTM{
+								VCT:    "urn:eudi:pid:1",
+								Claims: tt.vctmClaims,
+							},
+						},
+					},
+				},
+				Verifier: &model.Verifier{},
+			}
+
+			client, _ := CreateTestClientWithMock(cfg)
+			client.cfg = cfg
+
+			dcql := &openid4vp.DCQL{
+				Credentials: []openid4vp.CredentialQuery{
+					{
+						ID:     "pid",
+						Format: "dc+sd-jwt",
+						Claims: tt.inputClaims,
+					},
+				},
+			}
+
+			client.augmentDCQLFromVCTM(dcql)
+
+			resultPaths := make([][]*string, 0, len(dcql.Credentials[0].Claims))
+			for _, claim := range dcql.Credentials[0].Claims {
+				resultPaths = append(resultPaths, claim.Path)
+			}
+
+			// Check expected paths are present
+			require.Len(t, resultPaths, len(tt.expectedPaths), "unexpected number of claims")
+			for i, expected := range tt.expectedPaths {
+				require.Len(t, resultPaths[i], len(expected), "path %d has wrong length", i)
+				for j, seg := range expected {
+					if seg == nil {
+						assert.Nil(t, resultPaths[i][j], "path[%d][%d] should be nil", i, j)
+					} else {
+						require.NotNil(t, resultPaths[i][j], "path[%d][%d] should not be nil", i, j)
+						assert.Equal(t, *seg, *resultPaths[i][j], "path[%d][%d] mismatch", i, j)
+					}
+				}
+			}
+
+			// Check removed paths are absent
+			for _, removed := range tt.removedPaths {
+				for _, resultPath := range resultPaths {
+					if len(resultPath) != len(removed) {
+						continue
+					}
+					match := true
+					for j, seg := range removed {
+						if seg == nil && resultPath[j] != nil {
+							match = false
+						} else if seg != nil && (resultPath[j] == nil || *seg != *resultPath[j]) {
+							match = false
+						}
+					}
+					assert.False(t, match, "path %v should have been removed", removed)
+				}
+			}
+		})
+	}
 }
 
 // TestPerScopeValidationApplication tests that the verification handler
@@ -414,6 +586,236 @@ func TestPerScopeValidationApplication(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestAugmentDCQLFromVCTM_ComplexCredential tests augmentDCQLFromVCTM with a credential
+// containing nested objects, arrays of objects, and simple arrays — verifying correct
+// path handling for each DCQL claim type.
+func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
+	// VCTM claims model a credential like:
+	// {
+	//   "name": "Arthur Dent",
+	//   "address": { "street_address": "42 Market Street", "locality": "Milliways", "postal_code": "12345" },
+	//   "degrees": [{ "type": "...", "university": "..." }, ...],
+	//   "nationalities": ["British", "Betelgeusian"]
+	// }
+	vctmClaims := []sdjwtvc.Claim{
+		{Path: []*string{new("name")}},
+		{Path: []*string{new("address")}},
+		{Path: []*string{new("address"), new("street_address")}},
+		{Path: []*string{new("address"), new("locality")}},
+		{Path: []*string{new("address"), new("postal_code")}},
+		{Path: []*string{new("degrees")}},
+		{Path: []*string{new("degrees"), nil}},
+		{Path: []*string{new("degrees"), nil, new("type")}},
+		{Path: []*string{new("degrees"), nil, new("university")}},
+		{Path: []*string{new("nationalities")}},
+		{Path: []*string{new("nationalities"), nil}},
+	}
+
+	// The credential that the DCQL paths will be resolved against.
+	credential := map[string]any{
+		"name": "Arthur Dent",
+		"address": map[string]any{
+			"street_address": "42 Market Street",
+			"locality":       "Milliways",
+			"postal_code":    "12345",
+		},
+		"degrees": []any{
+			map[string]any{"type": "Bachelor of Science", "university": "University of Betelgeuse"},
+			map[string]any{"type": "Master of Science", "university": "University of Betelgeuse"},
+		},
+		"nationalities": []any{"British", "Betelgeusian"},
+	}
+
+	tests := []struct {
+		name             string
+		inputClaims      []openid4vp.ClaimQuery
+		expectedPaths    [][]*string
+		expectedDCQLJSON []string // expected JSON for each claim after marshal
+		expectedValues   []any   // expected resolved values from the credential
+	}{
+		{
+			name: "array of objects element field: degrees null type",
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("degrees"), nil, new("type")}},
+			},
+			expectedPaths: [][]*string{
+				{new("degrees"), nil, new("type")},
+			},
+			expectedDCQLJSON: []string{
+				`{"path":["degrees",null,"type"]}`,
+			},
+			expectedValues: []any{
+				[]any{"Bachelor of Science", "Master of Science"},
+			},
+		},
+		{
+			name: "simple array element: nationalities 1",
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("nationalities"), new("1")}},
+			},
+			expectedPaths: [][]*string{
+				{new("nationalities"), new("1")},
+			},
+			expectedDCQLJSON: []string{
+				`{"path":["nationalities","1"]}`,
+			},
+			expectedValues: []any{
+				"Betelgeusian",
+			},
+		},
+		{
+			name: "simple scalar: name",
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("name")}},
+			},
+			expectedPaths: [][]*string{
+				{new("name")},
+			},
+			expectedDCQLJSON: []string{
+				`{"path":["name"]}`,
+			},
+			expectedValues: []any{
+				"Arthur Dent",
+			},
+		},
+		{
+			name: "object parent replaced with children: address",
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("address")}},
+			},
+			expectedPaths: [][]*string{
+				{new("address"), new("street_address")},
+				{new("address"), new("locality")},
+				{new("address"), new("postal_code")},
+			},
+			expectedDCQLJSON: []string{
+				`{"path":["address","street_address"]}`,
+				`{"path":["address","locality"]}`,
+				`{"path":["address","postal_code"]}`,
+			},
+			expectedValues: []any{
+				"42 Market Street",
+				"Milliways",
+				"12345",
+			},
+		},
+		{
+			name: "object child directly: address street_address",
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("address"), new("street_address")}},
+			},
+			expectedPaths: [][]*string{
+				{new("address"), new("street_address")},
+			},
+			expectedDCQLJSON: []string{
+				`{"path":["address","street_address"]}`,
+			},
+			expectedValues: []any{
+				"42 Market Street",
+			},
+		},
+		{
+			name: "all five claims together",
+			inputClaims: []openid4vp.ClaimQuery{
+				{Path: []*string{new("degrees"), nil, new("type")}},
+				{Path: []*string{new("nationalities"), new("1")}},
+				{Path: []*string{new("name")}},
+				{Path: []*string{new("address")}},
+				{Path: []*string{new("address"), new("street_address")}},
+			},
+			expectedPaths: [][]*string{
+				{new("degrees"), nil, new("type")},
+				{new("nationalities"), new("1")},
+				{new("name")},
+				// "address" parent replaced by children from VCTM
+				{new("address"), new("street_address")},
+				{new("address"), new("locality")},
+				{new("address"), new("postal_code")},
+			},
+			expectedDCQLJSON: []string{
+				`{"path":["degrees",null,"type"]}`,
+				`{"path":["nationalities","1"]}`,
+				`{"path":["name"]}`,
+				`{"path":["address","street_address"]}`,
+				`{"path":["address","locality"]}`,
+				`{"path":["address","postal_code"]}`,
+			},
+			expectedValues: []any{
+				[]any{"Bachelor of Science", "Master of Science"},
+				"Betelgeusian",
+				"Arthur Dent",
+				"42 Market Street",
+				"Milliways",
+				"12345",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &model.Cfg{
+				Common: &model.Common{
+					CredentialMetadata: map[string]*model.CredentialMetadata{
+						"complex": {
+							VCTM: &sdjwtvc.VCTM{
+								VCT:    "urn:test:complex:1",
+								Claims: vctmClaims,
+							},
+						},
+					},
+				},
+				Verifier: &model.Verifier{},
+			}
+
+			client, _ := CreateTestClientWithMock(cfg)
+			client.cfg = cfg
+
+			dcql := &openid4vp.DCQL{
+				Credentials: []openid4vp.CredentialQuery{
+					{
+						ID:     "complex",
+						Format: "dc+sd-jwt",
+						Claims: tt.inputClaims,
+					},
+				},
+			}
+
+			client.augmentDCQLFromVCTM(dcql)
+
+			resultPaths := make([][]*string, 0, len(dcql.Credentials[0].Claims))
+			for _, claim := range dcql.Credentials[0].Claims {
+				resultPaths = append(resultPaths, claim.Path)
+			}
+
+			require.Len(t, resultPaths, len(tt.expectedPaths), "unexpected number of claims")
+			for i, expected := range tt.expectedPaths {
+				require.Len(t, resultPaths[i], len(expected), "path %d has wrong length", i)
+				for j, seg := range expected {
+					if seg == nil {
+						assert.Nil(t, resultPaths[i][j], "path[%d][%d] should be nil", i, j)
+					} else {
+						require.NotNil(t, resultPaths[i][j], "path[%d][%d] should not be nil", i, j)
+						assert.Equal(t, *seg, *resultPaths[i][j], "path[%d][%d] mismatch", i, j)
+					}
+				}
+			}
+
+			// Verify JSON serialization produces correct output (null vs "null", etc.)
+			for i, claim := range dcql.Credentials[0].Claims {
+				got, err := json.Marshal(claim)
+				require.NoError(t, err, "claim[%d] marshal error", i)
+				assert.Equal(t, tt.expectedDCQLJSON[i], string(got), "claim[%d] JSON mismatch", i)
+			}
+
+			// Verify resolved values from the credential match expectations
+			for i, claim := range dcql.Credentials[0].Claims {
+				resolved := openid4vp.ResolveDCQLPath(credential, claim.Path)
+				assert.Equal(t, tt.expectedValues[i], resolved, "claim[%d] resolved value mismatch", i)
 			}
 		})
 	}

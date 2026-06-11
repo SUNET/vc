@@ -8,10 +8,65 @@ const credentialAttributesSchema = v.object({
         v.string(),
         v.record(
             v.string(),
-            v.array(v.string()),
+            v.array(v.nullable(v.string())),
         ),
     ),
 });
+
+/**
+ * @typedef {{ label: string; path: (string|null)[]; children: ClaimNode[] }} ClaimNode
+ */
+
+/**
+ * Build a tree of claim nodes from a flat claims map.
+ * Groups nested claims (path.length > 1) under their parent object.
+ * @param {Record<string, (string|null)[]>} claims - label → path mapping
+ * @returns {ClaimNode[]}
+ */
+function buildClaimTree(claims) {
+    /** @type {ClaimNode[]} */
+    const roots = [];
+    /** @type {Map<string, ClaimNode>} */
+    const parentMap = new Map();
+
+    // First pass: identify parent nodes (path.length === 1 that have children)
+    const entries = Object.entries(claims);
+    const childEntries = entries.filter(([, path]) => path.length > 1);
+    const parentKeys = new Set(childEntries.map(([, path]) => path[0]).filter(k => k !== null));
+
+    for (const [label, path] of entries) {
+        if (path.length === 1 && path[0] !== null && parentKeys.has(path[0])) {
+            // This is a parent node (object or array) that has children.
+            // If a synthetic parent was already created (child iterated first),
+            // upgrade it in place rather than creating a duplicate.
+            const existing = parentMap.get(path[0]);
+            if (existing) {
+                existing.label = label;
+                existing.path = path;
+            } else {
+                const node = { label, path, children: [] };
+                parentMap.set(path[0], node);
+                roots.push(node);
+            }
+        } else if (path.length > 1 && path[0] !== null) {
+            // This is a child — attach to parent
+            const parentKey = path[0];
+            let parent = parentMap.get(parentKey);
+            if (!parent) {
+                // Parent has no display entry; create a synthetic one
+                parent = { label: parentKey, path: [parentKey], children: [] };
+                parentMap.set(parentKey, parent);
+                roots.push(parent);
+            }
+            parent.children.push({ label, path, children: [] });
+        } else {
+            // Simple top-level claim
+            roots.push({ label, path, children: [] });
+        }
+    }
+
+    return roots;
+}
 
 /** @typedef {v.InferOutput<typeof credentialsList>} CredentialsList */
 const credentialsList = v.record(
@@ -32,7 +87,7 @@ const metadataResponseSchema = v.object({
                 vct_values: v.array(v.string()),
             }),
             claims: v.optional(v.array(v.object({
-                path: v.array(v.string()),
+                path: v.array(v.nullable(v.string())),
             }))),
             validations: v.optional(v.array(v.object({
                 rule: v.string(),
@@ -54,7 +109,7 @@ const dcqlQueryCredentialSchema = v.object({
         v.record(v.string(), v.union([v.string(), v.array(v.string())])),
     ]),
     claims: v.optional(v.array(v.object({
-        path: v.array(v.string()),
+        path: v.array(v.nullable(v.string())),
     }))),
 });
 
@@ -146,7 +201,7 @@ Alpine.data("app", () => ({
     /** @type {Record<string, string> | null} */
     walletInstances: null,
 
-     /** @type {{ id: string; vct: string; claims: Record<string, string[]>; } | null} */
+     /** @type {{ id: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /** 
@@ -273,7 +328,7 @@ Alpine.data("app", () => ({
 
         const chosenCredential = this.credentialsList[credential];
 
-        /** @type {Record<string, string[]>} */
+        /** @type {Record<string, (string|null)[]>} */
         const claims = {}
         for (const [label, path] of Object.entries(chosenCredential.attributes['en-US'])) {
             claims[label] = path;
@@ -283,6 +338,7 @@ Alpine.data("app", () => ({
             id: credential,
             vct: chosenCredential.vct,
             claims,
+            claimTree: buildClaimTree(claims),
         }
 
         this.loading = false;

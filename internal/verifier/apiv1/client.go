@@ -101,10 +101,12 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	// Initialize claims extractor
 	c.claimsExtractor = openid4vp.NewClaimsExtractor()
 
-	// Override Attributes with filtered variant (excludes nested object claims)
-	// since verifier only exposes leaf-level attributes to the UI.
+	// Use full Attributes (including nested object/array claims) so the UI
+	// can render them as a tree and let users select individual sub-fields.
 	for _, credentialInfo := range cfg.Common.CredentialMetadata {
-		credentialInfo.Attributes = credentialInfo.VCTM.AttributesWithoutObjects()
+		if vctm := credentialInfo.GetVCTM(); vctm != nil {
+			credentialInfo.Attributes = vctm.Attributes()
+		}
 	}
 
 	c.trustService = &openid4vp.TrustService{}
@@ -333,12 +335,11 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 		// Add claims from VCTM claim paths
 		if credInfo.VCTM != nil {
 			for _, claim := range credInfo.VCTM.Claims {
-				// Skip object claims (nested paths) — only leaf claims
-				if len(claim.Path) != 1 || claim.Path[0] == nil {
+				if len(claim.Path) == 0 {
 					continue
 				}
 				cred.Claims = append(cred.Claims, openid4vp.ClaimQuery{
-					Path: []string{*claim.Path[0]},
+					Path: claim.Path,
 				})
 			}
 		}
@@ -350,9 +351,15 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 		return nil, fmt.Errorf("no valid credentials found for requested scopes")
 	}
 
-	return &openid4vp.DCQL{
+	dcql := &openid4vp.DCQL{
 		Credentials: credentials,
-	}, nil
+	}
+
+	// Normalize: remove redundant parent paths that are superseded by more
+	// specific child or array-element paths (same logic used in UI queries).
+	c.augmentDCQLFromVCTM(dcql)
+
+	return dcql, nil
 }
 
 // extractAndMapClaims extracts claims from a VP token and maps them to OIDC claims

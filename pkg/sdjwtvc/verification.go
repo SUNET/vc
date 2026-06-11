@@ -252,11 +252,19 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 		}
 
 		result.Disclosures = append(result.Disclosures, *disclosure)
-		result.DisclosedClaims[disclosure.Claim] = disclosure.Value
+		if disclosure.Claim != "" {
+			result.DisclosedClaims[disclosure.Claim] = disclosure.Value
+		}
+	}
 
-		// Verify disclosure hash is in _sd array
-		if err := c.verifyDisclosureHash(claims, disclosure.Hash); err != nil {
-			result.Errors = append(result.Errors, err)
+	// Verify disclosure hashes: only hashes reachable from the issuer-signed
+	// claims tree (transitively, via values of already-anchored disclosures)
+	// are considered valid. This prevents mutually-referencing attacker-controlled
+	// disclosures from passing verification.
+	anchoredHashes := collectAnchoredHashes(map[string]any(claims), result.Disclosures)
+	for i := range result.Disclosures {
+		if !anchoredHashes[result.Disclosures[i].Hash] {
+			result.Errors = append(result.Errors, fmt.Errorf("disclosure hash %s not found in _sd array", result.Disclosures[i].Hash))
 		}
 	}
 
@@ -363,7 +371,8 @@ func (c *Client) validateSDJWTVCStructure(header map[string]any, claims jwt.MapC
 }
 
 // parseDisclosure parses a disclosure string into a Disclosure struct
-// Per draft-22 §4.2: Disclosure format is [<salt>, <claim_name>, <claim_value>]
+// Per draft-22 §4.2: Object property disclosures have format [<salt>, <claim_name>, <claim_value>]
+// Per draft-22 §4.2.2: Array element disclosures have format [<salt>, <value>]
 func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*Disclosure, error) {
 	// Base64url decode
 	decoded, err := base64.RawURLEncoding.DecodeString(disclosureStr)
@@ -377,21 +386,34 @@ func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*D
 		return nil, fmt.Errorf("failed to unmarshal disclosure: %w", err)
 	}
 
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid disclosure format: expected 3 elements, got %d", len(parts))
-	}
+	var salt, claim string
+	var value any
 
-	salt, ok := parts[0].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid disclosure: salt must be string")
+	switch len(parts) {
+	case 3:
+		// Object property disclosure: [salt, claim_name, claim_value]
+		s, ok := parts[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid disclosure: salt must be string")
+		}
+		salt = s
+		c, ok := parts[1].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid disclosure: claim name must be string")
+		}
+		claim = c
+		value = parts[2]
+	case 2:
+		// Array element disclosure: [salt, value]
+		s, ok := parts[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid disclosure: salt must be string")
+		}
+		salt = s
+		value = parts[1]
+	default:
+		return nil, fmt.Errorf("invalid disclosure format: expected 2 or 3 elements, got %d", len(parts))
 	}
-
-	claim, ok := parts[1].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid disclosure: claim name must be string")
-	}
-
-	value := parts[2]
 
 	// Calculate hash
 	hashMethod.Reset()
@@ -407,33 +429,201 @@ func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*D
 	}, nil
 }
 
-// verifyDisclosureHash verifies that a disclosure hash exists in the _sd array
-func (c *Client) verifyDisclosureHash(claims jwt.MapClaims, hash string) error {
-	// Check top-level _sd array
-	if sd, ok := claims["_sd"].([]any); ok {
-		for _, h := range sd {
-			if hashStr, ok := h.(string); ok && hashStr == hash {
-				return nil // Found
+// collectAnchoredHashes returns the set of disclosure hashes that are
+// transitively reachable from the issuer-signed claims tree. A hash is
+// anchored if it appears in an _sd array or as an array-element marker
+// ({"...": hash}) in the signed claims, OR in the value of a disclosure
+// whose own hash is already anchored. This prevents mutually-referencing
+// attacker-crafted disclosures from being accepted.
+func collectAnchoredHashes(claims map[string]any, disclosures []Disclosure) map[string]bool {
+	// Build hash -> disclosure lookup
+	byHash := make(map[string]*Disclosure, len(disclosures))
+	for i := range disclosures {
+		byHash[disclosures[i].Hash] = &disclosures[i]
+	}
+
+	anchored := make(map[string]bool, len(disclosures))
+
+	// Collect all hashes directly referenced in the issuer-signed claims tree
+	directHashes := collectHashesFromNode(claims)
+
+	// BFS/iterative expansion: anchor direct hashes, then transitively
+	// anchor hashes found inside anchored disclosure values.
+	queue := make([]string, 0, len(directHashes))
+	for h := range directHashes {
+		anchored[h] = true
+		queue = append(queue, h)
+	}
+
+	for len(queue) > 0 {
+		h := queue[0]
+		queue = queue[1:]
+
+		d, ok := byHash[h]
+		if !ok {
+			continue
+		}
+		// Find hashes inside this disclosure's value
+		childHashes := collectHashesFromValue(d.Value)
+		for ch := range childHashes {
+			if !anchored[ch] {
+				anchored[ch] = true
+				queue = append(queue, ch)
 			}
 		}
 	}
 
-	// TODO: Also check nested _sd arrays in objects
-	// For now, we accept if found at top level
-	return fmt.Errorf("disclosure hash %s not found in _sd array", hash)
+	return anchored
 }
 
-// reconstructClaims adds disclosed claims back into the claims map
-func (c *Client) reconstructClaims(claims map[string]any, disclosures []Disclosure) error {
-	for _, disclosure := range disclosures {
-		claims[disclosure.Claim] = disclosure.Value
+// collectHashesFromNode collects all disclosure hashes referenced in _sd arrays
+// and array-element markers ({"...": hash}) throughout a claims tree.
+func collectHashesFromNode(node map[string]any) map[string]bool {
+	hashes := make(map[string]bool)
+	collectHashesFromNodeInto(node, hashes)
+	return hashes
+}
+
+func collectHashesFromNodeInto(node map[string]any, hashes map[string]bool) {
+	// Collect from _sd array
+	if sdField, ok := node["_sd"]; ok {
+		if sdArray, ok := sdField.([]any); ok {
+			for _, h := range sdArray {
+				if hashStr, ok := h.(string); ok {
+					hashes[hashStr] = true
+				}
+			}
+		}
 	}
 
-	// Remove _sd and _sd_alg from final claims
-	delete(claims, "_sd")
-	delete(claims, "_sd_alg")
+	// Recurse into nested objects and arrays
+	for k, v := range node {
+		if k == "_sd" {
+			continue
+		}
+		switch val := v.(type) {
+		case map[string]any:
+			collectHashesFromNodeInto(val, hashes)
+		case []any:
+			collectHashesFromArrayInto(val, hashes)
+		}
+	}
+}
 
+func collectHashesFromArrayInto(arr []any, hashes map[string]bool) {
+	for _, elem := range arr {
+		switch v := elem.(type) {
+		case map[string]any:
+			if len(v) == 1 {
+				if hashVal, ok := v["..."]; ok {
+					if hashStr, ok := hashVal.(string); ok {
+						hashes[hashStr] = true
+						continue
+					}
+				}
+			}
+			collectHashesFromNodeInto(v, hashes)
+		case []any:
+			collectHashesFromArrayInto(v, hashes)
+		}
+	}
+}
+
+// collectHashesFromValue collects disclosure hashes from a disclosure's value.
+func collectHashesFromValue(value any) map[string]bool {
+	hashes := make(map[string]bool)
+	switch v := value.(type) {
+	case []any:
+		collectHashesFromArrayInto(v, hashes)
+	case map[string]any:
+		collectHashesFromNodeInto(v, hashes)
+	}
+	return hashes
+}
+
+// reconstructClaims adds disclosed claims back into the claims map, including nested _sd arrays.
+func (c *Client) reconstructClaims(claims map[string]any, disclosures []Disclosure) error {
+	// Build a hash -> Disclosure lookup
+	disclosureMap := make(map[string]*Disclosure, len(disclosures))
+	for i := range disclosures {
+		disclosureMap[disclosures[i].Hash] = &disclosures[i]
+	}
+
+	reconstructNode(claims, disclosureMap)
 	return nil
+}
+
+// reconstructNode resolves _sd arrays at this level and recurses into nested maps.
+func reconstructNode(node map[string]any, disclosureMap map[string]*Disclosure) {
+	if sdField, ok := node["_sd"]; ok {
+		if sdArray, ok := sdField.([]any); ok {
+			for _, h := range sdArray {
+				hashStr, ok := h.(string)
+				if !ok {
+					continue
+				}
+				if d, found := disclosureMap[hashStr]; found && d.Claim != "" {
+					node[d.Claim] = d.Value
+				}
+			}
+		}
+	}
+
+	delete(node, "_sd")
+	delete(node, "_sd_alg")
+
+	// Collect keys first to ensure newly-added claims from _sd resolution are included.
+	keys := make([]string, 0, len(node))
+	for k := range node {
+		keys = append(keys, k)
+	}
+
+	for _, key := range keys {
+		value := node[key]
+		switch v := value.(type) {
+		case map[string]any:
+			reconstructNode(v, disclosureMap)
+		case []any:
+			node[key] = reconstructArrayNode(v, disclosureMap)
+		}
+	}
+}
+
+// reconstructArrayNode resolves array element disclosures ({"...": hash}) and recurses.
+func reconstructArrayNode(arr []any, disclosureMap map[string]*Disclosure) []any {
+	result := make([]any, 0, len(arr))
+	for _, elem := range arr {
+		switch v := elem.(type) {
+		case map[string]any:
+			if len(v) == 1 {
+				if hashVal, ok := v["..."]; ok {
+					if hashStr, ok := hashVal.(string); ok {
+						if d, found := disclosureMap[hashStr]; found {
+							// Recurse into the disclosed value in case it
+							// contains nested _sd or array markers.
+							switch dv := d.Value.(type) {
+							case map[string]any:
+								reconstructNode(dv, disclosureMap)
+								result = append(result, dv)
+							case []any:
+								result = append(result, reconstructArrayNode(dv, disclosureMap))
+							default:
+								result = append(result, d.Value)
+							}
+							continue
+						}
+					}
+				}
+			}
+			reconstructNode(v, disclosureMap)
+			result = append(result, v)
+		case []any:
+			result = append(result, reconstructArrayNode(v, disclosureMap))
+		default:
+			result = append(result, elem)
+		}
+	}
+	return result
 }
 
 // verifyKeyBindingJWT verifies a Key Binding JWT per draft-22 §4.3

@@ -60,9 +60,9 @@ func TestDCQLQueryExample(t *testing.T) {
 					TypeValues: [][]string{{"VerifiableCredential", "PersonalID"}},
 				},
 				Claims: []ClaimQuery{
-					{Path: []string{"given_name"}},
-					{Path: []string{"family_name"}},
-					{Path: []string{"birth_date"}},
+					{Path: StringPath("given_name")},
+					{Path: StringPath("family_name")},
+					{Path: StringPath("birth_date")},
 				},
 			},
 		},

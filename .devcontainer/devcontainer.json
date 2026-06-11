@@ -15,6 +15,7 @@
 				"dev.containers.mountWaylandSocket": false
 			},
 			"extensions": [
+				"golang.Go",
 				"GitHub.vscode-pull-request-github",
 				"streetsidesoftware.code-spell-checker",
 				"DavidAnson.vscode-markdownlint",

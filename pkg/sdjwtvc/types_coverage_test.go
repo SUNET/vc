@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,11 +51,14 @@ func TestVCTM_Attributes(t *testing.T) {
 
 	assert.Contains(t, attrs["en"], label1)
 	assert.Contains(t, attrs["en"], label2)
-	assert.Equal(t, []string{"name"}, attrs["en"][label1])
-	assert.Equal(t, []string{"email"}, attrs["en"][label2])
+	require.Len(t, attrs["en"][label1], 1)
+	assert.Equal(t, "name", *attrs["en"][label1][0])
+	require.Len(t, attrs["en"][label2], 1)
+	assert.Equal(t, "email", *attrs["en"][label2][0])
 
 	assert.Contains(t, attrs["fr"], "Nom")
-	assert.Equal(t, []string{"name"}, attrs["fr"]["Nom"])
+	require.Len(t, attrs["fr"]["Nom"], 1)
+	assert.Equal(t, "name", *attrs["fr"]["Nom"][0])
 }
 
 func TestVCTM_Attributes_RealMetadata(t *testing.T) {
@@ -72,13 +74,12 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 			filename:      "vctm_pid.json",
 			expectedLangs: []string{"en-US"},
 			expectedLabels: map[string][]string{
-				"en-US": {"Last name", "First name", "Date of birth", "Nationality"},
+				"en-US": {"Last name", "First name", "Date of birth", "Nationalities"},
 			},
 			samplePathCheck: map[string]string{
 				"Last name":     "family_name",
 				"First name":    "given_name",
 				"Date of birth": "birthdate",
-				// Nationality uses path ["nationalities", null] so we can't check a single string path
 			},
 		},
 		{
@@ -129,7 +130,13 @@ func TestVCTM_Attributes_RealMetadata(t *testing.T) {
 					if paths, ok := attrs[lang][label]; ok {
 						assert.NotEmpty(t, paths, "Label '%s' should have paths", label)
 						// Check if the expected path is in the paths slice
-						found := slices.Contains(paths, expectedPath)
+						found := false
+						for _, p := range paths {
+							if p != nil && *p == expectedPath {
+								found = true
+								break
+							}
+						}
 						assert.True(t, found, "Expected path '%s' not found for label '%s'", expectedPath, label)
 					}
 				}
@@ -232,9 +239,12 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 	assert.Contains(t, attrs["en"], "Name")
 	assert.Contains(t, attrs["en"], "Email")
 	assert.Contains(t, attrs["en"], "Age")
-	assert.Equal(t, []string{"name"}, attrs["en"]["Name"])
-	assert.Equal(t, []string{"email"}, attrs["en"]["Email"])
-	assert.Equal(t, []string{"age"}, attrs["en"]["Age"])
+	require.Len(t, attrs["en"]["Name"], 1)
+	assert.Equal(t, "name", *attrs["en"]["Name"][0])
+	require.Len(t, attrs["en"]["Email"], 1)
+	assert.Equal(t, "email", *attrs["en"]["Email"][0])
+	require.Len(t, attrs["en"]["Age"], 1)
+	assert.Equal(t, "age", *attrs["en"]["Age"][0])
 
 	// Check that object attributes are excluded
 	assert.NotContains(t, attrs["en"], "Street Address")
@@ -242,7 +252,8 @@ func TestVCTM_AttributesWithoutObjects(t *testing.T) {
 
 	// Check French language
 	assert.Contains(t, attrs["fr"], "Nom")
-	assert.Equal(t, []string{"name"}, attrs["fr"]["Nom"])
+	require.Len(t, attrs["fr"]["Nom"], 1)
+	assert.Equal(t, "name", *attrs["fr"]["Nom"][0])
 	assert.NotContains(t, attrs["fr"], "Numéro de téléphone")
 }
 
