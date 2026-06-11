@@ -69,6 +69,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.image_tag == ''
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
         with:
+          context: git
           images: ${{ steps.image.outputs.name }}
           tags: |
             type=semver,pattern={{version}}
@@ -104,7 +105,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SERVICE_NAME=${{ matrix.service }}
-            BUILDTAG=${{ steps.custom-tag.outputs.version || github.ref_name }}
+            BUILDTAG=${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
