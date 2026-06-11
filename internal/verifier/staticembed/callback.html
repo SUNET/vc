@@ -28,10 +28,10 @@
                     {{end}}
                 </div>
                 {{if .}}
-                    <div class="columns is-multiline">
+                    <div class="columns is-multiline is-centered">
                     {{range $idx, $cred := .CredentialData}}
-                        <div class="column is-half-desktop">
-                        <div class="block">
+                        <div class="column {{if gt (len $.CredentialData) 1}}is-half-desktop{{end}}">
+                        <div class="box">
                             <h2 class="title is-size-5 mb-2">Credential claims — {{$cred.Scope}}</h2>
                             {{if $cred.Credential}}
                                 <div class="table-container">
@@ -50,11 +50,11 @@
                             {{else}}
                                 <p><em>No claims available.</em></p>
                             {{end}}
+                            <details class="vc-data-block-details">
+                                <summary>Credential data</summary>
+                                <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;"><code>{{toJSON $cred.Credential}}</code></pre>
+                            </details>
                         </div>
-                        <details class="vc-data-block-details">
-                            <summary>Credential data</summary>
-                            <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;"><code>{{toJSON $cred.Credential}}</code></pre>
-                        </details>
                         </div>
                     {{end}}
                     </div>
