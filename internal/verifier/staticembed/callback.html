@@ -10,7 +10,7 @@
 </head>
 <body>
     <section class="section" x-data="app">
-        <div class="container">
+        <div class="container" {{if .}}{{if le (len .CredentialData) 1}}style="max-width: 500px;"{{end}}{{else}}style="max-width: 500px;"{{end}}>
             <h1 class="title has-text-weight-bold is-size-2 is-flex is-justify-content-center is-align-items-center is-gap-2" x-ref="title">
                 <svg width="40" height="40" aria-label="SUNET">
                     <image href="/static/logo.png" width="40" height="40"></image>
@@ -31,7 +31,7 @@
                     <div class="columns is-multiline is-centered">
                     {{range $idx, $cred := .CredentialData}}
                         <div class="column {{if gt (len $.CredentialData) 1}}is-half-desktop{{end}}">
-                        <div class="box">
+                        <div class="box" style="overflow:hidden;">
                             <h2 class="title is-size-5 mb-2">Credential claims — {{$cred.Scope}}</h2>
                             {{if $cred.Credential}}
                                 <div class="table-container">
@@ -52,7 +52,7 @@
                             {{end}}
                             <details class="vc-data-block-details">
                                 <summary>Credential data</summary>
-                                <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;"><code>{{toJSON $cred.Credential}}</code></pre>
+                                <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;white-space:pre-wrap;word-break:break-all;"><code>{{toJSON $cred.Credential}}</code></pre>
                             </details>
                         </div>
                         </div>

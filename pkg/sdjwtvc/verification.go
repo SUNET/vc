@@ -257,13 +257,14 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 		}
 	}
 
-	// Verify disclosure hashes in a second pass using the full disclosures
-	// slice. SD-JWT disclosures are not ordered, so an array-element disclosure
-	// may appear before the parent disclosure whose value contains its {"...":}
-	// marker. Checking after all disclosures are collected avoids false negatives.
+	// Verify disclosure hashes: only hashes reachable from the issuer-signed
+	// claims tree (transitively, via values of already-anchored disclosures)
+	// are considered valid. This prevents mutually-referencing attacker-controlled
+	// disclosures from passing verification.
+	anchoredHashes := collectAnchoredHashes(map[string]any(claims), result.Disclosures)
 	for i := range result.Disclosures {
-		if err := c.verifyDisclosureHash(claims, result.Disclosures[i].Hash, result.Disclosures); err != nil {
-			result.Errors = append(result.Errors, err)
+		if !anchoredHashes[result.Disclosures[i].Hash] {
+			result.Errors = append(result.Errors, fmt.Errorf("disclosure hash %s not found in _sd array", result.Disclosures[i].Hash))
 		}
 	}
 
@@ -428,49 +429,68 @@ func (c *Client) parseDisclosure(disclosureStr string, hashMethod hash.Hash) (*D
 	}, nil
 }
 
-// verifyDisclosureHash verifies that a disclosure hash exists in the _sd array
-// of the issuer-signed claims tree, or within the value of a previously-parsed
-// disclosure (handles selectively-disclosed arrays whose element markers only
-// appear inside the parent disclosure value).
-func (c *Client) verifyDisclosureHash(claims jwt.MapClaims, hash string, disclosures []Disclosure) error {
-	if findHashInNode(map[string]any(claims), hash) {
-		return nil
-	}
-	// Check inside values of already-parsed disclosures (e.g. an array that
-	// was itself selectively disclosed and contains {"...": <hash>} markers).
+// collectAnchoredHashes returns the set of disclosure hashes that are
+// transitively reachable from the issuer-signed claims tree. A hash is
+// anchored if it appears in an _sd array or as an array-element marker
+// ({"...": hash}) in the signed claims, OR in the value of a disclosure
+// whose own hash is already anchored. This prevents mutually-referencing
+// attacker-crafted disclosures from being accepted.
+func collectAnchoredHashes(claims map[string]any, disclosures []Disclosure) map[string]bool {
+	// Build hash -> disclosure lookup
+	byHash := make(map[string]*Disclosure, len(disclosures))
 	for i := range disclosures {
-		if findHashInDisclosureValue(disclosures[i].Value, hash) {
-			return nil
+		byHash[disclosures[i].Hash] = &disclosures[i]
+	}
+
+	anchored := make(map[string]bool, len(disclosures))
+
+	// Collect all hashes directly referenced in the issuer-signed claims tree
+	directHashes := collectHashesFromNode(claims)
+
+	// BFS/iterative expansion: anchor direct hashes, then transitively
+	// anchor hashes found inside anchored disclosure values.
+	queue := make([]string, 0, len(directHashes))
+	for h := range directHashes {
+		anchored[h] = true
+		queue = append(queue, h)
+	}
+
+	for len(queue) > 0 {
+		h := queue[0]
+		queue = queue[1:]
+
+		d, ok := byHash[h]
+		if !ok {
+			continue
+		}
+		// Find hashes inside this disclosure's value
+		childHashes := collectHashesFromValue(d.Value)
+		for ch := range childHashes {
+			if !anchored[ch] {
+				anchored[ch] = true
+				queue = append(queue, ch)
+			}
 		}
 	}
-	return fmt.Errorf("disclosure hash %s not found in _sd array", hash)
+
+	return anchored
 }
 
-// findHashInDisclosureValue searches for an array-element disclosure marker
-// ({"...": hash}) within a disclosure's value, which may be an array or nested object.
-func findHashInDisclosureValue(value any, hash string) bool {
-	switch v := value.(type) {
-	case []any:
-		if findHashInArray(v, hash) {
-			return true
-		}
-	case map[string]any:
-		if findHashInNode(v, hash) {
-			return true
-		}
-	}
-	return false
+// collectHashesFromNode collects all disclosure hashes referenced in _sd arrays
+// and array-element markers ({"...": hash}) throughout a claims tree.
+func collectHashesFromNode(node map[string]any) map[string]bool {
+	hashes := make(map[string]bool)
+	collectHashesFromNodeInto(node, hashes)
+	return hashes
 }
 
-// findHashInNode recursively searches for a disclosure hash in _sd arrays
-// and array element disclosure markers ({"...": hash}) throughout the claims tree.
-func findHashInNode(node map[string]any, hash string) bool {
-	// Check _sd array at this level
+func collectHashesFromNodeInto(node map[string]any, hashes map[string]bool) {
+	// Collect from _sd array
 	if sdField, ok := node["_sd"]; ok {
 		if sdArray, ok := sdField.([]any); ok {
 			for _, h := range sdArray {
-				if hashStr, ok := h.(string); ok && hashStr == hash {
-					return true
+				if hashStr, ok := h.(string); ok {
+					hashes[hashStr] = true
 				}
 			}
 		}
@@ -483,37 +503,40 @@ func findHashInNode(node map[string]any, hash string) bool {
 		}
 		switch val := v.(type) {
 		case map[string]any:
-			if findHashInNode(val, hash) {
-				return true
-			}
+			collectHashesFromNodeInto(val, hashes)
 		case []any:
-			if findHashInArray(val, hash) {
-				return true
-			}
+			collectHashesFromArrayInto(val, hashes)
 		}
 	}
-	return false
 }
 
-// findHashInArray searches for a disclosure hash in array element disclosures
-// ({"...": hash}) and recurses into nested objects.
-func findHashInArray(arr []any, hash string) bool {
+func collectHashesFromArrayInto(arr []any, hashes map[string]bool) {
 	for _, elem := range arr {
 		switch v := elem.(type) {
 		case map[string]any:
 			if len(v) == 1 {
 				if hashVal, ok := v["..."]; ok {
-					if hashStr, ok := hashVal.(string); ok && hashStr == hash {
-						return true
+					if hashStr, ok := hashVal.(string); ok {
+						hashes[hashStr] = true
+						continue
 					}
 				}
 			}
-			if findHashInNode(v, hash) {
-				return true
-			}
+			collectHashesFromNodeInto(v, hashes)
 		}
 	}
-	return false
+}
+
+// collectHashesFromValue collects disclosure hashes from a disclosure's value.
+func collectHashesFromValue(value any) map[string]bool {
+	hashes := make(map[string]bool)
+	switch v := value.(type) {
+	case []any:
+		collectHashesFromArrayInto(v, hashes)
+	case map[string]any:
+		collectHashesFromNodeInto(v, hashes)
+	}
+	return hashes
 }
 
 // reconstructClaims adds disclosed claims back into the claims map, including nested _sd arrays.

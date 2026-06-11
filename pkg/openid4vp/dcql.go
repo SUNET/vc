@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 )
 
@@ -169,6 +170,9 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
+	}
 	cq.Path = raw.Path
 	return nil
 }
@@ -183,7 +187,21 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
+	}
 	cq.Path = raw.Path
+	return nil
+}
+
+// validateClaimPath checks that non-nil path elements are not empty strings.
+// Nil elements are valid (they represent JSON null for array element access).
+func validateClaimPath(path []*string) error {
+	for i, p := range path {
+		if p != nil && *p == "" {
+			return fmt.Errorf("claim path element at index %d must not be empty", i)
+		}
+	}
 	return nil
 }
 

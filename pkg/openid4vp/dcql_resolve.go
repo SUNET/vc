@@ -28,13 +28,16 @@ func ResolveDCQLPath(data any, path []*string) any {
 		return results
 	}
 
-	// Try as array index
-	if idx, err := strconv.Atoi(*seg); err == nil {
-		arr, ok := data.([]any)
-		if !ok || idx < 0 || idx >= len(arr) {
-			return nil
+	// Try as array index only when the current node is actually an array.
+	// Numeric object keys (e.g. "14" in age_equal_or_over) must not be
+	// misinterpreted as array indices.
+	if arr, ok := data.([]any); ok {
+		if idx, err := strconv.Atoi(*seg); err == nil {
+			if idx < 0 || idx >= len(arr) {
+				return nil
+			}
+			return ResolveDCQLPath(arr[idx], rest)
 		}
-		return ResolveDCQLPath(arr[idx], rest)
 	}
 
 	// Object key
