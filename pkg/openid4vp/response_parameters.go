@@ -61,7 +61,7 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("vp_token: expected JSON object or string, got: %.50s", raw.VPToken)
+	return fmt.Errorf("vp_token: expected JSON object (map of credential ID to token) or a plain string, got unsupported type")
 }
 
 type ResponseParameters struct {

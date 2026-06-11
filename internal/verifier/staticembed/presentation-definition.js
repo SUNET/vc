@@ -36,10 +36,18 @@ function buildClaimTree(claims) {
 
     for (const [label, path] of entries) {
         if (path.length === 1 && path[0] !== null && parentKeys.has(path[0])) {
-            // This is a parent node (object or array) that has children
-            const node = { label, path, children: [] };
-            parentMap.set(path[0], node);
-            roots.push(node);
+            // This is a parent node (object or array) that has children.
+            // If a synthetic parent was already created (child iterated first),
+            // upgrade it in place rather than creating a duplicate.
+            const existing = parentMap.get(path[0]);
+            if (existing) {
+                existing.label = label;
+                existing.path = path;
+            } else {
+                const node = { label, path, children: [] };
+                parentMap.set(path[0], node);
+                roots.push(node);
+            }
         } else if (path.length > 1 && path[0] !== null) {
             // This is a child — attach to parent
             const parentKey = path[0];

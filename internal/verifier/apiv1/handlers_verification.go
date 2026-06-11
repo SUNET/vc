@@ -136,7 +136,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	for _, scope := range authCtx.Scopes {
 		vpTokens, ok := vpResponse.VPToken[scope]
 		if !ok || len(vpTokens) == 0 {
-			// Fallback: wallet sent vp_token as a plain string (single credential)
+			// Fallback: wallet sent vp_token as a plain string (single credential).
+			// Only allow this when exactly one scope was requested; otherwise
+			// the same credential would be reused for every scope with potentially
+			// wrong validations.
+			if len(authCtx.Scopes) != 1 {
+				c.log.Error(nil, "VP token not found for scope and multiple scopes requested", "scope", scope)
+				return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single scope is requested", scope)
+			}
 			vpTokens, ok = vpResponse.VPToken["_default"]
 			if !ok || len(vpTokens) == 0 {
 				c.log.Error(nil, "VP token not found for scope", "scope", scope)
