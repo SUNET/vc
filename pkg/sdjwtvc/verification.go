@@ -255,9 +255,14 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 		if disclosure.Claim != "" {
 			result.DisclosedClaims[disclosure.Claim] = disclosure.Value
 		}
+	}
 
-		// Verify disclosure hash is in _sd array or in a previously-disclosed array value
-		if err := c.verifyDisclosureHash(claims, disclosure.Hash, result.Disclosures); err != nil {
+	// Verify disclosure hashes in a second pass using the full disclosures
+	// slice. SD-JWT disclosures are not ordered, so an array-element disclosure
+	// may appear before the parent disclosure whose value contains its {"...":}
+	// marker. Checking after all disclosures are collected avoids false negatives.
+	for i := range result.Disclosures {
+		if err := c.verifyDisclosureHash(claims, result.Disclosures[i].Hash, result.Disclosures); err != nil {
 			result.Errors = append(result.Errors, err)
 		}
 	}
