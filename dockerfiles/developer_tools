@@ -1,9 +1,6 @@
 # Compile
 FROM docker.sunet.se/iam_vc/gobuild:local AS builder
 
-ARG BUILDTAG
-ARG GO_BUILD_TAGS
-
 ENV GOTOOLCHAIN=auto
 ENV GOFLAGS=-mod=vendor
 ENV GOPROXY=off
@@ -27,4 +24,5 @@ WORKDIR /
 
 RUN apk add --no-cache ca-certificates
 
-COPY --from=builder /go/src/app/bin/* /usr/local/bin/
+COPY --from=builder /go/src/app/bin/gen_bootstrap /go/src/app/bin/gen_config_docs \
+    /go/src/app/bin/jwt_issuer /usr/local/bin/
