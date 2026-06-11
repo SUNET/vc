@@ -434,8 +434,8 @@ docker-build-gobuild: _check-reserved-tag ## Build gobuild Docker image
 
 docker-build-developer-tools: _check-reserved-tag ## Build developer tools Docker image
 	$(info Docker Building developer tools with tag: $(VERSION))
-	docker build --tag $(call docker-tag,developer_tools,$(VERSION)) \
-		--file dockerfiles/developer_tools .
+	docker build --tag $(call docker-tag,developer-tools,$(VERSION)) \
+		--file dockerfiles/developer-tools .
 
 # ==============================================================================
 # Docker Push Targets
@@ -463,8 +463,8 @@ docker-push-gobuild: _check-reserved-tag ## Push gobuild Docker image
 	docker push $(call docker-tag,gobuild,$(VERSION))
 
 docker-push-developer-tools: _check-reserved-tag ## Push developer tools Docker image
-	$(info Pushing docker image developer tools)
-	docker push $(call docker-tag,developer_tools,$(VERSION))
+	$(info Pushing docker image developer-tools)
+	docker push $(call docker-tag,developer-tools,$(VERSION))
 
 # ==============================================================================
 # Docker Tag Targets
