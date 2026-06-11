@@ -205,18 +205,17 @@ func (m *middlewareHandler) SessionOrAPIAuth(sessionKey string, apiAuth gin.Hand
 			allowedScopes := AllowedScopes(engine, subject)
 			c.Set("spocp_allowed_scopes", allowedScopes)
 
-			// Resource access: every resource-bearing request must include
-			// both authentic_source and scope so the full SPOCP query is used.
+			// For session users, resource-level SPOCP checks only apply when
+			// the request carries explicit resource pairs. Search/list endpoints
+			// without resource params rely on DB-level filtering via the allowed
+			// lists above.
 			pairs := extractResourcePairs(c)
 			for _, p := range pairs {
-				if p.authenticSource == "" && p.scope == "" {
-					continue
-				}
 				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), subject, p.authenticSource, p.scope)
 				if !engine.QueryElement(query) {
-					log.Info("spocp_denied", "subject", subject, "method", c.Request.Method, "path", c.FullPath(),
+					log.Info("spocp_denied", "subject", subject, "service", service, "method", c.Request.Method, "path", c.FullPath(),
 						"authentic_source", p.authenticSource, "scope", p.scope)
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for resource"})
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 					return
 				}
 			}

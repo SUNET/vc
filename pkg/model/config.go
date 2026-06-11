@@ -772,9 +772,11 @@ type SupportedCredentialConfig struct {
 // When Rules (and/or RulesFile) are configured, each authenticated request is
 // checked against a SPOCP engine. A query of the form
 //
-//	(vc (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
+//	(vc (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>)(authentic_source <SOURCE>)(scope <SCOPE>))
 //
 // is evaluated; the request is allowed only if a matching rule exists.
+// All six parts are required in every rule. Use * as wildcard for fields
+// you don't want to restrict.
 // The <SERVICE> value is supplied by the calling service at middleware
 // registration time. When two services share endpoints, rules for one
 // service do not grant access to the other.
@@ -789,10 +791,11 @@ type APIAuth struct {
 	// The RP fields (client_id, redirect_uri, etc.) also enable the admin UI
 	// login flow via OIDC redirect
 	OIDC APIAuthOIDC `yaml:"oidc"`
-	// Rules are SPOCP S-expression authorization rules loaded into an in-process engine
-	// When non-empty the middleware builds a query per request and checks it
+	// Rules are SPOCP S-expression authorization rules loaded into an in-process engine.
+	// All six parts (service, method, path, subject, authentic_source, scope) are mandatory
+	// in every rule — use * for wildcards.
 	// Rules apply regardless of whether JWKS or OIDC is the active auth method
-	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice))\"]"`
+	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))\"]"`
 	// RulesFile is an optional path to a file containing SPOCP rules (one per line)
 	// Rules from this file are loaded in addition to the inline Rules list
 	RulesFile string `yaml:"rules_file,omitempty"`

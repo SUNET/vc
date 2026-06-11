@@ -178,8 +178,8 @@ func TestBuildSPOCPEngine_NoRules(t *testing.T) {
 func TestBuildSPOCPEngine_InlineRules(t *testing.T) {
 	cfg := model.APIAuth{
 		Rules: []string{
-			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
-			"(vc (service test-svc)(method)(path /api/v1/document)(subject))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))",
+			"(vc (service test-svc)(method *)(path /api/v1/document)(subject *)(authentic_source *)(scope *))",
 		},
 	}
 
@@ -202,7 +202,7 @@ func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
 func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := "(vc (service test-svc)(method GET)(path /health)(subject))\n"
+	content := "(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{
@@ -228,11 +228,11 @@ func TestBuildSPOCPEngine_RulesFileMissing(t *testing.T) {
 func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
+	content := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{
-		Rules:     []string{"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
+		Rules:     []string{"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))"},
 		RulesFile: path,
 	}
 
@@ -247,7 +247,7 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 func TestBuildAPISPOCPQuery(t *testing.T) {
 	q := BuildSPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice", "", "")
 	assert.NotNil(t, q)
-	// With empty authentic_source/scope, only the 4 core tuples should be present.
+	// All 6 fields are always present in the query.
 	s := q.String()
 	assert.Contains(t, s, "service")
 	assert.Contains(t, s, "test-svc")
@@ -257,8 +257,8 @@ func TestBuildAPISPOCPQuery(t *testing.T) {
 	assert.Contains(t, s, "/api/v1/upload")
 	assert.Contains(t, s, "subject")
 	assert.Contains(t, s, "alice")
-	assert.NotContains(t, s, "authentic_source")
-	assert.NotContains(t, s, "scope")
+	assert.Contains(t, s, "authentic_source")
+	assert.Contains(t, s, "scope")
 }
 
 func TestBuildAPISPOCPQuery_WithResourceFields(t *testing.T) {
@@ -809,9 +809,9 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := `(vc (service test-svc)(method GET)(path /health)(subject))
-(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
-(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))
+	content := `(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))
+(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
@@ -826,11 +826,11 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := `# This is a comment
-(vc (service test-svc)(method GET)(path /health)(subject))
+(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))
 
 # Another comment
 
-(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))
 
 # trailing comment
 `
@@ -874,9 +874,9 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 func TestLoadRulesFromFile_InvalidLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := `(vc (service test-svc)(method GET)(path /health)(subject))
+	content := `(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))
 this is not valid
-(vc (service test-svc)(method POST)(path /upload)(subject bob))
+(vc (service test-svc)(method POST)(path /upload)(subject bob)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
@@ -890,13 +890,13 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := `# Wildcard subject
-(vc (service test-svc)(method GET)(path /api/v1/status)(subject (*)))
+(vc (service test-svc)(method GET)(path /api/v1/status)(subject *)(authentic_source *)(scope *))
 # Prefix path
-(vc (service test-svc)(method)(path (* prefix /api/v1/))(subject alice))
+(vc (service test-svc)(method *)(path (* prefix /api/v1/))(subject alice)(authentic_source *)(scope *))
 # Suffix path
-(vc (service test-svc)(method GET)(path (* suffix .json))(subject bob))
+(vc (service test-svc)(method GET)(path (* suffix .json))(subject bob)(authentic_source *)(scope *))
 # Set of methods
-(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie))
+(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
@@ -1391,7 +1391,7 @@ func TestJWTAuth_ResourceAccess_WrongScope(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
-	assert.Contains(t, w.Body.String(), "insufficient permissions for resource")
+	assert.Contains(t, w.Body.String(), "insufficient permissions")
 }
 
 func TestJWTAuth_ResourceAccess_WrongAuthenticSource(t *testing.T) {
@@ -1515,7 +1515,7 @@ func TestJWTAuth_ResourceAccess_WildcardAdmin(t *testing.T) {
 }
 
 func TestJWTAuth_NoResourcePairs_Allowed(t *testing.T) {
-	// Request with no resource fields (e.g. admin status) should pass if authenticated.
+	// Request with no resource fields should pass if rule uses wildcard for authentic_source/scope.
 	gin.SetMode(gin.TestMode)
 	m := newTestMiddleware(t)
 	priv, set := testKeyPair(t)
@@ -1523,7 +1523,7 @@ func TestJWTAuth_NoResourcePairs_Allowed(t *testing.T) {
 
 	engine := buildEngine(
 		t,
-		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source *)(scope *))",
 	)
 
 	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
@@ -1600,9 +1600,12 @@ func TestJWTAuth_ContextContainsAllowedScopes(t *testing.T) {
 	})
 
 	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
-	w := performRequest(r, "GET", "/api/v1/status", map[string]string{
-		"Authorization": "Bearer " + token,
-	})
+	body := `{"authentic_source":"SUNET","scope":"eduid"}`
+	req := httptest.NewRequest("GET", "/api/v1/status", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, []string{"SUNET"}, capturedSources)

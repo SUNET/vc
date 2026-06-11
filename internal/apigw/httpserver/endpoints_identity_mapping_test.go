@@ -56,6 +56,10 @@ func (m *identityMappingMock) IdentityMappingUpdate(_ context.Context, _ *apiv1.
 	return nil
 }
 
+func (m *identityMappingMock) DatastoreSearch(_ context.Context, _ *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error) {
+	return &apiv1.DatastoreSearchReply{Data: []*model.CompleteDocument{}}, nil
+}
+
 // --- test setup with identity mapping routes ---
 
 func testSetupIdentityMapping(t *testing.T, rules []string, mockAPI Apiv1) (*gin.Engine, *ecdsa.PrivateKey) {
@@ -413,7 +417,7 @@ func TestDatastoreSearch_SPOCPContextForwarding(t *testing.T) {
 	engine, priv := testSetup(t, rules, dsMock)
 
 	token := signTestJWT(t, priv, "alice", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/datastore/search?search=test", token, nil)
+	w := doRequest(engine, "GET", "/api/v1/datastore/search?search=test&authentic_source=SUNET&scope=eduid", token, nil)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.True(t, dsMock.searchCalled)
@@ -480,7 +484,7 @@ func TestIdentityMappingSearch_SPOCPContextForwarding(t *testing.T) {
 	engine, priv := testSetupIdentityMapping(t, rules, mock)
 
 	token := signTestJWT(t, priv, "alice", "https://test-issuer", "test-audience")
-	w := doRequest(engine, "GET", "/api/v1/identity/mapping/search?search=test", token, nil)
+	w := doRequest(engine, "GET", "/api/v1/identity/mapping/search?search=test&authentic_source=SUNET", token, nil)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.True(t, mock.searchCalled)
@@ -508,6 +512,74 @@ func TestIdentityMappingSearch_SPOCPDenied_NoIdentityMappingScope(t *testing.T) 
 }
 
 // ==================== Cross-scope isolation ====================
+
+// TestSPOCP_WrongSubject_DeniedOnAllEndpoints verifies that a user whose subject
+// does not match the SPOCP rule is denied on every /api/v1 endpoint, even when
+// the request carries no resource pairs (the original authorization bypass bug).
+func TestSPOCP_WrongSubject_DeniedOnAllEndpoints(t *testing.T) {
+	mock := &identityMappingMock{}
+	rules := []string{
+		// Only adminx@tecca is allowed — note the 'x'
+		`(vc (service apigw)(method *)(path /api/v1/*)(subject adminx@tecca)(authentic_source *)(scope *))`,
+	}
+	engine, priv := testSetupIdentityMapping(t, rules, mock)
+
+	// admin@tecca (without the 'x') should be denied everywhere
+	token := signTestJWT(t, priv, "admin@tecca", "https://test-issuer", "test-audience")
+
+	endpoints := []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{"GET", "/api/v1/identity/mapping/search?search=test", nil},
+		{"POST", "/api/v1/identity/mapping", map[string]any{"authentic_source": "SUNET", "attributes": map[string]string{"eppn": "x"}}},
+		{"PUT", "/api/v1/identity/mapping", map[string]any{"authentic_source": "SUNET", "authentic_source_person_id": "p1", "attributes": map[string]string{"eppn": "x"}}},
+		{"DELETE", "/api/v1/identity/mapping?authentic_source=SUNET&authentic_source_person_id=p1", nil},
+		{"GET", "/api/v1/datastore/search?search=test", nil},
+	}
+
+	for _, ep := range endpoints {
+		t.Run(ep.method+" "+ep.path, func(t *testing.T) {
+			w := doRequest(engine, ep.method, ep.path, token, ep.body)
+			assert.Equal(t, http.StatusForbidden, w.Code,
+				"wrong subject should be denied on %s %s", ep.method, ep.path)
+		})
+	}
+}
+
+// TestSPOCP_CorrectSubject_AllowedOnAllEndpoints verifies that the authorized
+// subject passes on every /api/v1 endpoint.
+func TestSPOCP_CorrectSubject_AllowedOnAllEndpoints(t *testing.T) {
+	mock := &identityMappingMock{}
+	rules := []string{
+		`(vc (service apigw)(method *)(path /api/v1/*)(subject admin@tecca)(authentic_source *)(scope *))`,
+	}
+	engine, priv := testSetupIdentityMapping(t, rules, mock)
+
+	token := signTestJWT(t, priv, "admin@tecca", "https://test-issuer", "test-audience")
+
+	endpoints := []struct {
+		method     string
+		path       string
+		body       any
+		wantStatus int
+	}{
+		{"GET", "/api/v1/identity/mapping/search?search=test", nil, http.StatusOK},
+		{"POST", "/api/v1/identity/mapping", map[string]any{"authentic_source": "SUNET", "attributes": map[string]string{"eppn": "x"}}, http.StatusOK},
+		{"PUT", "/api/v1/identity/mapping", map[string]any{"authentic_source": "SUNET", "authentic_source_person_id": "p1", "attributes": map[string]string{"eppn": "x"}}, http.StatusOK},
+		{"DELETE", "/api/v1/identity/mapping?authentic_source=SUNET&authentic_source_person_id=p1", nil, http.StatusOK},
+		{"GET", "/api/v1/datastore/search?search=test", nil, http.StatusOK},
+	}
+
+	for _, ep := range endpoints {
+		t.Run(ep.method+" "+ep.path, func(t *testing.T) {
+			w := doRequest(engine, ep.method, ep.path, token, ep.body)
+			assert.Equal(t, ep.wantStatus, w.Code,
+				"correct subject should be allowed on %s %s", ep.method, ep.path)
+		})
+	}
+}
 
 // TestUploadDenied_WrongScope verifies that a user with scope "eduid" cannot
 // upload a document with scope "pid".
