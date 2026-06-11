@@ -194,9 +194,12 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	return nil
 }
 
-// validateClaimPath checks that non-nil path elements are not empty strings.
+// validateClaimPath checks that the path is non-empty and that non-nil elements are not empty strings.
 // Nil elements are valid (they represent JSON null for array element access).
 func validateClaimPath(path []*string) error {
+	if len(path) == 0 {
+		return fmt.Errorf("claim path must not be empty")
+	}
 	for i, p := range path {
 		if p != nil && *p == "" {
 			return fmt.Errorf("claim path element at index %d must not be empty", i)

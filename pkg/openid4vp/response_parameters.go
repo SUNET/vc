@@ -25,6 +25,10 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+
+	if raw.State == "" {
+		return fmt.Errorf("state: missing or empty")
+	}
 	v.State = raw.State
 
 	if len(raw.VPToken) == 0 {
