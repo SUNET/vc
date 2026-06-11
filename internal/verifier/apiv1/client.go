@@ -307,6 +307,12 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // All scopes are considered for matching, including standard OIDC scopes like "openid".
 // Scopes that don't have a corresponding credential configuration are silently skipped,
 // making standard OIDC scopes optional - they can match if configured, but are not required.
+//
+// This is the fallback path used when no presentation request templates are configured
+// or when template loading fails (e.g. invalid presentation_requests_dir).
+// It does NOT enumerate individual claims from the VCTM — instead it omits the Claims
+// field, letting the wallet decide what to disclose. To request specific claims,
+// configure presentation request templates with explicit DCQL claim paths.
 func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, error) {
 	var credentials []openid4vp.CredentialQuery
 
@@ -329,19 +335,6 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			Meta: openid4vp.MetaQuery{
 				VCTValues: []string{vctID},
 			},
-			Claims: make([]openid4vp.ClaimQuery, 0),
-		}
-
-		// Add claims from VCTM claim paths
-		if credInfo.VCTM != nil {
-			for _, claim := range credInfo.VCTM.Claims {
-				if len(claim.Path) == 0 {
-					continue
-				}
-				cred.Claims = append(cred.Claims, openid4vp.ClaimQuery{
-					Path: claim.Path,
-				})
-			}
 		}
 
 		credentials = append(credentials, cred)
