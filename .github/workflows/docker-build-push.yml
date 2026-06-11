@@ -80,8 +80,10 @@ jobs:
       - name: Compute custom tag
         id: custom-tag
         if: inputs.image_tag != ''
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          SAFE_TAG=$(echo "${{ inputs.image_tag }}" \
+          SAFE_TAG=$(echo "${IMAGE_TAG}" \
             | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9._-]/-/g' \
             | sed 's/[-._]\{2,\}/-/g' \
