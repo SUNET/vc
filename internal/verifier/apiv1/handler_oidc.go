@@ -403,12 +403,16 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	idTokenTTL := time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
-		"sub":   sub,
-		"aud":   client.ClientID,
-		"exp":   now.Add(idTokenTTL).Unix(),
-		"iat":   now.Unix(),
-		"nonce": authCtx.Nonce,
+		"iss": c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
+		"sub": sub,
+		"aud": client.ClientID,
+		"exp": now.Add(idTokenTTL).Unix(),
+		"iat": now.Unix(),
+	}
+
+	// Only include nonce claim if a nonce was provided in the authorization request
+	if authCtx.Nonce != "" {
+		claims["nonce"] = authCtx.Nonce
 	}
 
 	// Add verified claims, but never overwrite reserved OIDC claims
