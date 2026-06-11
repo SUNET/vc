@@ -10,7 +10,7 @@
 </head>
 <body>
     <section class="section" x-data="app">
-        <div class="container" style="max-width: 500px;">
+        <div class="container">
             <h1 class="title has-text-weight-bold is-size-2 is-flex is-justify-content-center is-align-items-center is-gap-2" x-ref="title">
                 <svg width="40" height="40" aria-label="SUNET">
                     <image href="/static/logo.png" width="40" height="40"></image>
@@ -28,10 +28,11 @@
                     {{end}}
                 </div>
                 {{if .}}
+                    <div class="columns is-multiline">
                     {{range $idx, $cred := .CredentialData}}
-                        <hr>
+                        <div class="column is-half-desktop">
                         <div class="block">
-                            <h2 class="title is-size-5 mb-2">Credential claims</h2>
+                            <h2 class="title is-size-5 mb-2">Credential claims — {{$cred.Scope}}</h2>
                             {{if $cred.Credential}}
                                 <div class="table-container">
                                     <table class="table is-fullwidth is-hoverable">
@@ -50,11 +51,13 @@
                                 <p><em>No claims available.</em></p>
                             {{end}}
                         </div>
-                        <div class="block">
-                            <h2 class="title is-size-5 mb-2">Credential data</h2>
+                        <details class="vc-data-block-details">
+                            <summary>Credential data</summary>
                             <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;"><code>{{toJSON $cred.Credential}}</code></pre>
+                        </details>
                         </div>
                     {{end}}
+                    </div>
                 {{end}}
             </div>
             <div class="buttons is-centered">

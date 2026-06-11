@@ -213,6 +213,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 			// Add to per-scope credential cache
 			scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
+				Scope:      scope,
 				Credential: parsed.Claims,
 				Claims:     displayClaims,
 			})
@@ -255,6 +256,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 				verifiedClaims["namespaces"] = nsMap
 				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
+					Scope:      scope,
 					Credential: verifiedClaims,
 					Claims:     disclosers,
 				})
