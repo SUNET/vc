@@ -511,7 +511,7 @@ func TestDCQLValidationError(t *testing.T) {
 func TestNewVC20CredentialQuery(t *testing.T) {
 	id := "my_credential"
 	typeValues := [][]string{{"VerifiableCredential", "PersonalID"}}
-	claims := []ClaimQuery{{Path: []string{"given_name"}}}
+	claims := []ClaimQuery{{Path: StringPath("given_name")}}
 
 	query := NewVC20CredentialQuery(id, typeValues, claims)
 

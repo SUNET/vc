@@ -1,6 +1,10 @@
 package openid4vp
 
-import "slices"
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+)
 
 type DCQL struct {
 	// Credentials REQUIRED. A non-empty array of Credential Queries as defined in Section 6.1 that specify the requested Credentials.
@@ -134,8 +138,97 @@ type TrustedAuthority struct {
 }
 
 type ClaimQuery struct {
-	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer that specifies the path to a claim within the Credential, as defined in Section 7.
-	Path []string `json:"path" yaml:"path" validate:"required,min=1,dive,required"`
+	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer
+	// that specifies the path to a claim within the Credential, as defined in Section 7.
+	// Elements are strings (object keys) or nil (representing null for array element access).
+	Path []*string `json:"-" yaml:"-" validate:"required,min=1"`
+}
+
+// MarshalJSON implements custom JSON marshaling for ClaimQuery.
+// Nil path elements are serialized as JSON null (for DCQL array element access).
+func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
+	path := make([]any, len(cq.Path))
+	for i, p := range cq.Path {
+		if p == nil {
+			path[i] = nil
+		} else {
+			path[i] = *p
+		}
+	}
+	return json.Marshal(struct {
+		Path []any `json:"path"`
+	}{Path: path})
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
+// JSON null path elements are deserialized as nil pointers; non-string/non-null
+// elements cause an unmarshal error (Go's json package rejects them for *string).
+func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Path []*string `json:"path"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
+	}
+	cq.Path = raw.Path
+	return nil
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for ClaimQuery.
+// YAML null path elements are deserialized as nil pointers; non-string/non-null
+// elements cause an unmarshal error.
+func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw struct {
+		Path []*string `yaml:"path"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
+	}
+	cq.Path = raw.Path
+	return nil
+}
+
+// validateClaimPath checks that the path is non-empty and that non-nil elements are not empty strings.
+// Nil elements are valid (they represent JSON null for array element access).
+func validateClaimPath(path []*string) error {
+	if len(path) == 0 {
+		return fmt.Errorf("claim path must not be empty")
+	}
+	for i, p := range path {
+		if p != nil && *p == "" {
+			return fmt.Errorf("claim path element at index %d must not be empty", i)
+		}
+	}
+	return nil
+}
+
+// StringPath creates a []*string path from string arguments.
+// This is a convenience for constructing ClaimQuery paths.
+func StringPath(parts ...string) []*string {
+	path := make([]*string, len(parts))
+	for i := range parts {
+		s := parts[i]
+		path[i] = &s
+	}
+	return path
+}
+
+// ArrayElementPath creates a []*string path ending with nil (null) for array element access.
+// Example: ArrayElementPath("nationalities") → ["nationalities", null]
+func ArrayElementPath(parts ...string) []*string {
+	path := make([]*string, len(parts)+1)
+	for i := range parts {
+		s := parts[i]
+		path[i] = &s
+	}
+	path[len(parts)] = nil // null for array element access
+	return path
 }
 
 //type ClaimQuery struct {

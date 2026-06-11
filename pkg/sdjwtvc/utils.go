@@ -1,7 +1,6 @@
 package sdjwtvc
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -57,54 +56,14 @@ func (t Token) Parse() (*ParsedCredential, error) {
 		return nil, fmt.Errorf("failed to unmarshal claims: %w", err)
 	}
 
-	// Get the _sd array for hash comparison
-	var sdHashes []string
-	if sdField, ok := claims["_sd"]; ok {
-		if sdArray, ok := sdField.([]any); ok {
-			for _, h := range sdArray {
-				if hash, ok := h.(string); ok {
-					sdHashes = append(sdHashes, hash)
-				}
-			}
-		}
+	// Resolve all selective disclosures recursively (handles nested _sd arrays)
+	if err := resolveDisclosuresRecursive(claims, disclosures); err != nil {
+		return nil, err
 	}
 
-	// Process disclosures and add disclosed claims to the claims map
-	for _, disclosure := range disclosures {
-		// Calculate hash of disclosure
-		hash := sha256.Sum256([]byte(disclosure))
-		hashB64 := base64.RawURLEncoding.EncodeToString(hash[:])
-
-		// Check if this disclosure hash is in the _sd array
-		if slices.Contains(sdHashes, hashB64) {
-			// Decode the disclosure
-			disclosureBytes, err := base64.RawURLEncoding.DecodeString(disclosure)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode disclosure: %w", err)
-			}
-
-			// Parse disclosure array [salt, claim_name, claim_value]
-			var disclosureArray []any
-			if err := json.Unmarshal(disclosureBytes, &disclosureArray); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal disclosure: %w", err)
-			}
-
-			if len(disclosureArray) >= 3 {
-				claimName, ok := disclosureArray[1].(string)
-				if !ok {
-					return nil, fmt.Errorf("invalid claim name in disclosure")
-				}
-				claimValue := disclosureArray[2]
-
-				// Add disclosed claim to claims map
-				claims[claimName] = claimValue
-			}
-		}
-	}
-
-	// Remove _sd and _sd_alg from final claims (they're internal to SD-JWT)
-	delete(claims, "_sd")
-	delete(claims, "_sd_alg")
+	// Remove any unresolved array element markers {"...": hash} left behind
+	// when the wallet omits element disclosures from the token.
+	cleanUnresolvedMarkers(claims)
 
 	return &ParsedCredential{
 		Claims:      claims,
@@ -113,6 +72,188 @@ func (t Token) Parse() (*ParsedCredential, error) {
 		Signature:   signature,
 		KeyBinding:  keyBinding,
 	}, nil
+}
+
+// sdParsedDisclosure holds a parsed selective disclosure for resolution.
+type sdParsedDisclosure struct {
+	claimName  string
+	claimValue any
+	isArray    bool // true for array element disclosures [salt, value]
+}
+
+// resolveDisclosuresRecursive resolves selective disclosures at all levels of the claims map.
+// It matches disclosure hashes against _sd arrays in nested objects and inserts the disclosed values.
+// After processing, all _sd and _sd_alg keys are removed from the claims tree.
+func resolveDisclosuresRecursive(claims map[string]any, disclosures []string) error {
+	// Determine hash algorithm from _sd_alg claim (default: sha-256 per spec)
+	sdAlg, _ := claims["_sd_alg"].(string)
+	if sdAlg == "" {
+		sdAlg = "sha-256"
+	}
+	hashMethod, err := getHashFromAlgorithm(sdAlg)
+	if err != nil {
+		return fmt.Errorf("unsupported _sd_alg %q: %w", sdAlg, err)
+	}
+
+	// Build a map of disclosure hash -> parsed disclosure for efficient lookup
+	disclosureMap := make(map[string]*sdParsedDisclosure, len(disclosures))
+	for _, disclosure := range disclosures {
+		hashMethod.Reset()
+		hashMethod.Write([]byte(disclosure))
+		hashB64 := base64.RawURLEncoding.EncodeToString(hashMethod.Sum(nil))
+
+		disclosureBytes, err := base64.RawURLEncoding.DecodeString(disclosure)
+		if err != nil {
+			return fmt.Errorf("failed to base64url-decode disclosure: %w", err)
+		}
+
+		var disclosureArray []any
+		if err := json.Unmarshal(disclosureBytes, &disclosureArray); err != nil {
+			return fmt.Errorf("failed to unmarshal disclosure JSON: %w", err)
+		}
+
+		switch len(disclosureArray) {
+		case 2:
+			// Array element disclosure: [salt, value]
+			disclosureMap[hashB64] = &sdParsedDisclosure{
+				claimValue: disclosureArray[1],
+				isArray:    true,
+			}
+		case 3:
+			// Object property disclosure: [salt, claim_name, claim_value]
+			claimName, ok := disclosureArray[1].(string)
+			if !ok {
+				return fmt.Errorf("invalid disclosure: claim name must be a string, got %T", disclosureArray[1])
+			}
+			disclosureMap[hashB64] = &sdParsedDisclosure{
+				claimName:  claimName,
+				claimValue: disclosureArray[2],
+			}
+		default:
+			return fmt.Errorf("invalid disclosure format: expected 2 or 3 elements, got %d", len(disclosureArray))
+		}
+	}
+
+	// Recursively resolve _sd arrays in the claims tree
+	resolveNode(claims, disclosureMap)
+	return nil
+}
+
+// resolveNode processes a single map node, resolving its _sd array and recursing into nested maps.
+func resolveNode(node map[string]any, disclosureMap map[string]*sdParsedDisclosure) {
+	// Resolve _sd array at this level
+	if sdField, ok := node["_sd"]; ok {
+		if sdArray, ok := sdField.([]any); ok {
+			for _, h := range sdArray {
+				hashStr, ok := h.(string)
+				if !ok {
+					continue
+				}
+				if pd, found := disclosureMap[hashStr]; found && !pd.isArray {
+					node[pd.claimName] = pd.claimValue
+				}
+			}
+		}
+	}
+
+	// Remove _sd and _sd_alg from this level
+	delete(node, "_sd")
+	delete(node, "_sd_alg")
+
+	// Collect keys first to avoid issues with map iteration after modification.
+	// New keys added during _sd resolution above must be included.
+	keys := make([]string, 0, len(node))
+	for k := range node {
+		keys = append(keys, k)
+	}
+
+	// Recurse into nested maps and resolve array elements
+	for _, key := range keys {
+		value := node[key]
+		switch v := value.(type) {
+		case map[string]any:
+			resolveNode(v, disclosureMap)
+		case []any:
+			node[key] = resolveArrayNode(v, disclosureMap)
+		}
+	}
+}
+
+// resolveArrayNode processes an array, resolving any SD-JWT array element disclosures
+// (objects with a single "..." key containing a hash) and recursing into nested maps.
+func resolveArrayNode(arr []any, disclosureMap map[string]*sdParsedDisclosure) []any {
+	result := make([]any, 0, len(arr))
+	for _, elem := range arr {
+		switch v := elem.(type) {
+		case map[string]any:
+			// Check if this is an array element disclosure marker {"...": "<hash>"}
+			if len(v) == 1 {
+				if hashVal, ok := v["..."]; ok {
+					if hashStr, ok := hashVal.(string); ok {
+						if pd, found := disclosureMap[hashStr]; found && pd.isArray {
+							// Recurse into the disclosed value in case it
+							// contains nested _sd or array markers.
+							switch dv := pd.claimValue.(type) {
+							case map[string]any:
+								resolveNode(dv, disclosureMap)
+								result = append(result, dv)
+							case []any:
+								result = append(result, resolveArrayNode(dv, disclosureMap))
+							default:
+								result = append(result, pd.claimValue)
+							}
+							continue
+						}
+					}
+				}
+			}
+			// Regular nested object — recurse
+			resolveNode(v, disclosureMap)
+			result = append(result, v)
+		case []any:
+			result = append(result, resolveArrayNode(v, disclosureMap))
+		default:
+			result = append(result, elem)
+		}
+	}
+	return result
+}
+
+// cleanUnresolvedMarkers removes leftover {"...": hash} array element markers
+// from the claims tree. These remain when the wallet discloses a claim whose
+// value contains array element markers but doesn't include the corresponding
+// element disclosures in the token.
+func cleanUnresolvedMarkers(node map[string]any) {
+	for key, value := range node {
+		switch v := value.(type) {
+		case map[string]any:
+			cleanUnresolvedMarkers(v)
+		case []any:
+			node[key] = cleanArrayMarkers(v)
+		}
+	}
+}
+
+func cleanArrayMarkers(arr []any) []any {
+	result := make([]any, 0, len(arr))
+	for _, elem := range arr {
+		switch v := elem.(type) {
+		case map[string]any:
+			if len(v) == 1 {
+				if _, isMarker := v["..."]; isMarker {
+					// Skip unresolved marker
+					continue
+				}
+			}
+			cleanUnresolvedMarkers(v)
+			result = append(result, v)
+		case []any:
+			result = append(result, cleanArrayMarkers(v))
+		default:
+			result = append(result, elem)
+		}
+	}
+	return result
 }
 
 // Split splits the token into header, body, signature, selective disclosure, keybinding, or error

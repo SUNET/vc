@@ -180,7 +180,7 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 	response := &GetCredentialDisplayDataResponse{
 		SessionID:         authCtx.SessionID,
 		VPToken:           authCtx.VPToken,
-		Claims:            authCtx.VerifiedClaims,
+		Claims:            flattenClaimsForDisplay(authCtx.VerifiedClaims),
 		ClientID:          authCtx.ClientID,
 		RedirectURI:       authCtx.RedirectURI,
 		State:             authCtx.State,
@@ -200,4 +200,32 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 	}
 
 	return response, nil
+}
+
+// flattenClaimsForDisplay flattens nested maps into dot-notation keys for display.
+// For example, {"address": {"street": "Main St"}} becomes {"address.street": "Main St"}.
+// Non-map values are kept as-is. Arrays are kept as-is (rendered by the template).
+func flattenClaimsForDisplay(claims map[string]any) map[string]any {
+	if claims == nil {
+		return nil
+	}
+	result := make(map[string]any)
+	flattenRecursive(result, "", claims)
+	return result
+}
+
+func flattenRecursive(result map[string]any, prefix string, m map[string]any) {
+	for key, value := range m {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		switch v := value.(type) {
+		case map[string]any:
+			flattenRecursive(result, fullKey, v)
+		default:
+			result[fullKey] = value
+		}
+	}
 }

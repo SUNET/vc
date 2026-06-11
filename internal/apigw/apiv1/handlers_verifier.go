@@ -49,7 +49,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	claimQueries := make([]openid4vp.ClaimQuery, 0, len(vpAuth.AuthClaims))
 	for _, claim := range vpAuth.AuthClaims {
 		claimQueries = append(claimQueries, openid4vp.ClaimQuery{
-			Path: []string{claim},
+			Path: openid4vp.StringPath(claim),
 		})
 	}
 

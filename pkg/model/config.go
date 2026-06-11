@@ -1074,7 +1074,7 @@ type CredentialMetadata struct {
 	// Format is the credential format to issue
 	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
-	Attributes map[string]map[string][]string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
+	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving
 	// via /type-metadata/:scope. Only populated for local VCTMs (VCTMFilePath).
@@ -1174,7 +1174,7 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 }
 
 // GetAttributes returns the derived attributes under a read lock.
-func (c *CredentialMetadata) GetAttributes() map[string]map[string][]string {
+func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Attributes
