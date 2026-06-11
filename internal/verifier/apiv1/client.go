@@ -351,9 +351,15 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 		return nil, fmt.Errorf("no valid credentials found for requested scopes")
 	}
 
-	return &openid4vp.DCQL{
+	dcql := &openid4vp.DCQL{
 		Credentials: credentials,
-	}, nil
+	}
+
+	// Normalize: remove redundant parent paths that are superseded by more
+	// specific child or array-element paths (same logic used in UI queries).
+	c.augmentDCQLFromVCTM(dcql)
+
+	return dcql, nil
 }
 
 // extractAndMapClaims extracts claims from a VP token and maps them to OIDC claims

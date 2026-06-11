@@ -24,7 +24,6 @@ templates:
             - path: ["given_name"]
             - path: ["family_name"]
             - path: ["birthdate"]
-            - path: ["nationalities"]
             - path: ["nationalities", null]
     claim_mappings:
       given_name: "given_name"
@@ -51,7 +50,6 @@ templates:
             - path: ["family_name"]
             - path: ["birthdate"]
             - path: ["place_of_birth"]
-            - path: ["nationalities"]
             - path: ["nationalities", null]
             - path: ["sex"]
             - path: ["address"]

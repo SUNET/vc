@@ -26,11 +26,12 @@ func (v *VPResponse) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	v.State = raw.State
-	v.VPToken = make(map[string][]string)
 
 	if len(raw.VPToken) == 0 {
-		return nil
+		return fmt.Errorf("vp_token: missing or empty")
 	}
+
+	v.VPToken = make(map[string][]string)
 
 	// Try as object (DCQL format): {"id": "token"} or {"id": ["token1","token2"]}
 	var obj map[string]json.RawMessage
