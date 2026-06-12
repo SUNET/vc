@@ -42,6 +42,15 @@ func main() {
 		*email = *subject
 	}
 
+	// Guard against input/output file overlap
+	if *privInFile != "" {
+		for _, outFile := range []string{*jwtFile, *jwkFile, *privFile} {
+			if outFile != "" && outFile == *privInFile {
+				fatal("output file %q must not be the same as -priv-in to avoid overwriting the private key", outFile)
+			}
+		}
+	}
+
 	var privJWK jwk.Key
 
 	if *privInFile != "" {
@@ -53,6 +62,14 @@ func main() {
 		privJWK, err = jwk.ParseKey(privJSON)
 		if err != nil {
 			fatal("parse private key: %v", err)
+		}
+		// Validate the loaded key is an EC P-256 private key
+		var rawKey ecdsa.PrivateKey
+		if err := jwk.Export(privJWK, &rawKey); err != nil {
+			fatal("-priv-in must contain an EC private key (not a public key or other key type): %v", err)
+		}
+		if rawKey.Curve != elliptic.P256() {
+			fatal("-priv-in must be an EC P-256 key, got %s", rawKey.Curve.Params().Name)
 		}
 		fmt.Printf("Private key loaded from %s\n", *privInFile)
 	} else {
