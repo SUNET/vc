@@ -120,7 +120,10 @@ func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs m
 // Used when a datastore credential is authenticated via SAML/OIDC — the
 // identity extracted from the assertion is used to find the pre-loaded document.
 func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error {
-	identityClaims := dsCred.ExtractIdentityClaims(claims)
+	identityClaims, err := model.ExtractIdentityClaims(claims, dsCred.AuthClaims)
+	if err != nil {
+		return fmt.Errorf("identity extraction failed for scope %q: %w", scope, err)
+	}
 
 	// Resolve the person identifier — uses authentic_source_person_id directly
 	// when present in the extracted claims, otherwise falls back to identity

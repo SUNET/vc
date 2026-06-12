@@ -76,37 +76,62 @@ func TestLeafs_Array(t *testing.T) {
 }
 
 func TestExtractIdentityClaims(t *testing.T) {
-	ds := &DatastoreScope{
-		AuthClaims: []string{"sub", "email", "name"},
-	}
+	required := []string{"sub", "email", "name"}
 
 	claims := map[string]any{
 		"sub":   "user123",
 		"email": "test@example.com",
-		"age":   30, // non-string, should be skipped
+		"age":   30, // non-string, should cause error
 	}
 
-	result := ds.ExtractIdentityClaims(claims)
+	_, err := ExtractIdentityClaims(claims, required)
+	if err == nil {
+		t.Fatal("expected error for missing/non-string claims")
+	}
 
+	// With all required claims present as strings
+	claims["name"] = "Test User"
+	delete(claims, "age")
+	result, err := ExtractIdentityClaims(claims, []string{"sub", "email"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result["sub"] != "user123" {
 		t.Errorf("expected sub=user123, got %s", result["sub"])
 	}
 	if result["email"] != "test@example.com" {
 		t.Errorf("expected email=test@example.com, got %s", result["email"])
 	}
-	if _, ok := result["name"]; ok {
-		t.Error("name should not be in result (not in claims)")
-	}
-	if _, ok := result["age"]; ok {
-		t.Error("age should not be in result (not in AuthClaims)")
-	}
 }
 
 func TestExtractIdentityClaims_Empty(t *testing.T) {
-	ds := &DatastoreScope{}
-	result := ds.ExtractIdentityClaims(nil)
+	result, err := ExtractIdentityClaims(nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(result) != 0 {
 		t.Errorf("expected empty result, got %v", result)
+	}
+}
+
+func TestExtractIdentityClaims_MissingClaim(t *testing.T) {
+	claims := map[string]any{
+		"given_name": "John",
+	}
+	_, err := ExtractIdentityClaims(claims, []string{"given_name", "family_name"})
+	if err == nil {
+		t.Fatal("expected error for missing claim")
+	}
+}
+
+func TestExtractIdentityClaims_NonStringClaim(t *testing.T) {
+	claims := map[string]any{
+		"given_name": "John",
+		"age":        30,
+	}
+	_, err := ExtractIdentityClaims(claims, []string{"given_name", "age"})
+	if err == nil {
+		t.Fatal("expected error for non-string claim")
 	}
 }
 
@@ -198,8 +223,9 @@ func TestGetOpenID4VPAuth(t *testing.T) {
 						Scopes: map[string]DatastoreScope{
 							"test": {
 								AuthProvider: AuthProviderOpenID4VP,
-								AuthScopes:   []string{"openid"},
-								AuthClaims:   []string{"sub"},
+								AuthScopes: map[string]AuthScopeEntry{
+									"openid": {AuthClaims: []string{"sub"}},
+								},
 							},
 						},
 					},
@@ -210,8 +236,15 @@ func TestGetOpenID4VPAuth(t *testing.T) {
 		if result == nil {
 			t.Fatal("expected non-nil")
 		}
-		if len(result.AuthScopes) != 1 || result.AuthScopes[0] != "openid" {
-			t.Errorf("unexpected auth scopes: %v", result.AuthScopes)
+		if len(result.AuthScopes) != 1 {
+			t.Fatalf("expected 1 auth scope, got %d", len(result.AuthScopes))
+		}
+		entry, ok := result.AuthScopes["openid"]
+		if !ok {
+			t.Fatal("expected 'openid' key in AuthScopes")
+		}
+		if len(entry.AuthClaims) != 1 || entry.AuthClaims[0] != "sub" {
+			t.Errorf("unexpected auth claims: %v", entry.AuthClaims)
 		}
 	})
 
