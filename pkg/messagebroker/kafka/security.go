@@ -1,0 +1,71 @@
+package kafka
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"os"
+	"path/filepath"
+
+	"github.com/SUNET/vc/pkg/model"
+
+	"github.com/IBM/sarama"
+)
+
+// applySecurityConfig applies SASL and TLS settings from cfg to the Sarama configuration.
+func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) {
+	if cfg == nil || cfg.Common == nil {
+		return
+	}
+	kafka := &cfg.Common.Kafka
+
+	// SASL
+	if kafka.SASL != nil && kafka.SASL.Enable {
+		saramaConfig.Net.SASL.Enable = true
+		saramaConfig.Net.SASL.User = kafka.SASL.Username
+		saramaConfig.Net.SASL.Password = kafka.SASL.Password
+
+		switch kafka.SASL.Mechanism {
+		case "SCRAM-SHA-256":
+			saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA256} }
+			saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		case "SCRAM-SHA-512":
+			saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA512} }
+			saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+		default: // PLAIN
+			saramaConfig.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		}
+	}
+
+	// TLS
+	if kafka.MTLS.Enable {
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+
+		// Load CA cert if provided
+		if kafka.MTLS.CACertPath != "" {
+			caCert, err := os.ReadFile(filepath.Clean(kafka.MTLS.CACertPath))
+			if err == nil {
+				caCertPool := x509.NewCertPool()
+				caCertPool.AppendCertsFromPEM(caCert)
+				tlsConfig.RootCAs = caCertPool
+			}
+		}
+
+		// Load client cert/key for mTLS if provided
+		if kafka.MTLS.CertFilePath != "" && kafka.MTLS.KeyFilePath != "" {
+			cert, err := tls.LoadX509KeyPair(
+				filepath.Clean(kafka.MTLS.CertFilePath),
+				filepath.Clean(kafka.MTLS.KeyFilePath),
+			)
+			if err == nil {
+				tlsConfig.Certificates = []tls.Certificate{cert}
+			}
+		}
+
+		tlsConfig.InsecureSkipVerify = kafka.MTLS.InsecureSkipVerify //nolint:gosec // configurable for testing only
+
+		saramaConfig.Net.TLS.Enable = true
+		saramaConfig.Net.TLS.Config = tlsConfig
+	}
+}

@@ -53,12 +53,12 @@ func NewConsumerClient(ctx context.Context, cfg *model.Cfg, brokers []string, lo
 
 // commonConsumerConfig returns a new Kafka consumer configuration instance with sane defaults for vc.
 func commonConsumerConfig(cfg *model.Cfg) *sarama.Config {
-	// TODO: set cfg from file - is now hardcoded
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
 	saramaConfig.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRange()}
-	saramaConfig.Net.SASL.Enable = false
-	// TODO: enable and configure security when consuming from Kafka
+
+	applySecurityConfig(saramaConfig, cfg)
+
 	return saramaConfig
 }
 
