@@ -49,6 +49,9 @@ var defaultAllowedAlgorithms = []string{"RS256", "RS384", "RS512", "ES256", "ES3
 // the signature, audience, issuer/subject, expiration, and jti (replay protection).
 // Returns the validated claims or an error.
 func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, client *Client) (*ClientAssertionClaims, error) {
+	if client == nil {
+		return nil, errors.New("client is nil")
+	}
 	if client.JWKSURI == "" {
 		return nil, errors.New("client has no jwks_uri configured for assertion verification")
 	}
