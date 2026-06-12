@@ -122,6 +122,7 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 		jwt.WithValidMethods(allowedAlgs),
 		jwt.WithAudience(v.TokenEndpoint),
 		jwt.WithExpirationRequired(),
+		jwt.WithLeeway(30*time.Second),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("client assertion verification failed: %w", err)
