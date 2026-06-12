@@ -156,7 +156,9 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 	}
 	expTime := time.Unix(int64(expFloat), 0)
 	iatTime := time.Unix(int64(iatFloat), 0)
-
+	if expTime.Before(iatTime) {
+		return nil, errors.New("client assertion 'exp' must be after 'iat'")
+	}
 	// Check max lifetime
 	maxLifetime := v.MaxLifetime
 	if maxLifetime == 0 {
