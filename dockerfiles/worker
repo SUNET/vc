@@ -13,7 +13,11 @@ RUN make install-tools
 RUN make clean-apt-cache
 
 # Compile
-FROM gobuild AS builder
+# Pin builder to the build host's native platform so Go can cross-compile
+# for TARGETARCH. The gobuild base image must have a manifest for BUILDPLATFORM
+# (golang and pre-built gobuild images are typically amd64/arm64 multi-arch).
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM gobuild AS builder
 
 ARG SERVICE_NAME
 ARG BUILDTAG
@@ -35,11 +39,17 @@ RUN make proto-${SERVICE_NAME}
 # Build with caching for both build cache and module cache
 # GO_BUILD_TAGS is optional - if set, adds -tags flag
 # CGO defaults to disabled for static builds. Pass --build-arg CGO_ENABLED=1
-# for features that require CGO (e.g. pkcs11 HSM support).
+# for features that require CGO (e.g. pkcs11 HSM support). Note: CGO with
+# cross-compilation requires a cross C toolchain in the builder image.
+# TARGETARCH is set automatically by BuildKit to the target platform.
+# With BuildKit (required by RUN --mount), even plain docker build sets
+# TARGETARCH to the host architecture, so this default is only a
+# documentation hint and does not affect BuildKit-based builds.
 ARG CGO_ENABLED=0
+ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=amd64 go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
+    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH} go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
     "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
     -X vc/pkg/model.BuildVariableTimestamp=$(date +'%F:T%TZ') \
