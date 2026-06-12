@@ -178,8 +178,8 @@ func TestBuildSPOCPEngine_NoRules(t *testing.T) {
 func TestBuildSPOCPEngine_InlineRules(t *testing.T) {
 	cfg := model.APIAuth{
 		Rules: []string{
-			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))",
-			"(vc (service test-svc)(method)(path /api/v1/document)(subject))",
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))",
+			"(vc (service test-svc)(method *)(path /api/v1/document)(subject *)(authentic_source *)(scope *))",
 		},
 	}
 
@@ -199,10 +199,65 @@ func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid inline SPOCP rule #1")
 }
 
+func TestBuildSPOCPEngine_MissingRequiredParts(t *testing.T) {
+	// Rule with only 4 parts; strict validation requires exactly 6.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must have exactly 6 parts, got 4")
+}
+
+func TestBuildSPOCPEngine_EmptyRequiredParts(t *testing.T) {
+	// All 6 parts present, but scope has no value.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "(scope) must have exactly 1 value")
+}
+
+func TestBuildSPOCPEngine_WrongOrder(t *testing.T) {
+	// All 6 parts present with values, but method and service are swapped.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (method GET)(service svc)(path /api)(subject alice)(authentic_source SUNET)(scope eduid))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "part 1 must be (service ...)")
+}
+
+func TestBuildSPOCPEngine_ExtraParts(t *testing.T) {
+	// Valid 6 parts plus an extra one.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope eduid)(extra foo))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must have exactly 6 parts, got 7")
+}
+
+func TestBuildSPOCPEngine_MultiValuedPart(t *testing.T) {
+	// scope has 2 values instead of exactly 1.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope eduid pda1))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "(scope) must have exactly 1 value, got 2")
+}
+
 func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := "(vc (service test-svc)(method GET)(path /health)(subject))\n"
+	content := "(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{
@@ -228,11 +283,11 @@ func TestBuildSPOCPEngine_RulesFileMissing(t *testing.T) {
 func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))\n"
+	content := "(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin)(authentic_source *)(scope *))\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
 	cfg := model.APIAuth{
-		Rules:     []string{"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))"},
+		Rules:     []string{"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))"},
 		RulesFile: path,
 	}
 
@@ -247,7 +302,7 @@ func TestBuildSPOCPEngine_InlineAndFile(t *testing.T) {
 func TestBuildAPISPOCPQuery(t *testing.T) {
 	q := BuildSPOCPQuery("test-svc", "POST", "/api/v1/upload", "alice", "", "")
 	assert.NotNil(t, q)
-	// With empty authentic_source/scope, only the 4 core tuples should be present.
+	// All 6 fields are always present in the query.
 	s := q.String()
 	assert.Contains(t, s, "service")
 	assert.Contains(t, s, "test-svc")
@@ -257,8 +312,8 @@ func TestBuildAPISPOCPQuery(t *testing.T) {
 	assert.Contains(t, s, "/api/v1/upload")
 	assert.Contains(t, s, "subject")
 	assert.Contains(t, s, "alice")
-	assert.NotContains(t, s, "authentic_source")
-	assert.NotContains(t, s, "scope")
+	assert.Contains(t, s, "authentic_source")
+	assert.Contains(t, s, "scope")
 }
 
 func TestBuildAPISPOCPQuery_WithResourceFields(t *testing.T) {
@@ -520,6 +575,656 @@ func TestJWTAuth_SPOCPMultipleRules(t *testing.T) {
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestJWTAuth_SPOCPSuffixSubject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
+		Rules: []string{
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+		},
+	}
+
+	engine, err := BuildSPOCPEngine(authCfg)
+	require.NoError(t, err)
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/upload", handler, okHandler)
+
+	tests := []struct {
+		name       string
+		subject    string
+		wantStatus int
+	}{
+		{"sunet user allowed", "alice@sunet.se", http.StatusOK},
+		{"another sunet user allowed", "bob@sunet.se", http.StatusOK},
+		{"non-sunet user denied", "alice@example.com", http.StatusForbidden},
+		{"partial match denied", "alice@notsunet.se", http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			token := signJWTWithEPPN(t, priv, tc.subject, "test-issuer", "test-aud")
+			body := `{"authentic_source":"SUNET","scope":"eduid"}`
+			req := httptest.NewRequest("POST", "/api/v1/upload", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code, "subject %s", tc.subject)
+		})
+	}
+}
+
+func TestJWTAuth_SPOCPPrefixSubject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
+	}
+	authCfg := model.APIAuth{
+		Rules: []string{
+			"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* prefix admin-))(authentic_source SUNET)(scope eduid))",
+		},
+	}
+
+	engine, err := BuildSPOCPEngine(authCfg)
+	require.NoError(t, err)
+
+	handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
+
+	r := gin.New()
+	r.POST("/api/v1/upload", handler, okHandler)
+
+	tests := []struct {
+		name       string
+		subject    string
+		wantStatus int
+	}{
+		{"admin prefix allowed", "admin-alice@sunet.se", http.StatusOK},
+		{"another admin allowed", "admin-bob@sunet.se", http.StatusOK},
+		{"non-admin denied", "user-alice@sunet.se", http.StatusForbidden},
+		{"partial mismatch denied", "notadmin-x@sunet.se", http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			token := signJWTWithEPPN(t, priv, tc.subject, "test-issuer", "test-aud")
+			body := `{"authentic_source":"SUNET","scope":"eduid"}`
+			req := httptest.NewRequest("POST", "/api/v1/upload", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code, "subject %s", tc.subject)
+		})
+	}
+}
+
+func TestJWTAuth_SPOCPRuleCombinations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+	priv, set := testKeyPair(t)
+	srv, cache := jwksServer(t, set)
+
+	jwksCfg := model.APIAuthJWKS{
+		Enable:   true,
+		JWKSURL:  srv.URL,
+		Issuer:   "test-issuer",
+		Audience: "test-aud",
+	}
+
+	tests := []struct {
+		name            string
+		rules           []string
+		method          string
+		path            string
+		subject         string
+		authenticSource string
+		scope           string
+		allow           bool
+	}{
+		// Exact match on all parts
+		{
+			name: "exact match all parts",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "exact match wrong subject",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "bob@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           false,
+		},
+
+		// Wildcard (*) in different positions
+		{
+			name: "wildcard method",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "DELETE",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "wildcard subject",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject *)(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "anyone@anywhere.org",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "wildcard authentic_source",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source *)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "LADOK",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "wildcard scope",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "pda1",
+			allow:           true,
+		},
+		{
+			name: "all wildcards",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path *)(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/anything",
+			subject:         "whoever@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+
+		// Suffix patterns
+		{
+			name: "suffix subject match",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "user@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "suffix subject no match",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "user@lu.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           false,
+		},
+		{
+			name: "suffix path match",
+			rules: []string{
+				"(vc (service test-svc)(method GET)(path (* suffix /health))(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/health",
+			subject:         "anyone@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "suffix path no match",
+			rules: []string{
+				"(vc (service test-svc)(method GET)(path (* suffix /health))(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/status",
+			subject:         "anyone@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           false,
+		},
+
+		// Prefix patterns
+		{
+			name: "prefix subject match",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* prefix admin-))(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "admin-alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "prefix subject no match",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* prefix admin-))(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "user-alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           false,
+		},
+		{
+			name: "prefix path match",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path (* prefix /api/v1/))(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/documents",
+			subject:         "anyone@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "prefix path no match",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path (* prefix /api/v1/))(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/internal/admin",
+			subject:         "anyone@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           false,
+		},
+		{
+			name: "prefix path shorthand match",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/*)(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/users",
+			subject:         "anyone@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "prefix path shorthand no match",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/*)(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v2/users",
+			subject:         "anyone@test",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           false,
+		},
+
+		// Combined patterns across multiple parts
+		{
+			name: "suffix subject + prefix path",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/*)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "LADOK",
+			scope:           "pid",
+			allow:           true,
+		},
+		{
+			name: "suffix subject + prefix path denied",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/*)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "alice@example.com",
+			authenticSource: "LADOK",
+			scope:           "pid",
+			allow:           false,
+		},
+		{
+			name: "suffix subject + exact scope",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "bob@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "suffix subject + wrong scope",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "bob@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "pid",
+			allow:           false,
+		},
+		{
+			name: "prefix subject + wildcard source + suffix path",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path (* suffix /status))(subject (* prefix svc-))(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/status",
+			subject:         "svc-monitor@ops",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "prefix subject + wildcard source + suffix path denied",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path (* suffix /status))(subject (* prefix svc-))(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/health",
+			subject:         "svc-monitor@ops",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           false,
+		},
+
+		// Multiple rules loaded together
+		{
+			name: "multi-rule: first rule matches",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/status)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: second rule matches",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/status)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/status",
+			subject:         "bob@sunet.se",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: no rule matches",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/status)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/status",
+			subject:         "bob@example.com",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           false,
+		},
+		{
+			name: "multi-rule: overlapping rules, more permissive wins",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method *)(path /api/v1/*)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "DELETE",
+			path:            "/api/v1/upload",
+			subject:         "alice@sunet.se",
+			authenticSource: "LADOK",
+			scope:           "pid",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: role-based with admin fallback",
+			rules: []string{
+				"(vc (service test-svc)(method GET)(path /api/v1/docs)(subject (* suffix @student.se))(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method *)(path *)(subject (* prefix admin-))(authentic_source *)(scope *))",
+			},
+			method:          "DELETE",
+			path:            "/api/v1/docs",
+			subject:         "admin-ops@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: student can read but not delete",
+			rules: []string{
+				"(vc (service test-svc)(method GET)(path /api/v1/docs)(subject (* suffix @student.se))(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method *)(path *)(subject (* prefix admin-))(authentic_source *)(scope *))",
+			},
+			method:          "DELETE",
+			path:            "/api/v1/docs",
+			subject:         "eve@student.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           false,
+		},
+		{
+			name: "multi-rule: per-scope access, eduid allowed",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/credential)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method POST)(path /api/v1/credential)(subject (* suffix @sunet.se))(authentic_source LADOK)(scope pid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/credential",
+			subject:         "alice@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: per-scope access, pid allowed",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/credential)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method POST)(path /api/v1/credential)(subject (* suffix @sunet.se))(authentic_source LADOK)(scope pid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/credential",
+			subject:         "alice@sunet.se",
+			authenticSource: "LADOK",
+			scope:           "pid",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: per-scope access, wrong authentic source denied",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/credential)(subject (* suffix @sunet.se))(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method POST)(path /api/v1/credential)(subject (* suffix @sunet.se))(authentic_source LADOK)(scope pid))",
+			},
+			method:          "POST",
+			path:            "/api/v1/credential",
+			subject:         "alice@sunet.se",
+			authenticSource: "LADOK",
+			scope:           "eduid",
+			allow:           false,
+		},
+		{
+			name: "multi-rule: path-specific + catch-all read",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path *)(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/upload",
+			subject:         "bob@example.com",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: path-specific + catch-all read, POST denied for wrong user",
+			rules: []string{
+				"(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path *)(subject *)(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/upload",
+			subject:         "bob@example.com",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           false,
+		},
+		{
+			name: "multi-rule: suffix + prefix subjects, different paths",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/internal/*)(subject (* prefix svc-))(authentic_source *)(scope *))",
+				"(vc (service test-svc)(method GET)(path /api/v1/public/*)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/public/docs",
+			subject:         "user@sunet.se",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: suffix + prefix subjects, wrong path for suffix user",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/internal/*)(subject (* prefix svc-))(authentic_source *)(scope *))",
+				"(vc (service test-svc)(method GET)(path /api/v1/public/*)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "GET",
+			path:            "/api/v1/internal/config",
+			subject:         "user@sunet.se",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           false,
+		},
+		{
+			name: "multi-rule: suffix + prefix subjects, svc prefix on internal path",
+			rules: []string{
+				"(vc (service test-svc)(method *)(path /api/v1/internal/*)(subject (* prefix svc-))(authentic_source *)(scope *))",
+				"(vc (service test-svc)(method GET)(path /api/v1/public/*)(subject (* suffix @sunet.se))(authentic_source *)(scope *))",
+			},
+			method:          "POST",
+			path:            "/api/v1/internal/config",
+			subject:         "svc-deployer@ops",
+			authenticSource: "ANY",
+			scope:           "any",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: three rules, third matches",
+			rules: []string{
+				"(vc (service test-svc)(method GET)(path /api/v1/a)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/b)(subject bob@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/c)(subject charlie@sunet.se)(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "GET",
+			path:            "/api/v1/c",
+			subject:         "charlie@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           true,
+		},
+		{
+			name: "multi-rule: three rules, none matches",
+			rules: []string{
+				"(vc (service test-svc)(method GET)(path /api/v1/a)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/b)(subject bob@sunet.se)(authentic_source SUNET)(scope eduid))",
+				"(vc (service test-svc)(method GET)(path /api/v1/c)(subject charlie@sunet.se)(authentic_source SUNET)(scope eduid))",
+			},
+			method:          "GET",
+			path:            "/api/v1/c",
+			subject:         "dave@sunet.se",
+			authenticSource: "SUNET",
+			scope:           "eduid",
+			allow:           false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			authCfg := model.APIAuth{Rules: tc.rules}
+			engine, err := BuildSPOCPEngine(authCfg)
+			require.NoError(t, err)
+
+			handler := m.JWKSAuth(context.Background(), "test-svc", jwksCfg, cache, engine)
+
+			r := gin.New()
+			r.Handle(tc.method, tc.path, handler, okHandler)
+
+			body := fmt.Sprintf(`{"authentic_source":%q,"scope":%q}`, tc.authenticSource, tc.scope)
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+			token := signJWTWithEPPN(t, priv, tc.subject, "test-issuer", "test-aud")
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if tc.allow {
+				assert.Equal(t, http.StatusOK, w.Code)
+			} else {
+				assert.Equal(t, http.StatusForbidden, w.Code)
+			}
 		})
 	}
 }
@@ -809,9 +1514,9 @@ func TestAPIAuth_JWTWithSPOCPRulesFile(t *testing.T) {
 func TestLoadRulesFromFile_MultipleRules(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := `(vc (service test-svc)(method GET)(path /health)(subject))
-(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
-(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin))
+	content := `(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))
+(vc (service test-svc)(method DELETE)(path /api/v1/document)(subject admin)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
@@ -826,11 +1531,11 @@ func TestLoadRulesFromFile_BlankLinesAndComments(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := `# This is a comment
-(vc (service test-svc)(method GET)(path /health)(subject))
+(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))
 
 # Another comment
 
-(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice))
+(vc (service test-svc)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))
 
 # trailing comment
 `
@@ -874,9 +1579,9 @@ func TestLoadRulesFromFile_CommentsOnly(t *testing.T) {
 func TestLoadRulesFromFile_InvalidLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
-	content := `(vc (service test-svc)(method GET)(path /health)(subject))
+	content := `(vc (service test-svc)(method GET)(path /health)(subject *)(authentic_source *)(scope *))
 this is not valid
-(vc (service test-svc)(method POST)(path /upload)(subject bob))
+(vc (service test-svc)(method POST)(path /upload)(subject bob)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
@@ -890,13 +1595,13 @@ func TestLoadRulesFromFile_StarForms(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rules.spocp")
 	content := `# Wildcard subject
-(vc (service test-svc)(method GET)(path /api/v1/status)(subject (*)))
+(vc (service test-svc)(method GET)(path /api/v1/status)(subject *)(authentic_source *)(scope *))
 # Prefix path
-(vc (service test-svc)(method)(path (* prefix /api/v1/))(subject alice))
+(vc (service test-svc)(method *)(path (* prefix /api/v1/))(subject alice)(authentic_source *)(scope *))
 # Suffix path
-(vc (service test-svc)(method GET)(path (* suffix .json))(subject bob))
+(vc (service test-svc)(method GET)(path (* suffix .json))(subject bob)(authentic_source *)(scope *))
 # Set of methods
-(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie))
+(vc (service test-svc)(method (* set GET POST))(path /api/v1/items)(subject charlie)(authentic_source *)(scope *))
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644)) // #nosec G306
 
@@ -1391,7 +2096,7 @@ func TestJWTAuth_ResourceAccess_WrongScope(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
-	assert.Contains(t, w.Body.String(), "insufficient permissions for resource")
+	assert.Contains(t, w.Body.String(), "insufficient permissions")
 }
 
 func TestJWTAuth_ResourceAccess_WrongAuthenticSource(t *testing.T) {
@@ -1515,7 +2220,7 @@ func TestJWTAuth_ResourceAccess_WildcardAdmin(t *testing.T) {
 }
 
 func TestJWTAuth_NoResourcePairs_Allowed(t *testing.T) {
-	// Request with no resource fields (e.g. admin status) should pass if authenticated.
+	// Request with no resource fields should pass if rule uses wildcard for authentic_source/scope.
 	gin.SetMode(gin.TestMode)
 	m := newTestMiddleware(t)
 	priv, set := testKeyPair(t)
@@ -1523,7 +2228,7 @@ func TestJWTAuth_NoResourcePairs_Allowed(t *testing.T) {
 
 	engine := buildEngine(
 		t,
-		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))",
+		"(vc (service apigw)(method *)(path /api/v1/*)(subject alice@sunet.se)(authentic_source *)(scope *))",
 	)
 
 	handler := m.JWKSAuth(context.Background(), "apigw", model.APIAuthJWKS{
@@ -1600,9 +2305,12 @@ func TestJWTAuth_ContextContainsAllowedScopes(t *testing.T) {
 	})
 
 	token := signJWTWithEPPN(t, priv, "alice@sunet.se", "test-issuer", "test-aud")
-	w := performRequest(r, "GET", "/api/v1/status", map[string]string{
-		"Authorization": "Bearer " + token,
-	})
+	body := `{"authentic_source":"SUNET","scope":"eduid"}`
+	req := httptest.NewRequest("GET", "/api/v1/status", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, []string{"SUNET"}, capturedSources)

@@ -346,6 +346,47 @@ func (s *SafeEngine) RuleCount() int {
 	return s.engine.RuleCount()
 }
 
+// requiredRuleParts lists the tagged sub-lists that every SPOCP rule must contain.
+// All six parts are mandatory — use * as wildcard for fields you don't want to restrict.
+var requiredRuleParts = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
+
+// validateRuleElement checks that a parsed SPOCP rule element is a list with
+// tag "vc" containing exactly the 6 required sub-lists in positional order
+// (service, method, path, subject, authentic_source, scope), each with exactly
+// one value. SPOCP matching is positional, so wrong order, duplicates, extra
+// parts, or multi-valued parts would silently never match.
+func validateRuleElement(elem sexp.Element, source string) error {
+	list, ok := elem.(*sexp.List)
+	if !ok {
+		return fmt.Errorf("%s: rule must be a list, got %T", source, elem)
+	}
+	if list.Tag != "vc" {
+		return fmt.Errorf("%s: rule must have tag \"vc\", got %q", source, list.Tag)
+	}
+
+	if len(list.Elements) != len(requiredRuleParts) {
+		return fmt.Errorf("%s: rule must have exactly %d parts, got %d",
+			source, len(requiredRuleParts), len(list.Elements))
+	}
+
+	for i, req := range requiredRuleParts {
+		child := list.Elements[i]
+		cl, ok := child.(*sexp.List)
+		if !ok {
+			return fmt.Errorf("%s: part %d must be a list, got %T", source, i+1, child)
+		}
+		if cl.Tag != req {
+			return fmt.Errorf("%s: part %d must be (%s ...), got (%s ...)",
+				source, i+1, req, cl.Tag)
+		}
+		if len(cl.Elements) != 1 {
+			return fmt.Errorf("%s: part (%s) must have exactly 1 value, got %d (use * as wildcard)",
+				source, req, len(cl.Elements))
+		}
+	}
+	return nil
+}
+
 // BuildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
 func BuildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
@@ -362,6 +403,9 @@ func BuildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
 		elem, err := parseAdvancedSExp(r)
 		if err != nil {
 			return nil, fmt.Errorf("invalid inline SPOCP rule #%d: %w", i+1, err)
+		}
+		if err := validateRuleElement(elem, fmt.Sprintf("inline rule #%d", i+1)); err != nil {
+			return nil, err
 		}
 		engine.AddRuleElement(elem)
 	}
@@ -419,6 +463,9 @@ func loadRulesFromFile(engine *spocp.AdaptiveEngine, path string) error {
 		elem, err := parseAdvancedSExp(line)
 		if err != nil {
 			return fmt.Errorf("line %d: %w", lineNum, err)
+		}
+		if err := validateRuleElement(elem, fmt.Sprintf("file line %d", lineNum)); err != nil {
+			return err
 		}
 		engine.AddRuleElement(elem)
 	}
@@ -643,19 +690,14 @@ func extractSPOCPSubject(token jwt.Token) string {
 // The service dimension ensures that rules written for one service do not
 // accidentally grant access to another service sharing the same endpoints.
 func BuildSPOCPQuery(service, method, path, subject, authenticSource, scope string) sexp.Element {
-	elements := []sexp.Element{
+	return sexp.NewList("vc",
 		sexp.NewList("service", sexp.NewAtom(service)),
 		sexp.NewList("method", sexp.NewAtom(method)),
 		sexp.NewList("path", sexp.NewAtom(path)),
 		sexp.NewList("subject", sexp.NewAtom(subject)),
-	}
-	if authenticSource != "" {
-		elements = append(elements, sexp.NewList("authentic_source", sexp.NewAtom(authenticSource)))
-	}
-	if scope != "" {
-		elements = append(elements, sexp.NewList("scope", sexp.NewAtom(scope)))
-	}
-	return sexp.NewList("vc", elements...)
+		sexp.NewList("authentic_source", sexp.NewAtom(authenticSource)),
+		sexp.NewList("scope", sexp.NewAtom(scope)),
+	)
 }
 
 // ResourcePair represents an allowed (authentic_source, scope) combination.
@@ -877,18 +919,16 @@ func (m *middlewareHandler) JWKSAuth(ctx context.Context, service string, cfg mo
 			allowedScopes := AllowedScopes(engine, sub)
 			c.Set("spocp_allowed_scopes", allowedScopes)
 
-			// Resource access: every resource-bearing request must include
-			// both authentic_source and scope so the full SPOCP query is used.
 			pairs := extractResourcePairs(c)
+			if len(pairs) == 0 {
+				pairs = []resourcePair{{}}
+			}
 			for _, p := range pairs {
-				if p.authenticSource == "" && p.scope == "" {
-					continue
-				}
 				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub, p.authenticSource, p.scope)
 				if !engine.QueryElement(query) {
 					log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(),
 						"authentic_source", p.authenticSource, "scope", p.scope, "req_id", c.GetString("req_id"))
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for resource"})
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 					return
 				}
 			}
@@ -956,15 +996,15 @@ func (m *middlewareHandler) JWKSAuthWithProvider(_ context.Context, service stri
 			c.Set("spocp_allowed_scopes", allowedScopes)
 
 			pairs := extractResourcePairs(c)
+			if len(pairs) == 0 {
+				pairs = []resourcePair{{}}
+			}
 			for _, p := range pairs {
-				if p.authenticSource == "" && p.scope == "" {
-					continue
-				}
 				query := BuildSPOCPQuery(service, c.Request.Method, c.FullPath(), sub, p.authenticSource, p.scope)
 				if !engine.QueryElement(query) {
 					log.Info("spocp_denied", "subject", sub, "service", service, "method", c.Request.Method, "path", c.FullPath(),
 						"authentic_source", p.authenticSource, "scope", p.scope, "req_id", c.GetString("req_id"))
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for resource"})
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 					return
 				}
 			}
