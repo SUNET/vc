@@ -36,6 +36,11 @@ type Cache[V any] interface {
 	// "already exists" from operational errors.
 	SetNX(ctx context.Context, key string, value V) (bool, error)
 
+	// SetNXWithTTL stores a value only if the key does not already exist (atomic),
+	// using a custom TTL instead of the default. Returns true if the value was set,
+	// false if the key already existed.
+	SetNXWithTTL(ctx context.Context, key string, value V, ttl time.Duration) (bool, error)
+
 	// SetWithTTL stores a value with a custom TTL, overriding the default.
 	SetWithTTL(ctx context.Context, key string, value V, ttl time.Duration)
 

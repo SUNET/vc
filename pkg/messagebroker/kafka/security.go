@@ -56,17 +56,18 @@ func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) error {
 			tlsConfig.RootCAs = caCertPool
 		}
 
-		// Load client cert/key for mTLS if provided
-		if kafka.MTLS.CertFilePath != "" && kafka.MTLS.KeyFilePath != "" {
-			cert, err := tls.LoadX509KeyPair(
-				filepath.Clean(kafka.MTLS.CertFilePath),
-				filepath.Clean(kafka.MTLS.KeyFilePath),
-			)
-			if err != nil {
-				return fmt.Errorf("loading client cert/key (%q, %q): %w", kafka.MTLS.CertFilePath, kafka.MTLS.KeyFilePath, err)
-			}
-			tlsConfig.Certificates = []tls.Certificate{cert}
+		// Load client cert/key for mTLS — required when mTLS is enabled
+		if kafka.MTLS.CertFilePath == "" || kafka.MTLS.KeyFilePath == "" {
+			return fmt.Errorf("kafka mTLS is enabled but cert_file_path and key_file_path must both be set")
 		}
+		cert, err := tls.LoadX509KeyPair(
+			filepath.Clean(kafka.MTLS.CertFilePath),
+			filepath.Clean(kafka.MTLS.KeyFilePath),
+		)
+		if err != nil {
+			return fmt.Errorf("loading client cert/key (%q, %q): %w", kafka.MTLS.CertFilePath, kafka.MTLS.KeyFilePath, err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
 
 		tlsConfig.InsecureSkipVerify = kafka.MTLS.InsecureSkipVerify //nolint:gosec // configurable for testing only
 

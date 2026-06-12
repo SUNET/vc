@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
@@ -236,6 +238,26 @@ func TestClientAssertionVerifier_Verify(t *testing.T) {
 			wantErr: "must contain a numeric 'iat' claim",
 		},
 		{
+			name: "future_iat_bypass_max_lifetime",
+			verifier: &ClientAssertionVerifier{
+				TokenEndpoint: tokenEndpoint,
+				MaxLifetime:   5 * time.Minute,
+			},
+			claims: func() jwt.MapClaims {
+				futureIat := time.Now().Add(24 * time.Hour)
+				return jwt.MapClaims{
+					"iss": "client-id",
+					"sub": "client-id",
+					"aud": tokenEndpoint,
+					"jti": "future-iat-jti",
+					"iat": float64(futureIat.Unix()),
+					"exp": float64(futureIat.Add(2 * time.Minute).Unix()),
+				}
+			}(),
+			client:  client,
+			wantErr: "'iat' is in the future",
+		},
+		{
 			name: "expired_token",
 			verifier: &ClientAssertionVerifier{
 				TokenEndpoint: tokenEndpoint,
@@ -272,7 +294,7 @@ func TestClientAssertionVerifier_Verify(t *testing.T) {
 				}
 			}(),
 			client:  client,
-			wantErr: "lifetime exceeds maximum",
+			wantErr: "'exp' is too far in the future",
 		},
 		{
 			name: "jti_replay_detected",
@@ -471,5 +493,60 @@ func TestClientAssertionVerifier_InvalidJWT(t *testing.T) {
 				t.Errorf("error = %q, want substring %q", got, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestClientAssertionVerifier_JWKSCache(t *testing.T) {
+	privKey, srv := testKeySetup(t)
+	tokenEndpoint := "https://verifier.example.com/token"
+
+	// Count how many times the JWKS endpoint is hit.
+	var fetchCount atomic.Int32
+	countingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetchCount.Add(1)
+		// Proxy to the real JWKS server.
+		resp, err := http.Get(srv.URL)
+		if err != nil {
+			http.Error(w, "proxy error", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		buf := make([]byte, 4096)
+		n, _ := resp.Body.Read(buf)
+		w.Write(buf[:n])
+	}))
+	t.Cleanup(countingSrv.Close)
+
+	jwksCache := cache.NewMemoryCache[[]byte](5 * time.Minute)
+	verifier := &ClientAssertionVerifier{
+		TokenEndpoint: tokenEndpoint,
+		JWKSCache:     jwksCache,
+	}
+
+	client := &Client{JWKSURI: countingSrv.URL}
+
+	// First call: should fetch from remote.
+	claims1 := validClaims(tokenEndpoint)
+	claims1["jti"] = "cache-test-1"
+	assertion1 := signAssertion(t, privKey, claims1)
+	_, err := verifier.Verify(context.Background(), assertion1, client)
+	if err != nil {
+		t.Fatalf("first verify failed: %v", err)
+	}
+	if fetchCount.Load() != 1 {
+		t.Fatalf("expected 1 fetch, got %d", fetchCount.Load())
+	}
+
+	// Second call: should use cache, no additional fetch.
+	claims2 := validClaims(tokenEndpoint)
+	claims2["jti"] = "cache-test-2"
+	assertion2 := signAssertion(t, privKey, claims2)
+	_, err = verifier.Verify(context.Background(), assertion2, client)
+	if err != nil {
+		t.Fatalf("second verify failed: %v", err)
+	}
+	if fetchCount.Load() != 1 {
+		t.Fatalf("expected still 1 fetch after cache hit, got %d", fetchCount.Load())
 	}
 }

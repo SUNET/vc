@@ -233,8 +233,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 			verifier := &oauth2.ClientAssertionVerifier{
 				TokenEndpoint: c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint,
-				JTICheck: func(jti string, _ time.Time) error {
-					unique, err := c.cacheService.DPopJTI.SetNX(ctx, "client_assertion:"+jti, true)
+				JTICheck: func(jti string, exp time.Time) error {
+					// Scope by clientID to prevent cross-client collisions;
+					// use time.Until(exp) as TTL so entries expire with the assertion.
+					cacheKey := "client_assertion:" + clientID + ":" + jti
+					ttl := time.Until(exp)
+					if ttl <= 0 {
+						return errors.New("client_assertion jti has already expired")
+					}
+					unique, err := c.cacheService.DPopJTI.SetNXWithTTL(ctx, cacheKey, true, ttl)
 					if err != nil {
 						return fmt.Errorf("jti cache error: %w", err)
 					}

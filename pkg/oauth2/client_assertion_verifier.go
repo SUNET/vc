@@ -3,11 +3,13 @@ package oauth2
 import (
 	"context"
 	"crypto"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
@@ -34,6 +36,10 @@ type ClientAssertionVerifier struct {
 	// JTICheck is called to verify that the jti has not been replayed.
 	// Returns an error if the jti was already seen. May be nil to skip replay checks.
 	JTICheck func(jti string, exp time.Time) error
+	// JWKSCache caches raw JWKS JSON keyed by the client's jwks_uri.
+	// When non-nil, avoids fetching the JWKS on every token request.
+	// When nil, falls back to fetching the JWKS directly on each call.
+	JWKSCache cache.Cache[[]byte]
 }
 
 // defaultAllowedAlgorithms is the allowlist of signing algorithms accepted for client assertions.
@@ -50,8 +56,8 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 		return nil, errors.New("token endpoint (audience) is not configured for assertion verification")
 	}
 
-	// Fetch the client's JWKS
-	keySet, err := jwk.Fetch(ctx, client.JWKSURI)
+	// Fetch the client's JWKS (with optional cache)
+	keySet, err := v.fetchJWKS(ctx, client.JWKSURI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch client JWKS from %s: %w", client.JWKSURI, err)
 	}
@@ -76,43 +82,38 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 
 		// Find matching key in JWKS by kid (if present in header)
 		kid, _ := token.Header["kid"].(string)
-		var matchedKey jwk.Key
 		if kid != "" {
-			matchedKey, _ = keySet.LookupKeyID(kid)
-		}
-		if matchedKey == nil {
-			// Fall back to first key with matching algorithm
-			for i := 0; i < keySet.Len(); i++ {
-				k, ok := keySet.Key(i)
-				if !ok {
-					continue
+			if matchedKey, ok := keySet.LookupKeyID(kid); ok {
+				var rawKey crypto.PublicKey
+				if err := jwk.Export(matchedKey, &rawKey); err != nil {
+					return nil, fmt.Errorf("failed to extract raw key: %w", err)
 				}
-				kAlg, hasAlg := k.Algorithm()
-				if hasAlg && kAlg.String() == alg {
-					matchedKey = k
-					break
-				}
+				return rawKey, nil
 			}
-		}
-		if matchedKey == nil {
-			// Last resort: try first key in set
-			if keySet.Len() > 0 {
-				k, ok := keySet.Key(0)
-				if ok {
-					matchedKey = k
-				}
-			}
-		}
-		if matchedKey == nil {
-			return nil, errors.New("no suitable key found in client JWKS")
 		}
 
-		// Extract raw public key
-		var rawKey crypto.PublicKey
-		if err := jwk.Export(matchedKey, &rawKey); err != nil {
-			return nil, fmt.Errorf("failed to extract raw key: %w", err)
+		// No kid match — collect all candidate keys and return a VerificationKeySet
+		// so the parser can try each key until one verifies.
+		var keys []jwt.VerificationKey
+		for i := 0; i < keySet.Len(); i++ {
+			k, ok := keySet.Key(i)
+			if !ok {
+				continue
+			}
+			// If the key declares an algorithm, skip keys that don't match
+			if kAlg, hasAlg := k.Algorithm(); hasAlg && kAlg.String() != alg {
+				continue
+			}
+			var rawKey crypto.PublicKey
+			if err := jwk.Export(k, &rawKey); err != nil {
+				continue
+			}
+			keys = append(keys, rawKey)
 		}
-		return rawKey, nil
+		if len(keys) == 0 {
+			return nil, errors.New("no suitable key found in client JWKS")
+		}
+		return jwt.VerificationKeySet{Keys: keys}, nil
 	},
 		jwt.WithValidMethods(allowedAlgs),
 		jwt.WithAudience(v.TokenEndpoint),
@@ -157,6 +158,20 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 	if maxLifetime == 0 {
 		maxLifetime = 5 * time.Minute
 	}
+
+	now := time.Now()
+	clockSkew := 30 * time.Second
+
+	// Reject iat in the future (beyond clock skew tolerance)
+	if iatTime.After(now.Add(clockSkew)) {
+		return nil, errors.New("client assertion 'iat' is in the future")
+	}
+
+	// Reject exp too far ahead of now (beyond maxLifetime + clock skew)
+	if expTime.After(now.Add(maxLifetime + clockSkew)) {
+		return nil, fmt.Errorf("client assertion 'exp' is too far in the future (max %s from now)", maxLifetime)
+	}
+
 	if expTime.Sub(iatTime) > maxLifetime {
 		return nil, fmt.Errorf("client assertion lifetime exceeds maximum (%s)", maxLifetime)
 	}
@@ -180,4 +195,33 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 	}
 
 	return result, nil
+}
+
+// fetchJWKS retrieves a JWKS keyset, using the cache when available.
+func (v *ClientAssertionVerifier) fetchJWKS(ctx context.Context, uri string) (jwk.Set, error) {
+	if v.JWKSCache == nil {
+		return jwk.Fetch(ctx, uri)
+	}
+
+	// Try cache first.
+	if raw, ok := v.JWKSCache.Get(ctx, uri); ok {
+		set, err := jwk.Parse(raw)
+		if err == nil {
+			return set, nil
+		}
+		// Cached data is corrupt – fall through to re-fetch.
+	}
+
+	// Fetch from remote.
+	set, err := jwk.Fetch(ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+
+	// Serialize and store in cache.
+	if raw, err := json.Marshal(set); err == nil {
+		v.JWKSCache.Set(ctx, uri, raw)
+	}
+
+	return set, nil
 }
