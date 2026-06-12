@@ -115,7 +115,7 @@ type Kafka struct {
 	Brokers []string `yaml:"brokers" validate:"required_if=Enable true" doc_example:"[\"kafka0:9092\", \"kafka1:9092\"]"`
 	// SASL configures SASL authentication for Kafka connections
 	SASL *KafkaSASL `yaml:"sasl,omitempty"`
-	// MTLS configures TLS/mTLS for Kafka broker connections
+	// MTLS configures mutual TLS (mTLS) for Kafka broker connections
 	MTLS MTLS `yaml:"mtls" validate:"omitempty"`
 }
 
