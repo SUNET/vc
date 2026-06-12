@@ -91,6 +91,10 @@ jobs:
             | sed 's/^[-._]\+//; s/[-._]\+$//' \
             | cut -c1-128 \
           )
+          if [[ -z "${SAFE_TAG}" ]]; then
+            echo "::error::image_tag '${IMAGE_TAG}' produced an empty tag after sanitization"
+            exit 1
+          fi
           echo "tags=${{ steps.image.outputs.name }}:${SAFE_TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${SAFE_TAG}" >> "$GITHUB_OUTPUT"
 
