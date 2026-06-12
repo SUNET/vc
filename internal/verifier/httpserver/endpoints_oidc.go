@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"errors"
+	"html/template"
 	"net/http"
 	"strings"
 
@@ -89,7 +90,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 	templateData := gin.H{
 		"SessionID":        response.SessionID,
 		"QRCodeData":       response.QRCodeData,
-		"DeepLinkURL":      response.DeepLinkURL,
+		"DeepLinkURL":      template.URL(response.DeepLinkURL),
 		"PollURL":          response.PollURL,
 		"WalletLinks":      response.WalletLinks,
 		"PreferredFormats": response.PreferredFormats,
