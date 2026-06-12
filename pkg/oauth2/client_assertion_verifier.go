@@ -46,6 +46,9 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 	if client.JWKSURI == "" {
 		return nil, errors.New("client has no jwks_uri configured for assertion verification")
 	}
+	if v.TokenEndpoint == "" {
+		return nil, errors.New("token endpoint (audience) is not configured for assertion verification")
+	}
 
 	// Fetch the client's JWKS
 	keySet, err := jwk.Fetch(ctx, client.JWKSURI)
