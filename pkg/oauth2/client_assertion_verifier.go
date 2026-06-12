@@ -84,6 +84,10 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 		kid, _ := token.Header["kid"].(string)
 		if kid != "" {
 			if matchedKey, ok := keySet.LookupKeyID(kid); ok {
+				// If the key declares an algorithm, enforce it to avoid algorithm confusion.
+				if kAlg, hasAlg := matchedKey.Algorithm(); hasAlg && kAlg.String() != alg {
+					return nil, fmt.Errorf("key %q algorithm %q does not match token algorithm %q", kid, kAlg.String(), alg)
+				}
 				var rawKey crypto.PublicKey
 				if err := jwk.Export(matchedKey, &rawKey); err != nil {
 					return nil, fmt.Errorf("failed to extract raw key: %w", err)
