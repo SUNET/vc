@@ -32,8 +32,10 @@ func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) error {
 		case "SCRAM-SHA-512":
 			saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA512} }
 			saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
-		default: // PLAIN
+		case "PLAIN":
 			saramaConfig.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		default:
+			return fmt.Errorf("unsupported SASL mechanism %q; supported values are SCRAM-SHA-256, SCRAM-SHA-512, PLAIN", kafka.SASL.Mechanism)
 		}
 	}
 

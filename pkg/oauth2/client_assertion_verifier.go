@@ -196,8 +196,16 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 		Expiry:   expTime,
 		IssuedAt: iatTime,
 	}
-	if aud, ok := claims["aud"].(string); ok {
+	switch aud := claims["aud"].(type) {
+	case string:
 		result.Audience = aud
+	case []any:
+		for _, elem := range aud {
+			if s, ok := elem.(string); ok && s == v.TokenEndpoint {
+				result.Audience = s
+				break
+			}
+		}
 	}
 
 	return result, nil
