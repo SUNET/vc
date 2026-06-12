@@ -2318,10 +2318,10 @@ func TestProcessDirectPost(t *testing.T) {
 				if tt.expectShowCredentials {
 					// Should redirect to display page
 					assert.Contains(t, resp.RedirectURI, "/verification/display/")
-				} else if authCtx.RedirectURI != "" {
-					// Should have authorization code in redirect
-					assert.Contains(t, resp.RedirectURI, "code=")
-					assert.Contains(t, resp.RedirectURI, "state=")
+				} else {
+					// Direct post must NOT return redirect_uri; the browser
+					// picks up the redirect via the poll endpoint instead.
+					assert.Empty(t, resp.RedirectURI)
 				}
 			}
 		})
