@@ -29,7 +29,7 @@ type Client struct {
 	Scopes []string `json:"scopes" yaml:"scopes" validate:"required"`
 	// JWKSURI is the URL to the client's JWKS for verifying client_assertion signatures (RFC 7523).
 	// Required for confidential clients using private_key_jwt authentication.
-	JWKSURI string `json:"jwks_uri,omitempty" yaml:"jwks_uri,omitempty"`
+	JWKSURI string `json:"jwks_uri,omitempty" yaml:"jwks_uri,omitempty" validate:"omitempty,url"`
 }
 
 // RedirectURIs holds one or more allowed redirect URIs.
