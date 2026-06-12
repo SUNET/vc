@@ -3,6 +3,7 @@ package kafka
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -12,9 +13,9 @@ import (
 )
 
 // applySecurityConfig applies SASL and TLS settings from cfg to the Sarama configuration.
-func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) {
+func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) error {
 	if cfg == nil || cfg.Common == nil {
-		return
+		return nil
 	}
 	kafka := &cfg.Common.Kafka
 
@@ -36,7 +37,7 @@ func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) {
 		}
 	}
 
-	// TLS
+	// mTLS
 	if kafka.MTLS.Enable {
 		tlsConfig := &tls.Config{
 			MinVersion: tls.VersionTLS12,
@@ -45,11 +46,14 @@ func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) {
 		// Load CA cert if provided
 		if kafka.MTLS.CACertPath != "" {
 			caCert, err := os.ReadFile(filepath.Clean(kafka.MTLS.CACertPath))
-			if err == nil {
-				caCertPool := x509.NewCertPool()
-				caCertPool.AppendCertsFromPEM(caCert)
-				tlsConfig.RootCAs = caCertPool
+			if err != nil {
+				return fmt.Errorf("reading CA cert %q: %w", kafka.MTLS.CACertPath, err)
 			}
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return fmt.Errorf("parsing CA cert %q: no valid certificates found", kafka.MTLS.CACertPath)
+			}
+			tlsConfig.RootCAs = caCertPool
 		}
 
 		// Load client cert/key for mTLS if provided
@@ -58,9 +62,10 @@ func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) {
 				filepath.Clean(kafka.MTLS.CertFilePath),
 				filepath.Clean(kafka.MTLS.KeyFilePath),
 			)
-			if err == nil {
-				tlsConfig.Certificates = []tls.Certificate{cert}
+			if err != nil {
+				return fmt.Errorf("loading client cert/key (%q, %q): %w", kafka.MTLS.CertFilePath, kafka.MTLS.KeyFilePath, err)
 			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 
 		tlsConfig.InsecureSkipVerify = kafka.MTLS.InsecureSkipVerify //nolint:gosec // configurable for testing only
@@ -68,4 +73,6 @@ func applySecurityConfig(saramaConfig *sarama.Config, cfg *model.Cfg) {
 		saramaConfig.Net.TLS.Enable = true
 		saramaConfig.Net.TLS.Config = tlsConfig
 	}
+
+	return nil
 }

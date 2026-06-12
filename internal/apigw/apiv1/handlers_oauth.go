@@ -233,6 +233,16 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 			verifier := &oauth2.ClientAssertionVerifier{
 				TokenEndpoint: c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint,
+				JTICheck: func(jti string, _ time.Time) error {
+					unique, err := c.cacheService.DPopJTI.SetNX(ctx, "client_assertion:"+jti, true)
+					if err != nil {
+						return fmt.Errorf("jti cache error: %w", err)
+					}
+					if !unique {
+						return errors.New("client_assertion jti already used")
+					}
+					return nil
+				},
 			}
 			assertionClaims, err := verifier.Verify(ctx, req.ClientAssertion, oauthClientForVerify)
 			if err != nil {

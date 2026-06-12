@@ -48,7 +48,7 @@ func NewSyncProducerClient(ctx context.Context, saramaConfig *sarama.Config, cfg
 }
 
 // CommonProducerConfig returns a new Kafka producer configuration instance with sane defaults for vc.
-func CommonProducerConfig(cfg *model.Cfg) *sarama.Config {
+func CommonProducerConfig(cfg *model.Cfg) (*sarama.Config, error) {
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Producer.Return.Successes = true
 	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
@@ -56,9 +56,11 @@ func CommonProducerConfig(cfg *model.Cfg) *sarama.Config {
 	saramaConfig.Net.MaxOpenRequests = 1
 	saramaConfig.Producer.Retry.Max = 3
 
-	applySecurityConfig(saramaConfig, cfg)
+	if err := applySecurityConfig(saramaConfig, cfg); err != nil {
+		return nil, err
+	}
 
-	return saramaConfig
+	return saramaConfig, nil
 }
 
 // Close close the producer

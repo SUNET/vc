@@ -145,7 +145,10 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 
 	// Parse time claims
 	expFloat, _ := claims["exp"].(float64)
-	iatFloat, _ := claims["iat"].(float64)
+	iatFloat, okIat := claims["iat"].(float64)
+	if !okIat || iatFloat == 0 {
+		return nil, errors.New("client assertion must contain a numeric 'iat' claim")
+	}
 	expTime := time.Unix(int64(expFloat), 0)
 	iatTime := time.Unix(int64(iatFloat), 0)
 
@@ -154,7 +157,7 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 	if maxLifetime == 0 {
 		maxLifetime = 5 * time.Minute
 	}
-	if iatFloat > 0 && expTime.Sub(iatTime) > maxLifetime {
+	if expTime.Sub(iatTime) > maxLifetime {
 		return nil, fmt.Errorf("client assertion lifetime exceeds maximum (%s)", maxLifetime)
 	}
 

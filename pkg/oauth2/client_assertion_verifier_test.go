@@ -167,6 +167,75 @@ func TestClientAssertionVerifier_Verify(t *testing.T) {
 			wantErr: "must contain 'iss' and 'sub' claims",
 		},
 		{
+			name: "missing_iat",
+			verifier: &ClientAssertionVerifier{
+				TokenEndpoint: tokenEndpoint,
+			},
+			claims: func() jwt.MapClaims {
+				c := validClaims(tokenEndpoint)
+				delete(c, "iat")
+				return c
+			}(),
+			client:  client,
+			wantErr: "must contain a numeric 'iat' claim",
+		},
+		{
+			name: "missing_iat_with_far_future_exp_bypass_attempt",
+			verifier: &ClientAssertionVerifier{
+				TokenEndpoint: tokenEndpoint,
+				MaxLifetime:   5 * time.Minute,
+			},
+			claims: func() jwt.MapClaims {
+				return jwt.MapClaims{
+					"iss": "client-id",
+					"sub": "client-id",
+					"aud": tokenEndpoint,
+					"jti": "bypass-jti",
+					"exp": float64(time.Now().Add(24 * time.Hour).Unix()),
+				}
+			}(),
+			client:  client,
+			wantErr: "must contain a numeric 'iat' claim",
+		},
+		{
+			name: "zero_iat_bypass_attempt",
+			verifier: &ClientAssertionVerifier{
+				TokenEndpoint: tokenEndpoint,
+				MaxLifetime:   5 * time.Minute,
+			},
+			claims: func() jwt.MapClaims {
+				return jwt.MapClaims{
+					"iss": "client-id",
+					"sub": "client-id",
+					"aud": tokenEndpoint,
+					"jti": "zero-iat-jti",
+					"iat": float64(0),
+					"exp": float64(time.Now().Add(24 * time.Hour).Unix()),
+				}
+			}(),
+			client:  client,
+			wantErr: "must contain a numeric 'iat' claim",
+		},
+		{
+			name: "non_numeric_iat_bypass_attempt",
+			verifier: &ClientAssertionVerifier{
+				TokenEndpoint: tokenEndpoint,
+				MaxLifetime:   5 * time.Minute,
+			},
+			claims: func() jwt.MapClaims {
+				return jwt.MapClaims{
+					"iss": "client-id",
+					"sub": "client-id",
+					"aud": tokenEndpoint,
+					"jti": "string-iat-jti",
+					"iat": "not-a-number",
+					"exp": float64(time.Now().Add(24 * time.Hour).Unix()),
+				}
+			}(),
+			client:  client,
+			wantErr: "must contain a numeric 'iat' claim",
+		},
+		{
 			name: "expired_token",
 			verifier: &ClientAssertionVerifier{
 				TokenEndpoint: tokenEndpoint,

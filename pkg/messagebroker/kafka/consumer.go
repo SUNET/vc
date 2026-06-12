@@ -41,8 +41,13 @@ type MessageConsumerClient struct {
 }
 
 func NewConsumerClient(ctx context.Context, cfg *model.Cfg, brokers []string, log *logger.Log) (*MessageConsumerClient, error) {
+	saramaConfig, err := commonConsumerConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("kafka consumer security config: %w", err)
+	}
+
 	client := &MessageConsumerClient{
-		SaramaConfig: commonConsumerConfig(cfg),
+		SaramaConfig: saramaConfig,
 		brokers:      brokers,
 		wg:           sync.WaitGroup{},
 		log:          log,
@@ -52,14 +57,16 @@ func NewConsumerClient(ctx context.Context, cfg *model.Cfg, brokers []string, lo
 }
 
 // commonConsumerConfig returns a new Kafka consumer configuration instance with sane defaults for vc.
-func commonConsumerConfig(cfg *model.Cfg) *sarama.Config {
+func commonConsumerConfig(cfg *model.Cfg) (*sarama.Config, error) {
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
 	saramaConfig.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRange()}
 
-	applySecurityConfig(saramaConfig, cfg)
+	if err := applySecurityConfig(saramaConfig, cfg); err != nil {
+		return nil, err
+	}
 
-	return saramaConfig
+	return saramaConfig, nil
 }
 
 // Start starts the actual event consuming from specified kafka topics
