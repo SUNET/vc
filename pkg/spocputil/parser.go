@@ -153,6 +153,17 @@ func (p *advancedParser) parseList() (sexp.Element, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Treat a bare * inside a tagged list as a wildcard star form,
+		// so (method *) is equivalent to (method (*)).
+		// Treat a trailing * (e.g. /api/v1/*) as a prefix star form,
+		// so (path /api/v1/*) is equivalent to (path (* prefix /api/v1/)).
+		if atom, ok := elem.(*sexp.Atom); ok {
+			if atom.Value == "*" {
+				elem = &starform.Wildcard{}
+			} else if before, found := strings.CutSuffix(atom.Value, "*"); found {
+				elem = &starform.Prefix{Value: before}
+			}
+		}
 		elements = append(elements, elem)
 	}
 }

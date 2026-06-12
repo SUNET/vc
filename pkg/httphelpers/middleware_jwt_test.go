@@ -17,6 +17,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/spocputil"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-gonic/gin"
@@ -1918,7 +1919,7 @@ func TestExtractListValues_EmptyList(t *testing.T) {
 // parseAdvancedSExpT is a test helper that parses an S-expression or fails.
 func parseAdvancedSExpT(t *testing.T, input string) sexp.Element {
 	t.Helper()
-	elem, err := parseAdvancedSExp(input)
+	elem, err := spocputil.ParseAdvancedSExp(input)
 	require.NoError(t, err)
 	return elem
 }
