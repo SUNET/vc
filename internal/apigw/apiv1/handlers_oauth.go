@@ -233,6 +233,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 			verifier := &oauth2.ClientAssertionVerifier{
 				TokenEndpoint: c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint,
+				JWKSCache:     c.cacheService.JWKS,
 				JTICheck: func(jti string, exp time.Time) error {
 					// Scope by clientID to prevent cross-client collisions;
 					// use time.Until(exp) as TTL so entries expire with the assertion.

@@ -497,24 +497,29 @@ func TestClientAssertionVerifier_InvalidJWT(t *testing.T) {
 }
 
 func TestClientAssertionVerifier_JWKSCache(t *testing.T) {
-	privKey, srv := testKeySetup(t)
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	pubJWK, err := jwk.Import(privKey.Public())
+	if err != nil {
+		t.Fatalf("failed to import public key to JWK: %v", err)
+	}
+	_ = pubJWK.Set(jwk.KeyIDKey, "test-kid")
+	_ = pubJWK.Set(jwk.AlgorithmKey, "ES256")
+
+	set := jwk.NewSet()
+	_ = set.AddKey(pubJWK)
+
 	tokenEndpoint := "https://verifier.example.com/token"
 
 	// Count how many times the JWKS endpoint is hit.
 	var fetchCount atomic.Int32
 	countingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetchCount.Add(1)
-		// Proxy to the real JWKS server.
-		resp, err := http.Get(srv.URL)
-		if err != nil {
-			http.Error(w, "proxy error", http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
 		w.Header().Set("Content-Type", "application/json")
-		buf := make([]byte, 4096)
-		n, _ := resp.Body.Read(buf)
-		w.Write(buf[:n])
+		_ = json.NewEncoder(w).Encode(set)
 	}))
 	t.Cleanup(countingSrv.Close)
 
@@ -530,7 +535,7 @@ func TestClientAssertionVerifier_JWKSCache(t *testing.T) {
 	claims1 := validClaims(tokenEndpoint)
 	claims1["jti"] = "cache-test-1"
 	assertion1 := signAssertion(t, privKey, claims1)
-	_, err := verifier.Verify(context.Background(), assertion1, client)
+	_, err = verifier.Verify(context.Background(), assertion1, client)
 	if err != nil {
 		t.Fatalf("first verify failed: %v", err)
 	}
