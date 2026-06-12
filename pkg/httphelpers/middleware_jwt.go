@@ -358,7 +358,7 @@ var requiredRuleParts = []string{"service", "method", "path", "subject", "authen
 func validateRuleElement(elem sexp.Element, source string) error {
 	list, ok := elem.(*sexp.List)
 	if !ok {
-		return fmt.Errorf("%s: rule must be a list, got atom", source)
+		return fmt.Errorf("%s: rule must be a list, got %T", source, elem)
 	}
 	if list.Tag != "vc" {
 		return fmt.Errorf("%s: rule must have tag \"vc\", got %q", source, list.Tag)
@@ -373,7 +373,7 @@ func validateRuleElement(elem sexp.Element, source string) error {
 		child := list.Elements[i]
 		cl, ok := child.(*sexp.List)
 		if !ok {
-			return fmt.Errorf("%s: part %d must be a list, got atom", source, i+1)
+			return fmt.Errorf("%s: part %d must be a list, got %T", source, i+1, child)
 		}
 		if cl.Tag != req {
 			return fmt.Errorf("%s: part %d must be (%s ...), got (%s ...)",
