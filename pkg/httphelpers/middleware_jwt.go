@@ -351,8 +351,10 @@ func (s *SafeEngine) RuleCount() int {
 var requiredRuleParts = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
 
 // validateRuleElement checks that a parsed SPOCP rule element is a list with
-// tag "vc" and contains all required sub-lists (service, method, path, subject,
-// authentic_source, scope).
+// tag "vc" containing exactly the 6 required sub-lists in positional order
+// (service, method, path, subject, authentic_source, scope), each with exactly
+// one value. SPOCP matching is positional, so wrong order, duplicates, extra
+// parts, or multi-valued parts would silently never match.
 func validateRuleElement(elem sexp.Element, source string) error {
 	list, ok := elem.(*sexp.List)
 	if !ok {
@@ -362,28 +364,25 @@ func validateRuleElement(elem sexp.Element, source string) error {
 		return fmt.Errorf("%s: rule must have tag \"vc\", got %q", source, list.Tag)
 	}
 
-	present := make(map[string]int) // tag -> number of elements
-	for _, child := range list.Elements {
-		if cl, ok := child.(*sexp.List); ok {
-			present[cl.Tag] = len(cl.Elements)
-		}
+	if len(list.Elements) != len(requiredRuleParts) {
+		return fmt.Errorf("%s: rule must have exactly %d parts, got %d",
+			source, len(requiredRuleParts), len(list.Elements))
 	}
 
-	var missing []string
-	var empty []string
-	for _, req := range requiredRuleParts {
-		count, ok := present[req]
+	for i, req := range requiredRuleParts {
+		child := list.Elements[i]
+		cl, ok := child.(*sexp.List)
 		if !ok {
-			missing = append(missing, req)
-		} else if count == 0 {
-			empty = append(empty, req)
+			return fmt.Errorf("%s: part %d must be a list, got atom", source, i+1)
 		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%s: rule is missing required parts: %s", source, strings.Join(missing, ", "))
-	}
-	if len(empty) > 0 {
-		return fmt.Errorf("%s: rule has empty required parts (use * as wildcard): %s", source, strings.Join(empty, ", "))
+		if cl.Tag != req {
+			return fmt.Errorf("%s: part %d must be (%s ...), got (%s ...)",
+				source, i+1, req, cl.Tag)
+		}
+		if len(cl.Elements) != 1 {
+			return fmt.Errorf("%s: part (%s) must have exactly 1 value, got %d (use * as wildcard)",
+				source, req, len(cl.Elements))
+		}
 	}
 	return nil
 }

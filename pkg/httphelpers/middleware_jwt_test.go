@@ -200,27 +200,58 @@ func TestBuildSPOCPEngine_InvalidRule(t *testing.T) {
 }
 
 func TestBuildSPOCPEngine_MissingRequiredParts(t *testing.T) {
-	// Rule with only the 4 original parts; missing authentic_source and scope.
+	// Rule with only 4 parts; strict validation requires exactly 6.
 	cfg := model.APIAuth{
 		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice))"},
 	}
 
 	_, err := BuildSPOCPEngine(cfg)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "authentic_source")
-	assert.Contains(t, err.Error(), "scope")
+	assert.Contains(t, err.Error(), "must have exactly 6 parts, got 4")
 }
 
 func TestBuildSPOCPEngine_EmptyRequiredParts(t *testing.T) {
-	// All required parts present, but scope is empty (no elements).
+	// All 6 parts present, but scope has no value.
 	cfg := model.APIAuth{
 		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope))"},
 	}
 
 	_, err := BuildSPOCPEngine(cfg)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "empty required parts")
-	assert.Contains(t, err.Error(), "scope")
+	assert.Contains(t, err.Error(), "(scope) must have exactly 1 value")
+}
+
+func TestBuildSPOCPEngine_WrongOrder(t *testing.T) {
+	// All 6 parts present with values, but method and service are swapped.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (method GET)(service svc)(path /api)(subject alice)(authentic_source SUNET)(scope eduid))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "part 1 must be (service ...)")
+}
+
+func TestBuildSPOCPEngine_ExtraParts(t *testing.T) {
+	// Valid 6 parts plus an extra one.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope eduid)(extra foo))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must have exactly 6 parts, got 7")
+}
+
+func TestBuildSPOCPEngine_MultiValuedPart(t *testing.T) {
+	// scope has 2 values instead of exactly 1.
+	cfg := model.APIAuth{
+		Rules: []string{"(vc (service svc)(method GET)(path /api)(subject alice)(authentic_source SUNET)(scope eduid pda1))"},
+	}
+
+	_, err := BuildSPOCPEngine(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "(scope) must have exactly 1 value, got 2")
 }
 
 func TestBuildSPOCPEngine_RulesFile(t *testing.T) {
