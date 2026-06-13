@@ -238,7 +238,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 					// Scope by clientID to prevent cross-client collisions;
 					// use time.Until(exp) as TTL so entries expire with the assertion.
 					cacheKey := "client_assertion:" + clientID + ":" + jti
-					ttl := time.Until(exp)
+					// Add the same leeway as the JWT verifier to tolerate small clock skews.
+					ttl := time.Until(exp.Add(30 * time.Second))
 					if ttl <= 0 {
 						return errors.New("client_assertion jti has already expired")
 					}
