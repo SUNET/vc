@@ -749,24 +749,11 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 	c.log.Info("VP processed successfully", "session_id", session.SessionID, "claims_count", len(oidcClaims))
 
-	// Return redirect URI if present
-	redirectURI := ""
-	if session.RedirectURI != "" {
-		u, err := url.Parse(session.RedirectURI)
-		if err != nil {
-			c.log.Error(err, "Failed to parse redirect URI")
-			return nil, ErrServerError
-		}
-		q := u.Query()
-		q.Set("code", code)
-		q.Set("state", session.State)
-		u.RawQuery = q.Encode()
-		redirectURI = u.String()
-	}
-
-	return &DirectPostResponse{
-		RedirectURI: redirectURI,
-	}, nil
+	// Do NOT return redirect_uri here. The browser's /authorize page polls
+	// for session status and handles the redirect to the RP. Returning
+	// redirect_uri would cause the wallet to also redirect, consuming the
+	// authorization code before the browser can use it.
+	return &DirectPostResponse{}, nil
 }
 
 // CallbackRequest represents a callback request
