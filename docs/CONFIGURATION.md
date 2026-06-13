@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-06-11
+**Generated:** 2026-06-12
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -333,11 +333,21 @@ Each key under a data source is a credential type.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
 
-| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example                                 | Default | Required |
-| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
-| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                               | -                                       | -       | Yes      |
-| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup. These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
-| `auth_scopes`   | `[]string` | Credential keys whose VCTs are acceptable for wallet authentication (for OpenID4VP)                                                                                                                                                                                                                                                                                                                                                                             | `[pid]`                                 | -       | No       |
+| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                                 | Default | Required |
+| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
+| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | -                                       | -       | Yes      |
+| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
+| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                  | -                                       | -       | No       |
+
+### `auth_scopes` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.auth_scopes.<key>`
+
+Each entry represents one acceptable credential type the wallet can present.
+
+| Field         | Type       | Description                                               | Example                                 | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------- | --------------------------------------- | ------- | -------- |
+| `auth_claims` | `[]string` | The identity claims to extract from this credential type. | `[given_name, family_name, birth_date]` | -       | Yes      |
 
 ### `import`
 

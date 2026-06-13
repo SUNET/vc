@@ -916,10 +916,8 @@ type CredentialOffers struct {
 
 // OpenID4VPCredentialAuth holds per-credential OpenID4VP authentication requirements
 type OpenID4VPCredentialAuth struct {
-	// AuthScopes lists credential keys whose VCTs are acceptable for wallet authentication
-	AuthScopes []string `yaml:"auth_scopes" validate:"required,min=1"`
-	// AuthClaims lists identity claims to extract from the authentication credential
-	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1"`
+	// AuthScopes maps credential scope keys to per-scope auth config (claims to extract)
+	AuthScopes map[string]AuthScopeEntry
 }
 
 // APIGWDelivery groups credential delivery configuration (wallets, offers).
@@ -1035,7 +1033,6 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 		if cred.AuthProvider == AuthProviderOpenID4VP {
 			return &OpenID4VPCredentialAuth{
 				AuthScopes: cred.AuthScopes,
-				AuthClaims: cred.AuthClaims,
 			}
 		}
 	}

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -45,20 +48,19 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", fmt.Errorf("scope %q is not configured for openid4vp authentication", scope)
 	}
 
-	// Build DCQL claims from OpenID4VP auth configuration
-	claimQueries := make([]openid4vp.ClaimQuery, 0, len(vpAuth.AuthClaims))
-	for _, claim := range vpAuth.AuthClaims {
-		claimQueries = append(claimQueries, openid4vp.ClaimQuery{
-			Path: openid4vp.StringPath(claim),
-		})
-	}
-
 	// Build one CredentialQuery per auth scope so the wallet can authenticate
 	// with any of the acceptable credential types (e.g. pid OR eduid).
-	// Each scope may have a different format and VCT.
+	// Each scope has its own claim queries derived from its per-scope auth_claims.
 	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
 	options := make([][]string, 0, len(vpAuth.AuthScopes))
-	for _, authScope := range vpAuth.AuthScopes {
+	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
+		entry := vpAuth.AuthScopes[authScope]
+		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+		for _, claim := range entry.AuthClaims {
+			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
+				Path: openid4vp.StringPath(claim),
+			})
+		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
 			ID:       authScope,
 			Format:   c.cfg.GetFormatForScope(authScope),
@@ -67,7 +69,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 				VCTValues: c.cfg.VCTIdentifiersForScopes([]string{authScope}),
 			},
 			RequireCryptographicHolderBinding: false,
-			Claims:                            claimQueries,
+			Claims:                            scopeClaimQueries,
 		})
 		options = append(options, []string{authScope})
 	}
@@ -204,6 +206,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// not by the issuing scope. The wallet may have responded with any of
 	// the acceptable credential types, so try all DCQL credential query IDs.
 	var vpToken string
+	var matchedAuthScope string
 	if authCtx.DCQLQuery == nil || len(authCtx.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "DCQL query has no credential queries", "scope", scope)
 		return nil, errors.New("DCQL query has no credential queries")
@@ -214,6 +217,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Info("multiple VP tokens received for credential query, using first", "credential_query_id", cq.ID, "count", len(tokens))
 			}
 			vpToken = tokens[0]
+			matchedAuthScope = cq.ID
+			c.log.Info("VP token matched credential query", "matched_auth_scope", matchedAuthScope, "scope", scope)
 			break
 		}
 	}
@@ -267,9 +272,21 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
 
-	// Extract identity from validated credential using configured claim keys
-	dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
-	identityClaims := dsCred.ExtractIdentityClaims(credential)
+	// Extract identity from validated credential using the matched auth scope's claims.
+	// The vpAuth config tells us which claims to extract based on which credential was presented.
+	vpAuth2 := c.cfg.GetOpenID4VPAuth(scope)
+	if vpAuth2 == nil {
+		return nil, fmt.Errorf("scope %q lost openid4vp configuration", scope)
+	}
+	authScopeEntry, ok := vpAuth2.AuthScopes[matchedAuthScope]
+	if !ok {
+		return nil, fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope)
+	}
+	identityClaims, err := model.ExtractIdentityClaims(credential, authScopeEntry.AuthClaims)
+	if err != nil {
+		c.log.Error(err, "required identity claims missing from presented credential", "matched_auth_scope", matchedAuthScope, "scope", scope)
+		return nil, fmt.Errorf("identity extraction failed: %w", err)
+	}
 
 	// Resolve the person identifier — uses authentic_source_person_id directly
 	// when present in the extracted claims, otherwise falls back to identity

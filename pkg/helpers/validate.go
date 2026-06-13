@@ -327,14 +327,19 @@ func NewValidator() (*validator.Validate, error) {
 		for scope, cred := range ds.Datastore.Scopes {
 			switch cred.AuthProvider {
 			case model.AuthProviderOpenID4VP:
-				if slices.Contains(cred.AuthScopes, scope) {
+				if _, selfRef := cred.AuthScopes[scope]; selfRef {
 					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
 				}
 				if len(cred.AuthScopes) == 0 {
 					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_required_for_openid4vp", scope)
 				}
-				if len(cred.AuthClaims) == 0 {
-					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_identity_lookup", scope)
+				for name, entry := range cred.AuthScopes {
+					if len(entry.AuthClaims) == 0 {
+						sl.ReportError(entry.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_auth_scope", name)
+					}
+				}
+				if len(cred.AuthClaims) > 0 {
+					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_allowed_for_openid4vp", scope)
 				}
 			case model.AuthProviderSAML, model.AuthProviderOIDC:
 				if len(cred.AuthClaims) == 0 {

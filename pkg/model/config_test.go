@@ -196,13 +196,15 @@ func TestLookupCredentialSources(t *testing.T) {
 				Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
 					"pid": {
 						AuthProvider: "openid4vp",
-						AuthScopes:   []string{"pid"},
-						AuthClaims:   []string{"given_name"},
+						AuthScopes: map[string]AuthScopeEntry{
+							"pid_source": {AuthClaims: []string{"given_name"}},
+						},
 					},
 					"ehic": {
 						AuthProvider: "openid4vp",
-						AuthScopes:   []string{"pid"},
-						AuthClaims:   []string{"given_name"},
+						AuthScopes: map[string]AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 				Assertion: AssertionConfig{Scopes: map[string]AssertionScope{

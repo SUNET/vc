@@ -296,8 +296,10 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid", "eduid"},
-						AuthClaims:   []string{"given_name"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid":   {AuthClaims: []string{"given_name"}},
+							"eduid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 			},
@@ -310,8 +312,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid"},
-						AuthClaims:   []string{"given_name"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 			},
@@ -332,8 +335,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"diploma": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid"},
-						AuthClaims:   []string{"given_name", "family_name"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name", "family_name"}},
+						},
 					},
 				}},
 			},
@@ -341,17 +345,19 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			errorContains: "",
 		},
 		{
-			name: "openid4vp without auth_claims is rejected",
+			name: "openid4vp with empty auth_claims in scope entry is rejected",
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"ehic": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{}},
+						},
 					},
 				}},
 			},
 			shouldError:   true,
-			errorContains: "auth_claims_required_for_identity_lookup",
+			errorContains: "auth_claims_required_for_auth_scope",
 		},
 		{
 			name: "openid4vp without auth_scopes is rejected",
@@ -359,12 +365,42 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"ehic": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthClaims:   []string{"given_name"},
 					},
 				}},
 			},
 			shouldError:   true,
 			errorContains: "auth_scopes_required_for_openid4vp",
+		},
+		{
+			name: "openid4vp with top-level auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
+						AuthClaims: []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_not_allowed_for_openid4vp",
+		},
+		{
+			name: "multiple auth_scopes with different claims passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid":   {AuthClaims: []string{"given_name", "family_name", "birth_date"}},
+							"eduid": {AuthClaims: []string{"given_name", "family_name", "date_of_birth"}},
+						},
+					},
+				}},
+			},
+			shouldError: false,
 		},
 		{
 			name: "saml without auth_claims is rejected",
@@ -385,7 +421,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"pid": {
 						AuthProvider: model.AuthProviderSAML,
 						AuthClaims:   []string{"given_name"},
-						AuthScopes:   []string{"pid"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 			},

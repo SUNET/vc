@@ -58,7 +58,8 @@ type DatastoreScope struct {
 	// AuthProvider is the auth provider for this credential type (openid4vp, saml, or oidc)
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc"`
 
-	// AuthClaims lists the normalized claim names used for datastore identity lookup.
+	// AuthClaims lists the normalized claim names used for datastore identity lookup
+	// when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead).
 	// These names must match the BSON field names under "identities." in the datastore.
 	// Use attribute_mappings (in auth_providers) to normalize provider-specific attribute
 	// names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names.
@@ -66,21 +67,53 @@ type DatastoreScope struct {
 	// authentic_source_person_id, personal_administrative_number.
 	AuthClaims []string `yaml:"auth_claims,omitempty" doc_example:"[given_name, family_name, birth_date]"`
 
-	// AuthScopes lists credential keys whose VCTs are acceptable for wallet authentication (for OpenID4VP)
-	AuthScopes []string `yaml:"auth_scopes,omitempty" doc_example:"[pid]"`
+	// AuthScopes maps credential scope keys to their per-scope authentication config.
+	// Used only for openid4vp: the wallet must present a credential matching any one
+	// of the listed scopes (OR logic). Each entry specifies which claims to extract
+	// from that particular credential type.
+	AuthScopes map[string]AuthScopeEntry `yaml:"auth_scopes,omitempty"`
+}
+
+// AuthScopeEntry configures per-scope authentication requirements for OpenID4VP.
+// Each entry represents one acceptable credential type the wallet can present.
+type AuthScopeEntry struct {
+	// AuthClaims lists the identity claims to extract from this credential type.
+	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1" doc_example:"[given_name, family_name, birth_date]"`
+}
+
+// AuthScopeNames returns the list of scope keys from AuthScopes.
+func (d *DatastoreScope) AuthScopeNames() []string {
+	names := make([]string, 0, len(d.AuthScopes))
+	for k := range d.AuthScopes {
+		names = append(names, k)
+	}
+	return names
 }
 
 // ExtractIdentityClaims extracts identity field values from a claims map using
-// the configured auth_claims. The claim names are used directly as BSON field
-// names in the datastore query (e.g. "given_name" → identities.given_name).
-func (d *DatastoreScope) ExtractIdentityClaims(claims map[string]any) map[string]string {
-	result := make(map[string]string, len(d.AuthClaims))
-	for _, claimName := range d.AuthClaims {
-		if v, ok := claims[claimName].(string); ok {
-			result[claimName] = v
+// the provided required claim names. The claim names are used directly as BSON
+// field names in the datastore query (e.g. "given_name" → identities.given_name).
+// Returns an error if any required claim is missing or not a string value.
+func ExtractIdentityClaims(claims map[string]any, required []string) (map[string]string, error) {
+	result := make(map[string]string, len(required))
+	var missing []string
+	for _, claimName := range required {
+		v, ok := claims[claimName]
+		if !ok {
+			missing = append(missing, claimName)
+			continue
 		}
+		s, ok := v.(string)
+		if !ok {
+			missing = append(missing, claimName)
+			continue
+		}
+		result[claimName] = s
 	}
-	return result
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("required identity claims missing or not string: %v", missing)
+	}
+	return result, nil
 }
 
 // AssertionConfig groups assertion credential scopes.
