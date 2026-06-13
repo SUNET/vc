@@ -81,7 +81,7 @@ func TestExtractIdentityClaims(t *testing.T) {
 	claims := map[string]any{
 		"sub":   "user123",
 		"email": "test@example.com",
-		"age":   30, // non-string, should cause error
+		"age":   30, // extra non-string claim; not required here, so it should be ignored
 	}
 
 	_, err := ExtractIdentityClaims(claims, required)
