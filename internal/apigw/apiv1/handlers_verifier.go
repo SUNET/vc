@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -51,7 +53,8 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	// Each scope has its own claim queries derived from its per-scope auth_claims.
 	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
 	options := make([][]string, 0, len(vpAuth.AuthScopes))
-	for authScope, entry := range vpAuth.AuthScopes {
+	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
+		entry := vpAuth.AuthScopes[authScope]
 		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
 		for _, claim := range entry.AuthClaims {
 			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
