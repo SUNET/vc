@@ -150,7 +150,11 @@ func (m *MongoCache[V]) SetNX(ctx context.Context, key string, value V) (bool, e
 
 // SetNXWithTTL stores a value only if the key does not already exist (atomic),
 // using a custom TTL approximated via created_at shifting (same as SetWithTTL).
+// If ttl <= 0, falls back to SetNX (default TTL).
 func (m *MongoCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, ttl time.Duration) (bool, error) {
+	if ttl <= 0 {
+		return m.SetNX(ctx, key, value)
+	}
 	shift := m.ttl - ttl
 	createdAt := time.Now().Add(-shift)
 	entry, err := m.marshalEntry(key, value, createdAt)

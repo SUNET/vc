@@ -48,7 +48,11 @@ func (m *MemoryCache[V]) SetNX(_ context.Context, key string, value V) (bool, er
 
 // SetNXWithTTL stores a value only if the key does not already exist, using a custom TTL.
 // Returns true if the value was set, false if the key already existed.
-func (m *MemoryCache[V]) SetNXWithTTL(_ context.Context, key string, value V, ttl time.Duration) (bool, error) {
+// If ttl <= 0, falls back to SetNX (default TTL).
+func (m *MemoryCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, ttl time.Duration) (bool, error) {
+	if ttl <= 0 {
+		return m.SetNX(ctx, key, value)
+	}
 	_, found := m.cache.GetOrSet(key, value, ttlcache.WithTTL[string, V](ttl))
 	return !found, nil
 }
