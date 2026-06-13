@@ -94,6 +94,25 @@ func New(ctx context.Context, cfg *model.SAMLSP, sessionCache pkgcache.Cache[*Se
 			"cert_path", cfg.MetadataSigningCertPath)
 	}
 
+	// Determine if the metadata source is MDQ or URL-based (requires signature verification)
+	requiresRemoteFetch := cfg.MDQServer != "" ||
+		(cfg.StaticIDPMetadata != nil && cfg.StaticIDPMetadata.MetadataURL != "")
+
+	// Enforce metadata signature verification for MDQ/URL sources unless explicitly opted out
+	if requiresRemoteFetch && metadataSigningCert == nil && !cfg.AllowUnsignedMetadata {
+		return nil, fmt.Errorf("metadata_signing_cert_path is required when using MDQ or URL-based metadata sources " +
+			"(set allow_unsigned_metadata: true to override — NOT RECOMMENDED for production)")
+	}
+	if requiresRemoteFetch && metadataSigningCert == nil && cfg.AllowUnsignedMetadata {
+		s.log.Warn("INSECURE: accepting unsigned metadata from remote sources (allow_unsigned_metadata is enabled)")
+	}
+
+	// Warn for local file metadata without signature verification (allowed but noted)
+	if cfg.StaticIDPMetadata != nil && cfg.StaticIDPMetadata.MetadataPath != "" && metadataSigningCert == nil {
+		s.log.Warn("static IdP metadata loaded from local file without signature verification",
+			"path", cfg.StaticIDPMetadata.MetadataPath)
+	}
+
 	// Initialize MDQ client (either MDQ or static mode)
 	if cfg.StaticIDPMetadata != nil {
 		// Static IdP mode

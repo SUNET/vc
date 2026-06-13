@@ -27,6 +27,9 @@ type Client struct {
 	RedirectURIs RedirectURIs `json:"redirect_uri" yaml:"redirect_uri" validate:"required,min=1,dive,required" doc_example:"\"https://example.com/callback\""`
 	// Scopes is the list of OAuth2 scopes allowed for the client
 	Scopes []string `json:"scopes" yaml:"scopes" validate:"required"`
+	// JWKSURI is the URL to the client's JWKS for verifying client_assertion signatures (RFC 7523).
+	// Required for confidential clients using private_key_jwt authentication.
+	JWKSURI string `json:"jwks_uri,omitempty" yaml:"jwks_uri,omitempty" validate:"required_if=Type confidential,omitempty,httpsurl"`
 }
 
 // RedirectURIs holds one or more allowed redirect URIs.

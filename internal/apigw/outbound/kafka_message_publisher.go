@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -22,7 +23,10 @@ type kafkaMessageProducer struct {
 
 // New creates a new instance of a kafka event publisher used by apigw
 func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (apiv1.EventPublisher, error) {
-	saramaConfig := kafka.CommonProducerConfig(cfg)
+	saramaConfig, err := kafka.CommonProducerConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("kafka producer security config: %w", err)
+	}
 	client, err := kafka.NewSyncProducerClient(ctx, saramaConfig, cfg, tracer, log.New("kafka_message_producer_client"))
 	if err != nil {
 		return nil, err

@@ -148,6 +148,29 @@ func (m *MongoCache[V]) SetNX(ctx context.Context, key string, value V) (bool, e
 	return true, nil
 }
 
+// SetNXWithTTL stores a value only if the key does not already exist (atomic),
+// using a custom TTL approximated via created_at shifting (same as SetWithTTL).
+// If ttl <= 0, falls back to SetNX (default TTL).
+func (m *MongoCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, ttl time.Duration) (bool, error) {
+	if ttl <= 0 {
+		return m.SetNX(ctx, key, value)
+	}
+	shift := m.ttl - ttl
+	createdAt := time.Now().Add(-shift)
+	entry, err := m.marshalEntry(key, value, createdAt)
+	if err != nil {
+		return false, fmt.Errorf("mongo cache setnxttl marshal failed (cache=%s): %w", m.collection, err)
+	}
+	_, err = m.coll.InsertOne(ctx, entry)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("mongo cache setnxttl failed (cache=%s): %w", m.collection, err)
+	}
+	return true, nil
+}
+
 // SetWithTTL stores a value with a custom TTL.
 // MongoDB TTL indexes are collection-wide, so per-entry TTL is approximated
 // by shifting created_at: the document expires when

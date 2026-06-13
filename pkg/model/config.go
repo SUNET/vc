@@ -57,14 +57,28 @@ type CORS struct {
 	AllowedOrigins []string `yaml:"allowed_origins" validate:"omitempty" default:"[]" doc_example:"[\"https://wallet.sunet.se\", \"https://app.sunet.se\"]"`
 }
 
-// TLS holds the TLS configuration
+// TLS holds server-side TLS configuration (presenting a certificate to clients)
 type TLS struct {
 	// Enable enables TLS
 	Enable bool `yaml:"enable" default:"false"`
 	// CertFilePath is the path to the TLS certificate
-	CertFilePath string `yaml:"cert_file_path" validate:"required"`
+	CertFilePath string `yaml:"cert_file_path" validate:"required_if=Enable true"`
 	// KeyFilePath is the path to the TLS private key
-	KeyFilePath string `yaml:"key_file_path" validate:"required"`
+	KeyFilePath string `yaml:"key_file_path" validate:"required_if=Enable true"`
+}
+
+// MTLS holds mutual TLS configuration for client connections (verifying peer + presenting own cert)
+type MTLS struct {
+	// Enable enables mTLS for the connection
+	Enable bool `yaml:"enable" default:"false"`
+	// CACertPath is the path to a CA certificate for verifying the remote peer (optional; uses system roots if empty)
+	CACertPath string `yaml:"ca_cert_path,omitempty"`
+	// CertFilePath is the path to a client certificate for mutual authentication
+	CertFilePath string `yaml:"cert_file_path" validate:"required_if=Enable true"`
+	// KeyFilePath is the path to the client private key
+	KeyFilePath string `yaml:"key_file_path" validate:"required_if=Enable true"`
+	// InsecureSkipVerify disables certificate verification (TESTING ONLY — never use in production)
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify" default:"false"`
 }
 
 // Mongo holds the MongoDB configuration
@@ -98,7 +112,23 @@ type Kafka struct {
 	// Enable enables Kafka integration
 	Enable bool `yaml:"enable" default:"false"`
 	// Brokers is the list of Kafka broker addresses
-	Brokers []string `yaml:"brokers" validate:"required" doc_example:"[\"kafka0:9092\", \"kafka1:9092\"]"`
+	Brokers []string `yaml:"brokers" validate:"required_if=Enable true" doc_example:"[\"kafka0:9092\", \"kafka1:9092\"]"`
+	// SASL configures SASL authentication for Kafka connections
+	SASL *KafkaSASL `yaml:"sasl,omitempty"`
+	// MTLS configures mutual TLS (mTLS) for Kafka broker connections
+	MTLS MTLS `yaml:"mtls" validate:"omitempty"`
+}
+
+// KafkaSASL holds SASL authentication settings for Kafka
+type KafkaSASL struct {
+	// Enable activates SASL authentication
+	Enable bool `yaml:"enable" default:"false"`
+	// Mechanism is the SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)
+	Mechanism string `yaml:"mechanism" validate:"required_if=Enable true,omitempty,oneof=PLAIN SCRAM-SHA-256 SCRAM-SHA-512" default:"SCRAM-SHA-512"`
+	// Username is the SASL username
+	Username string `yaml:"username" validate:"required_if=Enable true"`
+	// Password is the SASL password
+	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
 // Log holds the logging configuration
@@ -231,6 +261,12 @@ type SAMLSP struct {
 	// metadata signatures. When set, all fetched metadata (MDQ and static) must
 	// carry a valid XML signature from this certificate.
 	MetadataSigningCertPath string `yaml:"metadata_signing_cert_path,omitempty"`
+
+	// AllowUnsignedMetadata permits MDQ/URL metadata without signature verification.
+	// This is INSECURE (MITM → fake IdP) and should only be used in development.
+	// When false (default), MDQ and URL metadata sources require MetadataSigningCertPath.
+	// Local metadata files are allowed unsigned regardless (with a startup warning).
+	AllowUnsignedMetadata bool `yaml:"allow_unsigned_metadata" default:"false"`
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`

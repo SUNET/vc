@@ -26,7 +26,7 @@ type VerificationRequestObjectRequest struct {
 }
 
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
-	c.log.Debug("Verification request object", "req", req)
+	c.log.Debug("Verification request object", "id", req.ID)
 
 	// Query by RequestObjectID since that's what the wallet sends via ?id= parameter
 	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
@@ -50,7 +50,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	c.log.Debug("Signed JWT", "jwt", signedJWT)
+	c.log.Debug("Signed JWT created", "requestObjectID", authorizationContext.RequestObjectID)
 
 	return signedJWT, nil
 }
@@ -103,7 +103,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
-	c.log.Debug("directPost", "vpResponse", vpResponse)
+	c.log.Debug("directPost", "state", vpResponse.State, "credential_count", len(vpResponse.VPToken))
 
 	// Get authorization context by state
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{State: vpResponse.State})
