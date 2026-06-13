@@ -148,7 +148,7 @@ func (v *ClientAssertionVerifier) Verify(ctx context.Context, assertion string, 
 
 	// Verify jti for replay protection
 	jti, _ := claims["jti"].(string)
-	if jti == "" {
+	if jti == "" && v.JTICheck != nil {
 		return nil, errors.New("client assertion must contain 'jti' claim for replay protection")
 	}
 

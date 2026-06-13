@@ -145,6 +145,7 @@ func TestClientAssertionVerifier_Verify(t *testing.T) {
 			name: "missing_jti",
 			verifier: &ClientAssertionVerifier{
 				TokenEndpoint: tokenEndpoint,
+				JTICheck:      func(_ string, _ time.Time) error { return nil },
 			},
 			claims: func() jwt.MapClaims {
 				c := validClaims(tokenEndpoint)
