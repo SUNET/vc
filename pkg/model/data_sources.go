@@ -81,7 +81,7 @@ type AuthScopeEntry struct {
 	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1" doc_example:"[given_name, family_name, birth_date]"`
 }
 
-// AuthScopeNames returns the sorted list of scope keys from AuthScopes.
+// AuthScopeNames returns the list of scope keys from AuthScopes.
 func (d *DatastoreScope) AuthScopeNames() []string {
 	names := make([]string, 0, len(d.AuthScopes))
 	for k := range d.AuthScopes {
