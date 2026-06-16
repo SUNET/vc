@@ -9,7 +9,7 @@ filippo.io/edwards25519/field
 ## explicit; go 1.16
 github.com/Azure/go-ansiterm
 github.com/Azure/go-ansiterm/winterm
-# github.com/IBM/sarama v1.50.2
+# github.com/IBM/sarama v1.50.3
 ## explicit; go 1.25.0
 github.com/IBM/sarama
 github.com/IBM/sarama/internal/queue
@@ -967,7 +967,7 @@ golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
 golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.55.0
+# golang.org/x/net v0.56.0
 ## explicit; go 1.25.0
 golang.org/x/net/bpf
 golang.org/x/net/http/httpguts

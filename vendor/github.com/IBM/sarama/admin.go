@@ -176,6 +176,10 @@ type ClusterAdmin interface {
 	// Upsert SCRAM users
 	UpsertUserScramCredentials(upsert []AlterUserScramCredentialsUpsert) ([]*AlterUserScramCredentialsResult, error)
 
+	// Update the maximum version level of finalized features.
+	// This operation is supported by brokers with version 2.7.0.0 or higher.
+	UpdateFeatures(featureUpdates []FeatureUpdate) ([]UpdatableFeatureResult, error)
+
 	// Get client quota configurations corresponding to the specified filter.
 	// This operation is supported by brokers with version 2.6.0.0 or higher.
 	DescribeClientQuotas(components []QuotaFilterComponent, strict bool) ([]DescribeClientQuotasEntry, error)
@@ -589,22 +593,11 @@ func (ca *clusterAdmin) DeleteTopic(topic string) error {
 		return ErrInvalidTopic
 	}
 
-	request := &DeleteTopicsRequest{
-		Topics:  []string{topic},
-		Timeout: ca.conf.Admin.Timeout,
-	}
-
-	// Versions 0, 1, 2, and 3 are the same.
-	// Version 4 is first flexible version.
-	if ca.conf.Version.IsAtLeast(V2_4_0_0) {
-		request.Version = 4
-	} else if ca.conf.Version.IsAtLeast(V2_1_0_0) {
-		request.Version = 3
-	} else if ca.conf.Version.IsAtLeast(V2_0_0_0) {
-		request.Version = 2
-	} else if ca.conf.Version.IsAtLeast(V0_11_0_0) {
-		request.Version = 1
-	}
+	request := NewDeleteTopicsRequest(
+		ca.conf.Version,
+		[]string{topic},
+		ca.conf.Admin.Timeout,
+	)
 
 	return ca.retryOnError(isRetriableControllerError, func() error {
 		b, err := ca.Controller()
@@ -650,7 +643,9 @@ func (ca *clusterAdmin) CreatePartitions(topic string, count int32, assignment [
 		Timeout:         ca.conf.Admin.Timeout,
 		ValidateOnly:    validateOnly,
 	}
-	if ca.conf.Version.IsAtLeast(V2_5_0_0) {
+	if ca.conf.Version.IsAtLeast(V2_7_0_0) {
+		request.Version = 3
+	} else if ca.conf.Version.IsAtLeast(V2_5_0_0) {
 		request.Version = 2
 	} else if ca.conf.Version.IsAtLeast(V2_0_0_0) {
 		request.Version = 1
@@ -693,7 +688,7 @@ func (ca *clusterAdmin) AlterPartitionReassignments(topic string, assignment [][
 		Version:   int16(0),
 	}
 
-	for i := 0; i < len(assignment); i++ {
+	for i := range assignment {
 		request.AddBlock(topic, int32(i), assignment[i])
 	}
 
@@ -1617,6 +1612,43 @@ func (ca *clusterAdmin) AlterUserScramCredentials(u []AlterUserScramCredentialsU
 
 		rsp, err = b.AlterUserScramCredentials(req)
 		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return rsp.Results, nil
+}
+
+func (ca *clusterAdmin) UpdateFeatures(featureUpdates []FeatureUpdate) ([]UpdatableFeatureResult, error) {
+	request := &UpdateFeaturesRequest{
+		Timeout:        ca.conf.Admin.Timeout,
+		FeatureUpdates: featureUpdates,
+	}
+
+	var rsp *UpdateFeaturesResponse
+	err := ca.retryOnError(isRetriableControllerError, func() error {
+		b, err := ca.Controller()
+		if err != nil {
+			return err
+		}
+
+		rsp, err = b.UpdateFeatures(request)
+		if err != nil {
+			return err
+		}
+
+		if !errors.Is(rsp.ErrorCode, ErrNoError) {
+			if errors.Is(rsp.ErrorCode, ErrNotController) {
+				_, _ = ca.refreshController()
+			}
+			if rsp.ErrorMessage != nil {
+				return fmt.Errorf("%w - %s", rsp.ErrorCode, *rsp.ErrorMessage)
+			}
+			return rsp.ErrorCode
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, err

@@ -129,9 +129,12 @@ func (r *DescribeConfigsResponse) decode(pd packetDecoder, version int16) (err e
 	if err != nil {
 		return err
 	}
+	if n < 0 {
+		return errInvalidArrayLength
+	}
 
 	r.Resources = make([]*ResourceResponse, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		rr := &ResourceResponse{}
 		if err := rr.decode(pd, version); err != nil {
 			return err
@@ -251,9 +254,12 @@ func (r *ResourceResponse) decode(pd packetDecoder, version int16) (err error) {
 	if err != nil {
 		return err
 	}
+	if n < 0 {
+		return errInvalidArrayLength
+	}
 
 	r.Configs = make([]*ConfigEntry, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		c := &ConfigEntry{}
 		if err := c.decode(pd, version); err != nil {
 			return err
@@ -360,9 +366,12 @@ func (r *ConfigEntry) decode(pd packetDecoder, version int16) (err error) {
 		if err != nil {
 			return err
 		}
+		if n < 0 {
+			return errInvalidArrayLength
+		}
 		r.Synonyms = make([]*ConfigSynonym, n)
 
-		for i := 0; i < n; i++ {
+		for i := range n {
 			s := &ConfigSynonym{}
 			if err := s.decode(pd, version); err != nil {
 				return err

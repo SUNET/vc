@@ -246,14 +246,20 @@ func (b *Broker) Open(conf *Config) error {
 		// It will be used to determine the supported API versions for each request.
 		// This should happen before SASL authentication: https://kafka.apache.org/42/design/protocol/#retrieving-supported-api-versions
 		if conf.ApiVersionsRequest {
-			apiVersionsResponse, err := b.sendAndReceiveApiVersions(3)
+			// v4 additionally includes supported features whose min version is 0,
+			// which v0-v3 omit from the response
+			apiVersionsVersion := int16(3)
+			if conf.Version.IsAtLeast(V3_9_0_0) {
+				apiVersionsVersion = 4
+			}
+			apiVersionsResponse, err := b.sendAndReceiveApiVersions(apiVersionsVersion)
 			if err != nil {
 				if b.maybeCloseLocked(err) {
 					// Open is async, so we can't return the error here; surface it via Connected().
 					return
 				}
 
-				Logger.Printf("Error while sending ApiVersionsRequest V3 to broker %s: %s\n", b.addr, err)
+				Logger.Printf("Error while sending ApiVersionsRequest V%d to broker %s: %s\n", apiVersionsVersion, b.addr, err)
 				// send a lower version request in case remote cluster is <= 2.4.0.0
 				maxVersion := int16(0)
 				if apiVersionsResponse != nil {
@@ -994,6 +1000,18 @@ func (b *Broker) DescribeUserScramCredentials(req *DescribeUserScramCredentialsR
 
 func (b *Broker) AlterUserScramCredentials(req *AlterUserScramCredentialsRequest) (*AlterUserScramCredentialsResponse, error) {
 	res := new(AlterUserScramCredentialsResponse)
+
+	err := b.sendAndReceive(req, res)
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+// UpdateFeatures sends a request to update finalized feature versions
+func (b *Broker) UpdateFeatures(req *UpdateFeaturesRequest) (*UpdateFeaturesResponse, error) {
+	res := new(UpdateFeaturesResponse)
 
 	err := b.sendAndReceive(req, res)
 	if err != nil {
