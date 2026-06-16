@@ -3,13 +3,20 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/google/uuid"
+	"github.com/skip2/go-qrcode"
 )
 
 // DatastoreUploadReply is the reply for a document upload
@@ -535,6 +542,131 @@ func (c *Client) DatastoreSearch(ctx context.Context, req *DatastoreSearchReques
 	reply := &DatastoreSearchReply{
 		Data: docs,
 	}
+
+	return reply, nil
+}
+
+// DatastorePreAuthOfferRequest is the request for generating a pre-authorized credential offer
+// for a specific document in the datastore.
+type DatastorePreAuthOfferRequest struct {
+	// required: true
+	// example: SUNET
+	AuthenticSource string `json:"authentic_source" validate:"required,max=128,printascii"`
+
+	// required: true
+	// example: pid
+	Scope string `json:"scope" validate:"required,max=128,printascii"`
+
+	// required: true
+	// example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
+	DocumentID string `json:"document_id" validate:"required,max=128,printascii"`
+}
+
+// DatastorePreAuthOfferReply is the reply containing a credential offer and QR code
+type DatastorePreAuthOfferReply struct {
+	CredentialOffer    *openid4vci.CredentialOfferResult `json:"credential_offer"`
+	CredentialOfferURL string                            `json:"credential_offer_url"`
+	QR                 *openid4vp.QRReply                `json:"qr,omitempty"`
+}
+
+// DatastorePreAuthOffer generates a pre-authorized credential offer for a specific
+// document in the datastore. This allows an admin or authentic source to create
+// a credential offer that a wallet can redeem without user authentication.
+//
+//	@Summary		DatastorePreAuthOffer
+//	@ID				datastore-preauth-offer
+//	@Description	Generate a pre-authorized credential offer for a datastore document
+//	@Tags			vc-platform
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	DatastorePreAuthOfferReply	"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
+//	@Failure		404	{object}	helpers.ErrorResponse		"Document not found"
+//	@Param			req	body		DatastorePreAuthOfferRequest	true	" "
+//	@Router			/api/v1/datastore/preauth_offer [post]
+func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAuthOfferRequest) (*DatastorePreAuthOfferReply, error) {
+	// Look up the document from the datastore
+	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
+	if err != nil {
+		return nil, fmt.Errorf("document not found: %w", err)
+	}
+
+	// Generate credential offer with pre-authorized code
+	credentialOffer, err := openid4vci.NewCredentialOffer(
+		c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
+		req.Scope,
+		openid4vci.GrantTypePreAuthorizedCode,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
+	}
+
+	preAuthCode := credentialOffer.ID
+
+	// Generate nonce for the authorization context
+	nonce, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Create and persist the authorization context so the wallet can redeem
+	// the offer via the token endpoint.
+	authCtx := &cache.AuthorizationContext{
+		SessionID:  preAuthCode,
+		Code:       preAuthCode,
+		Status:     "code_issued",
+		CreatedAt:  time.Now(),
+		ExpiresAt:  time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:     []string{req.Scope},
+		Nonce:      nonce,
+		DataSource: string(model.DataSourceDatastore),
+		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
+			{
+				Type:                      "openid_credential",
+				CredentialConfigurationID: req.Scope,
+			},
+		},
+	}
+	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
+	}
+
+	// Store the document data so the credential endpoint can issue the
+	// credential when the wallet redeems the offer.
+	if err := c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{req.AuthenticSource: doc}); err != nil {
+		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+	}
+
+	// Build the credential offer URL (inline offer, not by-reference)
+	offerParams := credentialOffer.CredentialOfferParameters
+	credentialOfferEncoded, err := offerParams.CredentialOffer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode credential offer: %w", err)
+	}
+	credentialOfferURL := fmt.Sprintf("openid-credential-offer://?%s", string(credentialOfferEncoded))
+
+	// Generate QR code for the offer URL
+	u, err := url.Parse(credentialOfferURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse credential offer URL: %w", err)
+	}
+	qr, err := openid4vp.GenerateQR(u, qrcode.Medium, 256)
+	if err != nil {
+		c.log.Debug("failed to generate QR code", "error", err)
+		// QR generation failure is non-fatal; return the offer without the QR
+	}
+
+	reply := &DatastorePreAuthOfferReply{
+		CredentialOffer:    credentialOffer,
+		CredentialOfferURL: credentialOfferURL,
+		QR:                 qr,
+	}
+
+	c.log.Info("Pre-authorized credential offer created for datastore document",
+		"authentic_source", req.AuthenticSource,
+		"scope", req.Scope,
+		"document_id", req.DocumentID,
+		"offer_id", credentialOffer.ID)
 
 	return reply, nil
 }

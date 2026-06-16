@@ -262,6 +262,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "/identity", http.StatusNoContent, s.endpointDatastoreDeleteIdentity)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "/search", http.StatusOK, s.endpointDatastoreSearch)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/bulk", http.StatusOK, s.endpointDatastoreBulkUpload)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/preauth_offer", http.StatusOK, s.endpointDatastorePreAuthOffer)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)
