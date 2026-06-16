@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/outbound"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
 )
@@ -52,6 +53,15 @@ func main() {
 	mainLog := log.New("main")
 
 	tracer, err := trace.New(ctx, cfg, serviceName, log)
+	if err != nil {
+		panic(err)
+	}
+
+	meter, err := metric.New(ctx, cfg, serviceName, log)
+	if err != nil {
+		panic(err)
+	}
+	vciMetrics, err := metric.NewVCI(meter.Meter)
 	if err != nil {
 		panic(err)
 	}
@@ -91,7 +101,7 @@ func main() {
 		mainLog.Info("EventPublisher disabled in config")
 	}
 
-	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, cfg, log)
+	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, vciMetrics, cfg, log)
 	if err != nil {
 		panic(err)
 	}
@@ -111,7 +121,7 @@ func main() {
 		panic(err)
 	}
 
-	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, eventPublisher, authProvidersSvc, dataSourcesSvc, cacheService, log)
+	httpService, err := httpserver.New(ctx, cfg, apiv1Client, tracer, eventPublisher, authProvidersSvc, dataSourcesSvc, cacheService, meter.HTTPHandler(), log)
 	services["httpService"] = httpService
 	if err != nil {
 		panic(err)

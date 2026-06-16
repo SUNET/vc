@@ -20,6 +20,9 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ResolveIdentifier resolves an identifier string from authentication claims.
@@ -211,6 +214,7 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
 func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+	start := time.Now()
 	c.log.Debug("VCICredential request", "credential_identifier", req.CredentialIdentifier, "credential_configuration_id", req.CredentialConfigurationID)
 	// Validate DPoP JWT signature and claims first, before checking JTI replay.
 	// This prevents attackers from poisoning the JTI cache with forged tokens.
@@ -409,21 +413,45 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Branch based on requested credential format
+	var resp *openid4vci.CredentialResponse
 	switch format {
 	case "mso_mdoc":
-		return c.issueMDoc(ctx, scope, documentData, jwk, identifier)
+		resp, err = c.issueMDoc(ctx, scope, documentData, jwk, identifier)
 
 	case "vc+sd-jwt", "dc+sd-jwt":
-		return c.issueSDJWT(ctx, scope, documentData, jwk, identifier)
+		resp, err = c.issueSDJWT(ctx, scope, documentData, jwk, identifier)
 
 	case "ldp_vc", "vc+ld+json":
 		// W3C VC 2.0 Data Integrity credential
-		return c.issueVC20(ctx, scope, documentData, identifier, req)
+		resp, err = c.issueVC20(ctx, scope, documentData, identifier, req)
 
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
-		return nil, errors.New("unsupported or missing credential format: " + format)
+		err = errors.New("unsupported or missing credential format: " + format)
 	}
+
+	formatAttr := metric.WithAttributes(attribute.String("format", format))
+	if err != nil {
+		if c.vci != nil {
+			c.vci.CredentialsFailed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("format", format),
+				attribute.String("error_class", "issuance_error"),
+			))
+		}
+		return nil, err
+	}
+	if c.vci != nil {
+		configID := req.CredentialConfigurationID
+		if configID == "" {
+			configID = req.CredentialIdentifier
+		}
+		c.vci.CredentialsIssued.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("format", format),
+			attribute.String("credential_config_id", configID),
+		))
+		c.vci.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
+	}
+	return resp, nil
 }
 
 // issueSDJWT issues an SD-JWT credential
@@ -635,6 +663,11 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
+	if c.vci != nil {
+		c.vci.DeferredCredentials.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("status", "pending"),
+		))
+	}
 	// run the same code as VCICredential
 	return nil, nil
 }
@@ -658,6 +691,15 @@ func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
 func (c *Client) VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
 	c.log.Debug("notification", "req", req)
+	if c.vci != nil {
+		event := req.Event
+		if event == "" {
+			event = "unknown"
+		}
+		c.vci.Notifications.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event", event),
+		))
+	}
 	return nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -34,6 +35,7 @@ type Client struct {
 	db     *db.Service
 	log    *logger.Log
 	tracer *trace.Tracer
+	vp     *metric.VP
 	notify *notify.Service
 
 	// Metadata
@@ -60,7 +62,7 @@ type Client struct {
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheService *cache.Service, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheService *cache.Service, cfg *model.Cfg, tracer *trace.Tracer, vpMetrics *metric.VP, log *logger.Log) (*Client, error) {
 	// Create OpenID4VP client with custom TTL settings
 	openid4vpClient, err := openid4vp.New(ctx, &openid4vp.Config{
 		EphemeralKeyTTL:  10 * time.Minute,
@@ -77,6 +79,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		notify:       notify,
 		openid4vp:    openid4vpClient,
 		tracer:       tracer,
+		vp:           vpMetrics,
 		cacheService: cacheService,
 		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
 			HTTPClient:          &http.Client{Timeout: 30 * time.Second},

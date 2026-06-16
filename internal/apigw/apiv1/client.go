@@ -17,6 +17,7 @@ import (
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -37,6 +38,7 @@ type Client struct {
 	db     *db.Service
 	log    *logger.Log
 	tracer *trace.Tracer
+	vci    *metric.VCI
 
 	// database collections
 	credentialOfferStore db.CredentialOfferStore
@@ -72,7 +74,7 @@ type Client struct {
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, vciMetrics *metric.VCI, cfg *model.Cfg, log *logger.Log) (*Client, error) {
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
@@ -81,6 +83,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		identityMappingStore:          db.IdentityMappingsColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
+		vci:                           vciMetrics,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
 		cacheService:                  cacheService,
 	}
