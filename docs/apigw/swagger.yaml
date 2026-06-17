@@ -145,8 +145,6 @@ definitions:
         $ref: '#/definitions/openid4vci.CredentialOfferResult'
       credential_offer_url:
         type: string
-      qr:
-        $ref: '#/definitions/openid4vp.QRReply'
     type: object
   apiv1.DatastorePreAuthOfferRequest:
     properties:
@@ -1130,16 +1128,6 @@ definitions:
     - access_token
     - expires_in
     - token_type
-    type: object
-  openid4vp.QRReply:
-    properties:
-      base64_image:
-        type: string
-      uri:
-        type: string
-    required:
-    - base64_image
-    - uri
     type: object
   vcclient.UploadRequest:
     properties:

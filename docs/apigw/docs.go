@@ -1170,9 +1170,6 @@ const docTemplate = `{
                 },
                 "credential_offer_url": {
                     "type": "string"
-                },
-                "qr": {
-                    "$ref": "#/definitions/openid4vp.QRReply"
                 }
             }
         },
@@ -2288,21 +2285,6 @@ const docTemplate = `{
                 },
                 "token_type": {
                     "description": "TokenType REQUIRED.  The type of the token issued as described in Section 7.1.  Value is case insensitive.",
-                    "type": "string"
-                }
-            }
-        },
-        "openid4vp.QRReply": {
-            "type": "object",
-            "required": [
-                "base64_image",
-                "uri"
-            ],
-            "properties": {
-                "base64_image": {
-                    "type": "string"
-                },
-                "uri": {
                     "type": "string"
                 }
             }

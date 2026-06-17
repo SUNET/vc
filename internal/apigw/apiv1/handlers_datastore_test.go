@@ -981,10 +981,6 @@ func TestDatastorePreAuthOffer_Success(t *testing.T) {
 	assert.Contains(t, reply.CredentialOfferURL, "openid-credential-offer://")
 	assert.Contains(t, reply.CredentialOfferURL, "credential_offer")
 
-	// Verify QR code was generated
-	require.NotNil(t, reply.QR)
-	assert.NotEmpty(t, reply.QR.Base64Image)
-	assert.NotEmpty(t, reply.QR.URI)
 }
 
 func TestDatastorePreAuthOffer_DocumentNotFound(t *testing.T) {

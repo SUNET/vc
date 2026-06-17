@@ -3,7 +3,6 @@ package apiv1
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
@@ -12,11 +11,9 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
-	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/google/uuid"
-	"github.com/skip2/go-qrcode"
 )
 
 // DatastoreUploadReply is the reply for a document upload
@@ -562,11 +559,10 @@ type DatastorePreAuthOfferRequest struct {
 	DocumentID string `json:"document_id" validate:"required,max=128,printascii"`
 }
 
-// DatastorePreAuthOfferReply is the reply containing a credential offer and QR code
+// DatastorePreAuthOfferReply is the reply containing a credential offer
 type DatastorePreAuthOfferReply struct {
 	CredentialOffer    *openid4vci.CredentialOfferResult `json:"credential_offer"`
 	CredentialOfferURL string                            `json:"credential_offer_url"`
-	QR                 *openid4vp.QRReply                `json:"qr,omitempty"`
 }
 
 // DatastorePreAuthOffer generates a pre-authorized credential offer for a specific
@@ -645,21 +641,9 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	}
 	credentialOfferURL := fmt.Sprintf("openid-credential-offer://?%s", string(credentialOfferEncoded))
 
-	// Generate QR code for the offer URL
-	u, err := url.Parse(credentialOfferURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse credential offer URL: %w", err)
-	}
-	qr, err := openid4vp.GenerateQR(u, qrcode.Medium, 256)
-	if err != nil {
-		c.log.Debug("failed to generate QR code", "error", err)
-		// QR generation failure is non-fatal; return the offer without the QR
-	}
-
 	reply := &DatastorePreAuthOfferReply{
 		CredentialOffer:    credentialOffer,
 		CredentialOfferURL: credentialOfferURL,
-		QR:                 qr,
 	}
 
 	c.log.Info("Pre-authorized credential offer created for datastore document",
