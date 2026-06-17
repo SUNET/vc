@@ -607,6 +607,11 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 
 	// Create and persist the authorization context so the wallet can redeem
 	// the offer via the token endpoint.
+	// Note: AuthorizationDetails is intentionally left empty. If set, the token
+	// endpoint would return authorization_details with credential_identifiers,
+	// which per OID4VCI spec forces the wallet to use credential_identifier
+	// (not credential_configuration_id) in the credential request. Most wallets
+	// use credential_configuration_id for pre-auth flows, so we keep it simple.
 	authCtx := &cache.AuthorizationContext{
 		SessionID:  preAuthCode,
 		Code:       preAuthCode,
@@ -616,12 +621,6 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		Scopes:     []string{req.Scope},
 		Nonce:      nonce,
 		DataSource: string(model.DataSourceDatastore),
-		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
-			{
-				Type:                      "openid_credential",
-				CredentialConfigurationID: req.Scope,
-			},
-		},
 	}
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
