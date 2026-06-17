@@ -139,6 +139,40 @@ definitions:
     required:
     - identity_mapping_id
     type: object
+  apiv1.DatastorePreAuthOfferReply:
+    properties:
+      credential_offer:
+        $ref: '#/definitions/openid4vci.CredentialOfferResult'
+      credential_offer_url:
+        type: string
+      qr:
+        $ref: '#/definitions/openid4vp.QRReply'
+    type: object
+  apiv1.DatastorePreAuthOfferRequest:
+    properties:
+      authentic_source:
+        description: |-
+          required: true
+          example: SUNET
+        maxLength: 128
+        type: string
+      document_id:
+        description: |-
+          required: true
+          example: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8
+        maxLength: 128
+        type: string
+      scope:
+        description: |-
+          required: true
+          example: pid
+        maxLength: 128
+        type: string
+    required:
+    - authentic_source
+    - document_id
+    - scope
+    type: object
   apiv1.DatastoreResolveReply:
     properties:
       authentic_source_person_id:
@@ -1097,6 +1131,16 @@ definitions:
     - expires_in
     - token_type
     type: object
+  openid4vp.QRReply:
+    properties:
+      base64_image:
+        type: string
+      uri:
+        type: string
+    required:
+    - base64_image
+    - uri
+    type: object
   vcclient.UploadRequest:
     properties:
       document_data:
@@ -1331,6 +1375,37 @@ paths:
           schema:
             $ref: '#/definitions/helpers.ErrorResponse'
       summary: DatastoreList
+      tags:
+      - vc-platform
+  /api/v1/datastore/preauth_offer:
+    post:
+      consumes:
+      - application/json
+      description: Generate a pre-authorized credential offer for a datastore document
+      operationId: datastore-preauth-offer
+      parameters:
+      - description: ' '
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/apiv1.DatastorePreAuthOfferRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/apiv1.DatastorePreAuthOfferReply'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+        "404":
+          description: Document not found
+          schema:
+            $ref: '#/definitions/helpers.ErrorResponse'
+      summary: DatastorePreAuthOffer
       tags:
       - vc-platform
   /api/v1/datastore/resolve:

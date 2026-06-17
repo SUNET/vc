@@ -394,6 +394,10 @@ func (u unimplementedApiv1) ListAuthenticSources(context.Context) ([]string, err
 	return nil, nil
 }
 
+func (u unimplementedApiv1) DatastorePreAuthOffer(context.Context, *apiv1.DatastorePreAuthOfferRequest) (*apiv1.DatastorePreAuthOfferReply, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) Health(context.Context, *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
 	panic("not implemented")
 }

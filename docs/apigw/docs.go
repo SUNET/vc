@@ -336,6 +336,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/datastore/preauth_offer": {
+            "post": {
+                "description": "Generate a pre-authorized credential offer for a datastore document",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "DatastorePreAuthOffer",
+                "operationId": "datastore-preauth-offer",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastorePreAuthOfferRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/apiv1.DatastorePreAuthOfferReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/datastore/resolve": {
             "post": {
                 "description": "Resolve identity attributes to documents",
@@ -1112,6 +1159,45 @@ const docTemplate = `{
                 },
                 "valid_to": {
                     "type": "integer"
+                }
+            }
+        },
+        "apiv1.DatastorePreAuthOfferReply": {
+            "type": "object",
+            "properties": {
+                "credential_offer": {
+                    "$ref": "#/definitions/openid4vci.CredentialOfferResult"
+                },
+                "credential_offer_url": {
+                    "type": "string"
+                },
+                "qr": {
+                    "$ref": "#/definitions/openid4vp.QRReply"
+                }
+            }
+        },
+        "apiv1.DatastorePreAuthOfferRequest": {
+            "type": "object",
+            "required": [
+                "authentic_source",
+                "document_id",
+                "scope"
+            ],
+            "properties": {
+                "authentic_source": {
+                    "description": "required: true\nexample: SUNET",
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "document_id": {
+                    "description": "required: true\nexample: 7a00fe1a-3e1a-11ef-9272-fb906803d1b8",
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "scope": {
+                    "description": "required: true\nexample: pid",
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -2202,6 +2288,21 @@ const docTemplate = `{
                 },
                 "token_type": {
                     "description": "TokenType REQUIRED.  The type of the token issued as described in Section 7.1.  Value is case insensitive.",
+                    "type": "string"
+                }
+            }
+        },
+        "openid4vp.QRReply": {
+            "type": "object",
+            "required": [
+                "base64_image",
+                "uri"
+            ],
+            "properties": {
+                "base64_image": {
+                    "type": "string"
+                },
+                "uri": {
                     "type": "string"
                 }
             }
