@@ -56,10 +56,11 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 }
 
 // requireIdentifier validates that a non-empty identifier exists for data sources
-// that require it. Assertion-based issuance allows an empty identifier because
-// all data comes from the trusted IdP claims.
+// that require it. Assertion-based and datastore-based issuance allow an empty
+// identifier because the data comes from trusted sources (IdP claims or
+// pre-uploaded documents) rather than identity-mapped lookups.
 func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
-	if identifier == "" && dataSource != model.DataSourceAssertion {
+	if identifier == "" && dataSource != model.DataSourceAssertion && dataSource != model.DataSourceDatastore {
 		return "", errors.New("no identifier in auth context")
 	}
 	return identifier, nil

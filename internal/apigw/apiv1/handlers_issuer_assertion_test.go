@@ -175,10 +175,10 @@ func TestAssertionDataSource_CredentialIssuance_AllowsEmptyIdentifier(t *testing
 			wantErr:    false,
 		},
 		{
-			name:       "datastore_empty_identifier_rejected",
+			name:       "datastore_empty_identifier_allowed",
 			dataSource: model.DataSourceDatastore,
 			identifier: "",
-			wantErr:    true,
+			wantErr:    false,
 		},
 		{
 			name:       "external_api_empty_identifier_rejected",
