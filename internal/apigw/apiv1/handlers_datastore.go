@@ -619,8 +619,9 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		CreatedAt:  time.Now(),
 		ExpiresAt:  time.Now().Add(5 * time.Minute).Unix(),
 		Scopes:     []string{req.Scope},
-		Nonce:      nonce,
-		DataSource: string(model.DataSourceDatastore),
+		Nonce:        nonce,
+		DataSource:   string(model.DataSourceDatastore),
+		AuthProvider: model.AuthProviderDatastore,
 	}
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
