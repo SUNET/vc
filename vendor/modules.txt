@@ -798,7 +798,7 @@ github.com/youmark/pkcs8
 # github.com/yusufpapurcu/wmi v1.2.4
 ## explicit; go 1.16
 github.com/yusufpapurcu/wmi
-# go.mongodb.org/mongo-driver/v2 v2.6.0
+# go.mongodb.org/mongo-driver/v2 v2.7.0
 ## explicit; go 1.19
 go.mongodb.org/mongo-driver/v2/bson
 go.mongodb.org/mongo-driver/v2/event
