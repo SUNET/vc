@@ -18,6 +18,9 @@ const OID4VP_ALL_PROTOCOLS = [
   ...OID4VP_SPEC_PROTOCOLS,
   OID4VP_PROTOCOLS.LEGACY
 ];
+function isOID4VPProtocol(value) {
+  return OID4VP_ALL_PROTOCOLS.includes(value);
+}
 
 // src/detect.ts
 function isDCAPIAvailable() {
@@ -95,10 +98,13 @@ function isProtocolUnsupported(error) {
 }
 export {
   ERROR_MESSAGES,
+  OID4VP_ALL_PROTOCOLS,
   OID4VP_PROTOCOLS,
+  OID4VP_SPEC_PROTOCOLS,
   getBestProtocol,
   getUserFriendlyErrorMessage,
   isDCAPIAvailable,
+  isOID4VPProtocol,
   isProtocolAllowed,
   isProtocolUnsupported,
   isUserCancel,
