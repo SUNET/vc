@@ -1,5 +1,14 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
+import {
+    configure as configureDCAPI,
+    requestCredential,
+    isNativeDCAPIAvailable,
+    getBestSupportedProtocol,
+    getDeepLinkUrl,
+    getWebWalletUrls,
+    getUserFriendlyErrorMessage,
+} from "./dc-api-polyfill.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -456,25 +465,55 @@ Alpine.data("app", () => ({
                 },
             );
 
-            // Start SSE listener AFTER interaction call sets session_id
+            this.presentationDefinition = v.parse(presentationDefinitionSchema, res);
+
+            // Configure the DC API polyfill with server-side session info
+            configureDCAPI({
+                baseUrl: baseUrl.toString(),
+                sseUrl: new URL("/ui/notify", baseUrl).toString(),
+                webWallets: this.walletInstances,
+            });
+
+            // Try native DC API first — if the browser supports
+            // an openid4vp protocol variant, use it directly.
+            if (isNativeDCAPIAvailable() && getBestSupportedProtocol()) {
+                try {
+                    const abortController = new AbortController();
+                    this._dcAbort = abortController;
+
+                    const result = await requestCredential(
+                        this.presentationDefinition.authorization_request,
+                        { signal: abortController.signal },
+                    );
+
+                    // Native DC API succeeded — handle redirect from response
+                    if (result.data && result.data.redirect_uri) {
+                        window.location.href = result.data.redirect_uri;
+                        return;
+                    }
+                    // If no redirect in response, the wallet posted directly
+                    // to the server — wait for SSE notification below
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                    console.log("DC API not available or failed, falling back to QR/links:", err.message);
+                    // Fall through to QR + wallet links
+                }
+            }
+
+            // Fallback: show QR code + wallet links + SSE listener
             if (!this.notifyEventSource) {
                 console.log("Starting SSE notify listener from sendDcqlQuery");
                 this.notifyEventSource = setupNotifyListener();
-                console.log("SSE notify listener started, eventSource:", this.notifyEventSource);
             }
-
-            this.presentationDefinition = v.parse(presentationDefinitionSchema, res);
 
             const presDefURI = new URL(this.presentationDefinition.authorization_request);
 
             for (const [label, url] of Object.entries(this.walletInstances)) {
                 const uri = new URL(url);
-
-                uri.search = presDefURI.search
-                uri.hash = presDefURI.hash
+                uri.search = presDefURI.search;
+                uri.hash = presDefURI.hash;
 
                 if (!this.redirectUris) this.redirectUris = {};
-
                 this.redirectUris[`Open with ${label}`] = uri.toString();
             }
         } catch (error) {
