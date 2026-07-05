@@ -94,12 +94,14 @@ func validateKeyPair(priv crypto.Signer, cert *x509.Certificate) error {
 	return nil
 }
 
-// IssuanceRequest contains the data for issuing an mDL.
+// IssuanceRequest contains the data for issuing an PID.
 type IssuanceRequest struct {
 	// Holder's device public key
 	DevicePublicKey crypto.PublicKey
-	// mDL data elements
+	// Mdoc data elements
 	MDoc *MDoc
+	//doc type
+	DocType string
 	// Custom validity period (optional)
 	ValidFrom  *time.Time
 	ValidUntil *time.Time
@@ -116,7 +118,18 @@ type IssuedDocumentMdoc struct {
 	ValidUntil time.Time
 }
 
-// Issue creates a signed mDL document from the request.
+func namespaceForDocType(docType string) (string, error) {
+	switch docType {
+	case DocTypeMDL:
+		return NamespaceMDL, nil
+	case DocTypePID:
+		return NamespacePID, nil
+	default:
+		return "", fmt.Errorf("unsupported doc type: %s", docType)
+	}
+}
+
+// Issue creates a signed PID document from the request.
 func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	// Accumulator for document errors instead of throwing hard Go app errors
 	var documentErrors []DocumentError
@@ -125,7 +138,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		return nil, fmt.Errorf("device public key is required")
 	}
 	if req.MDoc == nil {
-		return nil, fmt.Errorf("mDL data is required")
+		return nil, fmt.Errorf("PID data is required")
 	}
 
 	// Convert device public key to COSE key
@@ -144,28 +157,37 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		validUntil = req.ValidUntil.UTC()
 	}
 
+	// Determine the namespace from the requested doc type. This must be derived
+	// per-request rather than hardcoded, since mDL and PID use different
+	// namespace strings and mixing them produces a malformed/rejectable document.
+	ns, err := namespaceForDocType(req.DocType)
+	if err != nil {
+		return nil, fmt.Errorf("resolve namespace: %w", err)
+	}
+
 	// Build the MSO
-	builder := NewMSOBuilder(DocType).
+	builder := NewMSOBuilder(req.DocType).
 		WithDigestAlgorithm(i.digestAlgorithm).
 		WithValidity(validFrom, validUntil).
 		WithDeviceKey(deviceKey).
 		WithSigner(i.signerKey, i.certChain)
 
 	// Add all mandatory data elements
-	if err := i.addMandatoryElements(builder, req.MDoc); err != nil {
+	if err := i.addMandatoryElements(builder, req.MDoc, ns); err != nil {
 		return nil, fmt.Errorf("add mandatory elements: %w", err)
 	}
 
 	// Add optional data elements
-	if err := i.addOptionalElements(builder, req.MDoc); err != nil {
+	if err := i.addOptionalElements(builder, req.MDoc, ns); err != nil {
 		return nil, fmt.Errorf("add optional elements: %w", err)
 	}
 
-	// Add driving privileges
-	if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
-		return nil, fmt.Errorf("add driving privileges: %w", err)
+	// Add driving privileges (mDL-specific; not part of the PID attribute set)
+	if req.DocType == DocTypeMDL {
+		if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
+			return nil, fmt.Errorf("add driving privileges: %w", err)
+		}
 	}
-
 	// Build and sign the MSO
 	signedMSO, issuerNameSpaces, err := builder.Build()
 	if err != nil {
@@ -200,7 +222,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	}
 	// Everything encoded successfully: build response containing the document
 	innerDoc := DocumentMdoc{
-		DocType: DocType,
+		DocType: req.DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: issuerSignedNS,
 			IssuerAuth: issuerAuthArray,
@@ -246,23 +268,40 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	return issuedDoc, nil
 }
 
-// addMandatoryElements adds all mandatory data elements to the builder.
-func (i *Issuer) addMandatoryElements(builder *MSOBuilder, mdoc *MDoc) error {
-	ns := Namespace
+// addMandatoryElements adds all mandatory data elements to the builder,
+func (i *Issuer) addMandatoryElements(builder *MSOBuilder, mdoc *MDoc, ns string) error {
+	var elements map[string]any
 
-	// Per ISO 18013-5 Table 5, mandatory elements
-	elements := map[string]any{
-		"family_name":            mdoc.FamilyName,
-		"given_name":             mdoc.GivenName,
-		"birth_date":             mdoc.BirthDate,
-		"issue_date":             mdoc.IssueDate,
-		"expiry_date":            mdoc.ExpiryDate,
-		"issuing_country":        mdoc.IssuingCountry,
-		"issuing_authority":      mdoc.IssuingAuthority,
-		"document_number":        mdoc.DocumentNumber,
-		"portrait":               mdoc.Portrait,
-		"driving_privileges":     mdoc.DrivingPrivileges,
-		"un_distinguishing_sign": mdoc.UNDistinguishingSign,
+	switch ns {
+	case NamespaceMDL:
+		// Per ISO 18013-5 Table 5, mandatory elements
+		elements = map[string]any{
+			"family_name":            mdoc.FamilyName,
+			"given_name":             mdoc.GivenName,
+			"birth_date":             mdoc.BirthDate,
+			"issue_date":             mdoc.IssueDate,
+			"expiry_date":            mdoc.ExpiryDate,
+			"issuing_country":        mdoc.IssuingCountry,
+			"issuing_authority":      mdoc.IssuingAuthority,
+			"document_number":        mdoc.DocumentNumber,
+			"portrait":               mdoc.Portrait,
+			"driving_privileges":     mdoc.DrivingPrivileges,
+			"un_distinguishing_sign": mdoc.UNDistinguishingSign,
+		}
+	case NamespacePID:
+		// Per ARF PID Rulebook mandatory elements (no driving privileges,
+		// no UN distinguishing sign — those are mDL-only)
+		elements = map[string]any{
+			"family_name":       mdoc.FamilyName,
+			"given_name":        mdoc.GivenName,
+			"birth_date":        mdoc.BirthDate,
+			"issuance_date":     mdoc.IssueDate,
+			"expiry_date":       mdoc.ExpiryDate,
+			"issuing_country":   mdoc.IssuingCountry,
+			"issuing_authority": mdoc.IssuingAuthority,
+		}
+	default:
+		return fmt.Errorf("unsupported namespace: %s", ns)
 	}
 
 	for elementID, value := range elements {
@@ -274,35 +313,64 @@ func (i *Issuer) addMandatoryElements(builder *MSOBuilder, mdoc *MDoc) error {
 	return nil
 }
 
-// addOptionalElements adds optional data elements if present.
-func (i *Issuer) addOptionalElements(builder *MSOBuilder, mdoc *MDoc) error {
-	ns := Namespace
-
-	// Add optional elements only if they have values
-	optionalElements := map[string]any{
-		"family_name_national_character": mdoc.FamilyNameNationalCharacter,
-		"given_name_national_character":  mdoc.GivenNameNationalCharacter,
-		"signature_usual_mark":           mdoc.SignatureUsualMark,
-		"sex":                            mdoc.Sex,
-		"height":                         mdoc.Height,
-		"weight":                         mdoc.Weight,
-		"eye_colour":                     mdoc.EyeColour,
-		"hair_colour":                    mdoc.HairColour,
-		"birth_place":                    mdoc.BirthPlace,
-		"resident_address":               mdoc.ResidentAddress,
-		"portrait_capture_date":          mdoc.PortraitCaptureDate,
-		"age_in_years":                   mdoc.AgeInYears,
-		"age_birth_year":                 mdoc.AgeBirthYear,
-		"issuing_jurisdiction":           mdoc.IssuingJurisdiction,
-		"nationality":                    mdoc.Nationality,
-		"resident_city":                  mdoc.ResidentCity,
-		"resident_state":                 mdoc.ResidentState,
-		"resident_postal_code":           mdoc.ResidentPostalCode,
-		"resident_country":               mdoc.ResidentCountry,
-		"administrative_number":          mdoc.AdministrativeNumber,
+// addOptionalElements adds optional data elements if present, selecting the
+func (i *Issuer) addOptionalElements(builder *MSOBuilder, mdoc *MDoc, ns string) error {
+	var optionalElements map[string]any
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
+		return fmt.Errorf("failed to generate pseudonym seed: %w", err)
+	}
+	switch ns {
+	case NamespaceMDL:
+		optionalElements = map[string]any{
+			"family_name_national_character": mdoc.FamilyNameNationalCharacter,
+			"given_name_national_character":  mdoc.GivenNameNationalCharacter,
+			"signature_usual_mark":           mdoc.SignatureUsualMark,
+			"sex":                            mdoc.Sex,
+			"height":                         mdoc.Height,
+			"weight":                         mdoc.Weight,
+			"eye_colour":                     mdoc.EyeColour,
+			"hair_colour":                    mdoc.HairColour,
+			"birth_place":                    mdoc.BirthPlace,
+			"resident_address":               mdoc.ResidentAddress,
+			"portrait_capture_date":          mdoc.PortraitCaptureDate,
+			"age_in_years":                   mdoc.AgeInYears,
+			"age_birth_year":                 mdoc.AgeBirthYear,
+			"issuing_jurisdiction":           mdoc.IssuingJurisdiction,
+			"nationality":                    mdoc.Nationality,
+			"resident_city":                  mdoc.ResidentCity,
+			"resident_state":                 mdoc.ResidentState,
+			"resident_postal_code":           mdoc.ResidentPostalCode,
+			"resident_country":               mdoc.ResidentCountry,
+			"administrative_number":          mdoc.AdministrativeNumber,
+			"pseudonym_seed": 				  seed,
+		}
+	case NamespacePID:
+		optionalElements = map[string]any{
+			"family_name_national_character": mdoc.FamilyNameNationalCharacter,
+			"given_name_national_character":  mdoc.GivenNameNationalCharacter,
+			"sex":                             mdoc.Sex,
+			"birth_place":                     mdoc.BirthPlace,
+			"resident_address":                mdoc.ResidentAddress,
+			"portrait_capture_date":           mdoc.PortraitCaptureDate,
+			"age_in_years":                    mdoc.AgeInYears,
+			"age_birth_year":                  mdoc.AgeBirthYear,
+			"issuing_jurisdiction":            mdoc.IssuingJurisdiction,
+			"nationality":                     mdoc.Nationality,
+			"resident_city":                   mdoc.ResidentCity,
+			"resident_state":                  mdoc.ResidentState,
+			"resident_postal_code":            mdoc.ResidentPostalCode,
+			"resident_country":                mdoc.ResidentCountry,
+			"administrative_number":           mdoc.AdministrativeNumber,
+			"document_number":                 mdoc.DocumentNumber,
+			"portrait":                        mdoc.Portrait,
+			"pseudonym_seed": 				   seed,
+		}
+	default:
+		return fmt.Errorf("unsupported namespace: %s", ns)
 	}
 
-	// Add age_over attestations from the AgeOver struct
+	// Add age_over attestations from the AgeOver struct (valid in both namespaces)
 	if mdoc.AgeOver != nil {
 		if mdoc.AgeOver.Over18 != nil {
 			if err := builder.AddDataElement(ns, "age_over_18", *mdoc.AgeOver.Over18); err != nil {

@@ -40,6 +40,9 @@ type CredentialIssuerMetadataParameters struct {
 	// Display: OPTIONAL. A non-empty array of objects, where each object contains display properties of a Credential Issuer for a certain language.
 	Display []MetadataDisplay `json:"display,omitempty" yaml:"display,omitempty"`
 
+	// Claims: OPTIONAL. 
+	Claims []ClaimDescription `json:"claims,omitempty" yaml:"claims,omitempty"`
+
 	// SignedMetadata: OPTIONAL. A JWT that contains Credential Issuer metadata parameters as claims.
 	SignedMetadata string `json:"signed_metadata,omitempty" yaml:"signed_metadata,omitempty"`
 
@@ -189,11 +192,13 @@ type CredentialMetadata struct {
 }
 
 // ClaimDescription describes a claim within a Credential for display purposes.
-// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-claims-description-for-issu
 type ClaimDescription struct {
 	// Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential.
 	Path []string `json:"path" yaml:"path" validate:"required"`
-
+	
+	// SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.
+    SVGID string `json:"svg_id,omitempty" yaml:"svg_id,omitempty"`
+	
 	// Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.
 	Mandatory bool `json:"mandatory,omitempty" yaml:"mandatory,omitempty"`
 
@@ -206,6 +211,10 @@ type ClaimDisplayProperties struct {
 	// Name: OPTIONAL. String value of a display name for the claim.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
+	// Label: OPTIONAL. Same as Name — included for compatibility with consumers
+	// (e.g. wallet-common's dataUriResolver) that expect a "label" field.
+	Label string `json:"label,omitempty" yaml:"label,omitempty"`
+	
 	// Locale: OPTIONAL. String value that identifies the language of this object.
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 }
@@ -221,6 +230,36 @@ type CredentialDefinition struct {
 	Context []string `json:"@context,omitempty" yaml:"@context,omitempty"`
 }
 
+// MetadataRendering contains rendering information for a Credential Issuer or Credential,
+// as defined in ISO/IEC 18013-5 and referenced by OpenID4VCI mdoc rendering extensions.
+type MetadataRendering struct {
+	// Simple: OPTIONAL. Object containing simple rendering information, such as a logo.
+	Simple *MetadataSimpleRendering `json:"simple,omitempty" yaml:"simple,omitempty"`
+
+	// SvgTemplates: OPTIONAL. A non-empty array of SVG template objects used to render the Credential.
+	SvgTemplates []MetadataSvgTemplate `json:"svg_templates,omitempty" yaml:"svg_templates,omitempty"`
+}
+
+// MetadataSimpleRendering contains simple (non-SVG) rendering information.
+type MetadataSimpleRendering struct {
+	// Logo: OPTIONAL. Object with information about the logo to use for simple rendering.
+	Logo *MetadataLogo `json:"logo,omitempty" yaml:"logo,omitempty"`
+}
+
+// MetadataSvgTemplate describes a single SVG template used to render a Credential.
+type MetadataSvgTemplate struct {
+	// URI: REQUIRED. String value that contains a URI where the Wallet can obtain the SVG template.
+	URI string `json:"uri" yaml:"uri" validate:"required"`
+
+	// URIIntegrity: OPTIONAL. Subresource integrity hash (e.g. "sha256-...") of the SVG template,
+	// allowing the Wallet to verify the integrity of the fetched resource.
+	URIIntegrity string `json:"uri#integrity,omitempty" yaml:"uri_integrity,omitempty"`
+
+	// Properties: OPTIONAL. Object describing the rendering properties this template is suited for,
+	// such as orientation, color scheme, and contrast.
+	Properties *MetadataSvgTemplateProperties `json:"properties,omitempty" yaml:"properties,omitempty"`
+}
+
 // CredentialMetadataDisplay displays properties of the supported Credential for a certain language.
 type CredentialMetadataDisplay struct {
 	// Name: REQUIRED. String value of a display name for the Credential.
@@ -230,7 +269,6 @@ type CredentialMetadataDisplay struct {
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 
 	// Logo: OPTIONAL. Object with information about the logo of the Credential
-	Logo *MetadataLogo `json:"logo,omitempty" yaml:"logo,omitempty"`
 
 	// Description: OPTIONAL. String value of a description of the Credential.
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -239,10 +277,25 @@ type CredentialMetadataDisplay struct {
 	BackgroundColor string `json:"background_color,omitempty" yaml:"background_color,omitempty"`
 
 	// BackgroundImage: OPTIONAL. Object with information about the background image of the Credential. At least the following parameter MUST be included:
+	Logo            *MetadataLogo            `json:"logo,omitempty" yaml:"logo,omitempty"`
 	BackgroundImage *MetadataBackgroundImage `json:"background_image,omitempty" yaml:"background_image,omitempty"`
-
 	// TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].
 	TextColor string `json:"text_color,omitempty" yaml:"text_color,omitempty"`
+	
+	// Rendering: OPTIONAL
+	Rendering       *MetadataRendering       `json:"rendering,omitempty" yaml:"rendering,omitempty"`
+}
+
+// MetadataSvgTemplateProperties describes the rendering context an SVG template is intended for.
+type MetadataSvgTemplateProperties struct {
+	// Orientation: OPTIONAL. String value, e.g. "portrait" or "landscape".
+	Orientation string `json:"orientation,omitempty" yaml:"orientation,omitempty"`
+
+	// ColorScheme: OPTIONAL. String value, e.g. "light" or "dark".
+	ColorScheme string `json:"color_scheme,omitempty" yaml:"color_scheme,omitempty"`
+
+	// Contrast: OPTIONAL. String value, e.g. "normal" or "high".
+	Contrast string `json:"contrast,omitempty" yaml:"contrast,omitempty"`
 }
 
 // MetadataBackgroundImage contains  information about the background image of the Credential

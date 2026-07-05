@@ -1346,12 +1346,71 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 							URI: simple.BackgroundImage.URI,
 						}
 					}
+
+					// Map SVG templates (spec-compliant rendering)
+					if len(vctmDisplay.Rendering.SVGTemplates) > 0 {
+						svgTemplates := make([]openid4vci.MetadataSvgTemplate, len(vctmDisplay.Rendering.SVGTemplates))
+						for j, t := range vctmDisplay.Rendering.SVGTemplates {
+							tmpl := openid4vci.MetadataSvgTemplate{
+								URI: t.URI,
+							}
+							tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
+								Orientation: t.Properties.Orientation,
+								ColorScheme: t.Properties.ColorScheme,
+								Contrast:    t.Properties.Contrast,
+							}
+							svgTemplates[j] = tmpl
+						}
+						display.Rendering = &openid4vci.MetadataRendering{
+							SvgTemplates: svgTemplates,
+						}
+		
+						// Fallback: set logo.uri from first SVG template URI
+						// for wallets that render from logo.uri instead of svg_templates
+						if display.Logo == nil && len(svgTemplates) > 0 {
+							display.Logo = &openid4vci.MetadataLogo{
+								URI: svgTemplates[0].URI,
+							}
+						}
+					}
 				}
 
 				credMetadata.Display[i] = display
 			}
 		}
 
+		// Use VCTM claims information
+		if len(vctm.Claims) > 0 {
+			credMetadata.Claims = make([]openid4vci.ClaimDescription, len(vctm.Claims))
+			for i, vctmClaim := range vctm.Claims {
+				path := make([]string, len(vctmClaim.Path))
+				for k, p := range vctmClaim.Path {
+					if p != nil {
+						path[k] = *p
+					}
+				}
+
+				claim := openid4vci.ClaimDescription{
+					Path:      path,
+					Mandatory: vctmClaim.Mandatory,
+					SVGID:     vctmClaim.SVGID,
+				}
+
+				// Map claim display information from VCTM to OpenID4VCI format
+				if len(vctmClaim.Display) > 0 {
+					display := make([]openid4vci.ClaimDisplayProperties, len(vctmClaim.Display))
+					for j, d := range vctmClaim.Display {
+						display[j] = openid4vci.ClaimDisplayProperties{
+							Label:  d.Label,
+							Locale: d.Locale,
+						}
+					}
+					claim.Display = display
+				}
+
+				credMetadata.Claims[i] = claim
+			}
+		}
 		// Only set credential_metadata if it has content
 		if len(credMetadata.Display) > 0 || len(credMetadata.Claims) > 0 {
 			credConfig.CredentialMetadata = credMetadata

@@ -489,7 +489,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 	issuerReply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
 		Scope:           scope,
-		DocType:         mdoc.DocType, // org.iso.18013.5.1.mDL
+		DocType:         mdoc.DocTypePID, // org.iso.18013.5.1.mDL
 		DocumentData:    documentData,
 		DevicePublicKey: deviceKeyBytes,
 		DeviceKeyFormat: "cose",

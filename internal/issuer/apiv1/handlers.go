@@ -138,11 +138,10 @@ type CreateMDocReply struct {
 	ValidUntil        string `json:"valid_until"`
 }
 
-// MakeMDoc creates an mDL credential per ISO 18013-5
+// MakeMDoc creates credential per ISO 18013-5
 func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateMDocReply, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:MakeMDoc")
 	defer span.End()
-
 	c.log.Debug("MakeMDoc", "scope", req.Scope, "doc_type", req.DocType)
 
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
@@ -189,10 +188,11 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		}
 	}
 
-	// Issue the mDL
+	// Issue the mdoc
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
 		MDoc:            &mdocData,
+		DocType:         req.DocType,
 	}
 
 	issued, err := c.mdocIssuer.Issue(issuanceReq)
