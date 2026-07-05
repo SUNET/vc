@@ -11,7 +11,10 @@ common:
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
-
+    pid_1_5_mdoc:
+      vctm_file_path: "/metadata/vctm_pid_mdoc.json"
+      auth_method: basic
+      format: "mso_mdoc"
 issuer:
   issuer_url: "https://apigw.vc.docker:8080"
   api_server:
