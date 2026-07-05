@@ -136,6 +136,7 @@ func TestIssuer_Issue(t *testing.T) {
 	req := &IssuanceRequest{
 		MDoc:            mdoc,
 		DevicePublicKey: &deviceKey.PublicKey,
+		DocType: "org.iso.18013.5.1.mDL",
 	}
 
 	issued, err := issuer.Issue(req)
@@ -168,6 +169,8 @@ func TestIssuer_Issue_MissingDeviceKey(t *testing.T) {
 	req := &IssuanceRequest{
 		MDoc:            mdoc,
 		DevicePublicKey: nil,
+		DocType: "org.iso.18013.5.1.mDL",
+
 	}
 
 	_, err := issuer.Issue(req)
@@ -184,6 +187,8 @@ func TestIssuer_Issue_MissingMDoc(t *testing.T) {
 	req := &IssuanceRequest{
 		MDoc:            nil,
 		DevicePublicKey: &deviceKey.PublicKey,
+		DocType: "org.iso.18013.5.1.mDL",
+
 	}
 
 	_, err := issuer.Issue(req)
@@ -201,8 +206,8 @@ func TestIssuer_IssueBatch(t *testing.T) {
 
 	batch := BatchIssuanceRequest{
 		Requests: []IssuanceRequest{
-			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey1.PublicKey},
-			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey2.PublicKey},
+			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey1.PublicKey,DocType: "org.iso.18013.5.1.mDL"},
+			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey2.PublicKey,DocType: "org.iso.18013.5.1.mDL",},
 		},
 	}
 
@@ -224,8 +229,8 @@ func TestIssuer_IssueBatch_PartialFailure(t *testing.T) {
 
 	batch := BatchIssuanceRequest{
 		Requests: []IssuanceRequest{
-			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey.PublicKey},
-			{MDoc: createTestMDoc(), DevicePublicKey: nil}, // Will fail
+			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey.PublicKey, DocType: "org.iso.18013.5.1.mDL"},
+			{MDoc: createTestMDoc(), DevicePublicKey: nil,DocType: "org.iso.18013.5.1.mDL"}, // Will fail
 		},
 	}
 
@@ -336,6 +341,7 @@ func TestIssuer_OptionalElements(t *testing.T) {
 	req := &IssuanceRequest{
 		MDoc:            mdoc,
 		DevicePublicKey: &deviceKey.PublicKey,
+		DocType: "org.iso.18013.5.1.mDL",
 	}
 
 	issued, err := issuer.Issue(req)
@@ -382,6 +388,7 @@ func TestIssuer_DrivingPrivileges(t *testing.T) {
 	req := &IssuanceRequest{
 		MDoc:            mdoc,
 		DevicePublicKey: &deviceKey.PublicKey,
+		DocType: "org.iso.18013.5.1.mDL",
 	}
 
 	issued, err := issuer.Issue(req)

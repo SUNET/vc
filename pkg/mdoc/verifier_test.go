@@ -156,6 +156,7 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 	issued, err := issuer.Issue(&IssuanceRequest{
 		MDoc:            mdoc,
 		DevicePublicKey: &deviceKey.PublicKey,
+		DocType: "org.iso.18013.5.1.mDL",
 	})
 	if err != nil {
 		t.Fatalf("failed to issue mDL: %v", err)

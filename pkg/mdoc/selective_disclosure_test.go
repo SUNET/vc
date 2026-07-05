@@ -79,6 +79,7 @@ func createTestIssuerSigned(t *testing.T) *IssuerSignedMdoc {
 	issuedDoc, err := issuer.Issue(&IssuanceRequest{
 		DevicePublicKey: &deviceKey.PublicKey,
 		MDoc:            mdoc,
+		DocType: "org.iso.18013.5.1.mDL",
 	})
 	if err != nil {
 		t.Fatalf("failed to issue: %v", err)
