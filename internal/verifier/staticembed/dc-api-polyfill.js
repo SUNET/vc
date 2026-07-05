@@ -19,19 +19,7 @@
  *   - Library: https://github.com/sirosfoundation/dc-api
  */
 
-// Re-export core library functions for consumers
-import {
-    OID4VP_PROTOCOLS,
-    isDCAPIAvailable,
-    isProtocolAllowed,
-    getBestProtocol,
-    requestCredential as dcApiRequestCredential,
-    getUserFriendlyErrorMessage,
-    isUserCancel,
-    isProtocolUnsupported,
-    ERROR_MESSAGES,
-} from '@sirosfoundation/dc-api';
-
+// Re-export core library symbols
 export {
     OID4VP_PROTOCOLS,
     isDCAPIAvailable,
@@ -40,7 +28,13 @@ export {
     isUserCancel,
     isProtocolUnsupported,
     ERROR_MESSAGES,
-};
+} from '@sirosfoundation/dc-api';
+
+import {
+    isDCAPIAvailable,
+    getBestProtocol,
+    requestCredential as dcApiRequestCredential,
+} from '@sirosfoundation/dc-api';
 
 // ─── Aliases for backward compat ─────────────────────────────────────────────
 
@@ -52,21 +46,30 @@ export const getBestSupportedProtocol = getBestProtocol;
 
 // ─── Mobile detection ────────────────────────────────────────────────────────
 
+const MOBILE_UA_RE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+
 /**
  * Detect mobile device from user agent.
  * @returns {boolean}
  */
 function isMobileDevice() {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent
-    );
+    return MOBILE_UA_RE.test(globalThis.navigator?.userAgent ?? '');
+}
+
+// ─── SSE onError handler (outer scope per SonarCloud) ────────────────────────
+
+/**
+ * SSE error handler — SSE reconnects automatically; we only act on explicit abort.
+ */
+function _sseOnError() {
+    // SSE reconnects automatically; only reject on abort
 }
 
 // ─── Polyfill configuration ─────────────────────────────────────────────────
 
 /**
  * @typedef {Object} PolyfillConfig
- * @property {string}   baseUrl            Verifier origin (default: window.location.origin)
+ * @property {string}   baseUrl            Verifier origin (default: globalThis.location.origin)
  * @property {string}   [sessionId]        Session identifier for server-side correlation
  * @property {string}   [requestObjectUrl] URL to fetch signed JWT request object
  * @property {string}   [directPostUrl]    URL for wallet direct_post response
@@ -96,7 +99,7 @@ let _config = {
 export function configure(config) {
     _config = { ..._config, ...config };
     if (!_config.baseUrl) {
-        _config.baseUrl = window.location.origin;
+        _config.baseUrl = globalThis.location?.origin ?? '';
     }
 }
 
@@ -111,9 +114,8 @@ export function configure(config) {
  *   3. No DC API → polyfill fallback
  *
  * Polyfill fallback:
- *   a. Web wallet popup (if webWallets configured)
- *   b. Same-device redirect (openid4vp:// on mobile)
- *   c. Cross-device QR code + poll/SSE
+ *   a. Same-device redirect (openid4vp:// on mobile)
+ *   b. Cross-device QR code + poll/SSE
  *
  * @param {object} openid4vpRequest  The OpenID4VP authorization request object or signed JWT string
  * @param {object} [options]         Additional options
@@ -127,25 +129,18 @@ export async function requestCredential(openid4vpRequest, options = {}) {
 
         if (protocol) {
             try {
-                // Build data per protocol variant
-                let data;
-                if (typeof openid4vpRequest === 'string') {
-                    data = { request: openid4vpRequest };
-                } else {
-                    data = openid4vpRequest;
-                }
+                const data = typeof openid4vpRequest === 'string'
+                    ? { request: openid4vpRequest }
+                    : openid4vpRequest;
 
-                const result = await dcApiRequestCredential(protocol, data, options);
-                return result;
+                return await dcApiRequestCredential(protocol, data, options);
             } catch (err) {
                 // NotAllowedError → user cancelled or no wallet, fall through
                 if (err.name !== 'NotAllowedError') {
                     throw err;
                 }
-                // Fall through to polyfill
             }
         }
-        // protocol === null → DC API exists but no openid4vp variant allowed
     }
 
     // 2. Polyfill path — implement OpenID4VP transport ourselves
@@ -163,12 +158,9 @@ export async function requestCredential(openid4vpRequest, options = {}) {
  * @returns {Promise<{protocol: string, data: unknown}>}
  */
 async function _polyfillRequest(openid4vpRequest, options) {
-    // Same-device mobile: redirect to openid4vp:// scheme
     if (isMobileDevice() && _config.deepLinkScheme) {
         return _sameDeviceRedirect(openid4vpRequest, options);
     }
-
-    // Cross-device: wait for the wallet to respond via server-side
     return _crossDeviceWait(options);
 }
 
@@ -176,8 +168,6 @@ async function _polyfillRequest(openid4vpRequest, options) {
 
 /**
  * Redirect to openid4vp:// custom scheme for same-device mobile flow.
- * The wallet posts the VP token to the server's response_uri.
- * We wait for the server to notify us via SSE or polling.
  *
  * @param {object|string} openid4vpRequest
  * @param {object} options
@@ -187,16 +177,14 @@ async function _sameDeviceRedirect(openid4vpRequest, options) {
     let authRequestUri;
 
     if (typeof openid4vpRequest === 'string') {
+        const params = new URLSearchParams();
         if (_config.requestObjectUrl) {
-            const params = new URLSearchParams();
-            params.set('client_id', window.location.origin);
+            params.set('client_id', globalThis.location?.origin ?? '');
             params.set('request_uri', _config.requestObjectUrl);
-            authRequestUri = `${_config.deepLinkScheme}?${params.toString()}`;
         } else {
-            const params = new URLSearchParams();
             params.set('request', openid4vpRequest);
-            authRequestUri = `${_config.deepLinkScheme}?${params.toString()}`;
         }
+        authRequestUri = `${_config.deepLinkScheme}?${params.toString()}`;
     } else {
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(openid4vpRequest)) {
@@ -207,7 +195,7 @@ async function _sameDeviceRedirect(openid4vpRequest, options) {
         authRequestUri = `${_config.deepLinkScheme}?${params.toString()}`;
     }
 
-    window.location.href = authRequestUri;
+    globalThis.location.href = authRequestUri;
     return _crossDeviceWait(options);
 }
 
@@ -215,7 +203,6 @@ async function _sameDeviceRedirect(openid4vpRequest, options) {
 
 /**
  * Wait for the server to signal that the wallet has responded.
- * Uses SSE if sseUrl is configured, otherwise polls pollUrl.
  *
  * @param {object} options
  * @returns {Promise<{protocol: string, data: unknown}>}
@@ -231,6 +218,8 @@ function _crossDeviceWait(options) {
         new Error('No SSE or poll URL configured for cross-device flow'),
     );
 }
+
+const REDIRECT_URI_RE = /redirect_uri[=:]["']?([^"'\s]+)/;
 
 /**
  * Wait for server notification via SSE.
@@ -260,19 +249,15 @@ function _waitViaSSE(options) {
                     });
                 }
             } catch {
-                const match = data.match(/redirect_uri[=:]["']?([^"'\s]+)/);
-                if (match && match[1]) {
+                const result = REDIRECT_URI_RE.exec(data);
+                if (result?.[1]) {
                     cleanup();
                     resolve({
                         protocol: 'openid4vp',
-                        data: { redirect_uri: match[1] },
+                        data: { redirect_uri: result[1] },
                     });
                 }
             }
-        }
-
-        function onError() {
-            // SSE reconnects automatically; only reject on abort
         }
 
         function onAbort() {
@@ -283,16 +268,12 @@ function _waitViaSSE(options) {
         function cleanup() {
             clearTimeout(timeout);
             eventSource.close();
-            if (options.signal) {
-                options.signal.removeEventListener('abort', onAbort);
-            }
+            options.signal?.removeEventListener('abort', onAbort);
         }
 
         eventSource.onmessage = onMessage;
-        eventSource.onerror = onError;
-        if (options.signal) {
-            options.signal.addEventListener('abort', onAbort, { once: true });
-        }
+        eventSource.onerror = _sseOnError;
+        options.signal?.addEventListener('abort', onAbort, { once: true });
     });
 }
 
@@ -317,10 +298,7 @@ function _waitViaPoll(options) {
                 if (response.ok) {
                     const data = await response.json();
                     if (data.status === 'code_issued' || data.status === 'completed') {
-                        resolve({
-                            protocol: 'openid4vp',
-                            data,
-                        });
+                        resolve({ protocol: 'openid4vp', data });
                         return;
                     }
                     if (data.status === 'failed' || data.status === 'error') {
@@ -340,10 +318,7 @@ function _waitViaPoll(options) {
             reject(new DOMException('Request aborted', 'AbortError'));
         }
 
-        if (options.signal) {
-            options.signal.addEventListener('abort', onAbort, { once: true });
-        }
-
+        options.signal?.addEventListener('abort', onAbort, { once: true });
         poll();
     });
 }

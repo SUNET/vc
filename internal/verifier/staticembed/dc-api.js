@@ -1,5 +1,5 @@
 // src/protocols.ts
-var OID4VP_PROTOCOLS = {
+const OID4VP_PROTOCOLS = {
   /** Unsigned request — client_id derived from web-origin */
   UNSIGNED: "openid4vp-v1-unsigned",
   /** Signed request — JAR with single JWS compact serialization */
@@ -9,12 +9,12 @@ var OID4VP_PROTOCOLS = {
   /** Legacy protocol string (pre-spec, used by some implementations) */
   LEGACY: "openid4vp"
 };
-var OID4VP_SPEC_PROTOCOLS = [
+const OID4VP_SPEC_PROTOCOLS = [
   OID4VP_PROTOCOLS.UNSIGNED,
   OID4VP_PROTOCOLS.SIGNED,
   OID4VP_PROTOCOLS.MULTISIGNED
 ];
-var OID4VP_ALL_PROTOCOLS = [
+const OID4VP_ALL_PROTOCOLS = [
   ...OID4VP_SPEC_PROTOCOLS,
   OID4VP_PROTOCOLS.LEGACY
 ];
@@ -28,7 +28,7 @@ function isProtocolAllowed(protocol) {
   if (typeof DigitalCredential.userAgentAllowsProtocol !== "function") return false;
   return DigitalCredential.userAgentAllowsProtocol(protocol);
 }
-var DEFAULT_PREFERENCE = [
+const DEFAULT_PREFERENCE = [
   OID4VP_PROTOCOLS.SIGNED,
   OID4VP_PROTOCOLS.MULTISIGNED,
   OID4VP_PROTOCOLS.UNSIGNED
@@ -69,7 +69,7 @@ function normalizeCredential(credential, fallbackProtocol) {
 }
 
 // src/errors.ts
-var ERROR_MESSAGES = {
+const ERROR_MESSAGES = {
   NotAllowedError: "You denied the credential request or no wallet is available.",
   NotSupportedError: "Your browser or wallet does not support this credential type.",
   SecurityError: "Security error \u2014 ensure you are on HTTPS.",
@@ -77,7 +77,7 @@ var ERROR_MESSAGES = {
   InvalidStateError: "A credential request is already in progress.",
   TypeError: "The credential request data is malformed."
 };
-var DEFAULT_MESSAGE = "An unexpected error occurred. Please try again.";
+const DEFAULT_MESSAGE = "An unexpected error occurred. Please try again.";
 function getUserFriendlyErrorMessage(error) {
   if (error instanceof DOMException) {
     return ERROR_MESSAGES[error.name] ?? DEFAULT_MESSAGE;

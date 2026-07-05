@@ -5,9 +5,6 @@ import {
     requestCredential,
     isNativeDCAPIAvailable,
     getBestSupportedProtocol,
-    getDeepLinkUrl,
-    getWebWalletUrls,
-    getUserFriendlyErrorMessage,
 } from "./dc-api-polyfill.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
@@ -474,51 +471,60 @@ Alpine.data("app", () => ({
                 webWallets: this.walletInstances,
             });
 
-            // Try native DC API first — if the browser supports
-            // an openid4vp protocol variant, use it directly.
-            if (isNativeDCAPIAvailable() && getBestSupportedProtocol()) {
-                try {
-                    const abortController = new AbortController();
-                    this._dcAbort = abortController;
-
-                    const result = await requestCredential(
-                        this.presentationDefinition.authorization_request,
-                        { signal: abortController.signal },
-                    );
-
-                    // Native DC API succeeded — handle redirect from response
-                    if (result.data && result.data.redirect_uri) {
-                        window.location.href = result.data.redirect_uri;
-                        return;
-                    }
-                    // If no redirect in response, the wallet posted directly
-                    // to the server — wait for SSE notification below
-                } catch (err) {
-                    if (err.name === 'AbortError') return;
-                    console.log("DC API not available or failed, falling back to QR/links:", err.message);
-                    // Fall through to QR + wallet links
-                }
-            }
+            // Try native DC API first
+            if (await this._tryNativeDCAPI()) return;
 
             // Fallback: show QR code + wallet links + SSE listener
-            if (!this.notifyEventSource) {
-                console.log("Starting SSE notify listener from sendDcqlQuery");
-                this.notifyEventSource = setupNotifyListener();
-            }
-
-            const presDefURI = new URL(this.presentationDefinition.authorization_request);
-
-            for (const [label, url] of Object.entries(this.walletInstances)) {
-                const uri = new URL(url);
-                uri.search = presDefURI.search;
-                uri.hash = presDefURI.hash;
-
-                if (!this.redirectUris) this.redirectUris = {};
-                this.redirectUris[`Open with ${label}`] = uri.toString();
-            }
+            this._setupFallbackFlow();
         } catch (error) {
             this.error = `Error during posting of dcql query: ${error}`;
-            return;
+        }
+    },
+
+    /**
+     * Attempt credential request via native DC API.
+     * @returns {Promise<boolean>} true if handled, false to fall through
+     */
+    async _tryNativeDCAPI() {
+        if (!isNativeDCAPIAvailable() || !getBestSupportedProtocol()) return false;
+
+        try {
+            const abortController = new AbortController();
+            this._dcAbort = abortController;
+
+            const result = await requestCredential(
+                this.presentationDefinition.authorization_request,
+                { signal: abortController.signal },
+            );
+
+            if (result.data?.redirect_uri) {
+                globalThis.location.href = result.data.redirect_uri;
+                return true;
+            }
+            return false;
+        } catch (err) {
+            if (err.name === 'AbortError') return true;
+            console.log("DC API not available or failed, falling back to QR/links:", err.message);
+            return false;
+        }
+    },
+
+    /** Set up QR + wallet links + SSE fallback flow. */
+    _setupFallbackFlow() {
+        if (!this.notifyEventSource) {
+            console.log("Starting SSE notify listener from sendDcqlQuery");
+            this.notifyEventSource = setupNotifyListener();
+        }
+
+        const presDefURI = new URL(this.presentationDefinition.authorization_request);
+
+        for (const [label, url] of Object.entries(this.walletInstances)) {
+            const uri = new URL(url);
+            uri.search = presDefURI.search;
+            uri.hash = presDefURI.hash;
+
+            if (!this.redirectUris) this.redirectUris = {};
+            this.redirectUris[`Open with ${label}`] = uri.toString();
         }
     },
 
