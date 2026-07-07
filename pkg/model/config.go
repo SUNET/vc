@@ -1354,10 +1354,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 							tmpl := openid4vci.MetadataSvgTemplate{
 								URI: t.URI,
 							}
-							tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
-								Orientation: t.Properties.Orientation,
-								ColorScheme: t.Properties.ColorScheme,
-								Contrast:    t.Properties.Contrast,
+							
+							if t.Properties != nil {
+								tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
+									Orientation: t.Properties.Orientation,
+									ColorScheme: t.Properties.ColorScheme,
+									Contrast:    t.Properties.Contrast,
+								}
 							}
 							svgTemplates[j] = tmpl
 						}
