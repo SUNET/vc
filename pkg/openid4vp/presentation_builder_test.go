@@ -397,3 +397,47 @@ func TestPresentationBuilder_ScopePriority(t *testing.T) {
 			dcql.Credentials[0].ID)
 	}
 }
+
+// TestPresentationBuilder_MdocDoctypeValue verifies that copyDCQL preserves
+// DoctypeValue for mso_mdoc format templates (and TypeValues for W3C VC).
+// This is a regression test for the bug where copyDCQL only copied VCTValues,
+// producing an empty/invalid meta object for non-SD-JWT formats.
+func TestPresentationBuilder_MdocDoctypeValue(t *testing.T) {
+	ctx := t.Context()
+
+	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/mdoc_template.yaml")
+	if err != nil {
+		t.Fatalf("Failed to load mdoc test config: %v", err)
+	}
+
+	builder := openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
+
+	// Build DCQL from the mdl scope
+	dcql, err := builder.BuildDCQLQuery(ctx, []string{"openid", "mdl"})
+	if err != nil {
+		t.Fatalf("BuildDCQLQuery failed: %v", err)
+	}
+
+	if dcql == nil {
+		t.Fatal("Expected DCQL but got nil")
+	}
+
+	if len(dcql.Credentials) == 0 {
+		t.Fatal("Expected at least one credential")
+	}
+
+	cred := dcql.Credentials[0]
+
+	if cred.Format != "mso_mdoc" {
+		t.Errorf("Expected format mso_mdoc, got %s", cred.Format)
+	}
+
+	if cred.Meta.DoctypeValue != "org.iso.18013.5.1.mDL" {
+		t.Errorf("Expected DoctypeValue 'org.iso.18013.5.1.mDL', got %q", cred.Meta.DoctypeValue)
+	}
+
+	// Validate the copied DCQL passes format-specific validation
+	if err := openid4vp.ValidateCredentialQuery(cred); err != nil {
+		t.Errorf("Copied mdoc credential query failed validation: %v", err)
+	}
+}

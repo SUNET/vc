@@ -154,13 +154,23 @@ func copyDCQL(src *DCQL) *DCQL {
 
 	// Copy credentials
 	for i, cred := range src.Credentials {
+		meta := MetaQuery{
+			DoctypeValue: cred.Meta.DoctypeValue,
+		}
+		if len(cred.Meta.VCTValues) > 0 {
+			meta.VCTValues = append([]string{}, cred.Meta.VCTValues...)
+		}
+		if len(cred.Meta.TypeValues) > 0 {
+			meta.TypeValues = make([][]string, len(cred.Meta.TypeValues))
+			for j, tv := range cred.Meta.TypeValues {
+				meta.TypeValues[j] = append([]string{}, tv...)
+			}
+		}
 		dst.Credentials[i] = CredentialQuery{
-			ID:       cred.ID,
-			Format:   cred.Format,
-			Multiple: cred.Multiple,
-			Meta: MetaQuery{
-				VCTValues: append([]string{}, cred.Meta.VCTValues...),
-			},
+			ID:                                cred.ID,
+			Format:                            cred.Format,
+			Multiple:                          cred.Multiple,
+			Meta:                              meta,
 			RequireCryptographicHolderBinding: cred.RequireCryptographicHolderBinding,
 		}
 
