@@ -111,6 +111,10 @@ func main() {
 		}
 	}
 
+	if err := meter.Shutdown(ctx); err != nil {
+		mainLog.Error(err, "Meter shutdown")
+	}
+
 	wg.Wait() // Block here until are workers are done
 
 	mainLog.Info("Stopped")

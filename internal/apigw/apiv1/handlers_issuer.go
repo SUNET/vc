@@ -437,6 +437,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				attribute.String("format", format),
 				attribute.String("error_class", "issuance_error"),
 			))
+			c.vci.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 		}
 		return nil, err
 	}
