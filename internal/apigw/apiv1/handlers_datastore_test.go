@@ -994,7 +994,7 @@ func TestDatastorePreAuthOffer_DocumentNotFound(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, reply)
-	assert.Contains(t, err.Error(), "document not found")
+	assert.ErrorIs(t, err, helpers.ErrNoDocumentFound)
 }
 
 func TestDatastorePreAuthOffer_AuthContextPersisted(t *testing.T) {

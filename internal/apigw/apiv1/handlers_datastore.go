@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -584,7 +585,10 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	// Look up the document from the datastore
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
-		return nil, fmt.Errorf("document not found: %w", err)
+		if errors.Is(err, helpers.ErrNoDocumentFound) {
+			return nil, helpers.ErrNoDocumentFound
+		}
+		return nil, fmt.Errorf("failed to retrieve document: %w", err)
 	}
 
 	// Generate credential offer with pre-authorized code
