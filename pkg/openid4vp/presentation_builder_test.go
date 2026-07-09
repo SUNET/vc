@@ -398,46 +398,79 @@ func TestPresentationBuilder_ScopePriority(t *testing.T) {
 	}
 }
 
-// TestPresentationBuilder_MdocDoctypeValue verifies that copyDCQL preserves
-// DoctypeValue for mso_mdoc format templates (and TypeValues for W3C VC).
-// This is a regression test for the bug where copyDCQL only copied VCTValues,
-// producing an empty/invalid meta object for non-SD-JWT formats.
-func TestPresentationBuilder_MdocDoctypeValue(t *testing.T) {
-	ctx := t.Context()
-
-	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/mdoc_template.yaml")
-	if err != nil {
-		t.Fatalf("Failed to load mdoc test config: %v", err)
+// TestPresentationBuilder_CopyDCQLMetaQuery verifies that copyDCQL preserves
+// all MetaQuery fields (DoctypeValue, TypeValues) for non-SD-JWT formats.
+// This is a regression test for the bug where copyDCQL only copied VCTValues.
+func TestPresentationBuilder_CopyDCQLMetaQuery(t *testing.T) {
+	tests := []struct {
+		name           string
+		fixture        string
+		scopes         []string
+		expectedFormat string
+		checkMeta      func(t *testing.T, cred openid4vp.CredentialQuery)
+	}{
+		{
+			name:           "mso_mdoc preserves DoctypeValue",
+			fixture:        "../configuration/testdata/mdoc_template.yaml",
+			scopes:         []string{"openid", "mdl"},
+			expectedFormat: "mso_mdoc",
+			checkMeta: func(t *testing.T, cred openid4vp.CredentialQuery) {
+				if cred.Meta.DoctypeValue != "org.iso.18013.5.1.mDL" {
+					t.Errorf("Expected DoctypeValue 'org.iso.18013.5.1.mDL', got %q", cred.Meta.DoctypeValue)
+				}
+			},
+		},
+		{
+			name:           "ldp_vc preserves TypeValues",
+			fixture:        "../configuration/testdata/w3c_vc_template.yaml",
+			scopes:         []string{"openid", "diploma"},
+			expectedFormat: "ldp_vc",
+			checkMeta: func(t *testing.T, cred openid4vp.CredentialQuery) {
+				if len(cred.Meta.TypeValues) == 0 {
+					t.Fatal("Expected TypeValues to be preserved, got empty")
+				}
+				expected := []string{
+					"https://www.w3.org/2018/credentials#VerifiableCredential",
+					"https://example.org/credentials#UniversityDiploma",
+				}
+				if len(cred.Meta.TypeValues[0]) != len(expected) {
+					t.Fatalf("Expected %d types, got %d", len(expected), len(cred.Meta.TypeValues[0]))
+				}
+				for i, want := range expected {
+					if cred.Meta.TypeValues[0][i] != want {
+						t.Errorf("TypeValues[0][%d] = %q, want %q", i, cred.Meta.TypeValues[0][i], want)
+					}
+				}
+			},
+		},
 	}
 
-	builder := openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			config, err := configuration.LoadPresentationRequestsFromFile(ctx, tt.fixture)
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
 
-	// Build DCQL from the mdl scope
-	dcql, err := builder.BuildDCQLQuery(ctx, []string{"openid", "mdl"})
-	if err != nil {
-		t.Fatalf("BuildDCQLQuery failed: %v", err)
-	}
+			builder := openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
+			dcql, err := builder.BuildDCQLQuery(ctx, tt.scopes)
+			if err != nil {
+				t.Fatalf("BuildDCQLQuery failed: %v", err)
+			}
+			if dcql == nil || len(dcql.Credentials) == 0 {
+				t.Fatal("Expected at least one credential in DCQL")
+			}
 
-	if dcql == nil {
-		t.Fatal("Expected DCQL but got nil")
-	}
+			cred := dcql.Credentials[0]
+			if cred.Format != tt.expectedFormat {
+				t.Errorf("Expected format %s, got %s", tt.expectedFormat, cred.Format)
+			}
+			tt.checkMeta(t, cred)
 
-	if len(dcql.Credentials) == 0 {
-		t.Fatal("Expected at least one credential")
-	}
-
-	cred := dcql.Credentials[0]
-
-	if cred.Format != "mso_mdoc" {
-		t.Errorf("Expected format mso_mdoc, got %s", cred.Format)
-	}
-
-	if cred.Meta.DoctypeValue != "org.iso.18013.5.1.mDL" {
-		t.Errorf("Expected DoctypeValue 'org.iso.18013.5.1.mDL', got %q", cred.Meta.DoctypeValue)
-	}
-
-	// Validate the copied DCQL passes format-specific validation
-	if err := openid4vp.ValidateCredentialQuery(cred); err != nil {
-		t.Errorf("Copied mdoc credential query failed validation: %v", err)
+			if err := openid4vp.ValidateCredentialQuery(cred); err != nil {
+				t.Errorf("Credential query failed validation: %v", err)
+			}
+		})
 	}
 }

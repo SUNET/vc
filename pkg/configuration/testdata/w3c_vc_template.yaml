@@ -1,0 +1,25 @@
+# W3C VC Data Integrity template for testing type_values in DCQL
+
+templates:
+  - id: "w3c_vc_diploma"
+    name: "University Diploma (W3C VC)"
+    description: "University diploma using W3C VC Data Integrity"
+    version: "1.0"
+    oidc_scopes:
+      - "diploma"
+    dcql:
+      credentials:
+        - id: "diploma_credential"
+          format: "ldp_vc"
+          meta:
+            type_values:
+              - ["https://www.w3.org/2018/credentials#VerifiableCredential", "https://example.org/credentials#UniversityDiploma"]
+          claims:
+            - path: ["credentialSubject", "degree"]
+            - path: ["credentialSubject", "name"]
+    claim_mappings:
+      degree: "degree"
+      name: "name"
+    enabled: true
+
+default_template: "w3c_vc_diploma"
