@@ -149,9 +149,17 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		hostname := parsedURL.Hostname()
-		if hostname == "" {
-			return false
+		// For http/https, require a hostname. For custom schemes (native apps
+		// per RFC 8252 §7.1), only require that the URI has content beyond the scheme.
+		if parsedURL.Scheme == "http" || parsedURL.Scheme == "https" {
+			if parsedURL.Hostname() == "" {
+				return false
+			}
+		} else {
+			// Custom scheme: must have an opaque part or path (e.g. com.example.app:/callback)
+			if parsedURL.Host == "" && parsedURL.Path == "" && parsedURL.Opaque == "" {
+				return false
+			}
 		}
 
 		return true
