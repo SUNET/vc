@@ -271,7 +271,9 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex}
 	}
-	c.saveCredentialSubjects(ctx, document, entries)
+	if err := c.saveCredentialSubjects(ctx, document, entries); err != nil {
+		return nil, err
+	}
 
 	return credentials, nil
 }
@@ -316,7 +318,9 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
 	}
-	c.saveCredentialSubjects(ctx, document, entries)
+	if err := c.saveCredentialSubjects(ctx, document, entries); err != nil {
+		return nil, err
+	}
 
 	return credentials, nil
 }
@@ -393,7 +397,9 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
 	}
-	c.saveCredentialSubjects(ctx, document, entries)
+	if err := c.saveCredentialSubjects(ctx, document, entries); err != nil {
+		return nil, err
+	}
 
 	return credentials, nil
 }
@@ -404,9 +410,9 @@ type statusEntry struct {
 }
 
 // Save credential subject information to the registry for status management.
-func (c *Client) saveCredentialSubjects(ctx context.Context, document *model.CompleteDocument, entries []statusEntry) {
+func (c *Client) saveCredentialSubjects(ctx context.Context, document *model.CompleteDocument, entries []statusEntry) error {
 	if len(document.Identities) == 0 {
-		return
+		return nil
 	}
 
 	identity := document.Identities[0]
@@ -423,9 +429,10 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, document *model.Com
 			Index:       e.Index,
 		})
 		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
+			return fmt.Errorf("failed to save credential subject to registry: %w", err)
 		}
 	}
+	return nil
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes
