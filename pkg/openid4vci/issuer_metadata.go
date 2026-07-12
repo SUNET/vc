@@ -40,7 +40,7 @@ type CredentialIssuerMetadataParameters struct {
 	// Display: OPTIONAL. A non-empty array of objects, where each object contains display properties of a Credential Issuer for a certain language.
 	Display []MetadataDisplay `json:"display,omitempty" yaml:"display,omitempty"`
 
-	// Claims: OPTIONAL. 
+	// Claims: OPTIONAL.
 	Claims []ClaimDescription `json:"claims,omitempty" yaml:"claims,omitempty"`
 
 	// SignedMetadata: OPTIONAL. A JWT that contains Credential Issuer metadata parameters as claims.
@@ -195,10 +195,10 @@ type CredentialMetadata struct {
 type ClaimDescription struct {
 	// Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential.
 	Path []string `json:"path" yaml:"path" validate:"required"`
-	
+
 	// SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.
-    SVGID string `json:"svg_id,omitempty" yaml:"svg_id,omitempty"`
-	
+	SVGID string `json:"svg_id,omitempty" yaml:"svg_id,omitempty"`
+
 	// Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.
 	Mandatory bool `json:"mandatory,omitempty" yaml:"mandatory,omitempty"`
 
@@ -214,7 +214,7 @@ type ClaimDisplayProperties struct {
 	// Label: OPTIONAL. Same as Name — included for compatibility with consumers
 	// (e.g. wallet-common's dataUriResolver) that expect a "label" field.
 	Label string `json:"label,omitempty" yaml:"label,omitempty"`
-	
+
 	// Locale: OPTIONAL. String value that identifies the language of this object.
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 }
@@ -281,9 +281,9 @@ type CredentialMetadataDisplay struct {
 	BackgroundImage *MetadataBackgroundImage `json:"background_image,omitempty" yaml:"background_image,omitempty"`
 	// TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].
 	TextColor string `json:"text_color,omitempty" yaml:"text_color,omitempty"`
-	
+
 	// Rendering: OPTIONAL
-	Rendering       *MetadataRendering       `json:"rendering,omitempty" yaml:"rendering,omitempty"`
+	Rendering *MetadataRendering `json:"rendering,omitempty" yaml:"rendering,omitempty"`
 }
 
 // MetadataSvgTemplateProperties describes the rendering context an SVG template is intended for.

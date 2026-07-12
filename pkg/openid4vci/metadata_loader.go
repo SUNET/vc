@@ -21,7 +21,7 @@ type MetadataConfig struct {
 	CredentialResponseEncryption         *MetadataCredentialResponseEncryption
 	BatchCredentialIssuance              *BatchCredentialIssuance
 	Display                              []MetadataDisplay
-	Claims                                                           []ClaimDescription
+	Claims                               []ClaimDescription
 	CredentialConfigurationsSupported    map[string]CredentialConfigurationsSupported
 }
 
