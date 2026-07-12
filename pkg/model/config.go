@@ -1329,27 +1329,30 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				}
 
 				// Map rendering information from VCTM to OpenID4VCI format
-				if vctmDisplay.Rendering != nil && vctmDisplay.Rendering.Simple != nil {
-					simple := vctmDisplay.Rendering.Simple
-					if simple.BackgroundColor != "" {
-						display.BackgroundColor = simple.BackgroundColor
-					}
-					if simple.TextColor != "" {
-						display.TextColor = simple.TextColor
-					}
-					if simple.Logo != nil && simple.Logo.URI != "" {
-						display.Logo = &openid4vci.MetadataLogo{
-							URI:     simple.Logo.URI,
-							AltText: simple.Logo.AltText,
+				if vctmDisplay.Rendering != nil {
+					if vctmDisplay.Rendering.Simple != nil {
+						simple := vctmDisplay.Rendering.Simple
+						if simple.BackgroundColor != "" {
+							display.BackgroundColor = simple.BackgroundColor
 						}
-					}
-					if simple.BackgroundImage != nil && simple.BackgroundImage.URI != "" {
-						display.BackgroundImage = &openid4vci.MetadataBackgroundImage{
-							URI: simple.BackgroundImage.URI,
+						if simple.TextColor != "" {
+							display.TextColor = simple.TextColor
+						}
+						if simple.Logo != nil && simple.Logo.URI != "" {
+							display.Logo = &openid4vci.MetadataLogo{
+								URI:     simple.Logo.URI,
+								AltText: simple.Logo.AltText,
+							}
+						}
+						if simple.BackgroundImage != nil && simple.BackgroundImage.URI != "" {
+							display.BackgroundImage = &openid4vci.MetadataBackgroundImage{
+								URI: simple.BackgroundImage.URI,
+							}
 						}
 					}
 
-					// Map SVG templates (spec-compliant rendering)
+					// Map SVG templates (spec-compliant rendering) — independent of `simple`,
+					// since a VCTM may provide svg_templates without a simple rendering block.
 					if len(vctmDisplay.Rendering.SVGTemplates) > 0 {
 						svgTemplates := make([]openid4vci.MetadataSvgTemplate, len(vctmDisplay.Rendering.SVGTemplates))
 						for j, t := range vctmDisplay.Rendering.SVGTemplates {
