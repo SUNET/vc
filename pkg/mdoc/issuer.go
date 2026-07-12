@@ -24,6 +24,8 @@ type Issuer struct {
 	defaultValidity time.Duration
 	// Digest algorithm to use
 	digestAlgorithm DigestAlgorithm
+	//Deault false pseudonym seed
+	pseudonymSeed bool
 }
 
 // IssuerConfig contains configuration for creating an Issuer.
@@ -32,6 +34,7 @@ type IssuerConfig struct {
 	CertificateChain []*x509.Certificate
 	DefaultValidity  time.Duration
 	DigestAlgorithm  DigestAlgorithm
+	PseudonymSeed    bool
 }
 
 // NewIssuer creates a new mDL issuer.
@@ -64,6 +67,7 @@ func NewIssuer(config IssuerConfig) (*Issuer, error) {
 		certChain:       config.CertificateChain,
 		defaultValidity: validity,
 		digestAlgorithm: digestAlg,
+		pseudonymSeed:   config.PseudonymSeed,
 	}
 	return issuer, nil
 }
@@ -138,7 +142,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		return nil, fmt.Errorf("device public key is required")
 	}
 	if req.MDoc == nil {
-		return nil, fmt.Errorf("PID data is required")
+		return nil, fmt.Errorf("IssuanceRequest must not be nil")
 	}
 
 	// Convert device public key to COSE key
@@ -316,10 +320,7 @@ func (i *Issuer) addMandatoryElements(builder *MSOBuilder, mdoc *MDoc, ns string
 // addOptionalElements adds optional data elements if present, selecting the
 func (i *Issuer) addOptionalElements(builder *MSOBuilder, mdoc *MDoc, ns string) error {
 	var optionalElements map[string]any
-	seed := make([]byte, 32)
-	if _, err := rand.Read(seed); err != nil {
-		return fmt.Errorf("failed to generate pseudonym seed: %w", err)
-	}
+
 	switch ns {
 	case NamespaceMDL:
 		optionalElements = map[string]any{
@@ -343,31 +344,39 @@ func (i *Issuer) addOptionalElements(builder *MSOBuilder, mdoc *MDoc, ns string)
 			"resident_postal_code":           mdoc.ResidentPostalCode,
 			"resident_country":               mdoc.ResidentCountry,
 			"administrative_number":          mdoc.AdministrativeNumber,
-			"pseudonym_seed": 				  seed,
+			"age_over_18":                    true,
 		}
 	case NamespacePID:
 		optionalElements = map[string]any{
 			"family_name_national_character": mdoc.FamilyNameNationalCharacter,
 			"given_name_national_character":  mdoc.GivenNameNationalCharacter,
-			"sex":                             mdoc.Sex,
-			"birth_place":                     mdoc.BirthPlace,
-			"resident_address":                mdoc.ResidentAddress,
-			"portrait_capture_date":           mdoc.PortraitCaptureDate,
-			"age_in_years":                    mdoc.AgeInYears,
-			"age_birth_year":                  mdoc.AgeBirthYear,
-			"issuing_jurisdiction":            mdoc.IssuingJurisdiction,
-			"nationality":                     mdoc.Nationality,
-			"resident_city":                   mdoc.ResidentCity,
-			"resident_state":                  mdoc.ResidentState,
-			"resident_postal_code":            mdoc.ResidentPostalCode,
-			"resident_country":                mdoc.ResidentCountry,
-			"administrative_number":           mdoc.AdministrativeNumber,
-			"document_number":                 mdoc.DocumentNumber,
-			"portrait":                        mdoc.Portrait,
-			"pseudonym_seed": 				   seed,
+			"sex":                            mdoc.Sex,
+			"birth_place":                    mdoc.BirthPlace,
+			"resident_address":               mdoc.ResidentAddress,
+			"portrait_capture_date":          mdoc.PortraitCaptureDate,
+			"age_in_years":                   mdoc.AgeInYears,
+			"age_birth_year":                 mdoc.AgeBirthYear,
+			"issuing_jurisdiction":           mdoc.IssuingJurisdiction,
+			"nationality":                    mdoc.Nationality,
+			"resident_city":                  mdoc.ResidentCity,
+			"resident_state":                 mdoc.ResidentState,
+			"resident_postal_code":           mdoc.ResidentPostalCode,
+			"resident_country":               mdoc.ResidentCountry,
+			"administrative_number":          mdoc.AdministrativeNumber,
+			"document_number":                mdoc.DocumentNumber,
+			"portrait":                       mdoc.Portrait,
+			"age_over_18":                    true,
 		}
 	default:
 		return fmt.Errorf("unsupported namespace: %s", ns)
+	}
+
+	if i.pseudonymSeed {
+		seed := make([]byte, 32)
+		if _, err := rand.Read(seed); err != nil {
+			return fmt.Errorf("failed to generate pseudonym seed: %w", err)
+		}
+		optionalElements["pseudonym_seed"] = seed
 	}
 
 	// Add age_over attestations from the AgeOver struct (valid in both namespaces)

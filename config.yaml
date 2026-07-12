@@ -35,7 +35,7 @@ issuer:
     enable_not_before: true
     valid_duration: 3600
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
-
+  pseudonym_seed: true
 verifier:
   api_server:
     addr: :8080

@@ -414,6 +414,8 @@ type Issuer struct {
 	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
 	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
+	//PseudonymSeed is a boolean, If true the issuer attaches random seed as the pseuodnym_seed claim
+	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 }
 
 // SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.
@@ -1354,7 +1356,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 							tmpl := openid4vci.MetadataSvgTemplate{
 								URI: t.URI,
 							}
-							
+
 							if t.Properties != nil {
 								tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
 									Orientation: t.Properties.Orientation,
@@ -1367,7 +1369,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 						display.Rendering = &openid4vci.MetadataRendering{
 							SvgTemplates: svgTemplates,
 						}
-		
+
 						// Fallback: set logo.uri from first SVG template URI
 						// for wallets that render from logo.uri instead of svg_templates
 						if display.Logo == nil && len(svgTemplates) > 0 {
@@ -1388,9 +1390,10 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			for i, vctmClaim := range vctm.Claims {
 				path := make([]string, len(vctmClaim.Path))
 				for k, p := range vctmClaim.Path {
-					if p != nil {
-						path[k] = *p
+					if p == nil {
+						return nil, fmt.Errorf("vctm claim path contains null segment; cannot be represented in OpenID4VCI claim path")
 					}
+					path[k] = *p
 				}
 
 				claim := openid4vci.ClaimDescription{
@@ -1404,6 +1407,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					display := make([]openid4vci.ClaimDisplayProperties, len(vctmClaim.Display))
 					for j, d := range vctmClaim.Display {
 						display[j] = openid4vci.ClaimDisplayProperties{
+							Name:   d.Label,
 							Label:  d.Label,
 							Locale: d.Locale,
 						}
