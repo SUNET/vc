@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/crypto"
-	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
@@ -34,12 +33,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		c.log.Error(err, "Failed to construct response URI")
 		return "", err
 	}
-	// Build x509_san_dns client_id: strip scheme to get the DNS name (+ optional port)
-	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	// Determine client_id based on configured scheme (x509_san_dns or did)
+	clientID, err := c.cfg.Verifier.VerifierClientID()
 	if err != nil {
-		return "", fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		return "", fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
-	clientID := fmt.Sprintf("x509_san_dns:%s", host)
 
 	requestObject := &openid4vp.RequestObject{
 		ISS:          c.cfg.Verifier.Outbound.OIDCProvider.Issuer,

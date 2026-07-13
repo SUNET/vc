@@ -545,6 +545,13 @@ type Verifier struct {
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://verifier.sunet.se\""`
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	// ClientIDScheme determines how the verifier identifies itself to wallets.
+	// Supported values: "x509_san_dns" (default), "did".
+	// When "did", the DID field must be set and /.well-known/did.json is served.
+	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns did"`
+	// DID is the verifier's DID identity (e.g., "did:web:verifier.example.com").
+	// Required when ClientIDScheme is "did".
+	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
@@ -566,6 +573,23 @@ type Verifier struct {
 	// Each preset maps credential_metadata scopes to optional claim overrides.
 	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
 	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
+}
+
+// VerifierClientID returns the client_id value the verifier uses in OID4VP requests.
+// For "x509_san_dns" (default): returns "x509_san_dns:{hostname}".
+// For "did": returns the configured DID value directly.
+func (v *Verifier) VerifierClientID() (string, error) {
+	switch v.ClientIDScheme {
+	case "did":
+		return v.DID, nil
+	default:
+		// x509_san_dns (default)
+		u, err := url.Parse(v.PublicURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse PublicURL: %w", err)
+		}
+		return "x509_san_dns:" + u.Host, nil
+	}
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
