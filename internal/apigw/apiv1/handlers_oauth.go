@@ -31,12 +31,41 @@ import (
 //	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
 //	@Router			/op/par [post]
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
-	c.log.Debug("OAuthPar", "req", req)
+	c.log.Debug("OAuthPar", "client_id", req.ClientID, "scope", req.Scope)
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
-		c.log.Debug("OAuthPar client validation failed", "client_id", req.ClientID, "error", err)
-		// Use a generic description to avoid leaking internal configuration details.
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, err)
+		// Client not in static map — try wallet attestation via PDP
+		if c.walletAttestationEvaluator != nil && req.ClientAssertion != "" {
+			result, evalErr := c.walletAttestationEvaluator.Evaluate(ctx, req.ClientAssertion)
+			if evalErr != nil {
+				c.log.Debug("OAuthPar wallet attestation failed", "client_id", req.ClientID, "error", evalErr)
+				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, evalErr)
+			}
+			if result.Subject != "" && result.Subject != req.ClientID {
+				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
+					"wallet attestation subject does not match client_id", 401)
+			}
+			// SPOCP tier authorization: check if this attestation tier may request this scope
+			if !c.walletAttestationPolicy.Authorize(result.AttestationSource, req.Scope, result.Issuer) {
+				c.log.Info("PAR: wallet attestation tier denied by policy",
+					"client_id", req.ClientID, "attestation_source", result.AttestationSource,
+					"scope", req.Scope, "issuer", result.Issuer)
+				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidScope,
+					"attestation tier not authorized for requested scope", 403)
+			}
+			c.log.Info("PAR: wallet authenticated via attestation",
+				"client_id", req.ClientID, "wallet_provider", result.Issuer,
+				"attestation_source", result.AttestationSource,
+				"trust_framework", result.TrustFramework)
+			oauthClient = &oauth2.Client{
+				Type:         oauth2.ClientTypePublic,
+				RedirectURIs: oauth2.RedirectURIs{req.RedirectURI},
+				Scopes:       []string{"*"},
+			}
+		} else {
+			c.log.Debug("OAuthPar client validation failed", "client_id", req.ClientID, "error", err)
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, err)
+		}
 	}
 
 	// Public clients MUST use PKCE (RFC 6749 Section 2.1)
@@ -279,9 +308,41 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		var err error
 		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(clientID)
 		if err != nil {
-			c.log.Error(err, "client validation failed")
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
-				"Client authentication failed", 401, err)
+			// Client not in static map — try wallet attestation via PDP
+			if c.walletAttestationEvaluator != nil && req.ClientAssertion != "" {
+				result, evalErr := c.walletAttestationEvaluator.Evaluate(ctx, req.ClientAssertion)
+				if evalErr != nil {
+					c.log.Error(evalErr, "wallet attestation failed", "client_id", clientID)
+					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+						"Client authentication failed", 401, evalErr)
+				}
+				if result.Subject != "" && result.Subject != clientID {
+					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
+						"wallet attestation subject does not match client_id", 401)
+				}
+				// SPOCP tier authorization (nil engine = default open)
+				// Scope was validated at PAR time; token endpoint re-checks with wildcard
+				if !c.walletAttestationPolicy.Authorize(result.AttestationSource, "", result.Issuer) {
+					c.log.Info("Token: wallet attestation tier denied by policy",
+						"client_id", clientID, "attestation_source", result.AttestationSource,
+						"issuer", result.Issuer)
+					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidScope,
+						"attestation tier not authorized for requested scope", 403)
+				}
+				c.log.Info("Token: wallet authenticated via attestation",
+					"client_id", clientID, "wallet_provider", result.Issuer,
+					"attestation_source", result.AttestationSource,
+					"trust_framework", result.TrustFramework)
+				oauthClient = &oauth2.Client{
+					Type:         oauth2.ClientTypePublic,
+					RedirectURIs: oauth2.RedirectURIs{req.RedirectURI},
+					Scopes:       []string{"*"},
+				}
+			} else {
+				c.log.Error(err, "client validation failed")
+				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+					"Client authentication failed", 401, err)
+			}
 		}
 	}
 

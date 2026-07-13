@@ -46,6 +46,10 @@ type PARRequest struct {
 	WalletIssuer string `json:"wallet_issuer" form:"wallet_issuer"`
 	UserHint     string `json:"user_hint" form:"user_hint"`
 	IssuingState string `json:"issuing_state" form:"issuing_state"`
+
+	// Client authentication via wallet attestation
+	ClientAssertion     string `json:"client_assertion" form:"client_assertion" validate:"omitempty,max=8192,printascii"`
+	ClientAssertionType string `json:"client_assertion_type" form:"client_assertion_type" validate:"omitempty,max=256,printascii"`
 }
 
 type ParResponse struct {

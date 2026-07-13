@@ -998,11 +998,40 @@ type OAuthServer struct {
 	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
 	// Clients holds the OAuth2 client configurations
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
+	// AcceptWalletAttestation enables wallet attestation-based authentication.
+	// When true and Trust.PDPURL is configured, wallets can authenticate using
+	// a provider-signed attestation JWT instead of pre-registration in Clients.
+	// The PDP validates the wallet provider against configured trust lists/federation.
+	// PKCE remains mandatory as the primary code-binding mechanism.
+	AcceptWalletAttestation bool `yaml:"accept_wallet_attestation" default:"false"`
+	// WalletAttestationPolicy configures SPOCP-based authorization for wallet attestation.
+	// When configured, after the PDP validates the wallet provider, the SPOCP engine
+	// checks whether the attestation tier (attestation_source) is authorized for the
+	// requested scope. When empty, all trusted wallets are authorized (default open).
+	WalletAttestationPolicy WalletAttestationPolicy `yaml:"wallet_attestation_policy,omitempty"`
 	// AllowUnverifiedClientAssertion enables accepting client_assertion (private_key_jwt)
 	// WITHOUT signature verification. This is INSECURE and only intended for conformance
 	// testing environments. When false (default), client_assertion is rejected.
 	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
 	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
+}
+
+// WalletAttestationPolicy configures SPOCP-based tier authorization for wallet attestation.
+// Each rule is an S-expression of the form:
+//
+//	(wallet (attestation_source <tier>)(scope <scope>)(issuer <provider>))
+//
+// Use * as wildcard. When no rules are configured, any trusted wallet is authorized.
+// Example rules:
+//
+//	(wallet (attestation_source ios_app_attest)(scope pid)(issuer *))       — allow iOS Tier 4+ for PID
+//	(wallet (attestation_source android_play_integrity)(scope pid)(issuer *)) — allow Android Tier 4+ for PID
+//	(wallet (attestation_source *)(scope ehic)(issuer *))                   — allow any tier for EHIC
+type WalletAttestationPolicy struct {
+	// Rules are inline SPOCP rules.
+	Rules []string `yaml:"rules,omitempty"`
+	// RulesFile is a path to a file containing SPOCP rules (one per line, # comments).
+	RulesFile string `yaml:"rules_file,omitempty"`
 }
 
 // Cfg is the main configuration structure for this application
