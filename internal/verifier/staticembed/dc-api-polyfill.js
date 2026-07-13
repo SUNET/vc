@@ -6,8 +6,9 @@
  *
  * Detection:
  *   (a) typeof DigitalCredential !== "undefined"  — DC API exists
- *   (b) DigitalCredential.userAgentAllowsProtocol("openid4vp-v1-unsigned")
- *       — browser allows the openid4vp presentation protocol
+ *   (b) DigitalCredential.userAgentAllowsProtocol("openid4vp-v1-signed")
+ *       — browser allows the signed openid4vp presentation protocol
+ *       (library auto-selects best: signed > multisigned > unsigned)
  *
  * If a wallet extension shims the DC API transparently, no special
  * handling is needed — the native path works the same way.
