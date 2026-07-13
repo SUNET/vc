@@ -581,12 +581,18 @@ type Verifier struct {
 func (v *Verifier) VerifierClientID() (string, error) {
 	switch v.ClientIDScheme {
 	case "did":
+		if v.DID == "" {
+			return "", fmt.Errorf("client_id_scheme is \"did\" but no DID is configured")
+		}
 		return v.DID, nil
 	default:
 		// x509_san_dns (default)
 		u, err := url.Parse(v.PublicURL)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse PublicURL: %w", err)
+		}
+		if u.Host == "" {
+			return "", fmt.Errorf("PublicURL %q has no host component", v.PublicURL)
 		}
 		return "x509_san_dns:" + u.Host, nil
 	}

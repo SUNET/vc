@@ -73,8 +73,8 @@ func (s *Service) endpointDIDDocument(ctx context.Context, c *gin.Context) (any,
 
 	// Derive linked domains if PublicURL is set
 	if s.cfg.Verifier.PublicURL != "" {
-		u, _ := url.Parse(s.cfg.Verifier.PublicURL)
-		if u != nil {
+		u, parseErr := url.Parse(s.cfg.Verifier.PublicURL)
+		if parseErr == nil && u.Scheme != "" && u.Host != "" {
 			didDoc["alsoKnownAs"] = []string{u.Scheme + "://" + u.Host}
 		}
 	}
