@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -130,8 +131,8 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 	// Extract attestation_source (tier indicator) — may be absent
 	result.attestationSource, _ = claims["attestation_source"].(string)
 
-	// Determine issuer: prefer iss claim, fall back to x5c leaf cert identity
-	result.issuer, _ = claims["iss"].(string)
+	// Extract iss claim (may be absent in TS03 format)
+	issClaim, _ := claims["iss"].(string)
 
 	// Check for x5c in JWT header
 	if x5cRaw, ok := token.Header["x5c"]; ok {
@@ -143,15 +144,28 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 				}
 			}
 
-			// If no iss claim, derive identity from leaf certificate
-			if result.issuer == "" && len(result.x5cChain) > 0 {
-				issuerFromCert, err := issuerFromX5CLeaf(result.x5cChain[0])
+			// When x5c is present, identity MUST come from the certificate.
+			// The x5c chain is the cryptographic proof; iss is self-asserted
+			// and must not override the cert-derived identity.
+			if len(result.x5cChain) > 0 {
+				certIdentity, err := issuerFromX5CLeaf(result.x5cChain[0])
 				if err != nil {
 					return nil, fmt.Errorf("failed to extract issuer from x5c: %w", err)
 				}
-				result.issuer = issuerFromCert
+				// If iss is present, validate consistency (not strict equality —
+				// iss is typically a URL like "https://host" while cert SAN is
+				// a bare hostname "host")
+				if issClaim != "" && !issMatchesCertIdentity(issClaim, certIdentity) {
+					return nil, fmt.Errorf("iss claim %q does not match x5c certificate identity %q", issClaim, certIdentity)
+				}
+				result.issuer = certIdentity
 			}
 		}
+	}
+
+	// No x5c: use iss claim (IETF draft format — PDP validates via JWKS)
+	if result.issuer == "" {
+		result.issuer = issClaim
 	}
 
 	if result.issuer == "" {
@@ -186,4 +200,21 @@ func issuerFromX5CLeaf(b64Cert string) (string, error) {
 		return cert.Subject.CommonName, nil
 	}
 	return "", errors.New("x5c leaf has no SAN or CN to derive issuer identity")
+}
+
+// issMatchesCertIdentity checks if an iss claim is consistent with a cert-derived identity.
+// Handles the common case where iss is a URL ("https://host") and cert identity is
+// a bare hostname ("host") from a DNS SAN, or iss is a full URI matching a URI SAN.
+func issMatchesCertIdentity(iss, certIdentity string) bool {
+	// Exact match (URI SAN, CN, or iss happens to be bare hostname)
+	if iss == certIdentity {
+		return true
+	}
+	// iss is a URL whose host matches the cert's DNS SAN
+	if u, err := url.Parse(iss); err == nil && u.Host != "" {
+		if u.Host == certIdentity {
+			return true
+		}
+	}
+	return false
 }
