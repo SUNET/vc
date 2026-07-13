@@ -1391,14 +1391,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		if len(vctm.Claims) > 0 {
 			credMetadata.Claims = make([]openid4vci.ClaimDescription, len(vctm.Claims))
 			for i, vctmClaim := range vctm.Claims {
-				path := make([]string, len(vctmClaim.Path))
-				for k, p := range vctmClaim.Path {
+				path := make([]string, 0, len(vctmClaim.Path))
+				for _, p := range vctmClaim.Path {
 					if p == nil {
-						return nil, fmt.Errorf("vctm claim path contains null segment; cannot be represented in OpenID4VCI claim path")
+						continue
 					}
-					path[k] = *p
+					path = append(path, *p)
 				}
-
 				claim := openid4vci.ClaimDescription{
 					Path:      path,
 					Mandatory: vctmClaim.Mandatory,
