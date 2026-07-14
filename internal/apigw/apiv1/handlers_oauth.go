@@ -36,13 +36,20 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	if err != nil {
 		// Client not in static map — try wallet attestation via PDP.
 		// Standard-compliant: HTTP headers per draft-ietf-oauth-attestation-based-client-auth-04 §3.1
-		// Legacy fallback: form body client_assertion
+		// Legacy fallback: form body client_assertion (PoP not required)
 		attestation := req.ClientAttestation
+		popJWT := req.ClientAttestationPoP
 		if attestation == "" {
+			// Legacy form-body mode — PoP not required
 			attestation = req.ClientAssertion
+			popJWT = ""
+		} else if popJWT == "" {
+			// Header mode MUST include PoP (§3.1)
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
+				"OAuth-Client-Attestation-PoP header required when OAuth-Client-Attestation is present", 401)
 		}
 		if c.walletAttestationEvaluator != nil && attestation != "" {
-			result, evalErr := c.walletAttestationEvaluator.EvaluateWithPoP(ctx, attestation, req.ClientAttestationPoP, c.cfg.APIGW.PublicURL)
+			result, evalErr := c.walletAttestationEvaluator.EvaluateWithPoP(ctx, attestation, popJWT, c.cfg.APIGW.PublicURL)
 			if evalErr != nil {
 				c.log.Debug("OAuthPar wallet attestation failed", "client_id", req.ClientID, "error", evalErr)
 				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, evalErr)
@@ -262,11 +269,18 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			// Look up client to get JWKS URI for signature verification
 			oauthClientForVerify, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(clientID)
 			if err != nil {
-				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
-					"Client authentication failed", 401, err)
-			}
-
-			verifier := &oauth2.ClientAssertionVerifier{
+				// Client not in static map. If wallet attestation is configured,
+				// this client_assertion might actually be a WIA (legacy form-body mode).
+				// Don't fail here — let the wallet attestation block below handle it.
+				if c.walletAttestationEvaluator != nil {
+					c.log.Debug("client not in static map, deferring to wallet attestation",
+						"client_id", clientID)
+				} else {
+					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+						"Client authentication failed", 401, err)
+				}
+			} else {
+				verifier := &oauth2.ClientAssertionVerifier{
 				TokenEndpoint: c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint,
 				JWKSCache:     c.cacheService.JWKS,
 				JTICheck: func(jti string, exp time.Time) error {
@@ -295,6 +309,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 					"Client assertion verification failed", 401, err)
 			}
 			c.log.Debug("client_assertion verified", "client_id", clientID, "jti", assertionClaims.JTI)
+			}
 		}
 	} else if req.ClientAssertionType != "" {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
@@ -316,13 +331,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		if err != nil {
 			// Client not in static map — try wallet attestation via PDP.
 			// Standard-compliant: HTTP headers per draft-ietf-oauth-attestation-based-client-auth-04 §3.1
-			// Legacy fallback: form body client_assertion
+			// Legacy fallback: form body client_assertion (PoP not required)
 			attestation := req.ClientAttestation
+			popJWT := req.ClientAttestationPoP
 			if attestation == "" {
+				// Legacy form-body mode — PoP not required
 				attestation = req.ClientAssertion
+				popJWT = ""
+			} else if popJWT == "" {
+				// Header mode MUST include PoP (§3.1)
+				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
+					"OAuth-Client-Attestation-PoP header required when OAuth-Client-Attestation is present", 401)
 			}
 			if c.walletAttestationEvaluator != nil && attestation != "" {
-				result, evalErr := c.walletAttestationEvaluator.EvaluateWithPoP(ctx, attestation, req.ClientAttestationPoP, c.cfg.APIGW.PublicURL)
+				result, evalErr := c.walletAttestationEvaluator.EvaluateWithPoP(ctx, attestation, popJWT, c.cfg.APIGW.PublicURL)
 				if evalErr != nil {
 					c.log.Error(evalErr, "wallet attestation failed", "client_id", clientID)
 					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,

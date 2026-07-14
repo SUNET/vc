@@ -82,11 +82,14 @@ apigw:
 
 ### How It Works
 
-1. Wallet sends `client_assertion` (attestation JWT) in PAR request
+1. Wallet sends `OAuth-Client-Attestation` (WIA JWT) and `OAuth-Client-Attestation-PoP` (PoP JWT) as HTTP headers in the PAR request per [draft-ietf-oauth-attestation-based-client-auth-04 §3.1](https://www.ietf.org/archive/id/draft-ietf-oauth-attestation-based-client-auth-04.html#section-3.1)
 2. APIGW looks up `client_id` in static client map → not found
-3. APIGW sends attestation to go-trust PDP with `role=wallet-provider`
-4. PDP validates wallet provider's signature against trust lists/federation
-5. If trusted: wallet accepted as public client (PKCE mandatory)
+3. APIGW validates the PoP JWT signature against the WIA's `cnf.jwk` and checks `aud` matches this AS
+4. APIGW sends the WIA to go-trust PDP with `role=wallet-provider`
+5. PDP validates wallet provider's signature against trust lists/federation
+6. If trusted: wallet accepted as public client (PKCE mandatory)
+
+> **Legacy fallback:** Form-body `client_assertion` (without PoP) is accepted for backward compatibility but is deprecated. New integrations MUST use the HTTP header mechanism.
 
 ### Security
 

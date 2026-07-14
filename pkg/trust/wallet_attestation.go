@@ -312,6 +312,12 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 				}
 			}
 
+			// Fail closed: x5c header present but no valid cert strings extracted.
+			// This prevents falling back to self-asserted iss with a malformed x5c.
+			if len(result.x5cChain) == 0 {
+				return nil, errors.New("x5c header present but contains no valid certificate strings")
+			}
+
 			// When x5c is present, identity MUST come from the certificate.
 			// The x5c chain is the cryptographic proof; iss is self-asserted
 			// and must not override the cert-derived identity.
@@ -344,7 +350,7 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 }
 
 // issuerFromX5CLeaf extracts a wallet provider identifier from the leaf certificate.
-// Uses the first DNS SAN if available, otherwise falls back to the Subject CN.
+// Preference order: DNS SAN > URI SAN > Subject CN.
 func issuerFromX5CLeaf(b64Cert string) (string, error) {
 	der, err := base64.StdEncoding.DecodeString(b64Cert)
 	if err != nil {

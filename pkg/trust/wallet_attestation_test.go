@@ -33,30 +33,34 @@ func TestValidateAttestationPoP_Valid(t *testing.T) {
 }
 
 func TestValidateAttestationPoP_WrongKey(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	wrongKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	wrongKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 
 	wia := createTestWIA(t, key)
 	pop := createTestPoP(t, wrongKey, "test-client", "https://as.example.com")
 
-	err := validateAttestationPoP(wia, pop, "https://as.example.com")
+	err = validateAttestationPoP(wia, pop, "https://as.example.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "signature verification")
 }
 
 func TestValidateAttestationPoP_WrongAudience(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 
 	wia := createTestWIA(t, key)
 	pop := createTestPoP(t, key, "test-client", "https://other-as.example.com")
 
-	err := validateAttestationPoP(wia, pop, "https://as.example.com")
+	err = validateAttestationPoP(wia, pop, "https://as.example.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "aud")
 }
 
 func TestValidateAttestationPoP_MissingIat(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 
 	wia := createTestWIA(t, key)
 
@@ -69,15 +73,17 @@ func TestValidateAttestationPoP_MissingIat(t *testing.T) {
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tok.Header["typ"] = "oauth-client-attestation-pop+jwt"
-	pop, _ := tok.SignedString(key)
+	pop, err := tok.SignedString(key)
+	require.NoError(t, err)
 
-	err := validateAttestationPoP(wia, pop, "https://as.example.com")
+	err = validateAttestationPoP(wia, pop, "https://as.example.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "iat")
 }
 
 func TestValidateAttestationPoP_WrongTyp(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 
 	wia := createTestWIA(t, key)
 
@@ -91,15 +97,17 @@ func TestValidateAttestationPoP_WrongTyp(t *testing.T) {
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tok.Header["typ"] = "dpop+jwt" // wrong!
-	pop, _ := tok.SignedString(key)
+	pop, err := tok.SignedString(key)
+	require.NoError(t, err)
 
-	err := validateAttestationPoP(wia, pop, "https://as.example.com")
+	err = validateAttestationPoP(wia, pop, "https://as.example.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "typ")
 }
 
 func TestExtractCNFKeyFromWIA(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 	wia := createTestWIA(t, key)
 
 	extracted, err := extractCNFKeyFromWIA(wia)
@@ -111,7 +119,8 @@ func TestExtractCNFKeyFromWIA(t *testing.T) {
 }
 
 func TestExtractCNFKeyFromWIA_MissingCNF(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
 
 	// WIA without cnf
 	claims := jwt.MapClaims{
@@ -119,9 +128,10 @@ func TestExtractCNFKeyFromWIA_MissingCNF(t *testing.T) {
 		"sub": "thumbprint123",
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	wia, _ := tok.SignedString(key)
+	wia, err := tok.SignedString(key)
+	require.NoError(t, err)
 
-	_, err := extractCNFKeyFromWIA(wia)
+	_, err = extractCNFKeyFromWIA(wia)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cnf")
 }
