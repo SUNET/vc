@@ -47,9 +47,15 @@ type PARRequest struct {
 	UserHint     string `json:"user_hint" form:"user_hint"`
 	IssuingState string `json:"issuing_state" form:"issuing_state"`
 
-	// Client authentication via wallet attestation
-	ClientAssertion     string `json:"client_assertion" form:"client_assertion" validate:"omitempty,max=8192,printascii"`
-	ClientAssertionType string `json:"client_assertion_type" form:"client_assertion_type" validate:"omitempty,max=256,printascii"`
+	// Client authentication via wallet attestation.
+	// Supports two mechanisms per draft-ietf-oauth-attestation-based-client-auth-04:
+	//  1. HTTP headers: OAuth-Client-Attestation + OAuth-Client-Attestation-PoP (§3.1)
+	//  2. Form body: client_assertion + client_assertion_type (legacy, deprecated)
+	// The standard-compliant mechanism (1) takes precedence.
+	ClientAttestation    string `json:"-" form:"-" header:"OAuth-Client-Attestation"`
+	ClientAttestationPoP string `json:"-" form:"-" header:"OAuth-Client-Attestation-PoP"`
+	ClientAssertion      string `json:"client_assertion" form:"client_assertion" validate:"omitempty,max=8192,printascii"`
+	ClientAssertionType  string `json:"client_assertion_type" form:"client_assertion_type" validate:"omitempty,max=256,printascii"`
 }
 
 type ParResponse struct {

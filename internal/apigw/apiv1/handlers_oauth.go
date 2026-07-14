@@ -34,9 +34,15 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	c.log.Debug("OAuthPar", "client_id", req.ClientID, "scope", req.Scope)
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
-		// Client not in static map — try wallet attestation via PDP
-		if c.walletAttestationEvaluator != nil && req.ClientAssertion != "" {
-			result, evalErr := c.walletAttestationEvaluator.Evaluate(ctx, req.ClientAssertion)
+		// Client not in static map — try wallet attestation via PDP.
+		// Standard-compliant: HTTP headers per draft-ietf-oauth-attestation-based-client-auth-04 §3.1
+		// Legacy fallback: form body client_assertion
+		attestation := req.ClientAttestation
+		if attestation == "" {
+			attestation = req.ClientAssertion
+		}
+		if c.walletAttestationEvaluator != nil && attestation != "" {
+			result, evalErr := c.walletAttestationEvaluator.EvaluateWithPoP(ctx, attestation, req.ClientAttestationPoP, c.cfg.APIGW.PublicURL)
 			if evalErr != nil {
 				c.log.Debug("OAuthPar wallet attestation failed", "client_id", req.ClientID, "error", evalErr)
 				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, evalErr)
@@ -308,9 +314,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		var err error
 		oauthClient, err = c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Get(clientID)
 		if err != nil {
-			// Client not in static map — try wallet attestation via PDP
-			if c.walletAttestationEvaluator != nil && req.ClientAssertion != "" {
-				result, evalErr := c.walletAttestationEvaluator.Evaluate(ctx, req.ClientAssertion)
+			// Client not in static map — try wallet attestation via PDP.
+			// Standard-compliant: HTTP headers per draft-ietf-oauth-attestation-based-client-auth-04 §3.1
+			// Legacy fallback: form body client_assertion
+			attestation := req.ClientAttestation
+			if attestation == "" {
+				attestation = req.ClientAssertion
+			}
+			if c.walletAttestationEvaluator != nil && attestation != "" {
+				result, evalErr := c.walletAttestationEvaluator.EvaluateWithPoP(ctx, attestation, req.ClientAttestationPoP, c.cfg.APIGW.PublicURL)
 				if evalErr != nil {
 					c.log.Error(evalErr, "wallet attestation failed", "client_id", clientID)
 					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,

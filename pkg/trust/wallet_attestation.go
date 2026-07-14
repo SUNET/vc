@@ -2,11 +2,15 @@ package trust
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/url"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -96,6 +100,170 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 	}
 
 	return result, nil
+}
+
+// EvaluateWithPoP validates a wallet attestation (WIA) and its PoP JWT per
+// draft-ietf-oauth-attestation-based-client-auth-04 §3.1 and §5.2.
+//
+// When popJWT is non-empty, it validates:
+//   - typ header = "oauth-client-attestation-pop+jwt"
+//   - signature matches the cnf.jwk from the WIA
+//   - aud claim contains the expectedAudience (this AS's issuer URL)
+//   - exp is not in the past, iat is present
+//
+// When popJWT is empty (legacy form-body mode), only the WIA is validated.
+func (e *WalletAttestationEvaluator) EvaluateWithPoP(ctx context.Context, attestation, popJWT, expectedAudience string) (*WalletAttestationResult, error) {
+	// First evaluate the WIA itself via PDP
+	result, err := e.Evaluate(ctx, attestation)
+	if err != nil {
+		return result, err
+	}
+
+	// If no PoP provided (legacy mode), accept without PoP validation.
+	// This maintains backward compatibility with form-body client_assertion.
+	if popJWT == "" {
+		return result, nil
+	}
+
+	// Validate PoP JWT per §5.2
+	if err := validateAttestationPoP(attestation, popJWT, expectedAudience); err != nil {
+		return nil, fmt.Errorf("attestation PoP validation failed: %w", err)
+	}
+
+	return result, nil
+}
+
+// validateAttestationPoP validates an OAuth-Client-Attestation-PoP JWT.
+// It extracts the cnf.jwk from the WIA and verifies the PoP signature and claims.
+func validateAttestationPoP(attestation, popJWT, expectedAudience string) error {
+	// Extract cnf.jwk from the WIA (we trust the WIA since PDP validated it)
+	cnfKey, err := extractCNFKeyFromWIA(attestation)
+	if err != nil {
+		return fmt.Errorf("extract cnf key from WIA: %w", err)
+	}
+
+	// Parse and validate the PoP JWT
+	claims := &jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(popJWT, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
+			return nil, fmt.Errorf("unexpected PoP signing method: %v", t.Header["alg"])
+		}
+		return cnfKey, nil
+	}, jwt.WithValidMethods([]string{"ES256", "ES384", "ES512"}),
+		jwt.WithLeeway(30*time.Second))
+	if err != nil {
+		return fmt.Errorf("PoP signature verification: %w", err)
+	}
+
+	// Validate typ header
+	typ, _ := token.Header["typ"].(string)
+	if typ != "oauth-client-attestation-pop+jwt" {
+		return fmt.Errorf("invalid PoP typ %q, expected oauth-client-attestation-pop+jwt", typ)
+	}
+
+	// Validate aud contains our AS issuer URL
+	if expectedAudience != "" {
+		audValid := false
+		for _, aud := range claims.Audience {
+			if aud == expectedAudience {
+				audValid = true
+				break
+			}
+		}
+		if !audValid {
+			return fmt.Errorf("PoP aud %v does not contain expected audience %q", claims.Audience, expectedAudience)
+		}
+	}
+
+	// exp is already validated by jwt.Parse (with leeway)
+	// iat presence check
+	if claims.IssuedAt == nil {
+		return errors.New("PoP missing iat claim")
+	}
+
+	return nil
+}
+
+// extractCNFKeyFromWIA parses the WIA JWT and extracts the EC public key from cnf.jwk.
+func extractCNFKeyFromWIA(attestation string) (*ecdsa.PublicKey, error) {
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(attestation, jwt.MapClaims{}) //nolint:gosec // PDP already validated
+	if err != nil {
+		return nil, fmt.Errorf("parse WIA: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("unexpected claims type")
+	}
+
+	cnfRaw, ok := claims["cnf"]
+	if !ok {
+		return nil, errors.New("WIA missing cnf claim")
+	}
+	cnf, ok := cnfRaw.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("WIA cnf claim is not an object")
+	}
+
+	jwkRaw, ok := cnf["jwk"]
+	if !ok {
+		return nil, errors.New("WIA cnf missing jwk")
+	}
+	jwk, ok := jwkRaw.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("WIA cnf.jwk is not an object")
+	}
+
+	return parseECPublicKeyFromCNF(jwk)
+}
+
+// parseECPublicKeyFromCNF parses an EC public key from a JWK map (P-256, P-384, P-521).
+func parseECPublicKeyFromCNF(jwk map[string]interface{}) (*ecdsa.PublicKey, error) {
+	kty, _ := jwk["kty"].(string)
+	if kty != "EC" {
+		return nil, fmt.Errorf("unsupported cnf key type %q, expected EC", kty)
+	}
+
+	crv, _ := jwk["crv"].(string)
+	var curve elliptic.Curve
+	switch crv {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported curve %q", crv)
+	}
+
+	xB64, _ := jwk["x"].(string)
+	yB64, _ := jwk["y"].(string)
+	if xB64 == "" || yB64 == "" {
+		return nil, errors.New("cnf.jwk missing x or y coordinate")
+	}
+
+	xBytes, err := base64.RawURLEncoding.DecodeString(xB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode x: %w", err)
+	}
+	yBytes, err := base64.RawURLEncoding.DecodeString(yB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode y: %w", err)
+	}
+
+	pub := &ecdsa.PublicKey{
+		Curve: curve,
+		X:     new(big.Int).SetBytes(xBytes),
+		Y:     new(big.Int).SetBytes(yBytes),
+	}
+
+	if !curve.IsOnCurve(pub.X, pub.Y) {
+		return nil, errors.New("cnf.jwk point is not on curve")
+	}
+
+	return pub, nil
 }
 
 // attestationIdentity holds parsed identity information from a WIA JWT.
