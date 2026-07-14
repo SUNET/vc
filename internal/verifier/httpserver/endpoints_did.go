@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 
@@ -24,8 +25,14 @@ func (s *Service) endpointDIDDocument(ctx context.Context, c *gin.Context) (any,
 		return nil, err
 	}
 
-	// Build the DID Document
-	verificationMethodID := s.cfg.Verifier.DID + "#key-1"
+	// Build the DID Document.
+	// The verification method ID uses the JWK's kid to ensure consistency
+	// with the kid in signed JWTs (derived by determineKeyID in pki package).
+	kid := jwk.KeyID
+	if kid == "" {
+		return nil, fmt.Errorf("JWK has no key ID; cannot construct DID Document verification method")
+	}
+	verificationMethodID := s.cfg.Verifier.DID + "#" + kid
 
 	// Use the JWK's JSON serialization for the actual key data
 	pubJWK := jwk.Public()
