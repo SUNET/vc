@@ -21,14 +21,20 @@ func (s *Service) endpointFederationEntityConfig(ctx context.Context, c *gin.Con
 	signer := pki.NewSignerConfig(s.cfg.Verifier.KeyConfig)
 	svc := federation.NewService(cfg, signer, s.cfg.Verifier.PublicURL)
 
+	// Derive signing algorithm from the actual key configuration
+	jwk, err := signer.GetJWK()
+	if err != nil {
+		return nil, err
+	}
+
 	// Build metadata advertising this service as an OpenID Relying Party (verifier)
 	metadata := &federation.EntityMetadata{
 		OpenIDRelyingParty: map[string]any{
-			"client_id":       s.cfg.Verifier.PublicURL,
-			"response_types":  []string{"vp_token"},
-			"vp_formats":      s.cfg.Verifier.PreferredVPFormats,
-			"client_name":     cfg.OrganizationName,
-			"request_object_signing_alg": "ES256",
+			"client_id":                  svc.EntityID(),
+			"response_types":             []string{"vp_token"},
+			"vp_formats":                 s.cfg.Verifier.PreferredVPFormats,
+			"client_name":                cfg.OrganizationName,
+			"request_object_signing_alg": jwk.Algorithm,
 		},
 	}
 

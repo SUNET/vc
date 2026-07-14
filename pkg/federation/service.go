@@ -32,6 +32,11 @@ func NewService(cfg *Config, signer *pki.SignerConfig, publicURL string) *Servic
 	}
 }
 
+// EntityID returns the resolved entity identifier for this federation service.
+func (s *Service) EntityID() string {
+	return s.entityID
+}
+
 // entityConfigClaims is the JWT claims structure for the entity configuration.
 type entityConfigClaims struct {
 	jwt.RegisteredClaims
