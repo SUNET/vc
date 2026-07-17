@@ -1,5 +1,5 @@
 {
-    "scope": "pid:mso_mdoc",
+    "scope": "pid_mdoc",
     "doctype": "eu.europa.ec.eudi.pid.1",
     "vct": "eu.europa.ec.eudi.pid.1",
     "display": [

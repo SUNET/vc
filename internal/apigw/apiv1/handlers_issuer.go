@@ -487,9 +487,19 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		return nil, err
 	}
 
+	docType := mdoc.DocTypePID
+	switch scope {
+	case "pid_mdoc":
+		docType = mdoc.DocTypePID // eu.europa.ec.eudi.pid.1
+	case "mdl":
+		docType = mdoc.DocTypeMDL // org.iso.18013.5.1.mDL
+	default:
+		return nil, fmt.Errorf("unsupported scope: %s", scope)
+	}
+	
 	issuerReply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
 		Scope:           scope,
-		DocType:         mdoc.DocTypePID, // eu.europa.ec.eudi.pid.1
+		DocType:         docType,
 		DocumentData:    documentData,
 		DevicePublicKey: deviceKeyBytes,
 		DeviceKeyFormat: "cose",
