@@ -173,6 +173,8 @@ apigw:
           - "bootstrapping/elm.json"
           - "bootstrapping/pda1.json"
           - "bootstrapping/pid.json"
+          - "bootstrapping/mdl.json"
+          - "bootstrapping/pid_mdoc.json"
         users:
           - "100"
           - "102"
