@@ -145,6 +145,7 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 		result.Documents = append(result.Documents, docResult)
 		if !docResult.Valid {
 			result.Valid = false
+			result.Errors = append(result.Errors, docResult.Errors...)
 		}
 	}
 
