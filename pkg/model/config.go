@@ -896,6 +896,10 @@ type IssuerMetadata struct {
 	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
 	// Display holds the display metadata
 	Display []openid4vci.MetadataDisplay `yaml:"display" validate:"omitempty"`
+	// MdocIacasURI is the URL where IACA certificates are published for mDOC verification.
+	// When configured, this is included in .well-known/openid-credential-issuer metadata
+	// so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials.
+	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
 }
 
 // CredentialOfferWallets holds wallet redirect configuration
@@ -1416,6 +1420,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,
+		MdocIacasURI:                         cfg.MdocIacasURI,
 	}
 
 	metadata := metadataConfig.GenerateIssuerMetadata(ctx)

@@ -45,6 +45,11 @@ type CredentialIssuerMetadataParameters struct {
 
 	// CredentialConfigurationsSupported: REQUIRED. Object that describes specifics of the Credential that the Credential Issuer supports issuance of. This object contains a list of name/value pairs, where each name is a unique identifier of the supported Credential being described.
 	CredentialConfigurationsSupported map[string]CredentialConfigurationsSupported `json:"credential_configurations_supported" yaml:"credential_configurations_supported" validate:"required"`
+
+	// MdocIacasURI: OPTIONAL. URL of the endpoint where the Credential Issuer publishes
+	// its IACA (Issuing Authority Certificate Authority) certificates for mDOC verification.
+	// Used by verifiers to dynamically fetch trust anchors for ISO 18013-5 mDOC credentials.
+	MdocIacasURI string `json:"mdoc_iacas_uri,omitempty" yaml:"mdoc_iacas_uri,omitempty"`
 }
 
 // MetadataIssuer returns the issuer identifier embedded in the metadata
