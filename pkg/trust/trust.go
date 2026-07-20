@@ -96,18 +96,26 @@ func (r *EvaluationRequest) GetEffectiveAction() string {
 		return string(RolePIDProvider)
 	}
 
-	// For mDL documents, use mDL-specific policy
-	if r.DocType == "org.iso.18013.5.1.mDL" {
+	// For mDoc documents (any DocType — DocType is an ISO 18013-5 concept),
+	// route to mdoc-issuer/mdoc-verifier policy for IACA validation.
+	// mDL is a special case with its own policy name for backward compat.
+	if r.DocType != "" {
 		if r.Role == RoleIssuer || r.Role == RoleCredentialIssuer {
-			return "mdl-issuer"
+			if r.DocType == "org.iso.18013.5.1.mDL" {
+				return "mdl-issuer"
+			}
+			return "mdoc-issuer"
 		}
 		if r.Role == RoleVerifier || r.Role == RoleCredentialVerifier {
-			return "mdl-verifier"
+			if r.DocType == "org.iso.18013.5.1.mDL" {
+				return "mdl-verifier"
+			}
+			return "mdoc-verifier"
 		}
 	}
 
 	// For credential issuers, use credential-issuer policy
-	if (r.Role == RoleIssuer || r.Role == RoleCredentialIssuer) && (r.CredentialType != "" || r.DocType != "") {
+	if (r.Role == RoleIssuer || r.Role == RoleCredentialIssuer) && r.CredentialType != "" {
 		return string(RoleCredentialIssuer)
 	}
 

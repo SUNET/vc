@@ -415,9 +415,19 @@ func TestEvaluationRequest_GetEffectiveAction(t *testing.T) {
 			expect: "mdl-verifier",
 		},
 		{
-			name:   "credential issuer with docType becomes credential-issuer",
+			name:   "non-mDL mDoc docType issuer becomes mdoc-issuer",
 			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleCredentialIssuer, DocType: "org.iso.18013.5.1.PID"}},
-			expect: "credential-issuer",
+			expect: "mdoc-issuer",
+		},
+		{
+			name:   "eudi PID mDoc docType issuer becomes mdoc-issuer",
+			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleCredentialIssuer, DocType: "eu.europa.ec.eudi.pid.1"}},
+			expect: "mdoc-issuer",
+		},
+		{
+			name:   "non-mDL mDoc docType verifier becomes mdoc-verifier",
+			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleCredentialVerifier, DocType: "eu.europa.ec.eudi.pid.1"}},
+			expect: "mdoc-verifier",
 		},
 	}
 
