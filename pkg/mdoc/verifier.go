@@ -20,6 +20,7 @@ import (
 // Verifier verifies mDL documents according to ISO/IEC 18013-5:2021.
 type Verifier struct {
 	trustEvaluator      trust.TrustEvaluator
+	issuerURL           string
 	skipRevocationCheck bool
 	clock               func() time.Time
 	cryptoExt           *cryptoutil.Extensions
@@ -32,6 +33,12 @@ type VerifierConfig struct {
 	// This replaces the deprecated local TrustList approach - all trust decisions
 	// should go through TrustEvaluator for consistent policy enforcement.
 	TrustEvaluator trust.TrustEvaluator
+
+	// IssuerURL is the OpenID4VCI credential issuer URL (e.g., "https://issuer.example.com").
+	// When set, this is used as the SubjectID for trust evaluation, enabling the mdociaca
+	// registry to fetch .well-known/openid-credential-issuer metadata.
+	// When empty, the issuer ID is extracted from the DS certificate (URI SAN or Organization).
+	IssuerURL string
 
 	// SkipRevocationCheck skips CRL/OCSP revocation checking if true.
 	SkipRevocationCheck bool
@@ -93,6 +100,7 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 
 	return &Verifier{
 		trustEvaluator:      config.TrustEvaluator,
+		issuerURL:           config.IssuerURL,
 		skipRevocationCheck: config.SkipRevocationCheck,
 		clock:               clock,
 		cryptoExt:           config.CryptoExt,
@@ -342,9 +350,12 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 		return fmt.Errorf("certificate expired: valid until %s", dsCert.NotAfter)
 	}
 
-	// Extract issuer identifier from the DS certificate
-	// For mDOC, this is typically the issuing_country or issuing_authority
-	issuerID := extractMDocIssuerID(dsCert)
+	// Extract issuer identifier for trust evaluation.
+	// Priority: configured IssuerURL > certificate URI SAN > certificate Organization.
+	issuerID := v.issuerURL
+	if issuerID == "" {
+		issuerID = extractMDocIssuerID(dsCert)
+	}
 
 	// Delegate trust decision to TrustEvaluator (go-trust)
 	decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
@@ -373,21 +384,36 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 }
 
 // extractMDocIssuerID extracts an issuer identifier from an mDOC DS certificate.
-// This looks for the issuing country/authority in the certificate.
+// Priority:
+//  1. URI Subject Alternative Name (e.g., "https://issuer.example.com") — required by
+//     the mdociaca registry to fetch .well-known/openid-credential-issuer metadata.
+//  2. DNS Subject Alternative Name — converted to https:// URL for metadata discovery.
+//  3. Organization name (e.g., "siros-id") — usable by allowlist-based registries.
+//  4. Country code / Common Name as last resort.
 func extractMDocIssuerID(cert *x509.Certificate) string {
-	// Try to get a meaningful issuer identifier:
-	// 1. Organization (e.g., "Department of Motor Vehicles")
-	// 2. Country code (e.g., "SE" for Sweden)
-	// 3. Common Name (CN)
+	// 1. Check for URI SANs — best source for mdociaca discovery
+	for _, uri := range cert.URIs {
+		if uri.Scheme == "https" || uri.Scheme == "http" {
+			return uri.String()
+		}
+	}
 
+	// 2. Check for DNS SANs — construct https:// URL for metadata discovery
+	for _, dns := range cert.DNSNames {
+		return "https://" + dns
+	}
+
+	// 3. Organization (usable for static allowlist matching)
 	if len(cert.Subject.Organization) > 0 {
 		return cert.Subject.Organization[0]
 	}
 
+	// 4. Country code
 	if len(cert.Subject.Country) > 0 {
 		return cert.Subject.Country[0]
 	}
 
+	// 5. Common Name
 	if cert.Subject.CommonName != "" {
 		return cert.Subject.CommonName
 	}

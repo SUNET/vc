@@ -16,6 +16,7 @@ import (
 type MDocHandler struct {
 	verifier       *Verifier
 	trustEvaluator trust.TrustEvaluator
+	issuerURL      string
 }
 
 // MDocHandlerOption configures an MDocHandler.
@@ -27,6 +28,15 @@ type MDocHandlerOption func(*MDocHandler)
 func WithMDocTrustEvaluator(te trust.TrustEvaluator) MDocHandlerOption {
 	return func(h *MDocHandler) {
 		h.trustEvaluator = te
+	}
+}
+
+// WithMDocIssuerURL sets the expected credential issuer URL for trust evaluation.
+// This enables the mdociaca registry to discover IACA certificates via
+// .well-known/openid-credential-issuer metadata.
+func WithMDocIssuerURL(url string) MDocHandlerOption {
+	return func(h *MDocHandler) {
+		h.issuerURL = url
 	}
 }
 
@@ -54,6 +64,7 @@ func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 		var err error
 		h.verifier, err = NewVerifier(VerifierConfig{
 			TrustEvaluator: h.trustEvaluator,
+			IssuerURL:      h.issuerURL,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create verifier: %w", err)
