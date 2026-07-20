@@ -49,6 +49,7 @@ type Apiv1 interface {
 	VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error)
 	VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error
 	VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error)
+	GetIACAs(ctx context.Context) (*apiv1.GetIACAsResponse, error)
 
 	// OAuth endpoints
 	OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error)

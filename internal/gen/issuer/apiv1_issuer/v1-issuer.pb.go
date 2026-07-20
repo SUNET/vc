@@ -135,6 +135,52 @@ func (x *SignMetadataReply) GetSignedMetadata() string {
 	return ""
 }
 
+// GetIACAsReply contains the IACA (Issuing Authority CA) certificates
+// for mDOC verification. Certificates are DER-encoded X.509 in bytes.
+type GetIACAsReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Certificates  [][]byte               `protobuf:"bytes,1,rep,name=certificates,proto3" json:"certificates,omitempty"` // DER-encoded X.509 IACA certificates
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetIACAsReply) Reset() {
+	*x = GetIACAsReply{}
+	mi := &file_v1_issuer_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetIACAsReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetIACAsReply) ProtoMessage() {}
+
+func (x *GetIACAsReply) ProtoReflect() protoreflect.Message {
+	mi := &file_v1_issuer_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetIACAsReply.ProtoReflect.Descriptor instead.
+func (*GetIACAsReply) Descriptor() ([]byte, []int) {
+	return file_v1_issuer_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetIACAsReply) GetCertificates() [][]byte {
+	if x != nil {
+		return x.Certificates
+	}
+	return nil
+}
+
 type MakeSDJWTRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Scope         string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`
@@ -148,7 +194,7 @@ type MakeSDJWTRequest struct {
 
 func (x *MakeSDJWTRequest) Reset() {
 	*x = MakeSDJWTRequest{}
-	mi := &file_v1_issuer_proto_msgTypes[2]
+	mi := &file_v1_issuer_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +206,7 @@ func (x *MakeSDJWTRequest) String() string {
 func (*MakeSDJWTRequest) ProtoMessage() {}
 
 func (x *MakeSDJWTRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[2]
+	mi := &file_v1_issuer_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +219,7 @@ func (x *MakeSDJWTRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MakeSDJWTRequest.ProtoReflect.Descriptor instead.
 func (*MakeSDJWTRequest) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{2}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MakeSDJWTRequest) GetScope() string {
@@ -222,7 +268,7 @@ type MakeSDJWTReply struct {
 
 func (x *MakeSDJWTReply) Reset() {
 	*x = MakeSDJWTReply{}
-	mi := &file_v1_issuer_proto_msgTypes[3]
+	mi := &file_v1_issuer_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -234,7 +280,7 @@ func (x *MakeSDJWTReply) String() string {
 func (*MakeSDJWTReply) ProtoMessage() {}
 
 func (x *MakeSDJWTReply) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[3]
+	mi := &file_v1_issuer_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -247,7 +293,7 @@ func (x *MakeSDJWTReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MakeSDJWTReply.ProtoReflect.Descriptor instead.
 func (*MakeSDJWTReply) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{3}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MakeSDJWTReply) GetCredentials() []*Credential {
@@ -285,7 +331,7 @@ type MakeMDocRequest struct {
 
 func (x *MakeMDocRequest) Reset() {
 	*x = MakeMDocRequest{}
-	mi := &file_v1_issuer_proto_msgTypes[4]
+	mi := &file_v1_issuer_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +343,7 @@ func (x *MakeMDocRequest) String() string {
 func (*MakeMDocRequest) ProtoMessage() {}
 
 func (x *MakeMDocRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[4]
+	mi := &file_v1_issuer_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +356,7 @@ func (x *MakeMDocRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MakeMDocRequest.ProtoReflect.Descriptor instead.
 func (*MakeMDocRequest) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{4}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MakeMDocRequest) GetScope() string {
@@ -362,7 +408,7 @@ type MakeMDocReply struct {
 
 func (x *MakeMDocReply) Reset() {
 	*x = MakeMDocReply{}
-	mi := &file_v1_issuer_proto_msgTypes[5]
+	mi := &file_v1_issuer_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -374,7 +420,7 @@ func (x *MakeMDocReply) String() string {
 func (*MakeMDocReply) ProtoMessage() {}
 
 func (x *MakeMDocReply) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[5]
+	mi := &file_v1_issuer_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -387,7 +433,7 @@ func (x *MakeMDocReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MakeMDocReply.ProtoReflect.Descriptor instead.
 func (*MakeMDocReply) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{5}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MakeMDocReply) GetMdoc() []byte {
@@ -434,7 +480,7 @@ type Credential struct {
 
 func (x *Credential) Reset() {
 	*x = Credential{}
-	mi := &file_v1_issuer_proto_msgTypes[6]
+	mi := &file_v1_issuer_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -446,7 +492,7 @@ func (x *Credential) String() string {
 func (*Credential) ProtoMessage() {}
 
 func (x *Credential) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[6]
+	mi := &file_v1_issuer_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -459,7 +505,7 @@ func (x *Credential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Credential.ProtoReflect.Descriptor instead.
 func (*Credential) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{6}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Credential) GetCredential() string {
@@ -477,7 +523,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_v1_issuer_proto_msgTypes[7]
+	mi := &file_v1_issuer_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +535,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[7]
+	mi := &file_v1_issuer_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +548,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{7}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{8}
 }
 
 type JwksReply struct {
@@ -515,7 +561,7 @@ type JwksReply struct {
 
 func (x *JwksReply) Reset() {
 	*x = JwksReply{}
-	mi := &file_v1_issuer_proto_msgTypes[8]
+	mi := &file_v1_issuer_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -527,7 +573,7 @@ func (x *JwksReply) String() string {
 func (*JwksReply) ProtoMessage() {}
 
 func (x *JwksReply) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[8]
+	mi := &file_v1_issuer_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -540,7 +586,7 @@ func (x *JwksReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JwksReply.ProtoReflect.Descriptor instead.
 func (*JwksReply) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{8}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *JwksReply) GetIssuer() string {
@@ -566,7 +612,7 @@ type Keys struct {
 
 func (x *Keys) Reset() {
 	*x = Keys{}
-	mi := &file_v1_issuer_proto_msgTypes[9]
+	mi := &file_v1_issuer_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +624,7 @@ func (x *Keys) String() string {
 func (*Keys) ProtoMessage() {}
 
 func (x *Keys) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[9]
+	mi := &file_v1_issuer_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +637,7 @@ func (x *Keys) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Keys.ProtoReflect.Descriptor instead.
 func (*Keys) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{9}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Keys) GetKeys() []*Jwk {
@@ -621,7 +667,7 @@ type Jwk struct {
 
 func (x *Jwk) Reset() {
 	*x = Jwk{}
-	mi := &file_v1_issuer_proto_msgTypes[10]
+	mi := &file_v1_issuer_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -633,7 +679,7 @@ func (x *Jwk) String() string {
 func (*Jwk) ProtoMessage() {}
 
 func (x *Jwk) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[10]
+	mi := &file_v1_issuer_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -646,7 +692,7 @@ func (x *Jwk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Jwk.ProtoReflect.Descriptor instead.
 func (*Jwk) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{10}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Jwk) GetKid() string {
@@ -748,7 +794,7 @@ type MakeVC20Request struct {
 
 func (x *MakeVC20Request) Reset() {
 	*x = MakeVC20Request{}
-	mi := &file_v1_issuer_proto_msgTypes[11]
+	mi := &file_v1_issuer_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -760,7 +806,7 @@ func (x *MakeVC20Request) String() string {
 func (*MakeVC20Request) ProtoMessage() {}
 
 func (x *MakeVC20Request) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[11]
+	mi := &file_v1_issuer_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -773,7 +819,7 @@ func (x *MakeVC20Request) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MakeVC20Request.ProtoReflect.Descriptor instead.
 func (*MakeVC20Request) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{11}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MakeVC20Request) GetScope() string {
@@ -833,7 +879,7 @@ type MakeVC20Reply struct {
 
 func (x *MakeVC20Reply) Reset() {
 	*x = MakeVC20Reply{}
-	mi := &file_v1_issuer_proto_msgTypes[12]
+	mi := &file_v1_issuer_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -845,7 +891,7 @@ func (x *MakeVC20Reply) String() string {
 func (*MakeVC20Reply) ProtoMessage() {}
 
 func (x *MakeVC20Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_issuer_proto_msgTypes[12]
+	mi := &file_v1_issuer_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -858,7 +904,7 @@ func (x *MakeVC20Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MakeVC20Reply.ProtoReflect.Descriptor instead.
 func (*MakeVC20Reply) Descriptor() ([]byte, []int) {
-	return file_v1_issuer_proto_rawDescGZIP(), []int{12}
+	return file_v1_issuer_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MakeVC20Reply) GetCredential() []byte {
@@ -914,7 +960,9 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x03iss\x18\x03 \x01(\tR\x03iss\x12\x10\n" +
 	"\x03sub\x18\x04 \x01(\tR\x03sub\"<\n" +
 	"\x11SignMetadataReply\x12'\n" +
-	"\x0fsigned_metadata\x18\x01 \x01(\tR\x0esignedMetadata\"\xa6\x01\n" +
+	"\x0fsigned_metadata\x18\x01 \x01(\tR\x0esignedMetadata\"3\n" +
+	"\rGetIACAsReply\x12\"\n" +
+	"\fcertificates\x18\x01 \x03(\fR\fcertificates\"\xa6\x01\n" +
 	"\x10MakeSDJWTRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\"\n" +
 	"\fdocumentData\x18\x02 \x01(\fR\fdocumentData\x12 \n" +
@@ -982,13 +1030,14 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
 	"valid_from\x18\x05 \x01(\tR\tvalidFrom\x12\x1f\n" +
 	"\vvalid_until\x18\x06 \x01(\tR\n" +
-	"validUntil2\xe0\x02\n" +
+	"validUntil2\x9a\x03\n" +
 	"\rIssuerService\x12E\n" +
 	"\tMakeSDJWT\x12\x1b.v1.issuer.MakeSDJWTRequest\x1a\x19.v1.issuer.MakeSDJWTReply\"\x00\x12B\n" +
 	"\bMakeMDoc\x12\x1a.v1.issuer.MakeMDocRequest\x1a\x18.v1.issuer.MakeMDocReply\"\x00\x12B\n" +
 	"\bMakeVC20\x12\x1a.v1.issuer.MakeVC20Request\x1a\x18.v1.issuer.MakeVC20Reply\"\x00\x120\n" +
 	"\x04JWKS\x12\x10.v1.issuer.Empty\x1a\x14.v1.issuer.JwksReply\"\x00\x12N\n" +
-	"\fSignMetadata\x12\x1e.v1.issuer.SignMetadataRequest\x1a\x1c.v1.issuer.SignMetadataReply\"\x00B%Z#vc/internal/gen/issuer/apiv1_issuerb\x06proto3"
+	"\fSignMetadata\x12\x1e.v1.issuer.SignMetadataRequest\x1a\x1c.v1.issuer.SignMetadataReply\"\x00\x128\n" +
+	"\bGetIACAs\x12\x10.v1.issuer.Empty\x1a\x18.v1.issuer.GetIACAsReply\"\x00B%Z#vc/internal/gen/issuer/apiv1_issuerb\x06proto3"
 
 var (
 	file_v1_issuer_proto_rawDescOnce sync.Once
@@ -1002,39 +1051,42 @@ func file_v1_issuer_proto_rawDescGZIP() []byte {
 	return file_v1_issuer_proto_rawDescData
 }
 
-var file_v1_issuer_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_v1_issuer_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_v1_issuer_proto_goTypes = []any{
 	(*SignMetadataRequest)(nil), // 0: v1.issuer.SignMetadataRequest
 	(*SignMetadataReply)(nil),   // 1: v1.issuer.SignMetadataReply
-	(*MakeSDJWTRequest)(nil),    // 2: v1.issuer.MakeSDJWTRequest
-	(*MakeSDJWTReply)(nil),      // 3: v1.issuer.MakeSDJWTReply
-	(*MakeMDocRequest)(nil),     // 4: v1.issuer.MakeMDocRequest
-	(*MakeMDocReply)(nil),       // 5: v1.issuer.MakeMDocReply
-	(*Credential)(nil),          // 6: v1.issuer.Credential
-	(*Empty)(nil),               // 7: v1.issuer.Empty
-	(*JwksReply)(nil),           // 8: v1.issuer.JwksReply
-	(*Keys)(nil),                // 9: v1.issuer.keys
-	(*Jwk)(nil),                 // 10: v1.issuer.jwk
-	(*MakeVC20Request)(nil),     // 11: v1.issuer.MakeVC20Request
-	(*MakeVC20Reply)(nil),       // 12: v1.issuer.MakeVC20Reply
+	(*GetIACAsReply)(nil),       // 2: v1.issuer.GetIACAsReply
+	(*MakeSDJWTRequest)(nil),    // 3: v1.issuer.MakeSDJWTRequest
+	(*MakeSDJWTReply)(nil),      // 4: v1.issuer.MakeSDJWTReply
+	(*MakeMDocRequest)(nil),     // 5: v1.issuer.MakeMDocRequest
+	(*MakeMDocReply)(nil),       // 6: v1.issuer.MakeMDocReply
+	(*Credential)(nil),          // 7: v1.issuer.Credential
+	(*Empty)(nil),               // 8: v1.issuer.Empty
+	(*JwksReply)(nil),           // 9: v1.issuer.JwksReply
+	(*Keys)(nil),                // 10: v1.issuer.keys
+	(*Jwk)(nil),                 // 11: v1.issuer.jwk
+	(*MakeVC20Request)(nil),     // 12: v1.issuer.MakeVC20Request
+	(*MakeVC20Reply)(nil),       // 13: v1.issuer.MakeVC20Reply
 }
 var file_v1_issuer_proto_depIdxs = []int32{
-	10, // 0: v1.issuer.MakeSDJWTRequest.jwk:type_name -> v1.issuer.jwk
-	6,  // 1: v1.issuer.MakeSDJWTReply.credentials:type_name -> v1.issuer.Credential
-	9,  // 2: v1.issuer.JwksReply.jwks:type_name -> v1.issuer.keys
-	10, // 3: v1.issuer.keys.keys:type_name -> v1.issuer.jwk
-	2,  // 4: v1.issuer.IssuerService.MakeSDJWT:input_type -> v1.issuer.MakeSDJWTRequest
-	4,  // 5: v1.issuer.IssuerService.MakeMDoc:input_type -> v1.issuer.MakeMDocRequest
-	11, // 6: v1.issuer.IssuerService.MakeVC20:input_type -> v1.issuer.MakeVC20Request
-	7,  // 7: v1.issuer.IssuerService.JWKS:input_type -> v1.issuer.Empty
+	11, // 0: v1.issuer.MakeSDJWTRequest.jwk:type_name -> v1.issuer.jwk
+	7,  // 1: v1.issuer.MakeSDJWTReply.credentials:type_name -> v1.issuer.Credential
+	10, // 2: v1.issuer.JwksReply.jwks:type_name -> v1.issuer.keys
+	11, // 3: v1.issuer.keys.keys:type_name -> v1.issuer.jwk
+	3,  // 4: v1.issuer.IssuerService.MakeSDJWT:input_type -> v1.issuer.MakeSDJWTRequest
+	5,  // 5: v1.issuer.IssuerService.MakeMDoc:input_type -> v1.issuer.MakeMDocRequest
+	12, // 6: v1.issuer.IssuerService.MakeVC20:input_type -> v1.issuer.MakeVC20Request
+	8,  // 7: v1.issuer.IssuerService.JWKS:input_type -> v1.issuer.Empty
 	0,  // 8: v1.issuer.IssuerService.SignMetadata:input_type -> v1.issuer.SignMetadataRequest
-	3,  // 9: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
-	5,  // 10: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
-	12, // 11: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
-	8,  // 12: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
-	1,  // 13: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
+	8,  // 9: v1.issuer.IssuerService.GetIACAs:input_type -> v1.issuer.Empty
+	4,  // 10: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
+	6,  // 11: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
+	13, // 12: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
+	9,  // 13: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
+	1,  // 14: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
+	2,  // 15: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1051,7 +1103,7 @@ func file_v1_issuer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v1_issuer_proto_rawDesc), len(file_v1_issuer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
