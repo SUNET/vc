@@ -15,6 +15,10 @@ const (
 	NamespacePID = "eu.europa.ec.eudi.pid.1"
 )
 
+var DocTypes = map[string]string{
+	NamespaceMDL: DocTypeMDL,
+	NamespacePID: DocTypePID,
+}
 // MDoc represents a Mobile Driving Licence document according to ISO/IEC 18013-5:2021.
 type MDoc struct {
 	// Mandatory elements

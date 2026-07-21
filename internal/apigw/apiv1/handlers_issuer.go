@@ -478,25 +478,37 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	}
 }
 
-// issueMDoc issues an mDL/mDoc credential (ISO 18013-5)
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, identifier string) (*openid4vci.CredentialResponse, error) {
+// issueMDoc issues an mDoc credential
+func (c *Client) issueMDoc2(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, identifier string) (*openid4vci.CredentialResponse, error) {
 	// Convert JWK to COSE key bytes for mDoc
 	deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
 	if err != nil {
 		c.log.Error(err, "failed to convert JWK to COSE key")
 		return nil, err
 	}
-
-	docType := mdoc.DocTypePID
-	switch scope {
-	case "pid_mdoc":
-		docType = mdoc.DocTypePID // eu.europa.ec.eudi.pid.1
-	case "mdl":
-		docType = mdoc.DocTypeMDL // org.iso.18013.5.1.mDL
-	default:
+	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
+	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
-	
+	var docType string
+	if len(credentialMetadata.Attributes) == 0 {
+		return nil, fmt.Errorf("no claims found in credential metadata")
+	}
+	for _, attrs := range credentialMetadata.Attributes {
+		for _, path := range attrs {
+			if len(path) > 0 && path[0] != nil {
+				docType = mdoc.DocTypes[*path[0]]
+				break
+			}
+		}
+		if docType != "" {
+			break
+		}
+	}
+	if docType == "" {
+		return nil, fmt.Errorf("unable to determine document type from claims")
+	}
+
 	issuerReply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
 		Scope:           scope,
 		DocType:         docType,
