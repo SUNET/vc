@@ -479,7 +479,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 }
 
 // issueMDoc issues an mDoc credential
-func (c *Client) issueMDoc2(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, identifier string) (*openid4vci.CredentialResponse, error) {
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, identifier string) (*openid4vci.CredentialResponse, error) {
 	// Convert JWK to COSE key bytes for mDoc
 	deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
 	if err != nil {
