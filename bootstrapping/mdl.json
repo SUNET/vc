@@ -34,7 +34,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -70,7 +70,7 @@
         "issuing_authority": "SUNET",
         "issuing_country": "SE",
         "issuing_jurisdiction": "Stockholm",
-        "nationality": [
+        "nationalities": [
           "SE"
         ],
         "personal_administrative_number": "pan-authentic_source_person_id_101",
@@ -80,7 +80,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -126,7 +126,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -172,7 +172,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -218,7 +218,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -264,7 +264,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -310,7 +310,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -356,7 +356,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -402,7 +402,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -448,7 +448,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -494,7 +494,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -540,7 +540,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -586,7 +586,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -632,7 +632,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -678,7 +678,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -724,7 +724,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -770,7 +770,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -816,7 +816,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -862,7 +862,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -908,7 +908,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -954,7 +954,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1000,7 +1000,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1046,7 +1046,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1092,7 +1092,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1138,7 +1138,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1184,7 +1184,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1230,7 +1230,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1276,7 +1276,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1322,7 +1322,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1368,7 +1368,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1414,7 +1414,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1460,7 +1460,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1506,7 +1506,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1552,7 +1552,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1598,7 +1598,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1644,7 +1644,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1690,7 +1690,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1736,7 +1736,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1782,7 +1782,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1828,7 +1828,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1874,7 +1874,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1920,7 +1920,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -1966,7 +1966,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2012,7 +2012,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2058,7 +2058,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2104,7 +2104,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2150,7 +2150,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2196,7 +2196,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2242,7 +2242,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2288,7 +2288,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2334,7 +2334,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2380,7 +2380,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2426,7 +2426,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2472,7 +2472,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2518,7 +2518,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2564,7 +2564,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2610,7 +2610,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2656,7 +2656,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2702,7 +2702,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2748,7 +2748,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2794,7 +2794,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2840,7 +2840,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2886,7 +2886,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2932,7 +2932,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -2978,7 +2978,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3024,7 +3024,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3070,7 +3070,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3116,7 +3116,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3162,7 +3162,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3208,7 +3208,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3254,7 +3254,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3300,7 +3300,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3346,7 +3346,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3392,7 +3392,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3438,7 +3438,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3484,7 +3484,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3530,7 +3530,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3576,7 +3576,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3622,7 +3622,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",
@@ -3668,7 +3668,7 @@
         "resident_country": "SE",
         "resident_postal_code": "11353",
         "resident_state": "Stockholm",
-        "sex": "0",
+        "sex": 0,
         "driving_privileges": [
           {
             "vehicle_category_code": "B",

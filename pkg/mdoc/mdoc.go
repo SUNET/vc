@@ -105,8 +105,8 @@ type MDoc struct {
 	// IssuingJurisdiction is the country subdivision code (ISO 3166-2) of the issuing jurisdiction.
 	IssuingJurisdiction *string `json:"issuing_jurisdiction,omitempty" cbor:"issuing_jurisdiction,omitempty" validate:"omitempty"`
 
-	// Nationality is the nationality of the mDL holder (ISO 3166-1 alpha-2).
-	Nationality *string `json:"nationality,omitempty" cbor:"nationality,omitempty" validate:"omitempty,len=2"`
+	// nationalities is the nationalities of the mDL holder (ISO 3166-1 alpha-2).
+	Nationalities []string `json:"nationality,omitempty" cbor:"nationalities,omitempty" validate:"omitempty,len=2"`
 
 	// ResidentCity is the city where the mDL holder lives.
 	// Maximum 150 characters, Latin1 encoding.
@@ -423,8 +423,8 @@ type PIDMDOC struct {
 	// 0 = not known, 1 = male, 2 = female, 9 = not applicable
 	Gender *uint `json:"gender,omitempty" cbor:"gender,omitempty" validate:"omitempty,oneof=0 1 2 9"`
 
-	// Nationality is one or more nationalities of the PID holder (Alpha-2 country codes).
-	Nationality *string `json:"nationality,omitempty" cbor:"nationality,omitempty" validate:"omitempty,len=2"`
+	// nationalities is one or more nationality of the PID holder (Alpha-2 country codes).
+	Nationalities []string `json:"nationalities,omitempty" cbor:"nationalities,omitempty" validate:"omitempty,len=2"`
 
 	// DocumentNumber is a number for the PID, assigned by the PID Provider.
 	DocumentNumber *string `json:"document_number,omitempty" cbor:"document_number,omitempty"`
