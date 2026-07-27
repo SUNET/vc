@@ -15,7 +15,7 @@ import (
 // per the did:web method specification (https://w3c-ccg.github.io/did-method-web/).
 func (s *Service) endpointDIDDocument(ctx context.Context, c *gin.Context) (any, error) {
 	if s.cfg.Verifier.ClientIDScheme != "did" || s.cfg.Verifier.DID == "" {
-		c.Status(http.StatusNotFound)
+		c.AbortWithStatus(http.StatusNotFound)
 		return nil, nil
 	}
 
@@ -86,6 +86,5 @@ func (s *Service) endpointDIDDocument(ctx context.Context, c *gin.Context) (any,
 		}
 	}
 
-	c.JSON(http.StatusOK, didDoc)
-	return nil, nil
+	return didDoc, nil
 }
