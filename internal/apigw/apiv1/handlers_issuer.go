@@ -486,35 +486,17 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		c.log.Error(err, "failed to convert JWK to COSE key")
 		return nil, err
 	}
-	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
-	if credentialMetadata == nil {
+	credMeta := c.cfg.GetCredentialMetadata(scope)
+	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
-	}
-	var docType string
-	if len(credentialMetadata.Attributes) == 0 {
-		return nil, fmt.Errorf("no claims found in credential metadata")
-	}
-	for _, attrs := range credentialMetadata.Attributes {
-		for _, path := range attrs {
-			if len(path) > 0 && path[0] != nil {
-				docType = mdoc.DocTypes[*path[0]]
-				break
-			}
-		}
-		if docType != "" {
-			break
-		}
-	}
-	if docType == "" {
-		return nil, fmt.Errorf("unable to determine document type from claims")
 	}
 
 	issuerReply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
 		Scope:           scope,
-		DocType:         docType,
 		DocumentData:    documentData,
 		DevicePublicKey: deviceKeyBytes,
 		DeviceKeyFormat: "cose",
+		Mddl:            credMeta.GetMDDLRaw(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeMDoc")

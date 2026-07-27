@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -120,13 +119,13 @@ func (c *Client) JWKS(ctx context.Context, in *apiv1_issuer.Empty) (*apiv1_issue
 	return reply, nil
 }
 
-// CreateMDocRequest is the request for creating an mDL credential
+// CreateMDocRequest is the request for creating an mdoc credential
 type CreateMDocRequest struct {
 	Scope           string `json:"scope" validate:"required"`
-	DocType         string `json:"doc_type" validate:"required"`
 	DocumentData    []byte `json:"document_data" validate:"required"`
 	DevicePublicKey []byte `json:"device_public_key" validate:"required"`
 	DeviceKeyFormat string `json:"device_key_format"` // "cose", "jwk", or "x509"
+	MDDL            []byte `json:"mddl" validate:"required"`
 }
 
 // CreateMDocReply is the reply for mDL credential creation
@@ -142,7 +141,7 @@ type CreateMDocReply struct {
 func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateMDocReply, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:MakeMDoc")
 	defer span.End()
-	c.log.Debug("MakeMDoc", "scope", req.Scope, "doc_type", req.DocType)
+	c.log.Debug("MakeMDoc", "scope", req.Scope)
 
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
@@ -166,11 +165,13 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to parse device public key: %w", err)
 	}
 
-	// Parse document data into MDoc structure
-	var mdocData mdoc.MDoc
-	if err := json.Unmarshal(req.DocumentData, &mdocData); err != nil {
-		c.log.Error(err, "failed to parse document data")
-		return nil, fmt.Errorf("failed to parse document data: %w", err)
+	// Load the MDDL schema supplied inline by the caller (APIGW), which
+	// already loaded and verified it from config — the issuer never fetches
+	// arbitrary URLs itself, and never needs a doctype-specific Go struct.
+	schema, err := mdoc.LoadMDDLSchema(req.MDDL)
+	if err != nil {
+		c.log.Error(err, "failed to load MDDL schema")
+		return nil, fmt.Errorf("failed to load MDDL schema: %w", err)
 	}
 
 	// Allocate status list entry for revocation support (if registry is configured)
@@ -191,8 +192,8 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	// Issue the mdoc
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
-		MDoc:            &mdocData,
-		DocType:         req.DocType,
+		DocumentData:    req.DocumentData,
+		Schema:          schema,
 	}
 
 	issued, err := c.mdocIssuer.Issue(issuanceReq)
