@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -356,6 +357,104 @@ func TestVerifier_UntrustedIssuer(t *testing.T) {
 
 	if result.Valid {
 		t.Error("VerifyDeviceResponse() should fail for untrusted issuer")
+	}
+
+	// The per-document failure reason must be surfaced in result.Errors,
+	// not just reflected in the overall Valid flag, so callers can tell
+	// *why* verification failed.
+	if len(result.Errors) == 0 {
+		t.Fatal("VerifyDeviceResponse() Errors is empty, expected the untrusted-issuer reason to be propagated")
+	}
+
+	found := false
+	for _, err := range result.Errors {
+		if strings.Contains(err.Error(), "not trusted") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("VerifyDeviceResponse() Errors = %v, want an entry mentioning the untrusted issuer", result.Errors)
+	}
+
+	// The failure must also be recorded on the corresponding document result.
+	if len(result.Documents) != 1 {
+		t.Fatalf("VerifyDeviceResponse() Documents = %d, want 1", len(result.Documents))
+	}
+	if result.Documents[0].Valid {
+		t.Error("VerifyDeviceResponse() Documents[0].Valid = true, want false for untrusted issuer")
+	}
+	if len(result.Documents[0].Errors) == 0 {
+		t.Error("VerifyDeviceResponse() Documents[0].Errors is empty, expected the untrusted-issuer reason to be recorded on the document result")
+	}
+}
+
+func TestVerifier_MSOSignatureFailure(t *testing.T) {
+	// Create a trust evaluator that trusts the issuer, so the failure we
+	// observe is isolated to the MSO/COSE_Sign1 signature check.
+	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
+
+	verifier, err := NewVerifier(VerifierConfig{
+		TrustEvaluator:      trustEvaluator,
+		SkipRevocationCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	response := createTestDeviceResponse(t, dsKey, certChain)
+	if len(response.Documents) == 0 {
+		t.Fatal("expected at least one document in test response")
+	}
+
+	// Corrupt the IssuerAuth signature bytes so the COSE_Sign1 verification fails.
+	// The issuer builds IssuerAuth as a decoded 4-element COSE_Sign1 array
+	// ([protected, unprotected, payload, signature]); flip a bit in the
+	// signature (the last element) to invalidate it.
+	issuerAuthArr, ok := response.Documents[0].IssuerSigned.IssuerAuth.([]any)
+	if !ok {
+		t.Fatalf("expected IssuerAuth to be []any, got %T", response.Documents[0].IssuerSigned.IssuerAuth)
+	}
+	sigIdx := len(issuerAuthArr) - 1
+	sigBytes, ok := issuerAuthArr[sigIdx].([]byte)
+	if !ok {
+		t.Fatalf("expected IssuerAuth signature element to be []byte, got %T", issuerAuthArr[sigIdx])
+	}
+	tampered := make([]byte, len(sigBytes))
+	copy(tampered, sigBytes)
+	tampered[len(tampered)-1] ^= 0xFF
+	issuerAuthArr[sigIdx] = tampered
+	response.Documents[0].IssuerSigned.IssuerAuth = issuerAuthArr
+
+	result := verifier.VerifyDeviceResponse(response)
+
+	if result.Valid {
+		t.Error("VerifyDeviceResponse() should fail for a tampered MSO signature")
+	}
+
+	if len(result.Errors) == 0 {
+		t.Fatal("VerifyDeviceResponse() Errors is empty, expected the MSO signature failure reason to be propagated")
+	}
+
+	found := false
+	for _, err := range result.Errors {
+		if strings.Contains(err.Error(), "signature") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("VerifyDeviceResponse() Errors = %v, want an entry mentioning the signature failure", result.Errors)
+	}
+
+	if len(result.Documents) != 1 {
+		t.Fatalf("VerifyDeviceResponse() Documents = %d, want 1", len(result.Documents))
+	}
+	if result.Documents[0].Valid {
+		t.Error("VerifyDeviceResponse() Documents[0].Valid = true, want false for a tampered MSO signature")
+	}
+	if len(result.Documents[0].Errors) == 0 {
+		t.Error("VerifyDeviceResponse() Documents[0].Errors is empty, expected the signature failure reason to be recorded on the document result")
 	}
 }
 
