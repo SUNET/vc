@@ -60,7 +60,7 @@ type Config struct {
 	// LogoURI is the organization logo URL.
 	LogoURI string `yaml:"logo_uri,omitempty"`
 	// TrustMarks contains pre-issued trust mark JWTs.
-	TrustMarks []TrustMarkConfig `yaml:"trust_marks,omitempty"`
+	TrustMarks []TrustMarkConfig `yaml:"trust_marks,omitempty" validate:"omitempty,dive"`
 	// TTL is the validity period of the entity configuration in seconds.
 	// Default: 86400 (24 hours).
 	TTL int64 `yaml:"ttl" default:"86400"`

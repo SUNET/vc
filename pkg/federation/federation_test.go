@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/go-playground/validator/v10"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -32,8 +33,10 @@ func TestBuildEntityConfiguration(t *testing.T) {
 		},
 	}
 
-	// Create a test signer - we can't use pki.SignerConfig directly in unit tests
-	// without a key file, so we test the claims structure instead
+	// This sub-test only exercises Config field defaults and the claims
+	// structure directly; TestBuildEntityConfigurationSignedJWT below
+	// exercises BuildEntityConfiguration end-to-end with a real
+	// pki.SignerConfig backed by a generated key and self-signed cert.
 	t.Run("config defaults", func(t *testing.T) {
 		if cfg.EntityID != "https://issuer.example.com" {
 			t.Errorf("expected entity ID 'https://issuer.example.com', got %q", cfg.EntityID)
@@ -136,6 +139,50 @@ func TestServiceEntityIDFallback(t *testing.T) {
 	if svc.entityID != "https://fallback.example.com" {
 		t.Errorf("expected entity ID 'https://fallback.example.com', got %q", svc.entityID)
 	}
+}
+
+func TestConfigTrustMarksValidation(t *testing.T) {
+	validate := validator.New()
+
+	t.Run("valid trust marks pass", func(t *testing.T) {
+		cfg := &Config{
+			TrustMarks: []TrustMarkConfig{
+				{ID: "https://tm.example.com/mark", JWT: "jwt-value"},
+			},
+		}
+		if err := validate.Struct(cfg); err != nil {
+			t.Errorf("expected no validation error, got %v", err)
+		}
+	})
+
+	t.Run("missing trust mark id fails", func(t *testing.T) {
+		cfg := &Config{
+			TrustMarks: []TrustMarkConfig{
+				{JWT: "jwt-value"},
+			},
+		}
+		if err := validate.Struct(cfg); err == nil {
+			t.Error("expected validation error for trust mark missing id, got nil")
+		}
+	})
+
+	t.Run("missing trust mark jwt fails", func(t *testing.T) {
+		cfg := &Config{
+			TrustMarks: []TrustMarkConfig{
+				{ID: "https://tm.example.com/mark"},
+			},
+		}
+		if err := validate.Struct(cfg); err == nil {
+			t.Error("expected validation error for trust mark missing jwt, got nil")
+		}
+	})
+
+	t.Run("empty trust marks slice is valid", func(t *testing.T) {
+		cfg := &Config{}
+		if err := validate.Struct(cfg); err != nil {
+			t.Errorf("expected no validation error for empty trust marks, got %v", err)
+		}
+	})
 }
 
 // writeTestKeyAndCert generates an ephemeral ECDSA P-256 key pair, writes
@@ -268,5 +315,86 @@ func TestBuildEntityConfigurationSignedJWT(t *testing.T) {
 	}
 	if claims["iat"] == nil {
 		t.Error("iat missing")
+	}
+}
+
+// TestBuildEntityConfigurationDoesNotMutateInput guards against
+// BuildEntityConfiguration mutating the caller-supplied *EntityMetadata (or
+// the maps it holds) when it injects federation_entity fields. A caller
+// that reuses the same *EntityMetadata across requests must not see fields
+// injected for one request "leak" into another.
+func TestBuildEntityConfigurationDoesNotMutateInput(t *testing.T) {
+	keyPath, certPath := writeTestKeyAndCert(t)
+	keyCfg := &pki.KeyConfig{PrivateKeyPath: keyPath, ChainPath: certPath}
+	signer := pki.NewSignerConfig(keyCfg)
+
+	metadata := &EntityMetadata{
+		OpenIDCredentialIssuer: map[string]any{
+			"credential_issuer": "https://issuer.example.com",
+		},
+	}
+
+	cfg1 := &Config{
+		Enabled:          true,
+		EntityID:         "https://issuer.example.com",
+		OrganizationName: "Test Org",
+		LogoURI:          "https://issuer.example.com/logo.png",
+	}
+	svc1 := NewService(cfg1, signer, "https://issuer.example.com")
+
+	if _, err := svc1.BuildEntityConfiguration(metadata); err != nil {
+		t.Fatalf("BuildEntityConfiguration failed: %v", err)
+	}
+
+	// The caller's original metadata must be unaffected: no federation_entity
+	// map should have been injected into it, and its own map must be intact.
+	if metadata.FederationEntity != nil {
+		t.Errorf("expected caller's metadata.FederationEntity to remain nil, got %v", metadata.FederationEntity)
+	}
+	if len(metadata.OpenIDCredentialIssuer) != 1 {
+		t.Errorf("expected caller's OpenIDCredentialIssuer to be untouched, got %v", metadata.OpenIDCredentialIssuer)
+	}
+
+	// Reuse the same metadata instance with a second, differently-configured
+	// service/request and make sure nothing from the first call is visible
+	// afterwards, and that the two signed configurations don't cross-pollute.
+	cfg2 := &Config{
+		Enabled:          true,
+		EntityID:         "https://issuer2.example.com",
+		OrganizationName: "Other Org",
+	}
+	svc2 := NewService(cfg2, signer, "https://issuer2.example.com")
+
+	signed2, err := svc2.BuildEntityConfiguration(metadata)
+	if err != nil {
+		t.Fatalf("second BuildEntityConfiguration failed: %v", err)
+	}
+
+	if metadata.FederationEntity != nil {
+		t.Errorf("expected caller's metadata.FederationEntity to remain nil after second call, got %v", metadata.FederationEntity)
+	}
+
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(signed2, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("ParseUnverified failed: %v", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatal("unexpected claims type")
+	}
+	meta, ok := claims["metadata"].(map[string]any)
+	if !ok {
+		t.Fatal("metadata missing")
+	}
+	fedEntity, ok := meta["federation_entity"].(map[string]any)
+	if !ok {
+		t.Fatal("federation_entity missing from second signed configuration")
+	}
+	if fedEntity["organization_name"] != "Other Org" {
+		t.Errorf("organization_name = %v, want Other Org", fedEntity["organization_name"])
+	}
+	if _, ok := fedEntity["logo_uri"]; ok {
+		t.Errorf("expected no logo_uri (cfg2 has none), but got %v -- possible cross-request contamination", fedEntity["logo_uri"])
 	}
 }

@@ -37,13 +37,46 @@ func (s *Service) EntityID() string {
 	return s.entityID
 }
 
+// cloneMetadata returns a copy of metadata, including fresh copies of its
+// map fields, so that mutating the returned value (e.g. injecting
+// federation_entity fields) never affects the caller's original
+// *EntityMetadata or the maps it holds. A nil metadata yields an empty,
+// non-nil *EntityMetadata.
+func cloneMetadata(metadata *EntityMetadata) *EntityMetadata {
+	if metadata == nil {
+		return &EntityMetadata{}
+	}
+	clone := *metadata
+	clone.OpenIDCredentialIssuer = cloneMetadataMap(metadata.OpenIDCredentialIssuer)
+	clone.OAuthAuthorizationServer = cloneMetadataMap(metadata.OAuthAuthorizationServer)
+	clone.OpenIDRelyingParty = cloneMetadataMap(metadata.OpenIDRelyingParty)
+	clone.FederationEntity = cloneMetadataMap(metadata.FederationEntity)
+	return &clone
+}
+
+// cloneMetadataMap returns a shallow copy of m (a new map with the same
+// entries), preserving nil so omitempty JSON marshaling behavior is
+// unchanged. Values are not deep-copied, but BuildEntityConfiguration only
+// ever adds or overwrites top-level string keys, so a fresh map header is
+// sufficient to prevent the caller's map from being mutated.
+func cloneMetadataMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 // entityConfigClaims is the JWT claims structure for the entity configuration.
 type entityConfigClaims struct {
 	jwt.RegisteredClaims
-	JWKS           json.RawMessage  `json:"jwks"`
-	AuthorityHints []string         `json:"authority_hints,omitempty"`
-	Metadata       *EntityMetadata  `json:"metadata,omitempty"`
-	TrustMarks     []TrustMark      `json:"trust_marks,omitempty"`
+	JWKS           json.RawMessage `json:"jwks"`
+	AuthorityHints []string        `json:"authority_hints,omitempty"`
+	Metadata       *EntityMetadata `json:"metadata,omitempty"`
+	TrustMarks     []TrustMark     `json:"trust_marks,omitempty"`
 }
 
 // BuildEntityConfiguration produces a signed entity configuration JWT.
@@ -72,10 +105,12 @@ func (s *Service) BuildEntityConfiguration(metadata *EntityMetadata) (string, er
 		})
 	}
 
-	// Inject federation_entity metadata with org info
-	if metadata == nil {
-		metadata = &EntityMetadata{}
-	}
+	// Inject federation_entity metadata with org info. Clone the caller's
+	// metadata (and its maps) first so this function never mutates the
+	// caller-owned *EntityMetadata in place -- callers may reuse the same
+	// instance across requests, and a "Build" function mutating its input
+	// would be a surprising and hard-to-diagnose side effect.
+	metadata = cloneMetadata(metadata)
 	if s.config.OrganizationName != "" || s.config.LogoURI != "" {
 		if metadata.FederationEntity == nil {
 			metadata.FederationEntity = make(map[string]any)
