@@ -8,6 +8,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -98,14 +100,19 @@ func validateKeyPair(priv crypto.Signer, cert *x509.Certificate) error {
 	return nil
 }
 
-// IssuanceRequest contains the data for issuing an PID.
+// IssuanceRequest contains the data for issuing an mdoc credential.
 type IssuanceRequest struct {
 	// Holder's device public key
 	DevicePublicKey crypto.PublicKey
-	// Mdoc data elements
-	MDoc *MDoc
-	//doc type
-	DocType string
+	// DocumentData is the credential subject data as raw JSON, keyed by
+	// element identifier (e.g. {"family_name": "...", "birth_date": "..."}).
+	// Its shape is driven entirely by Schema — the issuer never needs a
+	// doctype-specific Go struct.
+	DocumentData []byte
+	// Schema describes the document type, namespace(s), mandatory/optional
+	// claims, and value encoding for this issuance (the mdoc analogue of an
+	// SD-JWT VCTM).
+	Schema *MDDLSchema
 	// Custom validity period (optional)
 	ValidFrom  *time.Time
 	ValidUntil *time.Time
@@ -122,18 +129,7 @@ type IssuedDocumentMdoc struct {
 	ValidUntil time.Time
 }
 
-func namespaceForDocType(docType string) (string, error) {
-	switch docType {
-	case DocTypeMDL:
-		return NamespaceMDL, nil
-	case DocTypePID:
-		return NamespacePID, nil
-	default:
-		return "", fmt.Errorf("unsupported doc type: %s", docType)
-	}
-}
-
-// Issue creates a signed PID document from the request.
+// Issue creates a signed mdoc document from the request.
 func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	// Accumulator for document errors instead of throwing hard Go app errors
 	var documentErrors []DocumentError
@@ -141,8 +137,20 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	if req.DevicePublicKey == nil {
 		return nil, fmt.Errorf("device public key is required")
 	}
-	if req.MDoc == nil {
-		return nil, fmt.Errorf("IssuanceRequest must not be nil")
+	if req.Schema == nil {
+		return nil, fmt.Errorf("schema is required")
+	}
+	if len(req.DocumentData) == 0 {
+		return nil, fmt.Errorf("document data is required")
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(req.DocumentData, &doc); err != nil {
+		return nil, fmt.Errorf("parse document data: %w", err)
+	}
+
+	if err := i.injectPseudonymSeed(req.Schema, doc); err != nil {
+		return nil, fmt.Errorf("inject pseudonym seed: %w", err)
 	}
 
 	// Convert device public key to COSE key
@@ -161,37 +169,20 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		validUntil = req.ValidUntil.UTC()
 	}
 
-	// Determine the namespace from the requested doc type. This must be derived
-	// per-request rather than hardcoded, since mDL and PID use different
-	// namespace strings and mixing them produces a malformed/rejectable document.
-	ns, err := namespaceForDocType(req.DocType)
-	if err != nil {
-		return nil, fmt.Errorf("resolve namespace: %w", err)
-	}
-
 	// Build the MSO
-	builder := NewMSOBuilder(req.DocType).
+	builder := NewMSOBuilder(req.Schema.DocType).
 		WithDigestAlgorithm(i.digestAlgorithm).
 		WithValidity(validFrom, validUntil).
 		WithDeviceKey(deviceKey).
 		WithSigner(i.signerKey, i.certChain)
 
-	// Add all mandatory data elements
-	if err := i.addMandatoryElements(builder, req.MDoc, ns); err != nil {
-		return nil, fmt.Errorf("add mandatory elements: %w", err)
+	// Add every claim declared by the schema, across all of its namespaces.
+	// This one generic pass replaces per-doctype element lists: adding a new
+	// mdoc document type requires only a new MDDL schema, never a Go change.
+	if err := i.addElements(builder, req.Schema, doc); err != nil {
+		return nil, fmt.Errorf("add elements: %w", err)
 	}
 
-	// Add optional data elements
-	if err := i.addOptionalElements(builder, req.MDoc, ns); err != nil {
-		return nil, fmt.Errorf("add optional elements: %w", err)
-	}
-
-	// Add driving privileges (mDL-specific; not part of the PID attribute set)
-	if req.DocType == DocTypeMDL {
-		if err := i.addDrivingPrivileges(builder, req.MDoc); err != nil {
-			return nil, fmt.Errorf("add driving privileges: %w", err)
-		}
-	}
 	// Build and sign the MSO
 	signedMSO, issuerNameSpaces, err := builder.Build()
 	if err != nil {
@@ -226,7 +217,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	}
 	// Everything encoded successfully: build response containing the document
 	innerDoc := DocumentMdoc{
-		DocType: req.DocType,
+		DocType: req.Schema.DocType,
 		IssuerSigned: IssuerSignedMdoc{
 			NameSpaces: issuerSignedNS,
 			IssuerAuth: issuerAuthArray,
@@ -272,192 +263,115 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 	return issuedDoc, nil
 }
 
-// addMandatoryElements adds all mandatory data elements to the builder,
-func (i *Issuer) addMandatoryElements(builder *MSOBuilder, mdoc *MDoc, ns string) error {
-	var elements map[string]any
-
-	switch ns {
-	case NamespaceMDL:
-		// Per ISO 18013-5 Table 5, mandatory elements
-		elements = map[string]any{
-			"family_name":            mdoc.FamilyName,
-			"given_name":             mdoc.GivenName,
-			"birth_date":             mdoc.BirthDate,
-			"issue_date":             mdoc.IssueDate,
-			"expiry_date":            mdoc.ExpiryDate,
-			"issuing_country":        mdoc.IssuingCountry,
-			"issuing_authority":      mdoc.IssuingAuthority,
-			"document_number":        mdoc.DocumentNumber,
-			"portrait":               mdoc.Portrait,
-			"driving_privileges":     mdoc.DrivingPrivileges,
-			"un_distinguishing_sign": mdoc.UNDistinguishingSign,
-		}
-	case NamespacePID:
-		// Per ARF PID Rulebook mandatory elements (no driving privileges,
-		// no UN distinguishing sign — those are mDL-only)
-		elements = map[string]any{
-			"family_name":       mdoc.FamilyName,
-			"given_name":        mdoc.GivenName,
-			"birth_date":        mdoc.BirthDate,
-			"issuance_date":     mdoc.IssueDate,
-			"expiry_date":       mdoc.ExpiryDate,
-			"issuing_country":   mdoc.IssuingCountry,
-			"issuing_authority": mdoc.IssuingAuthority,
-		}
-	default:
-		return fmt.Errorf("unsupported namespace: %s", ns)
-	}
-
-	for elementID, value := range elements {
-		if err := builder.AddDataElement(ns, elementID, value); err != nil {
-			return fmt.Errorf("failed to add %s: %w", elementID, err)
-		}
-	}
-
-	return nil
-}
-
-// addOptionalElements adds optional data elements if present, selecting the
-func (i *Issuer) addOptionalElements(builder *MSOBuilder, mdoc *MDoc, ns string) error {
-	var optionalElements map[string]any
-
-	switch ns {
-	case NamespaceMDL:
-		optionalElements = map[string]any{
-			"family_name_national_character": mdoc.FamilyNameNationalCharacter,
-			"given_name_national_character":  mdoc.GivenNameNationalCharacter,
-			"signature_usual_mark":           mdoc.SignatureUsualMark,
-			"sex":                            mdoc.Sex,
-			"height":                         mdoc.Height,
-			"weight":                         mdoc.Weight,
-			"eye_colour":                     mdoc.EyeColour,
-			"hair_colour":                    mdoc.HairColour,
-			"birth_place":                    mdoc.BirthPlace,
-			"resident_address":               mdoc.ResidentAddress,
-			"portrait_capture_date":          mdoc.PortraitCaptureDate,
-			"age_in_years":                   mdoc.AgeInYears,
-			"age_birth_year":                 mdoc.AgeBirthYear,
-			"issuing_jurisdiction":           mdoc.IssuingJurisdiction,
-			"nationalities":                  mdoc.Nationalities,
-			"resident_city":                  mdoc.ResidentCity,
-			"resident_state":                 mdoc.ResidentState,
-			"resident_postal_code":           mdoc.ResidentPostalCode,
-			"resident_country":               mdoc.ResidentCountry,
-			"administrative_number":          mdoc.AdministrativeNumber,
-			"age_over_18":                    true,
-		}
-	case NamespacePID:
-		optionalElements = map[string]any{
-			"family_name_national_character": mdoc.FamilyNameNationalCharacter,
-			"given_name_national_character":  mdoc.GivenNameNationalCharacter,
-			"sex":                            mdoc.Sex,
-			"birth_place":                    mdoc.BirthPlace,
-			"resident_address":               mdoc.ResidentAddress,
-			"portrait_capture_date":          mdoc.PortraitCaptureDate,
-			"age_in_years":                   mdoc.AgeInYears,
-			"age_birth_year":                 mdoc.AgeBirthYear,
-			"issuing_jurisdiction":           mdoc.IssuingJurisdiction,
-			"nationalities":                  mdoc.Nationalities,
-			"resident_city":                  mdoc.ResidentCity,
-			"resident_state":                 mdoc.ResidentState,
-			"resident_postal_code":           mdoc.ResidentPostalCode,
-			"resident_country":               mdoc.ResidentCountry,
-			"administrative_number":          mdoc.AdministrativeNumber,
-			"document_number":                mdoc.DocumentNumber,
-			"portrait":                       mdoc.Portrait,
-			"age_over_18":                    true,
-		}
-	default:
-		return fmt.Errorf("unsupported namespace: %s", ns)
-	}
-
-	if i.pseudonymSeed {
-		seed := make([]byte, 32)
-		if _, err := rand.Read(seed); err != nil {
-			return fmt.Errorf("failed to generate pseudonym seed: %w", err)
-		}
-		optionalElements["pseudonym_seed"] = seed
-	}
-
-	// Add age_over attestations from the AgeOver struct (valid in both namespaces)
-	if mdoc.AgeOver != nil {
-		if mdoc.AgeOver.Over18 != nil {
-			if err := builder.AddDataElement(ns, "age_over_18", *mdoc.AgeOver.Over18); err != nil {
-				return fmt.Errorf("failed to add age_over_18: %w", err)
+// addElements walks every namespace and claim declared by the schema and, for
+// each claim present in doc, converts its value per the claim's declared CDDL
+// value_type and adds it to the builder. Missing mandatory claims are an
+// error; missing optional claims are silently skipped. This single function
+// serves every mdoc document type — there is no per-doctype branching here.
+func (i *Issuer) addElements(builder *MSOBuilder, schema *MDDLSchema, doc map[string]any) error {
+	for namespace, elements := range schema.Claims {
+		for elementID, meta := range elements {
+			raw, present := doc[elementID]
+			if !present || raw == nil {
+				if meta.Mandatory {
+					return fmt.Errorf("missing mandatory claim %q", elementID)
+				}
+				continue
 			}
-		}
-		if mdoc.AgeOver.Over21 != nil {
-			if err := builder.AddDataElement(ns, "age_over_21", *mdoc.AgeOver.Over21); err != nil {
-				return fmt.Errorf("failed to add age_over_21: %w", err)
-			}
-		}
-		if mdoc.AgeOver.Over25 != nil {
-			if err := builder.AddDataElement(ns, "age_over_25", *mdoc.AgeOver.Over25); err != nil {
-				return fmt.Errorf("failed to add age_over_25: %w", err)
-			}
-		}
-		if mdoc.AgeOver.Over65 != nil {
-			if err := builder.AddDataElement(ns, "age_over_65", *mdoc.AgeOver.Over65); err != nil {
-				return fmt.Errorf("failed to add age_over_65: %w", err)
-			}
-		}
-	}
 
-	for elementID, value := range optionalElements {
-		if !isZeroValue(value) {
-			if err := builder.AddDataElement(ns, elementID, value); err != nil {
+			value, err := convertElementValue(meta.ValueType, raw)
+			if err != nil {
+				return fmt.Errorf("convert claim %q: %w", elementID, err)
+			}
+			if err := builder.AddDataElement(namespace, elementID, value); err != nil {
 				return fmt.Errorf("failed to add %s: %w", elementID, err)
 			}
 		}
 	}
-
 	return nil
 }
 
-// addDrivingPrivileges processes and adds driving privileges.
-func (i *Issuer) addDrivingPrivileges(builder *MSOBuilder, mdoc *MDoc) error {
-	// Driving privileges are already included as a mandatory element
-	// This method can be extended for additional privilege processing
-	return nil
-}
-
-// isZeroValue checks if a value is the zero value for its type.
-func isZeroValue(v any) bool {
-	if v == nil {
-		return true
-	}
-	switch val := v.(type) {
-	case string:
-		return val == ""
-	case []byte:
-		return len(val) == 0
-	case int, int8, int16, int32, int64:
-		return val == 0
-	case uint, uint8, uint16, uint32, uint64:
-		return val == 0
-	case float32:
-		return val == 0
-	case float64:
-		return val == 0
-	case bool:
-		return !val
-	case *bool:
-		return val == nil
-	case *uint:
-		return val == nil
-	case *string:
-		return val == nil
-	case time.Time:
-		return val.IsZero()
-	case *time.Time:
-		return val == nil
-	case FullDate:
-		return string(val) == ""
-	case TDate:
-		return string(val) == ""
+// convertElementValue converts a JSON-decoded value into the Go
+// representation fxamacker/cbor needs to encode it per ISO 18013-5: full-date
+// and tdate values are tagged strings, bstr values are raw bytes (accepted as
+// base64 in the source JSON). Every other value_type — including structured
+// "array"/"map" claims such as driving_privileges — passes through
+// unchanged, since CBOR encoding already recurses through nested Go
+// maps/slices correctly.
+func convertElementValue(valueType string, raw any) (any, error) {
+	switch valueType {
+	case "full-date":
+		s, ok := raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected string for full-date, got %T", raw)
+		}
+		return FullDate(s), nil
+	case "tdate":
+		s, ok := raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected string for tdate, got %T", raw)
+		}
+		return TDate(s), nil
+	case "bstr":
+		if b, ok := raw.([]byte); ok {
+			return b, nil
+		}
+		s, ok := raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected base64 string for bstr, got %T", raw)
+		}
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return nil, fmt.Errorf("decode bstr base64: %w", err)
+		}
+		return b, nil
+	case "int":
+		f, ok := raw.(float64)
+		if !ok {
+			return nil, fmt.Errorf("expected number for int, got %T", raw)
+		}
+		return int64(f), nil
+	case "uint":
+		f, ok := raw.(float64)
+		if !ok {
+			return nil, fmt.Errorf("expected number for uint, got %T", raw)
+		}
+		return uint64(f), nil
 	default:
-		return false
+		// "tstr", "bool", "array", "map", and any unrecognized type pass through as-is.
+		return raw, nil
 	}
+}
+
+// injectPseudonymSeed generates a fresh 32-byte pseudonym seed when the
+// issuer is configured for it and the schema declares "pseudonym_seed" as a
+// claim in some namespace but the caller didn't already supply one. This
+// keeps the toggle decoupled from any namespace/doctype: it is driven purely
+// by whether the schema opts in to the claim.
+func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) error {
+	if !i.pseudonymSeed {
+		return nil
+	}
+	if _, present := doc["pseudonym_seed"]; present {
+		return nil
+	}
+	declared := false
+	for _, elements := range schema.Claims {
+		if _, ok := elements["pseudonym_seed"]; ok {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return nil
+	}
+
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
+		return fmt.Errorf("failed to generate pseudonym seed: %w", err)
+	}
+	doc["pseudonym_seed"] = seed
+	return nil
 }
 
 // publicKeyToCOSEKey converts a crypto.PublicKey to a COSEKey.
