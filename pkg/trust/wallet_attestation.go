@@ -150,7 +150,8 @@ func validateAttestationPoP(attestation, popJWT, expectedAudience string) error 
 		}
 		return cnfKey, nil
 	}, jwt.WithValidMethods([]string{"ES256", "ES384", "ES512"}),
-		jwt.WithLeeway(30*time.Second))
+		jwt.WithLeeway(30*time.Second),
+		jwt.WithExpirationRequired())
 	if err != nil {
 		return fmt.Errorf("PoP signature verification: %w", err)
 	}
@@ -175,7 +176,7 @@ func validateAttestationPoP(attestation, popJWT, expectedAudience string) error 
 		}
 	}
 
-	// exp is already validated by jwt.Parse (with leeway)
+	// exp is required (jwt.WithExpirationRequired) and already validated by jwt.Parse (with leeway)
 	// iat presence check
 	if claims.IssuedAt == nil {
 		return errors.New("PoP missing iat claim")

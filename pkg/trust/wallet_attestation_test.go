@@ -144,7 +144,8 @@ func createTestWIA(t *testing.T, instanceKey *ecdsa.PrivateKey) string {
 	wpKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	ecdhKey, _ := instanceKey.PublicKey.ECDH()
+	ecdhKey, err := instanceKey.PublicKey.ECDH()
+	require.NoError(t, err)
 	raw := ecdhKey.Bytes()
 
 	jwk := map[string]interface{}{
@@ -167,7 +168,7 @@ func createTestWIA(t *testing.T, instanceKey *ecdsa.PrivateKey) string {
 			"jwk": jwk,
 			"jkt": jkt,
 		},
-		"iat":                jkt, // intentionally wrong type for brevity — doesn't affect test
+		"iat":                time.Now().Unix(),
 		"exp":                time.Now().Add(24 * time.Hour).Unix(),
 		"attestation_source": "backend_attested",
 	}

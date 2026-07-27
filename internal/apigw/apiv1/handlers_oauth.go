@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
@@ -281,34 +282,34 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				}
 			} else {
 				verifier := &oauth2.ClientAssertionVerifier{
-				TokenEndpoint: c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint,
-				JWKSCache:     c.cacheService.JWKS,
-				JTICheck: func(jti string, exp time.Time) error {
-					// Scope by clientID to prevent cross-client collisions;
-					// use time.Until(exp) as TTL so entries expire with the assertion.
-					cacheKey := "client_assertion:" + clientID + ":" + jti
-					// Add the same leeway as the JWT verifier to tolerate small clock skews.
-					ttl := time.Until(exp.Add(30 * time.Second))
-					if ttl <= 0 {
-						return errors.New("client_assertion jti has already expired")
-					}
-					unique, err := c.cacheService.DPopJTI.SetNXWithTTL(ctx, cacheKey, true, ttl)
-					if err != nil {
-						return fmt.Errorf("jti cache error: %w", err)
-					}
-					if !unique {
-						return errors.New("client_assertion jti already used")
-					}
-					return nil
-				},
-			}
-			assertionClaims, err := verifier.Verify(ctx, req.ClientAssertion, oauthClientForVerify)
-			if err != nil {
-				c.log.Error(err, "client_assertion verification failed", "client_id", clientID)
-				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
-					"Client assertion verification failed", 401, err)
-			}
-			c.log.Debug("client_assertion verified", "client_id", clientID, "jti", assertionClaims.JTI)
+					TokenEndpoint: c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint,
+					JWKSCache:     c.cacheService.JWKS,
+					JTICheck: func(jti string, exp time.Time) error {
+						// Scope by clientID to prevent cross-client collisions;
+						// use time.Until(exp) as TTL so entries expire with the assertion.
+						cacheKey := "client_assertion:" + clientID + ":" + jti
+						// Add the same leeway as the JWT verifier to tolerate small clock skews.
+						ttl := time.Until(exp.Add(30 * time.Second))
+						if ttl <= 0 {
+							return errors.New("client_assertion jti has already expired")
+						}
+						unique, err := c.cacheService.DPopJTI.SetNXWithTTL(ctx, cacheKey, true, ttl)
+						if err != nil {
+							return fmt.Errorf("jti cache error: %w", err)
+						}
+						if !unique {
+							return errors.New("client_assertion jti already used")
+						}
+						return nil
+					},
+				}
+				assertionClaims, err := verifier.Verify(ctx, req.ClientAssertion, oauthClientForVerify)
+				if err != nil {
+					c.log.Error(err, "client_assertion verification failed", "client_id", clientID)
+					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient,
+						"Client assertion verification failed", 401, err)
+				}
+				c.log.Debug("client_assertion verified", "client_id", clientID, "jti", assertionClaims.JTI)
 			}
 		}
 	} else if req.ClientAssertionType != "" {
@@ -354,9 +355,19 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidClient,
 						"wallet attestation subject does not match client_id", 401)
 				}
-				// SPOCP tier authorization (nil engine = default open)
-				// Scope was validated at PAR time; token endpoint re-checks with wildcard
-				if !c.walletAttestationPolicy.Authorize(result.AttestationSource, "", result.Issuer) {
+				// SPOCP tier authorization (nil engine = default open).
+				// Re-check against the scope actually bound to this code (not the
+				// caller-supplied request), since the code is what was authorized
+				// at PAR/offer time. A wildcard here would let a code obtained for
+				// a low tier be redeemed as if it were "*"-authorized, and pre-auth
+				// codes never go through PAR at all, so a blanket wildcard is wrong.
+				codeCtx, codeErr := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+				if codeErr != nil {
+					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+						"Authorization code is invalid or has already been used", 400, codeErr)
+				}
+				codeScope := strings.Join(codeCtx.Scopes, " ")
+				if !c.walletAttestationPolicy.Authorize(result.AttestationSource, codeScope, result.Issuer) {
 					c.log.Info("Token: wallet attestation tier denied by policy",
 						"client_id", clientID, "attestation_source", result.AttestationSource,
 						"issuer", result.Issuer)
