@@ -358,34 +358,37 @@ func TestVerifier_UntrustedIssuer(t *testing.T) {
 	if result.Valid {
 		t.Error("VerifyDeviceResponse() should fail for untrusted issuer")
 	}
+	assertFailurePropagated(t, result, "not trusted")
+}
 
-	// The per-document failure reason must be surfaced in result.Errors,
-	// not just reflected in the overall Valid flag, so callers can tell
-	// *why* verification failed.
+// assertFailurePropagated checks that a failed verification surfaces its
+// reason both in result.Errors and on the corresponding document result,
+// not just via the overall Valid flag.
+func assertFailurePropagated(t *testing.T, result *VerificationResult, wantErrSubstring string) {
+	t.Helper()
+
 	if len(result.Errors) == 0 {
-		t.Fatal("VerifyDeviceResponse() Errors is empty, expected the untrusted-issuer reason to be propagated")
+		t.Fatalf("VerifyDeviceResponse() Errors is empty, expected an entry mentioning %q", wantErrSubstring)
 	}
-
 	found := false
 	for _, err := range result.Errors {
-		if strings.Contains(err.Error(), "not trusted") {
+		if strings.Contains(err.Error(), wantErrSubstring) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("VerifyDeviceResponse() Errors = %v, want an entry mentioning the untrusted issuer", result.Errors)
+		t.Errorf("VerifyDeviceResponse() Errors = %v, want an entry mentioning %q", result.Errors, wantErrSubstring)
 	}
 
-	// The failure must also be recorded on the corresponding document result.
 	if len(result.Documents) != 1 {
 		t.Fatalf("VerifyDeviceResponse() Documents = %d, want 1", len(result.Documents))
 	}
 	if result.Documents[0].Valid {
-		t.Error("VerifyDeviceResponse() Documents[0].Valid = true, want false for untrusted issuer")
+		t.Error("VerifyDeviceResponse() Documents[0].Valid = true, want false")
 	}
 	if len(result.Documents[0].Errors) == 0 {
-		t.Error("VerifyDeviceResponse() Documents[0].Errors is empty, expected the untrusted-issuer reason to be recorded on the document result")
+		t.Error("VerifyDeviceResponse() Documents[0].Errors is empty, expected the failure reason to be recorded on the document result")
 	}
 }
 
@@ -431,31 +434,7 @@ func TestVerifier_MSOSignatureFailure(t *testing.T) {
 	if result.Valid {
 		t.Error("VerifyDeviceResponse() should fail for a tampered MSO signature")
 	}
-
-	if len(result.Errors) == 0 {
-		t.Fatal("VerifyDeviceResponse() Errors is empty, expected the MSO signature failure reason to be propagated")
-	}
-
-	found := false
-	for _, err := range result.Errors {
-		if strings.Contains(err.Error(), "signature") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("VerifyDeviceResponse() Errors = %v, want an entry mentioning the signature failure", result.Errors)
-	}
-
-	if len(result.Documents) != 1 {
-		t.Fatalf("VerifyDeviceResponse() Documents = %d, want 1", len(result.Documents))
-	}
-	if result.Documents[0].Valid {
-		t.Error("VerifyDeviceResponse() Documents[0].Valid = true, want false for a tampered MSO signature")
-	}
-	if len(result.Documents[0].Errors) == 0 {
-		t.Error("VerifyDeviceResponse() Documents[0].Errors is empty, expected the signature failure reason to be recorded on the document result")
-	}
+	assertFailurePropagated(t, result, "signature")
 }
 
 func TestVerificationResult_ExtractElements(t *testing.T) {
