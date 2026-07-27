@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -17,7 +18,9 @@ import (
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
-// Verifier verifies mDL documents according to ISO/IEC 18013-5:2021.
+// Verifier verifies mDoc documents according to ISO/IEC 18013-5:2021.
+// It handles generic ISO 18013-5 mDoc verification, not just mDL — the
+// DocType being verified may be mDL or any other ISO 18013-5 document type.
 type Verifier struct {
 	trustEvaluator      trust.TrustEvaluator
 	issuerURL           string
@@ -391,15 +394,27 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 //  3. Organization name (e.g., "siros-id") — usable by allowlist-based registries.
 //  4. Country code / Common Name as last resort.
 func extractMDocIssuerID(cert *x509.Certificate) string {
-	// 1. Check for URI SANs — best source for mdociaca discovery
+	// 1. Check for URI SANs — best source for mdociaca discovery.
+	// Metadata discovery expects an https URL, so normalize a plain "http"
+	// scheme up to "https" rather than passing it through insecurely.
 	for _, uri := range cert.URIs {
-		if uri.Scheme == "https" || uri.Scheme == "http" {
+		if uri.Scheme == "https" {
 			return uri.String()
+		}
+		if uri.Scheme == "http" {
+			secured := *uri
+			secured.Scheme = "https"
+			return secured.String()
 		}
 	}
 
-	// 2. Check for DNS SANs — construct https:// URL for metadata discovery
+	// 2. Check for DNS SANs — construct https:// URL for metadata discovery.
+	// Skip wildcard DNS SANs (e.g. "*.example.com") since they don't identify
+	// a concrete host to fetch metadata from.
 	for _, dns := range cert.DNSNames {
+		if strings.HasPrefix(dns, "*.") {
+			continue
+		}
 		return "https://" + dns
 	}
 

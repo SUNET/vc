@@ -429,6 +429,26 @@ func TestEvaluationRequest_GetEffectiveAction(t *testing.T) {
 			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleCredentialVerifier, DocType: "eu.europa.ec.eudi.pid.1"}},
 			expect: "mdoc-verifier",
 		},
+		{
+			name:   "mDL docType with RoleIssuer becomes mdl-issuer",
+			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleIssuer, DocType: "org.iso.18013.5.1.mDL"}},
+			expect: "mdl-issuer",
+		},
+		{
+			name:   "mDL docType with RoleVerifier becomes mdl-verifier",
+			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleVerifier, DocType: "org.iso.18013.5.1.mDL"}},
+			expect: "mdl-verifier",
+		},
+		{
+			name:   "non-mDL mDoc docType with RoleIssuer becomes mdoc-issuer",
+			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleIssuer, DocType: "org.iso.18013.5.1.PID"}},
+			expect: "mdoc-issuer",
+		},
+		{
+			name:   "non-mDL mDoc docType with RoleVerifier becomes mdoc-verifier",
+			req:    &EvaluationRequest{EvaluationRequest: trustapi.EvaluationRequest{Role: RoleVerifier, DocType: "eu.europa.ec.eudi.pid.1"}},
+			expect: "mdoc-verifier",
+		},
 	}
 
 	for _, tt := range tests {

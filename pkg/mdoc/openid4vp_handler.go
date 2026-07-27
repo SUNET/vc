@@ -34,6 +34,11 @@ func WithMDocTrustEvaluator(te trust.TrustEvaluator) MDocHandlerOption {
 // WithMDocIssuerURL sets the expected credential issuer URL for trust evaluation.
 // This enables the mdociaca registry to discover IACA certificates via
 // .well-known/openid-credential-issuer metadata.
+//
+// This option only takes effect when NewMDocHandler constructs its own Verifier
+// (i.e. WithMDocTrustEvaluator is used). If WithMDocVerifier supplies a
+// pre-configured Verifier, that Verifier's own IssuerURL (if any) is used instead
+// and this option is silently ignored.
 func WithMDocIssuerURL(url string) MDocHandlerOption {
 	return func(h *MDocHandler) {
 		h.issuerURL = url
