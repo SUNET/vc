@@ -95,7 +95,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
-		c.log.Info("Failed to load presentation templates", "error", err)
+		return nil, fmt.Errorf("failed to load presentation request templates: %w", err)
 	}
 
 	// Initialize claims extractor
@@ -148,8 +148,7 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Load templates from directory
 	config, err := configuration.LoadPresentationRequests(ctx, templatesDir)
 	if err != nil {
-		c.log.Info("Failed to load presentation request templates, falling back to credential config scope mapping", "error", err, "dir", templatesDir)
-		return nil
+		return fmt.Errorf("loading templates from %s: %w", templatesDir, err)
 	}
 
 	// Create presentation builder
