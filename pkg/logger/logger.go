@@ -34,7 +34,7 @@ func New(name, logPath string, production bool) (*Log, error) {
 	zc.DisableStacktrace = true
 
 	if logPath != "" {
-		if err := os.MkdirAll(logPath, fs.ModeDir); err != nil {
+		if err := os.MkdirAll(logPath, fs.ModeDir|0o700); err != nil {
 			return nil, err
 		}
 

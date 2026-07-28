@@ -479,3 +479,36 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 		c.Next()
 	}
 }
+
+// MaxBodySize returns middleware that limits the size of request bodies.
+// Requests exceeding maxBytes receive a 413 Payload Too Large response.
+func (m *middlewareHandler) MaxBodySize(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
+		c.Next()
+	}
+}
+
+// SecurityHeaders returns middleware that sets standard security headers on all responses.
+// When tlsEnabled is true, HSTS (Strict-Transport-Security) is also set.
+func (m *middlewareHandler) SecurityHeaders(tlsEnabled bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		if tlsEnabled {
+			// max-age=63072000 = 2 years; includeSubDomains applies to all subdomains
+			c.Header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
+		c.Next()
+	}
+}
+
+// AdminCSP returns middleware that sets a restrictive Content-Security-Policy for admin UI pages.
+func (m *middlewareHandler) AdminCSP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")
+		c.Next()
+	}
+}

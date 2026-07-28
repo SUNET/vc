@@ -57,11 +57,16 @@ WORKDIR /
 
 RUN apk add --no-cache ca-certificates curl
 
+# Run as non-root user for security hardening
+RUN addgroup -S vcservice && adduser -S vcservice -G vcservice
+
 COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
 COPY --from=builder /go/src/app/docs /docs
 COPY --from=builder /go/src/app/standards /standards
 
 EXPOSE 8080
+
+USER vcservice
 
 HEALTHCHECK --interval=20s --timeout=10s CMD curl -k --connect-timeout 5 https://localhost:8080/health | grep -q STATUS_OK
 

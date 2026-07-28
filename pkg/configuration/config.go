@@ -131,6 +131,12 @@ func LoadSecrets(path string) (*model.Secrets, error) {
 		return nil, fmt.Errorf("secrets path %q is a directory, not a file", cleanPath)
 	}
 
+	// Fail if the secrets file is group- or world-readable (expected 0600).
+	mode := fileInfo.Mode().Perm()
+	if mode&0o077 != 0 {
+		return nil, fmt.Errorf("secrets file %q has overly permissive mode %04o; expected 0600 (no group/world access)", cleanPath, mode)
+	}
+
 	data, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read secrets file %q: %w", cleanPath, err)
