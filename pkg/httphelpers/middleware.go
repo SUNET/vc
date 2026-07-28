@@ -400,8 +400,17 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 		ctx := c.Request.Context()
 
 		// Attempt to atomically create the counter for this window.
-		// SetNX only succeeds if the key doesn't exist yet (i.e. new window).
-		created, _ := rl.cache.SetNX(ctx, key, 1)
+		// SetNXWithTTL ensures the entry expires after exactly one window,
+		// regardless of the cache's default TTL.
+		created, err := rl.cache.SetNXWithTTL(ctx, key, 1, rl.window)
+		if err != nil {
+			// Backend failure (e.g. Mongo connectivity) — fail closed.
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error":             "service_unavailable",
+				"error_description": "Rate limiter unavailable. Please try again later.",
+			})
+			return
+		}
 		if created {
 			// First request in this window — allowed.
 			c.Next()
@@ -412,7 +421,7 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 		current, found := rl.cache.Get(ctx, key)
 		if !found {
 			// Expired between SetNX and Get (unlikely race); treat as new window.
-			rl.cache.Set(ctx, key, 1)
+			rl.cache.SetWithTTL(ctx, key, 1, rl.window)
 			c.Next()
 			return
 		}
@@ -425,9 +434,7 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 			return
 		}
 
-		// Increment counter. SetWithTTL with the full window duration approximates
-		// the original TTL — not perfect but avoids indefinite extension since the
-		// entry will expire at most 1 window after the last allowed request.
+		// Increment counter within the existing window.
 		rl.cache.SetWithTTL(ctx, key, current+1, rl.window)
 		c.Next()
 	}
