@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -587,6 +588,16 @@ func TestConvertElementValue(t *testing.T) {
 			arr, ok := got.([]any)
 			if !ok || len(arr) != 2 {
 				t.Errorf("got %#v, want a 2-element slice", got)
+			}
+		}},
+		{"int rejects fractional value", "int", 5.5, true, nil},
+		{"uint rejects fractional value", "uint", 5.5, true, nil},
+		{"uint rejects negative value", "uint", -1.0, true, nil},
+		{"int rejects out-of-range value", "int", math.MaxFloat64, true, nil},
+		{"uint rejects out-of-range value", "uint", math.MaxFloat64, true, nil},
+		{"int accepts large exact integer", "int", 9007199254740992.0, false, func(t *testing.T, got any) {
+			if got != int64(9007199254740992) {
+				t.Errorf("got %#v, want int64(9007199254740992)", got)
 			}
 		}},
 	}

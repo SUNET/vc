@@ -107,5 +107,23 @@ func LoadMDDLSchema(raw []byte) (*MDDLSchema, error) {
 	if len(schema.Claims) == 0 {
 		return nil, fmt.Errorf("MDDL schema for doctype %q declares no claims", schema.DocType)
 	}
+
+	// addElements() (pkg/mdoc/issuer.go) looks up document_data by element
+	// identifier alone, without namespace context, since document_data is a
+	// flat map. That is safe only if every element identifier is unique
+	// across all namespaces the schema declares; otherwise the lookup would
+	// be ambiguous (the same value would be used for both claims, and a
+	// mandatory/optional mismatch between namespaces could silently mis-fire).
+	// Reject such schemas up front rather than mis-issuing credentials.
+	seenIn := map[string]string{}
+	for namespace, elements := range schema.Claims {
+		for elementID := range elements {
+			if prev, ok := seenIn[elementID]; ok {
+				return nil, fmt.Errorf("MDDL schema for doctype %q declares claim %q in both namespace %q and %q: element identifiers must be unique across namespaces", schema.DocType, elementID, prev, namespace)
+			}
+			seenIn[elementID] = namespace
+		}
+	}
+
 	return &schema, nil
 }

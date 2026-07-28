@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -330,11 +331,17 @@ func convertElementValue(valueType string, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("expected number for int, got %T", raw)
 		}
+		if f != math.Trunc(f) || f < math.MinInt64 || f > math.MaxInt64 {
+			return nil, fmt.Errorf("value %v is not a valid int64", raw)
+		}
 		return int64(f), nil
 	case "uint":
 		f, ok := raw.(float64)
 		if !ok {
 			return nil, fmt.Errorf("expected number for uint, got %T", raw)
+		}
+		if f != math.Trunc(f) || f < 0 || f > math.MaxUint64 {
+			return nil, fmt.Errorf("value %v is not a valid uint64", raw)
 		}
 		return uint64(f), nil
 	default:

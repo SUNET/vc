@@ -1269,10 +1269,12 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) e
 	c.Integrity = "sha256-" + base64.StdEncoding.EncodeToString(h[:])
 	c.Attributes = schema.Attributes()
 
-	// Only keep raw bytes for locally-served MDDL schemas, mirroring VCTMRaw.
-	if c.IsLocalMDDL() {
-		c.MDDLRaw = rawBytes
-	}
+	// Unlike VCTMRaw (only needed to serve /type-metadata/:scope for local
+	// VCTMs), MDDLRaw is always required: APIGW sends it inline in every
+	// MakeMDocRequest and the issuer validates it as required, regardless of
+	// whether the schema came from a local file or mddl_url. Keep it
+	// unconditionally so mddl_url-configured scopes can actually issue.
+	c.MDDLRaw = rawBytes
 
 	return nil
 }

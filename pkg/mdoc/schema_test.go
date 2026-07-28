@@ -25,6 +25,17 @@ func TestLoadMDDLSchema(t *testing.T) {
 		{"wrong format", `{"format": "dc+sd-jwt", "doctype": "x", "claims": {"ns": {"a": {}}}}`},
 		{"missing doctype", `{"format": "mso_mdoc", "claims": {"ns": {"a": {}}}}`},
 		{"no claims", `{"format": "mso_mdoc", "doctype": "x"}`},
+		{
+			"duplicate element ID across namespaces",
+			`{
+				"format": "mso_mdoc",
+				"doctype": "x",
+				"claims": {
+					"ns1": {"given_name": {"mandatory": true, "value_type": "tstr"}},
+					"ns2": {"given_name": {"mandatory": false, "value_type": "tstr"}}
+				}
+			}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
