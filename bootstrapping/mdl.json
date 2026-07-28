@@ -70,7 +70,7 @@
         "issuing_authority": "SUNET",
         "issuing_country": "SE",
         "issuing_jurisdiction": "Stockholm",
-        "nationalities": [
+        "nationality": [
           "SE"
         ],
         "personal_administrative_number": "pan-authentic_source_person_id_101",
