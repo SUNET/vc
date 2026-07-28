@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/SUNET/vc/pkg/federation"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/gin-gonic/gin"
 )
@@ -20,7 +20,7 @@ func (s *Service) endpointFederationEntityConfig(ctx context.Context, c *gin.Con
 	}
 
 	signer := pki.NewSignerConfig(s.cfg.Verifier.KeyConfig)
-	svc := federation.NewService(cfg, signer, s.cfg.Verifier.PublicURL)
+	svc := openidfederation.NewService(cfg, signer, s.cfg.Verifier.PublicURL)
 
 	// Derive signing algorithm from the actual key configuration
 	jwk, err := signer.GetJWK()
@@ -29,7 +29,7 @@ func (s *Service) endpointFederationEntityConfig(ctx context.Context, c *gin.Con
 	}
 
 	// Build metadata advertising this service as an OpenID Relying Party (verifier)
-	metadata := &federation.EntityMetadata{
+	metadata := &openidfederation.EntityMetadata{
 		OpenIDRelyingParty: buildOpenIDRelyingPartyMetadata(
 			svc.EntityID(),
 			cfg.OrganizationName,

@@ -1,4 +1,4 @@
-package federation
+package openidfederation
 
 import (
 	"encoding/json"

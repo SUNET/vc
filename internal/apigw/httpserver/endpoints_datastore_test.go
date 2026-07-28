@@ -322,6 +322,10 @@ func (u unimplementedApiv1) SDJWTVCIssuerMetadata(context.Context) (*apiv1.SDJWT
 	panic("not implemented")
 }
 
+func (u unimplementedApiv1) FederationEntityConfig(context.Context) (*apiv1.FederationEntityConfigReply, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) VerificationRequestObject(context.Context, *apiv1.VerificationRequestObjectRequest) (string, error) {
 	panic("not implemented")
 }

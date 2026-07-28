@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-06-12
+**Generated:** 2026-07-28
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -80,10 +80,35 @@ Shared configuration used across all services.
 
 > **Path:** `.common.kafka`
 
-| Field     | Type       | Description                    | Example                          | Default | Required |
-| --------- | ---------- | ------------------------------ | -------------------------------- | ------- | -------- |
-| `enable`  | `bool`     | Kafka integration              | -                                | `false` | No       |
-| `brokers` | `[]string` | List of Kafka broker addresses | `["kafka0:9092", "kafka1:9092"]` | -       | Yes      |
+| Field     | Type       | Description                                    | Example                          | Default | Required         |
+| --------- | ---------- | ---------------------------------------------- | -------------------------------- | ------- | ---------------- |
+| `enable`  | `bool`     | Kafka integration                              | -                                | `false` | No               |
+| `brokers` | `[]string` | List of Kafka broker addresses                 | `["kafka0:9092", "kafka1:9092"]` | -       | Yes (if enabled) |
+| `sasl`    | `object`   | SASL authentication for Kafka connections      | -                                | -       | No               |
+| `mtls`    | `object`   | Mutual TLS (mTLS) for Kafka broker connections | -                                | -       | No               |
+
+### `sasl`
+
+> **Path:** `.common.kafka.sasl`
+
+| Field       | Type     | Description                                          | Example | Default         | Required         |
+| ----------- | -------- | ---------------------------------------------------- | ------- | --------------- | ---------------- |
+| `enable`    | `bool`   | Enable activates SASL authentication                 | -       | `false`         | No               |
+| `mechanism` | `string` | SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512) | -       | `SCRAM-SHA-512` | Yes (if enabled) |
+| `username`  | `string` | SASL username                                        | -       | -               | Yes (if enabled) |
+| `password`  | `string` | SASL password                                        | -       | -               | Yes (if enabled) |
+
+### `mtls`
+
+> **Path:** `.common.kafka.mtls`
+
+| Field                  | Type     | Description                                                                                     | Example | Default | Required         |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
+| `enable`               | `bool`   | MTLS for the connection                                                                         | -       | `false` | No               |
+| `ca_cert_path`         | `string` | Path to a CA certificate for verifying the remote peer (optional; uses system roots if empty)   | -       | -       | No               |
+| `cert_file_path`       | `string` | Path to a client certificate for mutual authentication                                          | -       | -       | Yes (if enabled) |
+| `key_file_path`        | `string` | Path to the client private key                                                                  | -       | -       | Yes (if enabled) |
+| `insecure_skip_verify` | `bool`   | InsecureSkipVerify disables certificate verification (TESTING ONLY — never use in production)   | -       | `false` | No               |
 
 ### `ha`
 
@@ -189,6 +214,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `registry_client`         | `object` | GRPC client config for registry                                                                                                                                                                                     | -                           | -       | Yes      |
 | `identity_mapping_import` | `object` | Automatic import of identity mappings from JSON files at startup. When configured, APIGW reads JSON files and imports them into the identity mappings collection on first startup (skipped if data already exists). | -                           | -       | No       |
 | `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
+| `federation`              | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                   | -                           | -       | No       |
 
 ### `api_server`
 
@@ -207,11 +233,11 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`
 
-| Field            | Type     | Description                 | Example | Default | Required |
-| ---------------- | -------- | --------------------------- | ------- | ------- | -------- |
-| `enable`         | `bool`   | TLS                         | -       | `false` | No       |
-| `cert_file_path` | `string` | Path to the TLS certificate | -       | -       | Yes      |
-| `key_file_path`  | `string` | Path to the TLS private key | -       | -       | Yes      |
+| Field            | Type     | Description                 | Example | Default | Required         |
+| ---------------- | -------- | --------------------------- | ------- | ------- | ---------------- |
+| `enable`         | `bool`   | TLS                         | -       | `false` | No               |
+| `cert_file_path` | `string` | Path to the TLS certificate | -       | -       | Yes (if enabled) |
+| `key_file_path`  | `string` | Path to the TLS private key | -       | -       | Yes (if enabled) |
 
 ### `api_auth`
 
@@ -434,6 +460,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow (AuthnRequest → Response) may remain active before it expires                                                                                                                                                                                                                               | -                                         | `300`   | No               |
 | `attribute_mapping`          | `object` | AttributeMapping normalizes provider-specific attribute names (e.g. SAML OIDs) to canonical claim names. Applied to ALL attributes in the assertion. Which normalized attributes are used depends on the data source: - assertion: VCTM determines which go into the credential - datastore: auth_claims determines which are used for DB identity lookup | -                                         | -       | Yes (if enabled) |
 | `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No               |
+| `allow_unsigned_metadata`    | `bool`   | AllowUnsignedMetadata permits MDQ/URL metadata without signature verification. This is INSECURE (MITM → fake IdP) and should only be used in development. When false (default), MDQ and URL metadata sources require MetadataSigningCertPath. Local metadata files are allowed unsigned regardless (with a startup warning).                              | -                                         | `false` | No               |
 | `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No               |
 
 ### `static_idp_metadata`
@@ -541,6 +568,7 @@ persisted in the database.
 | `type`         | `string`   | Client type per RFC 6749 Section 2.1 ("public" or "confidential"). Defaults to "public" since registered clients are wallets (native/web apps) that cannot securely store credentials and rely on PKCE instead. | -                                | `public` | No       |
 | `redirect_uri` | `[]string` | List of allowed redirect URIs for the client. Accepts either a single string or an array of strings in YAML/JSON.                                                                                               | `"https://example.com/callback"` | -        | Yes      |
 | `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client                                                                                                                                                                    | -                                | -        | Yes      |
+| `jwks_uri`     | `string`   | URL to the client's JWKS for verifying client_assertion signatures (RFC 7523). Required for confidential clients using private_key_jwt authentication.                                                          | -                                | -        | No       |
 
 ### `credential_offers`
 
@@ -653,6 +681,11 @@ Trust evaluation operates in one of two modes:
 | `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
 | `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
 
+### `federation`
+
+> **Path:** `.apigw.federation`, `.verifier.federation`
+
+
 ## `issuer` (Top-level)
 
 Configuration for the Issuer service that signs and issues verifiable credentials.
@@ -761,6 +794,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | `authorization_page_css` | `object` | Authorization page styling configuration                                                                                                                                                                                                                                                | -                                                          | -       | No       |
 | `credential_display`     | `object` | Credential display settings                                                                                                                                                                                                                                                             | -                                                          | -       | No       |
 | `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -       | No       |
+| `federation`             | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                                                                                       | -                                                          | -       | No       |
 | `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -       | No       |
 
 ### `preferred_vp_formats`
