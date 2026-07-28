@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lithammer/shortuuid/v4"
-	ginratelimit "github.com/ljahier/gin-ratelimit"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"
@@ -373,23 +373,64 @@ func deduplicatePairs(pairs []resourcePair) []resourcePair {
 	return out
 }
 
-// RateLimiter implements a token bucket rate limiter using gin-ratelimit
+// RateLimiter implements a fixed-window rate limiter backed by a Cache[int64].
+// When the cache is shared (e.g. MongoDB in HA mode) the rate limit is enforced
+// consistently across all instances.
 type RateLimiter struct {
-	tokenBucket *ginratelimit.TokenBucket
+	cache             cache.Cache[int64]
+	requestsPerMinute int64
+	window            time.Duration
 }
 
-// NewRateLimiter creates a new rate limiter using token bucket algorithm.
-// requestsPerMinute: maximum requests allowed per minute per IP
-func (m *middlewareHandler) NewRateLimiter(requestsPerMinute int) *RateLimiter {
-	tb := ginratelimit.NewTokenBucket(requestsPerMinute, 1*time.Minute)
+// NewRateLimiter creates a rate limiter that stores per-IP counters in the
+// provided cache. The cache's TTL should be >= window (default 1 minute).
+// Keys are namespaced by the request path automatically.
+func NewRateLimiter(c cache.Cache[int64], requestsPerMinute int) *RateLimiter {
 	return &RateLimiter{
-		tokenBucket: tb,
+		cache:             c,
+		requestsPerMinute: int64(requestsPerMinute),
+		window:            1 * time.Minute,
 	}
 }
 
-// Middleware returns a Gin middleware handler that enforces rate limiting by IP
+// Middleware returns a Gin middleware handler that enforces rate limiting by client IP.
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
-	return ginratelimit.RateLimitByIP(rl.tokenBucket)
+	return func(c *gin.Context) {
+		key := c.FullPath() + ":" + c.ClientIP()
+		ctx := c.Request.Context()
+
+		// Attempt to atomically create the counter for this window.
+		// SetNX only succeeds if the key doesn't exist yet (i.e. new window).
+		created, _ := rl.cache.SetNX(ctx, key, 1)
+		if created {
+			// First request in this window — allowed.
+			c.Next()
+			return
+		}
+
+		// Key exists — read current count.
+		current, found := rl.cache.Get(ctx, key)
+		if !found {
+			// Expired between SetNX and Get (unlikely race); treat as new window.
+			rl.cache.Set(ctx, key, 1)
+			c.Next()
+			return
+		}
+
+		if current >= rl.requestsPerMinute {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":             "rate_limit_exceeded",
+				"error_description": "Too many requests. Please try again later.",
+			})
+			return
+		}
+
+		// Increment counter. SetWithTTL with the full window duration approximates
+		// the original TTL — not perfect but avoids indefinite extension since the
+		// entry will expire at most 1 window after the last allowed request.
+		rl.cache.SetWithTTL(ctx, key, current+1, rl.window)
+		c.Next()
+	}
 }
 
 // CSRFProtection returns middleware that enforces CSRF token validation on

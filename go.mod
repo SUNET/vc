@@ -33,7 +33,6 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/lithammer/shortuuid/v4 v4.2.0
-	github.com/ljahier/gin-ratelimit v1.0.0
 	github.com/miekg/pkcs11 v1.1.2
 	github.com/moogar0880/problems v1.0.1
 	github.com/multiformats/go-multibase v0.3.0
@@ -50,6 +49,7 @@ require (
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
 	github.com/testcontainers/testcontainers-go v0.42.0
+	github.com/xdg-go/scram v1.2.0
 	go.mongodb.org/mongo-driver/v2 v2.6.0
 	go.opentelemetry.io/contrib/propagators/jaeger v1.44.0
 	go.opentelemetry.io/otel v1.44.0
@@ -183,7 +183,6 @@ require (
 	github.com/valyala/fastjson v1.6.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect

@@ -23,8 +23,9 @@ type Service struct {
 	log    *logger.Log
 	tracer *trace.Tracer
 
-	JWT Cache[string]
-	CWT Cache[[]byte]
+	JWT       Cache[string]
+	CWT       Cache[[]byte]
+	RateLimit Cache[int64]
 
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
@@ -51,6 +52,10 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.CWT, err = pkgcache.NewGenericCache[[]byte](cs, ctx, "tsl_cwt", tokenValidity); err != nil {
 		return nil, fmt.Errorf("cache: cwt: %w", err)
+	}
+
+	if s.RateLimit, err = pkgcache.NewGenericCache[int64](cs, ctx, "registry_rate_limit", 1*time.Minute); err != nil {
+		return nil, fmt.Errorf("cache: rate_limit: %w", err)
 	}
 
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).

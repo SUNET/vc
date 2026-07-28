@@ -185,7 +185,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.CredentialRequestsPerMinute > 0 {
 		credRPM = s.cfg.APIGW.RateLimit.CredentialRequestsPerMinute
 	}
-	credRL := s.httpHelpers.Middleware.NewRateLimiter(credRPM)
+	credRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, credRPM)
 	rgCredential := rgRoot.Group("")
 	rgCredential.Use(credRL.Middleware())
 	s.httpHelpers.Server.RegEndpoint(ctx, rgCredential, http.MethodPost, "credential", http.StatusOK, s.endpointVCICredential)
@@ -218,7 +218,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.TokenRequestsPerMinute > 0 {
 		tokenRPM = s.cfg.APIGW.RateLimit.TokenRequestsPerMinute
 	}
-	tokenRL := s.httpHelpers.Middleware.NewRateLimiter(tokenRPM)
+	tokenRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, tokenRPM)
 	rgTokenSession := rgRoot.Group("")
 	rgTokenSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
 	rgTokenSession.Use(tokenRL.Middleware())
@@ -278,7 +278,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.DatastoreRequestsPerMinute > 0 {
 		datastoreRPM = s.cfg.APIGW.RateLimit.DatastoreRequestsPerMinute
 	}
-	datastoreRL := s.httpHelpers.Middleware.NewRateLimiter(datastoreRPM)
+	datastoreRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, datastoreRPM)
 	rgDatastore.Use(datastoreRL.Middleware())
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "", http.StatusOK, s.endpointDatastoreGet)
