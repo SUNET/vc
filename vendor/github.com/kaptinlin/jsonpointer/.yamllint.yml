@@ -23,7 +23,7 @@ ignore: |
   node_modules/
   vendor/
   .git/
-  .references/
+  .reference/
   .agents/
   .claude/
   testdata/

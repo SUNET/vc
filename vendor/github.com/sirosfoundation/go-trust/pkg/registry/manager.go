@@ -243,12 +243,13 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		req.Context = make(map[string]interface{})
 	}
 
-	// First, merge action.parameters into context (client-supplied constraints)
-	// These can be overridden by server-side policy constraints below
+	// Merge action.parameters into context (client-supplied constraints).
+	// Only allowlisted keys are accepted to prevent clients from injecting
+	// security-sensitive policy controls (e.g., strict_entitlement_check,
+	// allow_intermediaries, required_cert_policy_oids).
 	if req.Action != nil && req.Action.Parameters != nil {
 		for k, v := range req.Action.Parameters {
-			// Don't allow overriding internal keys
-			if k != "_policy" {
+			if allowedActionParameterKey(k) {
 				req.Context[k] = v
 			}
 		}
@@ -290,6 +291,21 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		if len(etsi.CredentialTypes) > 0 {
 			req.Context["credential_types"] = etsi.CredentialTypes
 		}
+		if len(etsi.RequiredCertPolicyOIDs) > 0 {
+			req.Context["required_cert_policy_oids"] = etsi.RequiredCertPolicyOIDs
+		}
+		if etsi.ExtractRPIdentity {
+			req.Context["extract_rp_identity"] = true
+		}
+		if len(etsi.AllowedAttributes) > 0 {
+			req.Context["allowed_attributes"] = etsi.AllowedAttributes
+		}
+		if etsi.StrictEntitlementCheck {
+			req.Context["strict_entitlement_check"] = true
+		}
+		if etsi.AllowIntermediaries {
+			req.Context["allow_intermediaries"] = true
+		}
 	}
 
 	// Apply DID constraints
@@ -322,6 +338,25 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 
 	// Store policy name in context for debugging/logging
 	req.Context["_policy"] = policyCtx.Policy.Name
+}
+
+// allowedActionParameterKeys lists context keys that may be set via
+// action.parameters. Keys not in this set are silently dropped to prevent
+// clients from injecting security-sensitive policy controls.
+var allowedActionParameterKeys = map[string]bool{
+	// Data-carrying parameters (what the RP is requesting)
+	"query":                true, // DCQL query for over-request detection
+	"requested_attributes": true, // explicit attribute list
+	"credential_types":     true, // credential type identifiers
+
+	// Informational / audit
+	"purpose": true, // presentation purpose
+}
+
+// allowedActionParameterKey returns true if the key may flow from
+// action.parameters into the request context.
+func allowedActionParameterKey(key string) bool {
+	return allowedActionParameterKeys[key]
 }
 
 // SupportedResourceTypes returns the union of all resource types supported by registered registries
