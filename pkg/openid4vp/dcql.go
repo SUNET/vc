@@ -38,7 +38,7 @@ type CredentialQuery struct {
 	Claims []ClaimQuery `json:"claims,omitempty" yaml:"claims,omitempty"`
 
 	// ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers for elements in claims that specifies which combinations of claims for the Credential are requested. The rules for selecting claims to send are defined in Section 6.4.1.
-	ClaimSet []string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required"`
+	ClaimSet [][]string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required,min=1,dive,required"`
 }
 
 type CredentialSetQuery struct {
@@ -138,6 +138,12 @@ type TrustedAuthority struct {
 }
 
 type ClaimQuery struct {
+	// ID REQUIRED if claim_sets is present in the Credential Query; OPTIONAL otherwise.
+	// A string identifying the particular claim. The value MUST be a non-empty string
+	// consisting of alphanumeric, underscore (_), or hyphen (-) characters.
+	// Within the particular claims array, the same id MUST NOT be present more than once.
+	ID string `json:"-" yaml:"-"`
+
 	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer
 	// that specifies the path to a claim within the Credential, as defined in Section 7.
 	// Elements are strings (object keys) or nil (representing null for array element access).
@@ -155,9 +161,11 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 			path[i] = *p
 		}
 	}
-	return json.Marshal(struct {
-		Path []any `json:"path"`
-	}{Path: path})
+	type wire struct {
+		ID   string `json:"id,omitempty"`
+		Path []any  `json:"path"`
+	}
+	return json.Marshal(wire{ID: cq.ID, Path: path})
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
@@ -165,6 +173,7 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 // elements cause an unmarshal error (Go's json package rejects them for *string).
 func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	var raw struct {
+		ID   string    `json:"id"`
 		Path []*string `json:"path"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -173,6 +182,7 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	if err := validateClaimPath(raw.Path); err != nil {
 		return err
 	}
+	cq.ID = raw.ID
 	cq.Path = raw.Path
 	return nil
 }
@@ -182,6 +192,7 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 // elements cause an unmarshal error.
 func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw struct {
+		ID   string    `yaml:"id"`
 		Path []*string `yaml:"path"`
 	}
 	if err := unmarshal(&raw); err != nil {
@@ -190,6 +201,7 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	if err := validateClaimPath(raw.Path); err != nil {
 		return err
 	}
+	cq.ID = raw.ID
 	cq.Path = raw.Path
 	return nil
 }
