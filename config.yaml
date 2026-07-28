@@ -13,7 +13,6 @@ common:
       format: "dc+sd-jwt"
     pid_mdoc:
       mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
-      auth_method: basic
       format: "mso_mdoc"
     mdl:
       mddl_file_path: "/metadata/mdl.mdoc.json"

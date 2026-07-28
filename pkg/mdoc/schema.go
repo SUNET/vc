@@ -43,9 +43,53 @@ type NamespaceClaims map[string]ClaimMetadata
 // "tstr", "full-date", "tdate", "bstr", "array", "map"). Elements describes
 // the item/field shape for container ("array"/"map") claims.
 type ClaimMetadata struct {
+	Display   []ClaimDisplay           `json:"display,omitempty"`
 	Mandatory bool                     `json:"mandatory,omitempty"`
 	ValueType string                   `json:"value_type,omitempty"`
 	Elements  map[string]ClaimMetadata `json:"elements,omitempty"`
+}
+
+// ClaimDisplay is a localized display label for a claim.
+type ClaimDisplay struct {
+	Locale string `json:"locale"`
+	Name   string `json:"name"`
+}
+
+// defaultLocale is used to bucket claims that declare no display info, so
+// Attributes() still surfaces every claim rather than silently dropping it.
+const defaultLocale = "en-US"
+
+// Attributes returns a map of labels to claim paths for each locale, mirroring
+// sdjwtvc.VCTM.Attributes() so callers (e.g. the verifier UI) can treat mdoc
+// and sd-jwt credential types uniformly. Claims with no declared Display are
+// bucketed under defaultLocale using their raw element ID as the label.
+func (s *MDDLSchema) Attributes() map[string]map[string][]*string {
+	reply := map[string]map[string][]*string{}
+
+	for namespace, elements := range s.Claims {
+		ns := namespace
+		for elementID, meta := range elements {
+			id := elementID
+			path := []*string{&ns, &id}
+
+			if len(meta.Display) == 0 {
+				if reply[defaultLocale] == nil {
+					reply[defaultLocale] = map[string][]*string{}
+				}
+				reply[defaultLocale][elementID] = path
+				continue
+			}
+
+			for _, d := range meta.Display {
+				if reply[d.Locale] == nil {
+					reply[d.Locale] = map[string][]*string{}
+				}
+				reply[d.Locale][d.Name] = path
+			}
+		}
+	}
+
+	return reply
 }
 
 // LoadMDDLSchema parses and validates a raw MDDL (mso_mdoc) schema document.

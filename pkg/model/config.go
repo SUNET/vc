@@ -1267,6 +1267,7 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) e
 	defer c.mu.Unlock()
 	c.MDDL = schema
 	c.Integrity = "sha256-" + base64.StdEncoding.EncodeToString(h[:])
+	c.Attributes = schema.Attributes()
 
 	// Only keep raw bytes for locally-served MDDL schemas, mirroring VCTMRaw.
 	if c.IsLocalMDDL() {
