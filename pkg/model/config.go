@@ -969,11 +969,11 @@ type APIGW struct {
 	// When configured, credentials presented via VP are validated against a PDP.
 	Trust TrustConfig `yaml:"trust,omitempty"`
 	// RateLimit configures per-endpoint rate limiting for the APIGW.
-	RateLimit *APigwRateLimit `yaml:"rate_limit,omitempty"`
+	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
 }
 
-// APigwRateLimit holds per-endpoint rate limit settings for the APIGW.
-type APigwRateLimit struct {
+// APIGWRateLimit holds per-endpoint rate limit settings for the APIGW.
+type APIGWRateLimit struct {
 	// TokenRequestsPerMinute is the maximum token endpoint requests per minute per IP. Default: 20
 	TokenRequestsPerMinute int `yaml:"token_requests_per_minute" default:"20"`
 	// CredentialRequestsPerMinute is the maximum credential endpoint requests per minute per IP. Default: 30
