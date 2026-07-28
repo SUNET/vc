@@ -1,6 +1,7 @@
 package httphelpers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,8 +15,7 @@ import (
 func TestRateLimiter_AllowsUpToLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	c := cache.NewMemoryCache[int64](1 * time.Minute)
-	rl := NewRateLimiter(c, 5)
+	rl := NewRateLimiter(cache.NewMemoryRateLimitCounter(), 5)
 
 	r := gin.New()
 	r.Use(rl.Middleware())
@@ -41,8 +41,7 @@ func TestRateLimiter_AllowsUpToLimit(t *testing.T) {
 func TestRateLimiter_DifferentIPsAreIndependent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	c := cache.NewMemoryCache[int64](1 * time.Minute)
-	rl := NewRateLimiter(c, 2)
+	rl := NewRateLimiter(cache.NewMemoryRateLimitCounter(), 2)
 
 	r := gin.New()
 	r.Use(rl.Middleware())
@@ -75,9 +74,9 @@ func TestRateLimiter_DifferentIPsAreIndependent(t *testing.T) {
 func TestRateLimiter_DifferentPrefixesAreIndependent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	c := cache.NewMemoryCache[int64](1 * time.Minute)
-	rl1 := NewRateLimiter(c, 1)
-	rl2 := NewRateLimiter(c, 1)
+	counter := cache.NewMemoryRateLimitCounter()
+	rl1 := NewRateLimiter(counter, 1)
+	rl2 := NewRateLimiter(counter, 1)
 
 	r := gin.New()
 	r.GET("/a", rl1.Middleware(), func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
@@ -109,8 +108,7 @@ func TestRateLimiter_WindowResets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Use a very short TTL for the test.
-	c := cache.NewMemoryCache[int64](50 * time.Millisecond)
-	rl := NewRateLimiter(c, 2)
+	rl := NewRateLimiter(cache.NewMemoryRateLimitCounter(), 2)
 	rl.window = 50 * time.Millisecond
 
 	r := gin.New()
@@ -147,8 +145,7 @@ func TestRateLimiter_WindowResets(t *testing.T) {
 func TestRateLimiter_PathParamsAndQueryStringIgnored(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	c := cache.NewMemoryCache[int64](1 * time.Minute)
-	rl := NewRateLimiter(c, 2)
+	rl := NewRateLimiter(cache.NewMemoryRateLimitCounter(), 2)
 
 	r := gin.New()
 	r.GET("/user/:id", rl.Middleware(), func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
@@ -173,4 +170,34 @@ func TestRateLimiter_PathParamsAndQueryStringIgnored(t *testing.T) {
 	req.RemoteAddr = "10.0.0.1:1234"
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+}
+
+func TestRateLimiter_SlidingWindowPreventsWindowBoundaryBurst(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Use a counter directly to verify sliding window math.
+	counter := cache.NewMemoryRateLimitCounter()
+	window := 100 * time.Millisecond
+
+	ctx := context.Background()
+
+	// Fill the current window with 10 requests.
+	for range 10 {
+		_, err := counter.IncrementWithTTL(ctx, "test", window)
+		assert.NoError(t, err)
+	}
+
+	// Wait for the window to rotate (move into next window).
+	// Sleep ~60% of the window so the previous window still has high weight.
+	time.Sleep(window + 20*time.Millisecond)
+
+	// In a fixed-window scheme, the counter would reset to 0 and allow
+	// another full burst. With sliding window, the previous window's 10
+	// requests are still partially weighted (~40% of the window remaining).
+	// estimate ≈ ceil(10 * 0.8) + 1 = 9 (prev weight ≈ 0.8 since we're ~20% into new window)
+	// The exact weight depends on timing, but estimate should be > 1.
+	count, err := counter.IncrementWithTTL(ctx, "test", window)
+	assert.NoError(t, err)
+	assert.Greater(t, count, int64(1),
+		"sliding window should carry over requests from the previous window")
 }

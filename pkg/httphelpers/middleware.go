@@ -373,21 +373,20 @@ func deduplicatePairs(pairs []resourcePair) []resourcePair {
 	return out
 }
 
-// RateLimiter implements a fixed-window rate limiter backed by a Cache[int64].
-// When the cache is shared (e.g. MongoDB in HA mode) the rate limit is enforced
-// consistently across all instances.
+// RateLimiter implements a fixed-window rate limiter backed by a RateLimitCounter.
+// The counter provides atomic increment, so concurrent requests within the same
+// instance (or across HA instances when backed by MongoDB) are correctly counted.
 type RateLimiter struct {
-	cache             cache.Cache[int64]
+	counter           cache.RateLimitCounter
 	requestsPerMinute int64
 	window            time.Duration
 }
 
-// NewRateLimiter creates a rate limiter that stores per-IP counters in the
-// provided cache. The cache's TTL should be >= window (default 1 minute).
-// Keys are namespaced by the request path automatically.
-func NewRateLimiter(c cache.Cache[int64], requestsPerMinute int) *RateLimiter {
+// NewRateLimiter creates a rate limiter that uses the provided counter for
+// atomic per-IP request counting. Keys are namespaced by route path automatically.
+func NewRateLimiter(counter cache.RateLimitCounter, requestsPerMinute int) *RateLimiter {
 	return &RateLimiter{
-		cache:             c,
+		counter:           counter,
 		requestsPerMinute: int64(requestsPerMinute),
 		window:            1 * time.Minute,
 	}
@@ -397,36 +396,18 @@ func NewRateLimiter(c cache.Cache[int64], requestsPerMinute int) *RateLimiter {
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.FullPath() + ":" + c.ClientIP()
-		ctx := c.Request.Context()
 
-		// Attempt to atomically create the counter for this window.
-		// SetNXWithTTL ensures the entry expires after exactly one window,
-		// regardless of the cache's default TTL.
-		created, err := rl.cache.SetNXWithTTL(ctx, key, 1, rl.window)
+		count, err := rl.counter.IncrementWithTTL(c.Request.Context(), key, rl.window)
 		if err != nil {
-			// Backend failure (e.g. Mongo connectivity) — fail closed.
+			// Backend failure — fail closed.
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"error":             "service_unavailable",
 				"error_description": "Rate limiter unavailable. Please try again later.",
 			})
 			return
 		}
-		if created {
-			// First request in this window — allowed.
-			c.Next()
-			return
-		}
 
-		// Key exists — read current count.
-		current, found := rl.cache.Get(ctx, key)
-		if !found {
-			// Expired between SetNX and Get (unlikely race); treat as new window.
-			rl.cache.SetWithTTL(ctx, key, 1, rl.window)
-			c.Next()
-			return
-		}
-
-		if current >= rl.requestsPerMinute {
+		if count > rl.requestsPerMinute {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error":             "rate_limit_exceeded",
 				"error_description": "Too many requests. Please try again later.",
@@ -434,8 +415,6 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 			return
 		}
 
-		// Increment counter within the existing window.
-		rl.cache.SetWithTTL(ctx, key, current+1, rl.window)
 		c.Next()
 	}
 }

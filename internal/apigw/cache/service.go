@@ -67,10 +67,9 @@ type Service struct {
 	// TTL is 1 hour; a background ticker refreshes every 55 minutes.
 	SignedMetadata Cache[string]
 
-	// RateLimit stores per-IP request counters for rate limiting.
-	// Key is "<endpoint>:<ip>"; value is the request count in the current window.
-	// TTL is 1 minute (fixed window). Shared across HA instances via MongoDB.
-	RateLimit Cache[int64]
+	// RateLimit provides atomic per-IP request counting for rate limiting.
+	// Shared across HA instances via MongoDB when HA is enabled.
+	RateLimit pkgcache.RateLimitCounter
 
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
@@ -132,7 +131,7 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: signed_metadata: %w", err)
 	}
 
-	if s.RateLimit, err = pkgcache.NewGenericCache[int64](cs, ctx, "apigw_rate_limit", 1*time.Minute); err != nil {
+	if s.RateLimit, err = cs.NewRateLimitCounter(ctx, "apigw_rate_limit"); err != nil {
 		return nil, fmt.Errorf("cache: rate_limit: %w", err)
 	}
 

@@ -25,7 +25,7 @@ type Service struct {
 
 	JWT       Cache[string]
 	CWT       Cache[[]byte]
-	RateLimit Cache[int64]
+	RateLimit pkgcache.RateLimitCounter
 
 	// SessionAuthKey is the HMAC key for session cookies, shared across HA instances.
 	SessionAuthKey string
@@ -54,7 +54,7 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: cwt: %w", err)
 	}
 
-	if s.RateLimit, err = pkgcache.NewGenericCache[int64](cs, ctx, "registry_rate_limit", 1*time.Minute); err != nil {
+	if s.RateLimit, err = cs.NewRateLimitCounter(ctx, "registry_rate_limit"); err != nil {
 		return nil, fmt.Errorf("cache: rate_limit: %w", err)
 	}
 
