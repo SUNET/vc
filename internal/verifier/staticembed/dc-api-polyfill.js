@@ -111,8 +111,19 @@ export function configure(config) {
  *
  * Decision tree:
  *   1. Native DC API + openid4vp protocol → use @sirosfoundation/dc-api
- *   2. Native DC API exists but openid4vp fails → polyfill fallback
- *   3. No DC API → polyfill fallback
+ *   2. No DC API, or the protocol isn't supported at all → polyfill fallback
+ *
+ * A native attempt that actually ran and failed (including the user
+ * dismissing/declining the picker, which surfaces as NotAllowedError) is
+ * NOT retried through the polyfill fallback here — it propagates to the
+ * caller instead. The polyfill fallback below can block for
+ * `_config.timeoutMs` (default 5 minutes) waiting on a cross-device
+ * SSE/poll response; silently entering that wait after the user already
+ * responded to the native picker left the page stuck on a loading spinner
+ * with no way to reach the traditional QR/wallet-link UI. Callers already
+ * handle a rejection here by falling back to their own QR/wallet-link UI
+ * immediately, which is the correct behavior for both "user declined" and
+ * "no wallet available" outcomes.
  *
  * Polyfill fallback:
  *   a. Same-device redirect (openid4vp:// on mobile)
@@ -129,22 +140,18 @@ export async function requestCredential(openid4vpRequest, options = {}) {
         const protocol = getBestProtocol();
 
         if (protocol) {
-            try {
-                const data = typeof openid4vpRequest === 'string'
-                    ? { request: openid4vpRequest }
-                    : openid4vpRequest;
+            const data = typeof openid4vpRequest === 'string'
+                ? { request: openid4vpRequest }
+                : openid4vpRequest;
 
-                return await dcApiRequestCredential(protocol, data, options);
-            } catch (err) {
-                // NotAllowedError → user cancelled or no wallet, fall through
-                if (err.name !== 'NotAllowedError') {
-                    throw err;
-                }
-            }
+            return await dcApiRequestCredential(protocol, data, options);
         }
     }
 
-    // 2. Polyfill path — implement OpenID4VP transport ourselves
+    // 2. Polyfill path — implement OpenID4VP transport ourselves.
+    // Only reached when native DC API isn't available or doesn't support
+    // any of our preferred protocols — never as a retry after a native
+    // attempt that actually ran.
     return _polyfillRequest(openid4vpRequest, options);
 }
 

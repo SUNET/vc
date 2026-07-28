@@ -84,6 +84,7 @@ const credentialsList = v.record(
 const metadataResponseSchema = v.object({
     credentials: credentialsList,
     supported_wallets: v.record(v.string(), v.string()),
+    dc_api_enabled: v.optional(v.boolean(), false),
     presets: v.optional(v.record(v.string(), v.object({
         label: v.string(),
         credentials: v.array(v.object({
@@ -207,6 +208,9 @@ Alpine.data("app", () => ({
     /** @type {Record<string, string> | null} */
     walletInstances: null,
 
+    /** @type {boolean} Whether the server has opted in to native DC API attempts. */
+    dcApiEnabled: false,
+
      /** @type {{ id: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
@@ -250,6 +254,7 @@ Alpine.data("app", () => ({
 
         this.credentialsList = data.credentials;
         this.walletInstances = data.supported_wallets;
+        this.dcApiEnabled = data.dc_api_enabled;
 
         // Load presets from backend config
         if (data.presets) {
@@ -486,6 +491,7 @@ Alpine.data("app", () => ({
      * @returns {Promise<boolean>} true if handled, false to fall through
      */
     async _tryNativeDCAPI() {
+        if (!this.dcApiEnabled) return false;
         if (!isNativeDCAPIAvailable() || !getBestSupportedProtocol()) return false;
 
         try {

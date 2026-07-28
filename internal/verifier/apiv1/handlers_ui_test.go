@@ -22,11 +22,13 @@ func TestUIMetadata(t *testing.T) {
 		name              string
 		credentials       map[string]*model.CredentialMetadata
 		supportedWallets  map[string]string
+		dcAPIEnabled      bool
 		expectCredentials int
 		expectWallets     int
 	}{
 		{
-			name: "with credentials and wallets",
+			name:         "with credentials and wallets",
+			dcAPIEnabled: true,
 			credentials: map[string]*model.CredentialMetadata{
 				"pid": {
 					VCTMFilePath: "/path/to/vctm",
@@ -55,7 +57,8 @@ func TestUIMetadata(t *testing.T) {
 			expectWallets:     0,
 		},
 		{
-			name: "credentials only",
+			name:         "credentials only",
+			dcAPIEnabled: true,
 			credentials: map[string]*model.CredentialMetadata{
 				"ehic": {
 					VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
@@ -74,7 +77,8 @@ func TestUIMetadata(t *testing.T) {
 					CredentialMetadata: tt.credentials,
 				},
 				Verifier: &model.Verifier{
-					SupportedWallets: tt.supportedWallets,
+					SupportedWallets:   tt.supportedWallets,
+					DigitalCredentials: model.DigitalCredentialsConfig{Enable: tt.dcAPIEnabled},
 				},
 			}
 
@@ -86,6 +90,8 @@ func TestUIMetadata(t *testing.T) {
 
 			assert.NoError(t, err)
 			require.NotNil(t, reply)
+
+			assert.Equal(t, tt.dcAPIEnabled, reply.DCAPIEnabled, "DCAPIEnabled should mirror verifier.digital_credentials.enable")
 
 			if tt.expectCredentials == 0 {
 				assert.Len(t, reply.Credentials, 0)
@@ -296,11 +302,11 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 // so the wallet discloses individual array elements instead of only the opaque parent.
 func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 	tests := []struct {
-		name           string
-		vctmClaims     []sdjwtvc.Claim
-		inputClaims    []openid4vp.ClaimQuery
-		expectedPaths  [][]*string
-		removedPaths   [][]*string
+		name          string
+		vctmClaims    []sdjwtvc.Claim
+		inputClaims   []openid4vp.ClaimQuery
+		expectedPaths [][]*string
+		removedPaths  [][]*string
 	}{
 		{
 			name: "parent removed when array-element path present",
@@ -636,7 +642,7 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 		inputClaims      []openid4vp.ClaimQuery
 		expectedPaths    [][]*string
 		expectedDCQLJSON []string // expected JSON for each claim after marshal
-		expectedValues   []any   // expected resolved values from the credential
+		expectedValues   []any    // expected resolved values from the credential
 	}{
 		{
 			name: "array of objects element field: degrees null type",
