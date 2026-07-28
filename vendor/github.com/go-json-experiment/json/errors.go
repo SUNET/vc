@@ -39,6 +39,10 @@ import (
 // This error is only returned if [RejectUnknownMembers] is true.
 var ErrUnknownName = errors.New("unknown object member name")
 
+// errAmbiguousName indicates a JSON object member could be unmarshal
+// into multiple candidate Go struct fields.
+var errAmbiguousName = errors.New("ambiguous object member name")
+
 const errorPrefix = "json: "
 
 func isSemanticError(err error) bool {
@@ -99,9 +103,9 @@ type coder interface {
 	Options() Options
 }
 
-// newInvalidFormatError wraps err in a SemanticError because
+// newInvalidFormatError constructs a SemanticError because
 // the current type t cannot handle the provided options format.
-// This error must be called before producing or consuming the next value.
+// This function must be called before producing or consuming the next value.
 //
 // If [jsonflags.ReportErrorsWithLegacySemantics] is specified,
 // then this automatically skips the next value when unmarshaling
@@ -396,9 +400,9 @@ func (e *SemanticError) Error() string {
 	}
 
 	// Special handling for unknown names.
-	if e.Err == ErrUnknownName {
+	if e.Err == ErrUnknownName || e.Err == errAmbiguousName {
 		sb.WriteString(": ")
-		sb.WriteString(ErrUnknownName.Error())
+		sb.WriteString(e.Err.Error())
 		sb.WriteString(" ")
 		sb.WriteString(strconv.Quote(e.JSONPointer.LastToken()))
 		if parent := e.JSONPointer.Parent(); parent != "" {
