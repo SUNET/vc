@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/trust"
@@ -68,6 +69,12 @@ type Client struct {
 	// Trust evaluation
 	jwtTrustVerifier *trust.JWTTrustVerifier
 
+	// openidFederationService is nil when OpenID Federation is not enabled.
+	// Built once here rather than per-request, since constructing a signer
+	// forces key material to be (re)loaded every time (expensive, especially
+	// with PKCS#11/HSM).
+	openidFederationService *openidfederation.Service
+
 	// issuerReachable tracks whether the issuer gRPC was reachable on the last refresh.
 	// Used to log state transitions (down→up, up→down) at Info level.
 	issuerReachable atomic.Bool
@@ -107,6 +114,11 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
 	if err != nil {
 		c.log.Info("PKI signing key not loaded", "error", err)
+	}
+
+	if fedCfg := cfg.APIGW.OpenIDFederation; fedCfg != nil && fedCfg.Enabled {
+		fedSigner := pki.NewSignerConfig(cfg.APIGW.KeyConfig)
+		c.openidFederationService = openidfederation.New(fedCfg, fedSigner, cfg.APIGW.PublicURL)
 	}
 
 	// Initialize gRPC client for issuer service

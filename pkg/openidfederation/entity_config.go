@@ -39,6 +39,22 @@ type EntityMetadata struct {
 	FederationEntity map[string]any `json:"federation_entity,omitempty"`
 }
 
+// Clone returns a copy of m, including fresh copies of its map fields, so
+// that mutating the returned value (e.g. injecting federation_entity
+// fields) never affects the caller's original *EntityMetadata or the maps
+// it holds. A nil receiver yields an empty, non-nil *EntityMetadata.
+func (m *EntityMetadata) Clone() *EntityMetadata {
+	if m == nil {
+		return &EntityMetadata{}
+	}
+	clone := *m
+	clone.OpenIDCredentialIssuer = cloneMetadataMap(m.OpenIDCredentialIssuer)
+	clone.OAuthAuthorizationServer = cloneMetadataMap(m.OAuthAuthorizationServer)
+	clone.OpenIDRelyingParty = cloneMetadataMap(m.OpenIDRelyingParty)
+	clone.FederationEntity = cloneMetadataMap(m.FederationEntity)
+	return &clone
+}
+
 // TrustMark represents a trust mark issued to an entity.
 type TrustMark struct {
 	// ID is the trust mark identifier.

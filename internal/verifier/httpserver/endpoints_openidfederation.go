@@ -6,24 +6,21 @@ import (
 
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/openidfederation"
-	"github.com/SUNET/vc/pkg/pki"
 	"github.com/gin-gonic/gin"
 )
 
 // endpointOpenIDFederationEntityConfig serves the OpenID Federation entity configuration
 // at /.well-known/openid-federation as a self-signed JWT per OpenID Federation 1.0 §5.2.
+// The underlying *openidfederation.Service (and its signer) is constructed
+// once in New(), not per request.
 func (s *Service) endpointOpenIDFederationEntityConfig(ctx context.Context, c *gin.Context) (any, error) {
-	cfg := s.cfg.Verifier.Federation
-	if cfg == nil || !cfg.Enabled {
-		c.Status(http.StatusNotFound)
+	if s.openidFederationService == nil {
+		c.AbortWithStatus(http.StatusNotFound)
 		return nil, nil
 	}
 
-	signer := pki.NewSignerConfig(s.cfg.Verifier.KeyConfig)
-	svc := openidfederation.NewService(cfg, signer, s.cfg.Verifier.PublicURL)
-
 	// Derive signing algorithm from the actual key configuration
-	jwk, err := signer.GetJWK()
+	alg, err := s.openidFederationService.SigningAlgorithm()
 	if err != nil {
 		return nil, err
 	}
@@ -31,14 +28,14 @@ func (s *Service) endpointOpenIDFederationEntityConfig(ctx context.Context, c *g
 	// Build metadata advertising this service as an OpenID Relying Party (verifier)
 	metadata := &openidfederation.EntityMetadata{
 		OpenIDRelyingParty: buildOpenIDRelyingPartyMetadata(
-			svc.EntityID(),
-			cfg.OrganizationName,
-			jwk.Algorithm,
+			s.openidFederationService.EntityID(),
+			s.cfg.Verifier.OpenIDFederation.OrganizationName,
+			alg,
 			s.cfg.Verifier.PreferredVPFormats,
 		),
 	}
 
-	signed, err := svc.BuildEntityConfiguration(metadata)
+	signed, err := s.openidFederationService.BuildEntityConfiguration(metadata)
 	if err != nil {
 		return nil, err
 	}

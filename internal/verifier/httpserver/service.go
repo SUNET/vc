@@ -18,6 +18,8 @@ import (
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openidfederation"
+	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-contrib/cors"
@@ -45,6 +47,12 @@ type Service struct {
 	tokenLimiter     *middleware.RateLimiter
 	authorizeLimiter *middleware.RateLimiter
 	registerLimiter  *middleware.RateLimiter
+
+	// openidFederationService is nil when OpenID Federation is not enabled.
+	// Built once here rather than per-request, since constructing a signer
+	// forces key material to be (re)loaded every time (expensive, especially
+	// with PKCS#11/HSM).
+	openidFederationService *openidfederation.Service
 }
 
 // New creates a new httpserver service
@@ -226,6 +234,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			s.log.Trace("listen_error", "error", err)
 		}
 	}()
+
+	if fedCfg := cfg.Verifier.OpenIDFederation; fedCfg != nil && fedCfg.Enabled {
+		fedSigner := pki.NewSignerConfig(cfg.Verifier.KeyConfig)
+		s.openidFederationService = openidfederation.New(fedCfg, fedSigner, cfg.Verifier.PublicURL)
+	}
 
 	s.log.Info("Started")
 

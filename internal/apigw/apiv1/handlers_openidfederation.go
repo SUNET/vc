@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/SUNET/vc/pkg/openidfederation"
-	"github.com/SUNET/vc/pkg/pki"
 )
 
 // OpenIDFederationEntityConfigReply carries the signed OpenID Federation entity
@@ -16,15 +15,12 @@ type OpenIDFederationEntityConfigReply struct {
 
 // OpenIDFederationEntityConfig builds and signs the OpenID Federation entity
 // configuration served at /.well-known/openid-federation per OpenID
-// Federation 1.0 §5.2.
+// Federation 1.0 §5.2. The underlying *openidfederation.Service (and its
+// signer) is constructed once in New(), not per request.
 func (c *Client) OpenIDFederationEntityConfig(ctx context.Context) (*OpenIDFederationEntityConfigReply, error) {
-	cfg := c.cfg.APIGW.Federation
-	if cfg == nil || !cfg.Enabled {
+	if c.openidFederationService == nil {
 		return &OpenIDFederationEntityConfigReply{Enabled: false}, nil
 	}
-
-	signer := pki.NewSignerConfig(c.cfg.APIGW.KeyConfig)
-	svc := openidfederation.NewService(cfg, signer, c.cfg.APIGW.PublicURL)
 
 	// Build metadata from existing issuer/OAuth2 metadata
 	metadata := &openidfederation.EntityMetadata{
@@ -39,7 +35,7 @@ func (c *Client) OpenIDFederationEntityConfig(ctx context.Context) (*OpenIDFeder
 		},
 	}
 
-	signed, err := svc.BuildEntityConfiguration(metadata)
+	signed, err := c.openidFederationService.BuildEntityConfiguration(metadata)
 	if err != nil {
 		return nil, err
 	}

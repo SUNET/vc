@@ -135,7 +135,7 @@ func TestServiceEntityIDFallback(t *testing.T) {
 		Enabled: true,
 		// EntityID is empty - should fall back to publicURL
 	}
-	svc := NewService(cfg, nil, "https://fallback.example.com")
+	svc := New(cfg, nil, "https://fallback.example.com")
 	if svc.entityID != "https://fallback.example.com" {
 		t.Errorf("expected entity ID 'https://fallback.example.com', got %q", svc.entityID)
 	}
@@ -242,7 +242,7 @@ func TestBuildEntityConfigurationSignedJWT(t *testing.T) {
 		ChainPath:      certPath,
 	}
 	signer := pki.NewSignerConfig(keyCfg)
-	svc := NewService(cfg, signer, "https://issuer.example.com")
+	svc := New(cfg, signer, "https://issuer.example.com")
 
 	metadata := &EntityMetadata{
 		OpenIDCredentialIssuer: map[string]any{
@@ -340,7 +340,7 @@ func TestBuildEntityConfigurationDoesNotMutateInput(t *testing.T) {
 		OrganizationName: "Test Org",
 		LogoURI:          "https://issuer.example.com/logo.png",
 	}
-	svc1 := NewService(cfg1, signer, "https://issuer.example.com")
+	svc1 := New(cfg1, signer, "https://issuer.example.com")
 
 	if _, err := svc1.BuildEntityConfiguration(metadata); err != nil {
 		t.Fatalf("BuildEntityConfiguration failed: %v", err)
@@ -363,7 +363,7 @@ func TestBuildEntityConfigurationDoesNotMutateInput(t *testing.T) {
 		EntityID:         "https://issuer2.example.com",
 		OrganizationName: "Other Org",
 	}
-	svc2 := NewService(cfg2, signer, "https://issuer2.example.com")
+	svc2 := New(cfg2, signer, "https://issuer2.example.com")
 
 	signed2, err := svc2.BuildEntityConfiguration(metadata)
 	if err != nil {

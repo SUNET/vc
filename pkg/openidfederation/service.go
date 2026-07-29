@@ -5,21 +5,30 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/SUNET/vc/pkg/pki"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// Signer is the subset of *pki.SignerConfig's capability that Service needs
+// to produce a signed entity configuration. Defined here (consumer side)
+// rather than depending on the concrete pki type, so callers can inject
+// their own already-constructed signer instead of Service building one.
+type Signer interface {
+	GetJWK() (*jose.JSONWebKey, error)
+	SignJWT(claims jwt.Claims) (string, error)
+}
 
 // Service produces signed OpenID Federation entity configurations.
 type Service struct {
 	config    *Config
-	signer    *pki.SignerConfig
+	signer    Signer
 	entityID  string
 	publicURL string
 }
 
-// NewService creates a federation service.
+// New creates a federation service.
 // publicURL is used as the entity_id when config.EntityID is empty.
-func NewService(cfg *Config, signer *pki.SignerConfig, publicURL string) *Service {
+func New(cfg *Config, signer Signer, publicURL string) *Service {
 	entityID := cfg.EntityID
 	if entityID == "" {
 		entityID = publicURL
@@ -37,21 +46,15 @@ func (s *Service) EntityID() string {
 	return s.entityID
 }
 
-// cloneMetadata returns a copy of metadata, including fresh copies of its
-// map fields, so that mutating the returned value (e.g. injecting
-// federation_entity fields) never affects the caller's original
-// *EntityMetadata or the maps it holds. A nil metadata yields an empty,
-// non-nil *EntityMetadata.
-func cloneMetadata(metadata *EntityMetadata) *EntityMetadata {
-	if metadata == nil {
-		return &EntityMetadata{}
+// SigningAlgorithm returns the JWT algorithm this service's signer uses,
+// e.g. for advertising request_object_signing_alg in openid_relying_party
+// metadata.
+func (s *Service) SigningAlgorithm() (string, error) {
+	jwk, err := s.signer.GetJWK()
+	if err != nil {
+		return "", fmt.Errorf("federation: get signing JWK: %w", err)
 	}
-	clone := *metadata
-	clone.OpenIDCredentialIssuer = cloneMetadataMap(metadata.OpenIDCredentialIssuer)
-	clone.OAuthAuthorizationServer = cloneMetadataMap(metadata.OAuthAuthorizationServer)
-	clone.OpenIDRelyingParty = cloneMetadataMap(metadata.OpenIDRelyingParty)
-	clone.FederationEntity = cloneMetadataMap(metadata.FederationEntity)
-	return &clone
+	return jwk.Algorithm, nil
 }
 
 // cloneMetadataMap returns a shallow copy of m (a new map with the same
@@ -110,7 +113,7 @@ func (s *Service) BuildEntityConfiguration(metadata *EntityMetadata) (string, er
 	// caller-owned *EntityMetadata in place -- callers may reuse the same
 	// instance across requests, and a "Build" function mutating its input
 	// would be a surprising and hard-to-diagnose side effect.
-	metadata = cloneMetadata(metadata)
+	metadata = metadata.Clone()
 	if s.config.OrganizationName != "" || s.config.LogoURI != "" {
 		if metadata.FederationEntity == nil {
 			metadata.FederationEntity = make(map[string]any)
