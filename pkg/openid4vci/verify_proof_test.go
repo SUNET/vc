@@ -56,7 +56,7 @@ func createJWTProofWithIat(t *testing.T, privateKey *ecdsa.PrivateKey, aud strin
 
 	claims := jwtv5.MapClaims{
 		"aud":   aud,
-		"iat":   iat.Unix(),
+		"iat":   jwtv5.NewNumericDate(iat),
 		"nonce": "test-nonce",
 	}
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
@@ -288,7 +288,7 @@ func TestVerifyJWTProof(t *testing.T) {
 		// A wallet's clock running a few seconds ahead of the server (routine
 		// NTP jitter between two independent systems) must not fail every
 		// credential request outright - see proofIatClockSkew.
-		jwtStr := createJWTProofWithIat(t, privateKey, "https://issuer.example.com", time.Now().Add(10*time.Second))
+		jwtStr := createJWTProofWithIat(t, privateKey, "https://issuer.example.com", time.Now().Add(proofIatClockSkew/3))
 		jwt := ProofJWTToken(jwtStr)
 		opts := &VerifyProofOptions{Audience: "https://issuer.example.com", CNonce: "test-nonce"}
 		err := jwt.Verify(&privateKey.PublicKey, opts)
@@ -296,7 +296,7 @@ func TestVerifyJWTProof(t *testing.T) {
 	})
 
 	t.Run("iat far in the future is rejected", func(t *testing.T) {
-		jwtStr := createJWTProofWithIat(t, privateKey, "https://issuer.example.com", time.Now().Add(5*time.Minute))
+		jwtStr := createJWTProofWithIat(t, privateKey, "https://issuer.example.com", time.Now().Add(proofIatClockSkew+5*time.Minute))
 		jwt := ProofJWTToken(jwtStr)
 		opts := &VerifyProofOptions{Audience: "https://issuer.example.com", CNonce: "test-nonce"}
 		err := jwt.Verify(&privateKey.PublicKey, opts)
