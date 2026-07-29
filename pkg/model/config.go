@@ -147,6 +147,8 @@ type Common struct {
 	Mongo Mongo `yaml:"mongo" validate:"omitempty"`
 	// Tracing is the OpenTelemetry tracing configuration
 	Tracing OTEL `yaml:"tracing" validate:"omitempty"`
+	// Metrics is the OpenTelemetry metrics configuration
+	Metrics OTEL `yaml:"metrics" validate:"omitempty"`
 	// Kafka is the Kafka message broker configuration
 	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
 	// SecretFilePath is the path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.
