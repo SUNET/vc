@@ -28,6 +28,10 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		return nil, err
 	}
 
+	// Extract OAuth-Client-Attestation headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1)
+	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
+	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+
 	reply, err := s.apiv1.OAuthPar(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -124,6 +128,10 @@ func (s *Service) endpointOAuthToken(ctx context.Context, c *gin.Context) (any, 
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	// Extract OAuth-Client-Attestation headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1)
+	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
+	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
 
 	reply, err := s.apiv1.OAuthToken(ctx, request)
 	if err != nil {
