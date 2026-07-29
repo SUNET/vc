@@ -36,10 +36,13 @@ RUN make proto-${SERVICE_NAME}
 # GO_BUILD_TAGS is optional - if set, adds -tags flag
 # CGO defaults to disabled for static builds. Pass --build-arg CGO_ENABLED=1
 # for features that require CGO (e.g. pkcs11 HSM support).
+# TARGETARCH is automatically set by Docker buildx for multi-platform builds;
+# defaults to amd64 for plain docker build.
 ARG CGO_ENABLED=0
+ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=amd64 go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
+    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH} go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
     "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
     -X vc/pkg/model.BuildVariableTimestamp=$(date +'%F:T%TZ') \
