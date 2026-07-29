@@ -126,7 +126,10 @@ func NewValidator() (*validator.Validate, error) {
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
 	// Per RFC 8252 §7.3: loopback redirect URIs MUST be allowed for native clients.
-	// Non-loopback private IPs are blocked to prevent SSRF.
+	// No DNS resolution or SSRF check: redirect URIs are never fetched
+	// server-side — the browser follows them. Blocking unresolvable
+	// hostnames would reject valid registrations (e.g. any TLD not in the
+	// verifier's DNS).
 	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -146,28 +149,15 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		hostname := parsedURL.Hostname()
-		if hostname == "" {
-			return false
-		}
-
-		// Per RFC 8252 §7.3: loopback redirect URIs (localhost, 127.0.0.1, [::1])
-		// MUST be allowed for native OAuth 2.0 clients.
-		lowerHost := strings.ToLower(hostname)
-		if lowerHost == "localhost" || lowerHost == "127.0.0.1" || lowerHost == "::1" {
-			return true
-		}
-
-		// Resolve hostname and block private/loopback IPs
-		ips, err := net.LookupIP(hostname)
-		if err != nil {
-			// If we can't resolve, allow — it may be a custom scheme (e.g. eudi-wallet://)
-			// Custom schemes won't have a resolvable hostname
-			return parsedURL.Scheme != "http" && parsedURL.Scheme != "https"
-		}
-
-		for _, ip := range ips {
-			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		// For http/https, require a hostname. For custom schemes (native apps
+		// per RFC 8252 §7.1), only require that the URI has content beyond the scheme.
+		if parsedURL.Scheme == "http" || parsedURL.Scheme == "https" {
+			if parsedURL.Hostname() == "" {
+				return false
+			}
+		} else {
+			// Custom scheme: must have an opaque part or path (e.g. com.example.app:/callback)
+			if parsedURL.Host == "" && parsedURL.Path == "" && parsedURL.Opaque == "" {
 				return false
 			}
 		}

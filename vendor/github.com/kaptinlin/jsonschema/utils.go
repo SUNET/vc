@@ -8,6 +8,8 @@ import (
 	"path"
 	"reflect"
 	"strings"
+
+	"github.com/kaptinlin/jsonpointer"
 )
 
 // replace substitutes placeholders in a template string with actual parameter values.
@@ -148,6 +150,11 @@ func isAbsoluteURI(rawURL string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
+func hasURIScheme(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && u.Scheme != ""
+}
+
 // getBaseURI extracts the base URL from an $id URI, falling back if not valid.
 func getBaseURI(id string) string {
 	if id == "" {
@@ -182,7 +189,11 @@ func splitRef(ref string) (baseURI string, anchor string) {
 	return ref, ""
 }
 
-// isJSONPointer checks if a string is a JSON Pointer.
+// isJSONPointer checks if a non-empty string is a valid JSON Pointer.
 func isJSONPointer(s string) bool {
-	return strings.HasPrefix(s, "/")
+	if s == "" {
+		return false
+	}
+	_, err := jsonpointer.Parse(s)
+	return err == nil
 }

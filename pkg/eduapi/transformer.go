@@ -1,8 +1,9 @@
 package eduapi
 
-import "maps"
-
-import "strings"
+import (
+	"maps"
+	"strings"
+)
 
 // Flatten converts a Person into a flat map suitable for claim transformation.
 func (p *Person) Flatten() map[string]any {

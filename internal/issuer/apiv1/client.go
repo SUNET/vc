@@ -200,6 +200,35 @@ func (c *Client) loadCertificateChain(path string) ([]*x509.Certificate, error) 
 	return certs, nil
 }
 
+// GetIACAs returns the IACA certificates from the mDOC certificate chain.
+// IACA certificates are the non-leaf certificates (index 1+) in the chain.
+func (c *Client) GetIACAs(_ context.Context) (*apiv1_issuer.GetIACAsReply, error) {
+	if c.mdocIssuer == nil {
+		return nil, fmt.Errorf("mDOC issuer not configured")
+	}
+
+	chain := c.mdocIssuer.CertificateChain()
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("empty certificate chain")
+	}
+
+	// IACA certs are everything after the DS (leaf) cert.
+	// If only one cert (self-signed), return it as the IACA.
+	startIdx := 1
+	if len(chain) == 1 {
+		startIdx = 0
+	}
+
+	reply := &apiv1_issuer.GetIACAsReply{
+		Certificates: make([][]byte, 0, len(chain)-startIdx),
+	}
+	for i := startIdx; i < len(chain); i++ {
+		reply.Certificates = append(reply.Certificates, chain[i].Raw)
+	}
+
+	return reply, nil
+}
+
 // Close closes all client connections
 func (c *Client) Close() error {
 	if c.registryConn != nil {

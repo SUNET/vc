@@ -19,6 +19,7 @@ import (
 
 // UICredentialInfo is a sanitized view of a credential for the UI.
 type UICredentialInfo struct {
+	Format     string                          `json:"format"`
 	VCT        string                          `json:"vct"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
@@ -62,6 +63,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 
 	for scope, constructor := range c.cfg.Common.CredentialMetadata {
 		info := &UICredentialInfo{
+			Format:     constructor.Format,
 			Attributes: constructor.GetAttributes(),
 		}
 		if v := constructor.GetVCTURL(); v != "" {
