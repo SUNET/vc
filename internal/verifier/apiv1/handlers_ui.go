@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -220,9 +219,9 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// them using the VCTM so wallets disclose nested content correctly.
 	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
-	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	uiClientID, err := c.cfg.Verifier.VerifierClientID()
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		return nil, fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
 
 	authorizationContext := &cache.AuthorizationContext{
@@ -233,7 +232,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		WalletURI:           "",
 		Forfeited:           false,
 		State:               state,
-		ClientID:            fmt.Sprintf("x509_san_dns:%s", host),
+		ClientID:            uiClientID,
 		ExpiresAt:           0,
 		CodeChallenge:       "",
 		CodeChallengeMethod: "",
@@ -260,7 +259,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	requestObject := &openid4vp.RequestObject{
 		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
-		ISS:          host,
+		ISS:          uiClientID,
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post.jwt",
