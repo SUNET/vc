@@ -50,6 +50,28 @@ func createValidJWTProof(t *testing.T, privateKey *ecdsa.PrivateKey, aud string)
 	return signedToken
 }
 
+// createJWTProofWithIat creates a JWT proof with an explicit iat, to test clock-skew tolerance.
+func createJWTProofWithIat(t *testing.T, privateKey *ecdsa.PrivateKey, aud string, iat time.Time) string {
+	t.Helper()
+
+	claims := jwtv5.MapClaims{
+		"aud":   aud,
+		"iat":   jwtv5.NewNumericDate(iat),
+		"nonce": "test-nonce",
+	}
+	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
+	token.Header["typ"] = "openid4vci-proof+jwt"
+	token.Header["jwk"] = map[string]any{
+		"kty": "EC",
+		"crv": "P-256",
+		"x":   "test-x",
+		"y":   "test-y",
+	}
+	signedToken, err := token.SignedString(privateKey)
+	require.NoError(t, err)
+	return signedToken
+}
+
 func TestProofTypes(t *testing.T) {
 	tts := []struct {
 		name   string
@@ -260,6 +282,26 @@ func TestVerifyJWTProof(t *testing.T) {
 		err := jwt.Verify(&privateKey.PublicKey, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid_credential_request")
+	})
+
+	t.Run("iat slightly ahead of server clock is tolerated", func(t *testing.T) {
+		// A wallet's clock running a few seconds ahead of the server (routine
+		// NTP jitter between two independent systems) must not fail every
+		// credential request outright - see proofIatClockSkew.
+		jwtStr := createJWTProofWithIat(t, privateKey, "https://issuer.example.com", time.Now().Add(proofIatClockSkew/3))
+		jwt := ProofJWTToken(jwtStr)
+		opts := &VerifyProofOptions{Audience: "https://issuer.example.com", CNonce: "test-nonce"}
+		err := jwt.Verify(&privateKey.PublicKey, opts)
+		assert.NoError(t, err)
+	})
+
+	t.Run("iat far in the future is rejected", func(t *testing.T) {
+		jwtStr := createJWTProofWithIat(t, privateKey, "https://issuer.example.com", time.Now().Add(proofIatClockSkew+5*time.Minute))
+		jwt := ProofJWTToken(jwtStr)
+		opts := &VerifyProofOptions{Audience: "https://issuer.example.com", CNonce: "test-nonce"}
+		err := jwt.Verify(&privateKey.PublicKey, opts)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "iat claim value is in the future")
 	})
 
 	t.Run("nonce validation", func(t *testing.T) {
