@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -102,10 +103,36 @@ func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequ
 
 	vctm := credMeta.GetVCTM()
 	if vctm == nil {
+		if credMeta.GetMDDL() != nil {
+			// mso_mdoc scopes have no VCTM by design - a nil, nil result lets
+			// callers (e.g. UserLookup) skip VCTM-based rendering instead of
+			// treating this as an error.
+			return nil, nil
+		}
 		return nil, fmt.Errorf("VCTM not loaded for scope: %s", req.Scope)
 	}
 
 	return vctm, nil
+}
+
+type GetMDDLFromScopeRequest struct {
+	Scope string `validate:"required"`
+}
+
+// GetMDDLFromScope returns the MDDL schema for a scope, or (nil, nil) when
+// the scope is sd-jwt/VCTM-based instead - mirrors GetVCTMFromScope.
+func (c *Client) GetMDDLFromScope(ctx context.Context, req *GetMDDLFromScopeRequest) (*mdoc.MDDLSchema, error) {
+	credMeta, ok := c.cfg.Common.CredentialMetadata[req.Scope]
+	if !ok {
+		return nil, errors.New("scope is not valid credential")
+	}
+
+	mddl := credMeta.GetMDDL()
+	if mddl == nil && credMeta.GetVCTM() == nil {
+		return nil, fmt.Errorf("MDDL not loaded for scope: %s", req.Scope)
+	}
+
+	return mddl, nil
 }
 
 // TypeMetadataRequest holds the request for serving locally-published VCTM.
@@ -118,6 +145,14 @@ func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (js
 	constructor := c.cfg.GetCredentialMetadata(req.Scope)
 	if constructor == nil {
 		return nil, errors.New("unknown scope: " + req.Scope)
+	}
+
+	if constructor.IsLocalMDDL() {
+		raw := constructor.GetMDDLRaw()
+		if raw == nil {
+			return nil, errors.New("MDDL not loaded for scope: " + req.Scope)
+		}
+		return json.RawMessage(raw), nil
 	}
 
 	if !constructor.IsLocalVCTM() {

@@ -205,7 +205,7 @@ func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
 
 	err := client.CreateCredentialOfferLookupMetadata(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `credential constructor for scope "diploma" has no VCTM configured`)
+	assert.Contains(t, err.Error(), `credential constructor for scope "diploma" has no VCTM or MDDL configured`)
 }
 
 func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
@@ -235,7 +235,7 @@ func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
 
 	err := client.CreateCredentialOfferLookupMetadata(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `credential constructor for scope "empty_scope" has no VCTM configured`)
+	assert.Contains(t, err.Error(), `credential constructor for scope "empty_scope" has no VCTM or MDDL configured`)
 }
 
 func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) {
@@ -272,7 +272,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 
 	err := client.CreateCredentialOfferLookupMetadata(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "has no VCTM configured")
+	assert.Contains(t, err.Error(), "has no VCTM or MDDL configured")
 }
 
 func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {

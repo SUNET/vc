@@ -397,6 +397,17 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, err
 	}
+	if vctm == nil {
+		// mso_mdoc scopes have no VCTM (and no SVG-template concept at all -
+		// see MDDLSchema) - GetVCTMFromScope returns (nil, nil) for them
+		// rather than an error, so this must be checked separately to avoid
+		// passing a nil VCTM into SVGTemplateReply below.
+		err := errors.New("scope has no SVG templates (mso_mdoc credential)")
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Debug(err.Error(), "scope", scope)
+		c.AbortWithStatus(http.StatusBadRequest)
+		return nil, err
+	}
 
 	svgTemplateRequest := &apiv1.SVGTemplateRequest{
 		VCTM: vctm,

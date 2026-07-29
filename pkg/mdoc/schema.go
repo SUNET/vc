@@ -92,6 +92,44 @@ func (s *MDDLSchema) Attributes() map[string]map[string][]*string {
 	return reply
 }
 
+// Presentation resolves MDDL claims against document data and returns a flat
+// map suitable for the consent preview UI, mirroring VCTM.Presentation's
+// {label, value} shape. Document data (e.g. from the datastore) is flat -
+// keyed by element ID directly, not nested under the mdoc namespace - so
+// only the element ID (the path's second segment, per Attributes()) is used
+// for lookup.
+func (s *MDDLSchema) Presentation(data map[string]any) map[string]any {
+	if data == nil || len(s.Claims) == 0 {
+		return nil
+	}
+
+	labels := s.Attributes()[defaultLocale]
+	if labels == nil {
+		for _, m := range s.Attributes() {
+			labels = m
+			break
+		}
+	}
+
+	result := map[string]any{}
+	for label, path := range labels {
+		if len(path) < 2 || path[1] == nil {
+			continue
+		}
+		elementID := *path[1]
+		value, ok := data[elementID]
+		if !ok {
+			continue
+		}
+		result[elementID] = map[string]any{
+			"label": label,
+			"value": value,
+		}
+	}
+
+	return result
+}
+
 // LoadMDDLSchema parses and validates a raw MDDL (mso_mdoc) schema document.
 func LoadMDDLSchema(raw []byte) (*MDDLSchema, error) {
 	var schema MDDLSchema

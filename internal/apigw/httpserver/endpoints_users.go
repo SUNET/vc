@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
 
@@ -59,6 +60,16 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 		return nil, err
 	}
 
+	var mddl *mdoc.MDDLSchema
+	if vctm == nil {
+		mddl, err = s.apiv1.GetMDDLFromScope(ctx, &apiv1.GetMDDLFromScopeRequest{Scope: scope})
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			s.log.Error(err, "endpointUserLookup: error getting MDDL from scope")
+			return nil, err
+		}
+	}
+
 	requestURI, ok := session.Get("request_uri").(string)
 	if !ok {
 		err := errors.New("request_uri not found in session")
@@ -83,6 +94,7 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 
 	request.AuthProvider = authProvider
 	request.VCTM = vctm
+	request.MDDL = mddl
 
 	switch authProvider {
 	case model.AuthProviderOpenID4VP:
