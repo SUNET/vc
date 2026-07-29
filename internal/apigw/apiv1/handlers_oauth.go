@@ -15,6 +15,9 @@ import (
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/google/uuid"
 )
 
@@ -214,6 +217,7 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 //	@Failure		400		{object}	helpers.ErrorResponse		"Bad Request"
 //	@Router			/token [post]
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
+	start := time.Now()
 	c.log.Debug("OAuthToken", "grant_type", req.GrantType)
 
 	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
@@ -605,6 +609,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	c.log.Debug("OAuthToken complete")
+
+	if c.vciMetrics != nil {
+		grantTypeAttr := metric.WithAttributes(attribute.String("grant_type", req.GrantType))
+		c.vciMetrics.TokensIssued.Add(ctx, 1, grantTypeAttr)
+		c.vciMetrics.TokenLatency.Record(ctx, time.Since(start).Seconds(), grantTypeAttr)
+	}
+
 	return reply, nil
 }
 

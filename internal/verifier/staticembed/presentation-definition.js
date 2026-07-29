@@ -1,8 +1,15 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
+import {
+    configure as configureDCAPI,
+    requestCredential,
+    isNativeDCAPIAvailable,
+    getBestSupportedProtocol,
+} from "./dc-api-polyfill.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
+    format: v.string(),
     vct: v.string(),
     attributes: v.record(
         v.string(),
@@ -78,6 +85,7 @@ const credentialsList = v.record(
 const metadataResponseSchema = v.object({
     credentials: credentialsList,
     supported_wallets: v.record(v.string(), v.string()),
+    dc_api_enabled: v.optional(v.boolean(), false),
     presets: v.optional(v.record(v.string(), v.object({
         label: v.string(),
         credentials: v.array(v.object({
@@ -201,7 +209,10 @@ Alpine.data("app", () => ({
     /** @type {Record<string, string> | null} */
     walletInstances: null,
 
-     /** @type {{ id: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+    /** @type {boolean} Whether the server has opted in to native DC API attempts. */
+    dcApiEnabled: false,
+
+     /** @type {{ id: string; format: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /** 
@@ -244,6 +255,7 @@ Alpine.data("app", () => ({
 
         this.credentialsList = data.credentials;
         this.walletInstances = data.supported_wallets;
+        this.dcApiEnabled = data.dc_api_enabled;
 
         // Load presets from backend config
         if (data.presets) {
@@ -336,6 +348,7 @@ Alpine.data("app", () => ({
 
         this.credentialAttributes = {
             id: credential,
+            format: chosenCredential.format,
             vct: chosenCredential.vct,
             claims,
             claimTree: buildClaimTree(claims),
@@ -409,7 +422,7 @@ Alpine.data("app", () => ({
         /** @satisfies {DCQLQueryCredential} */
         const credential = {
             id: this.credentialAttributes.id,
-            format: "dc+sd-jwt",
+            format: this.credentialAttributes.format,
             meta: {
                 vct_values: [this.credentialAttributes.vct]
             },
@@ -456,30 +469,70 @@ Alpine.data("app", () => ({
                 },
             );
 
-            // Start SSE listener AFTER interaction call sets session_id
-            if (!this.notifyEventSource) {
-                console.log("Starting SSE notify listener from sendDcqlQuery");
-                this.notifyEventSource = setupNotifyListener();
-                console.log("SSE notify listener started, eventSource:", this.notifyEventSource);
-            }
-
             this.presentationDefinition = v.parse(presentationDefinitionSchema, res);
 
-            const presDefURI = new URL(this.presentationDefinition.authorization_request);
+            // Configure the DC API polyfill with server-side session info
+            configureDCAPI({
+                baseUrl: baseUrl.toString(),
+                sseUrl: new URL("/ui/notify", baseUrl).toString(),
+                webWallets: this.walletInstances,
+            });
 
-            for (const [label, url] of Object.entries(this.walletInstances)) {
-                const uri = new URL(url);
+            // Try native DC API first
+            if (await this._tryNativeDCAPI()) return;
 
-                uri.search = presDefURI.search
-                uri.hash = presDefURI.hash
-
-                if (!this.redirectUris) this.redirectUris = {};
-
-                this.redirectUris[`Open with ${label}`] = uri.toString();
-            }
+            // Fallback: show QR code + wallet links + SSE listener
+            this._setupFallbackFlow();
         } catch (error) {
             this.error = `Error during posting of dcql query: ${error}`;
-            return;
+        }
+    },
+
+    /**
+     * Attempt credential request via native DC API.
+     * @returns {Promise<boolean>} true if handled, false to fall through
+     */
+    async _tryNativeDCAPI() {
+        if (!this.dcApiEnabled) return false;
+        if (!isNativeDCAPIAvailable() || !getBestSupportedProtocol()) return false;
+
+        try {
+            const abortController = new AbortController();
+            this._dcAbort = abortController;
+
+            const result = await requestCredential(
+                this.presentationDefinition.authorization_request,
+                { signal: abortController.signal },
+            );
+
+            if (result.data?.redirect_uri) {
+                globalThis.location.href = result.data.redirect_uri;
+                return true;
+            }
+            return false;
+        } catch (err) {
+            if (err.name === 'AbortError') return true;
+            console.log("DC API not available or failed, falling back to QR/links:", err.message);
+            return false;
+        }
+    },
+
+    /** Set up QR + wallet links + SSE fallback flow. */
+    _setupFallbackFlow() {
+        if (!this.notifyEventSource) {
+            console.log("Starting SSE notify listener from sendDcqlQuery");
+            this.notifyEventSource = setupNotifyListener();
+        }
+
+        const presDefURI = new URL(this.presentationDefinition.authorization_request);
+
+        for (const [label, url] of Object.entries(this.walletInstances)) {
+            const uri = new URL(url);
+            uri.search = presDefURI.search;
+            uri.hash = presDefURI.hash;
+
+            if (!this.redirectUris) this.redirectUris = {};
+            this.redirectUris[`Open with ${label}`] = uri.toString();
         }
     },
 

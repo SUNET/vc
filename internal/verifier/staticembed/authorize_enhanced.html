@@ -390,13 +390,21 @@
         </div>
     </div>
 
+    <script type="importmap">
+    {
+        "imports": {
+            "@sirosfoundation/dc-api": "/static/dc-api.js"
+        }
+    }
+    </script>
     <script type="module">
         import { 
-            DigitalCredentialsClient, 
-            isDigitalCredentialsSupported,
-            isMobileDevice,
+            configure as configureDCAPI,
+            requestCredential,
+            isNativeDCAPIAvailable,
+            getBestSupportedProtocol,
             getUserFriendlyErrorMessage
-        } from '/static/digital-credentials.js';
+        } from '/static/dc-api-polyfill.js';
 
         // Configuration from server
         const config = {
@@ -412,6 +420,18 @@
             credentialDisplayRequired: {{.Config.CredentialDisplay.RequireConfirmation}}
         };
 
+        // Configure the DC API polyfill
+        configureDCAPI({
+            baseUrl: config.baseUrl,
+            sessionId: config.sessionId,
+            requestObjectUrl: config.useJAR
+                ? `${config.baseUrl}/verification/request-object/${config.sessionId}`
+                : undefined,
+            directPostUrl: `${config.baseUrl}/verification/direct_post`,
+            pollUrl: `${config.baseUrl}/poll/${config.sessionId}`,
+            deepLinkScheme: config.deepLinkScheme || 'openid4vp://',
+        });
+
         // UI elements
         const statusPending = document.getElementById('status-pending');
         const statusSuccess = document.getElementById('status-success');
@@ -426,9 +446,9 @@
         const btnShowQR = document.getElementById('btn-show-qr');
         const showCredentialDetailsCheckbox = document.getElementById('show-credential-details');
 
-        // Check browser capabilities
-        const hasDCSupport = isDigitalCredentialsSupported();
-        const isMobile = isMobileDevice();
+        // Check browser capabilities — DC API with openid4vp protocol support
+        const hasDCSupport = isNativeDCAPIAvailable() && getBestSupportedProtocol() !== null;
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         // Initialize UI based on capabilities
         function initializeUI() {
@@ -461,24 +481,64 @@
                 // Save credential display preference before invoking wallet
                 await saveDisplayPreference();
 
-                showLoader('Requesting credential from browser wallet...');
+                showLoader('Requesting credential from wallet...');
 
-                const client = new DigitalCredentialsClient({
-                    ...config,
-                    onProgress: (message) => {
-                        console.log('Progress:', message);
-                        showLoader(message);
-                    },
-                    onError: (error) => {
-                        console.error('DC API Error:', error);
-                        handleError(error);
-                    },
-                    onSuccess: (message) => {
-                        showSuccess(message);
-                    }
+                // Fetch the authorization request (signed JWT or plain object)
+                const endpoint = config.useJAR
+                    ? `/verification/request-object/${config.sessionId}`
+                    : `/verification/request/${config.sessionId}`;
+                const accept = config.useJAR
+                    ? 'application/oauth-authz-req+jwt'
+                    : 'application/json';
+
+                const reqResponse = await fetch(`${config.baseUrl}${endpoint}`, {
+                    method: 'GET',
+                    headers: { 'Accept': accept },
                 });
 
-                await client.requestCredential();
+                if (!reqResponse.ok) {
+                    throw new Error(`Failed to fetch authorization request: ${reqResponse.status}`);
+                }
+
+                const authRequest = config.useJAR
+                    ? await reqResponse.text()
+                    : await reqResponse.json();
+
+                // Use polyfill — it tries native DC API first, then falls back
+                const credential = await requestCredential(authRequest);
+
+                showLoader('Submitting credential...');
+
+                // Submit credential response to verifier
+                const body = new URLSearchParams({
+                    response: typeof credential.data === 'string'
+                        ? credential.data
+                        : JSON.stringify(credential.data),
+                    state: config.sessionId,
+                });
+
+                const submitResponse = await fetch(`${config.baseUrl}/verification/direct_post`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body,
+                });
+
+                if (!submitResponse.ok) {
+                    const errorText = await submitResponse.text();
+                    throw new Error(`Failed to submit credential: ${submitResponse.status} - ${errorText}`);
+                }
+
+                if (submitResponse.redirected) {
+                    window.location.href = submitResponse.url;
+                    return;
+                }
+
+                const result = await submitResponse.json();
+                if (result.redirect_uri) {
+                    window.location.href = result.redirect_uri;
+                } else {
+                    showSuccess('Credential verified successfully!');
+                }
 
             } catch (error) {
                 handleError(error);

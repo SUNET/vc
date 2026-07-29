@@ -22,11 +22,13 @@ func TestUIMetadata(t *testing.T) {
 		name              string
 		credentials       map[string]*model.CredentialMetadata
 		supportedWallets  map[string]string
+		dcAPIEnabled      bool
 		expectCredentials int
 		expectWallets     int
 	}{
 		{
-			name: "with credentials and wallets",
+			name:         "with credentials and wallets",
+			dcAPIEnabled: true,
 			credentials: map[string]*model.CredentialMetadata{
 				"pid": {
 					VCTMFilePath: "/path/to/vctm",
@@ -55,7 +57,8 @@ func TestUIMetadata(t *testing.T) {
 			expectWallets:     0,
 		},
 		{
-			name: "credentials only",
+			name:         "credentials only",
+			dcAPIEnabled: true,
 			credentials: map[string]*model.CredentialMetadata{
 				"ehic": {
 					VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
@@ -74,7 +77,8 @@ func TestUIMetadata(t *testing.T) {
 					CredentialMetadata: tt.credentials,
 				},
 				Verifier: &model.Verifier{
-					SupportedWallets: tt.supportedWallets,
+					SupportedWallets:   tt.supportedWallets,
+					DigitalCredentials: model.DigitalCredentialsConfig{Enable: tt.dcAPIEnabled},
 				},
 			}
 
@@ -87,14 +91,19 @@ func TestUIMetadata(t *testing.T) {
 			assert.NoError(t, err)
 			require.NotNil(t, reply)
 
+			assert.Equal(t, tt.dcAPIEnabled, reply.DCAPIEnabled, "DCAPIEnabled should mirror verifier.digital_credentials.enable")
+
 			if tt.expectCredentials == 0 {
 				assert.Len(t, reply.Credentials, 0)
 			} else {
 				assert.Len(t, reply.Credentials, tt.expectCredentials)
 				for scope, cred := range reply.Credentials {
 					srcCred := tt.credentials[scope]
-					if srcCred != nil && srcCred.VCTM != nil {
-						assert.Equal(t, srcCred.VCTM.VCT, cred.VCT, "VCT should be populated from VCTM")
+					if srcCred != nil {
+						assert.Equal(t, srcCred.Format, cred.Format, "Format should be populated from credential metadata")
+						if srcCred.VCTM != nil {
+							assert.Equal(t, srcCred.VCTM.VCT, cred.VCT, "VCT should be populated from VCTM")
+						}
 					}
 				}
 			}
@@ -291,16 +300,50 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 	assert.Equal(t, openid4vp.FormatSDJWTVC, preset.Credentials[0].Format)
 }
 
+// TestUIMetadataCredentialFormatFromMetadata verifies that each credential
+// advertised to the UI carries the format from credential_metadata, so custom
+// presentation requests can use the correct DCQL format (e.g. mso_mdoc).
+func TestUIMetadataCredentialFormatFromMetadata(t *testing.T) {
+	ctx := t.Context()
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format: openid4vp.FormatSDJWTVC,
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"mdl": {
+					Format: openid4vp.FormatMsoMdoc,
+					VCTM:   &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	require.Len(t, reply.Credentials, 2)
+	assert.Equal(t, openid4vp.FormatSDJWTVC, reply.Credentials["pid"].Format)
+	assert.Equal(t, openid4vp.FormatMsoMdoc, reply.Credentials["mdl"].Format)
+}
+
 // TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure verifies that augmentDCQLFromVCTM
 // removes the parent path when an array-element path (with null) is also present,
 // so the wallet discloses individual array elements instead of only the opaque parent.
 func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 	tests := []struct {
-		name           string
-		vctmClaims     []sdjwtvc.Claim
-		inputClaims    []openid4vp.ClaimQuery
-		expectedPaths  [][]*string
-		removedPaths   [][]*string
+		name          string
+		vctmClaims    []sdjwtvc.Claim
+		inputClaims   []openid4vp.ClaimQuery
+		expectedPaths [][]*string
+		removedPaths  [][]*string
 	}{
 		{
 			name: "parent removed when array-element path present",
@@ -636,7 +679,7 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 		inputClaims      []openid4vp.ClaimQuery
 		expectedPaths    [][]*string
 		expectedDCQLJSON []string // expected JSON for each claim after marshal
-		expectedValues   []any   // expected resolved values from the credential
+		expectedValues   []any    // expected resolved values from the credential
 	}{
 		{
 			name: "array of objects element field: degrees null type",

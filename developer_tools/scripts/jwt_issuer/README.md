@@ -33,6 +33,10 @@ make release-jwt-issuer BUMP=patch   # or minor, major
   -jwt-out my-token.jwt \
   -jwk-out my-jwks.json \
   -priv-out my-private.jwk
+
+# Reuse an existing private key (avoids generating a new key each run)
+./bin/jwt_issuer \
+  -priv-in my-private.jwk
 ```
 
 ## Flags
@@ -49,6 +53,7 @@ make release-jwt-issuer BUMP=patch   # or minor, major
 | `-kid`      | `test-key-1`                       | Key ID in JWKS                       |
 | `-jwt-out`  | `token.jwt`                        | Output file for the signed JWT       |
 | `-jwk-out`  | `jwks.json`                        | Output file for the JWKS             |
+| `-priv-in`  | (none)                             | Input file for an existing private JWK (reuse key) |
 | `-priv-out` | (none)                             | Output file for the private JWK      |
 
 ## Example apigw config

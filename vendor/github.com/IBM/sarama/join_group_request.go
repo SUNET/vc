@@ -158,10 +158,13 @@ func (r *JoinGroupRequest) decode(pd packetDecoder, version int16) (err error) {
 	if err != nil {
 		return err
 	}
+	if n < 0 {
+		return errInvalidArrayLength
+	}
 
 	if n > 0 {
 		r.GroupProtocols = make(map[string][]byte)
-		for i := 0; i < n; i++ {
+		for range n {
 			protocol := &GroupProtocol{}
 			if err := protocol.decode(pd); err != nil {
 				return err

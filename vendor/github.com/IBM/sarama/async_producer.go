@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eapache/go-resiliency/breaker"
@@ -114,6 +115,11 @@ type asyncProducer struct {
 	// muter ensures per-partition ordering by preventing concurrent in-flight requests,
 	// mirroring Kafka's RecordAccumulator.
 	muter *partitionMuter
+
+	// done is closed on shutdown so a retryBatch goroutine blocked handing a muted
+	// batch to a broker can release the mute and fail instead of waiting forever.
+	done   chan struct{}
+	closed atomic.Bool
 
 	metricsRegistry metrics.Registry
 }
@@ -314,6 +320,7 @@ func newAsyncProducer(client Client) (AsyncProducer, error) {
 		input:           make(chan *ProducerMessage),
 		successes:       make(chan *ProducerMessage),
 		retries:         make(chan *ProducerMessage),
+		done:            make(chan struct{}),
 		brokers:         make(map[*Broker]*brokerProducer),
 		brokerRefs:      make(map[*brokerProducer]int),
 		txnmgr:          txnmgr,
@@ -357,7 +364,7 @@ type ProducerMessage struct {
 	// will be available when receiving on the Successes and Errors channels.
 	// Sarama completely ignores this field and is only to be used for
 	// pass-through data.
-	Metadata interface{}
+	Metadata any
 
 	// Below this point are filled in by the producer as the message is processed
 
@@ -1504,8 +1511,15 @@ func (p *asyncProducer) retryBatch(topic string, partition int32, pSet *partitio
 		}
 	}
 	bp := p.getBrokerProducer(leader)
-	bp.output <- produceSet
-	p.unrefBrokerProducer(leader, bp)
+	defer p.unrefBrokerProducer(leader, bp)
+	select {
+	case bp.output <- produceSet:
+	case <-p.done:
+		for _, msg := range pSet.msgs {
+			p.returnError(msg, ErrShuttingDown)
+		}
+		p.muter.unmute(produceSet)
+	}
 }
 
 func (bp *brokerProducer) handleError(sent *produceSet, err error) {
@@ -1529,7 +1543,7 @@ func (bp *brokerProducer) handleError(sent *produceSet, err error) {
 			retryTopicSeen[topic] = struct{}{}
 			retryTopics = append(retryTopics, topic)
 		})
-		if bp.parent.conf.Producer.Idempotent && len(retryTopics) > 0 {
+		if len(retryTopics) > 0 {
 			refreshErr := bp.parent.client.RefreshMetadata(retryTopics...)
 			if refreshErr != nil {
 				Logger.Printf("Failed refreshing metadata because of %v\n", refreshErr)
@@ -1542,15 +1556,13 @@ func (bp *brokerProducer) handleError(sent *produceSet, err error) {
 				bp.currentRetries[topic] = make(map[int32]error)
 			}
 			bp.currentRetries[topic][partition] = err
-			if bp.parent.conf.Producer.Idempotent {
-				if keepMuted[topic] == nil {
-					keepMuted[topic] = make(map[int32]struct{})
-				}
-				keepMuted[topic][partition] = struct{}{}
-				go bp.parent.retryBatch(topic, partition, pSet, err, true)
-			} else {
-				bp.parent.retryMessages(pSet.msgs, err)
+			// retry directly so the batch stays muted; retryMessages would release
+			// the mute and let a later same-partition batch flush ahead of it
+			if keepMuted[topic] == nil {
+				keepMuted[topic] = make(map[int32]struct{})
 			}
+			keepMuted[topic][partition] = struct{}{}
+			go bp.parent.retryBatch(topic, partition, pSet, err, true)
 		})
 		bp.accumulatingBatch.eachPartition(func(topic string, partition int32, pSet *partitionSet) {
 			bp.parent.retryMessages(pSet.msgs, err)
@@ -1634,6 +1646,9 @@ func (p *asyncProducer) retryHandler() {
 
 func (p *asyncProducer) shutdown() {
 	Logger.Println("Producer shutting down.")
+	if p.done != nil && p.closed.CompareAndSwap(false, true) {
+		close(p.done)
+	}
 	p.inFlight.Add(1)
 	p.input <- &ProducerMessage{flags: shutdown}
 

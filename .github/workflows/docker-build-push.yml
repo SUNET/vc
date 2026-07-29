@@ -1,0 +1,130 @@
+name: Build and Publish Docker Images
+
+# Builds multi-arch container images for all services and pushes to GHCR.
+# Includes Trivy CVE scanning with SARIF upload to the Security tab.
+#
+# Triggers:
+#   - Semver tags (v*.*.*): automatic build and push
+#   - workflow_dispatch: manual build from any git ref
+#
+# Images: ghcr.io/<owner>/vc/{verifier,registry,apigw,issuer}
+
+on:
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'Git ref to build (tag, branch, or SHA)'
+        required: true
+        default: 'main'
+      image_tag:
+        description: 'Custom image tag (auto-derived from ref if empty)'
+        required: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [verifier, registry, apigw, issuer]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name
+        id: image
+        run: |
+          # Lowercase the full repository path for GHCR compatibility
+          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=${{ env.REGISTRY }}/${REPO}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata
+        id: meta
+        if: github.event_name != 'workflow_dispatch' || inputs.image_tag == ''
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        with:
+          context: git
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Compute custom tag
+        id: custom-tag
+        if: github.event_name == 'workflow_dispatch' && inputs.image_tag != ''
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          SAFE_TAG=$(echo "${IMAGE_TAG}" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9._-]/-/g' \
+            | sed 's/[-._]\{2,\}/-/g' \
+            | sed 's/^[-._]\+//; s/[-._]\+$//' \
+            | cut -c1-128 \
+          )
+          if [[ -z "${SAFE_TAG}" ]]; then
+            echo "::error::image_tag '${IMAGE_TAG}' produced an empty tag after sanitization"
+            exit 1
+          fi
+          echo "tags=${{ steps.image.outputs.name }}:${SAFE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${SAFE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        with:
+          context: .
+          file: ./dockerfiles/worker
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.custom-tag.outputs.tags || steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+            BUILDTAG=${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.name }}:${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy results to Security tab
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-${{ matrix.service }}

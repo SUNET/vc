@@ -16,7 +16,6 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
-
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/go-playground/validator/v10"
@@ -126,7 +125,10 @@ func NewValidator() (*validator.Validate, error) {
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
 	// Per RFC 8252 §7.3: loopback redirect URIs MUST be allowed for native clients.
-	// Non-loopback private IPs are blocked to prevent SSRF.
+	// No DNS resolution or SSRF check: redirect URIs are never fetched
+	// server-side — the browser follows them. Blocking unresolvable
+	// hostnames would reject valid registrations (e.g. any TLD not in the
+	// verifier's DNS).
 	err = validate.RegisterValidation("redirect_uri", func(fl validator.FieldLevel) bool {
 		urlStr := fl.Field().String()
 		if urlStr == "" {
@@ -146,28 +148,15 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		hostname := parsedURL.Hostname()
-		if hostname == "" {
-			return false
-		}
-
-		// Per RFC 8252 §7.3: loopback redirect URIs (localhost, 127.0.0.1, [::1])
-		// MUST be allowed for native OAuth 2.0 clients.
-		lowerHost := strings.ToLower(hostname)
-		if lowerHost == "localhost" || lowerHost == "127.0.0.1" || lowerHost == "::1" {
-			return true
-		}
-
-		// Resolve hostname and block private/loopback IPs
-		ips, err := net.LookupIP(hostname)
-		if err != nil {
-			// If we can't resolve, allow — it may be a custom scheme (e.g. eudi-wallet://)
-			// Custom schemes won't have a resolvable hostname
-			return parsedURL.Scheme != "http" && parsedURL.Scheme != "https"
-		}
-
-		for _, ip := range ips {
-			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		// For http/https, require a hostname. For custom schemes (native apps
+		// per RFC 8252 §7.1), only require that the URI has content beyond the scheme.
+		if parsedURL.Scheme == "http" || parsedURL.Scheme == "https" {
+			if parsedURL.Hostname() == "" {
+				return false
+			}
+		} else {
+			// Custom scheme: must have an opaque part or path (e.g. com.example.app:/callback)
+			if parsedURL.Host == "" && parsedURL.Path == "" && parsedURL.Opaque == "" {
 				return false
 			}
 		}
@@ -243,6 +232,39 @@ func NewValidator() (*validator.Validate, error) {
 		header := make([]byte, 512)
 		n, _ := f.Read(header)
 		return http.DetectContentType(header[:n]) == "image/png"
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for single_proof_type - ensures only one proof type is present in Proofs struct
+	err = validate.RegisterValidation("single_proof_type", func(fl validator.FieldLevel) bool {
+		proofs := fl.Field()
+
+		// Handle pointer type
+		if proofs.Kind() == reflect.Ptr {
+			if proofs.IsNil() {
+				return true // omitempty handles this
+			}
+			proofs = proofs.Elem()
+		}
+
+		jwtLen := proofs.FieldByName("JWT").Len()
+		divpLen := proofs.FieldByName("DIVP").Len()
+		attestation := proofs.FieldByName("Attestation").String()
+
+		count := 0
+		if jwtLen > 0 {
+			count++
+		}
+		if divpLen > 0 {
+			count++
+		}
+		if attestation != "" {
+			count++
+		}
+
+		return count == 1
 	})
 	if err != nil {
 		return nil, err

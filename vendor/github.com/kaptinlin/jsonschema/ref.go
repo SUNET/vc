@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -11,7 +12,7 @@ import (
 // resolveRef resolves a reference to another schema, either locally or globally, supporting both $ref and $dynamicRef.
 func (s *Schema) resolveRef(ref string) (*Schema, error) {
 	if ref == "#" {
-		return s.rootSchema(), nil
+		return s.scopeSchema(), nil
 	}
 
 	if anchor, ok := strings.CutPrefix(ref, "#"); ok {
@@ -28,7 +29,7 @@ func (s *Schema) resolveRef(ref string) (*Schema, error) {
 }
 
 func (s *Schema) resolveAnchor(anchorName string) (*Schema, error) {
-	if strings.HasPrefix(anchorName, "/") {
+	if isJSONPointer(anchorName) {
 		schema, err := s.resolveJSONPointer(anchorName)
 		if schema == nil && s.parent != nil {
 			return s.parent.resolveAnchor(anchorName)
@@ -57,7 +58,7 @@ func (s *Schema) resolveRefWithFullURL(ref string) (*Schema, error) {
 
 	resolved, err := s.Compiler().Schema(ref)
 	if err != nil {
-		return nil, ErrGlobalReferenceResolution
+		return nil, fmt.Errorf("%w: %s: %w", ErrGlobalReferenceResolution, ref, err)
 	}
 	return resolved, nil
 }
@@ -72,7 +73,11 @@ func (s *Schema) resolveJSONPointer(pointer string) (*Schema, error) {
 	if err != nil {
 		return nil, ErrJSONPointerSegmentDecode
 	}
-	segments := jsonpointer.Parse(decodedPointer)
+	pointerValue, err := jsonpointer.Parse(decodedPointer)
+	if err != nil {
+		return nil, ErrJSONPointerSegmentDecode
+	}
+	segments := pointerValue.Tokens()
 	currentSchema := s
 
 	for i := 0; i < len(segments); i++ {
@@ -119,6 +124,9 @@ func (s *Schema) schemaForPointerSegment(segment string, segments []string, inde
 	case "else":
 		return schemaPointerTarget(s.Else)
 	case "items":
+		if s.Dialect().usesLegacyTupleItems() && len(s.PrefixItems) > 0 {
+			return schemaSlicePointerTarget(s.PrefixItems, segments, index)
+		}
 		return schemaPointerTarget(s.Items)
 	case "contains":
 		return schemaPointerTarget(s.Contains)

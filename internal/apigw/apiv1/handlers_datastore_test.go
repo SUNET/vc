@@ -4,9 +4,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/stretchr/testify/assert"
@@ -914,4 +916,134 @@ func TestDatastoreDeleteNotFound(t *testing.T) {
 		AuthenticSource: "SUNET", Scope: "ehic", DocumentID: "no-such",
 	})
 	assert.Error(t, err)
+}
+
+// --- DatastorePreAuthOffer ---
+
+func newPreAuthOfferTestClient(t *testing.T) (*Client, *memoryDatastoreStore) {
+	t.Helper()
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	datastore := newMemoryDatastoreStore()
+	authContextStore := cache.NewTestMemoryStore(10 * time.Minute)
+	docCache := cache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute)
+
+	client := &Client{
+		log:            log,
+		datastoreStore: datastore,
+		cfg: &model.Cfg{
+			APIGW: &model.APIGW{
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						IssuerURL: "https://issuer.example.com",
+						Wallets:   map[string]model.CredentialOfferWallets{},
+					},
+				},
+			},
+		},
+		cacheService: &cache.Service{
+			AuthContext: authContextStore,
+			Document:    docCache,
+		},
+	}
+	return client, datastore
+}
+
+func TestDatastorePreAuthOffer_Success(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+
+	seedDoc(t, datastore, "SUNET", "pid", "doc-1", []string{"person-1"}, map[string]any{
+		"family_name": "Doe",
+		"given_name":  "John",
+	})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "pid",
+		DocumentID:      "doc-1",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	// Verify credential offer fields
+	assert.Equal(t, "https://issuer.example.com", reply.CredentialOffer.CredentialIssuer)
+	assert.Equal(t, []string{"pid"}, reply.CredentialOffer.CredentialConfigurationIDs)
+	assert.NotEmpty(t, reply.CredentialOffer.ID)
+
+	// Verify the offer contains a pre-authorized code grant
+	grant, ok := reply.CredentialOffer.Grants[openid4vci.GrantTypePreAuthorizedCode]
+	require.True(t, ok, "offer should contain pre-authorized_code grant")
+	require.NotNil(t, grant)
+
+	// Verify credential offer URL
+	assert.Contains(t, reply.CredentialOfferURL, "openid-credential-offer://")
+	assert.Contains(t, reply.CredentialOfferURL, "credential_offer")
+
+}
+
+func TestDatastorePreAuthOffer_DocumentNotFound(t *testing.T) {
+	client, _ := newPreAuthOfferTestClient(t)
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "pid",
+		DocumentID:      "nonexistent",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	assert.ErrorIs(t, err, helpers.ErrNoDocumentFound)
+}
+
+func TestDatastorePreAuthOffer_AuthContextPersisted(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+
+	seedDoc(t, datastore, "SUNET", "ehic", "doc-2", []string{"person-2"}, map[string]any{
+		"card_number": "SE123456",
+	})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "ehic",
+		DocumentID:      "doc-2",
+	})
+	require.NoError(t, err)
+
+	// Verify the auth context was saved by retrieving it
+	preAuthCode := reply.CredentialOffer.ID
+	authCtx, err := client.cacheService.AuthContext.GetByID(t.Context(), preAuthCode)
+	require.NoError(t, err)
+	require.NotNil(t, authCtx)
+
+	assert.Equal(t, preAuthCode, authCtx.SessionID)
+	assert.Equal(t, preAuthCode, authCtx.Code)
+	assert.Equal(t, "code_issued", string(authCtx.Status))
+	assert.Equal(t, []string{"ehic"}, authCtx.Scopes)
+	assert.Equal(t, "datastore", authCtx.DataSource)
+	assert.NotEmpty(t, authCtx.Nonce)
+	assert.True(t, authCtx.ExpiresAt > time.Now().Unix())
+}
+
+func TestDatastorePreAuthOffer_DocumentDataCached(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+
+	docData := map[string]any{
+		"family_name": "Smith",
+		"given_name":  "Jane",
+		"birth_date":  "1990-05-15",
+	}
+	seedDoc(t, datastore, "SUNET", "pid", "doc-3", []string{"person-3"}, docData)
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "pid",
+		DocumentID:      "doc-3",
+	})
+	require.NoError(t, err)
+
+	// Verify the document data was cached for the credential endpoint
+	preAuthCode := reply.CredentialOffer.ID
+	assert.True(t, client.HasVCIDocuments(t.Context(), preAuthCode))
 }
