@@ -686,6 +686,35 @@ func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerM
 	return &metadata, nil
 }
 
+// GetIACAsResponse is the HTTP response for the /iacas endpoint.
+type GetIACAsResponse struct {
+	Iacas []IACACertificate `json:"iacas"`
+}
+
+// IACACertificate is a single IACA certificate in the response.
+type IACACertificate struct {
+	Certificate string `json:"certificate"` // Base64 DER-encoded X.509 certificate
+}
+
+// GetIACAs returns the IACA certificates from the mDOC issuer via gRPC.
+func (c *Client) GetIACAs(ctx context.Context) (*GetIACAsResponse, error) {
+	reply, err := c.issuerClient.GetIACAs(ctx, &apiv1_issuer.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IACAs from issuer: %w", err)
+	}
+
+	resp := &GetIACAsResponse{
+		Iacas: make([]IACACertificate, 0, len(reply.Certificates)),
+	}
+	for _, certDER := range reply.Certificates {
+		resp.Iacas = append(resp.Iacas, IACACertificate{
+			Certificate: base64.StdEncoding.EncodeToString(certDER),
+		})
+	}
+
+	return resp, nil
+}
+
 // jwkProtoToPublicKey converts a protobuf Jwk to a crypto.PublicKey for proof verification.
 func jwkProtoToPublicKey(jwk *apiv1_issuer.Jwk) (any, error) {
 	// Build a standard JWK map and use jose.ParseJWKToPublicKey
