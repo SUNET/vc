@@ -592,6 +592,27 @@ type TrustConfig struct {
 	// If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA.
 	// The "none" algorithm is NEVER allowed regardless of configuration.
 	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms,omitempty" doc_example:"[\"ES256\", \"ES384\", \"ES512\", \"EdDSA\"]"`
+
+	// WalletAttestation configures wallet attestation-based client authentication.
+	// This is a trust-evaluation mechanism (delegates to the PDP above), so it
+	// lives here rather than under delivery.openid4vci.
+	WalletAttestation WalletAttestationConfig `yaml:"wallet_attestation,omitempty"`
+}
+
+// WalletAttestationConfig configures wallet attestation-based client authentication.
+type WalletAttestationConfig struct {
+	// Enabled enables wallet attestation-based authentication.
+	// When true and PDPURL is configured, wallets can authenticate using
+	// a provider-signed attestation JWT instead of pre-registration in Clients.
+	// The PDP validates the wallet provider against configured trust lists/federation.
+	// PKCE remains mandatory as the primary code-binding mechanism.
+	Enabled bool `yaml:"enabled" default:"false"`
+
+	// Policy configures SPOCP-based authorization for wallet attestation.
+	// When configured, after the PDP validates the wallet provider, the SPOCP engine
+	// checks whether the attestation tier (attestation_source) is authorized for the
+	// requested scope. When empty, all trusted wallets are authorized (default open).
+	Policy WalletAttestationPolicy `yaml:"policy,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -998,17 +1019,6 @@ type OAuthServer struct {
 	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
 	// Clients holds the OAuth2 client configurations
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
-	// AcceptWalletAttestation enables wallet attestation-based authentication.
-	// When true and Trust.PDPURL is configured, wallets can authenticate using
-	// a provider-signed attestation JWT instead of pre-registration in Clients.
-	// The PDP validates the wallet provider against configured trust lists/federation.
-	// PKCE remains mandatory as the primary code-binding mechanism.
-	AcceptWalletAttestation bool `yaml:"accept_wallet_attestation" default:"false"`
-	// WalletAttestationPolicy configures SPOCP-based authorization for wallet attestation.
-	// When configured, after the PDP validates the wallet provider, the SPOCP engine
-	// checks whether the attestation tier (attestation_source) is authorized for the
-	// requested scope. When empty, all trusted wallets are authorized (default open).
-	WalletAttestationPolicy WalletAttestationPolicy `yaml:"wallet_attestation_policy,omitempty"`
 	// AllowUnverifiedClientAssertion enables accepting client_assertion (private_key_jwt)
 	// WITHOUT signature verification. This is INSECURE and only intended for conformance
 	// testing environments. When false (default), client_assertion is rejected.

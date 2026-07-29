@@ -152,12 +152,12 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		Log:                        c.log,
 	})
 
-	// Wallet attestation: enabled when accept_wallet_attestation + pdp_url are set
-	if cfg.APIGW.Delivery.OpenID4VCI.AcceptWalletAttestation && pdpURL != "" {
+	// Wallet attestation: enabled when trust.wallet_attestation.enabled + pdp_url are set
+	if cfg.APIGW.Trust.WalletAttestation.Enabled && pdpURL != "" {
 		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator)
 
 		// Build SPOCP policy engine for tier-based scope authorization (nil = default open)
-		policy := cfg.APIGW.Delivery.OpenID4VCI.WalletAttestationPolicy
+		policy := cfg.APIGW.Trust.WalletAttestation.Policy
 		policyEngine, err := trust.BuildWalletAttestationPolicyEngine(policy.Rules, policy.RulesFile)
 		if err != nil {
 			return nil, fmt.Errorf("wallet attestation policy: %w", err)

@@ -71,9 +71,13 @@ Wallets can authenticate to the issuer (APIGW) using a provider-signed attestati
 apigw:
   trust:
     pdp_url: "https://trust.siros.se/pdp"   # Required
+    wallet_attestation:
+      enabled: true                          # Enable attestation
+      policy:                                # Optional SPOCP tier gating
+        rules:
+          - "(wallet (attestation_source ios_app_attest)(scope pid)(issuer *))"
   delivery:
     openid4vci:
-      accept_wallet_attestation: true        # Enable attestation
       clients:                               # Static map still works as fallback
         legacy-wallet:
           redirect_uri: "..."
