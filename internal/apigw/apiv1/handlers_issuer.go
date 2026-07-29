@@ -20,6 +20,9 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ResolveIdentifier resolves an identifier string from authentication claims.
@@ -212,6 +215,7 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
 func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+	start := time.Now()
 	c.log.Debug("VCICredential request", "credential_identifier", req.CredentialIdentifier, "credential_configuration_id", req.CredentialConfigurationID)
 	// Validate DPoP JWT signature and claims first, before checking JTI replay.
 	// This prevents attackers from poisoning the JTI cache with forged tokens.
@@ -308,34 +312,28 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Extract JWK from proof (singular) or proofs (plural/batch)
-	var jwk *apiv1_issuer.Jwk
+	// Extract JWKs from proof (singular) or proofs (plural/batch)
+	var jwks []*apiv1_issuer.Jwk
 	if req.Proof != nil {
-		jwk, err = req.Proof.ExtractJWK()
+		jwk, err := req.Proof.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proof")
 			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
+		jwks = []*apiv1_issuer.Jwk{jwk}
 	} else if req.Proofs != nil {
-		jwk, err = req.Proofs.ExtractJWK()
+		maxBatch := 1
+		if c.issuerMetadata.BatchCredentialIssuance != nil && c.issuerMetadata.BatchCredentialIssuance.BatchSize > 0 {
+			maxBatch = c.issuerMetadata.BatchCredentialIssuance.BatchSize
+		}
+
+		jwks, err = req.Proofs.ExtractAllJWKs(maxBatch)
 		if err != nil {
-			c.log.Error(err, "failed to extract JWK from proofs")
+			c.log.Error(err, "failed to extract JWKs from proofs")
 			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 	} else {
 		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "proof or proofs parameter is required"}
-	}
-
-	// Verify proof of possession per OID4VCI Appendix F.4
-	pubKey, err := jwkProtoToPublicKey(jwk)
-	if err != nil {
-		desc := "invalid key in proof"
-		// Detect kid-only references that lack embedded key material
-		if jwk.X == "" && jwk.Y == "" && jwk.N == "" && jwk.E == "" && jwk.Kid != "" {
-			desc = "proof contains only a key reference (kid) without embedded key material; key resolution is not supported"
-		}
-		c.log.Error(err, "failed to convert proof JWK to public key")
-		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: desc}
 	}
 
 	// Resolve the expected c_nonce: extract nonce from the proof and check if
@@ -374,16 +372,48 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		CNonce:   expectedNonce,
 		Audience: c.issuerMetadata.CredentialIssuer,
 	}
-	if req.Proof != nil && req.Proof.ProofType == "jwt" {
-		proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
-		if verifyErr := proofJWT.Verify(pubKey, verifyOpts); verifyErr != nil {
-			c.log.Error(verifyErr, "proof JWT verification failed")
-			return nil, verifyErr
+
+	// Verify proof of possession per OID4VCI Appendix F.4. JWT proofs are
+	// verified individually against their own extracted key, since a batch
+	// request may bind each credential to a distinct holder key (that's the
+	// whole point of ExtractAllJWKs - one key per proof). DIVP/attestation
+	// proofs resolve and verify their own signing key internally (see
+	// ProofDIVP.Verify / ProofAttestation.Verify), so they don't need
+	// per-key pairing and go through the existing aggregate verifier.
+	if req.Proof != nil {
+		if req.Proof.ProofType == "jwt" {
+			pubKey, err := c.proofJWKToPublicKey(jwks[0])
+			if err != nil {
+				return nil, err
+			}
+			proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
+			if verifyErr := proofJWT.Verify(pubKey, verifyOpts); verifyErr != nil {
+				c.log.Error(verifyErr, "proof JWT verification failed")
+				return nil, verifyErr
+			}
 		}
 	} else if req.Proofs != nil {
-		if err := req.VerifyProofWithOptions(pubKey, verifyOpts); err != nil {
-			c.log.Error(err, "proofs verification failed")
-			return nil, err
+		switch req.Proofs.ProofType() {
+		case "jwt":
+			if len(req.Proofs.JWT) != len(jwks) {
+				return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "number of extracted keys does not match number of JWT proofs"}
+			}
+			for i, jwtProof := range req.Proofs.JWT {
+				pubKey, err := c.proofJWKToPublicKey(jwks[i])
+				if err != nil {
+					return nil, err
+				}
+				if verifyErr := jwtProof.Verify(pubKey, verifyOpts); verifyErr != nil {
+					c.log.Error(verifyErr, "proof JWT verification failed", "proof_index", i)
+					return nil, verifyErr
+				}
+			}
+		default:
+			// publicKey is unused by VerifyProofWithOptions for DIVP/attestation.
+			if err := req.VerifyProofWithOptions(nil, verifyOpts); err != nil {
+				c.log.Error(err, "proofs verification failed")
+				return nil, err
+			}
 		}
 	}
 
@@ -409,84 +439,111 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Branch based on requested credential format
+	var credentials []openid4vci.Credential
+	var issueErr error
+
 	switch format {
 	case "mso_mdoc":
-		return c.issueMDoc(ctx, scope, documentData, jwk, identifier)
-
+		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, identifier)
 	case "vc+sd-jwt", "dc+sd-jwt":
-		return c.issueSDJWT(ctx, scope, documentData, jwk, identifier)
-
+		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier)
 	case "ldp_vc", "vc+ld+json":
-		// W3C VC 2.0 Data Integrity credential
-		return c.issueVC20(ctx, scope, documentData, identifier, req)
-
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, req)
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
-		return nil, errors.New("unsupported or missing credential format: " + format)
+		issueErr = errors.New("unsupported or missing credential format: " + format)
 	}
+
+	if issueErr == nil && len(credentials) == 0 {
+		issueErr = errors.New("no credentials were issued")
+	}
+
+	formatAttr := metric.WithAttributes(attribute.String("format", format))
+	if issueErr != nil {
+		c.log.Error(issueErr, "issuance failed", "format", format)
+		if c.vciMetrics != nil {
+			c.vciMetrics.CredentialsFailed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("format", format),
+				attribute.String("error_class", "issuance_error"),
+			))
+			c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
+		}
+		return nil, issueErr
+	}
+	if c.vciMetrics != nil {
+		configID := req.CredentialConfigurationID
+		if configID == "" {
+			configID = req.CredentialIdentifier
+		}
+		c.vciMetrics.CredentialsIssued.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("format", format),
+			attribute.String("credential_config_id", configID),
+		))
+		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
+	}
+
+	return &openid4vci.CredentialResponse{
+		Credentials: credentials,
+	}, nil
 }
 
-// issueSDJWT issues an SD-JWT credential
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, identifier string) (*openid4vci.CredentialResponse, error) {
+// issueSDJWT issues SD-JWT credentials, one per JWK.
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
 	credMeta := c.cfg.GetCredentialMetadata(scope)
 	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
-	issuerReply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
-		Scope:        scope,
-		DocumentData: documentData,
-		Jwk:          jwk,
-		Integrity:    credMeta.GetIntegrity(),
-		Vctm:         credMeta.GetVCTMRaw(),
-	})
-	if err != nil {
-		c.log.Error(err, "failed to call MakeSDJWT")
-		return nil, err
+	replies := make([]*apiv1_issuer.MakeSDJWTReply, 0, len(jwks))
+
+	for _, jwk := range jwks {
+		reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
+			Scope:        scope,
+			DocumentData: documentData,
+			Jwk:          jwk,
+			Integrity:    credMeta.GetIntegrity(),
+			Vctm:         credMeta.GetVCTMRaw(),
+		})
+		if err != nil {
+			c.log.Error(err, "failed to call MakeSDJWT")
+			return nil, err
+		}
+
+		if reply == nil {
+			return nil, errors.New("MakeSDJWT reply is nil")
+		}
+
+		replies = append(replies, reply)
 	}
 
-	if issuerReply == nil {
-		return nil, errors.New("MakeSDJWT reply is nil")
+	credentials := make([]openid4vci.Credential, len(replies))
+	for i, reply := range replies {
+		switch len(reply.Credentials) {
+		case 0:
+			return nil, helpers.ErrNoDocumentFound
+		case 1:
+			credentials[i] = openid4vci.Credential{Credential: reply.Credentials[0].Credential}
+		default:
+			return nil, errors.New("multiple credentials returned from issuer, not supported")
+		}
 	}
 
 	// Save credential subject info to registry for status management
-	if identifier != "" {
-		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			Identifier: identifier,
-			Section:    issuerReply.TokenStatusListSection,
-			Index:      issuerReply.TokenStatusListIndex,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
-			return nil, fmt.Errorf("failed to save credential subject: %w", err)
-		}
+	entries := make([]statusEntry, len(replies))
+	for i, r := range replies {
+		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex}
 	}
-
-	reply := &openid4vci.CredentialResponse{}
-	switch len(issuerReply.Credentials) {
-	case 0:
-		return nil, helpers.ErrNoDocumentFound
-	case 1:
-		reply.Credentials = []openid4vci.Credential{
-			{
-				Credential: issuerReply.Credentials[0].Credential,
-			},
-		}
-		return reply, nil
-	default:
-		return nil, errors.New("multiple credentials returned from issuer, not supported")
-	}
-}
-
-// issueMDoc issues an mDoc credential
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwk *apiv1_issuer.Jwk, identifier string) (*openid4vci.CredentialResponse, error) {
-	// Convert JWK to COSE key bytes for mDoc
-	deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
-	if err != nil {
-		c.log.Error(err, "failed to convert JWK to COSE key")
+	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
 	}
+
+	return credentials, nil
+}
+
+// issueMDoc issues mDL/mDoc credentials (ISO 18013-5), one per JWK. The
+// document type is resolved from the scope's credential metadata so that
+// non-mDL mdoc doctypes (e.g. mDoc-based PID) are supported, not just mDL.
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
@@ -510,51 +567,60 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		return nil, fmt.Errorf("unable to determine document type from claims")
 	}
 
-	issuerReply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
-		Scope:           scope,
-		DocType:         docType,
-		DocumentData:    documentData,
-		DevicePublicKey: deviceKeyBytes,
-		DeviceKeyFormat: "cose",
-	})
-	if err != nil {
-		c.log.Error(err, "failed to call MakeMDoc")
+	replies := make([]*apiv1_issuer.MakeMDocReply, 0, len(jwks))
+
+	for _, jwk := range jwks {
+		deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
+		if err != nil {
+			c.log.Error(err, "failed to convert JWK to COSE key")
+			return nil, err
+		}
+
+		reply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
+			Scope:           scope,
+			DocType:         docType,
+			DocumentData:    documentData,
+			DevicePublicKey: deviceKeyBytes,
+			DeviceKeyFormat: "cose",
+		})
+		if err != nil {
+			c.log.Error(err, "failed to call MakeMDoc")
+			return nil, err
+		}
+
+		if reply == nil {
+			return nil, errors.New("MakeMDoc reply is nil")
+		}
+
+		replies = append(replies, reply)
+	}
+
+	credentials := make([]openid4vci.Credential, len(replies))
+	for i, reply := range replies {
+		// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
+		credentials[i] = openid4vci.Credential{Credential: base64.StdEncoding.EncodeToString(reply.Mdoc)}
+	}
+
+	entries := make([]statusEntry, len(replies))
+	for i, r := range replies {
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
+	}
+	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
 	}
 
-	if issuerReply == nil {
-		return nil, errors.New("MakeMDoc reply is nil")
-	}
-
-	// Save credential subject info to registry for status management
-	if identifier != "" && issuerReply.StatusListSection > 0 {
-		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			Identifier: identifier,
-			Section:    issuerReply.StatusListSection,
-			Index:      issuerReply.StatusListIndex,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
-			return nil, fmt.Errorf("failed to save credential subject: %w", err)
-		}
-	}
-
-	// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
-	mdocBase64 := base64.StdEncoding.EncodeToString(issuerReply.Mdoc)
-
-	reply := &openid4vci.CredentialResponse{
-		Credentials: []openid4vci.Credential{
-			{
-				Credential: mdocBase64,
-			},
-		},
-	}
-
-	return reply, nil
+	return credentials, nil
 }
 
-// issueVC20 issues a W3C VC 2.0 Data Integrity credential
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
+// issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
+// Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
+	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
+	if hasNoJWTProof || hasNoJWTProofs {
+		return nil, errors.New("vc+ld+json format requires JWT proof type")
+	}
+
 	// Extract cryptosuite from credential configuration
 	var cryptosuite string
 	var mandatoryPointers []string
@@ -566,7 +632,6 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			if config.CredentialDefinition != nil {
 				credentialTypes = config.CredentialDefinition.Type
 			}
-			// Mandatory pointers could be specified in config in future
 		}
 	}
 
@@ -580,52 +645,80 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		credentialTypes = []string{"VerifiableCredential"}
 	}
 
-	// Extract subject DID from proof if available
-	var subjectDID string
+	var subjectDIDs []string
 	if req.Proof != nil {
-		subjectDID = req.Proof.ExtractSubjectDID()
-	}
-
-	issuerReply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
-		Scope:             scope,
-		DocumentData:      documentData,
-		CredentialTypes:   credentialTypes,
-		SubjectDid:        subjectDID,
-		Cryptosuite:       cryptosuite,
-		MandatoryPointers: mandatoryPointers,
-	})
-	if err != nil {
-		c.log.Error(err, "failed to call MakeVC20")
-		return nil, err
-	}
-
-	if issuerReply == nil {
-		return nil, errors.New("MakeVC20 reply is nil")
-	}
-
-	// Save credential subject info to registry for status management
-	if identifier != "" && issuerReply.StatusListSection > 0 {
-		_, err = c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			Identifier: identifier,
-			Section:    issuerReply.StatusListSection,
-			Index:      issuerReply.StatusListIndex,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
-			return nil, fmt.Errorf("failed to save credential subject: %w", err)
+		subjectDIDs = []string{req.Proof.ExtractSubjectDID()}
+	} else if req.Proofs != nil {
+		for _, jwt := range req.Proofs.JWT {
+			subjectDIDs = append(subjectDIDs, jwt.ExtractSubjectDID())
 		}
 	}
 
-	reply := &openid4vci.CredentialResponse{
-		Credentials: []openid4vci.Credential{
-			{
-				// VC20 Data Integrity credentials are JSON-LD, return as-is
-				Credential: string(issuerReply.Credential),
-			},
-		},
+	replies := make([]*apiv1_issuer.MakeVC20Reply, 0, len(subjectDIDs))
+	for _, did := range subjectDIDs {
+		reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
+			Scope:             scope,
+			DocumentData:      documentData,
+			CredentialTypes:   credentialTypes,
+			SubjectDid:        did,
+			Cryptosuite:       cryptosuite,
+			MandatoryPointers: mandatoryPointers,
+		})
+		if err != nil {
+			c.log.Error(err, "failed to call MakeVC20")
+			return nil, err
+		}
+		if reply == nil {
+			return nil, errors.New("MakeVC20 reply is nil")
+		}
+		replies = append(replies, reply)
 	}
 
-	return reply, nil
+	credentials := make([]openid4vci.Credential, len(replies))
+	for i, reply := range replies {
+		// VC20 Data Integrity credentials are JSON-LD, return as-is
+		credentials[i] = openid4vci.Credential{Credential: string(reply.Credential)}
+	}
+
+	// Save credential subject info to registry for status management
+	entries := make([]statusEntry, len(replies))
+	for i, r := range replies {
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
+	}
+	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+		return nil, err
+	}
+
+	return credentials, nil
+}
+
+type statusEntry struct {
+	Section int64
+	Index   int64
+}
+
+// saveCredentialSubjects saves credential subject info linked to Token Status
+// List entries, once per credential issued in a (possibly batched) request.
+func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, entries []statusEntry) error {
+	if identifier == "" {
+		return nil
+	}
+
+	for _, e := range entries {
+		if e.Section <= 0 {
+			continue
+		}
+		_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+			Identifier: identifier,
+			Section:    e.Section,
+			Index:      e.Index,
+		})
+		if err != nil {
+			c.log.Error(err, "failed to save credential subject to registry")
+			return fmt.Errorf("failed to save credential subject: %w", err)
+		}
+	}
+	return nil
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes
@@ -658,6 +751,11 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
+	if c.vciMetrics != nil {
+		c.vciMetrics.DeferredCredentials.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("status", "pending"),
+		))
+	}
 	// run the same code as VCICredential
 	return nil, nil
 }
@@ -681,6 +779,15 @@ func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
 func (c *Client) VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
 	c.log.Debug("notification", "req", req)
+	if c.vciMetrics != nil {
+		event := req.Event
+		if event == "" {
+			event = "unknown"
+		}
+		c.vciMetrics.Notifications.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event", event),
+		))
+	}
 	return nil
 }
 
@@ -735,6 +842,23 @@ func (c *Client) GetIACAs(ctx context.Context) (*GetIACAsResponse, error) {
 	}
 
 	return resp, nil
+}
+
+// proofJWKToPublicKey converts a proof's extracted JWK to a crypto.PublicKey,
+// returning an OID4VCI-typed invalid_proof error (with a more specific
+// description for kid-only references) on failure.
+func (c *Client) proofJWKToPublicKey(jwk *apiv1_issuer.Jwk) (any, error) {
+	pubKey, err := jwkProtoToPublicKey(jwk)
+	if err != nil {
+		desc := "invalid key in proof"
+		// Detect kid-only references that lack embedded key material
+		if jwk.X == "" && jwk.Y == "" && jwk.N == "" && jwk.E == "" && jwk.Kid != "" {
+			desc = "proof contains only a key reference (kid) without embedded key material; key resolution is not supported"
+		}
+		c.log.Error(err, "failed to convert proof JWK to public key")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: desc}
+	}
+	return pubKey, nil
 }
 
 // jwkProtoToPublicKey converts a protobuf Jwk to a crypto.PublicKey for proof verification.

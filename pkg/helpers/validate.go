@@ -16,7 +16,6 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
-
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/go-playground/validator/v10"
@@ -233,6 +232,39 @@ func NewValidator() (*validator.Validate, error) {
 		header := make([]byte, 512)
 		n, _ := f.Read(header)
 		return http.DetectContentType(header[:n]) == "image/png"
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for single_proof_type - ensures only one proof type is present in Proofs struct
+	err = validate.RegisterValidation("single_proof_type", func(fl validator.FieldLevel) bool {
+		proofs := fl.Field()
+
+		// Handle pointer type
+		if proofs.Kind() == reflect.Ptr {
+			if proofs.IsNil() {
+				return true // omitempty handles this
+			}
+			proofs = proofs.Elem()
+		}
+
+		jwtLen := proofs.FieldByName("JWT").Len()
+		divpLen := proofs.FieldByName("DIVP").Len()
+		attestation := proofs.FieldByName("Attestation").String()
+
+		count := 0
+		if jwtLen > 0 {
+			count++
+		}
+		if divpLen > 0 {
+			count++
+		}
+		if attestation != "" {
+			count++
+		}
+
+		return count == 1
 	})
 	if err != nil {
 		return nil, err
