@@ -200,9 +200,9 @@ func RegisterAPIRoutes(r *gin.Engine, serverCtx *ServerContext) {
 	r.GET("/info", InfoHandler(serverCtx))
 
 	// Test-mode shutdown endpoint
-	// This endpoint is only registered when GO_TRUST_TEST_MODE environment variable is set
+	// This endpoint is only registered when GT_TEST_MODE environment variable is set
 	// It allows integration tests to gracefully shutdown the server
-	if os.Getenv("GO_TRUST_TEST_MODE") == "1" {
+	if os.Getenv("GT_TEST_MODE") == "1" {
 		r.POST("/test/shutdown", TestShutdownHandler(serverCtx))
 		serverCtx.Logger.Warn("Test mode enabled: /test/shutdown endpoint is available")
 	}

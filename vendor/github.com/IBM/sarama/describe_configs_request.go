@@ -57,10 +57,13 @@ func (r *DescribeConfigsRequest) decode(pd packetDecoder, version int16) (err er
 	if err != nil {
 		return err
 	}
+	if n < 0 {
+		return errInvalidArrayLength
+	}
 
 	r.Resources = make([]*ConfigResource, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		r.Resources[i] = &ConfigResource{}
 		t, err := pd.getInt8()
 		if err != nil {
@@ -78,9 +81,9 @@ func (r *DescribeConfigsRequest) decode(pd packetDecoder, version int16) (err er
 			return err
 		}
 
-		if confLength != -1 {
+		if confLength >= 0 {
 			cfnames := make([]string, confLength)
-			for i := 0; i < confLength; i++ {
+			for i := range confLength {
 				s, err := pd.getString()
 				if err != nil {
 					return err

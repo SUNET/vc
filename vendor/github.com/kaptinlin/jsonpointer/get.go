@@ -1,123 +1,81 @@
 package jsonpointer
 
-import (
-	"reflect"
-)
+import "reflect"
 
-func fastGet(val any, step string) (any, bool) {
-	switch v := val.(type) {
-	case map[string]any:
-		result, exists := v[step]
-		return result, exists
-
-	case *map[string]any:
-		if v == nil {
-			return nil, false
-		}
-		result, exists := (*v)[step]
-		return result, exists
-
-	case []any:
-		return fastSliceGet(v, step)
-
-	case *[]any:
-		if v == nil {
-			return nil, false
-		}
-		return fastSliceGet(*v, step)
-
-	case *any:
-		if v == nil {
-			return nil, false
-		}
-		return fastGet(*v, step)
-
-	default:
-		return nil, false
-	}
+func resolveValue(doc any, pointer Pointer) (any, error) {
+	value, _, err := walk(doc, pointer, nil)
+	return value, err
 }
 
-func fastSliceGet(values []any, step string) (any, bool) {
-	if step == "-" {
-		return nil, false
-	}
-	index := fastAtoi(step)
-	if index < 0 || index >= len(values) {
-		return nil, false
-	}
-	return values[index], true
-}
-
-func sliceValue(values []any, step string) (any, error) {
-	index, err := validateAndAccessArray(step, len(values))
+func resolveReference(doc any, pointer Pointer) (Reference, error) {
+	var parent any
+	value, token, err := walk(doc, pointer, &parent)
 	if err != nil {
-		return nil, err
+		return Reference{}, err
 	}
-	return values[index], nil
+
+	return Reference{
+		value:   value,
+		parent:  parent,
+		token:   token,
+		pointer: pointer,
+	}, nil
 }
 
-func stringMapValue(values map[string]any, step string) (any, error) {
-	result, ok := values[step]
-	if !ok {
-		return nil, ErrKeyNotFound
-	}
-	return result, nil
-}
-
-func get(val any, path Path) (any, error) {
-	pathLength := len(path)
-	if pathLength == 0 {
-		return val, nil
-	}
-
-	current := val
-	fastPathDepth := 0
-
-	for i := range pathLength {
-		step := path[i]
-
-		if result, ok := fastGet(current, step); ok {
-			current = result
-			fastPathDepth = i + 1
-		} else {
-			break
+func walk(doc any, pointer Pointer, parent *any) (any, string, error) {
+	current := doc
+	var token string
+	for depth, stepToken := range pointer.tokens {
+		var parentOutput *any
+		if parent != nil && depth == len(pointer.tokens)-1 {
+			parentOutput = parent
 		}
-	}
-
-	for i := fastPathDepth; i < pathLength; i++ {
-		var err error
-		current, err = traverseStep(current, path[i])
+		next, err := step(current, stepToken, parentOutput)
 		if err != nil {
-			return nil, err
+			return nil, "", newError(err, pointer, depth)
 		}
+		token = stepToken
+		current = next
 	}
-
-	return current, nil
+	return current, token, nil
 }
 
-func traverseStep(current any, step string) (any, error) {
+func step(current any, token string, parent *any) (any, error) {
 	if current == nil {
-		return nil, ErrNotFound
+		return nil, ErrNotTraversable
 	}
 
 	switch value := current.(type) {
-	case []any:
-		return sliceValue(value, step)
-
-	case *[]any:
-		if value == nil {
-			return nil, ErrNilPointer
-		}
-		return sliceValue(*value, step)
-
 	case map[string]any:
-		return stringMapValue(value, step)
-
+		next, err := stringMapValue(value, token)
+		if err == nil && parent != nil {
+			*parent = value
+		}
+		return next, err
 	case *map[string]any:
 		if value == nil {
 			return nil, ErrNilPointer
 		}
-		return stringMapValue(*value, step)
+		next, err := stringMapValue(*value, token)
+		if err == nil && parent != nil {
+			*parent = *value
+		}
+		return next, err
+	case []any:
+		next, err := sliceValue(value, token)
+		if err == nil && parent != nil {
+			*parent = value
+		}
+		return next, err
+	case *[]any:
+		if value == nil {
+			return nil, ErrNilPointer
+		}
+		next, err := sliceValue(*value, token)
+		if err == nil && parent != nil {
+			*parent = *value
+		}
+		return next, err
 	}
 
 	value, err := derefValue(reflect.ValueOf(current))
@@ -127,26 +85,40 @@ func traverseStep(current any, step string) (any, error) {
 
 	switch value.Kind() {
 	case reflect.Slice, reflect.Array:
-		index, err := validateAndAccessArray(step, value.Len())
+		index, err := validateAndAccessArray(token, value.Len())
 		if err != nil {
 			return nil, err
+		}
+		if parent != nil {
+			*parent = value.Interface()
 		}
 		return value.Index(index).Interface(), nil
-
 	case reflect.Map:
-		result, err := mapValueByPathKey(value, step)
+		result, err := mapValueByToken(value, token)
 		if err != nil {
 			return nil, err
 		}
-		return result.Interface(), nil
-
-	case reflect.Struct:
-		if !structField(step, &value) {
-			return nil, ErrFieldNotFound
+		if parent != nil {
+			*parent = value.Interface()
 		}
-		return value.Interface(), nil
-
+		return result.Interface(), nil
 	default:
-		return nil, ErrNotFound
+		return nil, ErrNotTraversable
 	}
+}
+
+func sliceValue(values []any, token string) (any, error) {
+	index, err := validateAndAccessArray(token, len(values))
+	if err != nil {
+		return nil, err
+	}
+	return values[index], nil
+}
+
+func stringMapValue(values map[string]any, token string) (any, error) {
+	result, ok := values[token]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	return result, nil
 }

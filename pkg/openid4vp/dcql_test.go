@@ -175,3 +175,50 @@ func TestExample(t *testing.T) {
 		})
 	}
 }
+
+// TestClaimSetsRoundTrip verifies that claim_sets ([][]string) and claim IDs
+// survive JSON marshal/unmarshal round-trips per OID4VP §6.4.1.
+func TestClaimSetsRoundTrip(t *testing.T) {
+	dcql := &DCQL{
+		Credentials: []CredentialQuery{
+			{
+				ID:     "pid",
+				Format: "dc+sd-jwt",
+				Meta: MetaQuery{
+					VCTValues: []string{"urn:eudi:pid:1"},
+				},
+				Claims: []ClaimQuery{
+					{ID: "name", Path: StringPath("given_name")},
+					{ID: "family", Path: StringPath("family_name")},
+					{ID: "age", Path: StringPath("age_over_18")},
+				},
+				ClaimSet: [][]string{
+					{"name", "family"},
+					{"name", "age"},
+				},
+			},
+		},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(dcql)
+	assert.NoError(t, err)
+
+	// Unmarshal back
+	var decoded DCQL
+	err = json.Unmarshal(data, &decoded)
+	assert.NoError(t, err)
+
+	cred := decoded.Credentials[0]
+	// Verify claim IDs survived
+	assert.Equal(t, "name", cred.Claims[0].ID)
+	assert.Equal(t, "family", cred.Claims[1].ID)
+	assert.Equal(t, "age", cred.Claims[2].ID)
+
+	// Verify claim_sets survived as [][]string
+	assert.Equal(t, [][]string{{"name", "family"}, {"name", "age"}}, cred.ClaimSet)
+
+	// Verify the JSON contains expected structure
+	assert.Contains(t, string(data), `"claim_sets"`)
+	assert.Contains(t, string(data), `"id":"name"`)
+}

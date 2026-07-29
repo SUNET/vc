@@ -307,6 +307,9 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 				// Verify credential format matches config
 				for _, cred := range dcql.Credentials {
 					assert.Equal(t, "dc+sd-jwt", cred.Format)
+					// Claims should not be populated in fallback mode —
+					// let the wallet decide what to disclose
+					assert.Nil(t, cred.Claims, "fallback DCQL should not enumerate individual claims")
 				}
 			}
 		})
