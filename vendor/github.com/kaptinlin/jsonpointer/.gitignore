@@ -49,6 +49,7 @@ TODO*.md
 
 # Project-specific
 .reference/
+.references/
 .vscode/
 .claude/
 
@@ -77,3 +78,4 @@ ANALYSIS.md
 # Meeting records
 .meetings/
 .plans
+.codegraph/

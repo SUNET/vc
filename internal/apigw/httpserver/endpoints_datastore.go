@@ -214,3 +214,22 @@ func (s *Service) endpointDatastoreBulkUpload(ctx context.Context, c *gin.Contex
 
 	return reply, nil
 }
+
+func (s *Service) endpointDatastorePreAuthOffer(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDatastorePreAuthOffer")
+	defer span.End()
+
+	request := &apiv1.DatastorePreAuthOfferRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	reply, err := s.apiv1.DatastorePreAuthOffer(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return reply, nil
+}

@@ -22,6 +22,7 @@ type MetadataConfig struct {
 	BatchCredentialIssuance              *BatchCredentialIssuance
 	Display                              []MetadataDisplay
 	CredentialConfigurationsSupported    map[string]CredentialConfigurationsSupported
+	MdocIacasURI                         string
 }
 
 // GenerateIssuerMetadata creates issuer metadata from configuration.
@@ -67,6 +68,11 @@ func (cfg *MetadataConfig) GenerateIssuerMetadata(ctx context.Context) *Credenti
 	// Set display information if provided
 	if len(cfg.Display) > 0 {
 		metadata.Display = cfg.Display
+	}
+
+	// Set mdoc IACA endpoint if provided
+	if cfg.MdocIacasURI != "" {
+		metadata.MdocIacasURI = cfg.MdocIacasURI
 	}
 
 	return metadata

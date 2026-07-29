@@ -898,6 +898,10 @@ type IssuerMetadata struct {
 	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
 	// Display holds the display metadata
 	Display []openid4vci.MetadataDisplay `yaml:"display" validate:"omitempty"`
+	// MdocIacasURI is the URL where IACA certificates are published for mDOC verification.
+	// When configured, this is included in .well-known/openid-credential-issuer metadata
+	// so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials.
+	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
 }
 
 // CredentialOfferWallets holds wallet redirect configuration
@@ -970,6 +974,18 @@ type APIGW struct {
 	// Trust holds the trust evaluation configuration for OpenID4VP credential validation.
 	// When configured, credentials presented via VP are validated against a PDP.
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// RateLimit configures per-endpoint rate limiting for the APIGW.
+	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
+}
+
+// APIGWRateLimit holds per-endpoint rate limit settings for the APIGW.
+type APIGWRateLimit struct {
+	// TokenRequestsPerMinute is the maximum token endpoint requests per minute per IP. Default: 20
+	TokenRequestsPerMinute int `yaml:"token_requests_per_minute" default:"20"`
+	// CredentialRequestsPerMinute is the maximum credential endpoint requests per minute per IP. Default: 30
+	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
+	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
+	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -1418,6 +1434,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,
+		MdocIacasURI:                         cfg.MdocIacasURI,
 	}
 
 	metadata := metadataConfig.GenerateIssuerMetadata(ctx)

@@ -70,6 +70,11 @@ func StatusCode(ctx context.Context, err error) int {
 		return http.StatusInternalServerError
 	}
 
+	// Check for http.MaxBytesError (request body exceeded size limit)
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return http.StatusRequestEntityTooLarge
+	}
+
 	// Check for OAuth2 sentinel errors (fallback for code that hasn't migrated to OAuthError yet)
 	if errors.Is(err, oauth2.ErrInvalidClient) {
 		return http.StatusUnauthorized // RFC 6749 §5.2
