@@ -9,6 +9,7 @@ import {
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
+    format: v.string(),
     vct: v.string(),
     attributes: v.record(
         v.string(),
@@ -211,7 +212,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether the server has opted in to native DC API attempts. */
     dcApiEnabled: false,
 
-     /** @type {{ id: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /** 
@@ -347,6 +348,7 @@ Alpine.data("app", () => ({
 
         this.credentialAttributes = {
             id: credential,
+            format: chosenCredential.format,
             vct: chosenCredential.vct,
             claims,
             claimTree: buildClaimTree(claims),
@@ -420,7 +422,7 @@ Alpine.data("app", () => ({
         /** @satisfies {DCQLQueryCredential} */
         const credential = {
             id: this.credentialAttributes.id,
-            format: "dc+sd-jwt",
+            format: this.credentialAttributes.format,
             meta: {
                 vct_values: [this.credentialAttributes.vct]
             },

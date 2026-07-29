@@ -2,54 +2,137 @@ package jsonpointer
 
 import (
 	"reflect"
-	"slices"
-	"strconv"
 	"strings"
 )
 
-func fastAtoi(s string) int {
-	if len(s) == 0 {
-		return -1
+func parsePointer(pointer string) ([]string, error) {
+	if pointer == "" {
+		return nil, nil
+	}
+	if pointer[0] != '/' {
+		return nil, ErrInvalidPointer
 	}
 
-	if s == "0" {
+	tokens := make([]string, 0, strings.Count(pointer, "/"))
+	for segment := range strings.SplitSeq(pointer[1:], "/") {
+		token, err := unescapeToken(segment)
+		if err != nil {
+			return nil, err
+		}
+		tokens = append(tokens, token)
+	}
+	return tokens, nil
+}
+
+func formatPointer(tokens []string) string {
+	if len(tokens) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(pointerLength(tokens))
+	for _, token := range tokens {
+		b.WriteByte('/')
+		b.WriteString(escapeToken(token))
+	}
+	return b.String()
+}
+
+func pointerLength(tokens []string) int {
+	if len(tokens) == 0 {
 		return 0
 	}
 
-	if s[0] == '0' {
-		return -1
+	length := len(tokens)
+	for _, token := range tokens {
+		for i := range len(token) {
+			switch token[i] {
+			case '~', '/':
+				length += 2
+			default:
+				length++
+			}
+		}
+	}
+	return length
+}
+
+func escapeToken(token string) string {
+	if !strings.Contains(token, "/") && !strings.Contains(token, "~") {
+		return token
 	}
 
-	var n int
-	for i := range len(s) {
-		c := s[i]
-		if c < '0' || c > '9' {
-			return -1
+	var b strings.Builder
+	b.Grow(len(token) * 2)
+	for i := range len(token) {
+		switch token[i] {
+		case '~':
+			b.WriteString("~0")
+		case '/':
+			b.WriteString("~1")
+		default:
+			b.WriteByte(token[i])
 		}
-		next := n*10 + int(c-'0')
-		if next < n {
-			return -1
-		}
-		n = next
 	}
-	return n
+	return b.String()
+}
+
+func unescapeToken(encoded string) (string, error) {
+	if !strings.Contains(encoded, "~") {
+		return encoded, nil
+	}
+
+	var b strings.Builder
+	b.Grow(len(encoded))
+	for i := 0; i < len(encoded); i++ {
+		if encoded[i] != '~' {
+			b.WriteByte(encoded[i])
+			continue
+		}
+		if i+1 >= len(encoded) {
+			return "", ErrInvalidPointer
+		}
+		switch encoded[i+1] {
+		case '0':
+			b.WriteByte('~')
+		case '1':
+			b.WriteByte('/')
+		default:
+			return "", ErrInvalidPointer
+		}
+		i++
+	}
+	return b.String(), nil
 }
 
 func derefValue(v reflect.Value) (reflect.Value, error) {
+	type pointerIdentity struct {
+		typeOf reflect.Type
+		value  uintptr
+	}
+
+	var seen map[pointerIdentity]struct{}
 	for {
 		if !v.IsValid() {
-			return reflect.Value{}, ErrNotFound
+			return reflect.Value{}, ErrNotTraversable
 		}
-
 		switch v.Kind() {
 		case reflect.Pointer:
 			if v.IsNil() {
 				return reflect.Value{}, ErrNilPointer
 			}
+			identity := pointerIdentity{typeOf: v.Type(), value: v.Pointer()}
+			if _, ok := seen[identity]; ok {
+				return reflect.Value{}, ErrNotTraversable
+			}
+			if seen == nil {
+				seen = make(map[pointerIdentity]struct{})
+			}
+			seen[identity] = struct{}{}
 			v = v.Elem()
 		case reflect.Interface:
 			if v.IsNil() {
-				return reflect.Value{}, ErrNotFound
+				return reflect.Value{}, ErrNotTraversable
 			}
 			v = v.Elem()
 		default:
@@ -58,8 +141,8 @@ func derefValue(v reflect.Value) (reflect.Value, error) {
 	}
 }
 
-func mapValueByPathKey(mapVal reflect.Value, key string) (reflect.Value, error) {
-	mapKey := reflect.ValueOf(key)
+func mapValueByToken(mapVal reflect.Value, token string) (reflect.Value, error) {
+	mapKey := reflect.ValueOf(token)
 	mapKeyType := mapVal.Type().Key()
 	stringType := reflect.TypeFor[string]()
 
@@ -68,245 +151,55 @@ func mapValueByPathKey(mapVal reflect.Value, key string) (reflect.Value, error) 
 	case stringType.ConvertibleTo(mapKeyType):
 		mapKey = mapKey.Convert(mapKeyType)
 	default:
-		return reflect.Value{}, ErrNotFound
+		return reflect.Value{}, ErrNotTraversable
 	}
 
 	mapEntry := mapVal.MapIndex(mapKey)
 	if !mapEntry.IsValid() {
 		return reflect.Value{}, ErrKeyNotFound
 	}
-
 	return mapEntry, nil
 }
 
-// unescapeComponent un-escapes a JSON pointer path component.
-//
-// TypeScript Original:
-//
-//	export function unescapeComponent(component: string): string {
-//	  if (component.indexOf('~') === -1) return component;
-//	  return component.replace(r1, '/').replace(r2, '~');
-//	}
-func unescapeComponent(component string) string {
-	if !strings.Contains(component, "~") {
-		return component
-	}
-
-	result := make([]byte, 0, len(component))
-	for i := 0; i < len(component); i++ {
-		if component[i] == '~' && i+1 < len(component) {
-			switch component[i+1] {
-			case '0':
-				result = append(result, '~')
-				i++
-			case '1':
-				result = append(result, '/')
-				i++
-			default:
-				result = append(result, component[i])
-			}
-		} else {
-			result = append(result, component[i])
-		}
-	}
-	return string(result)
-}
-
-// escapeComponent escapes a JSON pointer path component.
-//
-// TypeScript Original:
-//
-//	export function escapeComponent(component: string): string {
-//	  if (component.indexOf('/') === -1 && component.indexOf('~') === -1) return component;
-//	  return component.replace(r3, '~0').replace(r4, '~1');
-//	}
-func escapeComponent(component string) string {
-	if !strings.Contains(component, "/") && !strings.Contains(component, "~") {
-		return component
-	}
-
-	result := make([]byte, 0, len(component)*2)
-	for i := range len(component) {
-		switch component[i] {
-		case '~':
-			result = append(result, '~', '0')
-		case '/':
-			result = append(result, '~', '1')
-		default:
-			result = append(result, component[i])
-		}
-	}
-	return string(result)
-}
-
-// parseJSONPointer converts JSON pointer like "/foo/bar" to path slice
-// like []string{"foo", "bar"}, while also un-escaping reserved characters.
-//
-// TypeScript Original:
-//
-//	export function parseJsonPointer(pointer: string): Path {
-//	  if (!pointer) return [];
-//	  return pointer.slice(1).split('/').map(unescapeComponent);
-//	}
-func parseJSONPointer(pointer string) Path {
-	if pointer == "" {
-		return Path{}
-	}
-
-	segmentCount := strings.Count(pointer, "/")
-	result := make(Path, 0, segmentCount)
-	for segment := range strings.SplitSeq(pointer[1:], "/") {
-		result = append(result, unescapeComponent(segment))
-	}
-	return result
-}
-
-// formatJSONPointer escapes and formats a path slice like []string{"foo", "bar"}
-// to JSON pointer like "/foo/bar".
-//
-// TypeScript Original:
-//
-//	export function formatJsonPointer(path: Path): string {
-//	  if (isRoot(path)) return '';
-//	  return '/' + path.map((component) => escapeComponent(String(component))).join('/');
-//	}
-func formatJSONPointer(path Path) string {
-	if IsRoot(path) {
-		return ""
-	}
-
-	capacity := len(path)
-	for _, component := range path {
-		capacity += len(component)
-	}
-
-	var b strings.Builder
-	b.Grow(capacity)
-
-	for _, component := range path {
-		b.WriteByte('/')
-		b.WriteString(escapeComponent(component))
-	}
-	return b.String()
-}
-
-// IsChild returns true if parent contains child path, false otherwise.
-//
-// TypeScript Original:
-//
-//	export function isChild(parent: Path, child: Path): boolean {
-//	  if (parent.length >= child.length) return false;
-//	  for (let i = 0; i < parent.length; i++) if (parent[i] !== child[i]) return false;
-//	  return true;
-//	}
-func IsChild(parent, child Path) bool {
-	if len(parent) >= len(child) {
-		return false
-	}
-	return slices.Equal(parent, child[:len(parent)])
-}
-
-// IsPathEqual returns true if two paths are equal, false otherwise.
-//
-// TypeScript Original:
-//
-//	export function isPathEqual(p1: Path, p2: Path): boolean {
-//	  if (p1.length !== p2.length) return false;
-//	  for (let i = 0; i < p1.length; i++) if (p1[i] !== p2[i]) return false;
-//	  return true;
-//	}
-func IsPathEqual(p1, p2 Path) bool {
-	return slices.Equal(p1, p2)
-}
-
-// IsRoot returns true if JSON Pointer points to root value, false otherwise.
-//
-// TypeScript Original:
-// export const isRoot = (path: Path): boolean => !path.length;
-func IsRoot(path Path) bool {
-	return len(path) == 0
-}
-
-// Parent returns parent path, e.g. for []string{"foo", "bar", "baz"}
-// returns []string{"foo", "bar"}.
-// Returns ErrNoParent if the path has no parent (empty or root path).
-//
-// TypeScript Original:
-//
-//	export function parent(path: Path): Path {
-//	  if (path.length < 1) throw new Error('NO_PARENT');
-//	  return path.slice(0, path.length - 1);
-//	}
-func Parent(path Path) (Path, error) {
-	if len(path) < 1 {
-		return nil, ErrNoParent
-	}
-
-	parent := make(Path, len(path)-1)
-	copy(parent, path[:len(path)-1])
-	return parent, nil
-}
-
-// IsValidIndex checks if path component can be a valid array index.
-//
-// TypeScript Original:
-//
-//	export function isValidIndex(index: string | number): boolean {
-//	  if (typeof index === 'number') return true;
-//	  const n = Number.parseInt(index, 10);
-//	  return String(n) === index && n >= 0;
-//	}
-func IsValidIndex(index string) bool {
-	if index == "-" {
+func isArrayIndex(token string) bool {
+	if token == "0" {
 		return true
 	}
-	n, err := strconv.ParseInt(index, 10, 64)
-	if err != nil {
+	if len(token) == 0 || token[0] < '1' || token[0] > '9' {
 		return false
 	}
-	return strconv.FormatInt(n, 10) == index && n >= 0
-}
-
-// IsInteger checks if a string contains only digit characters (0-9).
-//
-// TypeScript Original:
-//
-//	export const isInteger = (str: string): boolean => {
-//	  const len = str.length;
-//	  let i = 0;
-//	  let charCode: any;
-//	  while (i < len) {
-//	    charCode = str.charCodeAt(i);
-//	    if (charCode >= 48 && charCode <= 57) {
-//	      i++;
-//	      continue;
-//	    }
-//	    return false;
-//	  }
-//	  return true;
-//	};
-func IsInteger(str string) bool {
-	if len(str) == 0 {
-		return false
-	}
-	for i := range len(str) {
-		if str[i] < '0' || str[i] > '9' {
+	for i := 1; i < len(token); i++ {
+		if token[i] < '0' || token[i] > '9' {
 			return false
 		}
 	}
 	return true
 }
 
-func validateAndAccessArray(key string, length int) (int, error) {
-	if key == "-" {
+// IsArrayIndex reports whether token has canonical RFC 6901 array-index syntax.
+func IsArrayIndex(token string) bool {
+	return isArrayIndex(token)
+}
+
+func validateAndAccessArray(token string, length int) (int, error) {
+	if token == "-" {
 		return -1, ErrIndexOutOfBounds
 	}
-	index := fastAtoi(key)
-	if index < 0 {
+	if !isArrayIndex(token) {
 		return -1, ErrInvalidIndex
 	}
-	if index >= length {
+	if length == 0 {
 		return -1, ErrIndexOutOfBounds
+	}
+
+	maxIndex := length - 1
+	var index int
+	for i := range len(token) {
+		digit := int(token[i] - '0')
+		if index > maxIndex/10 || index == maxIndex/10 && digit > maxIndex%10 {
+			return -1, ErrIndexOutOfBounds
+		}
+		index = index*10 + digit
 	}
 	return index, nil
 }

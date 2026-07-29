@@ -290,6 +290,10 @@ func (u unimplementedApiv1) VCIMetadata(context.Context) (*openid4vci.Credential
 	panic("not implemented")
 }
 
+func (u unimplementedApiv1) GetIACAs(context.Context) (*apiv1.GetIACAsResponse, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) OAuthPar(context.Context, *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	panic("not implemented")
 }

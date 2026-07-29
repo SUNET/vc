@@ -187,6 +187,20 @@ func TestClientRegistrationRequest_Validation(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "valid redirect URI with ccTLD",
+			req: ClientRegistrationRequest{
+				RedirectURIs: []string{"https://example.se/callback"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid redirect URI with non-resolving hostname",
+			req: ClientRegistrationRequest{
+				RedirectURIs: []string{"https://nonexistent.test/callback"},
+			},
+			wantErr: false,
+		},
+		{
 			name: "valid token endpoint auth method - client_secret_basic",
 			req: ClientRegistrationRequest{
 				RedirectURIs:            []string{"https://example.com/callback"},

@@ -99,8 +99,11 @@ func TestUIMetadata(t *testing.T) {
 				assert.Len(t, reply.Credentials, tt.expectCredentials)
 				for scope, cred := range reply.Credentials {
 					srcCred := tt.credentials[scope]
-					if srcCred != nil && srcCred.VCTM != nil {
-						assert.Equal(t, srcCred.VCTM.VCT, cred.VCT, "VCT should be populated from VCTM")
+					if srcCred != nil {
+						assert.Equal(t, srcCred.Format, cred.Format, "Format should be populated from credential metadata")
+						if srcCred.VCTM != nil {
+							assert.Equal(t, srcCred.VCTM.VCT, cred.VCT, "VCT should be populated from VCTM")
+						}
 					}
 				}
 			}
@@ -295,6 +298,40 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 	require.NotNil(t, preset)
 	require.Len(t, preset.Credentials, 1)
 	assert.Equal(t, openid4vp.FormatSDJWTVC, preset.Credentials[0].Format)
+}
+
+// TestUIMetadataCredentialFormatFromMetadata verifies that each credential
+// advertised to the UI carries the format from credential_metadata, so custom
+// presentation requests can use the correct DCQL format (e.g. mso_mdoc).
+func TestUIMetadataCredentialFormatFromMetadata(t *testing.T) {
+	ctx := t.Context()
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format: openid4vp.FormatSDJWTVC,
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"mdl": {
+					Format: openid4vp.FormatMsoMdoc,
+					VCTM:   &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	require.Len(t, reply.Credentials, 2)
+	assert.Equal(t, openid4vp.FormatSDJWTVC, reply.Credentials["pid"].Format)
+	assert.Equal(t, openid4vp.FormatMsoMdoc, reply.Credentials["mdl"].Format)
 }
 
 // TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure verifies that augmentDCQLFromVCTM

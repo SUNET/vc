@@ -99,23 +99,24 @@
 //     the value must either be 'ignore' or 'strict'.
 //     The 'ignore' value specifies that matching is case-insensitive
 //     where dashes and underscores are also ignored. If multiple fields match,
-//     the first declared field in breadth-first order takes precedence.
+//     then the field with an exact name match is selected, otherwise an error
+//     is reported due to an ambiguous set of candidate fields to unmarshal into.
 //     The 'strict' value specifies that matching is case-sensitive.
 //     This takes precedence over the [MatchCaseInsensitiveNames] option.
 //
-//   - inline: The "inline" option specifies that
+//   - embed: The "embed" option specifies that
 //     the JSON representable content of this field type is to be promoted
 //     as if they were specified in the parent struct.
 //     It is the JSON equivalent of Go struct embedding.
-//     A Go embedded field is implicitly inlined unless an explicit JSON name
-//     is specified. The inlined field must be a Go struct
+//     A Go embedded field is implicitly JSON embedded unless
+//     an explicit JSON name is specified. The embedded field must be a Go struct
 //     (that does not implement any JSON methods), [jsontext.Value],
 //     map[~string]T, or an unnamed pointer to such types. When marshaling,
-//     inlined fields from a pointer type are omitted if it is nil.
-//     Inlined fields of type [jsontext.Value] and map[~string]T are called
-//     “inlined fallbacks” as they can represent all possible
+//     embedded fields from a pointer type are omitted if it is nil.
+//     Embedded fields of type [jsontext.Value] and map[~string]T are called
+//     “embedded fallbacks” as they can represent all possible
 //     JSON object members not directly handled by the parent struct.
-//     Only one inlined fallback field may be specified in a struct,
+//     Only one embedded fallback field may be specified in a struct,
 //     while many non-fallback fields may be specified. This option
 //     must not be specified with any other option (including the JSON name).
 //
@@ -131,8 +132,8 @@
 // Every Go struct corresponds to a list of JSON representable fields
 // which is constructed by performing a breadth-first search over
 // all struct fields (excluding unexported or ignored fields),
-// where the search recursively descends into inlined structs.
-// The set of non-inlined fields in a struct must have unique JSON names.
+// where the search recursively descends into embedded structs.
+// The set of non-embedded fields in a struct must have unique JSON names.
 // If multiple fields all have the same JSON name, then the one
 // at shallowest depth takes precedence and the other fields at deeper depths
 // are excluded from the list of JSON representable fields.
@@ -239,75 +240,6 @@
 // but care should still be taken with large integers or unknown members.
 //
 // [For example, suppose we have two micro-services.]: https://www.youtube.com/watch?v=avilmOcHKHE&t=1057s
-// # Format Tag Option
-//
-// The `format` tag option is experimental,
-// and not subject to the Go 1 compatibility promise.
-// It only exists when building with the GOEXPERIMENT=jsonformat environment variable set.
-//
-// Some Go types support alternative JSON representations as specified below.
-// The `format` tag option is a key-value pair specified as "format:value"
-// where the value must be either a literal consisting of letters and numbers
-// (e.g., "format:RFC3339") or a single-quoted string literal
-// (e.g., "format:'2006-01-02'"). The interpretation of the format option
-// is determined by the struct field type.
-//
-// Go types with alternative representations are as follows:
-//
-//   - A Go []byte or [N]byte is usually represented as a JSON string
-//     containing the binary value encoded using RFC 4648.
-//     If the format is "base64" or unspecified, then this uses RFC 4648, section 4.
-//     If the format is "base64url", then this uses RFC 4648, section 5.
-//     If the format is "base32", then this uses RFC 4648, section 6.
-//     If the format is "base32hex", then this uses RFC 4648, section 7.
-//     If the format is "base16" or "hex", then this uses RFC 4648, section 8.
-//     If the format is "array", then the bytes value is represented as a JSON array
-//     where each element recursively uses the JSON representation of each byte.
-//
-//   - A Go float is usually represented as a JSON number.
-//     If the format is "nonfinite", then NaN, +Inf, and -Inf are represented as
-//     the JSON strings "NaN", "Infinity", and "-Infinity", respectively.
-//     Without the use of this format, such string values result in a [SemanticError].
-//
-//   - A nil Go map is usually encoded using an empty JSON object.
-//     If the format is "emitnull", then a nil map is encoded as a JSON null.
-//     If the format is "emitempty", then a nil map is encoded as an empty JSON object,
-//     regardless of whether [FormatNilMapAsNull] is specified.
-//
-//   - A nil Go slice is usually encoded using an empty JSON array.
-//     If the format is "emitnull", then a nil slice is encoded as a JSON null.
-//     If the format is "emitempty", then a nil slice is encoded as an empty JSON array,
-//     regardless of whether [FormatNilSliceAsNull] is specified.
-//
-//   - A Go pointer usually uses the JSON representation of the underlying value.
-//     The format is forwarded to the marshaling and unmarshaling of the underlying type.
-//
-//   - A Go [time.Time] is usually represented as a JSON string containing
-//     the timestamp formatted in RFC 3339 with nanosecond precision.
-//     If the format matches one of the format constants declared
-//     in the time package (e.g., RFC1123), then that format is used.
-//     If the format is "unix", "unixmilli", "unixmicro", or "unixnano",
-//     then the timestamp is represented as a possibly fractional JSON number
-//     of the number of seconds (or milliseconds, microseconds, or nanoseconds)
-//     since the Unix epoch, which is January 1st, 1970 at 00:00:00 UTC.
-//     To avoid a fractional component when encoding,
-//     round the timestamp to the relevant unit.
-//     Otherwise if non-empty, the format is used as-is and
-//     encoded using [time.Time.Format] and
-//     decoded using [time.Time.Parse].
-//
-//   - A Go [time.Duration] usually has no default representation.
-//     If the format is "sec", "milli", "micro", or "nano",
-//     then the duration is represented as a possibly fractional JSON number
-//     of the number of seconds (or milliseconds, microseconds, or nanoseconds).
-//     To avoid a fractional component when encoding,
-//     round the duration to the relevant unit.
-//     If the format is "units", it is represented as a JSON string
-//     encoded using [time.Duration.String] and decoded using [time.ParseDuration]
-//     (e.g., "1h30m" for 1 hour 30 minutes).
-//     If the format is "iso8601", it is represented as a JSON string using the
-//     ISO 8601 standard for durations (e.g., "PT1H30M" for 1 hour 30 minutes)
-//     using only accurate units of hours, minutes, and seconds.
 package json
 
 import (
@@ -325,11 +257,11 @@ import (
 // Functions or methods that operate on *T are only called when encoding
 // a value of type T (by taking its address) or a non-nil value of *T.
 // Marshal ensures that a value is always addressable
-// (by boxing it on the heap if necessary) so that
+// (by copying the value if necessary) so that
 // these functions and methods can be consistently called. For performance,
 // it is recommended that Marshal be passed a non-nil pointer to the value.
 //
-// The input value is encoded as JSON according the following rules:
+// The input value is encoded as JSON according to the following rules:
 //
 //   - If any type-specific functions in a [WithMarshalers] option match
 //     the value type, then those functions are called to encode the value.
@@ -371,6 +303,7 @@ import (
 //   - A Go float is encoded as a JSON number.
 //     If [StringifyNumbers] is specified or encoding a JSON object name,
 //     then the JSON number is encoded within a JSON string.
+//     Encoding a NaN or ±Inf results in a [SemanticError].
 //
 //   - A Go map is encoded as a JSON object, where each Go map key and value
 //     is recursively encoded as a name and value pair in the JSON object.
@@ -413,6 +346,7 @@ import (
 // JSON cannot represent cyclic data structures and Marshal does not handle them.
 // Passing cyclic structures will result in an error.
 func Marshal(in any, opts ...Options) (out []byte, err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	return json.Marshal(in, opts...)
 }
 
@@ -421,6 +355,7 @@ func Marshal(in any, opts ...Options) (out []byte, err error) {
 // It does not terminate the output with a newline.
 // See [Marshal] for details about the conversion of a Go value into JSON.
 func MarshalWrite(out io.Writer, in any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	return json.MarshalWrite(out, in, opts...)
 }
 
@@ -431,6 +366,7 @@ func MarshalWrite(out io.Writer, in any, opts ...Options) (err error) {
 //
 // See [Marshal] for details about the conversion of a Go value into JSON.
 func MarshalEncode(out *jsontext.Encoder, in any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	return json.MarshalEncode(out, in, opts...)
 }
 
@@ -444,10 +380,14 @@ func MarshalEncode(out *jsontext.Encoder, in any, opts ...Options) (err error) {
 // Functions or methods that operate on *T are only called when decoding
 // a value of type T (by taking its address) or a non-nil value of *T.
 // Unmarshal ensures that a value is always addressable
-// (by boxing it on the heap if necessary) so that
+// (by copying the value if necessary) so that
 // these functions and methods can be consistently called.
+// If a value must be shallow copied to call a pointer-receiver
+// [Unmarshaler], [UnmarshalerFrom], or [encoding.TextUnmarshaler] method,
+// then any mutations performed by the method are shallow copied back
+// into the destination value.
 //
-// The input is decoded into the output according the following rules:
+// The input is decoded into the output according to the following rules:
 //
 //   - If any type-specific functions in a [WithUnmarshalers] option match
 //     the value type, then those functions are called to decode the JSON
@@ -501,6 +441,8 @@ func MarshalEncode(out *jsontext.Encoder, in any, opts ...Options) (err error) {
 //     It must be decoded from a JSON string containing a JSON number
 //     if [StringifyNumbers] is specified or decoding a JSON object name.
 //     It fails if it overflows the representation of the Go float type.
+//     Since JSON lacks a native representation for a NaN or ±Inf,
+//     such values cannot be the result of decoding.
 //
 //   - A Go map is decoded from a JSON object,
 //     where each JSON object name and value pair is recursively decoded
@@ -558,6 +500,7 @@ func MarshalEncode(out *jsontext.Encoder, in any, opts ...Options) (err error) {
 // For JSON objects, the input object is merged into the destination value
 // where matching object members recursively apply merge semantics.
 func Unmarshal(in []byte, out any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	return json.Unmarshal(in, out, opts...)
 }
 
@@ -568,6 +511,7 @@ func Unmarshal(in []byte, out any, opts ...Options) (err error) {
 // without reporting an error for EOF. The output must be a non-nil pointer.
 // See [Unmarshal] for details about the conversion of JSON into a Go value.
 func UnmarshalRead(in io.Reader, out any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	return json.UnmarshalRead(in, out, opts...)
 }
 
@@ -582,6 +526,7 @@ func UnmarshalRead(in io.Reader, out any, opts ...Options) (err error) {
 // The output must be a non-nil pointer.
 // See [Unmarshal] for details about the conversion of JSON into a Go value.
 func UnmarshalDecode(in *jsontext.Decoder, out any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	return json.UnmarshalDecode(in, out, opts...)
 }
 
@@ -639,6 +584,8 @@ func JoinUnmarshalers(us ...*Unmarshalers) *Unmarshalers {
 //
 // The function must marshal exactly one JSON value.
 // The value of T must not be retained outside the function call.
+// It is recommended that fn return a []byte buffer that is safe
+// for the caller to retain and potentially mutate.
 // It may not return [errors.ErrUnsupported].
 func MarshalFunc[T any](fn func(T) ([]byte, error)) *Marshalers {
 	return json.MarshalFunc[T](fn)
@@ -814,7 +761,7 @@ type SemanticError = json.SemanticError
 //
 //	opt := Options{"Deterministic": true}
 //
-// [JoinOptions] composes multiple options values to together:
+// [JoinOptions] composes multiple options values together:
 //
 //	out := JoinOptions(opts...)
 //
@@ -827,7 +774,7 @@ type SemanticError = json.SemanticError
 //		}
 //	}
 //
-// [GetOption] looks up the value of options parameter:
+// [GetOption] looks up the value of an options parameter:
 //
 //	v, ok := GetOption(opts, Deterministic)
 //
@@ -859,6 +806,7 @@ func JoinOptions(srcs ...Options) Options {
 
 // GetOption returns the value stored in opts with the provided setter,
 // reporting whether the value is present.
+// If not present, the returned value is the zero value for type T.
 //
 // Example usage:
 //
@@ -945,14 +893,25 @@ func OmitZeroStructFields(v bool) Options {
 
 // MatchCaseInsensitiveNames specifies that JSON object members are matched
 // against Go struct fields using a case-insensitive match of the name.
+// If a name matches multiple fields, it chooses the field with an exact
+// match of the name, otherwise it reports an error.
 // Go struct fields explicitly marked with `case:strict` or `case:ignore`
 // always use case-sensitive (or case-insensitive) name matching,
 // regardless of the value of this option.
 //
 // This affects either marshaling or unmarshaling.
-// For marshaling, this option may alter the detection of duplicate names
-// (assuming [jsontext.AllowDuplicateNames] is false) from inlined fields
-// if it matches one of the declared fields in the Go struct.
+//
+// By matching names in a case-insensitive manner, it also affects the detection
+// of duplicate names (assuming [jsontext.AllowDuplicateNames] is false) since
+// variations of the same name may match the same Go struct field.
+// For example, when unmarshaling, the names "foo" and "Foo" may both
+// match the same Go struct field and therefore be considered a duplicate name.
+// When marshaling, normally it is impossible for any two Go struct fields to
+// serialize in a way where they unmarshal into the same Go struct field
+// since they all have unique exact names.
+// However, with the use of an embedded fallback, it is possible for the
+// embedded fallback to contain a name that also matches the name for
+// a Go struct field, resulting in a duplicate name error.
 func MatchCaseInsensitiveNames(v bool) Options {
 	return json.MatchCaseInsensitiveNames(v)
 }

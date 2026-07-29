@@ -1,61 +1,95 @@
 package jsonpointer
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
-	// ErrInvalidIndex is returned when an invalid array index is encountered.
-	// TypeScript original code from find.ts:
-	// throw new Error('INVALID_INDEX');
+	// ErrInvalidPointer is returned when a JSON Pointer string is invalid.
+	ErrInvalidPointer = errors.New("invalid pointer")
+)
+
+var (
+	// ErrInvalidIndex is returned when an array token is not a canonical index.
 	ErrInvalidIndex = errors.New("invalid array index")
 
-	// ErrNotFound is returned when a path cannot be traversed.
-	// TypeScript original code from find.ts:
-	// throw new Error('NOT_FOUND');
-	ErrNotFound = errors.New("not found")
-
-	// ErrNoParent is returned when trying to get parent of root path.
-	// TypeScript original code from util.ts:
-	// if (path.length < 1) throw new Error('NO_PARENT');
-	ErrNoParent = errors.New("no parent")
-
-	// ErrPointerInvalid is returned when a JSON Pointer string is invalid.
-	// TypeScript original code from validate.ts:
-	// if (pointer[0] !== '/') throw new Error('POINTER_INVALID');
-	ErrPointerInvalid = errors.New("pointer invalid")
-
-	// ErrPointerTooLong is returned when a JSON Pointer string exceeds maximum length.
-	// TypeScript original code from validate.ts:
-	// if (pointer.length > 1024) throw new Error('POINTER_TOO_LONG');
-	ErrPointerTooLong = errors.New("pointer too long")
-
-	// ErrInvalidPath is a TypeScript-compatibility sentinel for invalid path values.
-	// Current Go APIs do not return it because Path is typed as []string.
-	// TypeScript original code from validate.ts:
-	// if (!isArray(path)) throw new Error('Invalid path.');
-	ErrInvalidPath = errors.New("invalid path")
-
-	// ErrPathTooLong is returned when a path array exceeds maximum length.
-	// TypeScript original code from validate.ts:
-	// if (path.length > 256) throw new Error('Path too long.');
-	ErrPathTooLong = errors.New("path too long")
-
-	// ErrInvalidPathStep is a TypeScript-compatibility sentinel for invalid path steps.
-	// Current Go APIs do not return it because Path steps are already strings.
-	// TypeScript original code from validate.ts:
-	// throw new Error('Invalid path step.');
-	ErrInvalidPathStep = errors.New("invalid path step")
-)
-
-var (
-	// ErrIndexOutOfBounds is returned when array index is out of bounds.
+	// ErrIndexOutOfBounds is returned when an array index is outside the array.
 	ErrIndexOutOfBounds = errors.New("array index out of bounds")
 
-	// ErrNilPointer is returned when trying to access through nil pointer.
+	// ErrKeyNotFound is returned when a map key is missing.
+	ErrKeyNotFound = errors.New("map key not found")
+
+	// ErrNilPointer is returned when traversal must dereference a nil pointer.
 	ErrNilPointer = errors.New("cannot traverse through nil pointer")
 
-	// ErrFieldNotFound is returned when trying to access a non-existent struct field.
-	ErrFieldNotFound = errors.New("struct field not found")
+	// ErrNotTraversable is returned when a value cannot consume a pointer token.
+	ErrNotTraversable = errors.New("value is not traversable")
 
-	// ErrKeyNotFound is returned when trying to access a non-existent map key.
-	ErrKeyNotFound = errors.New("map key not found")
+	// ErrNoParent is returned when asking for the parent of the root pointer.
+	ErrNoParent = errors.New("no parent")
 )
+
+// Error wraps a traversal failure with machine-readable pointer context.
+type Error struct {
+	cause   error
+	pointer Pointer
+	token   string
+	depth   int
+}
+
+func newError(cause error, pointer Pointer, depth int) *Error {
+	token := ""
+	if depth >= 0 && depth < len(pointer.tokens) {
+		token = pointer.tokens[depth]
+	}
+	return &Error{
+		cause:   cause,
+		pointer: pointer,
+		token:   token,
+		depth:   depth,
+	}
+}
+
+// Error returns a human-readable error message.
+func (e *Error) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	if e.depth < 0 {
+		return fmt.Sprintf("%s at %s", e.cause, e.pointer.String())
+	}
+	return fmt.Sprintf("%s at %s token %q", e.cause, e.pointer.String(), e.token)
+}
+
+// Unwrap returns the sentinel cause for errors.Is checks.
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// Pointer returns the requested pointer being resolved.
+func (e *Error) Pointer() Pointer {
+	if e == nil {
+		return Root()
+	}
+	return e.pointer
+}
+
+// Token returns the token being resolved when the error occurred.
+func (e *Error) Token() string {
+	if e == nil {
+		return ""
+	}
+	return e.token
+}
+
+// Depth returns the zero-based token depth where the error occurred.
+func (e *Error) Depth() int {
+	if e == nil {
+		return -1
+	}
+	return e.depth
+}
