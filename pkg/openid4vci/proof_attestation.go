@@ -105,8 +105,30 @@ func (p ProofAttestation) Validate() error {
 // ExtractJWK extracts the first attested key (JWK) from the attestation JWT.
 // The attested_keys claim contains an array of JWKs that are attested by this proof.
 func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
+	jwks, err := p.ExtractAllJWKs(1)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(jwks) == 0 {
+		return nil, fmt.Errorf("no attested keys found in attestation")
+	}
+
+	jwk := jwks[0]
+
+	return jwk, nil
+}
+
+// ExtractAllJWKs extracts all attested keys from the attestation JWT.
+// The attested_keys claim contains an array of JWKs; this returns all of them.
+// maxLength limits the number of keys that can be extracted to prevent abuse. It must be at least 1.
+func (p ProofAttestation) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
 	if p == "" {
 		return nil, fmt.Errorf("attestation is empty")
+	}
+
+	if maxLength < 1 {
+		return nil, fmt.Errorf("maxLength must be at least 1")
 	}
 
 	token, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
@@ -129,23 +151,30 @@ func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 		return nil, fmt.Errorf("attested_keys must be a non-empty array")
 	}
 
-	// Extract the first key
-	firstKey, ok := keysArr[0].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("first attested key is not a valid JWK object")
+	if len(keysArr) > maxLength {
+		return nil, fmt.Errorf("number of attested keys (%d) exceeds maxLength (%d)", len(keysArr), maxLength)
 	}
 
-	jwkByte, err := json.Marshal(firstKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal JWK: %w", err)
+	jwks := make([]*apiv1_issuer.Jwk, 0, len(keysArr))
+	for i, key := range keysArr {
+		keyMap, ok := key.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("attested key %d is not a valid JWK object", i)
+		}
+
+		jwkByte, err := json.Marshal(keyMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal attested key %d: %w", i, err)
+		}
+
+		jwk := &apiv1_issuer.Jwk{}
+		if err := json.Unmarshal(jwkByte, jwk); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal attested key %d: %w", i, err)
+		}
+		jwks = append(jwks, jwk)
 	}
 
-	jwk := &apiv1_issuer.Jwk{}
-	if err := json.Unmarshal(jwkByte, jwk); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JWK: %w", err)
-	}
-
-	return jwk, nil
+	return jwks, nil
 }
 
 // Verify verifies a Key Attestation proof according to OpenID4VCI 1.0 Appendix D.1
