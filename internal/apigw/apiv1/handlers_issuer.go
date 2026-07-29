@@ -520,8 +520,11 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		}
 	}
 
-	// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
-	mdocBase64 := base64.StdEncoding.EncodeToString(issuerReply.Mdoc)
+	// For mDoc, the credential is CBOR bytes - encode as base64url (no
+	// padding), matching wallet-common's fromBase64Url decoding convention
+	// for mso_mdoc credential responses. Standard base64 (with "+"/"/" and
+	// "=" padding) is not URL-safe and isn't what wallet clients expect here.
+	mdocBase64 := base64.RawURLEncoding.EncodeToString(issuerReply.Mdoc)
 
 	reply := &openid4vci.CredentialResponse{
 		Credentials: []openid4vci.Credential{
