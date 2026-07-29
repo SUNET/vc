@@ -322,7 +322,7 @@ func (u unimplementedApiv1) SDJWTVCIssuerMetadata(context.Context) (*apiv1.SDJWT
 	panic("not implemented")
 }
 
-func (u unimplementedApiv1) FederationEntityConfig(context.Context) (*apiv1.FederationEntityConfigReply, error) {
+func (u unimplementedApiv1) OpenIDFederationEntityConfig(context.Context) (*apiv1.OpenIDFederationEntityConfigReply, error) {
 	panic("not implemented")
 }
 

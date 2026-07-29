@@ -8,13 +8,13 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-// endpointFederationEntityConfig serves the OpenID Federation entity configuration
+// endpointOpenIDFederationEntityConfig serves the OpenID Federation entity configuration
 // at /.well-known/openid-federation as a self-signed JWT per OpenID Federation 1.0 §5.2.
-func (s *Service) endpointFederationEntityConfig(ctx context.Context, c *gin.Context) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:endpointFederationEntityConfig")
+func (s *Service) endpointOpenIDFederationEntityConfig(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOpenIDFederationEntityConfig")
 	defer span.End()
 
-	reply, err := s.apiv1.FederationEntityConfig(ctx)
+	reply, err := s.apiv1.OpenIDFederationEntityConfig(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err

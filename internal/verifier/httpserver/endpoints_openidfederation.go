@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// endpointFederationEntityConfig serves the OpenID Federation entity configuration
+// endpointOpenIDFederationEntityConfig serves the OpenID Federation entity configuration
 // at /.well-known/openid-federation as a self-signed JWT per OpenID Federation 1.0 §5.2.
-func (s *Service) endpointFederationEntityConfig(ctx context.Context, c *gin.Context) (any, error) {
+func (s *Service) endpointOpenIDFederationEntityConfig(ctx context.Context, c *gin.Context) (any, error) {
 	cfg := s.cfg.Verifier.Federation
 	if cfg == nil || !cfg.Enabled {
 		c.Status(http.StatusNotFound)

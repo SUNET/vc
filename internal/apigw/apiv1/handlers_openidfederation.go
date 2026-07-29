@@ -7,20 +7,20 @@ import (
 	"github.com/SUNET/vc/pkg/pki"
 )
 
-// FederationEntityConfigReply carries the signed OpenID Federation entity
+// OpenIDFederationEntityConfigReply carries the signed OpenID Federation entity
 // configuration JWT, or Enabled=false when federation is not configured.
-type FederationEntityConfigReply struct {
+type OpenIDFederationEntityConfigReply struct {
 	Enabled bool
 	JWT     string
 }
 
-// FederationEntityConfig builds and signs the OpenID Federation entity
+// OpenIDFederationEntityConfig builds and signs the OpenID Federation entity
 // configuration served at /.well-known/openid-federation per OpenID
 // Federation 1.0 §5.2.
-func (c *Client) FederationEntityConfig(ctx context.Context) (*FederationEntityConfigReply, error) {
+func (c *Client) OpenIDFederationEntityConfig(ctx context.Context) (*OpenIDFederationEntityConfigReply, error) {
 	cfg := c.cfg.APIGW.Federation
 	if cfg == nil || !cfg.Enabled {
-		return &FederationEntityConfigReply{Enabled: false}, nil
+		return &OpenIDFederationEntityConfigReply{Enabled: false}, nil
 	}
 
 	signer := pki.NewSignerConfig(c.cfg.APIGW.KeyConfig)
@@ -44,5 +44,5 @@ func (c *Client) FederationEntityConfig(ctx context.Context) (*FederationEntityC
 		return nil, err
 	}
 
-	return &FederationEntityConfigReply{Enabled: true, JWT: signed}, nil
+	return &OpenIDFederationEntityConfigReply{Enabled: true, JWT: signed}, nil
 }
