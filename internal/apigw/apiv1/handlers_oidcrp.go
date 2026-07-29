@@ -200,15 +200,18 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			return nil, fmt.Errorf("failed to initialize issuance policy engine: %w", policyErr)
 		}
 		if policyEngine != nil {
-			// Merge dynamic params into claims for policy evaluation.
-			// Dynamic params from the authentic source are available as dimensions;
-			// OIDC claims take precedence over dynamic params.
+			// Evaluate against the OIDC-provider-asserted claims only. Do NOT
+			// fall back to session.DynamicParams here: those are supplied by
+			// the caller in the PAR request body (nominally "from the
+			// authentic source business system", but nothing here verifies
+			// that), not validated by the OP. Letting them silently satisfy a
+			// missing OIDC claim would let a caller forge any policy
+			// dimension the OP didn't actually assert, defeating the point of
+			// gating issuance on the returned token. DynamicParams are still
+			// used (legitimately) to template the outgoing OIDC request
+			// parameters in resolveOIDCRequestParams - this is a separate,
+			// later use of the same data for a security decision.
 			policyClaims := maps.Clone(authResp.Claims)
-			for k, v := range session.DynamicParams {
-				if _, exists := policyClaims[k]; !exists {
-					policyClaims[k] = v
-				}
-			}
 			if policyErr := policyEngine.Evaluate(session.CredentialType, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
 				c.log.Warn("Issuance policy denied credential",
 					"credential_type", session.CredentialType,
