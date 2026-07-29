@@ -30,6 +30,7 @@ type Apiv1 interface {
 	DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error
 	DatastoreSearch(ctx context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error)
 	DatastoreBulkUpload(ctx context.Context, req *apiv1.DatastoreBulkUploadRequest) (*apiv1.DatastoreBulkUploadReply, error)
+	DatastorePreAuthOffer(ctx context.Context, req *apiv1.DatastorePreAuthOfferRequest) (*apiv1.DatastorePreAuthOfferReply, error)
 
 	// identity mapping endpoints
 	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
@@ -50,6 +51,7 @@ type Apiv1 interface {
 	VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error)
 	VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error
 	VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error)
+	GetIACAs(ctx context.Context) (*apiv1.GetIACAsResponse, error)
 
 	// OAuth endpoints
 	OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error)

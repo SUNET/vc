@@ -66,3 +66,8 @@ func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest
 func (s *Service) SignMetadata(ctx context.Context, in *apiv1_issuer.SignMetadataRequest) (*apiv1_issuer.SignMetadataReply, error) {
 	return s.apiv1.SignMetadata(ctx, in)
 }
+
+// GetIACAs returns the IACA certificates from the mDOC certificate chain
+func (s *Service) GetIACAs(ctx context.Context, _ *apiv1_issuer.Empty) (*apiv1_issuer.GetIACAsReply, error) {
+	return s.apiv1.GetIACAs(ctx)
+}

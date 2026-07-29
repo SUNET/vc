@@ -16,6 +16,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/notify"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
 )
@@ -59,6 +60,11 @@ func main() {
 		panic(err)
 	}
 
+	meter, err := metric.New(ctx, cfg, serviceName, log)
+	if err != nil {
+		panic(err)
+	}
+
 	dbService, err := db.New(ctx, cfg, tracer, log)
 	services["dbService"] = dbService
 	if err != nil {
@@ -76,7 +82,7 @@ func main() {
 		panic(err)
 	}
 
-	apiv1, err := apiv1.New(ctx, dbService, notifyService, cacheService, cfg, tracer, log)
+	apiv1, err := apiv1.New(ctx, dbService, notifyService, cacheService, cfg, tracer, meter, log)
 	if err != nil {
 		panic(err)
 	}
@@ -99,6 +105,10 @@ func main() {
 		if err := service.Close(ctx); err != nil {
 			mainLog.Trace("serviceName", serviceName, "error", err)
 		}
+	}
+
+	if err := meter.Shutdown(ctx); err != nil {
+		mainLog.Error(err, "Meter shutdown")
 	}
 
 	wg.Wait() // Block here until are workers are done

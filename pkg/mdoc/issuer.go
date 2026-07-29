@@ -75,6 +75,12 @@ func NewIssuer(config IssuerConfig) (*Issuer, error) {
 	return issuer, nil
 }
 
+// CertificateChain returns the issuer's certificate chain.
+// The DS (leaf) certificate is first, followed by intermediates, then the IACA root.
+func (i *Issuer) CertificateChain() []*x509.Certificate {
+	return i.certChain
+}
+
 // validateKeyPair checks that the private key matches the certificate's public key.
 func validateKeyPair(priv crypto.Signer, cert *x509.Certificate) error {
 	switch pub := cert.PublicKey.(type) {
@@ -132,6 +138,10 @@ type IssuedDocumentMdoc struct {
 
 // Issue creates a signed mdoc document from the request.
 func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
+	if req == nil {
+		return nil, fmt.Errorf("IssuanceRequest must not be nil")
+	}
+
 	// Accumulator for document errors instead of throwing hard Go app errors
 	var documentErrors []DocumentError
 	var documents []DocumentMdoc

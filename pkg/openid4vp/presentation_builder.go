@@ -187,6 +187,7 @@ func copyDCQL(src *DCQL) *DCQL {
 					}
 				}
 				dst.Credentials[i].Claims[j] = ClaimQuery{
+					ID:   claim.ID,
 					Path: pathCopy,
 				}
 			}
@@ -194,7 +195,10 @@ func copyDCQL(src *DCQL) *DCQL {
 
 		// Copy claim sets
 		if len(cred.ClaimSet) > 0 {
-			dst.Credentials[i].ClaimSet = append([]string{}, cred.ClaimSet...)
+			dst.Credentials[i].ClaimSet = make([][]string, len(cred.ClaimSet))
+			for j, cs := range cred.ClaimSet {
+				dst.Credentials[i].ClaimSet[j] = append([]string{}, cs...)
+			}
 		}
 	}
 

@@ -131,6 +131,9 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
 	// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
 	serverHTTP.ReadHeaderTimeout = 2 * time.Second
+	// MaxHeaderBytes limits the size of request headers to 1 MB (default).
+	// This mitigates memory exhaustion attacks from oversized headers.
+	serverHTTP.MaxHeaderBytes = 1 << 20 // 1 MB
 
 	// Middlewares
 	serverGin.Use(s.client.Middleware.ServedBy(ctx, apiServer.ServedByHeader))
@@ -138,6 +141,8 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	serverGin.Use(s.client.Middleware.Duration(ctx))
 	serverGin.Use(s.client.Middleware.Logger(ctx))
 	serverGin.Use(s.client.Middleware.Crash(ctx))
+	serverGin.Use(s.client.Middleware.SecurityHeaders(apiServer.TLS.Enable || apiServer.TrustProxyTLS))
+	serverGin.Use(s.client.Middleware.MaxBodySize(10 << 20)) // 10 MB default body limit
 	serverGin.Use(s.client.Middleware.CustomBranding(s.client.cfg.Common.Branding))
 	problem404 := helpers.Problem404()
 	serverGin.NoRoute(func(c *gin.Context) { c.JSON(http.StatusNotFound, problem404) })

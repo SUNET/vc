@@ -14,7 +14,9 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // OIDCRPInitiateRequest represents the request to initiate OIDC authentication
@@ -351,6 +353,14 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	c.log.Info("Credential offer created via OIDC RP standalone",
 		"credential_type", session.CredentialType,
 		"offer_id", credentialOffer.ID)
+
+	if c.vciMetrics != nil {
+		c.vciMetrics.OffersCreated.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("grant_type", "pre-authorized_code"),
+			attribute.String("credential_config_id", session.CredentialType),
+			attribute.String("source", "oidc_rp"),
+		))
+	}
 
 	reply := &OIDCRPCallbackResponse{
 		Status:          "success",

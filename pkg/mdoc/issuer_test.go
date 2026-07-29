@@ -13,7 +13,39 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
+
+// issuedElementValues extracts the disclosed element identifiers and values
+// for a namespace from an issued document, unwrapping the Tag 24
+// byte-string encoding used for each IssuerSignedItem.
+func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[string]any {
+	t.Helper()
+
+	values := make(map[string]any)
+	for _, anyItem := range doc.IssuerSigned.NameSpaces[namespace] {
+		var item IssuerSignedItem
+		switch v := anyItem.(type) {
+		case cbor.Tag:
+			content, ok := v.Content.([]byte)
+			if !ok {
+				t.Fatalf("Tag content is not []byte")
+			}
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				t.Fatalf("failed to unmarshal item from Tag: %v", err)
+			}
+		case IssuerSignedItem:
+			item = v
+		case *IssuerSignedItem:
+			item = *v
+		default:
+			t.Fatalf("unexpected item type %T in NameSpaces", anyItem)
+		}
+		values[item.ElementIdentifier] = item.ElementValue
+	}
+	return values
+}
 
 func createTestIssuerConfig(t *testing.T) IssuerConfig {
 	t.Helper()
@@ -229,6 +261,77 @@ func TestIssuer_Issue(t *testing.T) {
 	}
 	if issued.ValidUntil.IsZero() {
 		t.Error("ValidUntil is zero")
+	}
+
+	// testMDLDocumentData() doesn't set age_over_18, so it must not appear -
+	// addElements only adds a claim when the document data actually supplies
+	// it, never a hardcoded/forced value.
+	if len(issued.DocumentMdoc.Documents) != 1 {
+		t.Fatalf("Documents = %d, want 1", len(issued.DocumentMdoc.Documents))
+	}
+	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], Namespace)
+	if _, ok := values["age_over_18"]; ok {
+		t.Error("age_over_18 should not be disclosed when not present in document data")
+	}
+}
+
+func TestIssuer_Issue_NilRequest(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	_, err := issuer.Issue(nil)
+	if err == nil {
+		t.Error("Issue(nil) should fail, not panic")
+	}
+}
+
+func TestIssuer_Issue_AgeOverReflectsActualValue(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	data := map[string]any{
+		"family_name":       "Andersson",
+		"given_name":        "Erik",
+		"birth_date":        "1990-03-15",
+		"issue_date":        "2024-01-01",
+		"expiry_date":       "2034-01-01",
+		"issuing_country":   "SE",
+		"issuing_authority": "Transportstyrelsen",
+		"document_number":   "SE1234567",
+		"portrait":          base64.StdEncoding.EncodeToString([]byte{0xFF, 0xD8, 0xFF}),
+		"driving_privileges": []map[string]any{
+			{"vehicle_category_code": "B"},
+		},
+		"age_over_18": false,
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
+	}
+
+	deviceKey, err := GenerateDeviceKeyPair(elliptic.P256())
+	if err != nil {
+		t.Fatalf("GenerateDeviceKeyPair() error = %v", err)
+	}
+
+	req := &IssuanceRequest{
+		DocumentData:    raw,
+		DevicePublicKey: &deviceKey.PublicKey,
+		Schema:          testMDLSchema(),
+	}
+
+	issued, err := issuer.Issue(req)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+
+	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], Namespace)
+	v, ok := values["age_over_18"]
+	if !ok {
+		t.Fatal("age_over_18 should be disclosed when present in document data")
+	}
+	if v != false {
+		t.Errorf("age_over_18 = %v, want false (matching the supplied document data, not forced true)", v)
 	}
 }
 

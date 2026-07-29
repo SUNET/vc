@@ -24,5 +24,10 @@ WORKDIR /
 
 RUN apk add --no-cache ca-certificates
 
+# Run as non-root user for security hardening
+RUN addgroup -S vctools && adduser -S vctools -G vctools
+
 COPY --from=builder /go/src/app/bin/gen_bootstrap /go/src/app/bin/gen_config_docs \
     /go/src/app/bin/jwt_issuer /usr/local/bin/
+
+USER vctools

@@ -49,10 +49,11 @@ type Service struct {
 	dataSources     *datasources.Service
 	cacheService    *cache.Service
 	spocpEngine     *httphelpers.SafeEngine
+	metricsHandler  http.Handler
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, metricsHandler http.Handler, log *logger.Log) (*Service, error) {
 	// Register []string with gob so gin-contrib/sessions can serialize session values of that type
 	gob.Register([]string{})
 
@@ -66,6 +67,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		eventPublisher: eventPublisher,
 		authProviders:  authProviders,
 		dataSources:    dataSources,
+		metricsHandler: metricsHandler,
 		sessionsName:   "oauth_user_session",
 		sessionsOptions: sessions.Options{
 			Path:     "/",
@@ -179,9 +181,19 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "offers/:scope/:wallet_id", http.StatusOK, s.endpointUICreateCredentialOffer)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "nonce", http.StatusOK, s.endpointVCINonce)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "credential", http.StatusOK, s.endpointVCICredential)
+
+	// Credential endpoints with rate limiting
+	credRPM := 30
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.CredentialRequestsPerMinute > 0 {
+		credRPM = s.cfg.APIGW.RateLimit.CredentialRequestsPerMinute
+	}
+	credRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, credRPM)
+	rgCredential := rgRoot.Group("")
+	rgCredential.Use(credRL.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgCredential, http.MethodPost, "credential", http.StatusOK, s.endpointVCICredential)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgCredential, http.MethodPost, "deferred_credential", http.StatusOK, s.endpointVCIDeferredCredential)
+
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "credential-offer/:credential_offer_uuid", http.StatusOK, s.endpointVCICredentialOfferURI)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "deferred_credential", http.StatusOK, s.endpointVCIDeferredCredential)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "notification", http.StatusNoContent, s.endpointVCINotification)
 	// Register both with and without trailing slash so that wallets using either
 	// form get a direct 200 response instead of a 301 redirect.
@@ -194,6 +206,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/oauth-authorization-server", http.StatusOK, s.endpointOAuthMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/jwt-vc-issuer", http.StatusOK, s.endpointSDJWTVCIssuerMetadata)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "jwks", http.StatusOK, s.endpointJWKS)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "iacas", http.StatusOK, s.endpointIACAs)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "type-metadata/:scope", http.StatusOK, s.endpointTypeMetadata)
 	rgOAuthSession := rgRoot.Group("")
 	rgOAuthSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
@@ -202,7 +215,17 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent", http.StatusNotModified, s.endpointOAuthAuthorizationConsent)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/callback", http.StatusNotModified, s.endpointOAuthAuthorizationConsentCallback)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/svg-template", http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "token", http.StatusOK, s.endpointOAuthToken)
+
+	// Token endpoint with rate limiting (most restrictive — sensitive operation)
+	tokenRPM := 20
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.TokenRequestsPerMinute > 0 {
+		tokenRPM = s.cfg.APIGW.RateLimit.TokenRequestsPerMinute
+	}
+	tokenRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, tokenRPM)
+	rgTokenSession := rgRoot.Group("")
+	rgTokenSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+	rgTokenSession.Use(tokenRL.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgTokenSession, http.MethodPost, "token", http.StatusOK, s.endpointOAuthToken)
 
 	// SAML endpoints
 	rgSAML := rgRoot.Group("/samlsp")
@@ -217,10 +240,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
 
+	// Prometheus metrics scrape endpoint
+	if s.metricsHandler != nil {
+		rgRoot.GET("metrics", gin.WrapH(s.metricsHandler))
+	}
+
 	// Admin UI routes (login/logout only — CRUD goes through the real API)
 	if s.cfg.APIGW.AdminUIEnable {
 		rgAdminUI := rgRoot.Group("/ui")
 		rgAdminUI.Use(s.httpHelpers.Middleware.UserSession("admin_session", s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+		rgAdminUI.Use(s.httpHelpers.Middleware.AdminCSP())
 		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "", http.StatusOK, s.endpointAdminUI)
 		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/login", http.StatusFound, s.endpointAdminLogin)
 		s.httpHelpers.Server.RegEndpoint(ctx, rgAdminUI, http.MethodGet, "/callback", http.StatusFound, s.endpointAdminCallback)
@@ -252,6 +281,13 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")
+	// Rate limiting for datastore endpoints
+	datastoreRPM := 60
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.DatastoreRequestsPerMinute > 0 {
+		datastoreRPM = s.cfg.APIGW.RateLimit.DatastoreRequestsPerMinute
+	}
+	datastoreRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, datastoreRPM)
+	rgDatastore.Use(datastoreRL.Middleware())
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "", http.StatusOK, s.endpointDatastoreUpload)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "", http.StatusOK, s.endpointDatastoreGet)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "", http.StatusNoContent, s.endpointDatastoreDelete)
@@ -262,6 +298,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodDelete, "/identity", http.StatusNoContent, s.endpointDatastoreDeleteIdentity)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodGet, "/search", http.StatusOK, s.endpointDatastoreSearch)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/bulk", http.StatusOK, s.endpointDatastoreBulkUpload)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgDatastore, http.MethodPost, "/preauth_offer", http.StatusOK, s.endpointDatastorePreAuthOffer)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "/user/lookup", http.StatusOK, s.endpointUserLookup)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodPost, "/user/cancel", http.StatusSeeOther, s.endpointUserCancel)

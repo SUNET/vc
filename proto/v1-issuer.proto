@@ -13,6 +13,7 @@ service IssuerService {
     rpc MakeVC20 (MakeVC20Request) returns (MakeVC20Reply) {}
     rpc JWKS (Empty) returns (JwksReply) {}
     rpc SignMetadata (SignMetadataRequest) returns (SignMetadataReply) {}
+    rpc GetIACAs (Empty) returns (GetIACAsReply) {}
 }
 
 // SignMetadataRequest asks the issuer to sign metadata JSON with its own key
@@ -26,6 +27,12 @@ message SignMetadataRequest {
 
 message SignMetadataReply {
     string signed_metadata = 1; // The resulting signed JWT
+}
+
+// GetIACAsReply contains the IACA (Issuing Authority CA) certificates
+// for mDOC verification. Certificates are DER-encoded X.509 in bytes.
+message GetIACAsReply {
+    repeated bytes certificates = 1; // DER-encoded X.509 IACA certificates
 }
 
 message MakeSDJWTRequest {
