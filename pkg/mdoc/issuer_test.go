@@ -10,7 +10,39 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
+
+// issuedElementValues extracts the disclosed element identifiers and values
+// for a namespace from an issued document, unwrapping the Tag 24
+// byte-string encoding used for each IssuerSignedItem.
+func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[string]any {
+	t.Helper()
+
+	values := make(map[string]any)
+	for _, anyItem := range doc.IssuerSigned.NameSpaces[namespace] {
+		var item IssuerSignedItem
+		switch v := anyItem.(type) {
+		case cbor.Tag:
+			content, ok := v.Content.([]byte)
+			if !ok {
+				t.Fatalf("Tag content is not []byte")
+			}
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				t.Fatalf("failed to unmarshal item from Tag: %v", err)
+			}
+		case IssuerSignedItem:
+			item = v
+		case *IssuerSignedItem:
+			item = *v
+		default:
+			t.Fatalf("unexpected item type %T in NameSpaces", anyItem)
+		}
+		values[item.ElementIdentifier] = item.ElementValue
+	}
+	return values
+}
 
 // boolPtr returns a pointer to a bool value.
 //
@@ -158,6 +190,60 @@ func TestIssuer_Issue(t *testing.T) {
 	}
 	if issued.ValidUntil.IsZero() {
 		t.Error("ValidUntil is zero")
+	}
+
+	// createTestMDoc() doesn't set AgeOver, so age_over_18 must not appear -
+	// it must never be forced to true regardless of the holder's actual age
+	// (see the conditional AgeOver handling in addOptionalElements).
+	if len(issued.DocumentMdoc.Documents) != 1 {
+		t.Fatalf("Documents = %d, want 1", len(issued.DocumentMdoc.Documents))
+	}
+	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], NamespaceMDL)
+	if _, ok := values["age_over_18"]; ok {
+		t.Error("age_over_18 should not be disclosed when AgeOver is unset")
+	}
+}
+
+func TestIssuer_Issue_NilRequest(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	_, err := issuer.Issue(nil)
+	if err == nil {
+		t.Error("Issue(nil) should fail, not panic")
+	}
+}
+
+func TestIssuer_Issue_AgeOverReflectsActualValue(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	mdoc := createTestMDoc()
+	mdoc.AgeOver = &AgeOver{Over18: new(false)}
+
+	deviceKey, err := GenerateDeviceKeyPair(elliptic.P256())
+	if err != nil {
+		t.Fatalf("GenerateDeviceKeyPair() error = %v", err)
+	}
+
+	req := &IssuanceRequest{
+		MDoc:            mdoc,
+		DevicePublicKey: &deviceKey.PublicKey,
+		DocType:         "org.iso.18013.5.1.mDL",
+	}
+
+	issued, err := issuer.Issue(req)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+
+	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], NamespaceMDL)
+	v, ok := values["age_over_18"]
+	if !ok {
+		t.Fatal("age_over_18 should be disclosed when AgeOver.Over18 is explicitly set")
+	}
+	if v != false {
+		t.Errorf("age_over_18 = %v, want false (matching the explicitly set AgeOver.Over18)", v)
 	}
 }
 

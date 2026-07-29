@@ -141,6 +141,10 @@ func namespaceForDocType(docType string) (string, error) {
 
 // Issue creates a signed PID document from the request.
 func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
+	if req == nil {
+		return nil, fmt.Errorf("IssuanceRequest must not be nil")
+	}
+
 	// Accumulator for document errors instead of throwing hard Go app errors
 	var documentErrors []DocumentError
 	var documents []DocumentMdoc
@@ -148,7 +152,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		return nil, fmt.Errorf("device public key is required")
 	}
 	if req.MDoc == nil {
-		return nil, fmt.Errorf("IssuanceRequest must not be nil")
+		return nil, fmt.Errorf("MDoc must not be nil")
 	}
 
 	// Convert device public key to COSE key
@@ -350,7 +354,6 @@ func (i *Issuer) addOptionalElements(builder *MSOBuilder, mdoc *MDoc, ns string)
 			"resident_postal_code":           mdoc.ResidentPostalCode,
 			"resident_country":               mdoc.ResidentCountry,
 			"administrative_number":          mdoc.AdministrativeNumber,
-			"age_over_18":                    true,
 		}
 	case NamespacePID:
 		optionalElements = map[string]any{
