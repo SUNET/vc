@@ -29,6 +29,7 @@ type Apiv1 interface {
 	DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error
 	DatastoreSearch(ctx context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error)
 	DatastoreBulkUpload(ctx context.Context, req *apiv1.DatastoreBulkUploadRequest) (*apiv1.DatastoreBulkUploadReply, error)
+	DatastorePreAuthOffer(ctx context.Context, req *apiv1.DatastorePreAuthOfferRequest) (*apiv1.DatastorePreAuthOfferReply, error)
 
 	// identity mapping endpoints
 	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
