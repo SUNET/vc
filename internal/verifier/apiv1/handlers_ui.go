@@ -53,12 +53,17 @@ type UIMetadataReply struct {
 	Credentials      map[string]*UICredentialInfo `json:"credentials"`
 	SupportedWallets map[string]string            `json:"supported_wallets"`
 	Presets          map[string]*UIPreset         `json:"presets,omitempty"`
+	// DCAPIEnabled mirrors verifier.digital_credentials.enable, so the UI only
+	// attempts the native W3C Digital Credentials API when an operator has
+	// opted in, rather than always trying it regardless of server config.
+	DCAPIEnabled bool `json:"dc_api_enabled"`
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	reply := &UIMetadataReply{
 		Credentials:      make(map[string]*UICredentialInfo),
 		SupportedWallets: c.cfg.Verifier.SupportedWallets,
+		DCAPIEnabled:     c.cfg.Verifier.DigitalCredentials.Enable,
 	}
 
 	for scope, constructor := range c.cfg.Common.CredentialMetadata {
