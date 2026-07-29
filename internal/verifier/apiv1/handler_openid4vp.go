@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/crypto"
-	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // CreateRequestObject creates and signs an OpenID4VP request object
@@ -34,12 +36,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		c.log.Error(err, "Failed to construct response URI")
 		return "", err
 	}
-	// Build x509_san_dns client_id: strip scheme to get the DNS name (+ optional port)
-	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
+	// Determine client_id based on configured scheme (x509_san_dns or did)
+	clientID, err := c.cfg.Verifier.VerifierClientID()
 	if err != nil {
-		return "", fmt.Errorf("failed to extract host from PublicURL: %w", err)
+		return "", fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
-	clientID := fmt.Sprintf("x509_san_dns:%s", host)
 
 	requestObject := &openid4vp.RequestObject{
 		ISS:          c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
@@ -71,6 +72,10 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	// Cache the request object
 	c.cacheService.RequestObject.SetWithTTL(ctx, sessionID, requestObject, 5*time.Minute)
 
+	if c.vpMetrics != nil {
+		c.vpMetrics.RequestsCreated.Add(ctx, 1)
+	}
+
 	return signedJWT, nil
 }
 
@@ -89,6 +94,7 @@ func (c *Client) GetRequestObject(ctx context.Context, sessionID string) (*openi
 
 // HandleDirectPost processes the OpenID4VP direct_post response from a wallet
 func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken string, presentationSubmission any) error {
+	start := time.Now()
 	ctx, span := c.tracer.Start(ctx, "apiv1:handle_direct_post")
 	defer span.End()
 
@@ -115,6 +121,11 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session with error status")
 		}
+		if c.vpMetrics != nil {
+			c.vpMetrics.VerificationsFailed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_class", "claims_extraction"),
+			))
+		}
 		return err
 	}
 
@@ -135,6 +146,11 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return ErrServerError
+	}
+
+	if c.vpMetrics != nil {
+		c.vpMetrics.PresentationsReceived.Add(ctx, 1)
+		c.vpMetrics.VerificationLatency.Record(ctx, time.Since(start).Seconds())
 	}
 
 	return nil

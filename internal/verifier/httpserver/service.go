@@ -145,6 +145,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	// JWKS
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "jwks", http.StatusOK, s.endpointJWKS)
 
+	// DID Document (did:web)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, ".well-known/did.json", http.StatusOK, s.endpointDIDDocument)
+
 	// UserInfo endpoint
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "userinfo", http.StatusOK, s.endpointUserInfo)
 

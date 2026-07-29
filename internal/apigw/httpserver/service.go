@@ -49,10 +49,11 @@ type Service struct {
 	dataSources     *datasources.Service
 	cacheService    *cache.Service
 	spocpEngine     *httphelpers.SafeEngine
+	metricsHandler  http.Handler
 }
 
 // New creates a new httpserver service
-func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace.Tracer, eventPublisher apiv1.EventPublisher, authProviders *authproviders.Service, dataSources *datasources.Service, cacheService *cache.Service, metricsHandler http.Handler, log *logger.Log) (*Service, error) {
 	// Register []string with gob so gin-contrib/sessions can serialize session values of that type
 	gob.Register([]string{})
 
@@ -66,6 +67,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		eventPublisher: eventPublisher,
 		authProviders:  authProviders,
 		dataSources:    dataSources,
+		metricsHandler: metricsHandler,
 		sessionsName:   "oauth_user_session",
 		sessionsOptions: sessions.Options{
 			Path:     "/",
@@ -238,6 +240,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCRP, http.MethodGet, "/callback", http.StatusOK, s.endpointOIDCRPCallback)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
+
+	// Prometheus metrics scrape endpoint
+	if s.metricsHandler != nil {
+		rgRoot.GET("metrics", gin.WrapH(s.metricsHandler))
+	}
 
 	// Admin UI routes (login/logout only — CRUD goes through the real API)
 	if s.cfg.APIGW.AdminUIEnable {
