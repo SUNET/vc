@@ -15,6 +15,11 @@ import (
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 )
 
+// proofIATClockSkew is the tolerance applied when checking that a proof
+// JWT's iat isn't in the future, matching oauth2.DefaultClockSkew's value
+// for the equivalent DPoP check.
+const proofIATClockSkew = 5 * time.Second
+
 // ProofJWTToken represents a JWT proof token as defined in OpenID4VCI 1.0 Appendix F.1
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-jwt-proof-type
 type ProofJWTToken string
@@ -283,12 +288,16 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 			}
 		}
 
-		// iat: validate not in the future
+		// iat: validate not in the future, allowing for small clock skew
+		// between the wallet and this server (same tolerance as DPoP's
+		// oauth2.DefaultClockSkew) - a zero-tolerance check here rejects
+		// legitimate proofs from any client whose clock is even a second
+		// or two ahead.
 		t, err := claims.GetIssuedAt()
 		if err != nil {
 			return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to parse iat claim"}
 		}
-		if t.After(time.Now()) {
+		if t.After(time.Now().Add(proofIATClockSkew)) {
 			return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "iat claim value is in the future"}
 		}
 
