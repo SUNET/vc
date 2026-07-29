@@ -6,18 +6,23 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"net/http"
+	"sync/atomic"
 	"time"
+
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
@@ -34,9 +39,9 @@ type Client struct {
 	tracer *trace.Tracer
 
 	// database collections
-	usersStore           db.UsersStore
 	credentialOfferStore db.CredentialOfferStore
 	datastoreStore       db.DatastoreStore
+	identityMappingStore db.IdentityMappingStore
 
 	// gRPC clients
 	issuerClient   apiv1_issuer.IssuerServiceClient
@@ -54,6 +59,16 @@ type Client struct {
 
 	// Caches
 	cacheService *cache.Service
+
+	// Admin OIDC (when api_auth.oidc is enabled)
+	adminOIDC *lazyOIDCProvider
+
+	// Trust evaluation
+	jwtTrustVerifier *trust.JWTTrustVerifier
+
+	// issuerReachable tracks whether the issuer gRPC was reachable on the last refresh.
+	// Used to log state transitions (down→up, up→down) at Info level.
+	issuerReachable atomic.Bool
 }
 
 // New creates a new instance of the public api
@@ -61,9 +76,9 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
-		usersStore:                    db.VCUsersColl,
-		credentialOfferStore:          db.VCCredentialOfferColl,
-		datastoreStore:                db.VCDatastoreColl,
+		credentialOfferStore:          db.CredentialOfferColl,
+		datastoreStore:                db.DatastoreColl,
+		identityMappingStore:          db.IdentityMappingsColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
@@ -74,13 +89,13 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
 	// Unsigned metadata will be signed on-demand in the handler for freshness
-	c.issuerMetadata, err = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.PublicURL, cfg.Common.CredentialConstructor)
+	c.issuerMetadata, err = c.cfg.APIGW.IssuerMetadata.Generate(ctx, c.cfg.APIGW.PublicURL, cfg.Common.CredentialMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate issuer metadata: %w", err)
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand if needed)
-	c.oauth2Metadata = c.cfg.APIGW.OauthServer.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)
+	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)
 
 	// Load PKI signing key and chain for metadata signing
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
@@ -107,6 +122,33 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	if err := c.CreateCredentialOfferLookupMetadata(ctx); err != nil {
 		return nil, err
 	}
+
+	// Initialize OIDC provider for admin UI login (if configured).
+	if cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+		oidcCfg := cfg.APIGW.APIServer.APIAuth.OIDC
+		c.adminOIDC = newLazyOIDCProvider(ctx, oidcCfg, c.log)
+	}
+
+	// Initialize trust evaluator for VP credential validation
+	pdpURL := cfg.APIGW.Trust.PDPURL
+	trustEvaluator := trust.NewTrustEvaluatorFromConfig(pdpURL)
+	if pdpURL == "" {
+		c.log.Warn("Trust evaluation is DISABLED - no pdp_url configured. All credential issuers will be trusted.")
+	} else {
+		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
+	}
+
+	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator: trustEvaluator,
+		JWKSResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{
+			HTTPClient:          &http.Client{Timeout: 30 * time.Second},
+			ParseJWKToPublicKey: jose.ParseJWKToPublicKey,
+		}),
+		AllowedSignatureAlgorithms: cfg.APIGW.Trust.AllowedSignatureAlgorithms,
+		ParseX5C:                   func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:                   jose.ParseJWKToPublicKey,
+		Log:                        c.log,
+	})
 
 	c.log.Info("Started")
 
@@ -187,7 +229,7 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 
 	credentialTypes := map[string]CredentialOfferTypeData{}
 
-	for scope, credential := range c.cfg.Common.CredentialConstructor {
+	for scope, credential := range c.cfg.Common.CredentialMetadata {
 		vctm := credential.GetVCTM()
 		if vctm == nil {
 			c.log.Warn("credential constructor has nil VCTM; failing CreateCredentialOfferLookupMetadata", "scope", scope)
@@ -201,7 +243,7 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 	}
 
 	wallets := map[string]string{}
-	for key, wallet := range c.cfg.APIGW.CredentialOffers.Wallets {
+	for key, wallet := range c.cfg.APIGW.Delivery.CredentialOffers.Wallets {
 		wallets[key] = wallet.Label
 	}
 

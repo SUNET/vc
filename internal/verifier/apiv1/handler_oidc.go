@@ -7,18 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/oauth2"
-	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/skip2/go-qrcode"
@@ -78,6 +77,11 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	ctx, span := c.tracer.Start(ctx, "apiv1:authorize")
 	defer span.End()
 
+	if c.cfg.Verifier.Outbound.OIDCProvider == nil {
+		c.log.Error(nil, "OIDC Provider not configured")
+		return nil, ErrServerError
+	}
+
 	// Validate client (includes static clients from config)
 	client, _, err := c.getClientByID(ctx, req.ClientID)
 	if err != nil {
@@ -133,7 +137,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second).Unix(),
+		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -154,24 +158,11 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Generate OpenID4VP authorization request
-	requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", sessionID)
+	authzReqURL, authzParams, err := buildOpenID4VPAuthzRequest(c.cfg.Verifier.PublicURL, sessionID)
 	if err != nil {
-		c.log.Error(err, "Failed to construct request object path")
+		c.log.Error(err, "Failed to build OpenID4VP authorization request")
 		return nil, ErrServerError
 	}
-
-	// Construct OpenID4VP authorization request URL with query parameters
-	// Use x509_san_dns: prefix so wallets know how to verify the client identity
-	host, err := helpers.HostFromURL(c.cfg.Verifier.PublicURL)
-	if err != nil {
-		c.log.Error(err, "Failed to extract host from PublicURL")
-		return nil, ErrServerError
-	}
-	oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", host)
-	q := url.Values{}
-	q.Set("client_id", oidc4vpClientID)
-	q.Set("request_uri", requestObjectPath)
-	authzReqURL := "openid4vp://cb?" + q.Encode()
 
 	qrCodeImageURL, err := url.JoinPath("/qr", sessionID)
 	if err != nil {
@@ -197,7 +188,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	// Build wallet links from supported_wallets config
 	// Each wallet URL gets the same client_id + request_uri params appended
 	for name, walletBaseURL := range c.cfg.Verifier.SupportedWallets {
-		walletLink := walletBaseURL + "?" + q.Encode()
+		walletLink := walletBaseURL + "?" + authzParams.Encode()
 
 		// Build QR code image URL for cross-device flow
 		walletQRURL, err := url.JoinPath("/qr", sessionID)
@@ -261,9 +252,9 @@ type TokenRequest struct {
 
 // TokenResponse represents an OIDC token response
 type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken  string `json:"access_token,omitempty"`
 	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
+	ExpiresIn    int    `json:"expires_in,omitempty"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	IDToken      string `json:"id_token"`
 	Scope        string `json:"scope,omitempty"`
@@ -273,6 +264,11 @@ type TokenResponse struct {
 func (c *Client) Token(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:token")
 	defer span.End()
+
+	if c.cfg.Verifier.Outbound.OIDCProvider == nil {
+		c.log.Error(nil, "OIDC Provider not configured")
+		return nil, ErrServerError
+	}
 
 	switch req.GrantType {
 	case "authorization_code":
@@ -346,18 +342,6 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	}
 	authCtx.Forfeited = true
 
-	// Generate tokens
-	accessToken, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate access token")
-		return nil, ErrServerError
-	}
-	refreshToken, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		c.log.Error(err, "Failed to generate refresh token")
-		return nil, ErrServerError
-	}
-
 	// Generate ID token
 	idToken, err := c.generateIDToken(ctx, authCtx, client)
 	if err != nil {
@@ -365,27 +349,41 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		return nil, ErrServerError
 	}
 
-	// Update session with tokens
-	authCtx.AccessToken = accessToken
-	authCtx.AccessTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.AccessTokenDuration) * time.Second).Unix()
 	authCtx.IDToken = idToken
-	authCtx.RefreshToken = refreshToken
-	authCtx.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.RefreshTokenDuration) * time.Second).Unix()
 	authCtx.Status = cache.SessionStatusTokenIssued
+
+	resp := &TokenResponse{
+		TokenType: "Bearer",
+		IDToken:   idToken,
+		Scope:     strings.Join(authCtx.Scopes, " "),
+	}
+
+	// Only generate access tokens when UserInfo is enabled.
+	// When disabled, the verifier-OP is not a traditional IdP and the
+	// access token would not be usable at any endpoint, confusing
+	// standard RP libraries.
+	//
+	// When enabled, the access token is a signed JWT containing the same
+	// claims as the id_token (with typ=at+jwt per RFC 9068). This allows
+	// the userinfo endpoint to be fully stateless: it validates the JWT
+	// signature and returns the embedded claims without any session lookup.
+	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		accessToken, err := c.generateAccessToken(ctx, authCtx, client)
+		if err != nil {
+			c.log.Error(err, "Failed to generate access token")
+			return nil, ErrServerError
+		}
+
+		resp.AccessToken = accessToken
+		resp.ExpiresIn = c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration
+	}
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session")
 		return nil, ErrServerError
 	}
 
-	return &TokenResponse{
-		AccessToken:  accessToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    c.cfg.Verifier.OIDCOP.AccessTokenDuration,
-		RefreshToken: refreshToken,
-		IDToken:      idToken,
-		Scope:        strings.Join(authCtx.Scopes, " "),
-	}, nil
+	return resp, nil
 }
 
 func (c *Client) handleRefreshTokenGrant(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
@@ -402,19 +400,30 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
 
 	// Get token expiration from config
-	idTokenTTL := time.Duration(c.cfg.Verifier.OIDCOP.IDTokenDuration) * time.Second
+	idTokenTTL := time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration) * time.Second
 
 	claims := jwt.MapClaims{
-		"iss":   c.cfg.Verifier.OIDCOP.Issuer,
-		"sub":   sub,
-		"aud":   client.ClientID,
-		"exp":   now.Add(idTokenTTL).Unix(),
-		"iat":   now.Unix(),
-		"nonce": authCtx.Nonce,
+		"iss": c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
+		"sub": sub,
+		"aud": client.ClientID,
+		"exp": now.Add(idTokenTTL).Unix(),
+		"iat": now.Unix(),
 	}
 
-	// Add verified claims
-	maps.Copy(claims, authCtx.VerifiedClaims)
+	// Only include nonce claim if a nonce was provided in the authorization request
+	if authCtx.Nonce != "" {
+		claims["nonce"] = authCtx.Nonce
+	}
+
+	// Add verified claims, but never overwrite reserved OIDC claims
+	for k, v := range authCtx.VerifiedClaims {
+		switch k {
+		case "iss", "sub", "aud", "exp", "iat", "nonce":
+			continue
+		default:
+			claims[k] = v
+		}
+	}
 
 	// Use jose.MakeJWT to sign with pki.Signer
 	header := jwt.MapClaims{
@@ -426,6 +435,41 @@ func (c *Client) generateIDToken(ctx context.Context, authCtx *cache.Authorizati
 	}
 
 	return tokenString, nil
+}
+
+// generateAccessToken creates a signed JWT access token (RFC 9068 at+jwt).
+// It contains the same claims as the id_token so the userinfo endpoint can
+// return them without any session/database lookup (stateless).
+func (c *Client) generateAccessToken(ctx context.Context, authCtx *cache.AuthorizationContext, client *db.Client) (string, error) {
+	now := time.Now()
+
+	walletID := authCtx.WalletID
+	sub := c.generateSubjectIdentifier(walletID, client.ClientID)
+
+	accessTokenTTL := time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration) * time.Second
+
+	claims := jwt.MapClaims{
+		"iss": c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
+		"sub": sub,
+		"aud": client.ClientID,
+		"exp": now.Add(accessTokenTTL).Unix(),
+		"iat": now.Unix(),
+	}
+
+	// Add verified claims, but never overwrite reserved OIDC claims
+	for k, v := range authCtx.VerifiedClaims {
+		switch k {
+		case "iss", "sub", "aud", "exp", "iat", "nonce":
+			continue
+		default:
+			claims[k] = v
+		}
+	}
+
+	header := jwt.MapClaims{
+		"typ": "at+jwt",
+	}
+	return jose.MakeJWT(ctx, header, claims, c.pkiSigner)
 }
 
 // authenticateOIDCClient validates client credentials for OIDC endpoints
@@ -446,7 +490,7 @@ type DiscoveryMetadata struct {
 	Issuer                            string   `json:"issuer"`
 	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
 	TokenEndpoint                     string   `json:"token_endpoint"`
-	UserInfoEndpoint                  string   `json:"userinfo_endpoint"`
+	UserInfoEndpoint                  string   `json:"userinfo_endpoint,omitempty"`
 	JwksURI                           string   `json:"jwks_uri"`
 	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"` // RFC 7591
 	ResponseTypesSupported            []string `json:"response_types_supported"`
@@ -478,9 +522,12 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	if err != nil {
 		return nil, err
 	}
-	userInfoEndpoint, err := join("/userinfo")
-	if err != nil {
-		return nil, err
+	var userInfoEndpoint string
+	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		userInfoEndpoint, err = join("/userinfo")
+		if err != nil {
+			return nil, err
+		}
 	}
 	jwksURI, err := join("/jwks")
 	if err != nil {
@@ -492,7 +539,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 	}
 
 	metadata := &DiscoveryMetadata{
-		Issuer:                           c.cfg.Verifier.OIDCOP.Issuer,
+		Issuer:                           c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		AuthorizationEndpoint:            authorizationEndpoint,
 		TokenEndpoint:                    tokenEndpoint,
 		UserInfoEndpoint:                 userInfoEndpoint,
@@ -506,13 +553,17 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 			"sub", "name", "given_name", "family_name", "email",
 			"email_verified", "birthdate", "address",
 		},
-		GrantTypesSupported:               []string{"authorization_code", "implicit", "refresh_token"},
+		GrantTypesSupported:               []string{"authorization_code"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 	}
 
+	// Note: "implicit" grant type is intentionally not advertised even when
+	// EnableUserInfo is true, because this OP only supports the authorization_code
+	// flow. The implicit flow is not implemented.
+
 	// Add configured credential scopes
-	for _, cred := range c.cfg.Verifier.OpenID4VP.GetSupportedCredentials() {
+	for _, cred := range c.cfg.Verifier.Inbound.OpenID4VP.GetSupportedCredentials() {
 		for _, scope := range cred.Scopes {
 			metadata.ScopesSupported = append(metadata.ScopesSupported, scope)
 		}
@@ -611,14 +662,13 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 	// Check if this is a DC API response (encrypted JWT) or standard form-encoded
 	if req.Response != "" {
-		// DC API response - decrypt and extract vp_token
+		// DC API response - should be an encrypted JWT (JWE)
 		c.log.Debug("Processing DC API encrypted response", "state", req.State)
 
-		// TODO: Implement JWT decryption using OIDC keys
-		// For now, treat response as the vp_token
-		vpToken = req.Response
-
-		c.log.Info("DC API response decryption not yet implemented, treating response as vp_token")
+		// TODO: Implement JWT decryption using session ephemeral keys
+		// The response parameter contains a JWE that must be decrypted before use.
+		c.log.Error(nil, "DC API response decryption not yet implemented")
+		return nil, fmt.Errorf("DC API encrypted response handling not yet implemented")
 	} else if req.VPToken != "" {
 		// Standard direct_post with form-encoded parameters
 		vpToken = req.VPToken
@@ -687,7 +737,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		c.log.Error(err, "Failed to generate authorization code")
 		return nil, ErrServerError
 	}
-	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.OIDCOP.CodeDuration) * time.Second)
+	codeExpiry := time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second)
 
 	session.Code = code
 	session.CodeExpiresAt = codeExpiry.Unix()
@@ -699,24 +749,11 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 	c.log.Info("VP processed successfully", "session_id", session.SessionID, "claims_count", len(oidcClaims))
 
-	// Return redirect URI if present
-	redirectURI := ""
-	if session.RedirectURI != "" {
-		u, err := url.Parse(session.RedirectURI)
-		if err != nil {
-			c.log.Error(err, "Failed to parse redirect URI")
-			return nil, ErrServerError
-		}
-		q := u.Query()
-		q.Set("code", code)
-		q.Set("state", session.State)
-		u.RawQuery = q.Encode()
-		redirectURI = u.String()
-	}
-
-	return &DirectPostResponse{
-		RedirectURI: redirectURI,
-	}, nil
+	// Do NOT return redirect_uri here. The browser's /authorize page polls
+	// for session status and handles the redirect to the RP. Returning
+	// redirect_uri would cause the wallet to also redirect, consuming the
+	// authorization code before the browser can use it.
+	return &DirectPostResponse{}, nil
 }
 
 // CallbackRequest represents a callback request
@@ -816,7 +853,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 		}
 
 		// Build the web wallet URL with the same authorization params
-		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/request-object", req.SessionID)
+		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "request-object", req.SessionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to construct request object path: %w", err)
 		}
@@ -837,13 +874,19 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 			return nil, fmt.Errorf("failed to extract host from PublicURL: %w", err)
 		}
 
-		requestObject := &openid4vp.RequestObject{
-			ClientID: fmt.Sprintf("x509_san_dns:%s", host),
-		}
-		qrData, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, req.SessionID)
+		// Construct request_uri with path parameter (matching the OIDC
+		// request-object/:session_id endpoint), not the query-param format
+		// used by the UI flow.
+		requestObjectPath, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "request-object", req.SessionID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create authorization request URI: %w", err)
+			return nil, fmt.Errorf("failed to construct request object path: %w", err)
 		}
+
+		oidc4vpClientID := fmt.Sprintf("x509_san_dns:%s", host)
+		q := url.Values{}
+		q.Set("client_id", oidc4vpClientID)
+		q.Set("request_uri", requestObjectPath)
+		qrData = "openid4vp://cb?" + q.Encode()
 	}
 
 	// Generate QR code
@@ -909,46 +952,54 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 
 // UserInfoRequest represents a UserInfo endpoint request
 type UserInfoRequest struct {
-	Authorization string `json:"-" header:"Authorization" validate:"required,max=256,printascii"`
+	Authorization string `json:"-" header:"Authorization" validate:"required,max=8192,printascii"`
 	AccessToken   string `json:"-"` // Parsed from Authorization header
 }
 
 // UserInfoResponse contains user claims
 type UserInfoResponse map[string]any
 
-// GetUserInfo returns user claims based on access token
+// GetUserInfo returns user claims based on a JWT access token.
+// The endpoint is fully stateless: it validates the JWT signature and expiration
+// using the same signing key that issued the token, then returns the embedded claims.
 func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
-	// Get session by access token
-	session, err := c.cacheService.AuthContext.GetByAccessToken(ctx, req.AccessToken)
+	if !c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+		return nil, ErrRequestNotSupported
+	}
+
+	if c.pkiSigner == nil {
+		c.log.Error(nil, "Signing key not loaded, cannot validate access token")
+		return nil, ErrServerError
+	}
+
+	// Parse and validate the JWT access token using the issuer's public key
+	claims := jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(req.AccessToken, claims, func(t *jwt.Token) (any, error) {
+		return c.pkiSigner.PublicKey(), nil
+	}, jwt.WithValidMethods([]string{c.pkiSigner.Algorithm()}),
+		jwt.WithIssuer(c.cfg.Verifier.Outbound.OIDCProvider.Issuer))
 	if err != nil {
-		return nil, ErrInvalidGrant
-	}
-	if session == nil {
-		return nil, ErrInvalidGrant
-	}
-
-	// Check if access token is expired
-	if time.Now().Unix() > session.AccessTokenExpiresAt {
+		c.log.Info("Access token validation failed", "error", err)
 		return nil, ErrInvalidGrant
 	}
 
-	// Generate subject identifier
-	walletID := ""
-	if val, ok := session.VerifiedClaims["sub"]; ok {
-		if str, ok := val.(string); ok {
-			walletID = str
+	// Ensure the JWT is an access token (RFC 9068 typ=at+jwt), not an id_token
+	if typ, _ := token.Header["typ"].(string); typ != "at+jwt" {
+		c.log.Info("Rejected non-access-token JWT at userinfo", "typ", typ)
+		return nil, ErrInvalidGrant
+	}
+
+	// Build UserInfo response from the JWT claims.
+	// Omit JWT-specific claims that are not userinfo attributes.
+	response := UserInfoResponse{}
+	for k, v := range claims {
+		switch k {
+		case "iss", "aud", "exp", "iat", "nonce", "jti":
+			continue
+		default:
+			response[k] = v
 		}
 	}
-
-	subject := c.generateSubjectIdentifier(walletID, session.ClientID)
-
-	// Return verified claims
-	response := UserInfoResponse{
-		"sub": subject,
-	}
-
-	// Add verified claims from VP
-	maps.Copy(response, session.VerifiedClaims)
 
 	return response, nil
 }
@@ -975,4 +1026,24 @@ func (c *Client) matchRedirectURI(registered []string, reqURI string) bool {
 		}
 	}
 	return false
+}
+
+// buildOpenID4VPAuthzRequest constructs an OpenID4VP authorization request URL
+// with a request_uri pointing to the request-object endpoint as a path parameter.
+// It returns the full authorization request URL and the query parameters used.
+func buildOpenID4VPAuthzRequest(publicURL, sessionID string) (string, url.Values, error) {
+	requestObjectPath, err := url.JoinPath(publicURL, "verification", "request-object", sessionID)
+	if err != nil {
+		return "", nil, fmt.Errorf("construct request object path: %w", err)
+	}
+
+	host, err := helpers.HostFromURL(publicURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("extract host from PublicURL: %w", err)
+	}
+
+	q := url.Values{}
+	q.Set("client_id", fmt.Sprintf("x509_san_dns:%s", host))
+	q.Set("request_uri", requestObjectPath)
+	return "openid4vp://cb?" + q.Encode(), q, nil
 }

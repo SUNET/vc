@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package integration contains integration tests that run against the real
-// docker-compose stack (apigw, verifier, mockas, issuer, registry, mongo).
+// docker-compose stack (apigw, verifier, issuer, registry, mongo).
 //
 // Prerequisites:
 //   - The stack must be running: docker compose up -d
@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -38,7 +39,9 @@ import (
 	"github.com/SUNET/vc/internal/wallet/apiv1"
 	"github.com/SUNET/vc/internal/wallet/config"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -48,23 +51,22 @@ import (
 
 // Stack service addresses (Docker bridge IPs on vc-dev-net)
 var (
-	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")    // NOSONAR
-	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080") // NOSONAR
-	mockasURL   = envOrDefault("STACK_MOCKAS_URL", "https://172.16.50.13:8080")  // NOSONAR
+	apigwURL    = envOrDefault("STACK_APIGW_URL", "https://172.16.50.2:8080")     // NOSONAR
+	verifierURL = envOrDefault("STACK_VERIFIER_URL", "https://172.16.50.6:8080")  // NOSONAR
+	mockOIDCURL = envOrDefault("STACK_MOCK_OIDC_URL", "http://172.16.50.30:8080") // NOSONAR
 
 	// The public URLs the services use for self-referencing
-	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "https://apigw.vc.docker:8080")       // NOSONAR
-	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "https://verifier.vc.docker:8080") // NOSONAR
+	apigwPublicURL    = envOrDefault("STACK_APIGW_PUBLIC_URL", "https://apigw.vc.docker:8080")          // NOSONAR
+	verifierPublicURL = envOrDefault("STACK_VERIFIER_PUBLIC_URL", "https://verifier.vc.docker:8080")    // NOSONAR
+	mockOIDCPublicURL = envOrDefault("STACK_MOCK_OIDC_PUBLIC_URL", "http://mock-oauth2.vc.docker:8080") // NOSONAR
 
 	// tlsTransport is a shared TLS transport that trusts the dev rootCA.
 	// Initialised by TestMain before any tests run.
 	tlsTransport *http.Transport
 
 	// OAuth client config matching config.yaml
-	oauthClientID = "1003"                        // NOSONAR
-	oauthRedirect = "http://localhost:3000" // NOSONAR — must match apigw oauth_server in config_minimal.yaml
-	testUsername  = "wallet_test_user"            // NOSONAR
-	testPassword  = "wallet_test_pass_42"         // NOSONAR
+	oauthClientID = "1003"                  // NOSONAR
+	oauthRedirect = "http://localhost:3000" // NOSONAR — must match apigw oauth_server in config.yaml
 
 	// Shared VP client (registered once via sync.Once to avoid rate limiting)
 	sharedVPClient     *verifierClient
@@ -110,12 +112,14 @@ func TestMain(m *testing.M) {
 func rewritePublicToInternal(rawURL string) string {
 	rawURL = strings.ReplaceAll(rawURL, apigwPublicURL, apigwURL)
 	rawURL = strings.ReplaceAll(rawURL, verifierPublicURL, verifierURL)
+	rawURL = strings.ReplaceAll(rawURL, mockOIDCPublicURL, mockOIDCURL)
 	return rawURL
 }
 
 func rewriteInternalToPublic(rawURL string) string {
 	rawURL = strings.ReplaceAll(rawURL, apigwURL, apigwPublicURL)
 	rawURL = strings.ReplaceAll(rawURL, verifierURL, verifierPublicURL)
+	rawURL = strings.ReplaceAll(rawURL, mockOIDCURL, mockOIDCPublicURL)
 	return rawURL
 }
 
@@ -181,12 +185,22 @@ func extractSessionID(t *testing.T, htmlStr string) string {
 }
 
 // doVPAuthorize calls the verifier /authorize endpoint and returns the session ID.
+// Includes PKCE code_challenge because the verifier requires it by default (RFC 7636).
 func doVPAuthorize(t *testing.T, vpClientID, scope, state string) string {
 	t.Helper()
-	authURL := fmt.Sprintf("%s/authorize?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&state=%s",
-		verifierURL, vpClientID, url.QueryEscape(oauthRedirect), url.QueryEscape(scope), url.QueryEscape(state))
+	// Generate a dummy PKCE challenge (the VP flow doesn't use tokens, but the verifier validates the parameter)
+	codeChallenge := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" // SHA256 of "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	authURL := fmt.Sprintf("%s/authorize?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&state=%s&code_challenge=%s&code_challenge_method=S256",
+		verifierURL, vpClientID, url.QueryEscape(oauthRedirect), url.QueryEscape(scope), url.QueryEscape(state), codeChallenge)
 
-	resp, err := http.Get(authURL)
+	// Don't follow redirects — error redirects go to localhost:3000 which isn't running
+	noRedirectClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: tlsTransport,
+	}
+	resp, err := noRedirectClient.Get(authURL)
 	require.NoError(t, err)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -239,7 +253,6 @@ func TestStack_Health(t *testing.T) {
 	}{
 		{"apigw", apigwURL + "/health"},
 		{"verifier", verifierURL + "/health"},
-		{"mockas", mockasURL + "/health"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := http.Get(tc.url)
@@ -299,87 +312,142 @@ func TestStack_VCI_Nonce(t *testing.T) {
 // ---------- VCI: Upload + Credential Offer ----------
 
 // seedDocument uploads a document directly to apigw and returns identifiers.
-func seedDocument(t *testing.T, vct, scope, personID, givenName, familyName, birthDate string) (documentID, collectID, authenticSource string) {
+func seedDocument(t *testing.T, scope, identityMappingID, givenName, familyName, birthDate string) (documentID, authenticSource string) {
 	t.Helper()
 	docID := "doc-" + uuid.New().String()[:8]
-	colID := "col-" + uuid.New().String()[:8]
 
-	body, _ := json.Marshal(map[string]any{
-		"meta": map[string]any{
-			"authentic_source": "test_as",
-			"document_version": "1.0.0",
-			"vct":              vct,
-			"scope":            scope,
-			"document_id":      docID,
-			"collect": map[string]any{
-				"id": colID,
-			},
+	req := &vcclient.UploadRequest{
+		Meta: &model.MetaData{
+			AuthenticSource: "test_as",
+			Scope:           scope,
+			DocumentID:      docID,
 		},
-		"identities": []map[string]any{
-			{
-				"authentic_source_person_id": personID,
-				"given_name":                 givenName,
-				"family_name":                familyName,
-				"birth_date":                 birthDate,
-				"schema": map[string]any{
-					"name":    "SE",
-					"version": "1.0.0",
-				},
-			},
-		},
-		"document_data": map[string]any{
+		IdentityMappingIDs: []string{identityMappingID},
+		DocumentData: map[string]any{
 			"given_name":        givenName,
 			"family_name":       familyName,
-			"birth_date":        birthDate,
+			"birthdate":         birthDate,
+			"date_of_expiry":    "2030-01-01T00:00:00Z",
 			"issuing_country":   "SE",
 			"issuing_authority": "Test Authority",
+			"nationalities":     []string{"SE"},
+			"place_of_birth": map[string]any{
+				"country":  "SE",
+				"locality": "Stockholm",
+				"region":   "Stockholm",
+			},
 		},
-		"document_data_version": "1.0.0",
-	})
+	}
 
-	resp, err := http.Post(apigwURL+"/api/v1/upload", "application/json", bytes.NewReader(body))
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	resp, err := http.Post(apigwURL+"/api/v1/datastore/", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "upload failed: %s", string(respBody))
 
-	t.Logf("upload OK: document_id=%s collect_id=%s vct=%s scope=%s", docID, colID, vct, scope)
-	return docID, colID, "test_as"
+	t.Logf("upload OK: document_id=%s scope=%s", docID, scope)
+	return docID, "test_as"
 }
 
-// getCredentialOfferURL retrieves the credential_offer_url for a document via the notification endpoint.
-func getCredentialOfferURL(t *testing.T, authenticSource, vct, documentID string) string {
+// getCredentialOfferURL obtains a credential offer by driving the OIDC RP
+// standalone flow: initiate → mock-oauth2 login → callback → credential offer.
+// The oidcClaims are sent to mock-oauth2-server as the authenticated user's identity.
+func getCredentialOfferURL(t *testing.T, scope string, oidcClaims map[string]string) string {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{
-		"authentic_source": authenticSource,
-		"vct":              vct,
-		"document_id":      documentID,
-	})
 
-	resp, err := http.Post(apigwURL+"/api/v1/notification", "application/json", bytes.NewReader(body))
+	// Step 1: POST /oidcrp/initiate
+	initiateBody, _ := json.Marshal(map[string]string{"credential_type": scope})
+	resp, err := http.Post(apigwURL+"/oidcrp/initiate", "application/json", bytes.NewReader(initiateBody))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "notification failed: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "oidcrp/initiate: %s", string(respBody))
 
-	var reply struct {
-		Data struct {
-			CredentialOfferURL string `json:"credential_offer_url"`
-		} `json:"data"`
+	var initResp struct {
+		AuthorizationURL string `json:"authorization_url"`
+		State            string `json:"state"`
 	}
-	require.NoError(t, json.Unmarshal(respBody, &reply), "parse notification reply: %s", string(respBody))
-	require.NotEmpty(t, reply.Data.CredentialOfferURL, "credential_offer_url must not be empty")
+	require.NoError(t, json.Unmarshal(respBody, &initResp))
+	require.NotEmpty(t, initResp.AuthorizationURL, "authorization_url must not be empty")
+	t.Logf("oidcrp/initiate: auth_url=%s state=%s", initResp.AuthorizationURL, initResp.State)
 
-	t.Logf("credential_offer_url=%s", reply.Data.CredentialOfferURL[:min(len(reply.Data.CredentialOfferURL), 120)]+"...")
-	return reply.Data.CredentialOfferURL
+	// Step 2: Drive the mock-oauth2-server login flow
+	oidcAuthURL := rewritePublicToInternal(initResp.AuthorizationURL)
+
+	jar, _ := cookiejar.New(nil)
+	noRedirectClient := &http.Client{
+		Transport: tlsTransport,
+		Jar:       jar,
+		Timeout:   15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// GET mock-oauth2 authorize endpoint
+	oidcResp, err := noRedirectClient.Get(oidcAuthURL)
+	require.NoError(t, err)
+	oidcBody, _ := io.ReadAll(oidcResp.Body)
+	oidcResp.Body.Close()
+	t.Logf("mock-oauth2 authorize: status=%d location=%s", oidcResp.StatusCode, oidcResp.Header.Get("Location"))
+
+	var callbackURL string
+	if oidcResp.StatusCode == 302 {
+		// Auto-login mode
+		callbackURL = rewritePublicToInternal(oidcResp.Header.Get("Location"))
+	} else {
+		// Interactive mode: POST login form with claims
+		require.Equal(t, 200, oidcResp.StatusCode, "mock-oauth2 expected 200 or 302, body=%s", string(oidcBody))
+		claimsJSON, _ := json.Marshal(oidcClaims)
+		loginData := url.Values{
+			"username": {"testuser"},
+			"claims":   {string(claimsJSON)},
+		}
+		loginResp, loginErr := noRedirectClient.Post(oidcAuthURL, "application/x-www-form-urlencoded", strings.NewReader(loginData.Encode()))
+		require.NoError(t, loginErr)
+		loginResp.Body.Close()
+		t.Logf("mock-oauth2 login: status=%d location=%s", loginResp.StatusCode, loginResp.Header.Get("Location"))
+		require.Equal(t, 302, loginResp.StatusCode, "mock-oauth2 login expected 302")
+		callbackURL = rewritePublicToInternal(loginResp.Header.Get("Location"))
+	}
+	require.NotEmpty(t, callbackURL, "must get callback redirect from mock-oauth2")
+
+	// Step 3: GET /oidcrp/callback — in standalone mode returns JSON with credential_offer
+	callbackResp, err := noRedirectClient.Get(callbackURL)
+	require.NoError(t, err)
+	callbackBody, _ := io.ReadAll(callbackResp.Body)
+	callbackResp.Body.Close()
+	t.Logf("oidcrp/callback: status=%d body=%s", callbackResp.StatusCode, string(callbackBody)[:min(len(callbackBody), 300)])
+	require.Equal(t, http.StatusOK, callbackResp.StatusCode, "oidcrp/callback: %s", string(callbackBody))
+
+	var cbResp struct {
+		Status          string         `json:"status"`
+		CredentialOffer map[string]any `json:"credential_offer"`
+	}
+	require.NoError(t, json.Unmarshal(callbackBody, &cbResp))
+	require.Equal(t, "success", cbResp.Status, "callback status")
+	require.NotEmpty(t, cbResp.CredentialOffer, "credential_offer must not be empty")
+
+	// Step 4: Build credential_offer_url from the offer map
+	// Remove the "id" key (pre-auth code internal identifier) before building the URL
+	delete(cbResp.CredentialOffer, "id")
+	offerJSON, err := json.Marshal(cbResp.CredentialOffer)
+	require.NoError(t, err)
+
+	offerURL := fmt.Sprintf("openid-credential-offer://?credential_offer=%s", url.QueryEscape(string(offerJSON)))
+	t.Logf("credential_offer_url=%s", offerURL[:min(len(offerURL), 120)]+"...")
+	return offerURL
 }
 
 func TestStack_VCI_MockNextAndOffer(t *testing.T) {
-	docID, _, authSource := seedDocument(t,
-		"urn:eudi:pid:arf-1.5:1", "pid_1_5", "person-"+uuid.New().String()[:8],
-		"Test", "Walker", "1990-01-15")
-
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
+	offerURL := getCredentialOfferURL(t, "pid", map[string]string{
+		"given_name":  "Test",
+		"family_name": "Walker",
+		"birth_date":  "1990-01-15",
+	})
 
 	// Parse the credential_offer from the URL
 	parsed, err := url.Parse(offerURL)
@@ -428,74 +496,26 @@ func TestStack_VCI_PAR(t *testing.T) {
 
 // ---------- VCI: Full Authorization Code Flow ----------
 
-// createTestUser creates a test user for the basic auth consent flow.
-func createTestUser(t *testing.T, personID, givenName, familyName, birthDate string) {
-	t.Helper()
-	body, _ := json.Marshal(map[string]any{
-		"username": testUsername,
-		"password": testPassword,
-		"identity": map[string]any{
-			"authentic_source_person_id": personID,
-			"given_name":                 givenName,
-			"family_name":                familyName,
-			"birth_date":                 birthDate,
-			"schema": map[string]any{
-				"name":    "SE",
-				"version": "1.0.0",
-			},
-		},
-		"meta": map[string]any{
-			"authentic_source": "test_as",
-			"document_version": "1.0.0",
-			"vct":              "urn:eudi:pid:arf-1.5:1",
-			"scope":            "pid_1_5",
-			"document_id":      "meta-" + uuid.New().String()[:8],
-		},
-	})
-
-	resp, err := http.Post(apigwURL+"/api/v1/user/pid", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	// 200 = created, or may fail if user exists — both OK
-	t.Logf("create user: status=%d body=%s", resp.StatusCode, string(respBody))
-}
-
 func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 	// This test exercises the complete OpenID4VCI authorization_code flow:
-	// 1. Seed mock data via mockas
-	// 2. Get credential offer via notification
-	// 3. PAR request
-	// 4. Authorize → consent → login → user lookup → get auth code
-	// 5. Token request with DPoP
-	// 6. Credential request with DPoP
+	// 1. PAR request
+	// 2. Authorize → consent → OIDC login → user lookup → get auth code
+	// 3. Token request with DPoP
+	// 4. Credential request with DPoP
+	//
+	// Uses bootstrapped data (Helen Mirren, user "100") which has identity
+	// mappings that the consent flow can resolve via OIDC auth claims.
 
-	personID := "person-" + uuid.New().String()[:8]
-	givenName := "TestVCI"
-	familyName := "FullFlow"
-	birthDate := "1990-05-20"
+	// Bootstrapped user "100" identity
+	givenName := "Helen"
+	familyName := "Mirren"
+	birthDate := "1996-01-30"
 
-	// Step 0: Create a test user for login
-	createTestUser(t, personID, givenName, familyName, birthDate)
-
-	// Step 1: Seed data
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
-
-	// Step 2: Get credential offer
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
-	parsed, err := url.Parse(offerURL)
-	require.NoError(t, err)
-	offerJSON := parsed.Query().Get("credential_offer")
-	require.NotEmpty(t, offerJSON)
-
-	var offer openid4vci.CredentialOfferParameters
-	require.NoError(t, json.Unmarshal([]byte(offerJSON), &offer))
-
-	// Step 3: Fetch issuer metadata
+	// Step 1: Fetch metadata
 	issuerMeta := fetchIssuerMetadata(t, apigwURL)
 	oauth2Meta := fetchOAuth2Metadata(t, apigwURL)
 
-	// Step 4: PAR
+	// Step 2: PAR (no issuer_state needed — consent flow resolves via identity mapping)
 	codeVerifier := uuid.New().String() + uuid.New().String()
 	codeChallenge := computeS256(codeVerifier)
 	state := uuid.New().String()
@@ -507,37 +527,32 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 		"state":                 {state},
 		"code_challenge":        {codeChallenge},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"pid_1_5"},
-	}
-
-	// Extract issuer_state from the offer grants
-	if authCodeGrant, ok := offer.Grants["authorization_code"]; ok {
-		if grantMap, ok := authCodeGrant.(map[string]any); ok {
-			if issuerState, ok := grantMap["issuer_state"].(string); ok {
-				parData.Set("issuing_state", issuerState)
-			}
-		}
+		"scope":                 {"pid"},
 	}
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
 	t.Logf("PAR: request_uri=%s", parResp.RequestURI)
 
-	// Step 5: Authorization + consent flow (session-based)
-	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	// Step 3: Authorization + consent flow (session-based)
+	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name":  givenName,
+		"family_name": familyName,
+		"birth_date":  birthDate,
+	})
 	require.NotEmpty(t, authCode, "authorization code must not be empty")
 	t.Logf("authorization_code=%s", authCode)
 
-	// Step 6: Token request with DPoP
+	// Step 4: Token request with DPoP
 	signingKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tokenEndpoint := rewritePublicToInternal(oauth2Meta.TokenEndpoint)
 	tokenResp := doTokenRequest(t, tokenEndpoint, authCode, codeVerifier, signingKey)
 	require.NotEmpty(t, tokenResp.AccessToken, "access_token must not be empty")
 	t.Logf("access_token=%s... c_nonce=%s", tokenResp.AccessToken[:min(len(tokenResp.AccessToken), 20)], tokenResp.CNonce)
 
-	// Step 7: Credential request with DPoP
+	// Step 5: Credential request with DPoP
 	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
 	credResp := doCredentialRequest(t, credEndpoint, tokenResp.AccessToken, tokenResp.CNonce,
-		offer.CredentialConfigurationIDs[0], signingKey)
+		"pid", signingKey)
 	require.NotEmpty(t, credResp.Credentials, "must receive at least one credential")
 	t.Logf("credentials_received=%d notification_id=%s", len(credResp.Credentials), credResp.NotificationID)
 
@@ -549,52 +564,8 @@ func TestStack_VCI_FullAuthCodeFlow(t *testing.T) {
 // ---------- VCI: Wallet Client Full Flow ----------
 
 func TestStack_VCI_WalletClient(t *testing.T) {
-	// Tests the wallet apiv1.Client against the real stack.
-	// Uses the same seed + consent flow but drives through the wallet's Client.
-	personID := "person-" + uuid.New().String()[:8]
-	givenName := "TestWallet"
-	familyName := "Client"
-	birthDate := "1985-03-12"
-
-	createTestUser(t, personID, givenName, familyName, birthDate)
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
-
-	// Parse offer to get issuer_state
-	parsed, err := url.Parse(offerURL)
-	require.NoError(t, err)
-	offerJSON := parsed.Query().Get("credential_offer")
-	var offer openid4vci.CredentialOfferParameters
-	require.NoError(t, json.Unmarshal([]byte(offerJSON), &offer))
-
-	// For the wallet client, we need to pre-obtain the auth code since the
-	// wallet's followAuthorization() doesn't handle the multi-step consent flow.
-	oauth2Meta := fetchOAuth2Metadata(t, apigwURL)
-
-	codeVerifier := uuid.New().String() + uuid.New().String()
-	codeChallenge := computeS256(codeVerifier)
-	state := uuid.New().String()
-
-	parData := url.Values{
-		"response_type":         {"code"},
-		"client_id":             {oauthClientID},
-		"redirect_uri":          {oauthRedirect},
-		"state":                 {state},
-		"code_challenge":        {codeChallenge},
-		"code_challenge_method": {"S256"},
-		"scope":                 {"pid_1_5"},
-	}
-	if authCodeGrant, ok := offer.Grants["authorization_code"]; ok {
-		if grantMap, ok := authCodeGrant.(map[string]any); ok {
-			if issuerState, ok := grantMap["issuer_state"].(string); ok {
-				parData.Set("issuing_state", issuerState)
-			}
-		}
-	}
-
-	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
-	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
-	require.NotEmpty(t, authCode)
+	// Tests the wallet apiv1.Client initialization against the real stack.
+	// Uses bootstrapped data (Helen Mirren) for the consent flow.
 
 	// Now use the wallet apiv1.Client for token + credential
 	cfg := &config.Config{
@@ -607,11 +578,11 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 				Type: "vci",
 				VCI: &config.VCIScenario{
 					IssuerURL:                 apigwURL,
-					Scope:                     "pid_1_5",
+					Scope:                     "pid",
 					RedirectURI:               oauthRedirect,
 					UseDPoP:                   true,
 					PreAuthorizedCode:         "", // Using auth code
-					CredentialConfigurationID: offer.CredentialConfigurationIDs[0],
+					CredentialConfigurationID: "pid",
 				},
 			},
 		},
@@ -632,16 +603,9 @@ func TestStack_VCI_WalletClient(t *testing.T) {
 // and returns the code, the code verifier, and the signing key used.
 func getAuthCodeForNegativeTests(t *testing.T) (authCode, codeVerifier string, signingKey *ecdsa.PrivateKey) {
 	t.Helper()
-	personID := "neg-" + uuid.New().String()[:8]
-	createTestUser(t, personID, "NegTest", "Security", "1985-03-15")
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, "NegTest", "Security", "1985-03-15")
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
 
-	parsed, err := url.Parse(offerURL)
-	require.NoError(t, err)
-	var offer openid4vci.CredentialOfferParameters
-	require.NoError(t, json.Unmarshal([]byte(parsed.Query().Get("credential_offer")), &offer))
-
+	// Use bootstrapped data (Helen Mirren, user "100") which has identity
+	// mappings the consent flow can resolve via OIDC auth claims.
 	oauth2Meta := fetchOAuth2Metadata(t, apigwURL)
 
 	codeVerifier = uuid.New().String() + uuid.New().String()
@@ -654,18 +618,15 @@ func getAuthCodeForNegativeTests(t *testing.T) (authCode, codeVerifier string, s
 		"state":                 {uuid.New().String()},
 		"code_challenge":        {codeChallenge},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"pid_1_5"},
-	}
-	if authCodeGrant, ok := offer.Grants["authorization_code"]; ok {
-		if grantMap, ok := authCodeGrant.(map[string]any); ok {
-			if issuerState, ok := grantMap["issuer_state"].(string); ok {
-				parData.Set("issuing_state", issuerState)
-			}
-		}
+		"scope":                 {"pid"},
 	}
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
-	code := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	code := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name":  "Helen",
+		"family_name": "Mirren",
+		"birth_date":  "1996-01-30",
+	})
 	require.NotEmpty(t, code, "auth code for negative tests")
 
 	signingKey, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -680,14 +641,14 @@ func TestStack_VCI_PAR_UnknownClientID(t *testing.T) {
 		"state":                 {uuid.New().String()},
 		"code_challenge":        {"dummychallenge"},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"pid_1_5"},
+		"scope":                 {"pid"},
 	}
 	resp, err := http.Post(apigwURL+"/op/par", "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	// Expect rejection — 405 per the server's error handling for ErrInvalidClient
-	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode,
+	// Expect rejection — 401 Unauthorized per RFC 6749 §5.2 for invalid_client
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 		"PAR with unknown client_id should be rejected")
 }
 
@@ -699,13 +660,13 @@ func TestStack_VCI_PAR_BadRedirectURI(t *testing.T) {
 		"state":                 {uuid.New().String()},
 		"code_challenge":        {"dummychallenge"},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"pid_1_5"},
+		"scope":                 {"pid"},
 	}
 	resp, err := http.Post(apigwURL+"/op/par", "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode,
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 		"PAR with wrong redirect_uri should be rejected")
 }
 
@@ -728,9 +689,10 @@ func TestStack_VCI_Token_NoDPoP(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 
 	t.Logf("no DPoP: status=%d body=%s", resp.StatusCode, string(body))
-	assert.True(t, resp.StatusCode >= 400 && resp.StatusCode < 500,
-		"token without DPoP should be 4xx, got %d: %s", resp.StatusCode, string(body))
-	assert.Contains(t, string(body), "DPOP", "error should mention DPoP field")
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"token without DPoP should be 400: %s", string(body))
+	assert.Contains(t, string(body), "invalid_dpop_proof", "error code should be invalid_dpop_proof")
+	assert.Contains(t, string(body), "DPoP", "error should mention DPoP")
 }
 
 func TestStack_VCI_Token_InvalidDPoP(t *testing.T) {
@@ -778,7 +740,7 @@ func TestStack_VCI_Token_InvalidDPoP(t *testing.T) {
 		t.Logf("wrong htu: status=%d body=%s", resp.StatusCode, string(body))
 		assert.True(t, resp.StatusCode >= 400,
 			"DPoP with wrong htu should fail, got %d: %s", resp.StatusCode, string(body))
-		assert.Contains(t, string(body), "invalid HTU")
+		assert.Contains(t, string(body), "invalid htu")
 	})
 }
 
@@ -807,6 +769,7 @@ func TestStack_VCI_Token_WrongPKCE(t *testing.T) {
 		t.Logf("wrong PKCE verifier: status=%d body=%s", resp.StatusCode, string(body))
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
 			"wrong code_verifier should be 400: %s", string(body))
+		assert.Contains(t, string(body), "invalid_grant")
 		assert.Contains(t, string(body), "PKCE")
 	})
 
@@ -832,7 +795,8 @@ func TestStack_VCI_Token_WrongPKCE(t *testing.T) {
 		t.Logf("missing PKCE verifier: status=%d body=%s", resp.StatusCode, string(body))
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
 			"missing code_verifier should be 400: %s", string(body))
-		assert.Contains(t, string(body), "PKCE")
+		assert.Contains(t, string(body), "invalid_request")
+		assert.Contains(t, string(body), "code_verifier")
 	})
 }
 
@@ -935,7 +899,7 @@ func TestStack_VCI_Credential_NoDPoP(t *testing.T) {
 	proofJWT := createProofJWT(t, rewriteInternalToPublic(issuerMeta.CredentialEndpoint),
 		tokenResp.CNonce, signingKey)
 	reqBody, _ := json.Marshal(map[string]any{
-		"credential_configuration_id": "urn:eudi:pid:arf-1.5:1",
+		"credential_configuration_id": "pid",
 		"proofs":                      map[string]any{"jwt": []string{proofJWT}},
 	})
 
@@ -1062,21 +1026,12 @@ func TestStack_VP_DirectPost(t *testing.T) {
 
 func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 	// Full end-to-end: Issue a real credential via VCI, then present it via VP.
-	personID := "person-" + uuid.New().String()[:8]
-	givenName := "TestE2E"
-	familyName := "Runner"
-	birthDate := "1992-07-04"
+	// Uses bootstrapped data (Helen Mirren, user "100") for the consent flow.
+	givenName := "Helen"
+	familyName := "Mirren"
+	birthDate := "1996-01-30"
 
-	// VCI: Seed + offer + PAR + consent + token + credential
-	createTestUser(t, personID, givenName, familyName, birthDate)
-	docID, _, authSource := seedDocument(t, "urn:eudi:pid:arf-1.5:1", "pid_1_5", personID, givenName, familyName, birthDate)
-	offerURL := getCredentialOfferURL(t, authSource, "urn:eudi:pid:arf-1.5:1", docID)
-
-	parsed, err := url.Parse(offerURL)
-	require.NoError(t, err)
-	var offer openid4vci.CredentialOfferParameters
-	require.NoError(t, json.Unmarshal([]byte(parsed.Query().Get("credential_offer")), &offer))
-
+	// VCI: PAR + consent + token + credential
 	oauth2Meta := fetchOAuth2Metadata(t, apigwURL)
 	issuerMeta := fetchIssuerMetadata(t, apigwURL)
 
@@ -1090,18 +1045,15 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 		"state":                 {uuid.New().String()},
 		"code_challenge":        {codeChallenge},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"pid_1_5"},
-	}
-	if authCodeGrant, ok := offer.Grants["authorization_code"]; ok {
-		if grantMap, ok := authCodeGrant.(map[string]any); ok {
-			if issuerState, ok := grantMap["issuer_state"].(string); ok {
-				parData.Set("issuing_state", issuerState)
-			}
-		}
+		"scope":                 {"pid"},
 	}
 
 	parResp := doPAR(t, oauth2Meta.PAREndpoint, parData)
-	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID)
+	authCode := doConsentFlow(t, oauth2Meta.AuthorizationEndpoint, parResp.RequestURI, oauthClientID, map[string]string{
+		"given_name":  givenName,
+		"family_name": familyName,
+		"birth_date":  birthDate,
+	})
 	require.NotEmpty(t, authCode, "VCI auth code")
 
 	signingKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -1111,7 +1063,7 @@ func TestStack_E2E_VCI_Then_VP(t *testing.T) {
 
 	credEndpoint := rewritePublicToInternal(issuerMeta.CredentialEndpoint)
 	credResp := doCredentialRequest(t, credEndpoint, tokenResp.AccessToken, tokenResp.CNonce,
-		offer.CredentialConfigurationIDs[0], signingKey)
+		"pid", signingKey)
 	require.NotEmpty(t, credResp.Credentials, "VCI must issue credential")
 	realCredential := credResp.Credentials[0].Credential
 	t.Logf("VCI issued credential (%d bytes)", len(realCredential))
@@ -1204,9 +1156,11 @@ func doPAR(t *testing.T, parEndpoint string, data url.Values) openid4vci.ParResp
 	return parResp
 }
 
-// doConsentFlow drives the full authorize → consent → login → userLookup flow
+// doConsentFlow drives the full authorize → consent → OIDC login → userLookup flow
 // using a session cookie jar, and returns the authorization code.
-func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string) string {
+// It programmatically drives the OIDC flow through mock-oauth2-server.
+// The oidcClaims map is sent to mock-oauth2-server as the user's identity claims.
+func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string, oidcClaims map[string]string) string {
 	t.Helper()
 
 	jar, _ := cookiejar.New(nil)
@@ -1228,33 +1182,18 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 	t.Logf("authorize: status=%d url=%s", resp.StatusCode, resp.Request.URL.String())
 
 	// We should have been redirected to the consent page (200 after following redirect)
-	// or are on the consent page directly
-	assert.True(t, resp.StatusCode == 200 || resp.StatusCode == 302,
-		"authorize expected 200 or 302, got %d: %s", resp.StatusCode, string(body))
+	require.Equal(t, 200, resp.StatusCode, "authorize expected 200, got %d: %s", resp.StatusCode, string(body))
 
-	// Step 2: POST /user/pid/login
-	// The session now has the request_uri, scope, etc.
-	loginURL := rewritePublicToInternal(apigwURL + "/user/pid/login")
-	loginData := url.Values{
-		"username": {testUsername},
-		"password": {testPassword},
-	}
+	// Step 2: Extract the OIDC authorization URL from consent HTML
+	// The consent page embeds it as data-redirect-url="..."
+	oidcAuthURL := extractDataRedirectURL(t, string(body))
+	require.NotEmpty(t, oidcAuthURL, "consent page must contain data-redirect-url for OIDC")
+	t.Logf("consent: oidc_auth_url=%s", oidcAuthURL)
 
-	resp, err = client.Post(loginURL, "application/x-www-form-urlencoded", strings.NewReader(loginData.Encode()))
-	require.NoError(t, err)
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
+	// Rewrite the OIDC URL from Docker-internal hostname to bridge IP
+	oidcAuthURL = rewritePublicToInternal(oidcAuthURL)
 
-	t.Logf("login: status=%d body=%s", resp.StatusCode, string(body)[:min(len(body), 200)])
-	// Login should succeed (200)
-	require.True(t, resp.StatusCode == 200 || resp.StatusCode == 302,
-		"login failed with %d: %s", resp.StatusCode, string(body))
-
-	// Step 3: GET /user/lookup
-	// This grants consent and returns the redirect URL with the authorization code
-	lookupURL := rewritePublicToInternal(apigwURL + "/user/lookup")
-
-	// Use no-redirect client to capture the response with the code
+	// Use no-redirect client for all OIDC steps to control redirects manually
 	noRedirectClient := &http.Client{
 		Transport: tlsTransport,
 		Jar:       jar,
@@ -1264,18 +1203,59 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 		},
 	}
 
+	// Step 3: GET the mock-oauth2-server authorize endpoint
+	// With interactiveLogin:false it auto-completes and redirects to callback
+	oidcResp, err := noRedirectClient.Get(oidcAuthURL)
+	require.NoError(t, err)
+	oidcResp.Body.Close()
+	t.Logf("oidc authorize: status=%d location=%s", oidcResp.StatusCode, oidcResp.Header.Get("Location"))
+
+	// mock-oauth2-server with interactiveLogin:false redirects directly to callback
+	callbackURL := oidcResp.Header.Get("Location")
+	if oidcResp.StatusCode == 302 && callbackURL != "" {
+		// Auto-login mode: mock-oauth2-server redirected directly to callback
+		callbackURL = rewritePublicToInternal(callbackURL)
+		t.Logf("oidc auto-login: callback=%s", callbackURL)
+	} else {
+		// Interactive mode: mock-oauth2-server returned a login form
+		require.Equal(t, 200, oidcResp.StatusCode, "oidc authorize expected 200 or 302")
+		oidcBody, _ := io.ReadAll(oidcResp.Body)
+
+		// POST the login form with the identity claims
+		claimsJSON, _ := json.Marshal(oidcClaims)
+		loginData := url.Values{
+			"username": {"testuser"},
+			"claims":   {string(claimsJSON)},
+		}
+		loginResp, loginErr := noRedirectClient.Post(oidcAuthURL, "application/x-www-form-urlencoded", strings.NewReader(loginData.Encode()))
+		require.NoError(t, loginErr)
+		loginResp.Body.Close()
+		t.Logf("oidc login: status=%d location=%s", loginResp.StatusCode, loginResp.Header.Get("Location"))
+		require.Equal(t, 302, loginResp.StatusCode, "oidc login expected 302, body=%s", string(oidcBody))
+		callbackURL = rewritePublicToInternal(loginResp.Header.Get("Location"))
+	}
+
+	require.NotEmpty(t, callbackURL, "oidc flow must produce a callback redirect")
+
+	// Step 4: Follow the redirect to apigw /oidcrp/callback
+	callbackResp, err := noRedirectClient.Get(callbackURL)
+	require.NoError(t, err)
+	callbackResp.Body.Close()
+	t.Logf("oidc callback: status=%d location=%s", callbackResp.StatusCode, callbackResp.Header.Get("Location"))
+	require.Equal(t, 302, callbackResp.StatusCode, "oidc callback expected 302")
+
+	// Step 6: GET /user/lookup
+	// The OIDC callback has stored documents in the VCI cache; now we finalize
+	lookupURL := rewritePublicToInternal(apigwURL + "/user/lookup")
+
 	resp, err = noRedirectClient.Get(lookupURL)
 	require.NoError(t, err)
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-
 	t.Logf("user/lookup: status=%d body=%s", resp.StatusCode, string(body)[:min(len(body), 300)])
 
-	// The response should contain a redirect_url with the authorization code.
-	// It could be in JSON response or as a redirect.
+	// Parse the redirect_url containing the authorization code
 	var code string
-
-	// Try parsing as JSON (UserLookupReply)
 	var lookupReply struct {
 		SVGTemplateClaims map[string]any `json:"svg_template_claims,omitempty"`
 		RedirectURL       string         `json:"redirect_url,omitempty"`
@@ -1298,6 +1278,22 @@ func doConsentFlow(t *testing.T, authorizeEndpoint, requestURI, clientID string)
 	}
 
 	return code
+}
+
+// extractDataRedirectURL parses the OIDC redirect URL from the consent page HTML.
+func extractDataRedirectURL(t *testing.T, htmlBody string) string {
+	t.Helper()
+	const marker = `data-redirect-url="`
+	idx := strings.Index(htmlBody, marker)
+	if idx == -1 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := strings.Index(htmlBody[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return html.UnescapeString(htmlBody[start : start+end])
 }
 
 func doTokenRequest(t *testing.T, tokenEndpoint, code, codeVerifier string, signingKey *ecdsa.PrivateKey) openid4vci.TokenResponse {

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -44,7 +44,7 @@ type mockDatastoreColl struct {
 	err      error
 }
 
-func (m *mockDatastoreColl) GetDocumentWithIdentity(ctx context.Context, query *db.GetDocumentQuery) (*model.CompleteDocument, error) {
+func (m *mockDatastoreColl) GetDocument(ctx context.Context, authenticSource, documentID string) (*model.CompleteDocument, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -224,7 +224,7 @@ func TestVCICredentialOffer(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	req := &openid4vci.CredentialOfferParameters{
+	req := &openid4vci.CredentialOfferParameters{ // #nosec G101
 		CredentialIssuer: "https://issuer.example.com",
 	}
 
@@ -277,15 +277,9 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	// Create mock authorization context matching the actual structure
 	mockAuthCtx := &mockAuthContextColl{
 		authContext: &cache.AuthorizationContext{
-			SessionID: "session-123",
-			Scopes:    []string{"pid"},
-			Identity: &model.Identity{
-				AuthenticSourcePersonID: "test-identity-123",
-				GivenName:               "John",
-				FamilyName:              "Doe",
-				BirthDate:               "1990-01-01",
-				Schema:                  &model.IdentitySchema{},
-			},
+			SessionID:  "session-123",
+			Scopes:     []string{"pid"},
+			Identifier: "test-identity-123",
 			Token: &cache.Token{
 				AccessToken: accessToken,
 				ExpiresAt:   time.Now().Add(time.Hour).Unix(),
@@ -313,53 +307,31 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	mockDoc := &mockDatastoreColl{
 		document: &model.CompleteDocument{
 			Meta: &model.MetaData{
-				VCT: model.CredentialTypeUrnEudiPid1,
+				AuthenticSource: "SUNET",
+				Scope:           "pid",
+				DocumentID:      "test-doc-id",
 			},
 			DocumentData: map[string]any{
 				"sub":         "123",
 				"given_name":  "John",
 				"family_name": "Doe",
 			},
-			Identities: []model.Identity{
-				{
-					AuthenticSourcePersonID: "test-identity-123",
-					GivenName:               "John",
-					FamilyName:              "Doe",
-					BirthDate:               "1990-01-01",
-					Schema:                  &model.IdentitySchema{},
-				},
-			},
-			DocumentDisplay: &model.DocumentDisplay{
-				Version: "1.0.0",
-				Type:    "secure",
-				DescriptionStructured: map[string]any{
-					"en": "Personal ID",
-				},
-			},
-			DocumentDataVersion: "1.0.0",
+			IdentityMappingIDs: []string{"test-identity-123"},
 		},
 	}
 
 	// Verify mock document retrieval
-	doc, err := mockDoc.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-		Identity: &model.Identity{
-			AuthenticSourcePersonID: "test-identity-123",
-			GivenName:               "John",
-			FamilyName:              "Doe",
-			BirthDate:               "1990-01-01",
-			Schema:                  &model.IdentitySchema{},
-		},
-	})
+	doc, err := mockDoc.GetDocument(ctx, "SUNET", "test-doc-id")
 	require.NoError(t, err)
 	assert.NotNil(t, doc)
-	assert.Equal(t, model.CredentialTypeUrnEudiPid1, doc.Meta.VCT)
+	assert.Equal(t, "pid", doc.Meta.Scope)
 	assert.Equal(t, "John", doc.DocumentData["given_name"])
 
 	// Create mock issuer client that returns a credential
 	mockIssuer := &mockIssuerClient{
 		reply: &apiv1_issuer.MakeSDJWTReply{
 			Credentials: []*apiv1_issuer.Credential{
-				{
+				{ // #nosec G101
 					Credential: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZjK3NkLWp3dCJ9.eyJzdWIiOiIxMjMiLCJnaXZlbl9uYW1lIjoiSm9obiIsImZhbWlseV9uYW1lIjoiRG9lIn0.signature",
 				},
 			},
@@ -391,7 +363,7 @@ func TestVCICredential_SuccessfulIssuance(t *testing.T) {
 	assert.Contains(t, issuerResp.Credentials[0].Credential, "eyJ", "Should be a JWT")
 
 	// Build credential request matching the actual structure
-	req := &openid4vci.CredentialRequest{
+	req := &openid4vci.CredentialRequest{ // #nosec G101
 		DPoP:          dpopJWT,
 		Authorization: "DPoP " + accessToken,
 		Proofs: &openid4vci.Proofs{
@@ -506,4 +478,88 @@ func TestBatchCredentialRequest(t *testing.T) {
 	t.Log("✓ 3 proof JWTs included")
 	t.Log("✓ All JWKs extracted successfully")
 	t.Log("✓ Backward compat: ExtractJWK returns first key")
+}
+
+// TestDPoPThumbprintBinding verifies the verifyDPoPKeyBinding helper:
+// - Matching thumbprints pass
+// - Mismatched thumbprints produce an invalid_dpop_proof error (400)
+// - Empty stored thumbprint (no DPoP binding) is skipped
+// - Nil token is skipped
+func TestDPoPThumbprintBinding(t *testing.T) {
+	tests := []struct {
+		name            string
+		token           *cache.Token
+		proofPrint      string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:       "matching thumbprints",
+			token:      &cache.Token{DPoPThumbprint: "abc123"},
+			proofPrint: "abc123",
+			wantErr:    false,
+		},
+		{
+			name:            "mismatched thumbprints",
+			token:           &cache.Token{DPoPThumbprint: "abc123"},
+			proofPrint:      "xyz789",
+			wantErr:         true,
+			wantErrContains: "DPoP key does not match",
+		},
+		{
+			name:       "empty stored thumbprint (no binding)",
+			token:      &cache.Token{DPoPThumbprint: ""},
+			proofPrint: "xyz789",
+			wantErr:    false,
+		},
+		{
+			name:       "nil token (no binding)",
+			token:      nil,
+			proofPrint: "xyz789",
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := verifyDPoPKeyBinding(tt.proofPrint, tt.token)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContains)
+				var oauthErr *oauth2.OAuthError
+				if assert.ErrorAs(t, err, &oauthErr) {
+					assert.Equal(t, 400, oauthErr.HTTPStatus)
+					assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestChildSessionDocLookup verifies that child sessions (created in the
+// pre-auth multi-client flow) use SourceSessionID for document lookup,
+// while regular sessions use their own SessionID.
+func TestDocLookupSessionID(t *testing.T) {
+	tests := []struct {
+		name             string
+		sessionID        string
+		sourceSessionID  string
+		wantDocSessionID string
+	}{
+		{"regular session uses own SessionID", "session-abc", "", "session-abc"},
+		{"child session uses SourceSessionID", "child-session-xyz", "parent-session-abc", "parent-session-abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authCtx := &cache.AuthorizationContext{
+				SessionID:       tt.sessionID,
+				SourceSessionID: tt.sourceSessionID,
+			}
+			assert.Equal(t, tt.wantDocSessionID, docLookupSessionID(authCtx))
+		})
+	}
 }

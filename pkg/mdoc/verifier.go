@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -15,9 +18,12 @@ import (
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
-// Verifier verifies mDL documents according to ISO/IEC 18013-5:2021.
+// Verifier verifies mDoc documents according to ISO/IEC 18013-5:2021.
+// It handles generic ISO 18013-5 mDoc verification, not just mDL — the
+// DocType being verified may be mDL or any other ISO 18013-5 document type.
 type Verifier struct {
 	trustEvaluator      trust.TrustEvaluator
+	issuerURL           string
 	skipRevocationCheck bool
 	clock               func() time.Time
 	cryptoExt           *cryptoutil.Extensions
@@ -30,6 +36,12 @@ type VerifierConfig struct {
 	// This replaces the deprecated local TrustList approach - all trust decisions
 	// should go through TrustEvaluator for consistent policy enforcement.
 	TrustEvaluator trust.TrustEvaluator
+
+	// IssuerURL is the OpenID4VCI credential issuer URL (e.g., "https://issuer.example.com").
+	// When set, this is used as the SubjectID for trust evaluation, enabling the mdociaca
+	// registry to fetch .well-known/openid-credential-issuer metadata.
+	// When empty, the issuer ID is extracted from the DS certificate (URI SAN or Organization).
+	IssuerURL string
 
 	// SkipRevocationCheck skips CRL/OCSP revocation checking if true.
 	SkipRevocationCheck bool
@@ -91,6 +103,7 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 
 	return &Verifier{
 		trustEvaluator:      config.TrustEvaluator,
+		issuerURL:           config.IssuerURL,
 		skipRevocationCheck: config.SkipRevocationCheck,
 		clock:               clock,
 		cryptoExt:           config.CryptoExt,
@@ -98,13 +111,13 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 }
 
 // VerifyDeviceResponse verifies a complete DeviceResponse.
-func (v *Verifier) VerifyDeviceResponse(response *DeviceResponse) *VerificationResult {
+func (v *Verifier) VerifyDeviceResponse(response *DeviceResponseMdoc) *VerificationResult {
 	return v.VerifyDeviceResponseWithContext(context.Background(), response)
 }
 
 // VerifyDeviceResponseWithContext verifies a complete DeviceResponse with a context.
 // The context is used for external trust evaluation when TrustEvaluator is configured.
-func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response *DeviceResponse) *VerificationResult {
+func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response *DeviceResponseMdoc) *VerificationResult {
 	result := &VerificationResult{
 		Valid:     true,
 		Documents: make([]DocumentVerificationResult, 0, len(response.Documents)),
@@ -122,10 +135,24 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 		result.Errors = append(result.Errors, fmt.Errorf("response status indicates error: %d", response.Status))
 		result.Valid = false
 	}
+	// Check response documentErrors
+	if len(response.DocumentErrors) > 0 {
+		result.Valid = false
 
+		// Loop through and log the actual document-level failures
+		for _, docErr := range response.DocumentErrors {
+			for docType, errorCode := range docErr {
+				result.Errors = append(
+					result.Errors,
+					fmt.Errorf("document verification failed: docType %q returned error code %d", docType, errorCode),
+				)
+			}
+		}
+	}
 	// Verify each document
-	for _, doc := range response.Documents {
-		docResult := v.verifyDocumentWithContext(ctx, &doc)
+	for i := range response.Documents {
+		doc := &response.Documents[i]
+		docResult := v.verifyDocumentWithContext(ctx, doc)
 		result.Documents = append(result.Documents, docResult)
 		if !docResult.Valid {
 			result.Valid = false
@@ -136,12 +163,12 @@ func (v *Verifier) VerifyDeviceResponseWithContext(ctx context.Context, response
 }
 
 // VerifyDocument verifies a single Document.
-func (v *Verifier) VerifyDocument(doc *Document) DocumentVerificationResult {
+func (v *Verifier) VerifyDocument(doc *DocumentMdoc) DocumentVerificationResult {
 	return v.verifyDocumentWithContext(context.Background(), doc)
 }
 
 // verifyDocumentWithContext verifies a single Document with a context for trust evaluation.
-func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *Document) DocumentVerificationResult {
+func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *DocumentMdoc) DocumentVerificationResult {
 	result := DocumentVerificationResult{
 		DocType:          doc.DocType,
 		Valid:            true,
@@ -199,12 +226,33 @@ func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *Document)
 
 	// Step 6: Verify each IssuerSignedItem against MSO digests
 	for namespace, items := range doc.IssuerSigned.NameSpaces {
+		// Initialize the map for this namespace
 		result.VerifiedElements[namespace] = make(map[string]any)
 
-		for _, item := range items {
-			if err := VerifyDigest(mso, namespace, &item); err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("digest verification failed for %s/%s: %w",
-					namespace, item.ElementIdentifier, err))
+		for i, anyItem := range items {
+			if err := VerifyDigest(mso, namespace, anyItem); err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("digest mismatch in %s at index %d: %w", namespace, i, err))
+				result.Valid = false
+				continue
+			}
+
+			var item IssuerSignedItem
+			tag, ok := anyItem.(cbor.Tag)
+			if !ok {
+				result.Errors = append(result.Errors, fmt.Errorf("item in %s at index %d is not a CBOR Tag", namespace, i))
+				result.Valid = false
+				continue
+			}
+
+			content, ok := tag.Content.([]byte)
+			if !ok {
+				result.Errors = append(result.Errors, fmt.Errorf("tag content in %s at index %d is not a byte slice", namespace, i))
+				result.Valid = false
+				continue
+			}
+
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("failed to decode IssuerSignedItem in %s: %w", namespace, err))
 				result.Valid = false
 				continue
 			}
@@ -215,9 +263,56 @@ func (v *Verifier) verifyDocumentWithContext(ctx context.Context, doc *Document)
 	return result
 }
 
-// parseIssuerAuth parses the IssuerAuth CBOR bytes into a COSESign1 structure.
-func (v *Verifier) parseIssuerAuth(data []byte) (*COSESign1, error) {
-	if len(data) == 0 {
+// parseIssuerAuthArray handles cases where IssuerAuth is already a decoded slice.
+func (v *Verifier) parseIssuerAuthArray(arr []any) (*COSESign1, error) {
+	if len(arr) != 4 {
+		return nil, fmt.Errorf("invalid COSE_Sign1 array length: %d", len(arr))
+	}
+
+	var sign1 COSESign1
+
+	// 1. Protected Headers
+	if p, ok := arr[0].([]byte); ok {
+		sign1.Protected = p
+	} else {
+		return nil, fmt.Errorf("invalid type for protected headers: %T", arr[0])
+	}
+
+	// 2. Unprotected Headers (usually a map)
+	if u, ok := arr[1].(map[any]any); ok {
+		sign1.Unprotected = u
+	}
+
+	// 3. Payload
+	if payload, ok := arr[2].([]byte); ok {
+		sign1.Payload = payload
+	} else if arr[2] == nil {
+		sign1.Payload = nil // Detached payload
+	} else {
+		return nil, fmt.Errorf("invalid type for payload: %T", arr[2])
+	}
+
+	// 4. Signature
+	if sig, ok := arr[3].([]byte); ok {
+		sign1.Signature = sig
+	} else {
+		return nil, fmt.Errorf("invalid type for signature: %T", arr[3])
+	}
+
+	return &sign1, nil
+}
+
+// parseIssuerAuth parses the IssuerAuth into a COSESign1 structure.
+func (v *Verifier) parseIssuerAuth(data any) (*COSESign1, error) {
+	byteData, ok := data.([]byte)
+	if !ok {
+		if arrayData, ok := data.([]any); ok {
+			return v.parseIssuerAuthArray(arrayData)
+		}
+		return nil, fmt.Errorf("expected []byte for issuer auth, got %T", data)
+	}
+
+	if len(byteData) == 0 {
 		return nil, errors.New("empty issuer auth data")
 	}
 
@@ -227,7 +322,7 @@ func (v *Verifier) parseIssuerAuth(data []byte) (*COSESign1, error) {
 	}
 
 	var sign1 COSESign1
-	if err := encoder.Unmarshal(data, &sign1); err != nil {
+	if err := encoder.Unmarshal(byteData, &sign1); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal COSE_Sign1: %w", err)
 	}
 
@@ -258,9 +353,12 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 		return fmt.Errorf("certificate expired: valid until %s", dsCert.NotAfter)
 	}
 
-	// Extract issuer identifier from the DS certificate
-	// For mDOC, this is typically the issuing_country or issuing_authority
-	issuerID := extractMDocIssuerID(dsCert)
+	// Extract issuer identifier for trust evaluation.
+	// Priority: configured IssuerURL > certificate URI SAN > certificate Organization.
+	issuerID := v.issuerURL
+	if issuerID == "" {
+		issuerID = extractMDocIssuerID(dsCert)
+	}
 
 	// Delegate trust decision to TrustEvaluator (go-trust)
 	decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
@@ -272,7 +370,6 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 			DocType:   docType,
 		},
 	})
-
 	if err != nil {
 		return fmt.Errorf("trust evaluation failed: %w", err)
 	}
@@ -290,21 +387,48 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 }
 
 // extractMDocIssuerID extracts an issuer identifier from an mDOC DS certificate.
-// This looks for the issuing country/authority in the certificate.
+// Priority:
+//  1. URI Subject Alternative Name (e.g., "https://issuer.example.com") — required by
+//     the mdociaca registry to fetch .well-known/openid-credential-issuer metadata.
+//  2. DNS Subject Alternative Name — converted to https:// URL for metadata discovery.
+//  3. Organization name (e.g., "siros-id") — usable by allowlist-based registries.
+//  4. Country code / Common Name as last resort.
 func extractMDocIssuerID(cert *x509.Certificate) string {
-	// Try to get a meaningful issuer identifier:
-	// 1. Organization (e.g., "Department of Motor Vehicles")
-	// 2. Country code (e.g., "SE" for Sweden)
-	// 3. Common Name (CN)
+	// 1. Check for URI SANs — best source for mdociaca discovery.
+	// Metadata discovery expects an https URL, so normalize a plain "http"
+	// scheme up to "https" rather than passing it through insecurely.
+	for _, uri := range cert.URIs {
+		if uri.Scheme == "https" {
+			return uri.String()
+		}
+		if uri.Scheme == "http" {
+			secured := *uri
+			secured.Scheme = "https"
+			return secured.String()
+		}
+	}
 
+	// 2. Check for DNS SANs — construct https:// URL for metadata discovery.
+	// Skip wildcard DNS SANs (e.g. "*.example.com") since they don't identify
+	// a concrete host to fetch metadata from.
+	for _, dns := range cert.DNSNames {
+		if strings.HasPrefix(dns, "*.") {
+			continue
+		}
+		return "https://" + dns
+	}
+
+	// 3. Organization (usable for static allowlist matching)
 	if len(cert.Subject.Organization) > 0 {
 		return cert.Subject.Organization[0]
 	}
 
+	// 4. Country code
 	if len(cert.Subject.Country) > 0 {
 		return cert.Subject.Country[0]
 	}
 
+	// 5. Common Name
 	if cert.Subject.CommonName != "" {
 		return cert.Subject.CommonName
 	}
@@ -340,7 +464,7 @@ func (v *Verifier) validateMSO(mso *MobileSecurityObject, expectedDocType string
 
 // VerifyIssuerSigned verifies IssuerSigned data and returns verified elements.
 // This is a convenience method for verifying just the issuer-signed portion.
-func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSigned, docType string) (*MobileSecurityObject, map[string]map[string]any, error) {
+func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSignedMdoc, docType string) (*MobileSecurityObject, map[string]map[string]any, error) {
 	// Parse the IssuerAuth
 	issuerAuth, err := v.parseIssuerAuth(issuerSigned.IssuerAuth)
 	if err != nil {
@@ -380,12 +504,27 @@ func (v *Verifier) VerifyIssuerSigned(issuerSigned *IssuerSigned, docType string
 	for namespace, items := range issuerSigned.NameSpaces {
 		verifiedElements[namespace] = make(map[string]any)
 
-		for _, item := range items {
-			if err := VerifyDigest(mso, namespace, &item); err != nil {
-				return nil, nil, fmt.Errorf("digest verification failed for %s/%s: %w",
-					namespace, item.ElementIdentifier, err)
+		for _, rawItem := range items {
+			// 1. Pass the raw item (the any/cbor.Tag) to VerifyDigest.
+			if err := VerifyDigest(mso, namespace, rawItem); err != nil {
+				return nil, nil, fmt.Errorf("digest verification failed in namespace %s: %w", namespace, err)
 			}
-			verifiedElements[namespace][item.ElementIdentifier] = item.ElementValue
+
+			// 2. Now unmarshal the rawItem into the struct so we can read the fields.
+			var decodedItem IssuerSignedItem
+
+			// If rawItem is a cbor.Tag (Tag 24), we unmarshal its content.
+			if tag, ok := rawItem.(cbor.Tag); ok {
+				content, _ := tag.Content.([]byte)
+				if err := cbor.Unmarshal(content, &decodedItem); err != nil {
+					return nil, nil, fmt.Errorf("failed to decode verified item: %w", err)
+				}
+			} else {
+				return nil, nil, fmt.Errorf("unexpected item type: %T", rawItem)
+			}
+
+			// 3. Now we can safely use the fields from decodedItem
+			verifiedElements[namespace][decodedItem.ElementIdentifier] = decodedItem.ElementValue
 		}
 	}
 

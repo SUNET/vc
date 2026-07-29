@@ -1,0 +1,91 @@
+.has-border-radius {
+    border-radius: var(--bulma-box-radius);
+}
+
+.vc-loader {
+    min-height: 100px;
+    display: grid;
+    place-content: center;
+    > .loader {
+        width: 48px;
+        height: 48px;
+        border: 5px solid var(--bulma-info, currentColor);
+        border-bottom-color: transparent;
+        border-radius: 50%;
+        display: inline-block;
+        box-sizing: border-box;
+        animation: rotation 1s linear infinite;
+    }
+}
+
+@keyframes rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+} 
+
+.vc-attributes-list {
+    border-radius: var(--bulma-box-radius);
+    background-color: var(--bulma-pre-background);
+    
+
+    > ul {
+        padding: var(--bulma-box-padding);
+        max-height: 300px;
+        overflow: scroll;
+        mask-image: linear-gradient(
+            to bottom, 
+            black calc(100% - 16px), 
+            transparent 100%
+        );
+    }
+}
+
+.vc-data-block-details {
+    padding: var(--bulma-box-padding);
+    border-radius: var(--bulma-box-radius);
+    background-color: var(--bulma-pre-background);
+    overflow: hidden;
+    min-width: 0;
+
+    > pre {
+        padding: 1rem 0 0 0;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+}
+
+.vc-claim-group {
+    margin: 0.25rem 0;
+}
+
+.vc-claim-group-summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.1rem 0;
+}
+
+.vc-claim-group-summary::-webkit-details-marker {
+    display: none;
+}
+
+.vc-claim-group-summary::before {
+    content: "▶ ";
+    font-size: 0.7em;
+    display: inline-block;
+    transition: transform 0.15s;
+}
+
+.vc-claim-group[open] > .vc-claim-group-summary::before {
+    transform: rotate(90deg);
+}
+
+.vc-claim-children {
+    padding-left: 1.25rem;
+    border-left: 2px solid var(--bulma-border, #ddd);
+    margin-left: 0.5rem;
+    margin-top: 0.15rem;
+}

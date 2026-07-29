@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +113,11 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 		}, nil
 	}
 
+	// Normalize subject ID: strip OpenID4VP client_id_scheme prefixes
+	// (e.g. "x509_san_dns:host" -> "https://host") so all registries
+	// receive a consistent identifier.
+	req.Subject.ID = NormalizeSubjectID(req.Subject.ID)
+
 	// Resolve policy from action.name
 	policyCtx := m.resolvePolicyContext(req)
 
@@ -181,10 +187,25 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 			logging.F("error", err.Error()),
 			logging.F("duration_ms", duration.Milliseconds()))
 	} else {
-		logger.Debug("Evaluate: completed",
+		// Log decision with reason: deny at Info level, allow at Debug level.
+		action := ""
+		if req.Action != nil {
+			action = req.Action.Name
+		}
+		reason := extractDecisionReason(resp)
+		fields := []logging.Field{
 			logging.F("decision", resp.Decision),
+			logging.F("subject_id", req.Subject.ID),
+			logging.F("resource_type", req.Resource.Type),
+			logging.F("action", action),
+			logging.F("reason", reason),
 			logging.F("duration_ms", duration.Milliseconds()),
-			logging.F("subject_id", req.Subject.ID))
+		}
+		if resp.Decision {
+			logger.Debug("trust decision: allow", fields...)
+		} else {
+			logger.Info("trust decision: deny", fields...)
+		}
 	}
 
 	return resp, err
@@ -214,14 +235,28 @@ func (m *RegistryManager) resolvePolicyContext(req *authzen.EvaluationRequest) *
 
 // applyPolicyToRequest applies policy constraints to the request context.
 // This allows registries to read policy constraints from the request.
+// Action parameters from the request are merged first, then policy constraints are applied.
+// Policy constraints take precedence over action parameters for the same key.
 func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, policyCtx *PolicyContext) {
-	if policyCtx.Policy == nil {
-		return
-	}
-
 	// Initialize context if needed
 	if req.Context == nil {
 		req.Context = make(map[string]interface{})
+	}
+
+	// Merge action.parameters into context (client-supplied constraints).
+	// Only allowlisted keys are accepted to prevent clients from injecting
+	// security-sensitive policy controls (e.g., strict_entitlement_check,
+	// allow_intermediaries, required_cert_policy_oids).
+	if req.Action != nil && req.Action.Parameters != nil {
+		for k, v := range req.Action.Parameters {
+			if allowedActionParameterKey(k) {
+				req.Context[k] = v
+			}
+		}
+	}
+
+	if policyCtx.Policy == nil {
+		return
 	}
 
 	// Apply OIDF constraints
@@ -236,6 +271,9 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		if oidfed.MaxChainDepth > 0 {
 			req.Context["max_chain_depth"] = oidfed.MaxChainDepth
 		}
+		if len(oidfed.CredentialTypeTrustMarks) > 0 {
+			req.Context["credential_type_trust_marks"] = oidfed.CredentialTypeTrustMarks
+		}
 	}
 
 	// Apply ETSI constraints
@@ -249,6 +287,24 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		}
 		if len(etsi.Countries) > 0 {
 			req.Context["countries"] = etsi.Countries
+		}
+		if len(etsi.CredentialTypes) > 0 {
+			req.Context["credential_types"] = etsi.CredentialTypes
+		}
+		if len(etsi.RequiredCertPolicyOIDs) > 0 {
+			req.Context["required_cert_policy_oids"] = etsi.RequiredCertPolicyOIDs
+		}
+		if etsi.ExtractRPIdentity {
+			req.Context["extract_rp_identity"] = true
+		}
+		if len(etsi.AllowedAttributes) > 0 {
+			req.Context["allowed_attributes"] = etsi.AllowedAttributes
+		}
+		if etsi.StrictEntitlementCheck {
+			req.Context["strict_entitlement_check"] = true
+		}
+		if etsi.AllowIntermediaries {
+			req.Context["allow_intermediaries"] = true
 		}
 	}
 
@@ -282,6 +338,25 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 
 	// Store policy name in context for debugging/logging
 	req.Context["_policy"] = policyCtx.Policy.Name
+}
+
+// allowedActionParameterKeys lists context keys that may be set via
+// action.parameters. Keys not in this set are silently dropped to prevent
+// clients from injecting security-sensitive policy controls.
+var allowedActionParameterKeys = map[string]bool{
+	// Data-carrying parameters (what the RP is requesting)
+	"query":                true, // DCQL query for over-request detection
+	"requested_attributes": true, // explicit attribute list
+	"credential_types":     true, // credential type identifiers
+
+	// Informational / audit
+	"purpose": true, // presentation purpose
+}
+
+// allowedActionParameterKey returns true if the key may flow from
+// action.parameters into the request context.
+func allowedActionParameterKey(key string) bool {
+	return allowedActionParameterKeys[key]
 }
 
 // SupportedResourceTypes returns the union of all resource types supported by registered registries
@@ -519,4 +594,60 @@ func (m *RegistryManager) ListRegistries() []RegistryInfo {
 		infos[i] = info
 	}
 	return infos
+}
+
+// NormalizeSubjectID normalizes a subject ID by stripping OpenID4VP
+// client_id_scheme prefixes and converting bare hostnames to https:// URLs.
+// This ensures all registries receive a consistent identifier format.
+//
+// Examples:
+//
+//	"x509_san_dns:example.com" -> "https://example.com"
+//	"x509_san_uri:https://example.com" -> "https://example.com"
+//	"https://example.com" -> "https://example.com" (unchanged)
+func NormalizeSubjectID(id string) string {
+	for _, prefix := range []string{"x509_san_dns:", "x509_san_uri:"} {
+		if strings.HasPrefix(id, prefix) {
+			bare := strings.TrimPrefix(id, prefix)
+			// x509_san_uri values are already URIs; x509_san_dns values are bare hostnames
+			if prefix == "x509_san_dns:" {
+				return "https://" + bare
+			}
+			return bare
+		}
+	}
+	return id
+}
+
+// extractDecisionReason extracts a human-readable reason string from an
+// evaluation response. It checks for common reason keys in Context.Reason.
+// Priority: "admin" (server-side diagnostics, e.g. from LoTE/whitelist registries),
+// then decision-specific keys: "error" for denials, "user" for allows.
+func extractDecisionReason(resp *authzen.EvaluationResponse) string {
+	if resp.Context == nil || resp.Context.Reason == nil {
+		return ""
+	}
+	// "admin" contains server-side diagnostic detail (e.g. "entity X not found in any LoTE")
+	// and is the most informative reason for operator logs.
+	if v, ok := resp.Context.Reason["admin"]; ok {
+		return fmt.Sprintf("%v", v)
+	}
+	if resp.Decision {
+		// Allow: prefer "user" (e.g. "trusted via whitelist (pid-issuers)")
+		if v, ok := resp.Context.Reason["user"]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+		if v, ok := resp.Context.Reason["error"]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+	} else {
+		// Deny: prefer "error" (e.g. "subject not in whitelist for action 'issuer'")
+		if v, ok := resp.Context.Reason["error"]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+		if v, ok := resp.Context.Reason["user"]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	return ""
 }

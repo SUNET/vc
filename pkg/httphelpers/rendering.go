@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 
@@ -52,6 +53,13 @@ func isOIDCEndpoint(path string) bool {
 		"/register",
 		"/token",
 		"/userinfo",
+		"/oidcrp/",
+		"/samlsp/",
+		"/op/par",
+		"/nonce",
+		"/credential",
+		"/deferred_credential",
+		"/notification",
 	}
 
 	for _, indicator := range oidcIndicators {

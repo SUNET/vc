@@ -103,6 +103,7 @@ func TestFetchVCTM(t *testing.T) {
 			name: "invalid_json",
 			setup: func(t *testing.T) (string, string) {
 				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					// #nosec G104
 					w.Write([]byte(`{not json`))
 				}))
 				t.Cleanup(ts.Close)
@@ -123,7 +124,7 @@ func TestFetchVCTM(t *testing.T) {
 			name: "tampered_body",
 			setup: func(t *testing.T) (string, string) {
 				// Serve VCTM-B but pass VCTM-A's integrity.
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { // #nosec G104
 					w.Write(rawB)
 				}))
 				t.Cleanup(ts.Close)
@@ -137,7 +138,7 @@ func TestFetchVCTM(t *testing.T) {
 			setup: func(t *testing.T) (string, string) {
 				// Serve a body larger than maxVCTMSize (1 MiB).
 				oversized := strings.Repeat("X", maxVCTMSize+1)
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { // #nosec G104
 					w.Write([]byte(oversized))
 				}))
 				t.Cleanup(ts.Close)

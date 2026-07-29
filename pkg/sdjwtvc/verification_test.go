@@ -334,13 +334,13 @@ func TestParseDisclosure_InvalidFormat(t *testing.T) {
 	}{
 		{
 			name:        "Too few elements",
-			disclosure:  []any{"salt", "claim"},
-			expectError: "expected 3 elements",
+			disclosure:  []any{"salt"},
+			expectError: "expected 2 or 3 elements",
 		},
 		{
 			name:        "Too many elements",
 			disclosure:  []any{"salt", "claim", "value", "extra"},
-			expectError: "expected 3 elements",
+			expectError: "expected 2 or 3 elements",
 		},
 		{
 			name:        "Invalid salt type",
@@ -466,13 +466,13 @@ func TestReconstructClaims(t *testing.T) {
 	claims := map[string]any{
 		"vct":     "TestCredential",
 		"iss":     "https://issuer.example.com",
-		"_sd":     []any{"hash1", "hash2"},
+		"_sd":     []any{"hash_name", "hash_age"},
 		"_sd_alg": "sha-256",
 	}
 
 	disclosures := []Disclosure{
-		{Claim: "name", Value: "John Doe"},
-		{Claim: "age", Value: float64(30)},
+		{Claim: "name", Value: "John Doe", Hash: "hash_name"},
+		{Claim: "age", Value: float64(30), Hash: "hash_age"},
 	}
 
 	err := client.reconstructClaims(claims, disclosures)
@@ -485,6 +485,140 @@ func TestReconstructClaims(t *testing.T) {
 	// _sd and _sd_alg should be removed
 	assert.NotContains(t, claims, "_sd")
 	assert.NotContains(t, claims, "_sd_alg")
+}
+
+func TestReconstructClaims_Nested(t *testing.T) {
+	client := New()
+
+	claims := map[string]any{
+		"vct":     "TestCredential",
+		"iss":     "https://issuer.example.com",
+		"_sd":     []any{"hash_pob"},
+		"_sd_alg": "sha-256",
+		"address": map[string]any{
+			"_sd": []any{"hash_street", "hash_city"},
+		},
+	}
+
+	disclosures := []Disclosure{
+		{Claim: "place_of_birth", Value: map[string]any{
+			"_sd": []any{"hash_locality"},
+		}, Hash: "hash_pob"},
+		{Claim: "locality", Value: "Stockholm", Hash: "hash_locality"},
+		{Claim: "street_address", Value: "Tulegatan 11", Hash: "hash_street"},
+		{Claim: "locality", Value: "Stockholm", Hash: "hash_city"},
+	}
+
+	err := client.reconstructClaims(claims, disclosures)
+	require.NoError(t, err)
+
+	// Top-level nested claim should be resolved
+	pob, ok := claims["place_of_birth"].(map[string]any)
+	require.True(t, ok, "place_of_birth should be a map")
+	assert.Equal(t, "Stockholm", pob["locality"])
+	assert.NotContains(t, pob, "_sd")
+
+	// Nested address claims should be resolved
+	addr, ok := claims["address"].(map[string]any)
+	require.True(t, ok, "address should be a map")
+	assert.Equal(t, "Tulegatan 11", addr["street_address"])
+	assert.Equal(t, "Stockholm", addr["locality"])
+	assert.NotContains(t, addr, "_sd")
+
+	// Top-level internal fields removed
+	assert.NotContains(t, claims, "_sd")
+	assert.NotContains(t, claims, "_sd_alg")
+}
+
+func TestReconstructClaims_DecoyHashes(t *testing.T) {
+	// Decoy hashes in _sd that don't match any disclosure should be silently ignored
+	client := New()
+
+	claims := map[string]any{
+		"vct":     "TestCredential",
+		"iss":     "https://issuer.example.com",
+		"_sd":     []any{"hash_name", "decoy_aaaa", "decoy_bbbb", "decoy_cccc"},
+		"_sd_alg": "sha-256",
+	}
+
+	disclosures := []Disclosure{
+		{Claim: "name", Value: "Helen", Hash: "hash_name"},
+	}
+
+	err := client.reconstructClaims(claims, disclosures)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Helen", claims["name"])
+	// No extra claims from decoys
+	assert.NotContains(t, claims, "_sd")
+	assert.NotContains(t, claims, "_sd_alg")
+	// Only expected keys remain
+	for key := range claims {
+		switch key {
+		case "vct", "iss", "name":
+			// expected
+		default:
+			t.Errorf("Unexpected claim %q from decoy hash", key)
+		}
+	}
+}
+
+func TestReconstructClaims_AttackerInjectedDisclosure(t *testing.T) {
+	// Security: An attacker adds a Disclosure whose Hash is NOT in the signed _sd array.
+	// It MUST NOT appear in the resolved claims.
+	client := New()
+
+	claims := map[string]any{
+		"vct":     "TestCredential",
+		"iss":     "https://issuer.example.com",
+		"_sd":     []any{"hash_name"}, // Only legitimate hash
+		"_sd_alg": "sha-256",
+	}
+
+	disclosures := []Disclosure{
+		{Claim: "name", Value: "Helen", Hash: "hash_name"},
+		// Attacker injects these - their hashes are NOT in _sd
+		{Claim: "is_admin", Value: true, Hash: "attacker_hash_1"},
+		{Claim: "role", Value: "superuser", Hash: "attacker_hash_2"},
+	}
+
+	err := client.reconstructClaims(claims, disclosures)
+	require.NoError(t, err)
+
+	// Legitimate claim resolved
+	assert.Equal(t, "Helen", claims["name"])
+
+	// Attacker claims MUST NOT be present
+	assert.NotContains(t, claims, "is_admin", "SECURITY: attacker-injected 'is_admin' resolved without hash in _sd")
+	assert.NotContains(t, claims, "role", "SECURITY: attacker-injected 'role' resolved without hash in _sd")
+}
+
+func TestReconstructClaims_AttackerInjectedNested(t *testing.T) {
+	// Security: Attacker injects disclosure targeting a nested _sd array
+	client := New()
+
+	claims := map[string]any{
+		"vct": "TestCredential",
+		"iss": "https://issuer.example.com",
+		"address": map[string]any{
+			"_sd": []any{"hash_street"}, // Only legitimate hash
+		},
+	}
+
+	disclosures := []Disclosure{
+		{Claim: "street_address", Value: "Tulegatan", Hash: "hash_street"},
+		// Attacker disclosure targeting the nested address object
+		{Claim: "admin_override", Value: "pwned", Hash: "attacker_nested_hash"},
+	}
+
+	err := client.reconstructClaims(claims, disclosures)
+	require.NoError(t, err)
+
+	addr, ok := claims["address"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Tulegatan", addr["street_address"])
+	assert.NotContains(t, addr, "admin_override", "SECURITY: attacker-injected nested claim resolved")
+	assert.NotContains(t, addr, "_sd")
 }
 
 func TestJWKToPublicKey_ECDSA(t *testing.T) {

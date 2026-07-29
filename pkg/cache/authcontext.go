@@ -217,6 +217,65 @@ func (c *MemoryStore) ForfeitAuthorizationCode(ctx context.Context, query *Autho
 	return doc, nil
 }
 
+// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by
+// multiple distinct clients (identified by DPoP thumbprint). Each client may
+// redeem the code only once. This implements OID4VCI §4.1.1 "single use" on a
+// per-client basis: the code is single-use for each wallet, but the same
+// credential offer can serve multiple wallets.
+func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+	if dpopThumbprint == "" {
+		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
+	}
+	if len(dpopThumbprint) > 128 {
+		return nil, errors.New("dpop thumbprint exceeds maximum length")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("code:%s", code)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	doc := item.Value()
+
+	// Reject redemption if the code was forfeited (e.g. non-DPoP redemption
+	// already consumed it via ForfeitAuthorizationCode).
+	if doc.Forfeited {
+		return nil, errors.New("pre-authorized code has been forfeited")
+	}
+
+	// Check if this specific client (DPoP thumbprint) already redeemed the code
+	for _, tp := range doc.RedeemedBy {
+		if tp == dpopThumbprint {
+			return nil, errors.New("pre-authorized code already redeemed by this client")
+		}
+	}
+
+	// Enforce maximum number of distinct redeemers to prevent unbounded growth
+	if len(doc.RedeemedBy) >= MaxPreAuthRedeemers {
+		return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")
+	}
+
+	// Record this client as having redeemed the code.
+	// Use PreviousOrDefaultTTL to preserve the original TTL — repeated redemptions
+	// by different clients must not extend the code's lifetime.
+	doc.RedeemedBy = append(doc.RedeemedBy, dpopThumbprint)
+	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+
+	return doc, nil
+}
+
 // Consent marks an authorization context as consented
 func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) error {
 	if query == nil || query.RequestURI == "" {
@@ -308,50 +367,31 @@ func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *Authorizati
 	return nil
 }
 
-// AddIdentity adds identity information to an authorization context
-func (c *MemoryStore) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
+// SetIdentifier sets the resolved identifier on an authorization context.
+func (c *MemoryStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error {
 	if query == nil {
 		return errors.New("query cannot be nil")
 	}
-	if input == nil || input.Identity == nil {
-		return errors.New("identity cannot be nil")
+	if identifier == "" {
+		return errors.New("identifier cannot be empty")
+	}
+	if query.SessionID == "" {
+		return errors.New("session_id cannot be empty")
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var sessionID string
-	var ok bool
-
-	if query.SessionID != "" {
-		sessionID = query.SessionID
-		ok = true
-	} else if query.RequestURI != "" {
-		indexKey := fmt.Sprintf("request_uri:%s", query.RequestURI)
-		sessionID, ok = c.indices[indexKey]
-	} else if query.EphemeralEncryptionKeyID != "" {
-		indexKey := fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
-		sessionID, ok = c.indices[indexKey]
-	} else {
-		return errors.New("query must have sessionID, requestURI, or ephemeralEncryptionKeyID")
-	}
-
-	if !ok {
-		return ErrNoDocuments
-	}
-
-	item := c.cache.Get(sessionID)
+	item := c.cache.Get(query.SessionID)
 	if item == nil {
 		return ErrNoDocuments
 	}
 
 	doc := item.Value()
-	doc.Identity = input.Identity
-	doc.VCT = input.VCT
-	doc.AuthenticSource = input.AuthenticSource
+	doc.Identifier = identifier
 
 	// Update the primary cache entry
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.cache.Set(query.SessionID, doc, ttlcache.DefaultTTL)
 
 	return nil
 }

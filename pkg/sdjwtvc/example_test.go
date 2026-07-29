@@ -56,8 +56,6 @@ func ExampleCombineWithKeyBinding() {
 	// eyJhbGciOiJFUzI1NiJ9.eyJ2Y3QiOiJpZCJ9.c2ln~ZGlzYzE~ZGlzYzI~eyJ0eXAiOiJrYitqd3QifQ.eyJub25jZSI6Im4ifQ.a2JzaWc
 }
 
-func strPtr(s string) *string { return &s }
-
 func ExampleVCTM() {
 	vctm := &sdjwtvc.VCTM{
 		VCT:         "https://example.com/credentials/identity",
@@ -69,8 +67,8 @@ func ExampleVCTM() {
 				Name:        "Identity Credential",
 				Description: "Official identity document",
 				Rendering: &sdjwtvc.Rendering{
-					Simple: sdjwtvc.SimpleRendering{
-						Logo: sdjwtvc.Logo{
+					Simple: &sdjwtvc.SimpleRendering{
+						Logo: &sdjwtvc.Logo{
 							URI:     "https://example.com/logo.png",
 							AltText: "Logo",
 						},
@@ -82,7 +80,7 @@ func ExampleVCTM() {
 		},
 		Claims: []sdjwtvc.Claim{
 			{
-				Path: []*string{strPtr("given_name")},
+				Path: []*string{new("given_name")},
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Given Name"},
 				},
@@ -90,7 +88,7 @@ func ExampleVCTM() {
 				Mandatory: true,
 			},
 			{
-				Path: []*string{strPtr("family_name")},
+				Path: []*string{new("family_name")},
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Family Name"},
 				},
@@ -114,7 +112,7 @@ func ExampleVCTM_Attributes() {
 		VCT: "https://example.com/credentials/identity",
 		Claims: []sdjwtvc.Claim{
 			{
-				Path: []*string{strPtr("given_name")},
+				Path: []*string{new("given_name")},
 				Display: []sdjwtvc.ClaimDisplay{
 					{Locale: "en-US", Label: "Given Name"},
 					{Locale: "sv-SE", Label: "Förnamn"},
@@ -125,11 +123,20 @@ func ExampleVCTM_Attributes() {
 	}
 
 	attrs := vctm.Attributes()
-	fmt.Println("en-US Given Name path:", attrs["en-US"]["Given Name"])
-	fmt.Println("sv-SE Förnamn path:", attrs["sv-SE"]["Förnamn"])
+	// Print dereferenced path values
+	for _, p := range attrs["en-US"]["Given Name"] {
+		if p != nil {
+			fmt.Printf("en-US Given Name path: %s\n", *p)
+		}
+	}
+	for _, p := range attrs["sv-SE"]["Förnamn"] {
+		if p != nil {
+			fmt.Printf("sv-SE Förnamn path: %s\n", *p)
+		}
+	}
 	// Output:
-	// en-US Given Name path: [given_name]
-	// sv-SE Förnamn path: [given_name]
+	// en-US Given Name path: given_name
+	// sv-SE Förnamn path: given_name
 }
 
 func ExampleVCTM_SRIIntegrity() {

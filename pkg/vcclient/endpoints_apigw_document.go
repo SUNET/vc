@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -19,14 +20,14 @@ type documentHandler struct {
 // DocumentGetQuery is the query for GetDocument
 type DocumentGetQuery struct {
 	AuthenticSource string `json:"authentic_source"`
-	VCT             string `json:"vct"`
+	Scope           string `json:"scope"`
 	DocumentID      string `json:"document_id"`
 }
 
 // Get gets a document
 func (s *documentHandler) Get(ctx context.Context, query *DocumentGetQuery) (*model.Document, *http.Response, error) {
 	reply := &model.Document{}
-	resp, err := s.client.call(ctx, http.MethodPost, s.serviceBaseURL, s.defaultContentType, nil, reply, true, s.baseURL)
+	resp, err := s.client.call(ctx, http.MethodPost, s.serviceBaseURL, s.defaultContentType, query, reply, true, s.baseURL)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -35,11 +36,11 @@ func (s *documentHandler) Get(ctx context.Context, query *DocumentGetQuery) (*mo
 
 // DocumentListQuery is the query for ListDocument
 type DocumentListQuery struct {
-	AuthenticSource string          `json:"authentic_source"`
-	Identity        *model.Identity `json:"identity"`
-	VCT             string          `json:"vct"`
-	ValidTo         int64           `json:"valid_to"`
-	ValidFrom       int64           `json:"valid_from"`
+	AuthenticSource   string `json:"authentic_source"`
+	IdentityMappingID string `json:"identity_mapping_id"`
+	Scope             string `json:"scope"`
+	ValidTo           int64  `json:"valid_to"`
+	ValidFrom         int64  `json:"valid_from"`
 }
 
 func (s *documentHandler) List(ctx context.Context, query *DocumentListQuery) ([]model.DocumentList, *http.Response, error) {
@@ -51,7 +52,7 @@ func (s *documentHandler) List(ctx context.Context, query *DocumentListQuery) ([
 		return nil, nil, err
 	}
 	reply := []model.DocumentList{}
-	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, nil, reply, true, s.baseURL)
+	resp, err := s.client.call(ctx, http.MethodPost, fullURL, s.defaultContentType, query, reply, true, s.baseURL)
 	if err != nil {
 		return nil, resp, err
 	}
@@ -60,10 +61,9 @@ func (s *documentHandler) List(ctx context.Context, query *DocumentListQuery) ([
 
 // DocumentCollectIDQuery is the query for CollectID
 type DocumentCollectIDQuery struct {
-	AuthenticSource string          `json:"authentic_source"`
-	VCT             string          `json:"vct"`
-	CollectID       string          `json:"collect_id"`
-	Identity        *model.Identity `json:"identity"`
+	AuthenticSource string `json:"authentic_source"`
+	Scope           string `json:"scope"`
+	CollectID       string `json:"collect_id"`
 }
 
 // DocumentCollectIDReply is the reply for CollectID
@@ -110,7 +110,7 @@ func (s *documentHandler) Search(ctx context.Context, query *model.SearchDocumen
 // DocumentDeleteQuery is the query for Delete
 type DocumentDeleteQuery struct {
 	AuthenticSource string `json:"authentic_source" validate:"required"`
-	VCT             string `json:"vct" validate:"required"`
+	Scope           string `json:"scope" validate:"required"`
 	DocumentID      string `json:"document_id" validate:"required"`
 }
 

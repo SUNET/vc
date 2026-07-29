@@ -6,9 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"testing"
-	"time"
-	"github.com/SUNET/vc/internal/verifier/db"
-	"github.com/SUNET/vc/pkg/cache"
+
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -58,8 +56,8 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 						VCTValues: []string{"https://example.com/test"},
 					},
 					Claims: []openid4vp.ClaimQuery{
-						{Path: []string{"given_name"}},
-						{Path: []string{"family_name"}},
+						{Path: openid4vp.StringPath("given_name")},
+						{Path: openid4vp.StringPath("family_name")},
 					},
 				},
 			},
@@ -70,91 +68,4 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 		},
 		Enabled: true,
 	}
-}
-
-// createTestSession creates a session for testing
-func createTestSession(t *testing.T, id string, clientID string) *cache.AuthorizationContext {
-	t.Helper()
-	return &cache.AuthorizationContext{
-		SessionID:    id,
-		Status:       cache.SessionStatusPending,
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(15 * time.Minute).Unix(),
-		ClientID:     clientID,
-		RedirectURI:  "https://example.com/callback",
-		Scopes:        []string{"openid", "profile"},
-		State:        "test-state",
-		Nonce:        "test-nonce",
-		ResponseType: "code",
-	}
-}
-
-// createTestSessionWithCode creates a session with an authorization code
-func createTestSessionWithCode(t *testing.T, id string, clientID string, code string) *cache.AuthorizationContext {
-	t.Helper()
-	session := createTestSession(t, id, clientID)
-	session.Status = cache.SessionStatusCompleted
-	session.Code = code
-	session.CodeExpiresAt = time.Now().Add(10 * time.Minute).Unix()
-	return session
-}
-
-// createTestSessionWithTokens creates a session with tokens
-func createTestSessionWithTokens(t *testing.T, id string, clientID string, accessToken string) *cache.AuthorizationContext {
-	t.Helper()
-	session := createTestSession(t, id, clientID)
-	session.Status = cache.SessionStatusCompleted
-	session.AccessToken = accessToken
-	session.AccessTokenExpiresAt = time.Now().Add(1 * time.Hour).Unix()
-	session.RefreshToken = "refresh-" + accessToken
-	session.RefreshTokenExpiresAt = time.Now().Add(24 * time.Hour).Unix()
-	session.VerifiedClaims = map[string]any{
-		"given_name":  "John",
-		"family_name": "Doe",
-		"email":       "john.doe@example.com",
-	}
-	return session
-}
-
-// createTestClient creates a client for testing
-func createTestClient(t *testing.T, clientID string, clientSecret string) *db.Client {
-	t.Helper()
-	return &db.Client{
-		ClientID:                clientID,
-		ClientSecretHash:        hashPassword(t, clientSecret),
-		RedirectURIs:            []string{"https://example.com/callback"},
-		GrantTypes:              []string{"authorization_code", "refresh_token"},
-		ResponseTypes:           []string{"code"},
-		TokenEndpointAuthMethod: "client_secret_post",
-		AllowedScopes:           []string{"openid", "profile", "email"},
-		DefaultScopes:           []string{"openid"},
-		SubjectType:             "public",
-		RequirePKCE:             false,
-	}
-}
-
-// createTestPublicClient creates a public client (no secret) for testing
-func createTestPublicClient(t *testing.T, clientID string) *db.Client {
-	t.Helper()
-	return &db.Client{
-		ClientID:                clientID,
-		RedirectURIs:            []string{"https://example.com/callback"},
-		GrantTypes:              []string{"authorization_code"},
-		ResponseTypes:           []string{"code"},
-		TokenEndpointAuthMethod: "none",
-		AllowedScopes:           []string{"openid", "profile"},
-		DefaultScopes:           []string{"openid"},
-		SubjectType:             "public",
-		RequirePKCE:             true,
-	}
-}
-
-// generatePKCE creates a PKCE code verifier and challenge for testing
-func generatePKCE(t *testing.T) (verifier string, challenge string) {
-	t.Helper()
-	verifier = "test-code-verifier-with-sufficient-length-for-pkce-requirements-1234567890"
-	// S256: BASE64URL(SHA256(code_verifier))
-	// For testing, we use a pre-computed value
-	challenge = "6nLwF4T8X8T9X9X9X9X9X9X9X9X9X9X9X9X9X9X9X9Y"
-	return
 }

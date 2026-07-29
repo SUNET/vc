@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+
 	"github.com/SUNET/vc/internal/registry/apiv1"
 )
 
@@ -142,13 +143,9 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 	var resultHTML string
 	if result != nil && len(result.Results) > 0 {
 		// Get search params for hidden fields
-		searchFirstName := ""
-		searchLastName := ""
-		searchDateOfBirth := ""
+		searchIdentifier := ""
 		if searchParams != nil {
-			searchFirstName = searchParams.FirstName
-			searchLastName = searchParams.LastName
-			searchDateOfBirth = searchParams.DateOfBirth
+			searchIdentifier = searchParams.Identifier
 		}
 
 		var rows strings.Builder
@@ -162,16 +159,12 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 			rows.WriteString(fmt.Sprintf(`
 				<tr>
 					<td>%s</td>
-					<td>%s</td>
-					<td>%s</td>
 					<td><span class="status-badge %s">%d - %s</span></td>
 					<td>
 						<form method="POST" action="/admin/status" class="inline-form">
 							<input type="hidden" name="section" value="%d">
 							<input type="hidden" name="index" value="%d">
-							<input type="hidden" name="search_first_name" value="%s">
-							<input type="hidden" name="search_last_name" value="%s">
-							<input type="hidden" name="search_date_of_birth" value="%s">
+							<input type="hidden" name="search_identifier" value="%s">
 							<select name="status" style="width: 120px;">
 								<option value="0" %s>VALID</option>
 								<option value="1" %s>INVALID</option>
@@ -181,12 +174,10 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 						</form>
 					</td>
 				</tr>`,
-				html.EscapeString(person.FirstName),
-				html.EscapeString(person.LastName),
-				html.EscapeString(person.DateOfBirth),
+				html.EscapeString(person.Identifier),
 				statusClass, person.Status, statusLabel,
 				person.Section, person.Index,
-				html.EscapeString(searchFirstName), html.EscapeString(searchLastName), html.EscapeString(searchDateOfBirth),
+				html.EscapeString(searchIdentifier),
 				selected(person.Status == 0), selected(person.Status == 1), selected(person.Status == 2)))
 		}
 
@@ -196,9 +187,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 			<table class="result-table">
 				<thead>
 					<tr>
-						<th>First Name</th>
-						<th>Last Name</th>
-						<th>Date of Birth</th>
+						<th>Identifier</th>
 						<th>Status</th>
 						<th>Actions</th>
 					</tr>
@@ -212,14 +201,10 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 		resultHTML = `<div class="card"><p>No results found.</p></div>`
 	}
 
-	// Get search values for form pre-fill
-	searchFirstName := ""
-	searchLastName := ""
-	searchDateOfBirth := ""
+	// Get search value for form pre-fill
+	searchIdentifier := ""
 	if searchParams != nil {
-		searchFirstName = searchParams.FirstName
-		searchLastName = searchParams.LastName
-		searchDateOfBirth = searchParams.DateOfBirth
+		searchIdentifier = searchParams.Identifier
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -239,16 +224,8 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 			<form method="POST" action="/admin/search">
 				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
 					<div class="form-group" style="flex: 1; min-width: 150px;">
-						<label for="first_name">First Name</label>
-						<input type="text" id="first_name" name="first_name" placeholder="e.g., John" value="%s">
-					</div>
-					<div class="form-group" style="flex: 1; min-width: 150px;">
-						<label for="last_name">Last Name</label>
-						<input type="text" id="last_name" name="last_name" placeholder="e.g., Doe" value="%s">
-					</div>
-					<div class="form-group" style="flex: 1; min-width: 150px;">
-						<label for="date_of_birth">Date of Birth</label>
-						<input type="text" id="date_of_birth" name="date_of_birth" placeholder="e.g., 1990-01-15" value="%s">
+						<label for="identifier">Identifier</label>
+						<input type="text" id="identifier" name="identifier" placeholder="e.g., person123" value="%s">
 					</div>
 				</div>
 				<button type="submit" class="btn btn-primary">Search</button>
@@ -258,7 +235,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 	</div>
 </body>
 </html>`, adminCSS, navBarHTML(""), alertHTML,
-		html.EscapeString(searchFirstName), html.EscapeString(searchLastName), html.EscapeString(searchDateOfBirth),
+		html.EscapeString(searchIdentifier),
 		resultHTML)
 }
 

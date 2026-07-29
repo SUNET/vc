@@ -1,5 +1,0 @@
-authentic_source,authentic_source_person_id,family_name,given_name,birth_date,document_id,ehic_expiry_date,social_security_pin,ehic_start_date,ehic_end_date,ehic_card_identification_number,ehic_institution_id,ehic_institution_name,ehic_institution_country_code
-SWEDEN:SUNET:EHIC,authentic_source_person_id_70,De Niro,Robert,1982-01-15,1,2026-04-12,23451235,2023-09-08,2026-04-12,10000000000000000001,NFZ,Narodowy Fundusz Zdrowia,PL
-SWEDEN:SUNET:EHIC,authentic_source_person_id_71,Dench,Judi,1995-09-04,2,2026-04-12,23451236,2024-08-01,2026-04-12,10000000000000000002,NFZ,Narodowy Fundusz Zdrowia,PL
-SWEDEN:SUNET:EHIC,authentic_source_person_id_72,Depp,Johnny,1985-12-03,3,2026-04-12,23451237,2024-08-01,2026-04-12,10000000000000000003,NFZ,Narodowy Fundusz Zdrowia,PL
-SWEDEN:SUNET:EHIC,authentic_source_person_id_73,DiCaprio,Leonardo,1972-08-28,4,2026-04-12,23451238,2024-08-01,2026-04-12,10000000000000000004,NFZ,Narodowy Fundusz Zdrowia,PL

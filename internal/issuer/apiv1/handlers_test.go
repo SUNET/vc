@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/logger"
 

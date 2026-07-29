@@ -32,7 +32,7 @@ func TestHTTPClient_Send(t *testing.T) {
 		// Return response
 		w.Header().Set("Content-Type", didcomm.MediaTypePlaintext)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("response-message"))
+		w.Write([]byte("response-message")) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -43,7 +43,6 @@ func TestHTTPClient_Send(t *testing.T) {
 		Message:   []byte("test-message"),
 		MediaType: didcomm.MediaTypeEncrypted,
 	})
-
 	if err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
@@ -76,7 +75,6 @@ func TestHTTPClient_SendMessage_Accepted(t *testing.T) {
 
 	client := NewHTTPClient()
 	resp, err := client.SendMessage(context.Background(), server.URL, []byte("test"), didcomm.MediaTypeEncrypted)
-
 	if err != nil {
 		t.Fatalf("SendMessage() error = %v", err)
 	}

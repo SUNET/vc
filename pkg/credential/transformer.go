@@ -5,44 +5,30 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/biter777/countries"
 )
 
 // ClaimTransformer transforms external attributes/claims into credential document structures.
 // Protocol-agnostic — works for SAML OIDs, OIDC claim names, or any other attribute source.
 type ClaimTransformer struct {
-	mappings map[string]model.CredentialMapping // credential type → mapping
+	mapping model.AttributeMapping
 }
 
-// NewClaimTransformer creates a new claim transformer from credential mappings.
-func NewClaimTransformer(mappings map[string]model.CredentialMapping) *ClaimTransformer {
+// NewClaimTransformer creates a new claim transformer from an attribute mapping.
+func NewClaimTransformer(mapping model.AttributeMapping) *ClaimTransformer {
 	return &ClaimTransformer{
-		mappings: mappings,
+		mapping: mapping,
 	}
-}
-
-// GetMapping returns the credential mapping for a credential type.
-func (t *ClaimTransformer) GetMapping(credentialType string) (*model.CredentialMapping, error) {
-	mapping, exists := t.mappings[credentialType]
-	if !exists {
-		return nil, fmt.Errorf("unknown credential type: %s", credentialType)
-	}
-	return &mapping, nil
 }
 
 // TransformClaims converts external attributes (keyed by protocol-specific identifiers)
-// to a generic document structure using the configured mappings.
+// to a generic document structure using the configured mapping.
 func (t *ClaimTransformer) TransformClaims(
-	credentialType string,
 	attributes map[string]any,
 ) (map[string]any, error) {
-	mapping, err := t.GetMapping(credentialType)
-	if err != nil {
-		return nil, err
-	}
-
 	doc := make(map[string]any)
 
-	for attrID, attrCfg := range mapping.Attributes {
+	for attrID, attrCfg := range t.mapping {
 		value, exists := attributes[attrID]
 
 		if !exists {
@@ -57,6 +43,10 @@ func (t *ClaimTransformer) TransformClaims(
 		}
 
 		value = ApplyTransform(value, attrCfg.Transform)
+
+		if attrCfg.AsArray {
+			value = wrapAsArray(value)
+		}
 
 		if err := SetNestedValue(doc, attrCfg.Claim, value); err != nil {
 			return nil, fmt.Errorf("failed to set claim %s: %w", attrCfg.Claim, err)
@@ -84,8 +74,31 @@ func ApplyTransform(value any, transform string) any {
 		return strings.ToUpper(str)
 	case "trim":
 		return strings.TrimSpace(str)
+	case "country_alpha2":
+		cc := countries.ByName(str)
+		if cc == countries.Unknown {
+			return value
+		}
+		return cc.Alpha2()
+	case "country_alpha3":
+		cc := countries.ByName(str)
+		if cc == countries.Unknown {
+			return value
+		}
+		return cc.Alpha3()
 	default:
 		return value
+	}
+}
+
+// wrapAsArray wraps a scalar string value in a single-element []string.
+// Any non-string value (including slices of any element type) is returned unchanged.
+func wrapAsArray(value any) any {
+	switch v := value.(type) {
+	case string:
+		return []string{v}
+	default:
+		return v
 	}
 }
 

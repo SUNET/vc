@@ -7,17 +7,104 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
+
+// ResolveIdentifier resolves an identifier string from authentication claims.
+// It first checks for an explicit authentic_source_person_id claim.
+// If none is found, it attempts an identity mapping lookup using the available
+// attributes against the configured authentic source.
+func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error) {
+	// Path 1: explicit identifier from claims
+	if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
+		c.log.Debug("ResolveIdentifier: direct identifier found", "value", v)
+		return v, nil
+	}
+
+	// Path 2: resolve from attributes via identity mapping
+	attrs := make(map[string]string)
+	for _, key := range []string{"family_name", "given_name", "birth_date"} {
+		if v, ok := claims[key].(string); ok && v != "" {
+			attrs[key] = v
+		}
+	}
+	if len(attrs) == 0 {
+		return "", errors.New("no identifier claim or identity attributes found in claims")
+	}
+
+	personID, err := c.identityMappingStore.ResolveMapping(ctx, &db.ResolveMappingQuery{
+		AuthenticSource: authenticSource,
+		Attributes:      attrs,
+	})
+	if err != nil {
+		return "", fmt.Errorf("identity mapping resolution failed: %w", err)
+	}
+	c.log.Debug("ResolveIdentifier: resolved via identity mapping", "identifier", personID)
+	return personID, nil
+}
+
+// requireIdentifier validates that a non-empty identifier exists for data sources
+// that require it. Assertion-based and datastore-based issuance allow an empty
+// identifier because the data comes from trusted sources (IdP claims or
+// pre-uploaded documents) rather than identity-mapped lookups.
+func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
+	if identifier == "" && dataSource != model.DataSourceAssertion && dataSource != model.DataSourceDatastore {
+		return "", errors.New("no identifier in auth context")
+	}
+	return identifier, nil
+}
+
+// ResolveVCIIdentifier resolves an identifier for a VCI session based on the
+// data source. For assertion data source, it derives the identifier directly
+// from claims and optional pre-transform fallback values (no identity mapping
+// lookup is performed — the issuer trusts the IdP). For other data sources, it
+// delegates to ResolveIdentifier which may perform identity mapping lookups.
+//
+// The fallbacks parameter allows callers to supply pre-transform identifiers
+// (e.g., authResp.IDToken.Subject for OIDC, assertion.NameID for SAML) that
+// should be tried when the transformed claims don't contain the expected keys.
+func (c *Client) ResolveVCIIdentifier(ctx context.Context, authCtx *cache.AuthorizationContext, claims map[string]any, fallbacks ...string) (string, error) {
+	if authCtx.Identifier != "" {
+		return authCtx.Identifier, nil
+	}
+
+	if authCtx.DataSource == string(model.DataSourceAssertion) {
+		// Assertion: derive identifier from claims, no identity mapping lookup.
+		if v, ok := claims["authentic_source_person_id"].(string); ok && v != "" {
+			return v, nil
+		}
+		if v, ok := claims["sub"].(string); ok && v != "" {
+			return v, nil
+		}
+		// Try caller-provided pre-transform fallbacks.
+		for _, fb := range fallbacks {
+			if fb != "" {
+				return fb, nil
+			}
+		}
+		// Best-effort: identifier may remain empty for assertion.
+		return "", nil
+	}
+
+	// Non-assertion: perform full identity resolution (may include mapping lookup).
+	identifier, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claims)
+	if err != nil {
+		return "", err
+	}
+	return identifier, nil
+}
 
 // StoreVCIDocuments stores transformed credential documents in the VCI session cache.
 // This is used by external auth flows (SAML/OIDC) that are integrated into the
@@ -26,6 +113,58 @@ import (
 func (c *Client) StoreVCIDocuments(ctx context.Context, sessionID string, docs map[string]*model.CompleteDocument) error {
 	c.cacheService.Document.Set(ctx, sessionID, docs)
 	c.log.Debug("VCI documents stored from external auth", "session_id", sessionID, "doc_count", len(docs))
+	return nil
+}
+
+// LookupDatastoreByIdentity queries the datastore for documents matching the
+// given identity claims and scope, then stores them in the VCI session cache.
+// Used when a datastore credential is authenticated via SAML/OIDC — the
+// identity extracted from the assertion is used to find the pre-loaded document.
+func (c *Client) LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error {
+	identityClaims, err := model.ExtractIdentityClaims(claims, dsCred.AuthClaims)
+	if err != nil {
+		return fmt.Errorf("identity extraction failed for scope %q: %w", scope, err)
+	}
+
+	// Resolve the person identifier — uses authentic_source_person_id directly
+	// when present in the extracted claims, otherwise falls back to identity
+	// mapping (given_name, family_name, birth_date → authentic_source_person_id).
+	claimsAny := make(map[string]any, len(identityClaims))
+	for k, v := range identityClaims {
+		claimsAny[k] = v
+	}
+	identityMappingID, err := c.ResolveIdentifier(ctx, authenticSource, claimsAny)
+	if err != nil {
+		return fmt.Errorf("failed to resolve identity for scope %q: %w", scope, err)
+	}
+
+	c.log.Debug("LookupDatastoreByIdentity", "scope", scope, "identity_mapping_id", identityMappingID)
+
+	docs, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
+	if err != nil {
+		return fmt.Errorf("datastore lookup failed for scope %q: %w", scope, err)
+	}
+	if len(docs) == 0 {
+		return fmt.Errorf("no documents found in datastore for scope %q with the provided identity", scope)
+	}
+
+	// Filter out expired documents
+	now := time.Now().UTC()
+	for key, doc := range docs {
+		if doc.Meta.ValidNotAfter != nil && now.After(*doc.Meta.ValidNotAfter) {
+			c.log.Info("Skipping expired document", "document_id", doc.Meta.DocumentID, "valid_not_after", doc.Meta.ValidNotAfter)
+			delete(docs, key)
+		}
+	}
+
+	// If all documents are expired, return an error to avoid caching and issuing from expired data
+	if len(docs) == 0 {
+		return fmt.Errorf("all documents expired for scope %q", scope)
+	}
+
+	c.cacheService.Document.Set(ctx, sessionID, docs)
+	c.log.Info("Datastore documents cached for VCI session",
+		"session_id", sessionID, "scope", scope, "doc_count", len(docs))
 	return nil
 }
 
@@ -50,10 +189,14 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 	if err != nil {
 		return nil, err
 	}
-	response := &openid4vci.NonceResponse{
+	// Store the nonce in cache so the credential endpoint can validate proofs
+	if c.cacheService != nil && c.cacheService.VCINonce != nil {
+		c.cacheService.VCINonce.Set(ctx, nonce, true)
+	}
+	reply := &openid4vci.NonceResponse{
 		CNonce: nonce,
 	}
-	return response, nil
+	return reply, nil
 }
 
 // VCICredential implements OpenID4VCI credential issuance endpoint
@@ -61,7 +204,7 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Summary		VCICredential
 //	@ID				create-credential
 //	@Description	Create credential endpoint
-//	@Tags			dc4eu
+//	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	apiv1_issuer.MakeSDJWTReply		"Success"
@@ -69,24 +212,25 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
 //	@Router			/credential [post]
 func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRequest) (*openid4vci.CredentialResponse, error) {
-	jti, err := oauth2.ExtractJTI(req.DPoP)
-	if err != nil {
-		c.log.Error(err, "failed to extract JTI from DPoP")
-		return nil, err
-	}
-
-	if _, hasJTI := c.cacheService.DPopJTI.Get(ctx, jti); hasJTI {
-		c.log.Error(nil, "DPoP JTI replay detected", "jti", jti)
-		return nil, oauth2.ErrJTIReplay
-	}
-
+	c.log.Debug("VCICredential request", "credential_identifier", req.CredentialIdentifier, "credential_configuration_id", req.CredentialConfigurationID)
+	// Validate DPoP JWT signature and claims first, before checking JTI replay.
+	// This prevents attackers from poisoning the JTI cache with forged tokens.
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPoP)
 	if err != nil {
 		c.log.Error(err, "failed to validate DPoP JWT")
 		return nil, err
 	}
 
-	c.cacheService.DPopJTI.Set(ctx, jti, true)
+	unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+	if err != nil {
+		c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error checking DPoP proof", 500, err)
+	}
+	if !unique {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+		return nil, oauth2.OAuthErrJTIReplay
+	}
 
 	// Validate HTU matches credential endpoint
 	if dpop.HTU != c.issuerMetadata.CredentialEndpoint {
@@ -98,15 +242,21 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, fmt.Errorf("invalid HTM in DPoP claims: expected POST, got %s", dpop.HTM)
 	}
 
-	if !dpop.IsAccessTokenDPoP(req.HashAuthorizeToken()) {
+	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
+
+	if !dpop.IsAccessTokenDPoP(accessToken) {
 		return nil, errors.New("invalid DPoP token")
 	}
-
-	accessToken := strings.TrimPrefix(req.Authorization, "DPoP ")
 
 	authContext, err := c.cacheService.AuthContext.GetWithAccessToken(ctx, accessToken)
 	if err != nil {
 		c.log.Error(err, "failed to get authorization")
+		return nil, err
+	}
+
+	// Verify DPoP key binding: the proof's public key must match the one used
+	// at token issuance (RFC 9449 §4.3).
+	if err := verifyDPoPKeyBinding(dpop.Thumbprint, authContext.Token); err != nil {
 		return nil, err
 	}
 
@@ -117,7 +267,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	}
 
 	// Match a scope from the authorization context to a known credential constructor
-	scope, credentialConstructor, err := c.matchScope(authContext.Scopes)
+	scope, _, err := c.matchScope(authContext.Scopes)
 	if err != nil {
 		c.log.Error(err, "no matching scope in auth context")
 		return nil, err
@@ -125,42 +275,32 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	document := &model.CompleteDocument{}
 
-	// Determine retrieval strategy based on auth method
-	// - "basic": Identity-based authentication → retrieve from datastore
-	// - Other methods (e.g., "openid4vp"): Session-based → retrieve from cache
-	authMethod := credentialConstructor.AuthMethod
-	switch authMethod {
-	case model.AuthMethodBasic:
-		// Basic auth: retrieve from datastore using identity
-		document, err = c.datastoreStore.GetDocumentWithIdentity(ctx, &db.GetDocumentQuery{
-			Meta: &model.MetaData{
-				AuthenticSource: authContext.AuthenticSource,
-				Scope:           scope,
-			},
-			Identity: authContext.Identity,
-		})
-		if err != nil {
-			return nil, err
-		}
+	// For child sessions created in the pre-auth multi-client flow, use the
+	// source session ID (the original pre-auth code) for document lookup.
+	docSessionID := docLookupSessionID(authContext)
 
-	default:
-		// Session-based auth methods (e.g., openid4vp): retrieve from session cache
-		// These credentials require presenting another credential for authentication
-		docs, ok := c.cacheService.Document.Get(ctx, authContext.SessionID)
+	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID, "doc_session_id", docSessionID)
+	// Retrieve credential data based on the auth provider used during authorization
+	switch authContext.AuthProvider {
+	case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
+		// Session-based auth providers: retrieve from session cache
+		docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
 		if !ok || len(docs) == 0 {
-			c.log.Error(nil, "no documents found in cache for session", "session_id", authContext.SessionID)
-			return nil, errors.New("no documents found for session " + authContext.SessionID)
+			c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
+			return nil, errors.New("no documents found for session " + docSessionID)
 		}
 		if len(docs) > 1 {
-			c.log.Info("multiple documents in cache for session, using first", "session_id", authContext.SessionID, "count", len(docs))
+			c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
 		}
 		for _, doc := range docs {
 			document = doc
 			break
 		}
 		if document == nil || document.DocumentData == nil {
-			return nil, errors.New("cached document is empty for session " + authContext.SessionID)
+			return nil, errors.New("cached document is empty for session " + docSessionID)
 		}
+	default:
+		return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)
@@ -174,7 +314,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		jwk, err := req.Proof.ExtractJWK()
 		if err != nil {
 			c.log.Error(err, "failed to extract JWK from proof")
-			return nil, err
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 		jwks = []*apiv1_issuer.Jwk{jwk}
 	} else if req.Proofs != nil {
@@ -186,16 +326,112 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		jwks, err = req.Proofs.ExtractAllJWKs(maxBatch)
 		if err != nil {
 			c.log.Error(err, "failed to extract JWKs from proofs")
-			return nil, err
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: err.Error()}
 		}
 	} else {
-		return nil, errors.New("no proof found in credential request")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "proof or proofs parameter is required"}
+	}
+
+	// Resolve the expected c_nonce: extract nonce from the proof and check if
+	// it was issued by us (via token response or nonce endpoint).
+	var proofNonce string
+	if req.Proof != nil && req.Proof.ProofType == "jwt" {
+		proofNonce = openid4vci.ProofJWTToken(req.Proof.JWT).ExtractNonce()
+	} else if req.Proofs != nil && len(req.Proofs.JWT) > 0 {
+		proofNonce = req.Proofs.JWT[0].ExtractNonce()
+	}
+
+	// Determine which nonce to validate against.
+	// Non-destructive lookup (Get) finds the expected nonce without consuming it.
+	// The nonce is consumed (GetAndDelete) only after successful proof verification
+	// to enforce one-time use while avoiding false rejections on verification failure.
+	expectedNonce := ""
+	if c.cacheService.VCINonce != nil {
+		// First try the nonce from the proof JWT (non-destructive lookup)
+		if proofNonce != "" {
+			if _, ok := c.cacheService.VCINonce.Get(ctx, proofNonce); ok {
+				expectedNonce = proofNonce
+			}
+		}
+		// Fall back to the nonce stored in the auth context
+		if expectedNonce == "" && authContext.Nonce != "" {
+			if _, ok := c.cacheService.VCINonce.Get(ctx, authContext.Nonce); ok {
+				expectedNonce = authContext.Nonce
+			}
+		}
+	}
+	if expectedNonce == "" {
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce is missing or already consumed"}
+	}
+
+	verifyOpts := &openid4vci.VerifyProofOptions{
+		CNonce:   expectedNonce,
+		Audience: c.issuerMetadata.CredentialIssuer,
+	}
+
+	// Verify proof of possession per OID4VCI Appendix F.4. JWT proofs are
+	// verified individually against their own extracted key, since a batch
+	// request may bind each credential to a distinct holder key (that's the
+	// whole point of ExtractAllJWKs - one key per proof). DIVP/attestation
+	// proofs resolve and verify their own signing key internally (see
+	// ProofDIVP.Verify / ProofAttestation.Verify), so they don't need
+	// per-key pairing and go through the existing aggregate verifier.
+	if req.Proof != nil {
+		if req.Proof.ProofType == "jwt" {
+			pubKey, err := c.proofJWKToPublicKey(jwks[0])
+			if err != nil {
+				return nil, err
+			}
+			proofJWT := openid4vci.ProofJWTToken(req.Proof.JWT)
+			if verifyErr := proofJWT.Verify(pubKey, verifyOpts); verifyErr != nil {
+				c.log.Error(verifyErr, "proof JWT verification failed")
+				return nil, verifyErr
+			}
+		}
+	} else if req.Proofs != nil {
+		switch req.Proofs.ProofType() {
+		case "jwt":
+			if len(req.Proofs.JWT) != len(jwks) {
+				return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: "number of extracted keys does not match number of JWT proofs"}
+			}
+			for i, jwtProof := range req.Proofs.JWT {
+				pubKey, err := c.proofJWKToPublicKey(jwks[i])
+				if err != nil {
+					return nil, err
+				}
+				if verifyErr := jwtProof.Verify(pubKey, verifyOpts); verifyErr != nil {
+					c.log.Error(verifyErr, "proof JWT verification failed", "proof_index", i)
+					return nil, verifyErr
+				}
+			}
+		default:
+			// publicKey is unused by VerifyProofWithOptions for DIVP/attestation.
+			if err := req.VerifyProofWithOptions(nil, verifyOpts); err != nil {
+				c.log.Error(err, "proofs verification failed")
+				return nil, err
+			}
+		}
+	}
+
+	// Consume nonce atomically after successful proof verification.
+	// If another request consumed it concurrently, fail with invalid_nonce.
+	if c.cacheService.VCINonce != nil {
+		if _, ok := c.cacheService.VCINonce.GetAndDelete(ctx, expectedNonce); !ok {
+			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce was consumed concurrently"}
+		}
 	}
 
 	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := req.ResolveCredentialFormat(c.issuerMetadata)
+	format, err := req.ResolveCredentialFormatWithAuthDetails(c.issuerMetadata, authContext.AuthorizationDetails)
 	if err != nil {
 		c.log.Error(err, "failed to resolve credential format")
+		return nil, err
+	}
+
+	// The authenticated identifier is used for registry; for assertion-based
+	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
+	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
+	if err != nil {
 		return nil, err
 	}
 
@@ -204,11 +440,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	switch format {
 	case "mso_mdoc":
-		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, document)
+		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, identifier)
 	case "vc+sd-jwt", "dc+sd-jwt":
-		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, document)
+		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier)
 	case "ldp_vc", "vc+ld+json":
-		credentials, issueErr = c.issueVC20(ctx, scope, documentData, document, req)
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, req)
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
 		return nil, errors.New("unsupported or missing credential format: " + format)
@@ -229,9 +465,9 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 }
 
 // issueSDJWT issues SD-JWT credentials, one per JWK.
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, document *model.CompleteDocument) ([]openid4vci.Credential, error) {
-	credentialConstructor := c.cfg.GetCredentialConstructor(scope)
-	if credentialConstructor == nil {
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
+	credMeta := c.cfg.GetCredentialMetadata(scope)
+	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
@@ -242,8 +478,8 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 			Scope:        scope,
 			DocumentData: documentData,
 			Jwk:          jwk,
-			Integrity:    credentialConstructor.GetIntegrity(),
-			Vctm:         credentialConstructor.GetVCTMRaw(),
+			Integrity:    credMeta.GetIntegrity(),
+			Vctm:         credMeta.GetVCTMRaw(),
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeSDJWT")
@@ -259,11 +495,14 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 
 	credentials := make([]openid4vci.Credential, len(replies))
 	for i, reply := range replies {
-		if len(reply.Credentials) != 1 {
-			return nil, fmt.Errorf("expected exactly 1 credential from MakeSDJWT, got %d", len(reply.Credentials))
+		switch len(reply.Credentials) {
+		case 0:
+			return nil, helpers.ErrNoDocumentFound
+		case 1:
+			credentials[i] = openid4vci.Credential{Credential: reply.Credentials[0].Credential}
+		default:
+			return nil, errors.New("multiple credentials returned from issuer, not supported")
 		}
-
-		credentials[i] = openid4vci.Credential{Credential: reply.Credentials[0].Credential}
 	}
 
 	// Save credential subject info to registry for status management
@@ -271,7 +510,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex}
 	}
-	if err := c.saveCredentialSubjects(ctx, document, entries); err != nil {
+	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
 	}
 
@@ -279,7 +518,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 }
 
 // issueMDoc issues mDL/mDoc credentials (ISO 18013-5), one per JWK.
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, document *model.CompleteDocument) ([]openid4vci.Credential, error) {
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
 	replies := make([]*apiv1_issuer.MakeMDocReply, 0, len(jwks))
 
 	for _, jwk := range jwks {
@@ -318,7 +557,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
 	}
-	if err := c.saveCredentialSubjects(ctx, document, entries); err != nil {
+	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
 	}
 
@@ -327,7 +566,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, document *model.CompleteDocument, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
 	if hasNoJWTProof || hasNoJWTProofs {
@@ -389,6 +628,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 
 	credentials := make([]openid4vci.Credential, len(replies))
 	for i, reply := range replies {
+		// VC20 Data Integrity credentials are JSON-LD, return as-is
 		credentials[i] = openid4vci.Credential{Credential: string(reply.Credential)}
 	}
 
@@ -397,7 +637,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
 	}
-	if err := c.saveCredentialSubjects(ctx, document, entries); err != nil {
+	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
 	}
 
@@ -409,27 +649,25 @@ type statusEntry struct {
 	Index   int64
 }
 
-// Save credential subject information to the registry for status management.
-func (c *Client) saveCredentialSubjects(ctx context.Context, document *model.CompleteDocument, entries []statusEntry) error {
-	if len(document.Identities) == 0 {
+// saveCredentialSubjects saves credential subject info linked to Token Status
+// List entries, once per credential issued in a (possibly batched) request.
+func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, entries []statusEntry) error {
+	if identifier == "" {
 		return nil
 	}
 
-	identity := document.Identities[0]
-
 	for _, e := range entries {
-		if e.Section == 0 {
+		if e.Section <= 0 {
 			continue
 		}
 		_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			FirstName:   identity.GivenName,
-			LastName:    identity.FamilyName,
-			DateOfBirth: identity.BirthDate,
-			Section:     e.Section,
-			Index:       e.Index,
+			Identifier: identifier,
+			Section:    e.Section,
+			Index:      e.Index,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to save credential subject to registry: %w", err)
+			c.log.Error(err, "failed to save credential subject to registry")
+			return fmt.Errorf("failed to save credential subject: %w", err)
 		}
 	}
 	return nil
@@ -479,7 +717,9 @@ func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 		return nil, err
 	}
 
-	return &doc.CredentialOfferParameters, nil
+	reply := &doc.CredentialOfferParameters
+
+	return reply, nil
 }
 
 // VCINotification implements OpenID4VCI notification endpoint
@@ -491,21 +731,126 @@ func (c *Client) VCINotification(ctx context.Context, req *openid4vci.Notificati
 
 // VCIMetadata https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 func (c *Client) VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error) {
-	c.log.Debug("metadata request")
-
 	if err := helpers.Check(ctx, c.cfg, c.issuerMetadata, c.log); err != nil {
 		c.log.Error(err, "failed to check metadata")
 		return nil, err
 	}
 
-	if c.pkiSigner != nil {
-		metadata, err := c.issuerMetadata.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
-		if err != nil {
-			c.log.Error(err, "failed to sign metadata")
-			return nil, err
-		}
-		return metadata, nil
+	// Shallow-copy to avoid mutating the shared struct concurrently.
+	metadata := *c.issuerMetadata
+
+	// Use cached signed metadata (refreshed by background ticker every 55 min).
+	// signed_metadata is OPTIONAL per OID4VCI §12.2.4 — if signing fails
+	// (issuer unreachable, not configured, etc.) return unsigned metadata.
+	signedMetadata, err := c.getOrSignMetadata(ctx, signedMetadataKeyVCI, c.issuerMetadata, "vci-issuer", c.issuerMetadata.CredentialIssuer)
+	if err != nil {
+		c.log.Error(err, "signed_metadata unavailable, serving unsigned metadata")
+		metadata.SignedMetadata = ""
+	} else {
+		metadata.SignedMetadata = signedMetadata
 	}
 
-	return c.issuerMetadata, nil
+	return &metadata, nil
+}
+
+// GetIACAsResponse is the HTTP response for the /iacas endpoint.
+type GetIACAsResponse struct {
+	Iacas []IACACertificate `json:"iacas"`
+}
+
+// IACACertificate is a single IACA certificate in the response.
+type IACACertificate struct {
+	Certificate string `json:"certificate"` // Base64 DER-encoded X.509 certificate
+}
+
+// GetIACAs returns the IACA certificates from the mDOC issuer via gRPC.
+func (c *Client) GetIACAs(ctx context.Context) (*GetIACAsResponse, error) {
+	reply, err := c.issuerClient.GetIACAs(ctx, &apiv1_issuer.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IACAs from issuer: %w", err)
+	}
+
+	resp := &GetIACAsResponse{
+		Iacas: make([]IACACertificate, 0, len(reply.Certificates)),
+	}
+	for _, certDER := range reply.Certificates {
+		resp.Iacas = append(resp.Iacas, IACACertificate{
+			Certificate: base64.StdEncoding.EncodeToString(certDER),
+		})
+	}
+
+	return resp, nil
+}
+
+// proofJWKToPublicKey converts a proof's extracted JWK to a crypto.PublicKey,
+// returning an OID4VCI-typed invalid_proof error (with a more specific
+// description for kid-only references) on failure.
+func (c *Client) proofJWKToPublicKey(jwk *apiv1_issuer.Jwk) (any, error) {
+	pubKey, err := jwkProtoToPublicKey(jwk)
+	if err != nil {
+		desc := "invalid key in proof"
+		// Detect kid-only references that lack embedded key material
+		if jwk.X == "" && jwk.Y == "" && jwk.N == "" && jwk.E == "" && jwk.Kid != "" {
+			desc = "proof contains only a key reference (kid) without embedded key material; key resolution is not supported"
+		}
+		c.log.Error(err, "failed to convert proof JWK to public key")
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidProof, ErrorDescription: desc}
+	}
+	return pubKey, nil
+}
+
+// jwkProtoToPublicKey converts a protobuf Jwk to a crypto.PublicKey for proof verification.
+func jwkProtoToPublicKey(jwk *apiv1_issuer.Jwk) (any, error) {
+	// Build a standard JWK map and use jose.ParseJWKToPublicKey
+	jwkMap := map[string]any{
+		"kty": jwk.Kty,
+	}
+	if jwk.Crv != "" {
+		jwkMap["crv"] = jwk.Crv
+	}
+	if jwk.X != "" {
+		jwkMap["x"] = jwk.X
+	}
+	if jwk.Y != "" {
+		jwkMap["y"] = jwk.Y
+	}
+	if jwk.N != "" {
+		jwkMap["n"] = jwk.N
+	}
+	if jwk.E != "" {
+		jwkMap["e"] = jwk.E
+	}
+	if jwk.Kid != "" {
+		jwkMap["kid"] = jwk.Kid
+	}
+	return jose.ParseJWKToPublicKey(jwkMap)
+}
+
+// verifyDPoPKeyBinding checks that the DPoP proof's JWK thumbprint matches the
+// thumbprint bound to the access token at issuance time (RFC 9449 §4.3).
+// When the token was issued without DPoP binding (e.g. pre-authorized_code flow
+// where the client did not present DPoP), the stored thumbprint is empty and the
+// check is skipped — the token was not bound to a specific key.
+func verifyDPoPKeyBinding(proofThumbprint string, token *cache.Token) error {
+	if token == nil || token.DPoPThumbprint == "" {
+		return nil
+	}
+	if proofThumbprint != token.DPoPThumbprint {
+		return oauth2.NewOAuthError(
+			oauth2.ErrCodeInvalidDPoPProof,
+			"DPoP key does not match the key bound to the access token",
+			400,
+		)
+	}
+	return nil
+}
+
+// docLookupSessionID returns the session ID to use for document lookup.
+// For child sessions created in the pre-auth multi-client flow, the source
+// session ID (original pre-auth code) is used instead of the child's own ID.
+func docLookupSessionID(authContext *cache.AuthorizationContext) string {
+	if authContext.SourceSessionID != "" {
+		return authContext.SourceSessionID
+	}
+	return authContext.SessionID
 }

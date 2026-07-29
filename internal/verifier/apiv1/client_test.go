@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -13,8 +14,8 @@ import (
 
 func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDCOP.SubjectType = "public"
-	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
 	walletID := "wallet-123"
 	clientID1 := "client-1"
@@ -31,8 +32,8 @@ func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDCOP.SubjectType = "pairwise"
-	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "pairwise"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
 	walletID := "wallet-123"
 	clientID1 := "client-1"
@@ -53,8 +54,8 @@ func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 
 func TestClient_generateSubjectIdentifier_DifferentWallets(t *testing.T) {
 	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDCOP.SubjectType = "pairwise"
-	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "pairwise"
+	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
 	walletID1 := "wallet-1"
 	walletID2 := "wallet-2"
@@ -179,16 +180,16 @@ func TestPKCE_S256(t *testing.T) {
 
 func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 	tests := []struct {
-		name                  string
-		scopes                []string
-		credentialConstructor map[string]*model.CredentialConstructor
-		expectError           bool
-		expectedCredCount     int
+		name              string
+		scopes            []string
+		credMeta          map[string]*model.CredentialMetadata
+		expectError       bool
+		expectedCredCount int
 	}{
 		{
 			name:   "single valid scope",
 			scopes: []string{"diploma"},
-			credentialConstructor: map[string]*model.CredentialConstructor{
+			credMeta: map[string]*model.CredentialMetadata{
 				"diploma": {
 					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
@@ -202,7 +203,7 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 		{
 			name:   "multiple valid scopes",
 			scopes: []string{"diploma", "ehic"},
-			credentialConstructor: map[string]*model.CredentialConstructor{
+			credMeta: map[string]*model.CredentialMetadata{
 				"diploma": {
 					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
@@ -222,7 +223,7 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 		{
 			name:   "scopes with openid (should be skipped)",
 			scopes: []string{"openid", "diploma"},
-			credentialConstructor: map[string]*model.CredentialConstructor{
+			credMeta: map[string]*model.CredentialMetadata{
 				"diploma": {
 					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
@@ -234,16 +235,16 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 			expectedCredCount: 1,
 		},
 		{
-			name:                  "no matching scopes",
-			scopes:                []string{"unknown_scope"},
-			credentialConstructor: map[string]*model.CredentialConstructor{},
-			expectError:           true,
-			expectedCredCount:     0,
+			name:              "no matching scopes",
+			scopes:            []string{"unknown_scope"},
+			credMeta:          map[string]*model.CredentialMetadata{},
+			expectError:       true,
+			expectedCredCount: 0,
 		},
 		{
 			name:   "all scopes are openid or unmatched",
 			scopes: []string{"openid"},
-			credentialConstructor: map[string]*model.CredentialConstructor{
+			credMeta: map[string]*model.CredentialMetadata{
 				"diploma": {
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
@@ -256,7 +257,7 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 		{
 			name:   "scope with VCTM containing claims",
 			scopes: []string{"diploma"},
-			credentialConstructor: map[string]*model.CredentialConstructor{
+			credMeta: map[string]*model.CredentialMetadata{
 				"diploma": {
 					Format: "dc+sd-jwt",
 					VCTM: &sdjwtvc.VCTM{
@@ -288,7 +289,7 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: tt.credentialConstructor,
+					CredentialMetadata: tt.credMeta,
 				},
 			}
 			client, _ := CreateTestClientWithMock(cfg)
@@ -306,32 +307,28 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 				// Verify credential format matches config
 				for _, cred := range dcql.Credentials {
 					assert.Equal(t, "dc+sd-jwt", cred.Format)
+					// Claims should not be populated in fallback mode —
+					// let the wallet decide what to disclose
+					assert.Nil(t, cred.Claims, "fallback DCQL should not enumerate individual claims")
 				}
 			}
 		})
 	}
 }
 
-// Helper function to create a pointer to a string
-//
-//go:fix inline
-func ptrString(s string) *string {
-	return new(s)
-}
-
 func TestClient_createDCQLQuery(t *testing.T) {
 	ctx := t.Context()
 
 	tests := []struct {
-		name                  string
-		scopes                []string
-		credentialConstructor map[string]*model.CredentialConstructor
-		expectError           bool
+		name        string
+		scopes      []string
+		credMeta    map[string]*model.CredentialMetadata
+		expectError bool
 	}{
 		{
 			name:   "creates DCQL from credential config (no presentation builder)",
 			scopes: []string{"diploma"},
-			credentialConstructor: map[string]*model.CredentialConstructor{
+			credMeta: map[string]*model.CredentialMetadata{
 				"diploma": {
 					VCTM: &sdjwtvc.VCTM{
 						VCT: "urn:credential:diploma",
@@ -341,10 +338,10 @@ func TestClient_createDCQLQuery(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:                  "falls back to legacy with empty config",
-			scopes:                []string{"unknown_scope"},
-			credentialConstructor: map[string]*model.CredentialConstructor{},
-			expectError:           true,
+			name:        "falls back to legacy with empty config",
+			scopes:      []string{"unknown_scope"},
+			credMeta:    map[string]*model.CredentialMetadata{},
+			expectError: true,
 		},
 	}
 
@@ -352,7 +349,7 @@ func TestClient_createDCQLQuery(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &model.Cfg{
 				Common: &model.Common{
-					CredentialConstructor: tt.credentialConstructor,
+					CredentialMetadata: tt.credMeta,
 				},
 			}
 			client, _ := CreateTestClientWithMock(cfg)

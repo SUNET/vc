@@ -286,7 +286,6 @@ func TestNewSessionEncryptionReader(t *testing.T) {
 		&deviceKey.PublicKey,
 		sessionTranscript,
 	)
-
 	if err != nil {
 		t.Fatalf("NewSessionEncryptionReader() error = %v", err)
 	}

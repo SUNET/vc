@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/issuer/apiv1"
 )
@@ -20,7 +21,7 @@ func (s *Service) MakeSDJWT(ctx context.Context, in *apiv1_issuer.MakeSDJWTReque
 	}
 
 	return &apiv1_issuer.MakeSDJWTReply{
-		Credentials:       reply.Data,
+		Credentials:            reply.Data,
 		TokenStatusListSection: reply.TokenStatusListSection,
 		TokenStatusListIndex:   reply.TokenStatusListIndex,
 	}, nil
@@ -59,4 +60,14 @@ func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest
 		ValidFrom:         reply.ValidFrom,
 		ValidUntil:        reply.ValidUntil,
 	}, nil
+}
+
+// SignMetadata signs metadata JSON with the issuer's own key (the key in JWKS)
+func (s *Service) SignMetadata(ctx context.Context, in *apiv1_issuer.SignMetadataRequest) (*apiv1_issuer.SignMetadataReply, error) {
+	return s.apiv1.SignMetadata(ctx, in)
+}
+
+// GetIACAs returns the IACA certificates from the mDOC certificate chain
+func (s *Service) GetIACAs(ctx context.Context, _ *apiv1_issuer.Empty) (*apiv1_issuer.GetIACAsReply, error) {
+	return s.apiv1.GetIACAs(ctx)
 }

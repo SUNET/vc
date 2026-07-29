@@ -9,9 +9,11 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
-func createTestIssuerSigned(t *testing.T) *IssuerSigned {
+func createTestIssuerSigned(t *testing.T) *IssuerSignedMdoc {
 	t.Helper()
 
 	// Create issuer key and certificate
@@ -82,7 +84,13 @@ func createTestIssuerSigned(t *testing.T) *IssuerSigned {
 		t.Fatalf("failed to issue: %v", err)
 	}
 
-	return &issuedDoc.Document.IssuerSigned
+	if len(issuedDoc.DocumentMdoc.Documents) == 0 {
+		t.Fatal("no documents found in issued response")
+	}
+
+	doc := issuedDoc.DocumentMdoc.Documents[0]
+
+	return &doc.IssuerSigned
 }
 
 func TestNewSelectiveDisclosure(t *testing.T) {
@@ -119,15 +127,33 @@ func TestSelectiveDisclosure_Disclose(t *testing.T) {
 		t.Fatalf("Disclose() error = %v", err)
 	}
 
-	// Should have only 2 elements
 	items := disclosed.NameSpaces[Namespace]
 	if len(items) != 2 {
 		t.Errorf("Disclose() returned %d elements, want 2", len(items))
 	}
 
-	// Check that only requested elements are present
 	elementSet := make(map[string]bool)
-	for _, item := range items {
+	for _, anyItem := range items {
+		var item IssuerSignedItem
+
+		// Peek into the Tag 24 wrapper
+		if tag, ok := anyItem.(cbor.Tag); ok {
+			content, ok := tag.Content.([]byte)
+			if !ok {
+				t.Fatalf("Tag content is not []byte")
+			}
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				t.Fatalf("Failed to unmarshal item from Tag: %v", err)
+			}
+		} else if concrete, ok := anyItem.(IssuerSignedItem); ok {
+			// Fallback for non-encoded items (if your mock creates them raw)
+			item = concrete
+		} else if pItem, ok := anyItem.(*IssuerSignedItem); ok {
+			item = *pItem
+		} else {
+			t.Fatalf("Disclose() returned unexpected type %T in NameSpaces", anyItem)
+		}
+
 		elementSet[item.ElementIdentifier] = true
 	}
 
@@ -268,20 +294,37 @@ func TestDeviceResponseBuilder_Build_WithSignature(t *testing.T) {
 		t.Fatalf("Documents count = %d, want 1", len(response.Documents))
 	}
 
-	doc := response.Documents[0]
+	if len(response.Documents) == 0 {
+		t.Fatal("No documents found in response")
+	}
+	doc := &response.Documents[0]
+
 	if doc.DocType != DocType {
 		t.Errorf("DocType = %s, want %s", doc.DocType, DocType)
 	}
 
-	// Should have 2 disclosed elements
 	items := doc.IssuerSigned.NameSpaces[Namespace]
 	if len(items) != 2 {
 		t.Errorf("Disclosed elements = %d, want 2", len(items))
 	}
 
-	// Should have device signature
-	if len(doc.DeviceSigned.DeviceAuth.DeviceSignature) == 0 {
-		t.Error("DeviceSignature is empty")
+	sigRaw := doc.DeviceSigned.DeviceAuth.DeviceSignature
+	if sigRaw == nil {
+		t.Fatal("DeviceSignature should not be nil")
+	}
+
+	var sigLen int
+	switch v := sigRaw.(type) {
+	case []byte:
+		sigLen = len(v)
+	case []any:
+		sigLen = len(v)
+	default:
+		t.Fatalf("DeviceSignature has unexpected type %T", sigRaw)
+	}
+
+	if sigLen == 0 {
+		t.Error("DeviceSignature contains no data")
 	}
 }
 
@@ -301,9 +344,31 @@ func TestDeviceResponseBuilder_Build_WithMAC(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	doc := response.Documents[0]
-	if len(doc.DeviceSigned.DeviceAuth.DeviceMac) == 0 {
+	if len(response.Documents) == 0 {
+		t.Fatal("expected at least one document")
+	}
+
+	doc := &response.Documents[0]
+
+	if doc.DeviceSigned.DeviceAuth.DeviceMac == nil {
 		t.Error("DeviceMac is empty")
+	}
+
+	if doc.DeviceSigned.DeviceAuth.DeviceSignature != nil {
+		// Extract the value to check length
+		var sigLen int
+		switch v := doc.DeviceSigned.DeviceAuth.DeviceSignature.(type) {
+		case []byte:
+			sigLen = len(v)
+		case []any:
+			sigLen = len(v)
+		default:
+			t.Errorf("unexpected type for DeviceSignature: %T", v)
+		}
+
+		if sigLen == 0 {
+			t.Error("DeviceSignature was provided but is empty")
+		}
 	}
 }
 
@@ -359,15 +424,26 @@ func TestDeviceResponseBuilder_AddError(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	doc := response.Documents[0]
+	if len(response.Documents) == 0 {
+		t.Fatal("expected at least one document")
+	}
+
+	doc := &response.Documents[0]
+
 	if doc.Errors == nil {
 		t.Fatal("Errors should not be nil")
 	}
 
-	errorCode, ok := doc.Errors[Namespace]["nonexistent"]
+	namespaceErrors, ok := doc.Errors[Namespace]
 	if !ok {
-		t.Error("Missing error for nonexistent element")
+		t.Fatalf("Namespace %s missing from Errors map", Namespace)
 	}
+
+	errorCode, ok := namespaceErrors["nonexistent"]
+	if !ok {
+		t.Error("Missing error entry for 'nonexistent' element")
+	}
+
 	if errorCode != ErrorDataNotAvailable {
 		t.Errorf("Error code = %d, want %d", errorCode, ErrorDataNotAvailable)
 	}
@@ -527,12 +603,10 @@ func TestEncodeDecodeDeviceResponse(t *testing.T) {
 }
 
 func TestSelectiveDisclosure_RoundTrip(t *testing.T) {
-	// Complete round-trip test: issue -> selective disclose -> verify
 	issuerSigned := createTestIssuerSigned(t)
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	transcript := []byte("test session transcript")
 
-	// Create request for subset of elements
 	request := &ItemsRequest{
 		DocType: DocType,
 		NameSpaces: map[string]map[string]bool{
@@ -543,29 +617,48 @@ func TestSelectiveDisclosure_RoundTrip(t *testing.T) {
 		},
 	}
 
-	// Build response with selective disclosure
 	response, err := NewDeviceResponseBuilder(DocType).
 		WithIssuerSigned(issuerSigned).
 		WithDeviceKey(deviceKey).
 		WithSessionTranscript(transcript).
 		WithRequest(request).
 		Build()
-
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	// Verify the response has only requested elements
-	doc := response.Documents[0]
-	items := doc.IssuerSigned.NameSpaces[Namespace]
+	if len(response.Documents) == 0 {
+		t.Fatal("expected at least one document")
+	}
 
+	doc := &response.Documents[0]
+
+	items := doc.IssuerSigned.NameSpaces[Namespace]
 	if len(items) != 2 {
 		t.Errorf("Expected 2 disclosed elements, got %d", len(items))
 	}
 
-	// Verify element identifiers
 	identifiers := make(map[string]bool)
-	for _, item := range items {
+	for i, anyItem := range items {
+		var item IssuerSignedItem
+
+		switch v := anyItem.(type) {
+		case cbor.Tag:
+			content, ok := v.Content.([]byte)
+			if !ok {
+				t.Fatalf("item at index %d: tag content is not bytes", i)
+			}
+			if err := cbor.Unmarshal(content, &item); err != nil {
+				t.Fatalf("item at index %d: failed to unmarshal: %v", i, err)
+			}
+		case IssuerSignedItem:
+			item = v
+		case *IssuerSignedItem:
+			item = *v
+		default:
+			t.Fatalf("unexpected item type %T at index %d", anyItem, i)
+		}
+
 		identifiers[item.ElementIdentifier] = true
 	}
 
@@ -582,8 +675,7 @@ func TestSelectiveDisclosure_RoundTrip(t *testing.T) {
 		t.Error("portrait should not be disclosed")
 	}
 
-	// Verify MSO is still intact (needed for digest verification)
-	if len(doc.IssuerSigned.IssuerAuth) == 0 {
+	if doc.IssuerSigned.IssuerAuth == nil {
 		t.Error("IssuerAuth should be preserved")
 	}
 }

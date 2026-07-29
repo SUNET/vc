@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -30,7 +31,7 @@ func TestHTTP_SendWebHook_NoDestinations(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Clean up
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_SendToDestination_Webhook_Success(t *testing.T) {
@@ -73,7 +74,7 @@ func TestHTTP_SendToDestination_Webhook_Success(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_SendToDestination_Webhook_Failure(t *testing.T) {
@@ -108,7 +109,7 @@ func TestHTTP_SendToDestination_Webhook_Failure(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
@@ -135,7 +136,7 @@ func TestHTTP_SendWebhook_InvalidURL(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_SendWebhook_Timeout(t *testing.T) {
@@ -169,7 +170,7 @@ func TestHTTP_SendWebhook_Timeout(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_DestinationParsing(t *testing.T) {
@@ -201,7 +202,7 @@ func TestHTTP_DestinationParsing(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_MessageDelivery(t *testing.T) {
@@ -241,7 +242,7 @@ func TestHTTP_MessageDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestHTTP_QueueFull(t *testing.T) {
@@ -276,5 +277,5 @@ func TestHTTP_QueueFull(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

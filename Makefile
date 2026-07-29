@@ -19,14 +19,16 @@ BUILD_ARCH              := amd64
 BUILD_FLAGS             := -v
 
 # Services Configuration
-SERVICES                := verifier registry mockas apigw issuer ui
-WEB_SERVICES            := verifier ui
-WORKER_SERVICES         := registry mockas apigw issuer
+SERVICES                := verifier registry apigw issuer
+WORKER_SERVICES         := verifier registry apigw issuer
 
 # Docker Configuration
 DOCKER_REGISTRY         := docker.sunet.se/iam_vc
 DOCKER_BUILD_FLAGS      := 
 GO_BUILD_TAGS           ?=
+# Override to use a pre-built gobuild image instead of the inline stage.
+# Example: make docker-build-gobuild VERSION=local && make docker-build GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local
+GOBUILD_IMAGE           ?=
 
 # Release Guard Configuration
 _RELEASE_MODE           ?=
@@ -41,22 +43,20 @@ PKCS11_TAG              := pkcs11
 BUILD_CONFIGS           := \
 	verifier:static: \
 	registry:static: \
-	mockas:static: \
 	apigw:static: \
 	issuer:static: \
-	ui:static: \
 	vc20-test-server:static:
 
 # ==============================================================================
 # Phony Targets Declaration
 # ==============================================================================
 
-.PHONY: help pki pki-clean test test-env \
+.PHONY: help pki pki-clean test test-env test-js \
 	build build-% \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
-	check-protoc diagram install-tools clean-apt-cache vscode vendor-js \
+	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
@@ -68,7 +68,9 @@ BUILD_CONFIGS           := \
 	oidc-conformance-test oidc-conformance-test-vci oidc-conformance-test-vp oidc-conformance-test-oidc \
 	oidc-conformance-status \
 	_check-reserved-tag \
-	release release-prod release-demo check_current_branch
+	release release-prod release-demo check_current_branch \
+	release-check-issuer-jwks \
+	release-jwt-issuer build-jwt-issuer
 
 # ==============================================================================
 # Help Target
@@ -168,7 +170,7 @@ pki-clean: ## Clean PKI material
 # Testing Targets
 # ==============================================================================
 
-test: $(addprefix test-,$(SERVICES)) ## Run all service tests
+test: $(addprefix test-,$(SERVICES)) test-js ## Run all service tests
 
 # Generate test-SERVICE targets dynamically
 define TEST_TEMPLATE
@@ -183,6 +185,10 @@ $(foreach service,$(SERVICES),$(eval $(call TEST_TEMPLATE,$(service))))
 test-env: ## Set up test environment
 	$(info Setting up test environment)
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
+
+test-js: ## Run JS unit tests for staticembed helpers
+	$(info Running JS unit tests)
+	@node --test $(APIGW_STATIC)/tests/*.test.js
 
 # Test targets with build tags
 test-pkcs11: ## Test with PKCS#11 build tag
@@ -298,11 +304,93 @@ build-wallet: ## Build wallet test tool
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_wallet \
 		$(LDFLAGS) ./cmd/wallet/
 
+build-check-issuer-jwks: ## Build check_issuer_jwks developer tool
+	$(info Building check_issuer_jwks)
+	$(eval CHECK_ISSUER_JWKS_VERSION := $(or $(shell git tag -l "check-issuer-jwks-v*" --sort=-v:refname | head -n1 | sed 's/^check-issuer-jwks-//'),dev))
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/check_issuer_jwks \
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(CHECK_ISSUER_JWKS_VERSION)" \
+		./developer_tools/scripts/check_issuer_jwks/
+
+build-jwt-issuer: ## Build jwt_issuer developer tool
+	$(info Building jwt_issuer)
+	$(eval JWT_ISSUER_VERSION := $(or $(shell git tag -l "jwt-issuer-v*" --sort=-v:refname | head -n1 | sed 's/^jwt-issuer-//'),dev))
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/jwt_issuer \
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(JWT_ISSUER_VERSION)" \
+		./developer_tools/scripts/jwt_issuer/
+
+release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "check-issuer-jwks-v*" --sort=-v:refname | grep -E '^check-issuer-jwks-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing check-issuer-jwks tags found, starting at check-issuer-jwks-v0.0.0"; \
+		LATEST="check-issuer-jwks-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^check-issuer-jwks-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="check-issuer-jwks-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed. GitHub Actions will build check_issuer_jwks binaries."; \
+	echo ""
+
+release-jwt-issuer: check_current_branch ## Tag and push a release for jwt_issuer (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "jwt-issuer-v*" --sort=-v:refname | grep -E '^jwt-issuer-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing jwt-issuer tags found, starting at jwt-issuer-v0.0.0"; \
+		LATEST="jwt-issuer-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^jwt-issuer-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="jwt-issuer-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed."; \
+	echo ""
+
 docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test tool
 	$(info Docker Building wallet with tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=wallet \
 		--tag $(call docker-tag,wallet,$(VERSION)) \
-		--file dockerfiles/wallet .
+		--file dockerfiles/worker .
 
 # ==============================================================================
 # Optional Feature Builds (with build tags)
@@ -320,19 +408,6 @@ build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
 
 docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
-# Generate docker-build targets for web workers
-define DOCKER_BUILD_WEB_TEMPLATE
-docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
-	$$(info Docker Building $(1) with tag: $$(VERSION))
-	docker build --build-arg SERVICE_NAME=$(1) \
-		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
-		--tag $$(call docker-tag,$(1),$$(VERSION)) \
-		--file dockerfiles/web_worker .
-
-endef
-
-$(foreach service,$(WEB_SERVICES),$(eval $(call DOCKER_BUILD_WEB_TEMPLATE,$(service))))
-
 # Generate docker-build targets for workers
 define DOCKER_BUILD_WORKER_TEMPLATE
 docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
@@ -340,6 +415,7 @@ docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
 		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
+		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .
 
@@ -352,12 +428,19 @@ docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with P
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS=$(PKCS11_TAG) \
+		--build-arg CGO_ENABLED=1 \
+		$(if $(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$(GOBUILD_IMAGE)) \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
 		--file dockerfiles/worker .
 
 docker-build-gobuild: _check-reserved-tag ## Build gobuild Docker image
 	$(info Docker Building gobuild with tag: $(VERSION))
 	docker build --tag $(call docker-tag,gobuild,$(VERSION)) --file dockerfiles/gobuild .
+
+docker-build-developer-tools: _check-reserved-tag ## Build developer tools Docker image
+	$(info Docker Building developer tools with tag: $(VERSION))
+	docker build --tag $(call docker-tag,developer-tools,$(VERSION)) \
+		--file dockerfiles/developer-tools .
 
 # ==============================================================================
 # Docker Push Targets
@@ -383,6 +466,10 @@ docker-push-issuer-hsm: _check-reserved-tag ## Push issuer Docker image with PKC
 docker-push-gobuild: _check-reserved-tag ## Push gobuild Docker image
 	$(info Pushing docker image gobuild)
 	docker push $(call docker-tag,gobuild,$(VERSION))
+
+docker-push-developer-tools: _check-reserved-tag ## Push developer tools Docker image
+	$(info Pushing docker image developer-tools)
+	docker push $(call docker-tag,developer-tools,$(VERSION))
 
 # ==============================================================================
 # Docker Tag Targets
@@ -431,6 +518,10 @@ proto: proto-status proto-registry proto-issuer ## Generate all protobuf files
 
 PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=vc --go-grpc_out=. --go_opt=module=vc --go_out=.
 
+# Catch-all for services without explicit proto targets (e.g. apigw)
+proto-%:
+	@echo "No protobuf for $*"
+
 proto-registry: ## Generate registry protobuf
 	protoc $(PROTO_OPTS) ./proto/v1-registry.proto
 
@@ -449,7 +540,12 @@ swagger: swagger-registry swagger-verifier swagger-apigw swagger-issuer swagger-
 swagger-fmt: ## Format Swagger annotations
 	swag fmt
 
-SWAGGER_OPTS := --parseDependency --packageName docs
+SWAGGER_OPTS := --packageName docs
+
+# Catch-all for services without explicit swagger targets
+swagger-%:
+	@echo "No swagger docs for $*"
+	@mkdir -p docs
 
 swagger-registry: ## Generate registry Swagger docs
 	swag init -d internal/registry/apiv1/ -g client.go --output docs/registry $(SWAGGER_OPTS)
@@ -458,7 +554,7 @@ swagger-verifier: ## Generate verifier Swagger docs
 	swag init -d internal/verifier/apiv1/ -g client.go --output docs/verifier $(SWAGGER_OPTS)
 
 swagger-apigw: ## Generate apigw Swagger docs
-	swag init -d internal/apigw/apiv1/ -g client.go --output docs/apigw $(SWAGGER_OPTS)
+	swag init -d internal/apigw/apiv1/,pkg/helpers,pkg/model,pkg/vcclient,pkg/openid4vci,pkg/openid4vp,pkg/oauth2,internal/gen/issuer/apiv1_issuer -g client.go --output docs/apigw $(SWAGGER_OPTS)
 
 swagger-issuer: ## Generate issuer Swagger docs
 	swag init -d internal/issuer/apiv1/ -g client.go --output docs/issuer $(SWAGGER_OPTS)
@@ -603,6 +699,17 @@ vendor-js: ## Download vendored JS/CSS dependencies
 	$(info Done — vendored JS/CSS dependencies updated)
 
 # ==============================================================================
+# Go Dependency Management
+# ==============================================================================
+
+update: ## Update all Go dependencies to their latest versions and re-vendor
+	$(info Updating all Go dependencies...)
+	GOFLAGS="" go get -u ./...
+	GOFLAGS="" go mod tidy
+	go mod vendor
+	$(info Done — all Go dependencies updated and vendor refreshed)
+
+# ==============================================================================
 # Development Tools
 # ==============================================================================
 
@@ -616,6 +723,14 @@ build-gen-config-docs: ## Build gen_config_docs tool
 gen-config-docs: build-gen-config-docs ## Generate configuration reference documentation
 	$(info Generating docs/CONFIGURATION.md)
 	./bin/gen_config_docs
+
+build-gen-bootstrap: ## Build gen_bootstrap tool
+	$(info Building gen_bootstrap)
+	$(CGO_ENABLED_STATIC) go build $(BUILD_FLAGS) -o ./bin/gen_bootstrap ./developer_tools/scripts/gen_bootstrap/
+
+gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAML source
+	$(info Generating bootstrapping/*.json from developer_tools/scripts/gen_bootstrap/users_paris.yaml)
+	./bin/gen_bootstrap developer_tools/scripts/gen_bootstrap/users_paris.yaml bootstrapping
 
 install-tools: ## Install required development tools
 	$(info Installing from apt)
@@ -649,7 +764,15 @@ vscode: test-env ## Set up VS Code development environment
 	go install golang.org/x/tools/cmd/deadcode@latest && \
 	go install github.com/securego/gosec/v2/cmd/gosec@latest && \
 	go install golang.org/x/vuln/cmd/govulncheck@latest && \
-	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install honnef.co/go/tools/cmd/staticcheck@latest && \
+	go install mvdan.cc/gofumpt@latest
+
+# ==============================================================================
+# Formatting
+# ==============================================================================
+
+formatting: ## Format Go code with gofumpt
+	gofumpt -l -w .
 
 # ==============================================================================
 # GitHub Actions Testing

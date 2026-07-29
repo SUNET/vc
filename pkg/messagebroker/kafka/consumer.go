@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -40,8 +41,13 @@ type MessageConsumerClient struct {
 }
 
 func NewConsumerClient(ctx context.Context, cfg *model.Cfg, brokers []string, log *logger.Log) (*MessageConsumerClient, error) {
+	saramaConfig, err := commonConsumerConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("kafka consumer security config: %w", err)
+	}
+
 	client := &MessageConsumerClient{
-		SaramaConfig: commonConsumerConfig(cfg),
+		SaramaConfig: saramaConfig,
 		brokers:      brokers,
 		wg:           sync.WaitGroup{},
 		log:          log,
@@ -51,14 +57,16 @@ func NewConsumerClient(ctx context.Context, cfg *model.Cfg, brokers []string, lo
 }
 
 // commonConsumerConfig returns a new Kafka consumer configuration instance with sane defaults for vc.
-func commonConsumerConfig(cfg *model.Cfg) *sarama.Config {
-	//TODO(mk): set cfg from file - is now hardcoded
+func commonConsumerConfig(cfg *model.Cfg) (*sarama.Config, error) {
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
 	saramaConfig.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRange()}
-	saramaConfig.Net.SASL.Enable = false
-	//TODO(mk): enable and configure security when consuming from Kafka
-	return saramaConfig
+
+	if err := applySecurityConfig(saramaConfig, cfg); err != nil {
+		return nil, err
+	}
+
+	return saramaConfig, nil
 }
 
 // Start starts the actual event consuming from specified kafka topics
@@ -85,7 +93,7 @@ func (c *MessageConsumerClient) Start(ctx context.Context, handlerFactory func(s
 				handler := handlerFactory(topic)
 				if err := group.Consume(cancelCtx, []string{topic}, handler); err != nil {
 					c.log.Error(err, "Error on consumer group", "group", handlerConfig.ConsumerGroup)
-					//TODO(mk): use more advanced backoff algorithm?
+					// TODO: use more advanced backoff algorithm?
 					time.Sleep(1 * time.Second)
 				}
 
@@ -123,15 +131,15 @@ func (cgh *ConsumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error { 
 func (cgh *ConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	if cgh.Handlers == nil {
 		cgh.Log.Error(errors.New("no handlers defined"), "No Handlers for any topic")
-		//TODO(mk): send to a general error topic?
-		return nil
+		// TODO: consider a dead-letter queue so unhandled messages are not silently lost
+		return errors.New("no handlers defined for any topic")
 	}
 
 	handler, exists := cgh.Handlers[claim.Topic()]
 	if !exists {
 		cgh.Log.Error(errors.New("no handler for topic"), "topic", claim.Topic())
-		//TODO(mk): send to a general error topic?
-		return nil
+		// TODO: consider routing to a dead-letter topic for later inspection
+		return fmt.Errorf("no handler registered for topic %s", claim.Topic())
 	}
 
 	handlerType := reflect.TypeOf(handler).String()
@@ -141,11 +149,12 @@ func (cgh *ConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSessio
 
 		if err := handler.HandleMessage(session.Context(), message); err != nil {
 			cgh.Log.Error(err, "Error handling message", "topic", claim.Topic())
-			//TODO(mk): more advanced retry/error handling including send to error topic if not OK after X number of retries
+			// TODO: more advanced retry/error handling including send to error topic if not OK after X number of retries
 			errMessage = fmt.Sprintf("error handling message: %v", err)
 		}
 
-		info := fmt.Sprintf("message consumed by handler type: %s, topic: %s, partition: %d, offset: %d",
+		info := fmt.Sprintf(
+			"message consumed by handler type: %s, topic: %s, partition: %d, offset: %d",
 			handlerType,
 			claim.Topic(),
 			message.Partition,

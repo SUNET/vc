@@ -51,7 +51,7 @@ func TestHostFromURL(t *testing.T) {
 			rawURL: "https://example.com/path#section",
 			want:   "example.com",
 		},
-		{
+		{ // #nosec G101
 			name:   "with userinfo",
 			rawURL: "https://user:pass@example.com/path",
 			want:   "example.com",

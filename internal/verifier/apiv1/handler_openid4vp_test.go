@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -183,7 +184,7 @@ func TestHandleDirectPost(t *testing.T) {
 		authCtxSetup           func(*cache.AuthorizationContext)
 		expectError            bool
 	}{
-		{
+		{ // #nosec G101
 			name:                   "successful direct post",
 			sessionID:              "test-session-dp-1",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test.signature",
@@ -193,7 +194,7 @@ func TestHandleDirectPost(t *testing.T) {
 			},
 			expectError: false,
 		},
-		{
+		{ // #nosec G101
 			name:                   "session not found",
 			sessionID:              "non-existent-session",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test.signature",
@@ -201,7 +202,7 @@ func TestHandleDirectPost(t *testing.T) {
 			authCtxSetup:           nil,
 			expectError:            true,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with scope",
 			sessionID:              "test-session-dp-2",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.payload.signature",
@@ -352,13 +353,13 @@ func TestExtractAndMapClaimsEmpty(t *testing.T) {
 			expectedClaims: 0,
 			expectError:    false,
 		},
-		{
+		{ // #nosec G101
 			name:           "nil claims extractor with valid token",
 			vpToken:        "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
 			expectedClaims: 0,
 			expectError:    false,
 		},
-		{
+		{ // #nosec G101
 			name:           "nil claims extractor with another token",
 			vpToken:        "eyJhbGciOiJFUzI1NiJ9.payload.sig",
 			expectedClaims: 0,

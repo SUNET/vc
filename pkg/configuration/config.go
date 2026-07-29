@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -30,7 +31,7 @@ var servicesRequiringVCTM = map[string]bool{
 // New parses config file from VC_CONFIG_YAML environment variable.
 // serviceName identifies the calling service so that steps like VCTM loading
 // can be skipped for services that do not use credential constructors (e.g.
-// ui, mockas, registry).
+// registry).
 func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	log := logger.NewSimple("Configuration")
 	log.Info("Read environmental variable")
@@ -71,27 +72,26 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	// If a secret file path is configured, load secrets from that file
-	// and clear all secrets from the main config so they are not used.
+	// and apply secrets to the config (clearing secret fields first).
 	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
 		secrets, err := LoadSecrets(cfg.Common.SecretFilePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load secrets file: %w", err)
 		}
-		cfg.ClearSecrets()
 		cfg.ApplySecrets(secrets)
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
-	// Only services that depend on credential_constructor need VCTM loading
-	// and the requirement check. Other services (ui, mockas, registry) share
+	// Only services that depend on credentials need VCTM loading
+	// and the requirement check. Other services (registry) share
 	// the same config file but do not use credential constructors at all.
 	if servicesRequiringVCTM[serviceName] {
-		if cfg.Common == nil || len(cfg.Common.CredentialConstructor) == 0 {
-			return nil, fmt.Errorf("common.credential_constructor is required for the %s service", serviceName)
+		if cfg.Common == nil || len(cfg.Common.CredentialMetadata) == 0 {
+			return nil, fmt.Errorf("common.credential_metadata is required for the %s service", serviceName)
 		}
 
 		// Load VCTM data and derive Attributes before validation.
-		for scope, constructor := range cfg.Common.CredentialConstructor {
+		for scope, constructor := range cfg.Common.CredentialMetadata {
 			if constructor == nil {
 				continue
 			}
@@ -108,6 +108,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 				return nil, fmt.Errorf("failed to resolve VCT URLs: %w", err)
 			}
 		}
+
 	}
 
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
@@ -128,6 +129,12 @@ func LoadSecrets(path string) (*model.Secrets, error) {
 
 	if fileInfo.IsDir() {
 		return nil, fmt.Errorf("secrets path %q is a directory, not a file", cleanPath)
+	}
+
+	// Fail if the secrets file has any group or world permission bits set.
+	mode := fileInfo.Mode().Perm()
+	if mode&0o077 != 0 {
+		return nil, fmt.Errorf("secrets file %q has overly permissive mode %04o; no group/world access allowed (e.g. 0600 or 0400)", cleanPath, mode)
 	}
 
 	data, err := os.ReadFile(cleanPath)

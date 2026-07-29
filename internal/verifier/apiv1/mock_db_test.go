@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/logger"
@@ -118,15 +119,17 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 		cfg = &model.Cfg{
 			Verifier: &model.Verifier{
 				PublicURL: "https://verifier.example.com",
-				OIDCOP: &model.OIDCOPConfig{
-					Issuer:               "https://verifier.example.com",
-					SubjectType:          "public",
-					SubjectSalt:          "test-salt",
-					SessionDuration:      900,   // 15 minutes
-					CodeDuration:         600,   // 10 minutes
-					AccessTokenDuration:  3600,  // 1 hour
-					IDTokenDuration:      3600,  // 1 hour
-					RefreshTokenDuration: 86400, // 24 hours
+				Outbound: model.VerifierOutbound{
+					OIDCProvider: &model.OIDCOP{
+						Issuer:               "https://verifier.example.com",
+						SubjectType:          "public",
+						SubjectSalt:          "test-salt",
+						SessionDuration:      900,   // 15 minutes
+						CodeDuration:         600,   // 10 minutes
+						AccessTokenDuration:  3600,  // 1 hour
+						IDTokenDuration:      3600,  // 1 hour
+						RefreshTokenDuration: 86400, // 24 hours
+					},
 				},
 			},
 		}

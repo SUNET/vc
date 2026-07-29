@@ -11,6 +11,9 @@ import (
 
 // TokenStatusListAdd adds a new status entry to the Token Status List
 func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_registry.TokenStatusListAddStatusRequest) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
+	if req.Status > 255 {
+		return nil, fmt.Errorf("status value %d exceeds uint8 range", req.Status)
+	}
 	section, index, err := s.tokenStatusListIssuer.AddStatus(ctx, uint8(req.Status))
 	if err != nil {
 		return nil, err
@@ -36,6 +39,9 @@ func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_regis
 
 // TokenStatusListUpdate updates an existing status entry in the Token Status List
 func (s *Service) TokenStatusListUpdateStatus(ctx context.Context, req *apiv1_registry.TokenStatusListUpdateStatusRequest) (*apiv1_registry.TokenStatusListUpdateStatusReply, error) {
+	if req.Status > 255 {
+		return nil, fmt.Errorf("status value %d exceeds uint8 range", req.Status)
+	}
 	err := s.tokenStatusListIssuer.UpdateStatus(ctx, req.Section, req.Index, uint8(req.Status))
 	if err != nil {
 		return nil, err
@@ -47,11 +53,9 @@ func (s *Service) TokenStatusListUpdateStatus(ctx context.Context, req *apiv1_re
 // SaveCredentialSubject saves credential subject info linked to a Token Status List entry
 func (s *Service) SaveCredentialSubject(ctx context.Context, req *apiv1_registry.SaveCredentialSubjectRequest) (*apiv1_registry.SaveCredentialSubjectReply, error) {
 	err := s.apiv1.SaveCredentialSubject(ctx, &apiv1.SaveCredentialSubjectRequest{
-		FirstName:   req.FirstName,
-		LastName:    req.LastName,
-		DateOfBirth: req.DateOfBirth,
-		Section:     req.Section,
-		Index:       req.Index,
+		Identifier: req.Identifier,
+		Section:    req.Section,
+		Index:      req.Index,
 	})
 	if err != nil {
 		return nil, err

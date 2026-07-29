@@ -41,9 +41,9 @@ func ExampleValidatePKCE() {
 func ExampleClients_Get() {
 	clients := oauth2.Clients{
 		"wallet-app": &oauth2.Client{
-			Type:        oauth2.ClientTypePublic,
-			RedirectURI: "https://wallet.example.com/callback",
-			Scopes:      []string{"openid", "pid"},
+			Type:         oauth2.ClientTypePublic,
+			RedirectURIs: oauth2.RedirectURIs{"https://wallet.example.com/callback"},
+			Scopes:       []string{"openid", "pid"},
 		},
 	}
 
@@ -53,7 +53,7 @@ func ExampleClients_Get() {
 		return
 	}
 	fmt.Println("type:", client.Type)
-	fmt.Println("redirect_uri:", client.RedirectURI)
+	fmt.Println("redirect_uri:", client.RedirectURIs[0])
 
 	_, err = clients.Get("unknown")
 	fmt.Println("unknown client:", err)
@@ -66,9 +66,9 @@ func ExampleClients_Get() {
 func ExampleClients_Allow() {
 	clients := oauth2.Clients{
 		"wallet-app": &oauth2.Client{
-			Type:        oauth2.ClientTypePublic,
-			RedirectURI: "https://wallet.example.com/callback",
-			Scopes:      []string{"openid", "pid"},
+			Type:         oauth2.ClientTypePublic,
+			RedirectURIs: oauth2.RedirectURIs{"https://wallet.example.com/callback"},
+			Scopes:       []string{"openid", "pid"},
 		},
 	}
 

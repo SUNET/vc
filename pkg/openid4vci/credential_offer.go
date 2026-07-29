@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	vccrypto "github.com/SUNET/vc/pkg/crypto"
 	"github.com/google/uuid"
 	"github.com/skip2/go-qrcode"
 )
@@ -17,6 +18,19 @@ type CredentialOfferParameters struct {
 	CredentialIssuer           string         `json:"credential_issuer" bson:"credential_issuer" validate:"required"`
 	CredentialConfigurationIDs []string       `json:"credential_configuration_ids" bson:"credential_configuration_ids" validate:"required"`
 	Grants                     map[string]any `json:"grants"`
+}
+
+// Grant type constants used as map keys in CredentialOfferParameters.Grants
+// and as GrantType values in TokenRequest.
+const (
+	GrantTypeAuthorizationCode = "authorization_code"
+	GrantTypePreAuthorizedCode = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+)
+
+// CredentialOfferResult wraps a credential offer with its pre-authorized code.
+type CredentialOfferResult struct {
+	CredentialOfferParameters
+	ID string `json:"-"`
 }
 
 // Marshal marshals the CredentialOffer
@@ -32,16 +46,16 @@ type GrantAuthorizationCode struct {
 
 // GrantPreAuthorizedCode authorization code grant
 type GrantPreAuthorizedCode struct {
-	PreAuthorizedCode   string `json:"pre-authorized_code" bson:"pre-authorized_code" validate:"required"`
-	TXCode              TXCode `json:"tx_code" bson:"tx_code,omitempty"`
-	AuthorizationServer string `json:"authorization_server,omitempty" bson:"authorization_server,omitempty"`
+	PreAuthorizedCode   string  `json:"pre-authorized_code" bson:"pre-authorized_code" validate:"required"`
+	TXCode              *TXCode `json:"tx_code,omitempty" bson:"tx_code,omitempty"`
+	AuthorizationServer string  `json:"authorization_server,omitempty" bson:"authorization_server,omitempty"`
 }
 
 // TXCode Transaction Code
 type TXCode struct {
-	InputMode   string `json:"input_mode" bson:"input_mode" validate:"oneof=numeric text"`
-	Length      int    `json:"length"`
-	Description string `json:"description"`
+	InputMode   string `json:"input_mode,omitempty" bson:"input_mode,omitempty" validate:"omitempty,oneof=numeric text"`
+	Length      int    `json:"length,omitempty" bson:"length,omitempty"`
+	Description string `json:"description,omitempty" bson:"description,omitempty"`
 }
 
 type CredentialOfferURIRequest struct {
@@ -169,7 +183,6 @@ func (c *CredentialOffer) QR(recoveryLevel, size int, walletURL string) (*QR, er
 	}
 
 	return qr, nil
-
 }
 
 // CredentialOfferURI https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-sending-credential-offer-by-uri
@@ -253,4 +266,38 @@ func ParseCredentialOfferURI(credentialOfferURI string) (*CredentialOfferParamet
 	}
 
 	return credentialOfferParameter, nil
+}
+
+// NewCredentialOffer creates an OpenID4VCI credential offer for the given grant type.
+// Supported grant types: GrantTypePreAuthorizedCode, GrantTypeAuthorizationCode.
+func NewCredentialOffer(issuerURL, credentialConfigID, grantType string) (*CredentialOfferResult, error) {
+	token, err := vccrypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	var grant any
+	switch grantType {
+	case GrantTypePreAuthorizedCode:
+		grant = GrantPreAuthorizedCode{
+			PreAuthorizedCode: token,
+		}
+	case GrantTypeAuthorizationCode:
+		grant = GrantAuthorizationCode{
+			IssuerState: token,
+		}
+	default:
+		return nil, fmt.Errorf("unsupported grant type: %s", grantType)
+	}
+
+	return &CredentialOfferResult{
+		CredentialOfferParameters: CredentialOfferParameters{
+			CredentialIssuer:           issuerURL,
+			CredentialConfigurationIDs: []string{credentialConfigID},
+			Grants: map[string]any{
+				grantType: grant,
+			},
+		},
+		ID: token,
+	}, nil
 }

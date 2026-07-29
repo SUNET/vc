@@ -1,12 +1,26 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
 
+import {
+    base64ToUtf8,
+    escapeHtml,
+    flattenClaims,
+    renderClaimValueHtml,
+    utf8ToBase64,
+    valueForSvgPlaceholder,
+} from "./consent-helpers.js";
+
+/**
+ * A single claim entry — either a leaf with a value, or a parent with children.
+ * @typedef {{ label: string; value: unknown; children?: undefined } | { label: string; children: Record<string, { label: string; value: unknown }>; value?: undefined }} ClaimEntry
+ */
+
 /**
  * @typedef {Object} Credential
  * @property {string} vct
  * @property {string} name
  * @property {string} svg
- * @property {Record<string, { label: string; value: string; }>} claims
+ * @property {Record<string, ClaimEntry>} claims
  */
 
 /**
@@ -18,42 +32,50 @@ const SvgTemplateResponseSchema = v.required(v.object({
 }));
 
 /**
- * @typedef {v.InferOutput<typeof BasicAuthResponseSchema>} BasicAuthResponse
+ * Recursive JSON-value schema for claim values. Claim values are always
+ * delivered as JSON (string, number, boolean, null, or a nested object/array
+ * of the same), so anything outside that set is rejected at parse time and
+ * the consumer can rely on `typeof` checks at use sites.
+ * @type {import('valibot').GenericSchema<unknown>}
  */
-const BasicAuthResponseSchema = v.required(v.object({
-    grant: v.boolean(),
-    redirect_url: v.pipe(
-        v.string(),
-        v.url(),
-    )
-}));
+const ClaimValueSchema = v.lazy(() => v.union([
+    v.string(),
+    v.number(),
+    v.boolean(),
+    v.null(),
+    v.array(ClaimValueSchema),
+    v.record(v.string(), ClaimValueSchema),
+]));
 
 /**
  * @typedef {v.InferOutput<typeof UserDataSchema>} UserData
  */
+/** Schema for a leaf claim entry: { label, value }. */
+const LeafClaimSchema = v.object({
+    label: v.string(),
+    value: ClaimValueSchema,
+});
+
+/** Schema for a parent claim entry: { label, children: { key: leaf } }. */
+const ParentClaimSchema = v.object({
+    label: v.string(),
+    children: v.record(v.string(), v.object({
+        label: v.string(),
+        value: ClaimValueSchema,
+    })),
+});
+
+/** A presentation claim is either a leaf or a parent with children. */
+const PresentationClaimSchema = v.union([LeafClaimSchema, ParentClaimSchema]);
+
 const UserDataSchema = v.required(v.object({
     svg_template_claims: v.record(v.string(), v.object({
         label: v.string(),
-        value: v.string(),
+        value: ClaimValueSchema,
     })),
+    presentation_claims: v.record(v.string(), PresentationClaimSchema),
     redirect_url: v.string(),
 }));
-
-/**
- * @param {string} key 
- * @returns {string}
- */
-function keyToLabel(key) {
-    if (key.includes("_")) {
-        let parts = key.split("_");
-
-        parts[0] = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-
-        key = parts.join(" ");
-    }
-
-    return key;
-}
 
 /**
  * Due to bfcache some state will persist across
@@ -86,7 +108,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"basic" | "saml" | "oidc" | "openid4vp" | null} */
+    /** @type {"saml" | "oidc" | "openid4vp" | null} */
     authMethod: null,
 
     /** @type {number | null} */
@@ -131,11 +153,10 @@ Alpine.data("app", () => ({
 
     setAuthMethod() {
         const authMethod = this.$el.dataset.authMethod || null;
-        const validMethods = ["basic", "openid4vp", "saml", "oidc"];
+        const validMethods = ["openid4vp", "saml", "oidc"];
 
         if (
             !authMethod ||
-            authMethod !== "basic" &&
             authMethod !== "saml" &&
             authMethod !== "oidc" &&
             authMethod !== "openid4vp"
@@ -150,11 +171,7 @@ Alpine.data("app", () => ({
     setRedirectUrl() {
         const raw = this.$el.dataset.redirectUrl || null;
         if (raw) {
-            try {
-                this.redirectUrl = decodeURIComponent(raw);
-            } catch (err) {
-                this.error = `Invalid redirect URL: ${err.message}`;
-            }
+            this.redirectUrl = raw;
         }
     },
 
@@ -174,88 +191,36 @@ Alpine.data("app", () => ({
         });
     },
 
-    /** @param {SubmitEvent} event */
-    async handleLoginBasic(event) {
-        this.loading = true;
-        this.error = null;
-
-        if (!(this.$refs.loginForm instanceof HTMLFormElement)) {
-            this.error = "Login form not of type 'HtmlFormElement'";
-            return;
-        }
-
-        const formData = new FormData(this.$refs.loginForm);
-
-        const username = formData.get("username");
-        if (!username) {
-            this.error = "Username is required";
-            return;
-        }
-
-        const password = formData.get("password");
-        if (!password) {
-            this.error = "Password is required";
-            return;
-        }
-
-        console.info("Fetching credential offers for user:", username);
-
-        const url = new URL("/user/pid/login", baseUrl);
-
-        const options = {
-            method: "POST", 
-            headers: {
-                "Accept": "application/json", 
-                "Content-Type": "application/json; charset=utf-8",
-            }, 
-            body: JSON.stringify({
-                username: username,
-                password: password,
-            }),
-        };
-
-        try {
-            await this.fetchData(url.toString(), options);
-
-            window.location.hash = ROUTES.credentials;
-        } catch (err) {
-            if (err instanceof v.ValiError) {
-                this.error = err.message;
-            } else {
-                this.error = `Failed to login: ${err.message}`;
-            }
-            this.loggedIn = false;
-            this.loading = false;
-        }
-    },
-
     handleLoginSAML() {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "Missing SAML redirect URL";
             return;
         }
-        this.redirect(this.redirectUrl);
+        this.redirect(url);
     },
 
     handleLoginOIDC() {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "Missing OIDC redirect URL";
             return;
         }
-        this.redirect(this.redirectUrl);
+        this.redirect(url);
     },
 
     /**
      * @param {boolean} immediate - Immediately proceed to 'redirect_uri'
      */
     handleLoginOpenID4VP(immediate = false) {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "Missing OpenID4VP redirect URL";
             return;
         }
 
         if (immediate) {
-            this.redirect(this.redirectUrl);
+            this.redirect(url);
             return;
         }
 
@@ -273,7 +238,7 @@ Alpine.data("app", () => ({
 
             if (this.openid4vpRedirectCountUp >= this.openid4vpRedirectMaxCount) {
                 clearInterval(increment);
-                this.redirect(this.redirectUrl);
+                this.redirect(url);
                 return;
             }
         }, 1000);
@@ -287,9 +252,10 @@ Alpine.data("app", () => ({
     async handleIsLoggedIn() {
         this.loading = true;
 
-        const url = new URL("/user/lookup", baseUrl);
+        const lookupUrl = new URL("/user/lookup", baseUrl);
+        const svgUrl = new URL("/authorization/consent/svg-template", baseUrl);
 
-        const options = {
+        const lookupOptions = {
             method: "GET", 
             headers: {
                 "Accept": "application/json", 
@@ -298,36 +264,58 @@ Alpine.data("app", () => ({
         };
 
         try {
-            const res = await this.fetchData(url.toString(), options);
+            // Fire user lookup and SVG template fetch in parallel.
+            // The template itself is independent of user data; only the
+            // placeholder substitution needs both.
+            const [res, svgTemplateResult] = await Promise.all([
+                this.fetchData(lookupUrl.toString(), lookupOptions),
+                this.fetchData(svgUrl.toString(), {}).catch((err) => {
+                    // fetchData flips loggedIn to false on 401 before throwing.
+                    // Re-throw so the outer catch block can redirect to login.
+                    // All other errors (404, 5xx, network) are treated as
+                    // "no template available" so the page still renders claims
+                    // without a card image.
+                    if (!this.loggedIn) {
+                        throw err;
+                    }
+                    return null;
+                }),
+            ]);
 
             const data = v.parse(UserDataSchema, res);
 
             this.redirectUrl = data.redirect_url;
 
             let svg = null;
-            try {
-                svg = await this.createCredentialSvgImageUri(
-                    data.svg_template_claims,
-                );
-            } catch (_) {
-                // VCTM has no SVG template — display claims without card image
+            if (svgTemplateResult) {
+                try {
+                    svg = this.applyClaimsToSvgTemplate(
+                        svgTemplateResult,
+                        data.svg_template_claims,
+                    );
+                } catch (_) {
+                    // VCTM has no SVG template — display claims without card image
+                }
             }
 
             this.credentials.push({
                 vct: "N/A",
                 name: "PID",
                 svg,
-                claims: data.svg_template_claims,
+                claims: data.presentation_claims,
             });
 
-            if (data.svg_template_claims.given_name?.value) {
-                this.$refs.title.innerText = `Welcome, ${data.svg_template_claims.given_name.value}!`
+            const givenName = data.svg_template_claims.given_name?.value;
+            if (typeof givenName === "string" && givenName.length > 0) {
+                this.$refs.title.innerText = `Welcome, ${givenName}!`;
             }
         } catch (err) {
             if (err instanceof v.ValiError) {
                 this.error = err.message;
-            } else {
+            } else if (err instanceof Error) {
                 this.error = `Error: ${err.message}`;
+            } else {
+                this.error = `Error: ${err}`;
             }
             window.location.hash = ROUTES.login;
         } finally {
@@ -337,11 +325,12 @@ Alpine.data("app", () => ({
 
     /** @param {SubmitEvent} event */
     handleCredentialSelection(event) {
-        if (!this.redirectUrl) {
+        const url = this.redirectUrl;
+        if (!url) {
             this.error = "'redirect_url' is null";
             return;
         }
-        this.redirect(this.redirectUrl);
+        this.redirect(url);
     },
 
     /**
@@ -367,22 +356,54 @@ Alpine.data("app", () => ({
     },
 
     /**
-     * @param {Record<string, { label: string; value: string; }>} claims
-     * @returns {Promise<string>}
+     * Apply claim values to a pre-fetched SVG template and return a data URI.
+     * @param {SvgTemplateResponse} svgData - Pre-fetched SVG template response
+     * @param {Record<string, { label: string; value: unknown; }>} claims
+     * @returns {string}
      */
-    async createCredentialSvgImageUri(claims) {
-        const url = new URL('/authorization/consent/svg-template', baseUrl);
-
-        /** @type {SvgTemplateResponse} */
-        const data = await this.fetchData(url.toString(), {});
-
-        let svg = atob(data.template);
+    applyClaimsToSvgTemplate(svgData, claims) {
+        // Decode the template as UTF-8 — `atob` alone returns a Latin-1 byte
+        // string, which would corrupt any non-ASCII characters in the SVG
+        // when re-encoded with utf8ToBase64 below.
+        let svg = base64ToUtf8(svgData.template);
 
         for (const [svg_id, claim] of Object.entries(claims)) {
-            svg = svg.replaceAll(`{{${svg_id}}}`, claim.value);
+            // valueForSvgPlaceholder decides what (if anything) is safe to
+            // substitute for this placeholder. Image-bearing slots only
+            // accept validated data: URLs — arbitrary strings are coerced
+            // to "" so the consent page can't be made to fetch external
+            // URLs at render time. Text slots pass scalar strings through.
+            const resolved = valueForSvgPlaceholder(svg_id, claim.value);
+            if (resolved === null) continue;
+            // Escape for XML text/attribute contexts. Without this, a value
+            // like O'Brien & Co. or "</text>..." would break SVG parsing or
+            // alter its structure. Base64 data: URLs only use characters
+            // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
+            svg = svg.replaceAll(`{{${svg_id}}}`, escapeHtml(resolved));
         }
 
-        return `data:image/svg+xml;base64,${btoa(svg)}`;
+        return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
+    },
+
+    /**
+     * Renders a claim value as HTML. Primitive values become escaped text;
+     * objects and arrays become nested <div> rows of indented key:value pairs.
+     * Returned HTML is safe to set via x-html: all user-supplied strings are
+     * passed through escapeHtml first.
+     * @param {unknown} value
+     * @returns {string}
+     */
+    renderClaimValue(value) {
+        return renderClaimValueHtml(value);
+    },
+
+    /**
+     * Flatten presentation claims into table rows for rendering.
+     * @param {Record<string, ClaimEntry>} claims
+     * @returns {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>}
+     */
+    flattenClaims(claims) {
+        return flattenClaims(claims);
     },
 
     /** @param {string} url */

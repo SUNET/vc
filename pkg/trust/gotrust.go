@@ -254,6 +254,8 @@ func (e *GoTrustEvaluator) GetClient() *authzenclient.Client {
 }
 
 // Verify interface compliance
-var _ TrustEvaluator = (*GoTrustEvaluator)(nil)
-var _ KeyResolver = (*GoTrustEvaluator)(nil)
-var _ CombinedTrustService = (*GoTrustEvaluator)(nil)
+var (
+	_ TrustEvaluator       = (*GoTrustEvaluator)(nil)
+	_ KeyResolver          = (*GoTrustEvaluator)(nil)
+	_ CombinedTrustService = (*GoTrustEvaluator)(nil)
+)

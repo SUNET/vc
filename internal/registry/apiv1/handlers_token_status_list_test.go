@@ -200,7 +200,7 @@ func TestTokenStatusLists_HistoricalResolution_NotSupported(t *testing.T) {
 
 	req := &TokenStatusListsRequest{
 		ID:   1,
-		Time: int64Ptr(1686920170), // Valid Unix timestamp
+		Time: new(int64(1686920170)), // Valid Unix timestamp
 	}
 
 	resp, err := client.TokenStatusLists(ctx, req)
@@ -219,7 +219,7 @@ func TestTokenStatusLists_NegativeTimeParameter(t *testing.T) {
 
 	req := &TokenStatusListsRequest{
 		ID:   1,
-		Time: int64Ptr(-1234567890), // Valid negative timestamp (before 1970)
+		Time: new(int64(-1234567890)), // Valid negative timestamp (before 1970)
 	}
 
 	resp, err := client.TokenStatusLists(ctx, req)
@@ -568,7 +568,7 @@ func TestTokenStatusLists_JWTWithSpecialCharacters(t *testing.T) {
 	ctx := t.Context()
 
 	// JWT with base64url characters
-	jwtToken := "eyJhbGciOiJFUzI1NiIsInR5cCI6InN0YXR1c2xpc3Qrand0In0.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwic3ViIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS9zdGF0dXNsaXN0cy8xIn0.MEUCIQDnGL_-gEP-3Z0xBLJJKz6x_d1WBHdPFX0H8oNTn8A4ngIgYbw7E6ydR0WC5sF8xGCNW7EzNqVZ8EH3qJNs0MxVH-A"
+	jwtToken := "eyJhbGciOiJFUzI1NiIsInR5cCI6InN0YXR1c2xpc3Qrand0In0.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwic3ViIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS9zdGF0dXNsaXN0cy8xIn0.MEUCIQDnGL_-gEP-3Z0xBLJJKz6x_d1WBHdPFX0H8oNTn8A4ngIgYbw7E6ydR0WC5sF8xGCNW7EzNqVZ8EH3qJNs0MxVH-A" // #nosec G101
 	mock.SetJWT(1, jwtToken)
 
 	req := &TokenStatusListsRequest{

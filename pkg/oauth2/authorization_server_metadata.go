@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/pki"
 
@@ -26,13 +27,13 @@ type AuthorizationServerMetadata struct {
 	// RegistrationEndpoint OPTIONAL.  URL of the authorization server's OAuth 2.0 Dynamic Client Registration endpoint [RFC7591].
 	RegistrationEndpoint string `json:"registration_endpoint,omitempty"`
 
-	//ScopesSupported RECOMMENDED.  JSON array containing a list of the OAuth 2.0 [RFC6749] "scope" values that this authorization server supports. Servers MAY choose not to advertise some supported scope values even when this parameter is used.
+	// ScopesSupported RECOMMENDED.  JSON array containing a list of the OAuth 2.0 [RFC6749] "scope" values that this authorization server supports. Servers MAY choose not to advertise some supported scope values even when this parameter is used.
 	ScopesSupported []string `json:"scopes_supported,omitempty"`
 
 	// ResponseTypesSupported REQUIRED.  JSON array containing a list of the OAuth 2.0 "response_type" values that this authorization server supports. The array values used are the same as those used with the "response_types" parameter defined by "OAuth 2.0 Dynamic Client Registration Protocol" [RFC7591].
 	ResponseTypesSupported []string `json:"response_types_supported" validate:"required"`
 
-	//response_modes_supported OPTIONAL.  JSON array containing a list of the OAuth 2.0 "response_mode" values that this authorization server supports, as specified in "OAuth 2.0 Multiple Response Type Encoding Practices" [OAuth.Responses].  If omitted, the default is "["query","fragment"]".  The response mode value "form_post" is also defined in "OAuth 2.0 Form Post Response Mode" [OAuth.Post].
+	// response_modes_supported OPTIONAL.  JSON array containing a list of the OAuth 2.0 "response_mode" values that this authorization server supports, as specified in "OAuth 2.0 Multiple Response Type Encoding Practices" [OAuth.Responses].  If omitted, the default is "["query","fragment"]".  The response mode value "form_post" is also defined in "OAuth 2.0 Form Post Response Mode" [OAuth.Post].
 	ResponseModesSupported []string `json:"response_modes_supported,omitempty"`
 
 	// grant_types_supported OPTIONAL.  JSON array containing a list of the OAuth 2.0 grant type values that this authorization server supports.  The array values used are the same as those used with the "grant_types" parameter defined by "OAuth 2.0 Dynamic Client Registration Protocol" [RFC7591].  If omitted, the default value is "["authorization_code", "implicit"]".
@@ -42,7 +43,7 @@ type AuthorizationServerMetadata struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
 
 	// TokenEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms ("alg" values) supported by the token endpoint for the signature on the JWT [JWT] used to authenticate the client at the token endpoint for the "private_key_jwt" and "client_secret_jwt" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the "token_endpoint_auth_methods_supported" entry.  No default algorithms are implied if this entry is omitted.  Servers SHOULD support "RS256".  The value "none" MUST NOT be used.
-	TokenEndpointAuthSiningALGValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
+	TokenEndpointAuthSigningALGValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 
 	// ServiceDocumentation OPTIONAL.  URL of a page containing human-readable information that developers might want or need to know when using the authorization server.  In particular, if the authorization server does not support Dynamic Client Registration, then information on how to register clients needs to be provided in this documentation.
 	ServiceDocumentation string `json:"service_documentation,omitempty"`
@@ -53,22 +54,22 @@ type AuthorizationServerMetadata struct {
 	// OPPolicyUri OPTIONAL. URL that the authorization server provides to the person registering the client to read about the authorization server's requirements on how the client can use the data provided by the authorization server.  The registration process SHOULD display this URL to the person registering the client if it is given.  As described in Section 5, despite the identifier "op_policy_uri" appearing to be OpenID-specific, its usage in this specification is actually referring to a general OAuth 2.0 feature that is not specific to OpenID Connect.
 	OPPolicyURI string `json:"op_policy_uri,omitempty"`
 
-	//OPTOSURI OPTIONAL. URL that the authorization server provides to the person registering the client to read about the authorization server's terms of service. The registration process SHOULD display this URL to the person registering the client if it is given.  As described in Section 5, despite the identifier "op_tos_uri", appearing to be OpenID-specific, its usage in this specification is actually referring to a general OAuth 2.0 feature that is not specific to OpenID Connect.
+	// OPTOSURI OPTIONAL. URL that the authorization server provides to the person registering the client to read about the authorization server's terms of service. The registration process SHOULD display this URL to the person registering the client if it is given.  As described in Section 5, despite the identifier "op_tos_uri", appearing to be OpenID-specific, its usage in this specification is actually referring to a general OAuth 2.0 feature that is not specific to OpenID Connect.
 	OPTOSURI string `json:"op_tos_uri,omitempty"`
 
 	// revocation_endpoint    OPTIONAL.  URL of the authorization server's OAuth 2.0 revocation endpoint [RFC7009].
 	RevocationEndpoint string `json:"revocation_endpoint,omitempty"`
 
-	//RevocationEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this revocation endpoint.  The valid client authentication method values are those registered in the IANA "OAuth Token Endpoint Authentication Methods" registry [IANA.OAuth.Parameters].  If omitted, the default is "client_secret_basic" -- the HTTP Basic Authentication Scheme specified in Section 2.3.1 of OAuth 2.0 [RFC6749].
+	// RevocationEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this revocation endpoint.  The valid client authentication method values are those registered in the IANA "OAuth Token Endpoint Authentication Methods" registry [IANA.OAuth.Parameters].  If omitted, the default is "client_secret_basic" -- the HTTP Basic Authentication Scheme specified in Section 2.3.1 of OAuth 2.0 [RFC6749].
 	RevocationEndpointAuthMethodsSupported []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
 
-	//RevocationEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms ("alg" values) supported by the revocation endpoint for the signature on the JWT [JWT] used to authenticate the client at the revocation endpoint for the "private_key_jwt" and "client_secret_jwt" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the "revocation_endpoint_auth_methods_supported" entry.  No default algorithms are implied if this entry is omitted.  The value "none" MUST NOT be used.
+	// RevocationEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms ("alg" values) supported by the revocation endpoint for the signature on the JWT [JWT] used to authenticate the client at the revocation endpoint for the "private_key_jwt" and "client_secret_jwt" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the "revocation_endpoint_auth_methods_supported" entry.  No default algorithms are implied if this entry is omitted.  The value "none" MUST NOT be used.
 	RevocationEndpointAuthSigningALGValuesSupported []string `json:"revocation_endpoint_auth_signing_alg_values_supported,omitempty"`
 
-	//IntrospectionEndpoint OPTIONAL.  URL of the authorization server's OAuth 2.0 introspection endpoint [RFC7662].
+	// IntrospectionEndpoint OPTIONAL.  URL of the authorization server's OAuth 2.0 introspection endpoint [RFC7662].
 	IntrospectionEndpoint string `json:"introspection_endpoint,omitempty"`
 
-	//IntrospectionEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this introspection endpoint.  The valid client authentication method values are those registered in the IANA "OAuth Token Endpoint Authentication Methods" registry [IANA.OAuth.Parameters] or those registered in the IANA "OAuth Access Token Types" registry [IANA.OAuth.Parameters].  (These values are and will remain distinct, due to Section 7.2.)  If omitted, the set of supported authentication methods MUST be determined by other means.
+	// IntrospectionEndpointAuthMethodsSupported OPTIONAL.  JSON array containing a list of client authentication methods supported by this introspection endpoint.  The valid client authentication method values are those registered in the IANA "OAuth Token Endpoint Authentication Methods" registry [IANA.OAuth.Parameters] or those registered in the IANA "OAuth Access Token Types" registry [IANA.OAuth.Parameters].  (These values are and will remain distinct, due to Section 7.2.)  If omitted, the set of supported authentication methods MUST be determined by other means.
 	IntrospectionEndpointAuthMethodsSupported []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
 
 	// IntrospectionEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms ("alg" values) supported by the introspection endpoint for the signature on the JWT [JWT] used to authenticate the client at the introspection endpoint for the "private_key_jwt" and "client_secret_jwt" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the "introspection_endpoint_auth_methods_supported" entry.  No default algorithms are implied if this entry is omitted.  The value "none" MUST NOT be used.
@@ -92,10 +93,15 @@ type AuthorizationServerMetadata struct {
 	PreAuthorizedGrantAnonymousAccessSupported bool `json:"pre-authorized_grant_anonymous_access_supported,omitempty"`
 
 	// More attributes MAY be present, such as https://openid.net/specs/openid-connect-discovery-1_0.html
-
 }
 
-func (c *AuthorizationServerMetadata) Marshal() (jwt.MapClaims, error) {
+// MetadataIssuer returns the issuer identifier embedded in the metadata,
+// used to verify it matches the request's iss claim.
+func (c *AuthorizationServerMetadata) MetadataIssuer() string {
+	return c.Issuer
+}
+
+func (c *AuthorizationServerMetadata) MarshalJWTClaims() (jwt.MapClaims, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -118,7 +124,7 @@ func (c *AuthorizationServerMetadata) Sign(ctx context.Context, signer pki.Signe
 	// ensure that signed_metadata is empty
 	c.SignedMetadata = ""
 
-	body, err := c.Marshal()
+	body, err := c.MarshalJWTClaims()
 	if err != nil {
 		return nil, err
 	}

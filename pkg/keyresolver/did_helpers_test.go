@@ -120,7 +120,7 @@ func encodeMultibase(data []byte) string {
 		for _, b := range x {
 			carry = carry*256 + int(b)
 			if len(newX) > 0 || carry >= 58 {
-				newX = append(newX, byte(carry/58))
+				newX = append(newX, byte(carry/58)) // #nosec G115
 			}
 			carry = carry % 58
 		}

@@ -84,13 +84,6 @@ func WithEndpointResolver(er EndpointResolver) Option {
 	}
 }
 
-// WithHTTPClient sets the HTTP client for sending messages.
-func WithHTTPClient(client *transport.HTTPClient) Option {
-	return func(a *Agent) {
-		a.httpClient = client
-	}
-}
-
 // New creates a new DIDComm agent.
 func New(opts ...Option) (*Agent, error) {
 	a := &Agent{

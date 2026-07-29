@@ -49,6 +49,12 @@ type OIDFedPolicyConstraints struct {
 
 	// MaxChainDepth limits trust chain resolution depth
 	MaxChainDepth int `json:"max_chain_depth,omitempty" yaml:"max_chain_depth,omitempty"`
+
+	// CredentialTypeTrustMarks maps credential type identifiers (VCT) to required trust marks.
+	// When a request includes credential_types, the corresponding trust marks are added
+	// to the required_trust_marks for validation.
+	// Example: {"eu.europa.ec.eudi.pid.1": ["https://trust.eu/wallet/pid-issuer"]}
+	CredentialTypeTrustMarks map[string][]string `json:"credential_type_trust_marks,omitempty" yaml:"credential_type_trust_marks,omitempty"`
 }
 
 // ETSIPolicyConstraints contains ETSI TSL-specific constraints.
@@ -61,6 +67,47 @@ type ETSIPolicyConstraints struct {
 
 	// Countries filters by country codes (e.g., ["DE", "FR"])
 	Countries []string `json:"countries,omitempty" yaml:"countries,omitempty"`
+
+	// CredentialTypes specifies credential type identifiers (e.g., SD-JWT VCT values).
+	// When specified, these values are included in the evaluation response for audit
+	// purposes and may be used for filtering when supported by the registry
+	// implementation (e.g., validated against TSL extensions or service metadata).
+	CredentialTypes []string `json:"credential_types,omitempty" yaml:"credential_types,omitempty"`
+
+	// RequiredCertPolicyOIDs specifies certificate policy OIDs that MUST appear
+	// in the leaf certificate's Certificate Policies extension. Used to distinguish
+	// access certificates (per ETSI TS 119 411-8) from generic TLS certificates.
+	// If non-empty, the leaf certificate must contain at least one of these OIDs.
+	// Also passable via request.Context["required_cert_policy_oids"].
+	RequiredCertPolicyOIDs []string `json:"required_cert_policy_oids,omitempty" yaml:"required_cert_policy_oids,omitempty"`
+
+	// ExtractRPIdentity controls whether RP identity information (Subject DN,
+	// SANs, serial number) is extracted from the leaf certificate and returned
+	// in response.Context.TrustMetadata["rp_identity"]. Defaults to false.
+	// Also passable via request.Context["extract_rp_identity"].
+	ExtractRPIdentity bool `json:"extract_rp_identity,omitempty" yaml:"extract_rp_identity,omitempty"`
+
+	// AllowedAttributes lists attribute names the RP is entitled to request.
+	// Used for over-request detection per TS 119 475. When both this and
+	// requested_attributes are present, the enrichment pipeline compares them
+	// and surfaces warnings (or rejects in strict mode).
+	// Also passable via request.Context["allowed_attributes"].
+	AllowedAttributes []string `json:"allowed_attributes,omitempty" yaml:"allowed_attributes,omitempty"`
+
+	// StrictEntitlementCheck controls whether over-requesting attributes results
+	// in rejection (true) or just warnings in the response (false). Defaults to false.
+	// Also passable via request.Context["strict_entitlement_check"].
+	StrictEntitlementCheck bool `json:"strict_entitlement_check,omitempty" yaml:"strict_entitlement_check,omitempty"`
+
+	// AllowIntermediaries controls whether intermediary/broker presentation
+	// requests are accepted. When true, the enrichment pipeline will check
+	// for an intermediary certificate chain in request.Context["intermediary_x5c"]
+	// and surface intermediary metadata in the response. Note: full intermediary
+	// chain validation is not yet implemented — this currently controls whether
+	// intermediary requests are allowed and metadata is surfaced.
+	// Defaults to false (intermediary presentations rejected).
+	// Also passable via request.Context["allow_intermediaries"].
+	AllowIntermediaries bool `json:"allow_intermediaries,omitempty" yaml:"allow_intermediaries,omitempty"`
 }
 
 // DIDPolicyConstraints contains DID method-specific constraints.

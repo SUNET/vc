@@ -322,6 +322,45 @@ func (c *Client) EvaluateJWK(ctx context.Context, subjectID string, jwk map[stri
 	return c.Evaluate(ctx, req)
 }
 
+// NewAction creates a new Action with the given name.
+func NewAction(name string) *authzen.Action {
+	return &authzen.Action{Name: name}
+}
+
+// NewActionWithCredentialTypes creates an Action with credential_types in parameters.
+// This is commonly used when evaluating trust for credential issuers or verifiers
+// to specify which SD-JWT VCT values (credential types) are being requested.
+//
+// Example:
+//
+//	action := authzenclient.NewActionWithCredentialTypes("credential-issuer",
+//	    "eu.europa.ec.eudi.pid.1", "eu.europa.ec.eudi.mdl.1")
+func NewActionWithCredentialTypes(name string, credentialTypes ...string) *authzen.Action {
+	return &authzen.Action{
+		Name: name,
+		Parameters: map[string]interface{}{
+			"credential_types": credentialTypes,
+		},
+	}
+}
+
+// NewActionWithParameters creates an Action with custom parameters.
+// This is useful for setting arbitrary action.parameters values.
+//
+// Example:
+//
+//	action := authzenclient.NewActionWithParameters("authenticate",
+//	    map[string]interface{}{
+//	        "credential_types": []string{"eu.europa.ec.eudi.pid.1"},
+//	        "query": dcqlQuery,
+//	    })
+func NewActionWithParameters(name string, params map[string]interface{}) *authzen.Action {
+	return &authzen.Action{
+		Name:       name,
+		Parameters: params,
+	}
+}
+
 // EvaluationError represents an error response from the PDP.
 type EvaluationError struct {
 	StatusCode int

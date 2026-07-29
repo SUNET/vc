@@ -30,7 +30,7 @@ func ExampleValidator_ValidateCredential() {
 		"@context": []any{
 			"https://www.w3.org/ns/credentials/v2",
 		},
-		"type": []any{"VerifiableCredential"},
+		"type":              []any{"VerifiableCredential"},
 		"issuer":            "did:example:issuer",
 		"credentialSubject": map[string]any{"id": "did:example:subject"},
 	}

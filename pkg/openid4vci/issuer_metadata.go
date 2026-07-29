@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/pki"
 
@@ -44,9 +45,20 @@ type CredentialIssuerMetadataParameters struct {
 
 	// CredentialConfigurationsSupported: REQUIRED. Object that describes specifics of the Credential that the Credential Issuer supports issuance of. This object contains a list of name/value pairs, where each name is a unique identifier of the supported Credential being described.
 	CredentialConfigurationsSupported map[string]CredentialConfigurationsSupported `json:"credential_configurations_supported" yaml:"credential_configurations_supported" validate:"required"`
+
+	// MdocIacasURI: OPTIONAL. URL of the endpoint where the Credential Issuer publishes
+	// its IACA (Issuing Authority Certificate Authority) certificates for mDOC verification.
+	// Used by verifiers to dynamically fetch trust anchors for ISO 18013-5 mDOC credentials.
+	MdocIacasURI string `json:"mdoc_iacas_uri,omitempty" yaml:"mdoc_iacas_uri,omitempty"`
 }
 
-func (c *CredentialIssuerMetadataParameters) Marshal() (jwt.MapClaims, error) {
+// MetadataIssuer returns the issuer identifier embedded in the metadata
+// (credential_issuer), used to verify it matches the request's iss claim.
+func (c *CredentialIssuerMetadataParameters) MetadataIssuer() string {
+	return c.CredentialIssuer
+}
+
+func (c *CredentialIssuerMetadataParameters) MarshalJWTClaims() (jwt.MapClaims, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -67,7 +79,7 @@ func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pk
 		"x5c": x5c,
 	}
 
-	body, err := c.Marshal()
+	body, err := c.MarshalJWTClaims()
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +114,7 @@ type MetadataCredentialResponseEncryption struct {
 }
 
 type BatchCredentialIssuance struct {
-	//BatchSize: REQUIRED. Integer value specifying the maximum array size for the proofs parameter in a Credential Request.
+	// BatchSize: REQUIRED. Integer value specifying the maximum array size for the proofs parameter in a Credential Request.
 	BatchSize int `json:"batch_size" yaml:"batch_size" validate:"required"`
 }
 
@@ -111,7 +123,7 @@ type MetadataDisplay struct {
 	// Name: OPTIONAL. String value of a display name for the Credential Issuer.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
-	//Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. There MUST be only one object for each language identifier.
+	// Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. There MUST be only one object for each language identifier.
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 
 	// Logo: OPTIONAL. Object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:
@@ -120,7 +132,7 @@ type MetadataDisplay struct {
 
 // MetadataLogo object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:
 type MetadataLogo struct {
-	//URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc.
+	// URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc.
 	URI string `json:"uri" yaml:"uri" validate:"required"`
 
 	// AltText: OPTIONAL. String value of the alternative text for the logo image.
@@ -167,7 +179,7 @@ type CredentialConfigurationsSupported struct {
 
 // ProofsTypesSupported Object that describes specifics of the key proof(s) that the Credential Issuer supports.
 type ProofsTypesSupported struct {
-	//ProofSigningAlgValuesSupported: REQUIRED. Array of case sensitive strings that identify the algorithms that the Issuer supports for this proof type. The Wallet uses one of them to sign the proof. Algorithm names used are determined by the key proof type and are defined in Section 7.2.1.
+	// ProofSigningAlgValuesSupported: REQUIRED. Array of case sensitive strings that identify the algorithms that the Issuer supports for this proof type. The Wallet uses one of them to sign the proof. Algorithm names used are determined by the key proof type and are defined in Section 7.2.1.
 	ProofSigningAlgValuesSupported []string `json:"proof_signing_alg_values_supported" yaml:"proof_signing_alg_values_supported" validate:"required"`
 }
 

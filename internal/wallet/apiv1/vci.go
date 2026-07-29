@@ -89,27 +89,6 @@ func (c *Client) RunScenario(ctx context.Context, name string) (*ScenarioResult,
 	return nil, fmt.Errorf("scenario %q not found", name)
 }
 
-// RunAllAutoScenarios runs all scenarios marked as auto_run
-func (c *Client) RunAllAutoScenarios(ctx context.Context) {
-	for _, s := range c.cfg.Scenarios {
-		if !s.AutoRun {
-			continue
-		}
-		go func(scenario config.Scenario) {
-			if scenario.DelayBefore > 0 {
-				c.log.Info("waiting before scenario", "scenario", scenario.Name, "delay", scenario.DelayBefore)
-				time.Sleep(scenario.DelayBefore)
-			}
-			result, err := c.executeScenario(ctx, &scenario)
-			if err != nil {
-				c.log.Error("auto-run scenario failed", "scenario", scenario.Name, "error", err)
-				return
-			}
-			c.log.Info("auto-run scenario completed", "scenario", scenario.Name, "success", result.Success)
-		}(s)
-	}
-}
-
 func (c *Client) executeScenario(ctx context.Context, scenario *config.Scenario) (*ScenarioResult, error) {
 	c.log.Info("executing scenario", "name", scenario.Name, "type", scenario.Type)
 
@@ -753,10 +732,14 @@ func (c *Client) pollDeferredCredential(ctx context.Context, deferredEndpoint, a
 		if resp.StatusCode == http.StatusOK {
 			var credResp openid4vci.CredentialResponse
 			if err := json.NewDecoder(resp.Body).Decode(&credResp); err != nil {
-				resp.Body.Close()
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					return nil, fmt.Errorf("%w; close body: %w", err, closeErr)
+				}
 				return nil, err
 			}
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				return nil, fmt.Errorf("close body: %w", err)
+			}
 
 			if len(credResp.Credentials) > 0 {
 				return &credResp, nil
@@ -765,7 +748,9 @@ func (c *Client) pollDeferredCredential(ctx context.Context, deferredEndpoint, a
 				transactionID = credResp.TransactionID
 			}
 		} else {
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				return nil, fmt.Errorf("close body: %w", err)
+			}
 		}
 
 		select {

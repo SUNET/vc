@@ -4,62 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
+
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vcclient"
-
-	"golang.org/x/crypto/bcrypt"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-func (c *Client) AddPIDUser(ctx context.Context, req *vcclient.AddPIDRequest) error {
-	// store user and password in the database before document is saved - to check constraints that the user not already exists
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	err = c.usersStore.Save(ctx, &model.OAuthUsers{
-		Username:        req.Username,
-		Password:        string(passwordHash),
-		Identity:        req.Identity,
-		AuthenticSource: req.Meta.AuthenticSource,
-	})
-	if err != nil {
-		c.log.Error(err, "failed to save user")
-		return err
-	}
-
-	return nil
-}
-
-func (c *Client) LoginPIDUser(ctx context.Context, req *vcclient.LoginPIDUserRequest) error {
-	username := strings.ToLower(req.Username)
-
-	c.log.Debug("LoginPIDUser called", "username", username)
-	user, err := c.usersStore.GetUser(ctx, username)
-	if err != nil {
-		return fmt.Errorf("username %s not found", username)
-	}
-
-	if err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		return fmt.Errorf("password mismatch for username %s", username)
-	}
-
-	update := &cache.AuthorizationContext{
-		Identity:        user.Identity,
-		AuthenticSource: user.AuthenticSource,
-	}
-	// Update the authorization with the user identity
-	if err := c.cacheService.AuthContext.AddIdentity(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}, update); err != nil {
-		c.log.Error(err, "failed to add identity to authorization context")
-		return err
-	}
-
-	return nil
-
-}
-
+// UserAuthenticSourceLookup resolves which authentic sources are available for a session,
+// or sets the selected authentic source on the authorization context.
 func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error) {
 	c.log.Debug("UserAuthenticSource called")
 
@@ -102,6 +56,10 @@ func (c *Client) UserAuthenticSourceLookup(ctx context.Context, req *vcclient.Us
 	return nil, nil
 }
 
+// UserLookup resolves the authenticated user's displayable claims for the credential preview (SVG template).
+// It retrieves data differently depending on the auth provider: from the verifier session cache for OpenID4VP,
+// or from the VCI session cache for SAML/OIDC.
+// After collecting the claims it marks the authorization context as consented and returns the wallet redirect URL.
 func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error) {
 	c.log.Debug("UserLookup called")
 
@@ -110,48 +68,23 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get authorization for user", "request_uri", req.RequestURI)
+		return nil, err
 	}
 
-	c.log.Debug("LoginPIDUser", "auth", authorizationContext)
+	c.log.Debug("UserLookup", "auth", authorizationContext)
 
-	redirectURL, err := url.Parse(authorizationContext.WalletURI)
+	redirectResult, err := buildAuthorizationRedirectURL(authorizationContext.WalletURI, authorizationContext.Code, authorizationContext.State, c.cfg.APIGW.PublicURL)
 	if err != nil {
-		c.log.Error(err, "failed to parse redirect URI", "redirect_uri", authorizationContext.WalletURI)
-		return nil, fmt.Errorf("failed to parse redirect URI %s: %w", authorizationContext.WalletURI, err)
+		c.log.Error(err, "failed to build redirect URL", "redirect_uri", authorizationContext.WalletURI)
+		return nil, err
 	}
 
-	redirectURL.RawQuery = url.Values{"code": {authorizationContext.Code}, "state": {authorizationContext.State}}.Encode()
+	var svgTemplateClaims map[string]sdjwtvc.SVGValue
+	var presentationClaims map[string]any
+	var doc *model.CompleteDocument
 
-	svgTemplateClaims := map[string]vcclient.SVGClaim{}
-
-	switch req.AuthMethod {
-	case model.AuthMethodBasic:
-		user, err := c.usersStore.GetUser(ctx, strings.ToLower(req.Username))
-		if err != nil {
-			c.log.Error(err, "failed to get user", "username", strings.ToLower(req.Username))
-			return nil, fmt.Errorf("user %s not found: %w", strings.ToLower(req.Username), err)
-		}
-
-		svgTemplateClaims = map[string]vcclient.SVGClaim{
-			"given_name": {
-				Label: "Given name",
-				Value: user.Identity.GivenName,
-			},
-			"family_name": {
-				Label: "Family name",
-				Value: user.Identity.FamilyName,
-			},
-			"birth_date": {
-				Label: "Birth date",
-				Value: user.Identity.BirthDate,
-			},
-			"expiry_date": {
-				Label: "Expiry date",
-				Value: user.Identity.ExpiryDate,
-			},
-		}
-
-	case model.AuthMethodOpenID4VP:
+	switch req.AuthProvider {
+	case model.AuthProviderOpenID4VP:
 		authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{VerifierResponseCode: req.ResponseCode})
 		if err != nil {
 			c.log.Error(err, "failed to get authorization context")
@@ -166,52 +99,14 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 		c.log.Debug("userLookup - retrieved docs from cache", "session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		doc, err := firstDocument(docs)
+		doc, err = firstDocument(docs)
 		if err != nil {
 			c.log.Error(err, "no usable document in cache")
 			return nil, err
 		}
 		c.log.Debug("userLookup", "authenticSource", doc.Meta.AuthenticSource, "docs", docs)
 
-		jsonPaths, err := req.VCTM.ClaimJSONPath()
-		if err != nil {
-			c.log.Error(err, "failed to get JSON paths from VCTM claims")
-			return nil, err
-		}
-
-		c.log.Debug("userLookup", "doc", doc, "jsonPath", jsonPaths)
-
-		claimValues, err := sdjwtvc.ExtractClaimsByJSONPath(doc.DocumentData, jsonPaths.Displayable)
-		if err != nil {
-			c.log.Error(err, "failed to extract claim values from document data", "json_paths", jsonPaths.Displayable, "document_data", doc.DocumentData)
-			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
-		}
-
-		c.log.Debug("extracted claim values", "extracted_count", len(claimValues), "requested_count", len(jsonPaths.Displayable), "claims", claimValues)
-
-		for _, claim := range req.VCTM.Claims {
-			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID].(string)
-				if !ok {
-					continue
-				}
-				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
-					Label: claim.Display[0].Label,
-					Value: value,
-				}
-			} else if len(claim.Display) > 0 {
-				// No svg_id — fall back to extracting claim value from document data by path
-				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
-					svgTemplateClaims[key] = vcclient.SVGClaim{
-						Label: claim.Display[0].Label,
-						Value: value,
-					}
-				}
-			}
-		}
-
-	case model.AuthMethodSAML, model.AuthMethodOIDC:
+	case model.AuthProviderSAML, model.AuthProviderOIDC:
 		// For SAML/OIDC, documents are stored in the VCI session cache by the
 		// ACS/callback handlers, keyed by the authorization context's session ID.
 		// No verifier response_code lookup is needed — we use the session ID directly.
@@ -225,89 +120,45 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		c.log.Debug("userLookup - retrieved SAML/OIDC docs from cache",
 			"session_id", authorizationContext.SessionID, "num_docs", len(docs))
 
-		doc, err := firstDocument(docs)
+		var err error
+		doc, err = firstDocument(docs)
 		if err != nil {
 			c.log.Error(err, "no usable document in cache for SAML/OIDC session")
 			return nil, err
 		}
 
-		jsonPaths, err := req.VCTM.ClaimJSONPath()
-		if err != nil {
-			c.log.Error(err, "failed to get JSON paths from VCTM claims")
-			return nil, err
-		}
-
-		claimValues, err := sdjwtvc.ExtractClaimsByJSONPath(doc.DocumentData, jsonPaths.Displayable)
-		if err != nil {
-			c.log.Error(err, "failed to extract claim values from document data",
-				"json_paths", jsonPaths.Displayable, "document_data", doc.DocumentData)
-			return nil, fmt.Errorf("failed to extract claim values from document data: %w", err)
-		}
-
-		if len(claimValues) == 0 && len(jsonPaths.Displayable) > 0 {
-			// Log diagnostic info when JSONPath extraction finds nothing.
-			// This typically means the credential_mappings don't produce the
-			// claim keys expected by the VCTM (check svg_id / path alignment).
-			docKeys := make([]string, 0, len(doc.DocumentData))
-			for k := range doc.DocumentData {
-				docKeys = append(docKeys, k)
-			}
-			c.log.Warn("no claims extracted: document data keys do not match VCTM JSONPaths",
-				"document_data_keys", docKeys,
-				"json_paths", jsonPaths.Displayable)
-		} else {
-			c.log.Debug("extracted claim values",
-				"extracted_count", len(claimValues),
-				"requested_count", len(jsonPaths.Displayable),
-				"claims", claimValues)
-		}
-
-		for _, claim := range req.VCTM.Claims {
-			if claim.SVGID != "" {
-				value, ok := claimValues[claim.SVGID].(string)
-				if !ok {
-					// JSONPath extraction missed this claim — try direct lookup as fallback
-					if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
-						svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
-							Label: claim.Display[0].Label,
-							Value: value,
-						}
-					}
-					continue
-				}
-				svgTemplateClaims[claim.SVGID] = vcclient.SVGClaim{
-					Label: claim.Display[0].Label,
-					Value: value,
-				}
-			} else if len(claim.Display) > 0 {
-				// No svg_id — fall back to extracting claim value from document data by path
-				key := claim.JSONPath()
-				if value := findValueByName(doc.DocumentData, claim.Path); value != "" {
-					svgTemplateClaims[key] = vcclient.SVGClaim{
-						Label: claim.Display[0].Label,
-						Value: value,
-					}
-				}
-			}
-		}
-
 	default:
-		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthMethod)
+		return nil, fmt.Errorf("unsupported auth method for user lookup: %s", req.AuthProvider)
 	}
 
-	c.log.Debug("lookupUser", "svgTemplateClaims", svgTemplateClaims)
+	// Normalize bson.D/bson.A values to map[string]any/[]any so that
+	// Presentation() and SVGValues() can traverse nested documents.
+	for k, v := range doc.DocumentData {
+		doc.DocumentData[k] = normalizeBSONValue(v)
+	}
+
+	presentationClaims = req.VCTM.Presentation(doc.DocumentData)
+	svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
+
+	if svgTemplateClaims == nil {
+		svgTemplateClaims = map[string]sdjwtvc.SVGValue{}
+	}
+	if presentationClaims == nil {
+		presentationClaims = map[string]any{}
+	}
+
+	c.log.Debug("lookupUser", "svgTemplateClaimCount", len(svgTemplateClaims), "presentationClaimCount", len(presentationClaims))
 
 	if err := c.cacheService.AuthContext.Consent(ctx, &cache.AuthorizationContext{RequestURI: req.RequestURI}); err != nil {
-		c.log.Error(err, "failed to consent for user", "username", req.Username)
-		return nil, fmt.Errorf("failed to consent for user %s: %w", req.Username, err)
+		c.log.Error(err, "failed to consent for user")
+		return nil, fmt.Errorf("failed to consent: %w", err)
 	}
 
 	reply := &vcclient.UserLookupReply{
-		SVGTemplateClaims: svgTemplateClaims,
-		RedirectURL:       redirectURL.String(),
+		SVGTemplateClaims:  svgTemplateClaims,
+		PresentationClaims: presentationClaims,
+		RedirectURL:        redirectResult,
 	}
-
-	c.log.Debug("userlookup", "reply", reply)
 
 	return reply, nil
 }
@@ -324,52 +175,55 @@ func firstDocument(docs map[string]*model.CompleteDocument) (*model.CompleteDocu
 	return nil, fmt.Errorf("no documents in cache")
 }
 
-// findValueByName searches the document data for a claim value matching
-// the VCTM claim path. It first tries an exact JSONPath-style lookup,
-// then falls back to searching recursively by the leaf key name.
-func findValueByName(data map[string]any, path []*string) string {
-	if len(path) == 0 {
-		return ""
-	}
-
-	// Walk the path through nested maps
-	var current any = data
-	for _, p := range path {
-		if p == nil {
-			break
+// normalizeBSONValue recursively converts bson.D values to map[string]any
+// so that downstream code (e.g. walkPath in VCTM.Presentation) can traverse
+// nested documents with plain Go type assertions.
+// The MongoDB driver v2 decodes nested BSON documents inside any-typed fields
+// as bson.D rather than map[string]any.
+func normalizeBSONValue(v any) any {
+	switch val := v.(type) {
+	case bson.D:
+		m := make(map[string]any, len(val))
+		for _, e := range val {
+			m[e.Key] = normalizeBSONValue(e.Value)
 		}
-		m, ok := current.(map[string]any)
-		if !ok {
-			break
+		return m
+	case map[string]any:
+		for k, elem := range val {
+			val[k] = normalizeBSONValue(elem)
 		}
-		current, ok = m[*p]
-		if !ok {
-			// Exact path failed — try recursive search by leaf key name
-			leafKey := *path[len(path)-1]
-			return findValueRecursive(data, leafKey)
+		return val
+	case []any:
+		for i, elem := range val {
+			val[i] = normalizeBSONValue(elem)
 		}
+		return val
+	case bson.A:
+		m := make([]any, len(val))
+		for i, elem := range val {
+			m[i] = normalizeBSONValue(elem)
+		}
+		return m
+	default:
+		return v
 	}
-
-	if s, ok := current.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", current)
 }
 
-// findValueRecursive searches a nested map for the first string value matching key.
-func findValueRecursive(data map[string]any, key string) string {
-	if v, ok := data[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-		return fmt.Sprintf("%v", v)
+// buildAuthorizationRedirectURL constructs the authorization response redirect URL
+// by preserving existing query parameters and appending code, state, and iss.
+func buildAuthorizationRedirectURL(walletURI, code, state, issuer string) (string, error) {
+	redirectURL, err := url.Parse(walletURI)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse redirect URI %s: %w", walletURI, err)
 	}
-	for _, v := range data {
-		if nested, ok := v.(map[string]any); ok {
-			if result := findValueRecursive(nested, key); result != "" {
-				return result
-			}
-		}
+
+	q, parseErr := url.ParseQuery(redirectURL.RawQuery)
+	if parseErr != nil {
+		return "", fmt.Errorf("malformed query in redirect URI: %w", parseErr)
 	}
-	return ""
+	q.Set("code", code)
+	q.Set("state", state)
+	q.Set("iss", issuer)
+	redirectURL.RawQuery = q.Encode()
+	return redirectURL.String(), nil
 }

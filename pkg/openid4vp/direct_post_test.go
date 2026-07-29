@@ -20,7 +20,7 @@ func TestBuildDirectPostURL(t *testing.T) {
 		{
 			name:    "full response with all fields",
 			baseURL: "https://verifier.example.com/callback",
-			response: &ResponseParameters{
+			response: &ResponseParameters{ // #nosec G101
 				VPToken: "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.test",
 				State:   "state123",
 				Code:    "code456",
@@ -54,7 +54,7 @@ func TestBuildDirectPostURL(t *testing.T) {
 		{
 			name:    "minimal response with vp_token and state",
 			baseURL: "https://verifier.example.com/callback",
-			response: &ResponseParameters{
+			response: &ResponseParameters{ // #nosec G101
 				VPToken: "vp_token_value",
 				State:   "state_value",
 			},
@@ -107,7 +107,7 @@ func TestBuildDirectPostURL(t *testing.T) {
 		{
 			name:    "with id_token",
 			baseURL: "https://verifier.example.com/callback",
-			response: &ResponseParameters{
+			response: &ResponseParameters{ // #nosec G101
 				IDToken: "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.sig",
 				State:   "state_value",
 			},

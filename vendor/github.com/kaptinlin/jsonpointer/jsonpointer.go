@@ -1,85 +1,40 @@
-// Package jsonpointer provides JSON Pointer (RFC 6901) implementation for Go.
-// This is a direct port of the TypeScript json-pointer library with identical behavior,
-// using modern Go generics for type safety and performance.
-//
-// This package implements helper functions for JSON Pointer (RFC 6901) specification.
-// https://tools.ietf.org/html/rfc6901
-//
-// TypeScript original source: https://github.com/jsonjoy-com/json-pointer
-//
-// Usage:
-//
-//	import "github.com/kaptinlin/jsonpointer"
-//
-//	// Parse JSON Pointer string to path
-//	path := jsonpointer.Parse("/users/0/name")
-//
-//	// Find value with error handling
-//	ref, err := jsonpointer.Find(data, path...)
-//	if err != nil {
-//		// Handle error
-//	}
-//
-//	// Get value with error handling
-//	value, err := jsonpointer.Get(data, path...)
-//	if err != nil {
-//		// Handle error
-//	}
-//
-//	// Validate JSON Pointer
-//	err = jsonpointer.Validate("/users/0/name")
+// Package jsonpointer implements read-only JSON Pointer (RFC 6901) traversal
+// for Go values.
 package jsonpointer
 
-// Get retrieves a value from document using string path components.
-// Returns errors for invalid operations, similar to Find function.
-func Get(doc any, path ...string) (any, error) {
-	return get(doc, Path(path))
+// Parse parses a strict RFC 6901 JSON Pointer string.
+func Parse(pointer string) (Pointer, error) {
+	tokens, err := parsePointer(pointer)
+	if err != nil {
+		return Pointer{}, err
+	}
+	return newPointer(tokens), nil
 }
 
-// Find locates a reference in document using string path components.
-// Returns errors for invalid operations.
-func Find(doc any, path ...string) (*Reference, error) {
-	return find(doc, Path(path))
+// Value parses pointer and resolves it against doc.
+func Value(doc any, pointer string) (any, error) {
+	p, err := Parse(pointer)
+	if err != nil {
+		return nil, err
+	}
+	return p.Value(doc)
 }
 
-// GetByPointer retrieves a value from document using JSON Pointer string.
-// Returns errors for invalid operations.
-func GetByPointer(doc any, pointer string) (any, error) {
-	path := Parse(pointer)
-	return get(doc, path)
+// ReferenceOf parses pointer and resolves it against doc with parent context.
+func ReferenceOf(doc any, pointer string) (Reference, error) {
+	p, err := Parse(pointer)
+	if err != nil {
+		return Reference{}, err
+	}
+	return p.Reference(doc)
 }
 
-// FindByPointer locates a reference in document using JSON Pointer string.
-func FindByPointer(doc any, pointer string) (*Reference, error) {
-	return findByPointer(pointer, doc)
+// EscapeToken escapes a raw token for use inside a JSON Pointer string.
+func EscapeToken(token string) string {
+	return escapeToken(token)
 }
 
-// Parse parses a JSON Pointer string to a path array.
-func Parse(pointer string) Path {
-	return parseJSONPointer(pointer)
-}
-
-// Format formats string path components into a JSON Pointer string.
-func Format(path ...string) string {
-	return formatJSONPointer(Path(path))
-}
-
-// Escape escapes special characters in a path component.
-func Escape(component string) string {
-	return escapeComponent(component)
-}
-
-// Unescape unescapes special characters in a path component.
-func Unescape(component string) string {
-	return unescapeComponent(component)
-}
-
-// Validate validates a JSON Pointer string.
-func Validate(pointer string) error {
-	return validatePointerString(pointer)
-}
-
-// ValidatePath validates a path array.
-func ValidatePath(path Path) error {
-	return validatePath(path)
+// UnescapeToken decodes one JSON Pointer token.
+func UnescapeToken(encoded string) (string, error) {
+	return unescapeToken(encoded)
 }

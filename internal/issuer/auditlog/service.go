@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -40,16 +42,16 @@ type AuditLog struct {
 
 // Service holds auditlog service
 type Service struct {
-	cfg            *model.Cfg
-	log            *logger.Log
-	auditLogChan   chan *AuditLog
-	wg             sync.WaitGroup
-	cancel         context.CancelFunc // cancels processAuditLog
-	destinations   []*Destination     // pre-parsed destinations
-	mu             sync.Mutex         // mutex for file operations
-	done           chan struct{}       // closed on shutdown to prevent sends
-	closeOnce      sync.Once          // ensures done is closed exactly once
-	fileSyncInterval time.Duration    // file destinations: 0 = fsync every write, >0 = periodic batched fsync
+	cfg              *model.Cfg
+	log              *logger.Log
+	auditLogChan     chan *AuditLog
+	wg               sync.WaitGroup
+	cancel           context.CancelFunc // cancels processAuditLog
+	destinations     []*Destination     // pre-parsed destinations
+	mu               sync.Mutex         // mutex for file operations
+	done             chan struct{}      // closed on shutdown to prevent sends
+	closeOnce        sync.Once          // ensures done is closed exactly once
+	fileSyncInterval time.Duration      // file destinations: 0 = fsync every write, >0 = periodic batched fsync
 }
 
 // New creates a new auditlog service
@@ -133,7 +135,7 @@ func (s *Service) parseDestinations(dests []string) ([]*Destination, error) {
 
 		// File path
 		// Open file in append mode, create if not exists
-		f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(filepath.Clean(dest), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open audit log file %s: %w", dest, err)
 		}

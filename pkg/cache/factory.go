@@ -37,9 +37,9 @@ func (s *Service) NewAuthContextCache(ctx context.Context, collection string, tt
 }
 
 // NewGenericCache creates a Cache[V] backed by the service's backend.
-func NewGenericCache[V any](s *Service, ctx context.Context, collection string, ttl time.Duration) (Cache[V], error) {
+func NewGenericCache[V any](s *Service, ctx context.Context, collection string, ttl time.Duration, opts ...MongoCacheOption[V]) (Cache[V], error) {
 	if !s.ha {
 		return NewMemoryCache[V](ttl), nil
 	}
-	return NewMongoCache[V](ctx, s.client, s.databaseName, collection, ttl, s.log)
+	return NewMongoCache[V](ctx, s.client, s.databaseName, collection, ttl, s.log, opts...)
 }

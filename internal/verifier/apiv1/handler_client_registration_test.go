@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"testing"
+
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -184,6 +185,20 @@ func TestClientRegistrationRequest_Validation(t *testing.T) {
 				RedirectURIs: []string{"https://example.com/callback#section"},
 			},
 			wantErr: true,
+		},
+		{
+			name: "valid redirect URI with ccTLD",
+			req: ClientRegistrationRequest{
+				RedirectURIs: []string{"https://example.se/callback"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid redirect URI with non-resolving hostname",
+			req: ClientRegistrationRequest{
+				RedirectURIs: []string{"https://nonexistent.test/callback"},
+			},
+			wantErr: false,
 		},
 		{
 			name: "valid token endpoint auth method - client_secret_basic",
@@ -600,7 +615,7 @@ func TestGetClientInformation(t *testing.T) {
 					ClientIDIssuedAt:            1699999999,
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", token
 			},
 			expectError: false,
@@ -622,7 +637,7 @@ func TestGetClientInformation(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", "wrong-token"
 			},
 			expectError:   true,
@@ -677,7 +692,7 @@ func TestDeleteClient(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", token
 			},
 			expectError: false,
@@ -699,7 +714,7 @@ func TestDeleteClient(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", "wrong-token"
 			},
 			expectError:   true,
@@ -760,7 +775,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", token
 			},
 			request: &ClientRegistrationRequest{
@@ -792,7 +807,7 @@ func TestUpdateClient(t *testing.T) {
 					ClientID:                    "test-client-id",
 					RegistrationAccessTokenHash: hash,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "test-client-id", "wrong-token"
 			},
 			request: &ClientRegistrationRequest{
@@ -816,7 +831,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "full-update-client", token
 			},
 			request: &ClientRegistrationRequest{
@@ -850,7 +865,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "jwks-update-client", token
 			},
 			request: &ClientRegistrationRequest{
@@ -876,7 +891,7 @@ func TestUpdateClient(t *testing.T) {
 					RegistrationAccessTokenHash: hash,
 					ClientIDIssuedAt:            1699999999,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 				return "invalid-update-client", token
 			},
 			request: &ClientRegistrationRequest{
@@ -1093,11 +1108,13 @@ func TestGetClientByID(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(&model.Cfg{
 		Verifier: &model.Verifier{
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:        "https://test.example.com",
-				SubjectType:   "pairwise",
-				SubjectSalt:   "test-salt",
-				StaticClients: staticClients,
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:        "https://test.example.com",
+					SubjectType:   "pairwise",
+					SubjectSalt:   "test-salt",
+					StaticClients: staticClients,
+				},
 			},
 		},
 	})
@@ -1213,11 +1230,13 @@ func TestAuthenticateClientWithStaticClients(t *testing.T) {
 
 	client, _ := CreateTestClientWithMock(&model.Cfg{
 		Verifier: &model.Verifier{
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:        "https://test.example.com",
-				SubjectType:   "pairwise",
-				SubjectSalt:   "test-salt",
-				StaticClients: staticClients,
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:        "https://test.example.com",
+					SubjectType:   "pairwise",
+					SubjectSalt:   "test-salt",
+					StaticClients: staticClients,
+				},
 			},
 		},
 	})

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 )
@@ -17,7 +19,6 @@ type Client struct {
 	httpClient *http.Client
 	log        *logger.Log
 	APIGW      *APIGWClient
-	MockAS     *MockASClient
 	Verifier   *VerifierClient
 }
 
@@ -33,15 +34,6 @@ type APIGWClient struct {
 	User     *userHandler
 }
 
-// MockASClient handles MockAS endpoints
-type MockASClient struct {
-	client  *Client
-	baseURL string
-	log     *logger.Log
-	Root    *mockasRootHandler
-	Mock    *mockHandler
-}
-
 // VerifierClient handles Verifier endpoints
 type VerifierClient struct {
 	client  *Client
@@ -52,7 +44,6 @@ type VerifierClient struct {
 // Config is the configuration for the client
 type Config struct {
 	ApigwURL    string `validate:""`
-	MockASURL   string `validate:""`
 	VerifierURL string `validate:""`
 }
 
@@ -77,22 +68,11 @@ func New(config *Config, log *logger.Log) (*Client, error) {
 			baseURL: config.ApigwURL,
 			log:     c.log.New("apigw"),
 		}
-		c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/document", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
+		c.APIGW.Document = &documentHandler{client: c, serviceBaseURL: "api/v1/datastore", defaultContentType: defaultContentType, log: c.log.New("apigw.document"), baseURL: config.ApigwURL}
 		c.APIGW.Identity = &identityHandler{client: c, serviceBaseURL: "api/v1/identity", defaultContentType: defaultContentType, log: c.log.New("apigw.identity"), baseURL: config.ApigwURL}
 		c.APIGW.Root = &rootHandler{client: c, serviceBaseURL: "api/v1", defaultContentType: defaultContentType, log: c.log.New("apigw.root"), baseURL: config.ApigwURL}
 		c.APIGW.OAuth = &oauthHandler{client: c, defaultContentType: defaultContentType, log: c.log.New("apigw.oauth"), baseURL: config.ApigwURL}
 		c.APIGW.User = &userHandler{client: c, serviceBaseURL: "api/v1/user", defaultContentType: defaultContentType, log: c.log.New("apigw.user"), baseURL: config.ApigwURL}
-	}
-
-	// Initialize MockAS client if configured
-	if config.MockASURL != "" {
-		c.MockAS = &MockASClient{
-			client:  c,
-			baseURL: config.MockASURL,
-			log:     c.log.New("mockas"),
-		}
-		c.MockAS.Root = &mockasRootHandler{client: c, baseURL: config.MockASURL, log: c.log.New("mockas.root")}
-		c.MockAS.Mock = &mockHandler{client: c, serviceBaseURL: "api/v1/mock", defaultContentType: defaultContentType, log: c.log.New("mockas.mock"), baseURL: config.MockASURL}
 	}
 
 	// Initialize Verifier client if configured
@@ -147,7 +127,11 @@ func (c *Client) newRequest(ctx context.Context, method, path, contentType strin
 
 // Do does the new request
 func (c *Client) do(ctx context.Context, req *http.Request, reply any, prefixReplyJSONWithData bool) (*http.Response, error) {
-	resp, err := c.httpClient.Do(req)
+	// Validate request URL scheme to prevent SSRF
+	if req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
+		return nil, fmt.Errorf("invalid URL scheme: %v", req.URL)
+	}
+	resp, err := c.httpClient.Do(req) //#nosec G704 -- URL from trusted config (baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +172,6 @@ func (c *Client) do(ctx context.Context, req *http.Request, reply any, prefixRep
 	}
 
 	return resp, nil
-
 }
 
 // read body and make it reusable

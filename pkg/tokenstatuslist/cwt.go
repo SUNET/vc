@@ -3,7 +3,9 @@ package tokenstatuslist
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
 	"fmt"
@@ -43,6 +45,9 @@ const (
 	CoseAlgES256 = -7  // ECDSA w/ SHA-256 (P-256 curve)
 	CoseAlgES384 = -35 // ECDSA w/ SHA-384 (P-384 curve)
 	CoseAlgES512 = -36 // ECDSA w/ SHA-512 (P-521 curve)
+	CoseAlgPS256 = -37 // RSASSA-PSS w/ SHA-256
+	CoseAlgPS384 = -38 // RSASSA-PSS w/ SHA-384
+	CoseAlgPS512 = -39 // RSASSA-PSS w/ SHA-512
 )
 
 // CWTStatusList represents the status_list claim in CWT format (Section 6.1).
@@ -55,11 +60,14 @@ type CWTStatusList struct {
 
 // CWTSigningConfig holds CWT-specific signing configuration.
 type CWTSigningConfig struct {
-	// SigningKey is the private key for signing (REQUIRED, must be *ecdsa.PrivateKey)
+	// SigningKey is the private key for signing (REQUIRED).
+	// Supported types: *ecdsa.PrivateKey (ES256/ES384/ES512),
+	// *rsa.PrivateKey (PS256/PS384/PS512).
 	SigningKey crypto.PrivateKey
 
-	// Algorithm specifies the COSE algorithm (default: CoseAlgES256)
-	// Use CoseAlgES256 (-7), CoseAlgES384 (-35), or CoseAlgES512 (-36)
+	// Algorithm specifies the COSE algorithm.
+	// Use 0 to auto-detect from the key type and curve (ES256 for P-256,
+	// ES384 for P-384, ES512 for P-521, PS256 for RSA keys).
 	Algorithm int
 }
 
@@ -68,7 +76,7 @@ type CWTSigningConfig struct {
 type CWTConfig struct {
 	TokenConfig
 
-	// SigningKey is the private key for signing (REQUIRED, must be *ecdsa.PrivateKey)
+	// SigningKey is the private key for signing (REQUIRED).
 	SigningKey crypto.PrivateKey
 
 	// Algorithm specifies the COSE algorithm (default: ES256)
@@ -110,10 +118,14 @@ func (sl *StatusList) GenerateCWT(cfg CWTSigningConfig) ([]byte, error) {
 		claims[cwtClaimTTL] = sl.TTL
 	}
 
-	// Determine algorithm
+	// Determine algorithm: use explicit value, or auto-detect from key type.
 	alg := cfg.Algorithm
 	if alg == 0 {
-		alg = CoseAlgES256 // Default to ES256
+		var err error
+		alg, err = detectCOSEAlgorithm(cfg.SigningKey)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Build protected header
@@ -201,6 +213,12 @@ func signCOSE(protectedBytes, payloadBytes []byte, key crypto.PrivateKey, alg in
 		return signECDSA(sigStructureBytes, key, sha512.New384())
 	case CoseAlgES512:
 		return signECDSA(sigStructureBytes, key, sha512.New())
+	case CoseAlgPS256:
+		return signRSAPSS(sigStructureBytes, key, crypto.SHA256)
+	case CoseAlgPS384:
+		return signRSAPSS(sigStructureBytes, key, crypto.SHA384)
+	case CoseAlgPS512:
+		return signRSAPSS(sigStructureBytes, key, crypto.SHA512)
 	default:
 		return nil, fmt.Errorf("unsupported algorithm: %d", alg)
 	}
@@ -239,6 +257,43 @@ func signECDSA(data []byte, key crypto.PrivateKey, hasher hash.Hash) ([]byte, er
 	copy(signature[2*keyBytes-len(sigSBytes):], sigSBytes)
 
 	return signature, nil
+}
+
+// signRSAPSS signs data using RSASSA-PSS with the provided hash algorithm.
+func signRSAPSS(data []byte, key crypto.PrivateKey, hashAlg crypto.Hash) ([]byte, error) {
+	rsaKey, ok := key.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("signing key must be *rsa.PrivateKey for PS* algorithms")
+	}
+
+	h := hashAlg.New()
+	h.Write(data)
+	digest := h.Sum(nil)
+
+	return rsa.SignPSS(rand.Reader, rsaKey, hashAlg, digest, &rsa.PSSOptions{
+		SaltLength: rsa.PSSSaltLengthEqualsHash,
+	})
+}
+
+// detectCOSEAlgorithm picks a default COSE algorithm based on the key type and curve.
+func detectCOSEAlgorithm(key crypto.PrivateKey) (int, error) {
+	switch k := key.(type) {
+	case *ecdsa.PrivateKey:
+		switch k.Curve {
+		case elliptic.P256():
+			return CoseAlgES256, nil
+		case elliptic.P384():
+			return CoseAlgES384, nil
+		case elliptic.P521():
+			return CoseAlgES512, nil
+		default:
+			return 0, fmt.Errorf("unsupported ECDSA curve: %s", k.Curve.Params().Name)
+		}
+	case *rsa.PrivateKey:
+		return CoseAlgPS256, nil
+	default:
+		return 0, fmt.Errorf("unsupported key type for CWT signing: %T", key)
+	}
 }
 
 // ParseCWT parses a Status List Token CWT and returns the claims.

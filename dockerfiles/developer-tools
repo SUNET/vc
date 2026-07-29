@@ -1,0 +1,33 @@
+# Compile
+FROM docker.sunet.se/iam_vc/gobuild:local AS builder
+
+ENV GOTOOLCHAIN=auto
+ENV GOFLAGS=-mod=vendor
+ENV GOPROXY=off
+ENV GONOSUMDB=*
+ENV GONOSUMCHECK=*
+
+# Copy source code (includes vendor/)
+COPY . .
+
+# Build with caching for both build cache and module cache
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make build-gen-bootstrap \
+    && make build-gen-config-docs \
+    && make build-jwt-issuer
+
+# Deploy — Alpine for minimal CVE surface (binary is statically linked)
+FROM alpine:3.23
+
+WORKDIR /
+
+RUN apk add --no-cache ca-certificates
+
+# Run as non-root user for security hardening
+RUN addgroup -S vctools && adduser -S vctools -G vctools
+
+COPY --from=builder /go/src/app/bin/gen_bootstrap /go/src/app/bin/gen_config_docs \
+    /go/src/app/bin/jwt_issuer /usr/local/bin/
+
+USER vctools

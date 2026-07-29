@@ -2,12 +2,16 @@ package httphelpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -48,13 +52,31 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 		res, err := handler(ctx, c)
 		if err != nil {
 			s.log.Debug("RegEndpoint", "err", err)
+
+			// OAuth 2.0 structured error response per RFC 6749 §5.2
+			if oauthErr, ok := errors.AsType[*oauth2.OAuthError](err); ok {
+				c.Header("Cache-Control", "no-store")
+				c.Header("Pragma", "no-cache")
+				if oauthErr.HTTPStatus == http.StatusUnauthorized && c.Writer.Header().Get("WWW-Authenticate") == "" {
+					c.Header("WWW-Authenticate", "Bearer")
+				}
+				c.JSON(oauthErr.HTTPStatus, oauthErr)
+				return
+			}
+
+			// OpenID4VCI structured error response per OID4VCI §7.3
+			if vciErr, ok := errors.AsType[*openid4vci.Error](err); ok {
+				c.JSON(openid4vci.StatusCode(vciErr), vciErr)
+				return
+			}
+
 			statusCode := StatusCode(ctx, err)
 			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": helpers.NewErrorFromError(err)})
 			return
 		}
 
-		// Skip rendering if response is nil (e.g., redirect was already handled)
 		if res == nil {
+			c.Status(defaultStatus)
 			return
 		}
 
@@ -109,6 +131,9 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	// Keep this low (a few seconds) to mitigate Slowloris DoS attacks (CWE-400).
 	// Do NOT increase this to "fix" slow requests — find the actual root cause instead.
 	serverHTTP.ReadHeaderTimeout = 2 * time.Second
+	// MaxHeaderBytes limits the size of request headers to 1 MB (default).
+	// This mitigates memory exhaustion attacks from oversized headers.
+	serverHTTP.MaxHeaderBytes = 1 << 20 // 1 MB
 
 	// Middlewares
 	serverGin.Use(s.client.Middleware.ServedBy(ctx, apiServer.ServedByHeader))
@@ -116,6 +141,8 @@ func (s *serverHandler) Default(ctx context.Context, serverHTTP *http.Server, se
 	serverGin.Use(s.client.Middleware.Duration(ctx))
 	serverGin.Use(s.client.Middleware.Logger(ctx))
 	serverGin.Use(s.client.Middleware.Crash(ctx))
+	serverGin.Use(s.client.Middleware.SecurityHeaders(apiServer.TLS.Enable || apiServer.TrustProxyTLS))
+	serverGin.Use(s.client.Middleware.MaxBodySize(10 << 20)) // 10 MB default body limit
 	serverGin.Use(s.client.Middleware.CustomBranding(s.client.cfg.Common.Branding))
 	problem404 := helpers.Problem404()
 	serverGin.NoRoute(func(c *gin.Context) { c.JSON(http.StatusNotFound, problem404) })

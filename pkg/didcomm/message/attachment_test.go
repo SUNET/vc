@@ -195,3 +195,45 @@ func TestNewLinksAttachment(t *testing.T) {
 		t.Errorf("Hash = %v, want sha256-abc123", attach.Data.Hash)
 	}
 }
+
+func TestAttachment_DecodeBase64(t *testing.T) {
+	attach := NewBase64Attachment("test", "text/plain", []byte("hello"))
+	data, err := attach.DecodeBase64()
+	if err != nil {
+		t.Fatalf("DecodeBase64() error = %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("expected hello, got %s", string(data))
+	}
+}
+
+func TestAttachment_DecodeBase64_Empty(t *testing.T) {
+	attach := &Attachment{Data: AttachmentData{}}
+	_, err := attach.DecodeBase64()
+	if err == nil {
+		t.Error("expected error for empty base64")
+	}
+}
+
+func TestAttachment_GetJSON_FromBase64(t *testing.T) {
+	jsonData := []byte(`{"name":"Bob"}`)
+	attach := NewBase64Attachment("test", "application/json", jsonData)
+
+	var result struct {
+		Name string `json:"name"`
+	}
+	if err := attach.GetJSON(&result); err != nil {
+		t.Fatalf("GetJSON() error = %v", err)
+	}
+	if result.Name != "Bob" {
+		t.Errorf("expected Bob, got %s", result.Name)
+	}
+}
+
+func TestAttachment_GetBytes_InvalidBase64(t *testing.T) {
+	attach := &Attachment{Data: AttachmentData{Base64: "not-valid-base64!!!"}}
+	_, err := attach.GetBytes()
+	if err == nil {
+		t.Error("expected error for invalid base64")
+	}
+}

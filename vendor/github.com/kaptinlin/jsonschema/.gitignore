@@ -39,11 +39,13 @@ build/
 
 # .ralphy
 .ralphy/deferred.json
+.ralphy/*.json
 .ralphy/*.txt
 
 # todo files
 .todo
 TODO.md
+TODO*.md
 
 # Project-specific
 .gocache
@@ -52,3 +54,29 @@ TODO.md
 /schemagen
 cmd/schemagen/jshcemagen
 debug/
+
+# Scratch/planning artifacts
+/.workspace
+/task.md
+/.cov.before
+/.cov.after
+/.fix.before*
+/.fix.after*
+.plans/
+.plan/*.md
+reports/
+PLAN*.md
+plan*.md
+IMPROVE.md
+IMPROVE*.md
+improve*.md
+REFACTOR.md
+REFACTOR*.md
+refactor*.md
+ANALYSIS.md
+
+# Meeting records
+.meetings/
+.plans
+task.md
+.codegraph/

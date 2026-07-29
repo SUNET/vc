@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/creasty/defaults"
@@ -21,27 +22,26 @@ common:
 apigw:
   api_server:
     api_auth:
-      basic_auth:
-        users:
-          admin: "secret-admin-pass"
-  oidc_rp:
-    registration:
-      preconfigured:
-        client_secret: "secret-client-secret"
-      dynamic:
-        initial_access_token: "secret-initial-token"
+      oidc:
+        client_secret: "secret-oidc-client"
+  auth_providers:
+    oidc:
+        registration:
+          preconfigured:
+            client_secret: "secret-client-secret"
+          dynamic:
+            initial_access_token: "secret-initial-token"
 registry:
   admin_gui:
     password: "secret-registry-pass"
 verifier:
-  oidc_op:
-    subject_salt: "secret-salt-value"
-ui:
-  password: "secret-ui-pass"
+  outbound:
+    oidc_provider:
+      subject_salt: "secret-salt-value"
 `, testMongoURI)
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0o600))
 
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)
@@ -52,11 +52,11 @@ ui:
 
 	// Verify APIGW secrets
 	require.NotNil(t, secrets.APIGW)
-	assert.Equal(t, "secret-admin-pass", secrets.APIGW.APIServer.APIAuth.BasicAuth.Users["admin"])
-	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Preconfigured)
-	assert.Equal(t, "secret-client-secret", secrets.APIGW.OIDCRP.Registration.Preconfigured.ClientSecret)
-	require.NotNil(t, secrets.APIGW.OIDCRP.Registration.Dynamic)
-	assert.Equal(t, "secret-initial-token", secrets.APIGW.OIDCRP.Registration.Dynamic.InitialAccessToken)
+	assert.Equal(t, "secret-oidc-client", secrets.APIGW.APIServer.APIAuth.OIDC.ClientSecret)
+	require.NotNil(t, secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured)
+	assert.Equal(t, "secret-client-secret", secrets.APIGW.AuthProviders.OIDC.Registration.Preconfigured.ClientSecret)
+	require.NotNil(t, secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic)
+	assert.Equal(t, "secret-initial-token", secrets.APIGW.AuthProviders.OIDC.Registration.Dynamic.InitialAccessToken)
 
 	// Verify Registry secrets
 	require.NotNil(t, secrets.Registry)
@@ -64,11 +64,7 @@ ui:
 
 	// Verify Verifier secrets
 	require.NotNil(t, secrets.Verifier)
-	assert.Equal(t, "secret-salt-value", secrets.Verifier.OIDCOP.SubjectSalt)
-
-	// Verify UI secrets
-	require.NotNil(t, secrets.UI)
-	assert.Equal(t, "secret-ui-pass", secrets.UI.Password)
+	assert.Equal(t, "secret-salt-value", secrets.Verifier.Outbound.OIDCProvider.SubjectSalt)
 }
 
 func TestLoadSecrets_FileNotFound(t *testing.T) {
@@ -82,10 +78,20 @@ func TestLoadSecrets_DirectoryPath(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestLoadSecrets_OverlyPermissiveMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
+	require.NoError(t, os.WriteFile(secretsPath, []byte("---\n"), 0o644))
+
+	_, err := LoadSecrets(secretsPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overly permissive mode")
+}
+
 func TestLoadSecrets_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "bad.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte("{{not valid yaml"), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte("{{not valid yaml"), 0o600))
 
 	_, err := LoadSecrets(secretsPath)
 	assert.Error(t, err)
@@ -94,7 +100,7 @@ func TestLoadSecrets_InvalidYAML(t *testing.T) {
 func TestLoadSecrets_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "empty.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte(""), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte(""), 0o600))
 
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)
@@ -105,18 +111,19 @@ func TestLoadSecrets_EmptyFile(t *testing.T) {
 
 func TestLoadSecrets_PartialSecrets(t *testing.T) {
 	content := `---
-ui:
-  password: "only-ui-password"
+registry:
+  admin_gui:
+    password: "only-registry-password"
 `
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "partial.yaml")
-	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0600))
+	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0o600))
 
 	secrets, err := LoadSecrets(secretsPath)
 	require.NoError(t, err)
 
-	require.NotNil(t, secrets.UI)
-	assert.Equal(t, "only-ui-password", secrets.UI.Password)
+	require.NotNil(t, secrets.Registry)
+	assert.Equal(t, "only-registry-password", secrets.Registry.AdminGUI.Password)
 	assert.Nil(t, secrets.Common)
 }
 
@@ -136,4 +143,18 @@ func TestDigitalCredentialsDefaults(t *testing.T) {
 		"Enable should default to false")
 	assert.False(t, dc.UseJAR,
 		"UseJAR should default to false")
+}
+
+func TestSignMetadataRateLimitDefaults(t *testing.T) {
+	cfg := &model.Cfg{
+		Issuer: &model.Issuer{},
+	}
+	require.NoError(t, defaults.Set(cfg))
+
+	rl := cfg.Issuer.SignMetadataRateLimit
+
+	assert.Equal(t, 2.0, rl.RequestsPerSecond,
+		"RequestsPerSecond should default to 2")
+	assert.Equal(t, 20, rl.Burst,
+		"Burst should default to 20")
 }

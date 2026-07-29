@@ -80,16 +80,16 @@ func (s *Schema) Unmarshal(dst, src any) error {
 // validateDestination validates the destination parameter
 func (s *Schema) validateDestination(dst any) error {
 	if dst == nil {
-		return &UnmarshalError{Type: "destination", Reason: ErrNilDestination.Error()}
+		return &UnmarshalError{Type: "destination", Reason: ErrNilDestination.Error(), Err: ErrNilDestination}
 	}
 
 	dstVal := reflect.ValueOf(dst)
 	if dstVal.Kind() != reflect.Pointer {
-		return &UnmarshalError{Type: "destination", Reason: ErrNotPointer.Error()}
+		return &UnmarshalError{Type: "destination", Reason: ErrNotPointer.Error(), Err: ErrNotPointer}
 	}
 
 	if dstVal.IsNil() {
-		return &UnmarshalError{Type: "destination", Reason: ErrNilPointer.Error()}
+		return &UnmarshalError{Type: "destination", Reason: ErrNilPointer.Error(), Err: ErrNilPointer}
 	}
 
 	return nil
@@ -101,6 +101,8 @@ func (s *Schema) unmarshalObject(dst, intermediate any) error {
 	if !ok {
 		return &UnmarshalError{Type: "source", Reason: "expected object but got different type"}
 	}
+
+	s.prepareStructFieldsForDefaults(dst, objData)
 
 	// Apply default values
 	if err := s.applyDefaults(objData, s); err != nil {
@@ -187,15 +189,261 @@ func (s *Schema) convertGenericSource(src any) (any, bool, error) {
 	return parsed, false, nil
 }
 
+type structDefaultFrame struct {
+	schema     *Schema
+	structType reflect.Type
+	dataPtr    uintptr
+}
+
+func (s *Schema) prepareStructFieldsForDefaults(dst any, data map[string]any) {
+	structType, ok := structTypeForDefaults(dst)
+	if !ok {
+		return
+	}
+
+	seen := make(map[structDefaultFrame]struct{})
+	s.prepareStructObjectForDefaults(data, s, structType, seen)
+}
+
+func structTypeForDefaults(dst any) (reflect.Type, bool) {
+	dstType := reflect.TypeOf(dst)
+	if dstType == nil || dstType.Kind() != reflect.Pointer {
+		return nil, false
+	}
+
+	structType := dstType.Elem()
+	for structType.Kind() == reflect.Pointer {
+		structType = structType.Elem()
+	}
+
+	if structType.Kind() != reflect.Struct {
+		return nil, false
+	}
+
+	return structType, true
+}
+
+func (s *Schema) prepareStructObjectForDefaults(data map[string]any, schema *Schema, structType reflect.Type, seen map[structDefaultFrame]struct{}) {
+	if schema == nil || structType.Kind() != reflect.Struct {
+		return
+	}
+
+	frame := structDefaultFrame{
+		schema:     schema,
+		structType: structType,
+		dataPtr:    reflect.ValueOf(data).Pointer(),
+	}
+
+	if _, ok := seen[frame]; ok {
+		return
+	}
+	seen[frame] = struct{}{}
+	defer delete(seen, frame)
+
+	if schema.ResolvedRef != nil {
+		s.prepareStructObjectForDefaults(data, schema.ResolvedRef, structType, seen)
+	}
+
+	if schema.Properties == nil {
+		return
+	}
+
+	fieldCache := getFieldCache(structType)
+	for propName, propSchema := range *schema.Properties {
+		fieldInfo, ok := fieldCache.FieldsByName[propName]
+		if !ok {
+			continue
+		}
+
+		fieldType := fieldInfo.Type
+		if fieldType.Kind() != reflect.Struct || fieldType == reflect.TypeFor[time.Time]() {
+			continue
+		}
+
+		propData, exists := data[propName]
+		if !exists {
+			if schemaHasOwnDefault(propSchema, map[*Schema]struct{}{}) || !schemaHasNestedDefault(propSchema, map[*Schema]struct{}{}) {
+				continue
+			}
+
+			propData = map[string]any{}
+			data[propName] = propData
+		}
+
+		propObject, ok := propData.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		s.prepareStructObjectForDefaults(propObject, propSchema, fieldType, seen)
+	}
+}
+
+func schemaHasOwnDefault(schema *Schema, seen map[*Schema]struct{}) bool {
+	if schema == nil {
+		return false
+	}
+	if _, ok := seen[schema]; ok {
+		return false
+	}
+	seen[schema] = struct{}{}
+
+	if schema.Default != nil {
+		return true
+	}
+
+	if schema.ResolvedRef != nil && schemaHasOwnDefault(schema.ResolvedRef, seen) {
+		return true
+	}
+
+	for _, subSchema := range schema.AnyOf {
+		if schemaHasOwnDefault(subSchema, seen) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func schemaHasNestedDefault(schema *Schema, seen map[*Schema]struct{}) bool {
+	if schema == nil {
+		return false
+	}
+	if _, ok := seen[schema]; ok {
+		return false
+	}
+	seen[schema] = struct{}{}
+
+	if schema.ResolvedRef != nil && schemaHasNestedDefault(schema.ResolvedRef, seen) {
+		return true
+	}
+
+	for _, subSchema := range schema.AnyOf {
+		if schemaHasNestedDefault(subSchema, seen) {
+			return true
+		}
+	}
+
+	if schema.Properties == nil {
+		return false
+	}
+
+	for _, propSchema := range *schema.Properties {
+		if schemaHasOwnDefault(propSchema, make(map[*Schema]struct{})) {
+			return true
+		}
+		if schemaHasNestedDefault(propSchema, seen) {
+			return true
+		}
+	}
+
+	return false
+}
+
+type defaultApplicationFrame struct {
+	schema  *Schema
+	dataPtr uintptr
+}
+
+type defaultExpansionEdge struct {
+	schema   *Schema
+	property string
+	target   *Schema
+}
+
+type defaultApplicationState struct {
+	activeFrames   map[defaultApplicationFrame]struct{}
+	expansionEdges map[defaultExpansionEdge]int
+}
+
+func newDefaultApplicationState() *defaultApplicationState {
+	return &defaultApplicationState{
+		activeFrames:   make(map[defaultApplicationFrame]struct{}),
+		expansionEdges: make(map[defaultExpansionEdge]int),
+	}
+}
+
+func (s *defaultApplicationState) enter(schema *Schema, data map[string]any) bool {
+	frame := defaultApplicationFrame{
+		schema:  schema,
+		dataPtr: reflect.ValueOf(data).Pointer(),
+	}
+
+	if _, exists := s.activeFrames[frame]; exists {
+		return false
+	}
+
+	s.activeFrames[frame] = struct{}{}
+	return true
+}
+
+func (s *defaultApplicationState) leave(schema *Schema, data map[string]any) {
+	frame := defaultApplicationFrame{
+		schema:  schema,
+		dataPtr: reflect.ValueOf(data).Pointer(),
+	}
+
+	delete(s.activeFrames, frame)
+}
+
+func (s *defaultApplicationState) enterDefaultExpansion(parent *Schema, propName string, target *Schema) bool {
+	edge := defaultExpansionEdge{
+		schema:   parent,
+		property: propName,
+		target:   target,
+	}
+
+	s.expansionEdges[edge]++
+	return s.expansionEdges[edge] == 1
+}
+
+func (s *defaultApplicationState) leaveDefaultExpansion(parent *Schema, propName string, target *Schema) {
+	edge := defaultExpansionEdge{
+		schema:   parent,
+		property: propName,
+		target:   target,
+	}
+
+	count := s.expansionEdges[edge]
+	if count <= 1 {
+		delete(s.expansionEdges, edge)
+		return
+	}
+
+	s.expansionEdges[edge] = count - 1
+}
+
 // applyDefaults recursively applies default values from schema to data
 func (s *Schema) applyDefaults(data map[string]any, schema *Schema) error {
-	if schema == nil || schema.Properties == nil {
+	state := newDefaultApplicationState()
+	return s.applyDefaultsWithState(data, schema, state)
+}
+
+func (s *Schema) applyDefaultsWithState(data map[string]any, schema *Schema, state *defaultApplicationState) error {
+	if schema == nil {
+		return nil
+	}
+
+	if !state.enter(schema, data) {
+		// Already processing this schema for this same object node
+		// Avoid re-entering reference cycles on identical data
+		return nil
+	}
+	defer state.leave(schema, data)
+
+	if schema.ResolvedRef != nil {
+		if err := s.applyDefaultsWithState(data, schema.ResolvedRef, state); err != nil {
+			return fmt.Errorf("%w: $ref '%s': %w", ErrDefaultApplication, schema.Ref, err)
+		}
+	}
+
+	if schema.Properties == nil {
 		return nil
 	}
 
 	// Apply defaults for current level properties
 	for propName, propSchema := range *schema.Properties {
-		if err := s.applyPropertyDefaults(data, propName, propSchema); err != nil {
+		if err := s.applyPropertyDefaults(data, schema, propName, propSchema, state); err != nil {
 			return fmt.Errorf("%w: property '%s': %w", ErrDefaultApplication, propName, err)
 		}
 	}
@@ -204,36 +452,42 @@ func (s *Schema) applyDefaults(data map[string]any, schema *Schema) error {
 }
 
 // applyPropertyDefaults applies defaults for a single property
-func (s *Schema) applyPropertyDefaults(data map[string]any, propName string, propSchema *Schema) error {
+func (s *Schema) applyPropertyDefaults(data map[string]any, parentSchema *Schema, propName string, propSchema *Schema, state *defaultApplicationState) error {
+	defaultCreatedObject := false
+
 	// Check if we need to handle anyOf schema (common for pointer fields)
 	if len(propSchema.AnyOf) > 0 {
 		// Look for a default value in the anyOf schemas
 		// Typically for pointer fields: [{"type": "string", "default": "..."}, {"type": "null"}]
 		for _, subSchema := range propSchema.AnyOf {
-			if subSchema.Default != nil {
-				// Check if property doesn't exist or is null
-				propData, exists := data[propName]
-				if !exists || propData == nil {
-					// Apply the default from the subschema
-					defaultValue, err := s.evaluateDefaultValue(subSchema.Default)
-					if err != nil {
-						return fmt.Errorf("%w: property '%s': %w", ErrDefaultEvaluation, propName, err)
-					}
-					data[propName] = defaultValue
-					break // Use the first default found
-				}
+			defaultValue, hasDefault, err := s.resolveDefaultValue(subSchema)
+			if err != nil {
+				return fmt.Errorf("%w: property '%s': %w", ErrDefaultEvaluation, propName, err)
+			}
+			if !hasDefault {
+				continue
+			}
+
+			// Check if property doesn't exist or is null
+			propData, exists := data[propName]
+			if !exists || propData == nil {
+				data[propName] = defaultValue
+				_, defaultCreatedObject = defaultValue.(map[string]any)
+				break // Use the first default found
 			}
 		}
 	}
 
 	// Set default value if property doesn't exist (for non-anyOf schemas)
-	if _, exists := data[propName]; !exists && propSchema.Default != nil {
-		// Try to evaluate dynamic default value
-		defaultValue, err := s.evaluateDefaultValue(propSchema.Default)
+	if _, exists := data[propName]; !exists {
+		defaultValue, hasDefault, err := s.resolveDefaultValue(propSchema)
 		if err != nil {
 			return fmt.Errorf("%w: property '%s': %w", ErrDefaultEvaluation, propName, err)
 		}
-		data[propName] = defaultValue
+		if hasDefault {
+			data[propName] = defaultValue
+			_, defaultCreatedObject = defaultValue.(map[string]any)
+		}
 	}
 
 	propData, exists := data[propName]
@@ -243,15 +497,96 @@ func (s *Schema) applyPropertyDefaults(data map[string]any, propName string, pro
 
 	// Recursively apply defaults for nested objects
 	if objData, ok := propData.(map[string]any); ok {
-		return s.applyDefaults(objData, propSchema)
+		if defaultCreatedObject {
+			if !state.enterDefaultExpansion(parentSchema, propName, propSchema) {
+				return fmt.Errorf("%w: property '%s' expansion loop detected", ErrDefaultReferenceLoop, propName)
+			}
+
+			err := s.applyDefaultsWithState(objData, propSchema, state)
+			state.leaveDefaultExpansion(parentSchema, propName, propSchema)
+			return err
+		}
+
+		return s.applyDefaultsWithState(objData, propSchema, state)
 	}
 
 	// Handle arrays
 	if arrayData, ok := propData.([]any); ok && propSchema.Items != nil {
-		return s.applyArrayDefaults(arrayData, propSchema.Items, propName)
+		return s.applyArrayDefaults(arrayData, propSchema.Items, propName, state)
 	}
 
 	return nil
+}
+
+func (s *Schema) resolveDefaultValue(schema *Schema) (any, bool, error) {
+	if schema == nil {
+		return nil, false, nil
+	}
+
+	visited := make(map[*Schema]struct{})
+	current := schema
+	for current != nil {
+		if _, seen := visited[current]; seen {
+			return nil, false, nil
+		}
+		visited[current] = struct{}{}
+
+		if current.Default != nil {
+			defaultValue, err := s.evaluateDefaultValue(current.Default)
+			if err != nil {
+				return nil, false, err
+			}
+			return cloneDefaultValue(defaultValue), true, nil
+		}
+
+		current = current.ResolvedRef
+	}
+
+	return nil, false, nil
+}
+
+func cloneDefaultValue(value any) any {
+	cloned := cloneDefaultValueReflect(reflect.ValueOf(value))
+	if !cloned.IsValid() {
+		return nil
+	}
+	return cloned.Interface()
+}
+
+func cloneDefaultValueReflect(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return value
+		}
+		return cloneDefaultValueReflect(value.Elem())
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+
+		clone := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for _, key := range value.MapKeys() {
+			clone.SetMapIndex(key, cloneDefaultValueReflect(value.MapIndex(key)))
+		}
+		return clone
+	case reflect.Slice:
+		if value.IsNil() {
+			return value
+		}
+
+		clone := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := range value.Len() {
+			clone.Index(i).Set(cloneDefaultValueReflect(value.Index(i)))
+		}
+		return clone
+	default:
+		return value
+	}
 }
 
 // evaluateDefaultValue evaluates a default value, checking if it's a function call
@@ -264,11 +599,7 @@ func (s *Schema) evaluateDefaultValue(defaultValue any) (any, error) {
 	}
 
 	// Try to parse as function call
-	call, err := parseFunctionCall(defaultStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrFunctionCallParsing, err)
-	}
-
+	call := parseFunctionCall(defaultStr)
 	if call == nil {
 		// Not a function call, use literal value
 		return defaultStr, nil
@@ -299,10 +630,10 @@ func (s *Schema) evaluateDefaultValue(defaultValue any) (any, error) {
 }
 
 // applyArrayDefaults applies defaults for array items
-func (s *Schema) applyArrayDefaults(arrayData []any, itemSchema *Schema, propName string) error {
+func (s *Schema) applyArrayDefaults(arrayData []any, itemSchema *Schema, propName string, state *defaultApplicationState) error {
 	for _, item := range arrayData {
 		if itemMap, ok := item.(map[string]any); ok {
-			if err := s.applyDefaults(itemMap, itemSchema); err != nil {
+			if err := s.applyDefaultsWithState(itemMap, itemSchema, state); err != nil {
 				return fmt.Errorf("%w: array item in '%s': %w", ErrArrayDefaultApplication, propName, err)
 			}
 		}
@@ -314,7 +645,6 @@ func (s *Schema) applyArrayDefaults(arrayData []any, itemSchema *Schema, propNam
 func (s *Schema) unmarshalToDestination(dst any, data map[string]any) error {
 	dstVal := reflect.ValueOf(dst).Elem()
 
-	//nolint:exhaustive,nolintlint // Only handling Map, Struct, and Ptr kinds - other types use default fallback
 	switch dstVal.Kind() {
 	case reflect.Map:
 		return s.unmarshalToMap(dstVal, data)
@@ -454,21 +784,15 @@ func (s *Schema) setPointerValue(fieldVal reflect.Value, valueVal reflect.Value,
 
 // setSliceValue handles slice field assignment
 func (s *Schema) setSliceValue(fieldVal reflect.Value, value any) error {
-	// Handle []any from JSON unmarshaling
 	if sliceVal, ok := value.([]any); ok {
-		// Create a new slice of the correct type
 		sliceType := fieldVal.Type()
 		newSlice := reflect.MakeSlice(sliceType, 0, len(sliceVal))
 
-		// Convert each element
 		elemType := sliceType.Elem()
 		for _, item := range sliceVal {
-			// Create a new element of the correct type
 			elemVal := reflect.New(elemType).Elem()
 
-			// Set the value for the element
 			if err := s.setFieldValue(elemVal, item); err != nil {
-				// If direct conversion fails, try JSON round-trip
 				jsonData, encErr := s.Compiler().jsonEncoder(item)
 				if encErr != nil {
 					return fmt.Errorf("%w: %w", ErrNestedValueEncode, encErr)
@@ -485,7 +809,6 @@ func (s *Schema) setSliceValue(fieldVal reflect.Value, value any) error {
 		return nil
 	}
 
-	// Fallback to JSON round-trip for other cases
 	return s.setComplexValue(fieldVal, value)
 }
 

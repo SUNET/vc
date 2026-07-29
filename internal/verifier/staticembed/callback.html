@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifier</title>
+    <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+</head>
+<body>
+    <section class="section" x-data="app">
+        <div class="container" {{if .}}{{if le (len .CredentialData) 1}}style="max-width: 500px;"{{end}}{{else}}style="max-width: 500px;"{{end}}>
+            <h1 class="title has-text-weight-bold is-size-2 is-flex is-justify-content-center is-align-items-center is-gap-2" x-ref="title">
+                <svg width="40" height="40" aria-label="SUNET">
+                    <image href="/static/logo.png" width="40" height="40"></image>
+                </svg>
+                <span>Verifier</span>
+            </h1>
+            <div class="box container">
+                <div class="block is-flex is-justify-content-center is-align-items-center is-flex-direction-column is-fullwidth">
+                    {{if .}}
+                        <svg class="has-text-success mb-2" style="width:100px" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"></path><path d="m9 11 3 3L22 4"></path></svg>
+                        <p class="title is-size-4 has-text-success">Verification succeeded</p>
+                    {{else}}
+                        <svg class="has-text-danger mb-2" style="width:100px" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-x-icon lucide-circle-x"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                        <p class="title is-size-4 has-text-danger">Verification failed</p>
+                    {{end}}
+                </div>
+                {{if .}}
+                    <div class="columns is-multiline is-centered">
+                    {{range $idx, $cred := .CredentialData}}
+                        <div class="column {{if gt (len $.CredentialData) 1}}is-half-desktop{{end}}">
+                        <div class="box" style="overflow:hidden;">
+                            <h2 class="title is-size-5 mb-2">Credential claims — {{$cred.Scope}}</h2>
+                            {{if $cred.Credential}}
+                                <div class="table-container">
+                                    <table class="table is-fullwidth is-hoverable">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        {{claimsTree $cred.Credential}}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {{else}}
+                                <p><em>No claims available.</em></p>
+                            {{end}}
+                            <details class="vc-data-block-details">
+                                <summary>Credential data</summary>
+                                <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;white-space:pre-wrap;word-break:break-all;"><code>{{toJSON $cred.Credential}}</code></pre>
+                            </details>
+                        </div>
+                        </div>
+                    {{end}}
+                    </div>
+                {{end}}
+            </div>
+            <div class="buttons is-centered">
+                <a href="/" class="button is-outlined is-black is-flex is-gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-house-icon lucide-house"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                    <span>
+                        Verifier start page
+                    </span>
+                </a>
+            </div>
+        </div>
+    </section>
+</body>
+</html>

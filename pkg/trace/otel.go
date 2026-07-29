@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -99,7 +100,8 @@ func newNoOpExporter() (sdktrace.SpanExporter, error) {
 }
 
 func newExporter(ctx context.Context, cfg *model.Cfg) (sdktrace.SpanExporter, error) {
-	return otlptracehttp.New(ctx,
+	return otlptracehttp.New(
+		ctx,
 		otlptracehttp.WithEndpoint(cfg.Common.Tracing.Addr),
 		otlptracehttp.WithInsecure(),
 		otlptracehttp.WithTimeout(time.Duration(cfg.Common.Tracing.Timeout)*time.Second),

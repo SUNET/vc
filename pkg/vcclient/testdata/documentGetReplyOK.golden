@@ -2,24 +2,8 @@
     "data": {
         "meta": {
             "authentic_source": "SUNET",
-            "document_version": "1.0.0",
-            "vct": "urn:eudi:ehic:1",
-            "document_id": "test_document_id",
-            "real_data": false,
-            "collect": {
-                "id": "test_collect_id",
-                "valid_until": 1731767173
-            },
-            "revocation": {
-                "id": "test_revocation_id",
-                "reference": {
-                    "authentic_source": "SUNET",
-                    "vct": "urn:eudi:ehic:1",
-                    "document_id": "test_document_id"
-                }
-            },
-            "credential_valid_from": 695706629,
-            "credential_valid_to": -1730367911
+            "scope": "ehic",
+            "document_id": "test_document_id"
         },
         "document_data": {
             "personal_administrative_number": "123123123",

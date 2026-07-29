@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -62,10 +64,33 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 		return nil, err
 	}
 
-	s.log.Debug("endpointAuthorize", "scope", reply.Scope, "auth_method", s.cfg.GetCredentialConstructorAuthMethod(reply.Scope))
+	authProvider, credSource, err := s.authProviders.Selector().Select(reply.Scope, &s.cfg.APIGW.DataSources)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "no usable auth provider for scope", "scope", reply.Scope)
+		return nil, err
+	}
+	s.log.Debug("endpointAuthorize", "scope", reply.Scope, "auth_provider", authProvider, "data_source", credSource.DataSource)
+
+	// Persist the auth provider into the authorization context so the
+	// credential endpoint (which has no gin session) can read it back.
+	authCtx, err := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: reply.SessionID})
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, fmt.Errorf("failed to get auth context for session %s: %w", reply.SessionID, err)
+	}
+	authCtx.AuthProvider = authProvider
+	authCtx.DataSource = string(credSource.DataSource)
+	authCtx.RemoteName = credSource.RemoteName
+	if err := s.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, fmt.Errorf("failed to update auth provider on session %s: %w", reply.SessionID, err)
+	}
 
 	session.Set("scope", reply.Scope)
-	session.Set("auth_method", s.cfg.GetCredentialConstructorAuthMethod(reply.Scope))
+	session.Set("auth_provider", authProvider)
+	session.Set("data_source", string(credSource.DataSource))
+	session.Set("remote_name", credSource.RemoteName)
 	session.Set("request_uri", request.RequestURI)
 	session.Set("session_id", reply.SessionID)
 	session.Set("client_id", reply.ClientID)
@@ -164,12 +189,12 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 	defer span.End()
 
 	session := sessions.Default(c)
-	authMethod, ok := session.Get("auth_method").(string)
-	s.log.Debug("endpointOAuthAuthorizationConsent", "authMethod", authMethod)
+	authProvider, ok := session.Get("auth_provider").(string)
+	s.log.Debug("endpointOAuthAuthorizationConsent", "authProvider", authProvider)
 	if !ok {
-		err := errors.New("auth_method not found in session")
+		err := errors.New("auth_provider not found in session")
 		span.SetStatus(codes.Error, err.Error())
-		s.log.Error(err, "auth_method not found in session")
+		s.log.Error(err, "auth_provider not found in session")
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, err
 	}
@@ -188,7 +213,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	if authMethod == model.AuthMethodOpenID4VP {
+	if authProvider == model.AuthProviderOpenID4VP {
 		request := &apiv1.OauthAuthorizationConsentRequest{
 			SessionID: sessionID,
 		}
@@ -207,26 +232,32 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		redirectURL = reply.RedirectURL
 	}
 
-	if authMethod == model.AuthMethodSAML {
-		if s.samlSPService == nil {
-			err := errors.New("SAML auth method requested but SAML is not enabled")
+	if authProvider == model.AuthProviderSAML {
+		if s.authProviders.SAML() == nil {
+			err := errors.New("SAML auth provider requested but SAML is not enabled")
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 
 		// Skip re-initiating auth if the callback already stored documents.
 		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
-			scope, _ := session.Get("scope").(string)
-			if s.cfg.GetCredentialConstructor(scope) == nil {
+			scope, ok := session.Get("scope").(string)
+			if !ok {
+				err := errors.New("scope not found in session")
+				span.SetStatus(codes.Error, err.Error())
+				c.AbortWithStatus(http.StatusBadRequest)
+				return nil, err
+			}
+			if s.cfg.GetCredentialMetadata(scope) == nil {
 				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
 			}
 
 			// Determine the IdP entity ID: use static IdP or default from config
-			idpEntityID := s.samlSPService.GetStaticIDPEntityID()
+			idpEntityID := s.authProviders.SAML().GetStaticIDPEntityID()
 
-			authReq, err := s.samlSPService.InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID)
+			authReq, err := s.authProviders.SAML().InitiateAuthForVCI(ctx, idpEntityID, scope, sessionID)
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
@@ -238,23 +269,30 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 	}
 
-	if authMethod == model.AuthMethodOIDC {
-		if s.oidcrpService == nil {
-			err := errors.New("OIDC auth method requested but OIDC RP is not enabled")
+	if authProvider == model.AuthProviderOIDC {
+		if s.authProviders.OIDC() == nil {
+			err := errors.New("OIDC auth provider requested but OIDC RP is not enabled")
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 
 		// Skip re-initiating auth if the callback already stored documents.
 		if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
-			scope, _ := session.Get("scope").(string)
-			if s.cfg.GetCredentialConstructor(scope) == nil {
+			scope, ok := session.Get("scope").(string)
+			if !ok {
+				err := errors.New("scope not found in session")
+				span.SetStatus(codes.Error, err.Error())
+				c.AbortWithStatus(http.StatusBadRequest)
+				return nil, err
+			}
+			if s.cfg.GetCredentialMetadata(scope) == nil {
 				err := fmt.Errorf("scope %q not configured for credential issuance", scope)
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
 			}
 
-			authReq, err := s.oidcrpService.InitiateAuthForVCI(ctx, scope, sessionID)
+			s.log.Debug("consent: initiating OIDC auth for VCI", "scope", scope, "session_id", sessionID)
+			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID)
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
@@ -266,12 +304,47 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 	}
 
+	// After authentication, check if the credential's data source is external_api
+	// and fetch the data from the remote if needed.
+	if !s.apiv1.HasVCIDocuments(ctx, sessionID) {
+		dataSource := model.DataSourceType(session.Get("data_source").(string))
+		if dataSource == model.DataSourceExternalAPI {
+			if s.dataSources.EduAPI() == nil {
+				scope, _ := session.Get("scope").(string)
+				err := fmt.Errorf("external API data source requested for %q but no remote is enabled", scope)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			// Read person_id from auth context cache (set by SAML ACS / OIDC callback)
+			authCtx, lookupErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
+			if lookupErr != nil {
+				span.SetStatus(codes.Error, "auth context lookup failed")
+				return nil, fmt.Errorf("failed to get auth context for session %s: %w", sessionID, lookupErr)
+			}
+			if authCtx.Identifier == "" {
+				err := errors.New("identifier not found in auth context for external API flow")
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			scope, _ := session.Get("scope").(string)
+			if err := s.dataSources.EduAPI().FetchAndStoreForVCI(ctx, authCtx.Identifier, scope, sessionID); err != nil {
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			s.log.Debug("External API data fetched and stored", "session_id", sessionID, "scope", scope, "remote", authCtx.RemoteName)
+		}
+	}
+
 	c.HTML(http.StatusOK, "consent.html", gin.H{
-		"AuthMethod":  authMethod,
+		"AuthMethod":  authProvider,
 		"RedirectURL": redirectURL,
 	})
 	return nil, nil
 }
+
 func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context, c *gin.Context) (any, error) {
 	session := sessions.Default(c)
 

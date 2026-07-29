@@ -17,7 +17,7 @@ func TestResponseParameters_Validate(t *testing.T) {
 	}{
 		{
 			name: "valid response with SD-JWT VP token",
-			response: &ResponseParameters{
+			response: &ResponseParameters{ // #nosec G101
 				VPToken: "eyJhbGciOiJFUzI1NiIsImtpZCI6ImtleS0xIiwidHlwIjoiZGMrc2Qtand0In0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlLmNvbSIsInZjdCI6IlRlc3RDcmVkZW50aWFsIiwiZ2l2ZW5fbmFtZSI6IkpvaG4iLCJmYW1pbHlfbmFtZSI6IkRvZSJ9.signature",
 				State:   "test-state",
 			},
@@ -224,9 +224,9 @@ func TestResponseParameters_RoundTrip(t *testing.T) {
 func TestVPResponse(t *testing.T) {
 	t.Run("create and marshal", func(t *testing.T) {
 		vpResp := VPResponse{
-			VPToken: map[string]string{
-				"credential_1": "token1",
-				"credential_2": "token2",
+			VPToken: map[string][]string{
+				"credential_1": {"token1"},
+				"credential_2": {"token2"},
 			},
 			State: "test-state",
 		}

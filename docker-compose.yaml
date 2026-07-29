@@ -7,44 +7,19 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
+      - ./bootstrapping/:/bootstrapping/:ro
     depends_on:
       - mongo
+      - mock-oauth2-server
     networks:
       vc-dev-net:
         ipv4_address: 172.16.50.2
     environment:
       - "VC_CONFIG_YAML=config.yaml"
       # Trust the dev rootCA for inter-service TLS (Go reads SSL_CERT_FILE)
-      - "SSL_CERT_FILE=/pki/rootCA.crt"
-
-  ui:
-    container_name: "vc_dev_ui"
-    hostname: "ui.vc.docker"
-    image: docker.sunet.se/iam_vc/ui:local
-    restart: always
-    volumes:
-      - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
-    depends_on:
-      #      apigw:
-      #        condition: service_started
-      #      mockas:
-      #        condition: service_started
-      #      kafka0:
-      #        condition: service_healthy
-      - apigw
-      - mockas
-      - verifier
-      #- kafka0
-      #- kafka1
-    networks:
-      vc-dev-net:
-        ipv4_address: 172.16.50.50
-    environment:
-      - "VC_CONFIG_YAML=config.yaml"
       - "SSL_CERT_FILE=/pki/rootCA.crt"
 
   issuer:
@@ -54,7 +29,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
       - ./metadata/:/metadata/:ro
       - /var/log/sunet:/var/log/sunet
     depends_on:
@@ -72,7 +47,7 @@ services:
     image: docker.sunet.se/iam_vc/verifier:local
     restart: always
     volumes:
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
       - ./developer_tools/pki/:/pki:ro
       - ./metadata/:/metadata/:ro
       - ./internal/verifier/static:/static:ro
@@ -93,7 +68,7 @@ services:
     restart: always
     volumes:
       - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
     depends_on:
       - mongo
     networks:
@@ -103,24 +78,20 @@ services:
       - "VC_CONFIG_YAML=config.yaml"
       - "SSL_CERT_FILE=/pki/rootCA.crt"
 
-  mockas:
-    container_name: "vc_dev_mockas"
-    hostname: "mockas.vc.docker"
-    image: docker.sunet.se/iam_vc/mockas:local
+
+  mock-oauth2-server:
+    container_name: "vc_dev_mock_oauth2"
+    hostname: "mock-oauth2.vc.docker"
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
     restart: always
-    volumes:
-      - ./developer_tools/pki/:/pki:ro
-      - ./config_minimal.yaml:/config.yaml:ro
-    depends_on:
-      apigw:
-        condition: service_started
+    expose:
+      - 8080
     networks:
       vc-dev-net:
-        ipv4_address: 172.16.50.13
+        ipv4_address: 172.16.50.30
     environment:
-      - "VC_CONFIG_YAML=config.yaml"
-      - "SSL_CERT_FILE=/pki/rootCA.crt"
-
+      - "SERVER_PORT=8080"
+      - 'JSON_CONFIG={"interactiveLogin":true,"httpServer":"NettyWrapper","tokenCallbacks":[]}'
 
   mongo:
     image: mongo:7.0

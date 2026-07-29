@@ -19,7 +19,7 @@ func TestCredentialOffer(t *testing.T) {
 	}{
 		{
 			name: "authorization_code",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"PDA1Credential",
@@ -34,7 +34,7 @@ func TestCredentialOffer(t *testing.T) {
 		},
 		{
 			name: "pre-authorized_code",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://credential-issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"UniversityDegreeCredential",
@@ -43,7 +43,7 @@ func TestCredentialOffer(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": &GrantPreAuthorizedCode{
 						PreAuthorizedCode: "oaKazRN8I0IbtZ0C7JuMn5",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "numeric",
 							Length:      4,
 							Description: "Please provide the one-time code that was sent via e-mail",
@@ -79,9 +79,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 		expectedGrantType          string
 		expectedIssuerStatePattern string
 	}{
-		{
+		{ // #nosec G101
 			name: "authorization_code_with_collect_id_vct_authentic_source",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -101,9 +101,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedGrantType:          "authorization_code",
 			expectedIssuerStatePattern: "collect_id=test-collect-123&vct=TestCredential&authentic_source=ExampleSource",
 		},
-		{
+		{ // #nosec G101
 			name: "authorization_code_with_uuid_collect_id",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"PDA1Credential",
@@ -123,9 +123,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedGrantType:          "authorization_code",
 			expectedIssuerStatePattern: "collect_id=d779badf-f333-434a-8bdf-fc0d419231ef&vct=PDA1&authentic_source=SUNET",
 		},
-		{
+		{ // #nosec G101
 			name: "authorization_code_with_multiple_credentials",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"CredentialType1",
@@ -146,9 +146,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedConfigurationIDs: []string{"CredentialType1", "CredentialType2", "CredentialType3"},
 			expectedGrantType:        "authorization_code",
 		},
-		{
+		{ // #nosec G101
 			name: "authorization_code_with_special_characters_in_issuer_state",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -167,9 +167,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedConfigurationIDs: []string{"TestCredential"},
 			expectedGrantType:        "authorization_code",
 		},
-		{
+		{ // #nosec G101
 			name: "pre_authorized_code_grant",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -177,7 +177,7 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": GrantPreAuthorizedCode{
 						PreAuthorizedCode: "test-pre-auth-code-123",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "numeric",
 							Length:      6,
 							Description: "Enter the 6-digit code",
@@ -193,9 +193,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedConfigurationIDs: []string{"TestCredential"},
 			expectedGrantType:        "urn:ietf:params:oauth:grant-type:pre-authorized_code",
 		},
-		{
+		{ // #nosec G101
 			name: "no_grants",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -209,9 +209,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedCredentialIssuer: "https://issuer.example.com",
 			expectedConfigurationIDs: []string{"TestCredential"},
 		},
-		{
+		{ // #nosec G101
 			name: "empty_grants",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -225,9 +225,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedCredentialIssuer: "https://issuer.example.com",
 			expectedConfigurationIDs: []string{"TestCredential"},
 		},
-		{
+		{ // #nosec G101
 			name: "authorization_code_with_empty_issuer_state",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -247,9 +247,9 @@ func TestCredentialOfferParameters_CredentialOffer(t *testing.T) {
 			expectedGrantType:          "authorization_code",
 			expectedIssuerStatePattern: "",
 		},
-		{
+		{ // #nosec G101
 			name: "authorization_code_with_authorization_server",
-			credentialOfferParameter: &CredentialOfferParameters{
+			credentialOfferParameter: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -341,7 +341,7 @@ func TestCredentialOfferParameters_CredentialOffer_RoundTrip(t *testing.T) {
 	}{
 		{
 			name: "round_trip_authorization_code",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -355,7 +355,7 @@ func TestCredentialOfferParameters_CredentialOffer_RoundTrip(t *testing.T) {
 		},
 		{
 			name: "round_trip_pre_authorized_code",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.example.com",
 				CredentialConfigurationIDs: []string{
 					"UniversityDegree",
@@ -363,7 +363,7 @@ func TestCredentialOfferParameters_CredentialOffer_RoundTrip(t *testing.T) {
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": GrantPreAuthorizedCode{
 						PreAuthorizedCode: "test-code-xyz",
-						TXCode: TXCode{
+						TXCode: &TXCode{
 							InputMode:   "text",
 							Length:      8,
 							Description: "Enter the code",
@@ -403,13 +403,13 @@ func TestParseCredentialOffer(t *testing.T) {
 		{
 			name: "espoo bootcamp",
 			have: "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fagent.ssi.dev.sphereon.com%2Fdid-web%2Foid4vci%22%2C%22credential_configuration_ids%22%3A%5B%22PensionSdJwt%22%5D%2C%22grants%22%3A%7B%22urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Apre-authorized_code%22%3A%7B%22pre-authorized_code%22%3A%22d270fee1-9185-4e60-9901-d291e1338d7a%22%7D%7D%7D",
-			want: &CredentialOfferParameters{
+			want: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer:           "https://agent.ssi.dev.sphereon.com/did-web/oid4vci",
 				CredentialConfigurationIDs: []string{"PensionSdJwt"},
 				Grants: map[string]any{
 					"urn:ietf:params:oauth:grant-type:pre-authorized_code": &GrantPreAuthorizedCode{
 						PreAuthorizedCode:   "d270fee1-9185-4e60-9901-d291e1338d7a",
-						TXCode:              TXCode{},
+						TXCode:              nil,
 						AuthorizationServer: "",
 					},
 				},
@@ -434,10 +434,10 @@ func TestCredentialOfferQR(t *testing.T) {
 		walletURL             string
 		expectedCredentialURL string
 	}{
-		{
+		{ // #nosec G101
 			name:      "openid-credential-offer-default",
 			walletURL: "",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"PDA1Credential",
@@ -450,10 +450,10 @@ func TestCredentialOfferQR(t *testing.T) {
 			},
 			expectedCredentialURL: "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22issuer.sunet.se%22%2C%22credential_configuration_ids%22%3A%5B%22PDA1Credential%22%5D%2C%22grants%22%3A%7B%22authorization_code%22%3A%7B%22issuer_state%22%3A%22collect_id%3Dcollect_id_1%5Cu0026vct%3DPDA1%5Cu0026authentic_source%3Dtest_authentic_source%22%7D%7D%7D",
 		},
-		{
+		{ // #nosec G101
 			name:      "web-wallet-https",
 			walletURL: "https://wallet.dc4eu.eu/cb",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://satosa-test-1.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"EHICCredential",
@@ -487,15 +487,15 @@ func TestCredentialOfferQR(t *testing.T) {
 
 func TestCredentialOfferURIQR(t *testing.T) {
 	tts := []struct {
-		name              string
-		parameters        *CredentialOfferParameters
-		walletURL         string
-		issuerURL         string
-		expectedProtocol  string
+		name             string
+		parameters       *CredentialOfferParameters
+		walletURL        string
+		issuerURL        string
+		expectedProtocol string
 	}{
 		{
 			name: "default-protocol",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"PDA1Credential",
@@ -512,7 +512,7 @@ func TestCredentialOfferURIQR(t *testing.T) {
 		},
 		{
 			name: "web-wallet",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"PDA1Credential",
@@ -558,7 +558,7 @@ func TestCredentialOfferURI(t *testing.T) {
 	}{
 		{
 			name: "",
-			parameters: &CredentialOfferParameters{
+			parameters: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "https://issuer.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"PDA1Credential",
@@ -601,7 +601,7 @@ func TestUnpackCredentialOffer(t *testing.T) {
 		{
 			name:  "authorization_code",
 			offer: "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22http%3A%2F%2Fvc_dev_apigw:8080%22%2C%22credential_configuration_ids%22%3A%5B%22EHICCredential%22%5D%2C%22grants%22%3A%7B%22authorization_code%22%3A%7B%22issuer_state%22%3A%22collect_id%3Dcdd81c80-f4ca-41fc-a6a6-6b4e322a77d7%5Cu0026vct%3DEHIC%5Cu0026authentic_source%3DSUNET%22%7D%7D%7D",
-			want: &CredentialOfferParameters{
+			want: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "http://vc_dev_apigw:8080",
 				CredentialConfigurationIDs: []string{
 					"EHICCredential",
@@ -632,7 +632,7 @@ func TestCredentialOfferUriUUID(t *testing.T) {
 	}{
 		{
 			name: "t1",
-			have: &CredentialOfferParameters{
+			have: &CredentialOfferParameters{ // #nosec G101
 				CredentialIssuer: "http://test.sunet.se",
 				CredentialConfigurationIDs: []string{
 					"TestCredential",
@@ -658,4 +658,91 @@ func TestCredentialOfferUriUUID(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestNewCredentialOffer(t *testing.T) {
+	t.Run("pre-authorized_code", func(t *testing.T) {
+		result, err := NewCredentialOffer("https://issuer.example.com", "TestCredential", GrantTypePreAuthorizedCode)
+		assert.NoError(t, err)
+
+		// ID is set internally
+		assert.NotEmpty(t, result.ID)
+
+		// Credential offer fields are populated
+		assert.Equal(t, "https://issuer.example.com", result.CredentialIssuer)
+		assert.Equal(t, []string{"TestCredential"}, result.CredentialConfigurationIDs)
+		assert.Contains(t, result.Grants, GrantTypePreAuthorizedCode)
+
+		// The grant's pre-authorized_code matches the internal ID
+		grantBytes, err := json.Marshal(result.Grants[GrantTypePreAuthorizedCode])
+		assert.NoError(t, err)
+		var grant GrantPreAuthorizedCode
+		err = json.Unmarshal(grantBytes, &grant)
+		assert.NoError(t, err)
+		assert.Equal(t, result.ID, grant.PreAuthorizedCode)
+
+		// ID must not appear in the JSON wire format
+		wireBytes, err := json.Marshal(result)
+		assert.NoError(t, err)
+		var wireMap map[string]any
+		err = json.Unmarshal(wireBytes, &wireMap)
+		assert.NoError(t, err)
+		assert.NotContains(t, wireMap, "id", "id field must not be serialized")
+	})
+
+	t.Run("authorization_code", func(t *testing.T) {
+		result, err := NewCredentialOffer("https://issuer.example.com", "DegreeCredential", GrantTypeAuthorizationCode)
+		assert.NoError(t, err)
+
+		assert.NotEmpty(t, result.ID)
+		assert.Equal(t, "https://issuer.example.com", result.CredentialIssuer)
+		assert.Equal(t, []string{"DegreeCredential"}, result.CredentialConfigurationIDs)
+		assert.Contains(t, result.Grants, GrantTypeAuthorizationCode)
+
+		// The grant's issuer_state matches the internal ID
+		grantBytes, err := json.Marshal(result.Grants[GrantTypeAuthorizationCode])
+		assert.NoError(t, err)
+		var grant GrantAuthorizationCode
+		err = json.Unmarshal(grantBytes, &grant)
+		assert.NoError(t, err)
+		assert.Equal(t, result.ID, grant.IssuerState)
+
+		// ID must not appear in the JSON wire format
+		wireBytes, err := json.Marshal(result)
+		assert.NoError(t, err)
+		var wireMap map[string]any
+		err = json.Unmarshal(wireBytes, &wireMap)
+		assert.NoError(t, err)
+		assert.NotContains(t, wireMap, "id", "id field must not be serialized")
+	})
+
+	t.Run("unsupported_grant_type", func(t *testing.T) {
+		result, err := NewCredentialOffer("https://issuer.example.com", "TestCredential", "unsupported_grant")
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "unsupported grant type")
+	})
+
+	t.Run("unique_tokens", func(t *testing.T) {
+		r1, err := NewCredentialOffer("https://issuer.example.com", "Cred", GrantTypePreAuthorizedCode)
+		assert.NoError(t, err)
+		r2, err := NewCredentialOffer("https://issuer.example.com", "Cred", GrantTypePreAuthorizedCode)
+		assert.NoError(t, err)
+		assert.NotEqual(t, r1.ID, r2.ID, "each offer must have a unique token")
+	})
+}
+
+func TestGrantPreAuthorizedCode_TXCodeOmitted(t *testing.T) {
+	grant := &GrantPreAuthorizedCode{
+		PreAuthorizedCode: "test-code",
+		TXCode:            nil,
+	}
+	data, err := json.Marshal(grant)
+	assert.NoError(t, err)
+
+	var decoded map[string]any
+	err = json.Unmarshal(data, &decoded)
+	assert.NoError(t, err)
+	_, hasTXCode := decoded["tx_code"]
+	assert.False(t, hasTXCode, "tx_code key must be absent from JSON when TXCode is nil")
 }

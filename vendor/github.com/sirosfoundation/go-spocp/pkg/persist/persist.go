@@ -99,6 +99,92 @@ func SaveFile(filename string, rules []sexp.Element, format FileFormat) error {
 
 // loadText loads rules from a text file (canonical or advanced form)
 func loadText(r io.Reader, opts LoadOptions) ([]sexp.Element, error) {
+	// For canonical form, use the streaming parser that handles multi-line expressions
+	if opts.Format == FormatCanonical {
+		return loadCanonical(r, opts)
+	}
+
+	// Advanced form still uses line-by-line parsing since tokens are whitespace-delimited
+	return loadAdvancedLineByLine(r, opts)
+}
+
+// loadCanonical loads canonical S-expressions from a reader.
+// S-expressions can span multiple lines. Comments (lines starting with #, ;, //)
+// are stripped before parsing.
+func loadCanonical(r io.Reader, opts LoadOptions) ([]sexp.Element, error) {
+	// Read all content
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read content: %w", err)
+	}
+
+	// Strip comment lines before parsing
+	// Comments can only appear on their own lines (not inline) since canonical
+	// form uses length-prefixed data that can contain anything
+	content := stripCommentLines(string(data), opts.Comments)
+
+	// Parse s-expressions one at a time to support SkipInvalid
+	parser := sexp.NewParser(content)
+	var rules []sexp.Element
+
+	for parser.HasMore() {
+		elem, err := parser.Parse()
+		if err != nil {
+			if opts.SkipInvalid {
+				// Try to skip to next potential s-expression start
+				if !parser.SkipToNextExpression() {
+					// No more expressions to try
+					break
+				}
+				continue
+			}
+			return nil, fmt.Errorf("failed to parse rules: %w", err)
+		}
+
+		rules = append(rules, elem)
+
+		// Apply max rules limit
+		if opts.MaxRules > 0 && len(rules) >= opts.MaxRules {
+			break
+		}
+	}
+
+	return rules, nil
+}
+
+// stripCommentLines removes lines that start with a comment prefix.
+// This allows comments between s-expressions without interfering with parsing.
+func stripCommentLines(content string, commentPrefixes []string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			// Keep whitespace-only lines as they don't affect parsing
+			result = append(result, line)
+			continue
+		}
+
+		isComment := false
+		for _, prefix := range commentPrefixes {
+			if strings.HasPrefix(trimmed, prefix) {
+				isComment = true
+				break
+			}
+		}
+
+		if !isComment {
+			result = append(result, line)
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// loadAdvancedLineByLine loads rules in advanced (human-readable) form line by line.
+// This is preserved for backward compatibility with single-line advanced form rules.
+func loadAdvancedLineByLine(r io.Reader, opts LoadOptions) ([]sexp.Element, error) {
 	scanner := bufio.NewScanner(r)
 	rules := make([]sexp.Element, 0)
 	lineNum := 0
@@ -117,19 +203,8 @@ func loadText(r io.Reader, opts LoadOptions) ([]sexp.Element, error) {
 			continue
 		}
 
-		// Parse the rule
-		var elem sexp.Element
-		var err error
-
-		if opts.Format == FormatAdvanced {
-			// Parse advanced form directly into sexp.Element (handles star-forms)
-			elem, err = parseAdvanced(line)
-		} else {
-			// Parse canonical form directly
-			parser := sexp.NewParser(line)
-			elem, err = parser.Parse()
-		}
-
+		// Parse advanced form directly into sexp.Element (handles star-forms)
+		elem, err := parseAdvanced(line)
 		if err != nil {
 			if opts.SkipInvalid {
 				continue

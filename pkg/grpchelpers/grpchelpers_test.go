@@ -223,7 +223,7 @@ func TestNewClientConn_TLS_InvalidCAPEM(t *testing.T) {
 
 	// Write invalid PEM content
 	caPath := filepath.Join(tmpDir, "invalid-ca.pem")
-	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0600)
+	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0o600)
 	require.NoError(t, err)
 
 	cfg := model.GRPCClientTLS{
@@ -257,7 +257,7 @@ func TestNewServerOptions_InvalidCert(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: "/nonexistent/cert.pem",
 			KeyFilePath:  "/nonexistent/key.pem",
 		},
@@ -281,7 +281,7 @@ func TestNewServerOptions_InvalidClientCA(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: "/nonexistent/ca.pem",
@@ -305,13 +305,13 @@ func TestNewServerOptions_InvalidClientCAPEM(t *testing.T) {
 
 	// Write invalid PEM content
 	caPath := filepath.Join(tmpDir, "invalid-ca.pem")
-	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0600)
+	err := os.WriteFile(caPath, []byte("not a valid PEM"), 0o600)
 	require.NoError(t, err)
 
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caPath,
@@ -336,7 +336,7 @@ func TestNewServerOptions_ValidTLS(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 		},
@@ -364,7 +364,7 @@ func TestNewServerOptions_ValidMTLS(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -393,7 +393,7 @@ func TestNewServerOptions_WithFingerprints(t *testing.T) {
 	cfg := model.GRPCServer{
 		Addr: "localhost:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -717,6 +717,36 @@ func TestCanonicalizeDN_MatchesCertCanonicalDN(t *testing.T) {
 	}
 }
 
+// TestBuildClientAllowlists_DN validates both the name->DN config format
+// (issue #349 regression) and fail-fast on invalid DN values.
+func TestBuildClientAllowlists_DN(t *testing.T) {
+	t.Run("valid DN matches cert", func(t *testing.T) {
+		// Exact scenario from issue #349
+		tlsCfg := model.GRPCTLS{
+			AllowedClientDNs: map[string]string{
+				"issuer-apigw": "CN=issuer-apigw-client,OU=clients,O=siros",
+			},
+		}
+		_, allowedDNs, err := buildClientAllowlists(tlsCfg)
+		require.NoError(t, err)
+		name, ok := allowedDNs[canonicalizeDN("CN=issuer-apigw-client,OU=clients,O=siros")]
+		require.True(t, ok, "canonical DN should be in allowlist, got keys: %v", allowedDNs)
+		assert.Equal(t, "issuer-apigw", name)
+	})
+
+	t.Run("invalid DN fails fast", func(t *testing.T) {
+		tlsCfg := model.GRPCTLS{
+			AllowedClientDNs: map[string]string{
+				"apigw-prod": "not-a-valid-dn",
+			},
+		}
+		_, _, err := buildClientAllowlists(tlsCfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "apigw-prod")
+		assert.Contains(t, err.Error(), "canonicalizes to empty")
+	})
+}
+
 // TestVerifyClientIdentity_DNOrderIndependent tests that DN allowlist matching works
 // regardless of the attribute order in the config DN string.
 func TestVerifyClientIdentity_DNOrderIndependent(t *testing.T) {
@@ -881,41 +911,8 @@ func TestVerifyClientIdentity_NeitherMatches(t *testing.T) {
 	assert.Contains(t, st.Message(), "not in allowlist")
 }
 
-// TestNewServerOptions_WithDNs tests server options with DN allowlist
-func TestNewServerOptions_WithDNs(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Generate CA
-	caCert, _ := generateTestCA(t)
-	caCertPath := writeCertToFile(t, tmpDir, "ca.pem", caCert)
-
-	// Generate server cert
-	serverCert, serverKey := generateTestCertAndKey(t, "server")
-	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
-	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
-
-	cfg := model.GRPCServer{
-		Addr: "localhost:0",
-		TLS: model.GRPCTLS{
-			Enable:      true,
-			CertFilePath: serverCertPath,
-			KeyFilePath:  serverKeyPath,
-			ClientCAPath: caCertPath,
-			AllowedClientDNs: map[string]string{
-				"CN=apigw,O=SUNET": "apigw-prod",
-			},
-		},
-	}
-
-	opts, err := NewServerOptions(cfg)
-	require.NoError(t, err)
-	require.NotNil(t, opts)
-	// TLS credentials + unary interceptor + stream interceptor
-	assert.Len(t, opts, 3)
-}
-
-// TestNewServerOptions_WithBothFingerprintsAndDNs tests server options with both allowlists
-func TestNewServerOptions_WithBothFingerprintsAndDNs(t *testing.T) {
+// TestNewServerOptions_WithAllowlists tests server options with DN and/or fingerprint allowlists
+func TestNewServerOptions_WithAllowlists(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	caCert, _ := generateTestCA(t)
@@ -925,26 +922,33 @@ func TestNewServerOptions_WithBothFingerprintsAndDNs(t *testing.T) {
 	serverCertPath := writeCertToFile(t, tmpDir, "server.pem", serverCert)
 	serverKeyPath := writeKeyToFile(t, tmpDir, "server-key.pem", serverKey)
 
-	cfg := model.GRPCServer{
-		Addr: "localhost:0",
-		TLS: model.GRPCTLS{
-			Enable:      true,
-			CertFilePath: serverCertPath,
-			KeyFilePath:  serverKeyPath,
-			ClientCAPath: caCertPath,
-			AllowedClientFingerprints: map[string]string{
-				"SHA256:a1:b2:c3:d4": "pinned-client",
-			},
-			AllowedClientDNs: map[string]string{
-				"CN=apigw,O=SUNET": "apigw-acme",
-			},
-		},
+	baseTLS := model.GRPCTLS{
+		Enable:       true,
+		CertFilePath: serverCertPath,
+		KeyFilePath:  serverKeyPath,
+		ClientCAPath: caCertPath,
 	}
 
-	opts, err := NewServerOptions(cfg)
-	require.NoError(t, err)
-	require.NotNil(t, opts)
-	assert.Len(t, opts, 3)
+	t.Run("DNs only", func(t *testing.T) {
+		tls := baseTLS
+		tls.AllowedClientDNs = map[string]string{"apigw-prod": "CN=apigw,O=SUNET"}
+		cfg := model.GRPCServer{Addr: "localhost:0", TLS: tls}
+		opts, err := NewServerOptions(cfg)
+		require.NoError(t, err)
+		require.NotNil(t, opts)
+		assert.Len(t, opts, 3)
+	})
+
+	t.Run("both fingerprints and DNs", func(t *testing.T) {
+		tls := baseTLS
+		tls.AllowedClientFingerprints = map[string]string{"SHA256:a1:b2:c3:d4": "pinned-client"}
+		tls.AllowedClientDNs = map[string]string{"apigw-acme": "CN=apigw,O=SUNET"}
+		cfg := model.GRPCServer{Addr: "localhost:0", TLS: tls}
+		opts, err := NewServerOptions(cfg)
+		require.NoError(t, err)
+		require.NotNil(t, opts)
+		assert.Len(t, opts, 3)
+	})
 }
 
 // TestVerifyClientIdentity_BothFingerprintAndDNMatch tests that when both fingerprint and DN
@@ -1007,7 +1011,7 @@ func TestIntegration_mTLS_BothFingerprintAndDNMatch(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1015,7 +1019,7 @@ func TestIntegration_mTLS_BothFingerprintAndDNMatch(t *testing.T) {
 				clientFingerprint: "client-pinned",
 			},
 			AllowedClientDNs: map[string]string{
-				clientDN: "client-dn",
+				"client-dn": clientDN,
 			},
 		},
 	}
@@ -1097,12 +1101,12 @@ func TestIntegration_mTLS_DNInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
 			AllowedClientDNs: map[string]string{
-				clientDN: "allowed-by-dn",
+				"allowed-by-dn": clientDN,
 			},
 		},
 	}
@@ -1170,12 +1174,12 @@ func TestIntegration_mTLS_DNNotInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
 			AllowedClientDNs: map[string]string{
-				"cn=some-other-client,o=other-org": "not-our-client",
+				"not-our-client": "cn=some-other-client,o=other-org",
 			},
 		},
 	}
@@ -1245,7 +1249,7 @@ func TestIntegration_mTLS_DNAllowedFingerprintNot(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1253,7 +1257,7 @@ func TestIntegration_mTLS_DNAllowedFingerprintNot(t *testing.T) {
 				"0000000000000000000000000000000000000000000000000000000000000000": "wrong-fingerprint",
 			},
 			AllowedClientDNs: map[string]string{
-				clientDN: "allowed-by-dn",
+				"allowed-by-dn": clientDN,
 			},
 		},
 	}
@@ -1493,7 +1497,7 @@ func writeCertToFile(t *testing.T, dir, filename string, cert *x509.Certificate)
 	t.Helper()
 
 	path := filepath.Join(dir, filename)
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304
 	require.NoError(t, err)
 	defer f.Close()
 
@@ -1510,7 +1514,7 @@ func writeKeyToFile(t *testing.T, dir, filename string, key *ecdsa.PrivateKey) s
 	t.Helper()
 
 	path := filepath.Join(dir, filename)
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304
 	require.NoError(t, err)
 	defer f.Close()
 
@@ -1557,7 +1561,7 @@ func TestIntegration_mTLS_FingerprintNotInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1646,7 +1650,7 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath,
@@ -1700,7 +1704,6 @@ func TestIntegration_mTLS_FingerprintInAllowlist(t *testing.T) {
 	defer cancel()
 
 	err = conn.Invoke(ctx, "/test.TestService/Ping", nil, nil)
-
 	// The unknown handler returns nil but doesn't send a response message,
 	// so we get an "Internal" error about no response. But that's OK -
 	// the important thing is we DIDN'T get PermissionDenied, meaning fingerprint passed.
@@ -1742,7 +1745,7 @@ func TestIntegration_mTLS_InvalidClientCert(t *testing.T) {
 	serverCfg := model.GRPCServer{
 		Addr: "127.0.0.1:0",
 		TLS: model.GRPCTLS{
-			Enable:      true,
+			Enable:       true,
 			CertFilePath: serverCertPath,
 			KeyFilePath:  serverKeyPath,
 			ClientCAPath: caCertPath, // Only trusts the first CA

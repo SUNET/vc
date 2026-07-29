@@ -45,11 +45,11 @@ func setupSoftHSM2(t *testing.T) *hsmTestInstance {
 	require.NoError(t, err)
 
 	tokensDir := filepath.Join(tmpDir, "tokens")
-	require.NoError(t, os.MkdirAll(tokensDir, 0755))
+	require.NoError(t, os.MkdirAll(tokensDir, 0o755))
 
 	configContent := fmt.Sprintf("directories.tokendir = %s\nobjectstore.backend = file\n", tokensDir)
 	configPath := filepath.Join(tmpDir, "softhsm2.conf")
-	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
 
 	modulePath := findSoftHSMModule(t)
 

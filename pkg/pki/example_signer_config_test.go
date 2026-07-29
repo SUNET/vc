@@ -188,7 +188,7 @@ func ExampleKeyMaterialSigner_withCredentials() {
 		// - s.PublicKey() for verification
 		fmt.Printf("Issuing credential with key: %s\n", s.KeyID())
 		fmt.Printf("Using algorithm: %s\n", s.Algorithm())
-		
+
 		// Example signing
 		data := []byte("credential data")
 		_, err := s.Sign(ctx, data)

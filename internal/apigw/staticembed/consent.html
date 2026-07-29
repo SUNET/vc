@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Authorize Consent</title>
+    <link rel="preload" href="/static/tailwindcss.js" as="script">
     <link rel="stylesheet" href="/static/styles.css">
     <script type="importmap">
     {
@@ -65,9 +66,7 @@
 <body class="content-fade-in-appear-done content-fade-in-enter-done">
 <section class="flex-grow flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 min-h-dvh flex flex-col" x-data="app" data-auth-method="{{.AuthMethod}}" data-redirect-url="{{.RedirectURL}}">
     <div class="w-full flex flex-col items-center gap-7 px-6 py-8 text-black dark:text-white max-w-lg p-8">
-        <a href="https://www.sunet.se" target="_blank" rel="noopener noreferrer">
-            <img src="/static/logo.png" alt="Sunet" style="height: 48px;">
-        </a>
+        <img src="/static/logo.png" alt="Logotype" style="height: 48px;">
         <h1 class="text-3xl font-bold leading-tight tracking-tight text-gray-900 text-center dark:text-white" x-ref="title">Authorize Consent</h1>
         <template x-if="error">
             <div class="flex items-center rounded-lg p-4 bg-red-600">
@@ -78,24 +77,6 @@
             <template x-if="loading">
                 <div class="vc-loader">
                     <span class="loader text-primary dark:text-primary-light"></span>
-                </div>
-            </template>
-            <template x-if="!loading && !loggedIn && authMethod === 'basic'">
-                <div class="space-y-4 md:space-y-6">
-                    <p class="pd-2">Authenticate with username and password to continue.</p>
-                    <form x-ref="loginForm" @submit.prevent="handleLoginBasic">
-                        <div>
-                            <div class="mb-2">
-                                <label for="username" class="block text-s font-semibold mb-1">Username</label>
-                                <input id="username" name="username" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:inputDarkModeOverride" type="text" placeholder="johndoe" required>
-                            </div>
-                            <div class="mb-2">
-                                <label for="password" class="block text-s font-semibold mb-1">Password</label>
-                                <input id="password" name="password" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:inputDarkModeOverride" type="password" placeholder="mysecret123" required>
-                            </div>
-                            <input type="submit" class="rounded-lg shadow-sm text-sm w-full px-4 py-2 mt-6 text-center text-white bg-primary hover:bg-primary-hover dark:text-white dark:hover:bg-primary-light-hover dark:bg-primary-light focus-visible:outline-2 focus-visible:outline-offset-2 cursor-pointer" value="Log in" />
-                        </div>
-                    </form>
                 </div>
             </template>
             <template x-if="!loading && !loggedIn && authMethod === 'openid4vp' && !openid4vpRedirectCountUp">
@@ -137,10 +118,12 @@
                                             <img x-show="credential.svg" class="vc-credential-card mb-2" width="829" height="504" :src="credential.svg" alt="">
                                             <table class="table-auto w-full">
                                                 <tbody>
-                                                    <template x-for="[svg_id, claim] of Object.entries(credential.claims)">
+                                                    <template x-for="row of flattenClaims(credential.claims)">
                                                         <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
-                                                            <th class="p-2 text-sm text-left" x-text="claim.label"></th>
-                                                            <td class="p-2 text-sm text-left" x-text="claim.value"></td>
+                                                            <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top' : 'p-2 text-sm text-left align-top')"
+                                                                x-text="row.label"
+                                                                :colspan="row.isHeader ? 2 : 1"></th>
+                                                            <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top" x-html="renderClaimValue(row.value)"></td>
                                                         </tr>
                                                     </template>
                                                 </tbody>

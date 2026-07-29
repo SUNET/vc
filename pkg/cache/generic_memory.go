@@ -39,6 +39,24 @@ func (m *MemoryCache[V]) Set(_ context.Context, key string, value V) {
 	m.cache.Set(key, value, ttlcache.DefaultTTL)
 }
 
+// SetNX stores a value only if the key does not already exist.
+// Returns true if the value was set, false if the key already existed.
+func (m *MemoryCache[V]) SetNX(_ context.Context, key string, value V) (bool, error) {
+	_, found := m.cache.GetOrSet(key, value)
+	return !found, nil
+}
+
+// SetNXWithTTL stores a value only if the key does not already exist, using a custom TTL.
+// Returns true if the value was set, false if the key already existed.
+// If ttl <= 0, falls back to SetNX (default TTL).
+func (m *MemoryCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, ttl time.Duration) (bool, error) {
+	if ttl <= 0 {
+		return m.SetNX(ctx, key, value)
+	}
+	_, found := m.cache.GetOrSet(key, value, ttlcache.WithTTL[string, V](ttl))
+	return !found, nil
+}
+
 // SetWithTTL stores a value with a custom TTL.
 func (m *MemoryCache[V]) SetWithTTL(_ context.Context, key string, value V, ttl time.Duration) {
 	m.cache.Set(key, value, ttl)
@@ -47,6 +65,16 @@ func (m *MemoryCache[V]) SetWithTTL(_ context.Context, key string, value V, ttl 
 // Delete removes a value by key.
 func (m *MemoryCache[V]) Delete(_ context.Context, key string) {
 	m.cache.Delete(key)
+}
+
+// GetAndDelete atomically retrieves and removes a value by key.
+func (m *MemoryCache[V]) GetAndDelete(_ context.Context, key string) (V, bool) {
+	item, ok := m.cache.GetAndDelete(key)
+	if !ok || item == nil {
+		var zero V
+		return zero, false
+	}
+	return item.Value(), true
 }
 
 // Len returns the number of items currently in the cache.

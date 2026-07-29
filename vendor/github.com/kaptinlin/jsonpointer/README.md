@@ -1,11 +1,26 @@
 # JSON Pointer
 
+[![Go Module](https://img.shields.io/badge/go-module-blue.svg)](https://golang.org/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/kaptinlin/jsonpointer.svg)](https://pkg.go.dev/github.com/kaptinlin/jsonpointer)
-[![Go Report Card](https://goreportcard.com/badge/github.com/kaptinlin/jsonpointer)](https://goreportcard.com/report/github.com/kaptinlin/jsonpointer)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Fast implementation of [JSON Pointer (RFC 6901)][json-pointer] specification in Go.
+A read-only JSON Pointer (RFC 6901) library for Go built around one strict,
+immutable `Pointer` value.
 
-[json-pointer]: https://tools.ietf.org/html/rfc6901
+## Features
+
+- **Strict RFC 6901 parsing**: malformed pointer strings return errors instead
+  of becoming lookup keys.
+- **Raw token construction**: build pointers from literal Go strings without
+  confusing token text with pointer-string syntax.
+- **Go-native traversal**: read JSON-shaped maps, slices, arrays, typed
+  string-keyed maps, pointers, and interface-wrapped values.
+- **Explicit errors**: keep `errors.Is` sentinel checks and use `errors.As` for
+  pointer, token, and depth context.
+- **Small API**: parse or build a `Pointer`, then ask it for a value or
+  reference.
+- **Fast common paths**: optimize decoded JSON shapes such as `map[string]any`
+  and `[]any` before typed-container fallbacks.
 
 ## Installation
 
@@ -13,368 +28,213 @@ Fast implementation of [JSON Pointer (RFC 6901)][json-pointer] specification in 
 go get github.com/kaptinlin/jsonpointer
 ```
 
-## Usage
+Requires the Go version declared in `go.mod`.
 
-### Basic Operations
-
-Find a value in a JSON object using a JSON Pointer string:
+## Quick Start
 
 ```go
 package main
 
 import (
-    "fmt"
-    "log"
-    
-    "github.com/kaptinlin/jsonpointer"
+	"fmt"
+	"log"
+
+	"github.com/kaptinlin/jsonpointer"
 )
 
 func main() {
-    doc := map[string]any{
-        "foo": map[string]any{
-            "bar": 123,
-        },
-    }
+	doc := map[string]any{
+		"users": []any{
+			map[string]any{"name": "Alice"},
+		},
+	}
 
-    ref, err := jsonpointer.FindByPointer(doc, "/foo/bar")
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    fmt.Println(ref.Val) // 123
+	p, err := jsonpointer.Parse("/users/0/name")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	name, err := p.Value(doc)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(name)
 }
 ```
 
-### Find by Path Components
+## Core APIs
 
-Use variadic arguments to navigate to a value:
+| API | Description |
+| --- | --- |
+| `Parse(pointer string) (Pointer, error)` | Parse a strict JSON Pointer string |
+| `FromTokens(tokens ...string) Pointer` | Build a pointer from raw token strings |
+| `Root() Pointer` | Return the root pointer |
+| `(Pointer).String() string` | Format the canonical JSON Pointer string |
+| `(Pointer).Tokens() []string` | Return a copy of the raw tokens |
+| `(Pointer).Parent() (Pointer, error)` | Return the parent pointer |
+| `(Pointer).Child(tokens ...string) Pointer` | Return a child pointer |
+| `(Pointer).Value(doc any) (any, error)` | Resolve a value |
+| `(Pointer).Reference(doc any) (Reference, error)` | Resolve a value with parent context |
+| `Value(doc any, pointer string) (any, error)` | Strict one-shot value lookup |
+| `ReferenceOf(doc any, pointer string) (Reference, error)` | Strict one-shot reference lookup |
+| `EscapeToken(token string) string` | Escape one raw token |
+| `UnescapeToken(encoded string) (string, error)` | Decode one escaped token strictly |
+| `IsArrayIndex(token string) bool` | Report whether a token has canonical array-index syntax |
+
+`Parse("/~2")` returns `ErrInvalidPointer`. `FromTokens("~2")` succeeds because
+`"~2"` is literal token data, not pointer-string syntax.
+
+## Reference Results
+
+`Pointer.Reference` and `ReferenceOf` return a `Reference` with named accessors:
+
+| Method | Meaning |
+| --- | --- |
+| `Value() any` | The resolved value |
+| `Parent() (any, bool)` | The parent container when one exists |
+| `Token() string` | The final token used to reach the value |
+| `Pointer() Pointer` | The pointer used for traversal |
+
+Root references have no parent and return `(nil, false)` from `Parent`. For
+non-root references, `Parent` is the dereferenced container that consumed the
+final token, so pointer and interface wrappers do not leak into reference
+context.
+
+## Examples
+
+### Build from raw tokens
 
 ```go
-package main
-
-import (
-    "fmt"
-    "log"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
-
-func main() {
-    doc := map[string]any{
-        "foo": map[string]any{
-            "bar": 123,
-        },
-    }
-
-    ref, err := jsonpointer.Find(doc, "foo", "bar")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Printf("Value: %v, Object: %v, Key: %v\n", ref.Val, ref.Obj, ref.Key)
-    // Value: 123, Object: map[bar:123], Key: bar
-}
+p := jsonpointer.FromTokens("foo/bar", "tilde~key")
+fmt.Println(p.String())
 ```
 
-### Safe Get Operations
+Output:
 
-Get values with error handling:
+```text
+/foo~1bar/tilde~0key
+```
+
+### Read with parent context
 
 ```go
-package main
-
-import (
-    "fmt"
-    "log"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
-
-func main() {
-    doc := map[string]any{
-        "users": []any{
-            map[string]any{"name": "Alice", "age": 30},
-            map[string]any{"name": "Bob", "age": 25},
-        },
-    }
-
-    // Get existing value using variadic arguments (array indices as strings)
-    name, err := jsonpointer.Get(doc, "users", "0", "name")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(name) // Alice
-
-    // Get non-existing value - returns error
-    missing, err := jsonpointer.Get(doc, "users", "5", "name")
-    if err != nil {
-        fmt.Printf("Error: %v\n", err) // Error: array index out of bounds
-    } else {
-        fmt.Println(missing)
-    }
-    
-    // Get using JSON Pointer string
-    age, err := jsonpointer.GetByPointer(doc, "/users/1/age")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(age) // 25
+doc := map[string]any{
+	"foo/bar": map[string]any{
+		"tilde~key": "ready",
+	},
 }
+
+p, err := jsonpointer.Parse("/foo~1bar/tilde~0key")
+if err != nil {
+	log.Fatal(err)
+}
+
+ref, err := p.Reference(doc)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(ref.Value())
+fmt.Println(ref.Token())
 ```
 
-### Path Manipulation
-
-Convert between JSON Pointer strings and path arrays:
+### Traverse typed containers
 
 ```go
-package main
+type Key string
 
-import (
-    "fmt"
-    "log"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
-
-func main() {
-    // Parse JSON Pointer string to path array
-    path := jsonpointer.Parse("/f~0o~1o/bar/1/baz")
-    fmt.Printf("%+v\n", path)
-    // [f~o/o bar 1 baz]
-
-    // Format path components to JSON Pointer string
-    pointer := jsonpointer.Format("f~o/o", "bar", "1", "baz")
-    fmt.Println(pointer)
-    // /f~0o~1o/bar/1/baz
-    
-    // Performance tip: For repeated access to the same path,
-    // pre-parse the pointer once and reuse the path
-    userNamePath := jsonpointer.Parse("/users/0/name")
-    
-    // Efficient repeated access
-    for _, data := range datasets {
-        name, err := jsonpointer.Get(data, userNamePath...)
-        if err != nil {
-            log.Printf("Error accessing user name: %v", err)
-            continue
-        }
-        fmt.Println(name)
-    }
+doc := map[string]any{
+	"labels": map[Key]string{
+		"status": "ready",
+	},
 }
+
+p := jsonpointer.FromTokens("labels", "status")
+status, err := p.Value(doc)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(status)
 ```
 
-### Component Encoding/Decoding
+Traversal follows JSON-shaped containers. Structs are not field-selected; convert
+struct values to a JSON document shape before using JSON Pointer over fields.
 
-Encode and decode individual path components:
+## Error Handling
+
+Pointer construction and navigation sentinel errors include:
+
+- `ErrInvalidPointer`
+- `ErrNoParent`
+
+Traversal sentinel errors include:
+
+- `ErrKeyNotFound`
+- `ErrInvalidIndex`
+- `ErrIndexOutOfBounds`
+- `ErrNilPointer`
+- `ErrNotTraversable`
+
+For arrays, malformed index tokens such as `01`, `+1`, non-ASCII digits, or
+decimal text return `ErrInvalidIndex`. `-`, indexes outside the collection, and
+arbitrarily long canonical indexes outside the collection return
+`ErrIndexOutOfBounds`.
+Values that cannot consume another token return `ErrNotTraversable`; a nil Go
+pointer returns the more specific `ErrNilPointer`.
+
+Use `errors.Is` for error classes and `errors.As` when traversal context matters:
 
 ```go
-package main
-
-import (
-    "fmt"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
-
-func main() {
-    // Unescape component
-    unescaped := jsonpointer.Unescape("~0~1")
-    fmt.Println(unescaped) // ~/
-
-    // Escape component
-    escaped := jsonpointer.Escape("~/")
-    fmt.Println(escaped) // ~0~1
+value, err := jsonpointer.Value(doc, "/users/1/name")
+if errors.Is(err, jsonpointer.ErrIndexOutOfBounds) {
+	var pointerErr *jsonpointer.Error
+	if errors.As(err, &pointerErr) {
+		fmt.Println(pointerErr.Pointer(), pointerErr.Token(), pointerErr.Depth())
+	}
 }
+_ = value
 ```
 
-### Array Operations
+## Performance
 
-Working with arrays and array indices:
+The package optimizes common `map[string]any` and `[]any` reads and falls back to
+reflection only for typed container mechanics such as slices, arrays, maps,
+pointers, and interfaces. Reuse parsed pointers when resolving the same location
+repeatedly.
 
-```go
-package main
+See [benchmarks/README.md](benchmarks/README.md) for benchmark coverage.
 
-import (
-    "fmt"
-    "log"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
+Run benchmarks with:
 
-func main() {
-    doc := map[string]any{
-        "items": []any{1, 2, 3},
-    }
-
-    // Access array element using variadic arguments (index as string)
-    ref, err := jsonpointer.Find(doc, "items", "1")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(ref.Val) // 2
-
-    // Using JSON Pointer string with Get
-    value, err := jsonpointer.GetByPointer(doc, "/items/0")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(value) // 1
-
-    // Array end marker "-" refers to nonexistent element (returns error)
-    // Per RFC 6901, "-" is used for append operations, not for reading
-    _, err = jsonpointer.Find(doc, "items", "-")
-    if err != nil {
-        fmt.Printf("Array end marker error: %v\n", err) // array index out of bounds
-    }
-}
+```bash
+task bench
 ```
 
-### Struct Operations
+## Development
 
-Working with Go structs and JSON tags:
-
-```go
-package main
-
-import (
-    "fmt"
-    "log"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
-
-type User struct {
-    Name    string `json:"name"`
-    Age     int    `json:"age"`
-    Email   string // No JSON tag, uses field name
-    private string // Private field, ignored
-    Ignored string `json:"-"` // Explicitly ignored
-}
-
-type Profile struct {
-    User     *User  `json:"user"` // Pointer to struct
-    Location string `json:"location"`
-}
-
-func main() {
-    profile := Profile{
-        User: &User{ // Pointer to struct
-            Name:    "Alice",
-            Age:     30,
-            Email:   "alice@example.com",
-            private: "secret",
-            Ignored: "ignored",
-        },
-        Location: "New York",
-    }
-
-    // JSON tag access using variadic arguments
-    name, err := jsonpointer.Get(profile, "user", "name")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(name) // Alice
-
-    // Field name access (no JSON tag)
-    email, err := jsonpointer.Get(profile, "user", "Email")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(email) // alice@example.com
-
-    // Private fields are ignored - returns error
-    private, err := jsonpointer.Get(profile, "user", "private")
-    if err != nil {
-        fmt.Printf("Error: %v\n", err) // Error: struct field not found
-    }
-
-    // json:"-" fields are ignored - returns error
-    ignored, err := jsonpointer.Get(profile, "user", "Ignored")
-    if err != nil {
-        fmt.Printf("Error: %v\n", err) // Error: struct field not found
-    }
-
-    // Nested struct navigation
-    age, err := jsonpointer.Get(profile, "user", "age")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(age) // 30
-
-    // JSON Pointer syntax
-    ref, err := jsonpointer.FindByPointer(profile, "/user/name")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(ref.Val) // Alice
-
-    // Mixed struct and map data
-    data := map[string]any{
-        "profile": profile,
-        "meta":    map[string]any{"version": "1.0"},
-        "users":   []User{{Name: "Bob", Age: 25}},
-    }
-    
-    // Access struct in map
-    location, err := jsonpointer.Get(data, "profile", "location")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(location) // New York
-    
-    // Access array of structs (index as string)
-    userName, err := jsonpointer.Get(data, "users", "0", "name")
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(userName) // Bob
-}
+```bash
+task test          # Run package tests with the race detector
+task lint          # Run golangci-lint and tidy checks
+task specs-check   # Validate spec and design doc placement
+task yamllint      # Lint YAML files
+task bench         # Run benchmark suites
 ```
 
-### Validation
+Run the demo program with:
 
-Validate JSON Pointer strings:
-
-```go
-package main
-
-import (
-    "fmt"
-    
-    "github.com/kaptinlin/jsonpointer"
-)
-
-func main() {
-    // Valid JSON Pointer
-    err := jsonpointer.Validate("/foo/bar")
-    if err != nil {
-        fmt.Printf("Invalid pointer: %v\n", err)
-    } else {
-        fmt.Println("Valid pointer")
-    }
-
-    // Invalid JSON Pointer
-    err = jsonpointer.Validate("foo/bar") // missing leading slash
-    if err != nil {
-        fmt.Printf("Invalid pointer: %v\n", err)
-    } else {
-        fmt.Println("Valid pointer")
-    }
-}
+```bash
+go run ./examples
 ```
 
-### Performance
+For development workflow and package contracts, see [AGENTS.md](AGENTS.md) and
+[`SPECS/`](SPECS/).
 
-This library offers excellent performance with zero-allocation `Get` operations and competitive `Find` operations. Our `Get` function achieves optimal performance for common use cases, while `Find` provides rich reference objects when needed.
+## Contributing
 
-For detailed benchmark results and performance comparisons with other JSON Pointer libraries, see [benchmarks/README.md](benchmarks/README.md).
-
-## Acknowledgments
-
-This project is a Go port of the excellent [jsonjoy-com/json-pointer](https://github.com/jsonjoy-com/json-pointer) TypeScript implementation. We've adapted the core algorithms and added Go-specific performance optimizations while maintaining full RFC 6901 compatibility.
-
-Special thanks to the original json-pointer project for providing a solid foundation and comprehensive test cases that enabled this high-quality Go implementation.
+Contributions are welcome. Keep `README.md`, `example_test.go`, and the relevant
+`SPECS/` documents aligned when public behavior changes.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
+for details.

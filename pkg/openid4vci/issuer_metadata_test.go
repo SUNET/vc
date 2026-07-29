@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -14,7 +15,7 @@ import (
 	"gotest.tools/v3/golden"
 )
 
-var mockIssuerMetadata = &CredentialIssuerMetadataParameters{
+var mockIssuerMetadata = &CredentialIssuerMetadataParameters{ // #nosec G101
 	CredentialIssuer:   "http://vc_dev_apigw:8080",
 	CredentialEndpoint: "http://vc_dev_apigw:8080/credential",
 	Display: []MetadataDisplay{
@@ -258,7 +259,7 @@ func TestSignIssuerMetadata(t *testing.T) {
 }
 
 func TestMarshal(t *testing.T) {
-	want := &CredentialIssuerMetadataParameters{
+	want := &CredentialIssuerMetadataParameters{ // #nosec G101
 		CredentialIssuer:           "http://vc_dev_apigw:8080",
 		CredentialEndpoint:         "http://vc_dev_apigw:8080/credential",
 		AuthorizationServers:       []string{"http://vc_dev_apigw:8080"},
@@ -332,7 +333,6 @@ func TestMarshal(t *testing.T) {
 
 		assert.Equal(t, want, metadata)
 	})
-
 }
 
 func TestCredentialIssuerMetadataParameters_MarshalRoundTrip(t *testing.T) {

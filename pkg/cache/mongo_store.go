@@ -33,35 +33,35 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys: bson.D{{Key: "request_uri", Value: 1}},
+			Keys:    bson.D{{Key: "request_uri", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "code", Value: 1}},
+			Keys:    bson.D{{Key: "code", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "state", Value: 1}},
+			Keys:    bson.D{{Key: "state", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "verifier_response_code", Value: 1}},
+			Keys:    bson.D{{Key: "verifier_response_code", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "ephemeral_encryption_key_id", Value: 1}},
+			Keys:    bson.D{{Key: "ephemeral_encryption_key_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "request_object_id", Value: 1}},
+			Keys:    bson.D{{Key: "request_object_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "token.access_token", Value: 1}},
+			Keys:    bson.D{{Key: "token.access_token", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
-			Keys: bson.D{{Key: "access_token", Value: 1}},
+			Keys:    bson.D{{Key: "access_token", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
@@ -287,7 +287,8 @@ func (s *MongoStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 		return errors.New("id cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"session_id": id},
 		bson.M{"$set": bson.M{"forfeited": true}},
 	)
@@ -301,13 +302,77 @@ func (s *MongoStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 	return nil
 }
 
+// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
+// distinct clients (identified by DPoP thumbprint). Uses an atomic FindOneAndUpdate
+// with $addToSet and a condition that the thumbprint is not already present.
+// The $expr size guard is enforced atomically within the single-document
+// FindOneAndUpdate operation, so the max-redeemer bound is strict.
+func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+	if dpopThumbprint == "" {
+		return nil, errors.New("dpop thumbprint is required for pre-authorized code redemption")
+	}
+	if len(dpopThumbprint) > 128 {
+		return nil, errors.New("dpop thumbprint exceeds maximum length")
+	}
+
+	filter := bson.M{
+		"code":        code,
+		"forfeited":   bson.M{"$ne": true},
+		"redeemed_by": bson.M{"$ne": dpopThumbprint},
+		// Enforce max redeemers atomically: reject if already at the cap
+		"$expr": bson.M{
+			"$lt": bson.A{
+				bson.M{"$size": bson.M{"$ifNull": bson.A{"$redeemed_by", bson.A{}}}},
+				MaxPreAuthRedeemers,
+			},
+		},
+	}
+
+	update := bson.M{"$addToSet": bson.M{"redeemed_by": dpopThumbprint}}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	var result AuthorizationContext
+	err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&result)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Distinguish: code not found, forfeited, already-redeemed, or max reached
+			var existing AuthorizationContext
+			findErr := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&existing)
+			if findErr != nil {
+				if errors.Is(findErr, mongo.ErrNoDocuments) {
+					return nil, ErrNoDocuments
+				}
+				return nil, fmt.Errorf("failed to look up pre-authorized code: %w", findErr)
+			}
+			if existing.Forfeited {
+				return nil, errors.New("pre-authorized code has been forfeited")
+			}
+			for _, tp := range existing.RedeemedBy {
+				if tp == dpopThumbprint {
+					return nil, errors.New("pre-authorized code already redeemed by this client")
+				}
+			}
+			if len(existing.RedeemedBy) >= MaxPreAuthRedeemers {
+				return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")
+			}
+		}
+		return nil, fmt.Errorf("failed to redeem pre-authorized code: %w", err)
+	}
+
+	return &result, nil
+}
+
 // Consent marks an authorization context as consented.
 func (s *MongoStore) Consent(ctx context.Context, query *AuthorizationContext) error {
 	if query == nil || query.RequestURI == "" {
 		return errors.New("request_uri cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"request_uri": query.RequestURI},
 		bson.M{"$set": bson.M{"consent": true}},
 	)
@@ -327,7 +392,8 @@ func (s *MongoStore) AddToken(ctx context.Context, code string, token *Token) er
 		return errors.New("code cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"code": code},
 		bson.M{"$set": bson.M{"token": token}},
 	)
@@ -350,7 +416,8 @@ func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *Authorizatio
 		return errors.New("session_id cannot be empty")
 	}
 
-	result, err := s.coll.UpdateOne(ctx,
+	result, err := s.coll.UpdateOne(
+		ctx,
 		bson.M{"session_id": query.SessionID},
 		bson.M{"$set": bson.M{"authentic_source": authenticSource}},
 	)
@@ -364,29 +431,22 @@ func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *Authorizatio
 	return nil
 }
 
-// AddIdentity adds identity information to an authorization context.
-func (s *MongoStore) AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error {
-	if query == nil {
-		return errors.New("query cannot be nil")
+// SetIdentifier sets the resolved identifier on an authorization context.
+func (s *MongoStore) SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error {
+	if identifier == "" {
+		return errors.New("identifier cannot be empty")
 	}
-	if input == nil || input.Identity == nil {
-		return errors.New("identity cannot be nil")
-	}
-
-	filter := s.buildFilter(query)
-	if filter == nil {
-		return errors.New("query must have sessionID, requestURI, or ephemeralEncryptionKeyID")
+	if query == nil || query.SessionID == "" {
+		return errors.New("session_id cannot be empty")
 	}
 
-	update := bson.M{"$set": bson.M{
-		"identity":         input.Identity,
-		"vct":              input.VCT,
-		"authentic_source": input.AuthenticSource,
-	}}
-
-	result, err := s.coll.UpdateOne(ctx, filter, update)
+	result, err := s.coll.UpdateOne(
+		ctx,
+		bson.M{"session_id": query.SessionID},
+		bson.M{"$set": bson.M{"identifier": identifier}},
+	)
 	if err != nil {
-		return fmt.Errorf("failed to add identity: %w", err)
+		return fmt.Errorf("failed to set identifier: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNoDocuments

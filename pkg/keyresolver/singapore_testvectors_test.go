@@ -44,12 +44,12 @@ const testVectorDir = "../../testdata/sg-test-vectors"
 // SGCredential represents a parsed Singapore test vector credential
 type SGCredential struct {
 	Context           any            `json:"@context"`
-	ID                string                 `json:"id"`
+	ID                string         `json:"id"`
 	Type              any            `json:"type"`
 	Issuer            any            `json:"issuer"`
 	CredentialSubject map[string]any `json:"credentialSubject"`
-	ValidFrom         string                 `json:"validFrom,omitempty"`
-	ValidUntil        string                 `json:"validUntil,omitempty"`
+	ValidFrom         string         `json:"validFrom,omitempty"`
+	ValidUntil        string         `json:"validUntil,omitempty"`
 	Proof             any            `json:"proof"`
 }
 
@@ -68,7 +68,7 @@ func loadTestVector(t *testing.T, filename string) []byte {
 	t.Helper()
 
 	path := filepath.Join(testVectorDir, filename)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		t.Fatalf("failed to read test vector %s: %v", filename, err)
 	}
@@ -145,7 +145,7 @@ func TestSingaporeIssuers_RealDIDWebResolution(t *testing.T) {
 		cryptosuite        string
 		expectedKeyType    string
 	}{
-		{
+		{ // #nosec G101
 			name:               "Accredify Ed25519 Key",
 			verificationMethod: "did:web:vc-issuer.accredify.io:organizations:9c7308e9-a770-4be8-bc0d-21d9cac585bc#key-iAGgYQTUeDjqcf2OdNINUtE7hXM5caMKV4pFxsxkp7U",
 			cryptosuite:        "eddsa-rdfc-2022",
@@ -196,7 +196,7 @@ func TestSingaporeIssuers_DirectDIDWebResolution(t *testing.T) {
 		verificationMethod string
 		cryptosuite        string
 	}{
-		{
+		{ // #nosec G101
 			name:               "Accredify Ed25519 Key",
 			did:                "did:web:vc-issuer.accredify.io:organizations:9c7308e9-a770-4be8-bc0d-21d9cac585bc",
 			verificationMethod: "did:web:vc-issuer.accredify.io:organizations:9c7308e9-a770-4be8-bc0d-21d9cac585bc#key-iAGgYQTUeDjqcf2OdNINUtE7hXM5caMKV4pFxsxkp7U",
@@ -567,6 +567,11 @@ func TestSingaporeCredentials_EdDSA_DirectVerify(t *testing.T) {
 			// Parse credential for verification
 			cred, err := credential.NewRDFCredentialFromJSON(data, nil)
 			if err != nil {
+				// Context loading requires fetching remote JSON-LD documents
+				// which may return 403 in restricted environments.
+				if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "no such host") {
+					t.Skipf("skipping verification - remote context unavailable: %v", err)
+				}
 				t.Fatalf("failed to parse credential: %v", err)
 			}
 
@@ -733,7 +738,7 @@ func base58Decode(s string) ([]byte, error) {
 		carry := idx
 		for i := size - 1; i >= 0; i-- {
 			carry += 58 * int(result[i])
-			result[i] = byte(carry % 256)
+			result[i] = byte(carry % 256) // #nosec G115
 			carry /= 256
 		}
 	}
@@ -905,7 +910,7 @@ func TestSingaporeCredentials_ECDSASD_Structure(t *testing.T) {
 func BenchmarkSingaporeCredential_Parse(b *testing.B) {
 	// Load test data once
 	path := filepath.Join(testVectorDir, "corporate_idvc.json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		b.Fatalf("failed to read test vector: %v", err)
 	}
@@ -922,7 +927,7 @@ func BenchmarkSingaporeCredential_Parse(b *testing.B) {
 func BenchmarkSingaporeCredential_ParseJSON(b *testing.B) {
 	// Load test data once
 	path := filepath.Join(testVectorDir, "corporate_idvc.json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		b.Fatalf("failed to read test vector: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -36,6 +37,7 @@ type CredentialOfferReply struct {
 }
 
 func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialOfferRequest) (*CredentialOfferReply, error) {
+	c.log.Debug("UICreateCredentialOffer", "scope", req.Scope, "wallet_id", req.WalletID)
 	vctmReq := &GetVCTMFromScopeRequest{
 		Scope: req.Scope,
 	}
@@ -46,7 +48,7 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	}
 
 	offerParams := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           c.cfg.APIGW.CredentialOffers.IssuerURL,
+		CredentialIssuer:           c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
 		CredentialConfigurationIDs: []string{req.Scope},
 		Grants: map[string]any{
 			"authorization_code": map[string]any{},
@@ -58,13 +60,14 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 		return nil, err
 	}
 
-	wallet, ok := c.cfg.APIGW.CredentialOffers.Wallets[req.WalletID]
+	wallet, ok := c.cfg.APIGW.Delivery.CredentialOffers.Wallets[req.WalletID]
 	if !ok {
 		err := errors.New("invalid wallet id")
 		return nil, err
 	}
 
 	credentialOfferURL := fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer)
+	c.log.Debug("UICreateCredentialOffer: offer created", "scope", req.Scope, "wallet_redirect_uri", wallet.RedirectURI, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 
 	u, err := url.Parse(credentialOfferURL)
 	if err != nil {
@@ -91,13 +94,13 @@ type GetVCTMFromScopeRequest struct {
 }
 
 func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error) {
-	credentialConstructor, ok := c.cfg.Common.CredentialConstructor[req.Scope]
+	credMeta, ok := c.cfg.Common.CredentialMetadata[req.Scope]
 	if !ok {
 		err := errors.New("scope is not valid credential")
 		return nil, err
 	}
 
-	vctm := credentialConstructor.GetVCTM()
+	vctm := credMeta.GetVCTM()
 	if vctm == nil {
 		return nil, fmt.Errorf("VCTM not loaded for scope: %s", req.Scope)
 	}
@@ -112,7 +115,7 @@ type TypeMetadataRequest struct {
 
 // TypeMetadata returns the raw VCTM JSON for a locally-published scope.
 func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (json.RawMessage, error) {
-	constructor := c.cfg.GetCredentialConstructor(req.Scope)
+	constructor := c.cfg.GetCredentialMetadata(req.Scope)
 	if constructor == nil {
 		return nil, errors.New("unknown scope: " + req.Scope)
 	}
@@ -145,7 +148,9 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 	svgTemplateURI := req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
 
 	if cached, ok := c.cacheService.SVGTemplate.Get(ctx, svgTemplateURI); ok {
-		return &vcclient.SVGTemplateReply{Template: cached}, nil
+		reply := &vcclient.SVGTemplateReply{Template: cached}
+
+		return reply, nil
 	}
 
 	c.log.Debug("SVG template not available in cache, fetching from origin")
@@ -169,12 +174,34 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 			template = base64.StdEncoding.EncodeToString([]byte(data))
 		}
 	} else {
+		// Validate URL scheme to prevent SSRF (only allow https)
+		parsedURL, err := url.Parse(svgTemplateURI)
+		if err != nil {
+			return nil, fmt.Errorf("invalid SVG template URI: %w", err)
+		}
+		if parsedURL.Scheme != "https" {
+			return nil, errors.New("SVG template URI must use https scheme")
+		}
+
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, svgTemplateURI, nil)
 		if err != nil {
 			return nil, err
 		}
 
-		response, err := http.DefaultClient.Do(httpReq)
+		svgClient := &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 3 {
+					return errors.New("too many redirects")
+				}
+				if req.URL.Scheme != "https" {
+					return errors.New("redirect to non-https scheme not allowed")
+				}
+				return nil
+			},
+		}
+
+		response, err := svgClient.Do(httpReq)
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +212,13 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 			return nil, err
 		}
 
-		responseData, err := io.ReadAll(response.Body)
+		contentType := response.Header.Get("Content-Type")
+		if contentType != "" && !strings.HasPrefix(contentType, "image/svg+xml") {
+			return nil, fmt.Errorf("unexpected content type from SVG template origin: %s", contentType)
+		}
+
+		const maxSVGSize = 5 * 1024 * 1024 // 5MB
+		responseData, err := io.ReadAll(io.LimitReader(response.Body, maxSVGSize))
 		if err != nil {
 			return nil, err
 		}

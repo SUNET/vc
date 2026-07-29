@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -23,7 +24,7 @@ type CreateCredentialRequest struct {
 
 // CreateCredentialReply is the reply for Credential
 type CreateCredentialReply struct {
-	//Data *sdjwt.PresentationFlat `json:"data"`
+	// Data *sdjwt.PresentationFlat `json:"data"`
 	Data                   []*apiv1_issuer.Credential `json:"data"`
 	TokenStatusListSection int64                      `json:"token_status_list_section"`
 	TokenStatusListIndex   int64                      `json:"token_status_list_index"`
@@ -33,8 +34,6 @@ type CreateCredentialReply struct {
 func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*CreateCredentialReply, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:CreateCredential")
 	defer span.End()
-
-	c.log.Debug("MakeSDJWT", "req", req)
 
 	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
 		c.log.Debug("Validation", "err", err)
@@ -208,7 +207,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 
-	mdocBytes, err := encoder.Marshal(issued.Document)
+	mdocBytes, err := encoder.Marshal(issued.DocumentMdoc)
 	if err != nil {
 		c.log.Error(err, "failed to encode mdoc")
 		return nil, fmt.Errorf("failed to encode mdoc: %w", err)

@@ -4,10 +4,12 @@ import (
 	"crypto"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
@@ -209,6 +211,36 @@ func (p ProofJWTToken) ExtractSubjectDID() string {
 	return claims.Iss
 }
 
+// ExtractNonce extracts the nonce claim from the JWT proof without verifying signature.
+func (p ProofJWTToken) ExtractNonce() string {
+	if p == "" {
+		return ""
+	}
+
+	parts := strings.Split(string(p), ".")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	claimsByte, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		claimsByte, err = base64.RawStdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+
+	var claims map[string]any
+	if err := json.Unmarshal(claimsByte, &claims); err != nil {
+		return ""
+	}
+
+	if nonce, ok := claims["nonce"].(string); ok {
+		return nonce
+	}
+	return ""
+}
+
 // Verify verifies a JWT proof according to OpenID4VCI 1.0 Appendix F.1
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-jwt-proof-type
 func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptions) error {
@@ -222,7 +254,10 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 	token, err := jwtv5.ParseWithClaims(string(p), claims, func(token *jwtv5.Token) (any, error) {
 		// Check if algorithm is supported (runtime option, not covered by struct validation)
 		if opts != nil && len(opts.SupportedAlgorithms) > 0 {
-			alg := token.Header["alg"].(string)
+			alg, ok := token.Header["alg"].(string)
+			if !ok {
+				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
+			}
 			if !slices.Contains(opts.SupportedAlgorithms, alg) {
 				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
 			}
@@ -284,13 +319,18 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 
 		return publicKey, nil
 	})
-
 	if err != nil {
-		return err
+		// If the error is already an OpenID4VCI error (from keyFunc), return it as-is
+		var vciErr *Error
+		if errors.As(err, &vciErr) {
+			return vciErr
+		}
+		// Wrap JWT library errors (signature verification failures, etc.) as invalid_proof
+		return &Error{Err: ErrInvalidProof, ErrorDescription: err.Error()}
 	}
 
 	if !token.Valid {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "JWT signature is invalid"}
+		return &Error{Err: ErrInvalidProof, ErrorDescription: "JWT signature is invalid"}
 	}
 
 	return nil

@@ -27,8 +27,7 @@ const (
 )
 
 // Suite implements the ECDSA Cryptosuite v1.0
-type Suite struct {
-}
+type Suite struct{}
 
 // NewSuite creates a new ECDSA cryptosuite
 func NewSuite() *Suite {

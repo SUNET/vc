@@ -1,6 +1,10 @@
 package openid4vp
 
-import "slices"
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+)
 
 type DCQL struct {
 	// Credentials REQUIRED. A non-empty array of Credential Queries as defined in Section 6.1 that specify the requested Credentials.
@@ -12,7 +16,7 @@ type DCQL struct {
 
 // CredentialQuery is an object representing a request for a presentation of one or more matching Credentials.
 type CredentialQuery struct {
-	//ID REQUIRED. A string identifying the Credential in the response and, if provided, the constraints in credential_sets. The value MUST be a non-empty string consisting of alphanumeric, underscore (_), or hyphen (-) characters. Within the Authorization Request, the same id MUST NOT be present more than once.
+	// ID REQUIRED. A string identifying the Credential in the response and, if provided, the constraints in credential_sets. The value MUST be a non-empty string consisting of alphanumeric, underscore (_), or hyphen (-) characters. Within the Authorization Request, the same id MUST NOT be present more than once.
 	ID string `json:"id" yaml:"id" validate:"required"`
 
 	// Format REQUIRED. A string that specifies the format of the requested Credential. Valid Credential Format Identifier values are defined in Appendix B.
@@ -34,7 +38,7 @@ type CredentialQuery struct {
 	Claims []ClaimQuery `json:"claims,omitempty" yaml:"claims,omitempty"`
 
 	// ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers for elements in claims that specifies which combinations of claims for the Credential are requested. The rules for selecting claims to send are defined in Section 6.4.1.
-	ClaimSet []string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required"`
+	ClaimSet [][]string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required,min=1,dive,required"`
 }
 
 type CredentialSetQuery struct {
@@ -134,8 +138,109 @@ type TrustedAuthority struct {
 }
 
 type ClaimQuery struct {
-	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer that specifies the path to a claim within the Credential, as defined in Section 7.
-	Path []string `json:"path" yaml:"path" validate:"required,min=1,dive,required"`
+	// ID REQUIRED if claim_sets is present in the Credential Query; OPTIONAL otherwise.
+	// A string identifying the particular claim. The value MUST be a non-empty string
+	// consisting of alphanumeric, underscore (_), or hyphen (-) characters.
+	// Within the particular claims array, the same id MUST NOT be present more than once.
+	ID string `json:"-" yaml:"-"`
+
+	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer
+	// that specifies the path to a claim within the Credential, as defined in Section 7.
+	// Elements are strings (object keys) or nil (representing null for array element access).
+	Path []*string `json:"-" yaml:"-" validate:"required,min=1"`
+}
+
+// MarshalJSON implements custom JSON marshaling for ClaimQuery.
+// Nil path elements are serialized as JSON null (for DCQL array element access).
+func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
+	path := make([]any, len(cq.Path))
+	for i, p := range cq.Path {
+		if p == nil {
+			path[i] = nil
+		} else {
+			path[i] = *p
+		}
+	}
+	type wire struct {
+		ID   string `json:"id,omitempty"`
+		Path []any  `json:"path"`
+	}
+	return json.Marshal(wire{ID: cq.ID, Path: path})
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
+// JSON null path elements are deserialized as nil pointers; non-string/non-null
+// elements cause an unmarshal error (Go's json package rejects them for *string).
+func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID   string    `json:"id"`
+		Path []*string `json:"path"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
+	}
+	cq.ID = raw.ID
+	cq.Path = raw.Path
+	return nil
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for ClaimQuery.
+// YAML null path elements are deserialized as nil pointers; non-string/non-null
+// elements cause an unmarshal error.
+func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw struct {
+		ID   string    `yaml:"id"`
+		Path []*string `yaml:"path"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	if err := validateClaimPath(raw.Path); err != nil {
+		return err
+	}
+	cq.ID = raw.ID
+	cq.Path = raw.Path
+	return nil
+}
+
+// validateClaimPath checks that the path is non-empty and that non-nil elements are not empty strings.
+// Nil elements are valid (they represent JSON null for array element access).
+func validateClaimPath(path []*string) error {
+	if len(path) == 0 {
+		return fmt.Errorf("claim path must not be empty")
+	}
+	for i, p := range path {
+		if p != nil && *p == "" {
+			return fmt.Errorf("claim path element at index %d must not be empty", i)
+		}
+	}
+	return nil
+}
+
+// StringPath creates a []*string path from string arguments.
+// This is a convenience for constructing ClaimQuery paths.
+func StringPath(parts ...string) []*string {
+	path := make([]*string, len(parts))
+	for i := range parts {
+		s := parts[i]
+		path[i] = &s
+	}
+	return path
+}
+
+// ArrayElementPath creates a []*string path ending with nil (null) for array element access.
+// Example: ArrayElementPath("nationalities") → ["nationalities", null]
+func ArrayElementPath(parts ...string) []*string {
+	path := make([]*string, len(parts)+1)
+	for i := range parts {
+		s := parts[i]
+		path[i] = &s
+	}
+	path[len(parts)] = nil // null for array element access
+	return path
 }
 
 //type ClaimQuery struct {
@@ -169,7 +274,7 @@ func IsW3CVCFormatIdentifier(format string) bool {
 }
 
 // IsSDJWTFormatIdentifier returns true if the format identifier is SD-JWT VC format.
-// Note: This is different from IsSDJWTFormat in sdjwt_handler.go which checks the actual token format.
+// Note: This is different from sdjwtvc.IsSDJWTFormat which checks the actual token format.
 func IsSDJWTFormatIdentifier(format string) bool {
 	return format == FormatSDJWTVC
 }

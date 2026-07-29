@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -156,6 +157,13 @@ func (r *JWKSKeyResolver) ResolveKeyByKID(ctx context.Context, issuerURL, kid st
 		}
 	}
 
+	// Fallback: if the JWKS has exactly one key, use it regardless of kid.
+	// This handles the common case where the issuer generates the kid
+	// differently (e.g. from certificate CN vs key thumbprint).
+	if len(jwks.keys) == 1 {
+		return jwks.keys[0].publicKey, jwks.keys[0].jwkMap, nil
+	}
+
 	return nil, nil, fmt.Errorf("no key found in issuer JWKS matching kid %q", kid)
 }
 
@@ -185,33 +193,37 @@ func (r *JWKSKeyResolver) getOrFetchJWKS(ctx context.Context, issuerURL string) 
 //  4. .well-known/oauth-authorization-server → jwks_uri (RFC 8414)
 func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string) (*cachedJWKS, error) {
 	baseURL := strings.TrimRight(issuerURL, "/")
+	var joinedErr error
 
 	// 1. Try .well-known/jwt-vc-issuer (SD-JWT VC §5.3 primary)
 	rawKeys, err := r.tryJWTVCIssuerMetadata(ctx, baseURL, issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
+	joinedErr = errors.Join(joinedErr, fmt.Errorf("jwt-vc-issuer: %w", err))
 
 	// 2. Try .well-known/openid-credential-issuer → chase AS metadata → jwks_uri
 	rawKeys, err = r.tryCredentialIssuerMetadata(ctx, baseURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
+	joinedErr = errors.Join(joinedErr, fmt.Errorf("openid-credential-issuer: %w", err))
 
 	// 3. Try .well-known/openid-configuration (OIDC Discovery) → jwks_uri
 	rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(baseURL, "openid-configuration"), issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
+	joinedErr = errors.Join(joinedErr, fmt.Errorf("openid-configuration: %w", err))
 
 	// 4. Try .well-known/oauth-authorization-server (RFC 8414) → jwks_uri
 	rawKeys, err = r.tryOAuthMetadata(ctx, buildWellKnownURL(baseURL, "oauth-authorization-server"), issuerURL)
 	if err == nil {
 		return r.parseRawKeys(rawKeys)
 	}
+	joinedErr = errors.Join(joinedErr, fmt.Errorf("oauth-authorization-server: %w", err))
 
-	return nil, fmt.Errorf("failed to discover JWKS for issuer %s: no metadata endpoint returned usable keys "+
-		"(tried .well-known/jwt-vc-issuer, openid-credential-issuer, openid-configuration, oauth-authorization-server)", issuerURL)
+	return nil, fmt.Errorf("failed to discover JWKS for issuer %s: %w", issuerURL, joinedErr)
 }
 
 // tryJWTVCIssuerMetadata tries the SD-JWT VC §5.3 primary discovery endpoint.
@@ -282,7 +294,8 @@ func (r *JWKSKeyResolver) tryOAuthMetadata(ctx context.Context, metadataURL, exp
 // extractJWKSFromMetadata returns raw JWK keys from inline jwks or jwks_uri.
 func (r *JWKSKeyResolver) extractJWKSFromMetadata(ctx context.Context, jwks *struct {
 	Keys []json.RawMessage `json:"keys"`
-}, jwksURI string) ([]json.RawMessage, error) {
+}, jwksURI string,
+) ([]json.RawMessage, error) {
 	if jwks != nil && len(jwks.Keys) > 0 {
 		return jwks.Keys, nil
 	}
@@ -294,18 +307,25 @@ func (r *JWKSKeyResolver) extractJWKSFromMetadata(ctx context.Context, jwks *str
 
 // parseRawKeys parses raw JSON JWK entries into cached key entries.
 func (r *JWKSKeyResolver) parseRawKeys(rawKeys []json.RawMessage) (*cachedJWKS, error) {
+	if len(rawKeys) == 0 {
+		return nil, fmt.Errorf("JWKS contains no keys")
+	}
+
 	entries := make([]jwkEntry, 0, len(rawKeys))
+	var parseErr error
 	for _, raw := range rawKeys {
 		var jwkMap map[string]any
 		if err := json.Unmarshal(raw, &jwkMap); err != nil {
-			continue // skip unparseable keys
+			parseErr = errors.Join(parseErr, fmt.Errorf("failed to unmarshal JWK: %w", err))
+			continue
 		}
 
 		kid, _ := jwkMap["kid"].(string)
 
 		publicKey, err := r.parseJWK(jwkMap)
 		if err != nil {
-			continue // skip keys that can't be parsed
+			parseErr = errors.Join(parseErr, fmt.Errorf("failed to parse JWK kid=%q: %w", kid, err))
+			continue
 		}
 
 		entries = append(entries, jwkEntry{
@@ -316,7 +336,7 @@ func (r *JWKSKeyResolver) parseRawKeys(rawKeys []json.RawMessage) (*cachedJWKS, 
 	}
 
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("JWKS contains no usable keys")
+		return nil, fmt.Errorf("JWKS contains no usable keys: %w", parseErr)
 	}
 
 	return &cachedJWKS{keys: entries}, nil

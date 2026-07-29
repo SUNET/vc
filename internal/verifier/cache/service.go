@@ -66,7 +66,7 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: credentials: %w", err)
 	}
 
-	if s.EphemeralEncryptionKey, err = pkgcache.NewGenericCache[jwk.Key](cs, ctx, "verifier_ephemeral_keys", 10*time.Minute); err != nil {
+	if s.EphemeralEncryptionKey, err = pkgcache.NewGenericCache[jwk.Key](cs, ctx, "verifier_ephemeral_keys", 10*time.Minute, pkgcache.WithDecoder(jwkKeyDecoder)); err != nil {
 		return nil, fmt.Errorf("cache: ephemeral_keys: %w", err)
 	}
 
@@ -83,4 +83,9 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 	s.SessionEncKey = sharedSecrets.SessionEncKey
 
 	return s, nil
+}
+
+// jwkKeyDecoder parses raw JSON bytes into a jwk.Key.
+func jwkKeyDecoder(data []byte) (jwk.Key, error) {
+	return jwk.ParseKey(data)
 }

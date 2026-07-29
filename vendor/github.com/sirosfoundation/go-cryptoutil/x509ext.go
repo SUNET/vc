@@ -8,9 +8,11 @@
 package cryptoutil
 
 import (
+	"crypto"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 )
 
 // ErrNotHandled signals that an extension does not handle this input.
@@ -90,6 +92,88 @@ func (ext *Extensions) CheckSignature(cert *x509.Certificate, algo x509.Signatur
 		return err
 	}
 	return stdErr
+}
+
+// CheckSignatureXMLDSIG verifies a signature using an XML-DSIG algorithm URI
+// (e.g. "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256").
+// It resolves the URI via the AlgorithmRegistry, tries the standard
+// x509.Certificate.CheckSignature if possible, and falls back to registered
+// SignatureVerifiers. This enables verification of non-standard algorithms
+// (e.g. brainpool) that have registered XML-DSIG URIs.
+func (ext *Extensions) CheckSignatureXMLDSIG(cert *x509.Certificate, xmldsigURI string, signed, signature []byte) error {
+	// Look up the algorithm in the registry
+	algo := ext.Algorithms.ByXMLDSIG(xmldsigURI)
+	if algo == nil {
+		return fmt.Errorf("cryptoutil: unknown XML-DSIG algorithm %q", xmldsigURI)
+	}
+
+	// Try standard x509 signature algorithms first (works for NIST curves, RSA)
+	x509algo := xmldsigToX509Algorithm(xmldsigURI)
+	if x509algo != x509.UnknownSignatureAlgorithm {
+		err := cert.CheckSignature(x509algo, signed, signature)
+		if err == nil {
+			return nil
+		}
+		// Fall through to extension verifiers
+	}
+
+	// Try extension verifiers with the hash from the algorithm registry
+	for _, v := range ext.Verifiers {
+		// Map the XML-DSIG URI to the closest x509.SignatureAlgorithm for the verifier
+		x509AlgoForVerifier := hashToECDSAAlgorithm(algo.Hash)
+		err := v(cert, x509AlgoForVerifier, signed, signature)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, ErrNotHandled) {
+			continue
+		}
+		return err
+	}
+
+	return fmt.Errorf("cryptoutil: no verifier handled XML-DSIG algorithm %q", xmldsigURI)
+}
+
+// xmldsigToX509Algorithm maps well-known XML-DSIG URIs to x509.SignatureAlgorithm.
+func xmldsigToX509Algorithm(uri string) x509.SignatureAlgorithm {
+	switch uri {
+	case "http://www.w3.org/2000/09/xmldsig#rsa-sha1":
+		return x509.SHA1WithRSA
+	case "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256":
+		return x509.SHA256WithRSA
+	case "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384":
+		return x509.SHA384WithRSA
+	case "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512":
+		return x509.SHA512WithRSA
+	case "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1":
+		return x509.ECDSAWithSHA1
+	case "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256":
+		return x509.ECDSAWithSHA256
+	case "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384":
+		return x509.ECDSAWithSHA384
+	case "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512":
+		return x509.ECDSAWithSHA512
+	default:
+		return x509.UnknownSignatureAlgorithm
+	}
+}
+
+// hashToECDSAAlgorithm maps a crypto.Hash to the closest ECDSA x509.SignatureAlgorithm.
+// This is used to pass a meaningful algorithm to extension verifiers that determine
+// the hash from the x509.SignatureAlgorithm parameter.
+func hashToECDSAAlgorithm(h crypto.Hash) x509.SignatureAlgorithm {
+	switch h {
+	case crypto.SHA256:
+		return x509.ECDSAWithSHA256
+	case crypto.SHA384:
+		return x509.ECDSAWithSHA384
+	case crypto.SHA512:
+		return x509.ECDSAWithSHA512
+	case crypto.SHA1:
+		return x509.ECDSAWithSHA1
+	default:
+		return x509.ECDSAWithSHA256
+	}
 }
 
 // ParseCertificatesPEM parses all certificates from PEM-encoded data,

@@ -120,7 +120,7 @@ func TestSdSuite_SignVerifyDerive(t *testing.T) {
 		// Convert to JSON and check fields
 		jsonBytes, _ := derivedPartial.ToJSON()
 		var partialMap map[string]any
-		json.Unmarshal(jsonBytes, &partialMap)
+		json.Unmarshal(jsonBytes, &partialMap) // #nosec G104
 		// We can't easily check what's missing without knowing the quad mapping,
 		// but verification success is the main test.
 	}

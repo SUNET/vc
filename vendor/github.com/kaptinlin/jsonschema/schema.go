@@ -7,97 +7,30 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
 	"github.com/kaptinlin/jsonpointer"
 )
 
-// knownSchemaFields contains all known JSON Schema keywords.
-// Used to filter out known fields when collecting extra/extension fields.
-var knownSchemaFields = map[string]struct{}{
-	// Core keywords
-	"$id":            {},
-	"$schema":        {},
-	"$ref":           {},
-	"$dynamicRef":    {},
-	"$anchor":        {},
-	"$dynamicAnchor": {},
-	"$defs":          {},
-	"definitions":    {}, // Draft-7 compatibility
-	"$comment":       {},
-
-	// Applicator keywords
-	"allOf":                 {},
-	"anyOf":                 {},
-	"oneOf":                 {},
-	"not":                   {},
-	"if":                    {},
-	"then":                  {},
-	"else":                  {},
-	"dependentSchemas":      {},
-	"prefixItems":           {},
-	"items":                 {},
-	"contains":              {},
-	"properties":            {},
-	"patternProperties":     {},
-	"additionalProperties":  {},
-	"propertyNames":         {},
-	"unevaluatedItems":      {},
-	"unevaluatedProperties": {},
-
-	// Validation keywords
-	"type":              {},
-	"enum":              {},
-	"const":             {},
-	"multipleOf":        {},
-	"maximum":           {},
-	"exclusiveMaximum":  {},
-	"minimum":           {},
-	"exclusiveMinimum":  {},
-	"maxLength":         {},
-	"minLength":         {},
-	"pattern":           {},
-	"maxItems":          {},
-	"minItems":          {},
-	"uniqueItems":       {},
-	"maxContains":       {},
-	"minContains":       {},
-	"maxProperties":     {},
-	"minProperties":     {},
-	"required":          {},
-	"dependentRequired": {},
-
-	// Format keyword
-	"format": {},
-
-	// Content keywords
-	"contentEncoding":  {},
-	"contentMediaType": {},
-	"contentSchema":    {},
-
-	// Meta-data keywords
-	"title":       {},
-	"description": {},
-	"default":     {},
-	"deprecated":  {},
-	"readOnly":    {},
-	"writeOnly":   {},
-	"examples":    {},
-}
-
 // Schema represents a JSON Schema as per the 2020-12 draft, containing all
 // necessary metadata and validation properties defined by the specification.
 type Schema struct {
-	compiledPatterns      map[string]*regexp.Regexp // Cached compiled regular expressions for pattern properties.
-	compiler              *Compiler                 // Reference to the associated Compiler instance.
-	parent                *Schema                   // Parent schema for hierarchical resolution.
-	uri                   string                    // Internal schema identifier resolved during compilation.
-	baseURI               string                    // Base URI for resolving relative references within the schema.
-	anchors               map[string]*Schema        // Anchors for quick lookup of internal schema references.
-	dynamicAnchors        map[string]*Schema        // Dynamic anchors for more flexible schema references.
-	schemas               map[string]*Schema        // Cache of compiled schemas.
-	compiledStringPattern *regexp.Regexp            // Cached compiled regular expressions for string patterns.
+	compiledPatterns       map[string]*regexp.Regexp // Cached compiled regular expressions for pattern properties.
+	compiler               *Compiler                 // Reference to the associated Compiler instance.
+	parent                 *Schema                   // Parent schema for hierarchical resolution.
+	uri                    string                    // Internal schema identifier resolved during compilation.
+	baseURI                string                    // Base URI for resolving relative references within the schema.
+	anchors                map[string]*Schema        // Anchors for quick lookup of internal schema references.
+	dynamicAnchors         map[string]*Schema        // Dynamic anchors for more flexible schema references.
+	schemas                map[string]*Schema        // Cache of compiled schemas.
+	compiledStringPattern  *regexp.Regexp            // Cached compiled regular expressions for string patterns.
+	dialect                Dialect                   // JSON Schema dialect selected for this schema resource.
+	rawExtra               map[string]jsontext.Value // Members not bound to a typed field; dialect layer claims known ones, the rest become Extra.
+	legacyExclusiveMinimum jsontext.Value            // Raw Draft-04 boolean exclusiveMinimum value.
+	legacyExclusiveMaximum jsontext.Value            // Raw Draft-04 boolean exclusiveMaximum value.
+	disableValidation      bool                      // True when the active metaschema omits validation vocabulary.
 
 	ID     string  `json:"$id,omitempty"`     // Public identifier for the schema.
 	Schema string  `json:"$schema,omitempty"` // URI indicating the specification the schema conforms to.
@@ -109,6 +42,8 @@ type Schema struct {
 	Anchor             string             `json:"$anchor,omitempty"`        // Anchor for resolving relative JSON Pointers.
 	DynamicAnchor      string             `json:"$dynamicAnchor,omitempty"` // Anchor for dynamic resolution
 	Defs               map[string]*Schema `json:"$defs,omitempty"`          // An object containing schema definitions.
+	Comment            string             `json:"$comment,omitempty"`       // Annotation-only comment, see core spec "$comment".
+	Vocabulary         map[string]bool    `json:"$vocabulary,omitempty"`    // Vocabulary declarations, meaningful on meta-schemas.
 	ResolvedRef        *Schema            `json:"-"`                        // Resolved schema for $ref
 	ResolvedDynamicRef *Schema            `json:"-"`                        // Resolved schema for $dynamicRef
 
@@ -193,11 +128,18 @@ type Schema struct {
 }
 
 // newSchema parses JSON schema data and returns a Schema object.
-func newSchema(jsonSchema []byte) (*Schema, error) {
+func newSchema(jsonSchema []byte, compilers ...*Compiler) (*Schema, error) {
 	schema := &Schema{}
 
 	// Parse schema
 	if err := json.Unmarshal(jsonSchema, schema); err != nil {
+		return nil, err
+	}
+	var compiler *Compiler
+	if len(compilers) > 0 {
+		compiler = compilers[0]
+	}
+	if err := schema.applyDialects(compiler); err != nil {
 		return nil, err
 	}
 
@@ -234,6 +176,9 @@ func (s *Schema) initializeSchemaCore(compiler *Compiler, parent *Schema, resolv
 	if s.Anchor != "" {
 		s.setAnchor(s.Anchor)
 	}
+	if s.Dialect().supportsLegacyIDAnchors() && strings.HasPrefix(s.ID, "#") {
+		s.setLegacyIDAnchor(strings.TrimPrefix(s.ID, "#"))
+	}
 	if s.DynamicAnchor != "" {
 		s.setDynamicAnchor(s.DynamicAnchor)
 	}
@@ -263,8 +208,13 @@ func (s *Schema) resolveBaseURI(compiler *Compiler) {
 		parentBaseURI = compiler.DefaultBaseURI
 	}
 
+	if s.Ref != "" && s.Dialect().refIgnoresSiblings() {
+		s.baseURI = parentBaseURI
+		return
+	}
+
 	if s.ID != "" {
-		if isValidURI(s.ID) {
+		if hasURIScheme(s.ID) {
 			s.uri = s.ID
 			s.baseURI = getBaseURI(s.ID)
 		} else {
@@ -285,62 +235,9 @@ func (s *Schema) resolveBaseURI(compiler *Compiler) {
 // When resolveRefs is true, schemas are initialized with full reference resolution.
 // When resolveRefs is false, reference resolution is deferred (used by CompileBatch).
 func initializeNestedSchemasCore(s *Schema, compiler *Compiler, resolveRefs bool) {
-	initChild := func(child *Schema) {
+	s.forEachChild(func(child *Schema) {
 		child.initializeSchemaCore(compiler, s, resolveRefs)
-	}
-
-	if s.Defs != nil {
-		for _, def := range s.Defs {
-			initChild(def)
-		}
-	}
-	// Initialize logical schema groupings
-	for _, schemas := range [][]*Schema{s.AllOf, s.AnyOf, s.OneOf} {
-		for _, schema := range schemas {
-			if schema != nil {
-				initChild(schema)
-			}
-		}
-	}
-
-	// Initialize conditional schemas
-	for _, schema := range []*Schema{s.Not, s.If, s.Then, s.Else} {
-		if schema != nil {
-			initChild(schema)
-		}
-	}
-	if s.DependentSchemas != nil {
-		for _, depSchema := range s.DependentSchemas {
-			initChild(depSchema)
-		}
-	}
-
-	// Initialize array and object schemas
-	if s.PrefixItems != nil {
-		for _, item := range s.PrefixItems {
-			initChild(item)
-		}
-	}
-	for _, schema := range []*Schema{s.Items, s.Contains, s.AdditionalProperties} {
-		if schema != nil {
-			initChild(schema)
-		}
-	}
-	if s.Properties != nil {
-		for _, prop := range *s.Properties {
-			initChild(prop)
-		}
-	}
-	if s.PatternProperties != nil {
-		for _, prop := range *s.PatternProperties {
-			initChild(prop)
-		}
-	}
-	for _, schema := range []*Schema{s.UnevaluatedProperties, s.UnevaluatedItems, s.ContentSchema, s.PropertyNames} {
-		if schema != nil {
-			initChild(schema)
-		}
-	}
+	})
 }
 
 // validateRegexSyntax validates that all regex patterns in the schema are valid Go RE2 syntax.
@@ -376,7 +273,7 @@ func (s *Schema) collectRegexErrors(pathTokens []string, visited map[*Schema]boo
 			patternTokens := slices.Concat(pathTokens, []string{"pattern"})
 			errs = append(errs, &RegexPatternError{
 				Keyword:  "pattern",
-				Location: "#" + jsonpointer.Format(patternTokens...),
+				Location: "#" + jsonpointer.FromTokens(patternTokens...).String(),
 				Pattern:  *s.Pattern,
 				Err:      err,
 			})
@@ -390,7 +287,7 @@ func (s *Schema) collectRegexErrors(pathTokens []string, visited map[*Schema]boo
 			if err := compilePattern(pattern); err != nil {
 				errs = append(errs, &RegexPatternError{
 					Keyword:  "patternProperties",
-					Location: "#" + jsonpointer.Format(patternPropTokens...),
+					Location: "#" + jsonpointer.FromTokens(patternPropTokens...).String(),
 					Pattern:  pattern,
 					Err:      err,
 				})
@@ -478,6 +375,14 @@ func (s *Schema) setAnchor(anchor string) {
 	}
 	s.anchors[anchor] = s
 
+	scope := s.scopeSchema()
+	if scope.anchors == nil {
+		scope.anchors = make(map[string]*Schema)
+	}
+	if scope.anchors[anchor] == nil {
+		scope.anchors[anchor] = s
+	}
+
 	root := s.rootSchema()
 	if root.anchors == nil {
 		root.anchors = make(map[string]*Schema)
@@ -486,6 +391,24 @@ func (s *Schema) setAnchor(anchor string) {
 	// Only set anchor at root level if it's in the same scope as root
 	if (s.ID == "" || s.ID == root.ID) && root.anchors[anchor] == nil {
 		root.anchors[anchor] = s
+	}
+}
+
+func (s *Schema) setLegacyIDAnchor(anchor string) {
+	if s.anchors == nil {
+		s.anchors = make(map[string]*Schema)
+	}
+	s.anchors[anchor] = s
+
+	scope := s.rootSchema()
+	if s.parent != nil {
+		scope = s.parent.scopeSchema()
+	}
+	if scope.anchors == nil {
+		scope.anchors = make(map[string]*Schema)
+	}
+	if scope.anchors[anchor] == nil {
+		scope.anchors[anchor] = s
 	}
 }
 
@@ -649,11 +572,21 @@ func (s *Schema) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Use a temporary struct to intercept "items" and "additionalItems"
+	// Decode into the typed model in a single pass. Keywords common to every
+	// supported dialect bind to struct fields; "exclusiveMinimum/Maximum" and
+	// "items" need decode-time disambiguation; everything else (dialect-specific
+	// keywords plus unknown extensions) lands in Rest, the inlined fallback.
+	// Recognition is otherwise structural: a keyword is "known" iff it has a
+	// field, so there is no separate hand-maintained keyword list to drift.
 	type Alias Schema
 	aux := &struct {
-		Items           jsontext.Value `json:"items,omitempty"`
-		AdditionalItems *Schema        `json:"additionalItems,omitempty"`
+		Items            jsontext.Value `json:"items,omitempty"`
+		ExclusiveMinimum jsontext.Value `json:"exclusiveMinimum,omitempty"`
+		ExclusiveMaximum jsontext.Value `json:"exclusiveMaximum,omitempty"`
+		// Const is captured as a raw token so "const": null is preserved
+		// (a *ConstValue field would be niled by the decoder, losing IsSet).
+		Const jsontext.Value            `json:"const,omitempty"`
+		Rest  map[string]jsontext.Value `json:",embed"` //nolint:staticcheck // go-json-experiment/json v2 uses embed for fallback fields.
 		*Alias
 	}{
 		Alias: (*Alias)(s),
@@ -662,69 +595,60 @@ func (s *Schema) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	if err := decodeExclusiveBound("exclusiveMinimum", aux.ExclusiveMinimum, &s.ExclusiveMinimum, &s.legacyExclusiveMinimum); err != nil {
+		return err
+	}
+	if err := decodeExclusiveBound("exclusiveMaximum", aux.ExclusiveMaximum, &s.ExclusiveMaximum, &s.legacyExclusiveMaximum); err != nil {
+		return err
+	}
 
-	// Smart handling for "items" polymorphism (Draft 07 vs 2020-12)
+	// "items" polymorphism (legacy tuple form vs 2020-12 list form). When items
+	// is an array, the sibling "additionalItems" (legacy) validates the rest;
+	// consume it from Rest so it is not later treated as an extension keyword.
 	if len(aux.Items) > 0 {
 		trimmed := bytes.TrimSpace(aux.Items)
 		if len(trimmed) > 0 && trimmed[0] == '[' {
-			// Case 1: items is an array (Draft 07 Tuple Validation)
 			if err := json.Unmarshal(aux.Items, &s.PrefixItems); err != nil {
 				return err
 			}
-			// In Draft 07, "additionalItems" validates the rest
-			if aux.AdditionalItems != nil {
-				s.Items = aux.AdditionalItems
+			if additional, ok := aux.Rest["additionalItems"]; ok {
+				item := &Schema{}
+				if err := json.Unmarshal(additional, item); err != nil {
+					return err
+				}
+				s.Items = item
+				delete(aux.Rest, "additionalItems")
 			}
 		} else {
-			// Case 2: items is a schema object (Draft 2020-12 List Validation)
 			if err := json.Unmarshal(aux.Items, &s.Items); err != nil {
 				return err
 			}
 		}
 	}
 
-	// Special handling for backward compatibility and const field
-	var raw map[string]jsontext.Value
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-
-	// Handle backward compatibility: "definitions" (Draft-7) -> "$defs" (Draft 2020-12)
-	if defsData, ok := raw["definitions"]; ok && s.Defs == nil {
+	// "definitions" (Draft-7 spelling) -> "$defs". Consume it so it is not
+	// reported as an extension keyword.
+	if defsData, ok := aux.Rest["definitions"]; ok && s.Defs == nil {
 		var defs map[string]*Schema
 		if err := json.Unmarshal(defsData, &defs); err != nil {
 			return err
 		}
 		s.Defs = defs
+		delete(aux.Rest, "definitions")
 	}
 
-	// Special handling for the const field
-	if constData, ok := raw["const"]; ok {
+	if len(aux.Const) > 0 {
 		if s.Const == nil {
 			s.Const = &ConstValue{}
 		}
-		if err := s.Const.UnmarshalJSON(constData); err != nil {
+		if err := s.Const.UnmarshalJSON(aux.Const); err != nil {
 			return err
 		}
 	}
 
-	return s.collectExtraFields(data)
-}
-
-func (s *Schema) collectExtraFields(raw []byte) error {
-	var allFields map[string]any
-	if err := json.Unmarshal(raw, &allFields); err != nil {
-		return err
-	}
-
-	// Remove all known schema fields
-	for key := range knownSchemaFields {
-		delete(allFields, key)
-	}
-
-	if len(allFields) > 0 {
-		s.Extra = allFields
-	}
+	// Defer Extra: which leftover members are extensions versus dialect-specific
+	// keywords depends on the dialect, which is not known until applyDialect.
+	s.rawExtra = aux.Rest
 	return nil
 }
 
@@ -733,8 +657,7 @@ type SchemaMap map[string]*Schema
 
 // MarshalJSON ensures that SchemaMap serializes properly as a JSON object.
 func (sm SchemaMap) MarshalJSON() ([]byte, error) {
-	m := make(map[string]*Schema)
-	maps.Copy(m, sm)
+	m := maps.Clone(map[string]*Schema(sm))
 	// Use deterministic marshaling to ensure consistent key ordering
 	return json.Marshal(m, json.Deterministic(true))
 }
@@ -747,8 +670,7 @@ func (sm *SchemaMap) MarshalJSONTo(enc *jsontext.Encoder, opts json.Options) err
 	if sm == nil {
 		return json.MarshalEncode(enc, nil, opts)
 	}
-	m := make(map[string]*Schema)
-	maps.Copy(m, *sm)
+	m := maps.Clone(map[string]*Schema(*sm))
 	return json.MarshalEncode(enc, m, opts)
 }
 

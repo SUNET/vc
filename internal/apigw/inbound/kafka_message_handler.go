@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/messagebroker"
@@ -68,8 +69,7 @@ func (h *UploadMessageHandler) HandleMessage(ctx context.Context, message *saram
 		return err
 	}
 
-	err := h.apiv1.Upload(ctx, &uploadRequest)
-	if err != nil {
+	if _, err := h.apiv1.DatastoreUpload(ctx, &uploadRequest); err != nil {
 		h.log.Error(err, "Failed to handle UploadRequest")
 		return err
 	}

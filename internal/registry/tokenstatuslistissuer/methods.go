@@ -39,6 +39,7 @@ func (s *Service) GenerateStatusListTokenJWT(ctx context.Context, cfg TokenConfi
 	jwtCfg := tokenstatuslist.JWTSigningConfig{
 		SigningKey:    kmSigner.PrivateKey(),
 		SigningMethod: cfg.SigningMethod,
+		PublicKey:     kmSigner.PublicKey(),
 	}
 
 	return sl.GenerateJWT(jwtCfg)
@@ -60,10 +61,10 @@ func (s *Service) GenerateStatusListTokenCWT(ctx context.Context, cfg TokenConfi
 		return nil, fmt.Errorf("signer must be a *pki.KeyMaterialSigner, got %T", s.signer)
 	}
 
-	// Generate CWT using tokenstatuslist package
+	// Generate CWT using tokenstatuslist package.
+	// Algorithm is auto-detected from the key type (ES256 for ECDSA, PS256 for RSA).
 	cwtCfg := tokenstatuslist.CWTSigningConfig{
 		SigningKey: kmSigner.PrivateKey(),
-		Algorithm:  tokenstatuslist.CoseAlgES256,
 	}
 
 	return sl.GenerateCWT(cwtCfg)
@@ -86,7 +87,9 @@ func (s *Service) CreateNewSectionIfNeeded(ctx context.Context) (int64, error) {
 		"section": currentSection,
 		"decoy":   true,
 	}
-	numberOfDecoyDocs, err := s.tokenStatusListColl.CountDocs(ctx, countFilter)
+	// Use limited count: we only need to know if decoys > 1000, not the exact total.
+	// With 1M+ documents, an unlimited CountDocuments takes ~670ms; with limit 1001 it returns in <1ms.
+	numberOfDecoyDocs, err := s.tokenStatusListColl.CountDocsWithLimit(ctx, countFilter, 1001)
 	if err != nil {
 		return 0, err
 	}
@@ -119,6 +122,9 @@ func (s *Service) AddStatus(ctx context.Context, status uint8) (int64, int64, er
 		return 0, 0, err
 	}
 
+	// Refresh cache so the new status is immediately visible in the served token
+	s.refreshSection(ctx, currentSection)
+
 	return currentSection, index, nil
 }
 
@@ -129,5 +135,10 @@ func (s *Service) GetAllSections(ctx context.Context) ([]int64, error) {
 
 // UpdateStatus updates the status of an existing entry at the given section and index.
 func (s *Service) UpdateStatus(ctx context.Context, section int64, index int64, status uint8) error {
-	return s.tokenStatusListColl.UpdateStatus(ctx, section, index, status)
+	if err := s.tokenStatusListColl.UpdateStatus(ctx, section, index, status); err != nil {
+		return err
+	}
+	// Refresh cache so the updated status is immediately visible in the served token
+	s.refreshSection(ctx, section)
+	return nil
 }

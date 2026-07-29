@@ -3,8 +3,10 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	cache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -15,23 +17,29 @@ import (
 // Apiv1 interface
 type Apiv1 interface {
 	// datastore endpoints
-	Upload(ctx context.Context, req *vcclient.UploadRequest) error
-	Notification(ctx context.Context, req *vcclient.NotificationRequest) (*vcclient.NotificationReply, error)
-	AddDocumentIdentity(ctx context.Context, req *apiv1.AddDocumentIdentityRequest) error
-	DeleteDocumentIdentity(ctx context.Context, req *apiv1.DeleteDocumentIdentityRequest) error
-	IdentityMapping(ctx context.Context, reg *apiv1.IdentityMappingRequest) (*apiv1.IdentityMappingReply, error)
-	GetDocument(ctx context.Context, req *apiv1.GetDocumentRequest) (*apiv1.GetDocumentReply, error)
-	DocumentList(ctx context.Context, req *apiv1.DocumentListRequest) (*apiv1.DocumentListReply, error)
-	DeleteDocument(ctx context.Context, req *apiv1.DeleteDocumentRequest) error
-	GetDocumentCollectID(ctx context.Context, req *apiv1.GetDocumentCollectIDRequest) (*apiv1.GetDocumentCollectIDReply, error)
-	RevokeDocument(ctx context.Context, req *apiv1.RevokeDocumentRequest) error
-	AddConsent(ctx context.Context, req *apiv1.AddConsentRequest) error
-	GetConsent(ctx context.Context, req *apiv1.GetConsentRequest) (*model.Consent, error)
+	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*apiv1.DatastoreUploadReply, error)
+	DatastoreAddIdentity(ctx context.Context, req *apiv1.DatastoreAddIdentityRequest) error
+	DatastoreDeleteIdentity(ctx context.Context, req *apiv1.DatastoreDeleteIdentityRequest) error
+	DatastoreGet(ctx context.Context, req *apiv1.DatastoreGetRequest) (*apiv1.DatastoreGetReply, error)
+	DatastoreList(ctx context.Context, req *apiv1.DatastoreListRequest) (*apiv1.DatastoreListReply, error)
+	DatastoreDelete(ctx context.Context, req *apiv1.DatastoreDeleteRequest) error
+	DatastoreGetByKey(ctx context.Context, req *apiv1.DatastoreGetByKeyRequest) (*apiv1.DatastoreGetByKeyReply, error)
+	DatastoreResolve(ctx context.Context, req *apiv1.DatastoreResolveRequest) (*apiv1.DatastoreResolveReply, error)
+	DatastoreDeleteByKey(ctx context.Context, req *apiv1.DatastoreDeleteByKeyRequest) error
+	DatastoreReplace(ctx context.Context, req *vcclient.UploadRequest) error
+	DatastoreSearch(ctx context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error)
+	DatastoreBulkUpload(ctx context.Context, req *apiv1.DatastoreBulkUploadRequest) (*apiv1.DatastoreBulkUploadReply, error)
+	DatastorePreAuthOffer(ctx context.Context, req *apiv1.DatastorePreAuthOfferRequest) (*apiv1.DatastorePreAuthOfferReply, error)
 
-	// datastore endpoints - disabled in production
-	SearchDocuments(ctx context.Context, req *model.SearchDocumentsRequest) (*model.SearchDocumentsReply, error)
-	AddPIDUser(ctx context.Context, req *vcclient.AddPIDRequest) error
-	LoginPIDUser(ctx context.Context, req *vcclient.LoginPIDUserRequest) error
+	// identity mapping endpoints
+	IdentityMappingCreate(ctx context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error)
+	IdentityMappingBulkCreate(ctx context.Context, req *apiv1.IdentityMappingBulkCreateRequest) (*apiv1.IdentityMappingBulkCreateReply, error)
+	IdentityMappingResolve(ctx context.Context, req *apiv1.IdentityMappingResolveRequest) (*apiv1.IdentityMappingResolveReply, error)
+	IdentityMappingUpdate(ctx context.Context, req *apiv1.IdentityMappingUpdateRequest) error
+	IdentityMappingDelete(ctx context.Context, req *apiv1.IdentityMappingDeleteRequest) error
+	IdentityMappingSearch(ctx context.Context, req *apiv1.IdentityMappingSearchRequest) (*apiv1.IdentityMappingSearchReply, error)
+
+	// user endpoints
 	UserAuthenticSourceLookup(ctx context.Context, req *vcclient.UserAuthenticSourceLookupRequest) (*vcclient.UserAuthenticSourceLookupReply, error)
 	UserLookup(ctx context.Context, req *vcclient.UserLookupRequest) (*vcclient.UserLookupReply, error)
 
@@ -42,7 +50,9 @@ type Apiv1 interface {
 	VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error)
 	VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error
 	VCIMetadata(ctx context.Context) (*openid4vci.CredentialIssuerMetadataParameters, error)
+	GetIACAs(ctx context.Context) (*apiv1.GetIACAsResponse, error)
 
+	// OAuth endpoints
 	OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error)
 	OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRequest) (*openid4vci.AuthorizationResponse, error)
 	OAuthAuthorizationConsent(ctx context.Context, req *apiv1.OauthAuthorizationConsentRequest) (*apiv1.OAuthAuthorizationConsentResponse, error)
@@ -52,15 +62,15 @@ type Apiv1 interface {
 	JWKS(ctx context.Context) (*apiv1.JWKSResponse, error)
 	SDJWTVCIssuerMetadata(ctx context.Context) (*apiv1.SDJWTVCIssuerMetadataResponse, error)
 
-	//Revoke(ctx context.Context, req *apiv1.RevokeRequest) (*apiv1.RevokeReply, error)
-
+	// verification endpoints
 	VerificationRequestObject(ctx context.Context, req *apiv1.VerificationRequestObjectRequest) (string, error)
 	VerificationDirectPost(ctx context.Context, req *apiv1.VerificationDirectPostRequest) (*apiv1.VerificationDirectPostResponse, error)
 
-	// UI Credential Offer endpoints
+	// credential offer UI endpoints
 	UICredentialOffers(ctx context.Context) (*apiv1.CredentialOfferLookupMetadata, error)
 	UICreateCredentialOffer(ctx context.Context, req *apiv1.UICredentialOfferRequest) (*apiv1.CredentialOfferReply, error)
 
+	// metadata endpoints
 	GetVCTMFromScope(ctx context.Context, req *apiv1.GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error)
 	SVGTemplateReply(ctx context.Context, req *apiv1.SVGTemplateRequest) (*vcclient.SVGTemplateReply, error)
 	TypeMetadata(ctx context.Context, req *apiv1.TypeMetadataRequest) (json.RawMessage, error)
@@ -72,7 +82,16 @@ type Apiv1 interface {
 	// VCI integration for external auth (SAML/OIDC)
 	StoreVCIDocuments(ctx context.Context, sessionID string, docs map[string]*model.CompleteDocument) error
 	HasVCIDocuments(ctx context.Context, sessionID string) bool
+	LookupDatastoreByIdentity(ctx context.Context, sessionID, scope, authenticSource string, claims map[string]any, dsCred *model.DatastoreScope) error
+	ResolveIdentifier(ctx context.Context, authenticSource string, claims map[string]any) (string, error)
+	ResolveVCIIdentifier(ctx context.Context, authCtx *cache.AuthorizationContext, claims map[string]any, fallbacks ...string) (string, error)
 
-	// misc endpoints
+	// admin UI endpoints
+	AdminLoginURL(ctx context.Context) (*apiv1.AdminLoginURLReply, error)
+	AdminCallback(ctx context.Context, req *apiv1.AdminCallbackRequest) (*apiv1.AdminCallbackReply, error)
+	AdminLogoutURL(ctx context.Context, idTokenHint string) string
+	ListAuthenticSources(ctx context.Context) ([]string, error)
+
+	// health
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
 }

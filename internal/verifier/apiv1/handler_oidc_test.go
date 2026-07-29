@@ -5,9 +5,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
+
 	internalcache "github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
@@ -240,7 +242,7 @@ func TestTokenRequest_Validation(t *testing.T) {
 
 // TestTokenResponse validates the TokenResponse struct
 func TestTokenResponse_Fields(t *testing.T) {
-	resp := TokenResponse{
+	resp := TokenResponse{ // #nosec G101
 		AccessToken:  "access-token-123",
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
@@ -360,7 +362,7 @@ func TestStandardClaims(t *testing.T) {
 // ============================================================================
 
 // TestAuthorize_ClientValidation tests client validation in the Authorize handler
-// Note: Full Authorize flow requires CredentialConstructor config which is complex to mock
+// Note: Full Authorize flow requires CredentialMetadata config which is complex to mock
 func TestAuthorize_ClientValidation(t *testing.T) {
 	ctx := t.Context()
 	client, mockDB := CreateTestClientWithMock(nil)
@@ -578,7 +580,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 						"email": "john@example.com",
 					},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
@@ -586,7 +588,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					TokenEndpointAuthMethod: "client_secret_basic",
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -638,7 +640,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     true, // Already used
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -663,7 +665,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(-1 * time.Minute).Unix(), // Expired
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -688,14 +690,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					ClientSecretHash:        hashPassword(t, "secret"), // hash of "secret"
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -720,14 +722,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "different-client",
 					ClientSecretHash:        hashPassword(t, "secret"),
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -752,14 +754,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:     false,
 					CodeExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					ClientSecretHash:        hashPassword(t, "secret"),
 					TokenEndpointAuthMethod: "client_secret_basic",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -788,14 +790,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					WalletID:            "wallet-123",
 					VerifiedClaims:      map[string]any{},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					TokenEndpointAuthMethod: "none", // Public client
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -821,13 +823,13 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					Forfeited:           false,
 					CodeExpiresAt:       time.Now().Add(10 * time.Minute).Unix(),
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "test-client",
 					TokenEndpointAuthMethod: "none",
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:    "authorization_code",
@@ -854,14 +856,14 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 					WalletID:       "wallet-456",
 					VerifiedClaims: map[string]any{},
 				}
-				sessions.Create(ctx, authCtx)
+				sessions.Create(ctx, authCtx) // #nosec G104
 
 				client := &db.Client{
 					ClientID:                "public-client",
 					TokenEndpointAuthMethod: "none", // Public client
 					RedirectURIs:            []string{"https://example.com/callback"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &TokenRequest{
 				GrantType:   "authorization_code",
@@ -895,24 +897,97 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, resp)
-				assert.NotEmpty(t, resp.AccessToken)
 				assert.Equal(t, "Bearer", resp.TokenType)
 				assert.NotEmpty(t, resp.IDToken)
-				assert.NotEmpty(t, resp.RefreshToken)
-				assert.Greater(t, resp.ExpiresIn, 0)
+
+				// With EnableUserInfo=false (default), access/refresh tokens are not issued
+				assert.Empty(t, resp.AccessToken)
+				assert.Empty(t, resp.RefreshToken)
+				assert.Equal(t, 0, resp.ExpiresIn)
 
 				// Verify session was updated
 				authCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, tt.request.Code)
 				if authCtx != nil {
 					assert.True(t, authCtx.Forfeited)
 					assert.Equal(t, cache.SessionStatusTokenIssued, authCtx.Status)
-					assert.Equal(t, resp.AccessToken, authCtx.AccessToken)
 					assert.Equal(t, resp.IDToken, authCtx.IDToken)
-					assert.Equal(t, resp.RefreshToken, authCtx.RefreshToken)
 				}
 			}
 		})
 	}
+}
+
+// TestToken_EnableUserInfoTrue tests token response when EnableUserInfo is true
+func TestToken_EnableUserInfoTrue(t *testing.T) {
+	ctx := t.Context()
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = true
+	client.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration = 3600
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID:      "session-userinfo",
+		Status:         cache.SessionStatusCodeIssued,
+		ClientID:       "test-client",
+		RedirectURI:    "https://example.com/callback",
+		Scopes:         []string{"openid", "profile"},
+		Nonce:          "test-nonce",
+		Code:           "userinfo-code",
+		Forfeited:      false,
+		CodeExpiresAt:  time.Now().Add(10 * time.Minute).Unix(),
+		WalletID:       "wallet-789",
+		VerifiedClaims: map[string]any{"name": "Jane Doe"},
+	}
+	client.cacheService.AuthContext.Create(ctx, authCtx) // #nosec G104
+
+	testClient := &db.Client{
+		ClientID:                "test-client",
+		ClientSecretHash:        hashPassword(t, "secret"),
+		TokenEndpointAuthMethod: "client_secret_basic",
+		RedirectURIs:            []string{"https://example.com/callback"},
+	}
+	mockDB.Clients.Create(ctx, testClient) // #nosec G104
+
+	key := generateTestRSAKey(t)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	resp, err := client.Token(ctx, &TokenRequest{
+		GrantType:    "authorization_code",
+		Code:         "userinfo-code",
+		ClientID:     "test-client",
+		ClientSecret: "secret",
+		RedirectURI:  "https://example.com/callback",
+	})
+
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "Bearer", resp.TokenType)
+	assert.NotEmpty(t, resp.IDToken)
+	assert.NotEmpty(t, resp.AccessToken)
+	assert.Equal(t, 3600, resp.ExpiresIn)
+
+	// access_token is now a JWT — no refresh_token in stateless mode
+	assert.Empty(t, resp.RefreshToken)
+
+	// Verify the access_token is a valid JWT with at+jwt type
+	parsedAT, err := jwt.Parse(resp.AccessToken, func(t *jwt.Token) (any, error) {
+		return key.Public(), nil
+	})
+	assert.NoError(t, err)
+	require.NotNil(t, parsedAT)
+	assert.Equal(t, "at+jwt", parsedAT.Header["typ"])
+	claims, ok := parsedAT.Claims.(jwt.MapClaims)
+	require.True(t, ok)
+	assert.Equal(t, "https://verifier.example.com", claims["iss"])
+	assert.Equal(t, "test-client", claims["aud"])
+	assert.Equal(t, "Jane Doe", claims["name"])
+
+	// Session should only have id_token stored — access token is self-contained
+	updatedCtx, _ := client.cacheService.AuthContext.GetByAuthorizationCode(ctx, "userinfo-code")
+	require.NotNil(t, updatedCtx)
+	assert.True(t, updatedCtx.Forfeited)
+	assert.Equal(t, cache.SessionStatusTokenIssued, updatedCtx.Status)
+	assert.Equal(t, resp.IDToken, updatedCtx.IDToken)
 }
 
 // TestToken_RefreshTokenGrant tests the refresh token grant (currently unimplemented)
@@ -937,59 +1012,87 @@ func TestToken_RefreshTokenGrant(t *testing.T) {
 
 // TestGenerateIDToken tests ID token generation
 func TestGenerateIDToken(t *testing.T) {
-	ctx := t.Context()
-
-	client, _ := CreateTestClientWithMock(nil)
-	client.cfg.Verifier.OIDCOP.Issuer = "https://issuer.example.com"
-	client.cfg.Verifier.OIDCOP.IDTokenDuration = 3600
-	client.cfg.Verifier.OIDCOP.SubjectType = "public"
-	client.cfg.Verifier.OIDCOP.SubjectSalt = "test-salt"
-
-	// Set up signing key
-	key := generateTestRSAKey(t)
-	require.NoError(t, client.SetSigningKeyForTesting(key))
-
-	authCtx := &cache.AuthorizationContext{
-		SessionID: "session-1",
-		ClientID:  "test-client",
-		Nonce:     "test-nonce-123",
-		WalletID:  "wallet-123",
-		VerifiedClaims: map[string]any{
-			"name":  "John Doe",
-			"email": "john@example.com",
+	tests := []struct {
+		name           string
+		nonce          string
+		verifiedClaims map[string]any
+		expectNonce    bool
+	}{
+		{
+			name:        "with nonce",
+			nonce:       "test-nonce-123",
+			expectNonce: true,
+			verifiedClaims: map[string]any{
+				"name":  "John Doe",
+				"email": "john@example.com",
+			},
+		},
+		{
+			name:        "without nonce",
+			nonce:       "",
+			expectNonce: false,
+			verifiedClaims: map[string]any{
+				"name": "John Doe",
+			},
 		},
 	}
 
-	dbClient := &db.Client{
-		ClientID: "test-client",
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+
+			client, _ := CreateTestClientWithMock(nil)
+			client.cfg.Verifier.Outbound.OIDCProvider.Issuer = "https://issuer.example.com"
+			client.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration = 3600
+			client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
+			client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
+
+			key := generateTestRSAKey(t)
+			require.NoError(t, client.SetSigningKeyForTesting(key))
+
+			authCtx := &cache.AuthorizationContext{
+				SessionID:      "session-1",
+				ClientID:       "test-client",
+				Nonce:          tt.nonce,
+				WalletID:       "wallet-123",
+				VerifiedClaims: tt.verifiedClaims,
+			}
+
+			dbClient := &db.Client{
+				ClientID: "test-client",
+			}
+
+			idToken, err := client.generateIDToken(ctx, authCtx, dbClient)
+			assert.NoError(t, err)
+			assert.NotEmpty(t, idToken)
+
+			token, err := jwt.Parse(idToken, func(token *jwt.Token) (any, error) {
+				return &key.PublicKey, nil
+			})
+			assert.NoError(t, err)
+			assert.True(t, token.Valid)
+
+			claims, ok := token.Claims.(jwt.MapClaims)
+			assert.True(t, ok)
+
+			assert.Equal(t, "https://issuer.example.com", claims["iss"])
+			assert.Equal(t, "test-client", claims["aud"])
+			assert.NotEmpty(t, claims["sub"])
+			assert.NotEmpty(t, claims["exp"])
+			assert.NotEmpty(t, claims["iat"])
+
+			if tt.expectNonce {
+				assert.Equal(t, tt.nonce, claims["nonce"])
+			} else {
+				_, nonceExists := claims["nonce"]
+				assert.False(t, nonceExists, "nonce claim should not be present when no nonce was provided")
+			}
+
+			for k, v := range tt.verifiedClaims {
+				assert.Equal(t, v, claims[k])
+			}
+		})
 	}
-
-	idToken, err := client.generateIDToken(ctx, authCtx, dbClient)
-
-	assert.NoError(t, err)
-	assert.NotEmpty(t, idToken)
-
-	// Parse and verify token
-	token, err := jwt.Parse(idToken, func(token *jwt.Token) (any, error) {
-		return &key.PublicKey, nil
-	})
-	assert.NoError(t, err)
-	assert.True(t, token.Valid)
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	assert.True(t, ok)
-
-	// Verify standard claims
-	assert.Equal(t, "https://issuer.example.com", claims["iss"])
-	assert.Equal(t, "test-client", claims["aud"])
-	assert.Equal(t, "test-nonce-123", claims["nonce"])
-	assert.NotEmpty(t, claims["sub"])
-	assert.NotEmpty(t, claims["exp"])
-	assert.NotEmpty(t, claims["iat"])
-
-	// Verify verified claims are included
-	assert.Equal(t, "John Doe", claims["name"])
-	assert.Equal(t, "john@example.com", claims["email"])
 }
 
 // TestAuthenticateOIDCClient tests client authentication
@@ -1072,7 +1175,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid", "profile", "email"},
 					RequirePKCE:   false,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1107,7 +1210,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1127,7 +1230,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "token",
@@ -1147,7 +1250,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid", "profile"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1168,7 +1271,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid"},
 					RequirePKCE:   true,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1189,7 +1292,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					AllowedScopes: []string{"openid", "profile"},
 					RequirePKCE:   true,
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType:        "code",
@@ -1212,7 +1315,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 					ResponseTypes: []string{"code"},
 					AllowedScopes: []string{"openid", "profile", "email", "address"},
 				}
-				clients.Create(ctx, client)
+				clients.Create(ctx, client) // #nosec G104
 			},
 			request: &AuthorizeRequest{
 				ResponseType: "code",
@@ -1230,7 +1333,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-			client.cfg.Verifier.OIDCOP.SessionDuration = 900
+			client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
 			client.cfg.Verifier.DigitalCredentials.UseJAR = true
@@ -1302,7 +1405,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
 	client.cfg.Verifier.DigitalCredentials.Enable = false
 	// Clear CSS title to test default fallback
@@ -1320,7 +1423,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1352,7 +1455,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	client.cfg.Verifier.SupportedWallets = map[string]string{
 		"SUNET Wallet": "https://wallet.sunet.se/cb",
 		"Test Wallet":  "https://test-wallet.example.com/authorize",
@@ -1369,7 +1472,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1422,7 +1525,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 
 	client, mockDB := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.OIDCOP.SessionDuration = 900
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// No supported wallets configured
 	client.cfg.Verifier.SupportedWallets = nil
 
@@ -1435,7 +1538,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 		ResponseTypes: []string{"code"},
 		AllowedScopes: []string{"openid", "profile"},
 	}
-	mockDB.Clients.Create(ctx, dbClient)
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
 		ResponseType: "code",
@@ -1619,75 +1722,69 @@ func TestPollSession(t *testing.T) {
 	}
 }
 
-// TestGetUserInfo tests the UserInfo endpoint
+// TestGetUserInfo tests the stateless UserInfo endpoint with JWT access tokens
 func TestGetUserInfo(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
-
-	// Create a session with verified claims
-	authCtx := &cache.AuthorizationContext{
-		SessionID:            "userinfo-session",
-		CreatedAt:            time.Now(),
-		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		ClientID:             "test-client",
-		Scopes:               []string{"openid", "profile", "email"},
-		AccessToken:          "test-access-token-123",
-		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
-		VerifiedClaims: map[string]any{
-			"sub":   "user-123",
-			"name":  "John Doe",
-			"email": "john@example.com",
+	client, _ := CreateTestClientWithMock(&model.Cfg{
+		Verifier: &model.Verifier{
+			PublicURL: "https://verifier.example.com",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:              "https://verifier.example.com",
+					SubjectType:         "public",
+					SubjectSalt:         "test-salt",
+					SessionDuration:     900,
+					CodeDuration:        600,
+					AccessTokenDuration: 3600,
+					IDTokenDuration:     3600,
+					EnableUserInfo:      true,
+				},
+			},
 		},
-	}
-	err := client.cacheService.AuthContext.Create(ctx, authCtx)
-	require.NoError(t, err)
+	})
 
-	// Create a session with expired token
-	expiredSession := &cache.AuthorizationContext{
-		SessionID:            "expired-session",
-		CreatedAt:            time.Now().Add(-2 * time.Hour),
-		ExpiresAt:            time.Now().Add(-1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		AccessToken:          "expired-token",
-		AccessTokenExpiresAt: time.Now().Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
-	}
-	err = client.cacheService.AuthContext.Create(ctx, expiredSession)
-	require.NoError(t, err)
+	// Set up signing key — required for both generating and validating JWT access tokens
+	key := generateTestRSAKey(t)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
 
-	// Create a session without 'sub' claim
-	sessionNoSub := &cache.AuthorizationContext{
-		SessionID:            "session-no-sub",
-		CreatedAt:            time.Now(),
-		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		ClientID:             "test-client",
-		AccessToken:          "token-no-sub",
-		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
-		VerifiedClaims: map[string]any{
-			"name":  "Jane Doe",
-			"email": "jane@example.com",
-		},
-	}
-	err = client.cacheService.AuthContext.Create(ctx, sessionNoSub)
-	require.NoError(t, err)
+	issuer := client.cfg.Verifier.Outbound.OIDCProvider.Issuer
 
-	// Create a session with non-string 'sub' claim
-	sessionNonStringSub := &cache.AuthorizationContext{
-		SessionID:            "session-non-string-sub",
-		CreatedAt:            time.Now(),
-		ExpiresAt:            time.Now().Add(1 * time.Hour).Unix(),
-		Status:               cache.SessionStatusTokenIssued,
-		ClientID:             "test-client",
-		AccessToken:          "token-non-string-sub",
-		AccessTokenExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
-		VerifiedClaims: map[string]any{
-			"sub":  12345, // Non-string sub
-			"name": "Bob Smith",
-		},
+	// Helper to create a signed JWT access token
+	makeAccessToken := func(claims jwt.MapClaims) string {
+		header := jwt.MapClaims{"typ": "at+jwt"}
+		token, err := jose.MakeJWT(ctx, header, claims, client.pkiSigner)
+		require.NoError(t, err)
+		return token
 	}
-	err = client.cacheService.AuthContext.Create(ctx, sessionNonStringSub)
-	require.NoError(t, err)
+
+	validToken := makeAccessToken(jwt.MapClaims{
+		"iss":   issuer,
+		"sub":   "user-123",
+		"aud":   "test-client",
+		"exp":   time.Now().Add(1 * time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+		"name":  "John Doe",
+		"email": "john@example.com",
+	})
+
+	expiredToken := makeAccessToken(jwt.MapClaims{
+		"iss": issuer,
+		"sub": "user-expired",
+		"aud": "test-client",
+		"exp": time.Now().Add(-1 * time.Hour).Unix(),
+		"iat": time.Now().Add(-2 * time.Hour).Unix(),
+	})
+
+	tokenWithClaims := makeAccessToken(jwt.MapClaims{
+		"iss":   issuer,
+		"sub":   "user-456",
+		"aud":   "test-client",
+		"exp":   time.Now().Add(1 * time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+		"name":  "Jane Doe",
+		"email": "jane@example.com",
+		"nonce": "should-be-stripped",
+	})
 
 	tests := []struct {
 		name      string
@@ -1696,54 +1793,66 @@ func TestGetUserInfo(t *testing.T) {
 		checkResp func(t *testing.T, resp UserInfoResponse)
 	}{
 		{
-			name: "valid access token",
+			name: "valid JWT access token",
 			req: &UserInfoRequest{
-				AccessToken: "test-access-token-123",
+				AccessToken: validToken,
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp UserInfoResponse) {
 				assert.Equal(t, "user-123", resp["sub"])
 				assert.Equal(t, "John Doe", resp["name"])
 				assert.Equal(t, "john@example.com", resp["email"])
+				// JWT-specific claims should be stripped
+				assert.Nil(t, resp["iss"])
+				assert.Nil(t, resp["aud"])
+				assert.Nil(t, resp["exp"])
+				assert.Nil(t, resp["iat"])
 			},
 		},
 		{
-			name: "invalid access token",
+			name: "invalid (non-JWT) access token",
 			req: &UserInfoRequest{
-				AccessToken: "invalid-token",
-			},
-			wantErr: ErrInvalidGrant,
-		},
-		{
-			name: "expired access token",
-			req: &UserInfoRequest{
-				AccessToken: "expired-token",
+				AccessToken: "not-a-valid-jwt",
 			},
 			wantErr: ErrInvalidGrant,
 		},
 		{
-			name: "valid token without sub claim",
+			name: "expired JWT access token",
 			req: &UserInfoRequest{
-				AccessToken: "token-no-sub",
+				AccessToken: expiredToken,
+			},
+			wantErr: ErrInvalidGrant,
+		},
+		{
+			name: "JWT with wrong issuer",
+			req: &UserInfoRequest{
+				AccessToken: func() string {
+					return makeAccessToken(jwt.MapClaims{
+						"iss": "https://evil.example.com",
+						"sub": "user-evil",
+						"aud": "test-client",
+						"exp": time.Now().Add(1 * time.Hour).Unix(),
+						"iat": time.Now().Unix(),
+					})
+				}(),
+			},
+			wantErr: ErrInvalidGrant,
+		},
+		{
+			name: "nonce and JWT claims are stripped from response",
+			req: &UserInfoRequest{
+				AccessToken: tokenWithClaims,
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				// Should still return a response, just with generated subject
-				assert.NotEmpty(t, resp["sub"])
+				assert.Equal(t, "user-456", resp["sub"])
 				assert.Equal(t, "Jane Doe", resp["name"])
 				assert.Equal(t, "jane@example.com", resp["email"])
-			},
-		},
-		{
-			name: "valid token with non-string sub claim",
-			req: &UserInfoRequest{
-				AccessToken: "token-non-string-sub",
-			},
-			wantErr: nil,
-			checkResp: func(t *testing.T, resp UserInfoResponse) {
-				// Should still return a response with generated subject (non-string sub is ignored)
-				assert.NotEmpty(t, resp["sub"])
-				assert.Equal(t, "Bob Smith", resp["name"])
+				assert.Nil(t, resp["nonce"], "nonce should be stripped from userinfo response")
+				assert.Nil(t, resp["iss"])
+				assert.Nil(t, resp["aud"])
+				assert.Nil(t, resp["exp"])
+				assert.Nil(t, resp["iat"])
 			},
 		},
 	}
@@ -2068,7 +2177,7 @@ func TestProcessDirectPost(t *testing.T) {
 		expectShowCredentials  bool
 		expectedStatus         cache.SessionStatus
 	}{
-		{
+		{ // #nosec G101
 			name:      "successful direct post with VP token",
 			sessionID: "session-dp-1",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2090,10 +2199,9 @@ func TestProcessDirectPost(t *testing.T) {
 				s.RedirectURI = "https://client.example.com/callback"
 				s.State = "client-state"
 			},
-			expectError:    false,
-			expectedStatus: cache.SessionStatusCodeIssued,
+			expectError: true,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with presentation submission",
 			sessionID:              "session-dp-3",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2106,7 +2214,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false,
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:                   "direct post with invalid presentation submission JSON",
 			sessionID:              "session-dp-4",
 			vpToken:                "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2119,7 +2227,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false, // Should continue even with invalid presentation submission
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
-		{
+		{ // #nosec G101
 			name:      "direct post with show credentials enabled",
 			sessionID: "session-dp-5",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2149,7 +2257,7 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:       true,
 			expectedErrorType: ErrInvalidRequest,
 		},
-		{
+		{ // #nosec G101
 			name:      "direct post without redirect URI",
 			sessionID: "session-dp-7",
 			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
@@ -2210,10 +2318,10 @@ func TestProcessDirectPost(t *testing.T) {
 				if tt.expectShowCredentials {
 					// Should redirect to display page
 					assert.Contains(t, resp.RedirectURI, "/verification/display/")
-				} else if authCtx.RedirectURI != "" {
-					// Should have authorization code in redirect
-					assert.Contains(t, resp.RedirectURI, "code=")
-					assert.Contains(t, resp.RedirectURI, "state=")
+				} else {
+					// Direct post must NOT return redirect_uri; the browser
+					// picks up the redirect via the poll endpoint instead.
+					assert.Empty(t, resp.RedirectURI)
 				}
 			}
 		})
@@ -2271,20 +2379,24 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{
-					{
-						VCT:    "https://credentials.example.com/person_id",
-						Scopes: []string{"pid"},
-					},
-					{
-						VCT:    "https://credentials.example.com/diploma",
-						Scopes: []string{"edu_diploma"},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{
+						{
+							VCT:    "https://credentials.example.com/person_id",
+							Scopes: []string{"pid"},
+						},
+						{
+							VCT:    "https://credentials.example.com/diploma",
+							Scopes: []string{"edu_diploma"},
+						},
 					},
 				},
 			},
@@ -2302,7 +2414,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	assert.Equal(t, "https://verifier.example.com", metadata.Issuer)
 	assert.Equal(t, "https://verifier.example.com/authorize", metadata.AuthorizationEndpoint)
 	assert.Equal(t, "https://verifier.example.com/token", metadata.TokenEndpoint)
-	assert.Equal(t, "https://verifier.example.com/userinfo", metadata.UserInfoEndpoint)
+	assert.Empty(t, metadata.UserInfoEndpoint, "userinfo_endpoint should be omitted when EnableUserInfo is false")
 	assert.Equal(t, "https://verifier.example.com/jwks", metadata.JwksURI)
 
 	// Verify supported features
@@ -2328,7 +2440,9 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 
 	// Verify grant types
 	assert.Contains(t, metadata.GrantTypesSupported, "authorization_code")
-	assert.Contains(t, metadata.GrantTypesSupported, "refresh_token")
+	// refresh_token and implicit are only advertised when EnableUserInfo is true
+	assert.NotContains(t, metadata.GrantTypesSupported, "refresh_token")
+	assert.NotContains(t, metadata.GrantTypesSupported, "implicit")
 
 	// Verify PKCE support
 	assert.Contains(t, metadata.CodeChallengeMethodsSupported, "S256")
@@ -2346,13 +2460,17 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{},
+				},
 			},
 		},
 	}
@@ -2400,13 +2518,18 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 			cfg := &model.Cfg{
 				Verifier: &model.Verifier{
 					PublicURL: tt.externalURL,
-					OIDCOP: &model.OIDCOPConfig{
-						Issuer:      tt.externalURL,
-						SubjectType: "public",
-						SubjectSalt: "test-salt",
+					Outbound: model.VerifierOutbound{
+						OIDCProvider: &model.OIDCOP{
+							Issuer:         tt.externalURL,
+							SubjectType:    "public",
+							SubjectSalt:    "test-salt",
+							EnableUserInfo: true,
+						},
 					},
-					OpenID4VP: &model.OpenID4VPConfig{
-						SupportedCredentials: []model.SupportedCredentialConfig{},
+					Inbound: model.VerifierInbound{
+						OpenID4VP: &model.OpenID4VPConfig{
+							SupportedCredentials: []model.SupportedCredentialConfig{},
+						},
 					},
 				},
 			}
@@ -2431,10 +2554,12 @@ func TestGetJWKS(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
 		},
 	}
@@ -2517,16 +2642,20 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
-			OpenID4VP: &model.OpenID4VPConfig{
-				SupportedCredentials: []model.SupportedCredentialConfig{
-					{VCT: "cred1", Scopes: []string{"scope1"}},
-					{VCT: "cred2", Scopes: []string{"scope2"}},
-					{VCT: "cred3", Scopes: []string{"scope3"}},
+			Inbound: model.VerifierInbound{
+				OpenID4VP: &model.OpenID4VPConfig{
+					SupportedCredentials: []model.SupportedCredentialConfig{
+						{VCT: "cred1", Scopes: []string{"scope1"}},
+						{VCT: "cred2", Scopes: []string{"scope2"}},
+						{VCT: "cred3", Scopes: []string{"scope3"}},
+					},
 				},
 			},
 		},
@@ -2545,10 +2674,12 @@ func BenchmarkGetJWKS(b *testing.B) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer:      "https://verifier.example.com",
-				SubjectType: "public",
-				SubjectSalt: "test-salt",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer:      "https://verifier.example.com",
+					SubjectType: "public",
+					SubjectSalt: "test-salt",
+				},
 			},
 		},
 	}
@@ -2622,8 +2753,10 @@ func TestMatchRedirectURI(t *testing.T) {
 	cfg := &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
-			OIDCOP: &model.OIDCOPConfig{
-				Issuer: "https://verifier.example.com",
+			Outbound: model.VerifierOutbound{
+				OIDCProvider: &model.OIDCOP{
+					Issuer: "https://verifier.example.com",
+				},
 			},
 		},
 	}
@@ -2705,6 +2838,54 @@ func TestMatchRedirectURI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := client.matchRedirectURI(tt.registered, tt.reqURI)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBuildOpenID4VPAuthzRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		publicURL string
+		sessionID string
+		wantErr   bool
+	}{
+		{
+			name:      "standard URL",
+			publicURL: "https://verifier.example.com",
+			sessionID: "session-abc-123",
+		},
+		{
+			name:      "URL with trailing slash",
+			publicURL: "https://verifier.example.com/",
+			sessionID: "session-xyz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _, err := buildOpenID4VPAuthzRequest(tt.publicURL, tt.sessionID)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			assert.True(t, strings.HasPrefix(result, "openid4vp://cb?"),
+				"must use openid4vp:// scheme")
+
+			parsed, err := url.Parse(result)
+			require.NoError(t, err)
+
+			requestURI := parsed.Query().Get("request_uri")
+			assert.True(t, strings.HasSuffix(requestURI,
+				"/verification/request-object/"+tt.sessionID),
+				"request_uri must use path-param format, got: %s", requestURI)
+			assert.NotContains(t, requestURI, "?id=",
+				"request_uri must not use query-param format")
+
+			clientID := parsed.Query().Get("client_id")
+			assert.True(t, strings.HasPrefix(clientID, "x509_san_dns:"),
+				"client_id must use x509_san_dns prefix")
 		})
 	}
 }

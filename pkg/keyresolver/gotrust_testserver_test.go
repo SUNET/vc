@@ -1920,7 +1920,7 @@ func NewDIDWebTestServer() *DIDWebTestServer {
 		}
 
 		w.Header().Set("Content-Type", "application/did+json")
-		json.NewEncoder(w).Encode(doc)
+		json.NewEncoder(w).Encode(doc) // #nosec G104
 	}))
 
 	return ts

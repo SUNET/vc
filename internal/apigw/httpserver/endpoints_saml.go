@@ -2,13 +2,12 @@ package httpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
-	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
-	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -22,19 +21,19 @@ import (
 //	@Description	Returns the SAML Service Provider metadata XML for IdP configuration
 //	@Tags			SAML
 //	@Produce		xml
-//	@Success		200	{string}	string					"SAML metadata XML"
+//	@Success		200	{string}	string			"SAML metadata XML"
 //	@Failure		500	{object}	map[string]any	"Internal server error"
-//	@Router			/saml/metadata [get]
+//	@Router			/samlsp/metadata [get]
 func (s *Service) endpointSAMLMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLMetadata")
 	defer span.End()
 
-	if s.samlSPService == nil {
+	if s.authProviders.SAML() == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
 
-	metadata, err := s.samlSPService.GetSPMetadata(ctx)
+	metadata, err := s.authProviders.SAML().GetSPMetadata(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -69,12 +68,12 @@ type SAMLInitiateResponse struct {
 //	@Success		200		{object}	SAMLInitiateResponse
 //	@Failure		400		{object}	map[string]any	"Bad request"
 //	@Failure		500		{object}	map[string]any	"Internal server error"
-//	@Router			/saml/initiate [post]
+//	@Router			/samlsp/initiate [post]
 func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLInitiate")
 	defer span.End()
 
-	if s.samlSPService == nil {
+	if s.authProviders.SAML() == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
@@ -85,7 +84,7 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 		return nil, err
 	}
 
-	authReq, err := s.samlSPService.InitiateAuth(ctx, req.IDPEntityID, req.CredentialType)
+	authReq, err := s.authProviders.SAML().InitiateAuth(ctx, req.IDPEntityID, req.CredentialType)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -105,17 +104,17 @@ func (s *Service) endpointSAMLInitiate(ctx context.Context, c *gin.Context) (any
 //	@Tags			SAML
 //	@Accept			application/x-www-form-urlencoded
 //	@Produce		json
-//	@Param			SAMLResponse	formData	string					true	"Base64-encoded SAML Response"
-//	@Param			RelayState		formData	string					false	"Relay state from initial request"
+//	@Param			SAMLResponse	formData	string			true	"Base64-encoded SAML Response"
+//	@Param			RelayState		formData	string			false	"Relay state from initial request"
 //	@Success		200				{object}	map[string]any	"Success with credential claims or offer"
 //	@Failure		400				{object}	map[string]any	"Bad request"
 //	@Failure		500				{object}	map[string]any	"Internal server error"
-//	@Router			/saml/acs [post]
+//	@Router			/samlsp/acs [post]
 func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointSAMLACS")
 	defer span.End()
 
-	if s.samlSPService == nil {
+	if s.authProviders.SAML() == nil {
 		span.SetStatus(codes.Error, "SAML not configured")
 		return nil, fmt.Errorf("SAML is not enabled")
 	}
@@ -131,7 +130,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Pass the base64-encoded SAMLResponse directly to ProcessAssertion.
 	// The crewjam/saml library handles base64 decoding internally.
-	assertion, err := s.samlSPService.ProcessAssertion(ctx, samlResponseB64, relayState)
+	assertion, err := s.authProviders.SAML().ProcessAssertion(ctx, samlResponseB64, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -139,29 +138,22 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Retrieve session to get credential type.
 	// Ensure session is cleaned up if any subsequent step fails.
-	session, err := s.samlSPService.GetSession(ctx, relayState)
+	session, err := s.authProviders.SAML().GetSession(ctx, relayState)
 	if err != nil {
 		span.SetStatus(codes.Error, "session retrieval failed")
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
 	defer func() {
 		if err != nil {
-			s.samlSPService.DeleteSession(ctx, relayState)
+			s.authProviders.SAML().DeleteSession(ctx, relayState)
 		}
 	}()
 
 	// Build transformer from config
-	transformer, err := s.samlSPService.BuildTransformer()
+	transformer, err := s.authProviders.SAML().BuildTransformer()
 	if err != nil {
 		span.SetStatus(codes.Error, "transformer creation failed")
 		return nil, fmt.Errorf("failed to create transformer: %w", err)
-	}
-
-	// Get the mapping for this credential type
-	mapping, err := transformer.GetMapping(session.CredentialType)
-	if err != nil {
-		span.SetStatus(codes.Error, "no mapping found")
-		return nil, err
 	}
 
 	// Convert SAML attributes (map[string][]string) to map[string]any
@@ -178,7 +170,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Transform SAML attributes to credential claims using the generic transformer
-	claims, err := transformer.TransformClaims(session.CredentialType, samlAttrs)
+	claims, err := transformer.TransformClaims(samlAttrs)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -197,165 +189,151 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// store the transformed claims as a document in the VCI session cache and redirect
 	// back to the consent page, where the standard VCI pipeline will continue.
 	if session.VCISessionID != "" {
-		s.log.Info("SAML ACS: VCI mode detected, storing document in VCI cache",
+		s.log.Info("SAML ACS: VCI mode detected",
 			"vci_session_id", session.VCISessionID,
 			"credential_type", session.CredentialType)
 
-		doc := &model.CompleteDocument{
-			Meta: &model.MetaData{
-				AuthenticSource: session.IDPEntityID,
-			},
-			DocumentData:        claims,
-			DocumentDataVersion: "1.0.0",
-		}
-		docs := map[string]*model.CompleteDocument{
-			session.IDPEntityID: doc,
+		// Check if this credential's data source is external_api — if so,
+		// we only need the person identifier from the assertion, not the full claims.
+		authCtx, lookupErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: session.VCISessionID})
+		if lookupErr != nil {
+			span.SetStatus(codes.Error, "auth context lookup failed")
+			return nil, fmt.Errorf("failed to get auth context for VCI session %s: %w", session.VCISessionID, lookupErr)
 		}
 
-		if err := s.apiv1.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
-			span.SetStatus(codes.Error, "VCI document storage failed")
-			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		if authCtx.DataSource == string(model.DataSourceExternalAPI) {
+			// External API: identifier will be resolved by the common
+			// ResolveIdentifier call below (authentic_source_person_id or identity mapping).
+		} else if authCtx.DataSource == string(model.DataSourceDatastore) {
+			// Datastore: use the authenticated identity to look up pre-loaded documents.
+			dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
+			if err := s.apiv1.LookupDatastoreByIdentity(ctx, session.VCISessionID, session.CredentialType, authCtx.AuthenticSource, claims, &dsCred); err != nil {
+				span.SetStatus(codes.Error, "datastore lookup failed")
+				return nil, fmt.Errorf("SAML datastore lookup failed: %w", err)
+			}
+		} else {
+			// Assertion: store the transformed claims directly as a document
+			doc := &model.CompleteDocument{
+				Meta: &model.MetaData{
+					AuthenticSource: session.IDPEntityID,
+				},
+				DocumentData: claims,
+			}
+			docs := map[string]*model.CompleteDocument{
+				session.IDPEntityID: doc,
+			}
+
+			if err := s.apiv1.StoreVCIDocuments(ctx, session.VCISessionID, docs); err != nil {
+				span.SetStatus(codes.Error, "VCI document storage failed")
+				return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+			}
 		}
+
+		// Resolve the authenticated identifier for registry (applies to all flows).
+		if authCtx.Identifier == "" {
+			var resolveErr error
+			// For assertion: pre-transform fallbacks are raw SAML attrs and NameID.
+			var fallbacks []string
+			if v, ok := samlAttrs["authentic_source_person_id"].(string); ok && v != "" {
+				fallbacks = append(fallbacks, v)
+			}
+			if assertion.NameID != "" {
+				fallbacks = append(fallbacks, assertion.NameID)
+			}
+			authCtx.Identifier, resolveErr = s.apiv1.ResolveVCIIdentifier(ctx, authCtx, claims, fallbacks...)
+			if resolveErr != nil {
+				span.SetStatus(codes.Error, "identifier resolution failed")
+				return nil, fmt.Errorf("failed to resolve identifier for VCI session %s: %w", session.VCISessionID, resolveErr)
+			}
+		}
+		if updateErr := s.cacheService.AuthContext.Update(ctx, authCtx); updateErr != nil {
+			span.SetStatus(codes.Error, "failed to store identifier")
+			return nil, fmt.Errorf("failed to update identifier on auth context: %w", updateErr)
+		}
+		s.log.Info("SAML ACS: identifier resolved",
+			"vci_session_id", session.VCISessionID, "identifier", authCtx.Identifier)
 
 		// Clean up SAML session (clear err so defer doesn't double-delete)
 		err = nil
-		s.samlSPService.DeleteSession(ctx, relayState)
+		s.authProviders.SAML().DeleteSession(ctx, relayState)
 
 		// Redirect browser back to the consent page to continue the VCI flow
 		c.Redirect(http.StatusFound, "/authorization/consent/#/credentials")
 		return nil, nil
 	}
 
-	// Standalone mode: create credential directly via issuer gRPC
-	// Marshal claims to JSON for the credential
-	documentData, err := json.Marshal(claims)
-	if err != nil {
-		span.SetStatus(codes.Error, "document marshaling failed")
-		return nil, fmt.Errorf("failed to marshal document: %w", err)
-	}
-
-	// Generate ephemeral JWK for credential binding if not provided
-	// In a production scenario, the wallet would provide the JWK
-	jwk := session.JWK
-	if jwk == nil {
-		span.SetStatus(codes.Error, "JWK required for standalone SAML credential binding")
-		return nil, fmt.Errorf("wallet must provide a JWK for credential binding in standalone SAML mode")
-	}
-
-	// Create credential using the issuer gRPC API
-	credential, err := s.createCredentialViaSAML(ctx, session.CredentialType, documentData, jwk)
-	if err != nil {
-		span.SetStatus(codes.Error, "credential creation failed")
-		return nil, fmt.Errorf("failed to create credential: %w", err)
-	}
+	// Standalone mode: generate a credential offer with a pre-authorized code.
+	// The actual credential is created later when the wallet redeems the offer
+	// via the token + credential endpoints (which provide the wallet's JWK).
 
 	// Generate credential offer for wallet
-	credentialOffer, err := s.generateCredentialOffer(ctx, session.CredentialType, mapping.CredentialConfigID)
+	credentialOffer, err := openid4vci.NewCredentialOffer(s.cfg.APIGW.Delivery.CredentialOffers.IssuerURL, session.CredentialType, openid4vci.GrantTypePreAuthorizedCode)
 	if err != nil {
 		span.SetStatus(codes.Error, "credential offer generation failed")
 		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
 	}
 
+	// Persist the pre-authorized code in the auth context cache so the wallet
+	// can redeem the credential offer via the token endpoint.
+	preAuthCode := credentialOffer.ID
+	nonce, nonceErr := crypto.GenerateSecureToken(0, 32)
+	if nonceErr != nil {
+		span.SetStatus(codes.Error, "nonce generation failed")
+		return nil, fmt.Errorf("failed to generate nonce: %w", nonceErr)
+	}
+
+	identifier, resolveErr := s.apiv1.ResolveIdentifier(ctx, session.IDPEntityID, claims)
+	if resolveErr != nil {
+		s.log.Debug("standalone SAML: could not resolve identifier", "error", resolveErr)
+	}
+
+	authCtx := &cache.AuthorizationContext{
+		SessionID:    preAuthCode,
+		Code:         preAuthCode,
+		Status:       "code_issued",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:       []string{session.CredentialType},
+		Nonce:        nonce,
+		AuthProvider: model.AuthProviderSAML,
+		Identifier:   identifier,
+		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
+			{
+				Type:                      "openid_credential",
+				CredentialConfigurationID: session.CredentialType,
+			},
+		},
+	}
+	if err = s.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+		span.SetStatus(codes.Error, "pre-auth code persistence failed")
+		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
+	}
+
+	// Store document data so the credential endpoint can issue the credential
+	// when the wallet redeems the offer.
+	doc := &model.CompleteDocument{
+		Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
+		DocumentData: claims,
+	}
+	if err = s.apiv1.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IDPEntityID: doc}); err != nil {
+		span.SetStatus(codes.Error, "failed to store VCI documents")
+		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+	}
+
 	// Clean up SAML session (clear err so defer doesn't double-delete)
 	err = nil
-	s.samlSPService.DeleteSession(ctx, relayState)
+	s.authProviders.SAML().DeleteSession(ctx, relayState)
 
-	s.log.Info("Credential issued successfully",
+	s.log.Info("Credential offer created via SAML standalone",
 		"credential_type", session.CredentialType,
-		"offer_id", credentialOffer["id"])
+		"offer_id", credentialOffer.ID)
 
 	response := map[string]any{
 		"status":           "success",
 		"credential_type":  session.CredentialType,
-		"credential":       credential,
 		"credential_offer": credentialOffer,
-		"message":          "SAML authentication and credential issuance successful",
+		"message":          "SAML authentication successful, credential offer created",
 	}
 
 	return response, nil
-}
-
-// createCredentialViaSAML calls the issuer gRPC service to create a credential
-// This follows the same pattern as other APIGW handlers that call the issuer
-func (s *Service) createCredentialViaSAML(ctx context.Context, credentialType string, documentData []byte, jwk *apiv1_issuer.Jwk) (string, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:createCredentialViaSAML")
-	defer span.End()
-
-	// Connect to issuer gRPC service
-	conn, err := grpchelpers.NewClientConn(s.cfg.APIGW.IssuerClient)
-	if err != nil {
-		s.log.Error(err, "Failed to connect to issuer")
-		return "", fmt.Errorf("failed to connect to issuer: %w", err)
-	}
-	defer conn.Close()
-
-	client := apiv1_issuer.NewIssuerServiceClient(conn)
-
-	credentialConstructor := s.cfg.GetCredentialConstructor(credentialType)
-	if credentialConstructor == nil {
-		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
-	}
-
-	// Call the issuer's MakeSDJWT method
-	reply, err := client.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
-		Scope:        credentialType,
-		DocumentData: documentData,
-		Jwk:          jwk,
-		Integrity:    credentialConstructor.GetIntegrity(),
-		Vctm:         credentialConstructor.GetVCTMRaw(),
-	})
-	if err != nil {
-		s.log.Error(err, "failed to call MakeSDJWT")
-		return "", fmt.Errorf("failed to create credential: %w", err)
-	}
-
-	if reply == nil || len(reply.Credentials) == 0 {
-		return "", fmt.Errorf("no credential data returned")
-	}
-
-	// Return the first credential (assuming single credential response)
-	return reply.Credentials[0].Credential, nil
-}
-
-// generateCredentialOffer creates an OpenID4VCI credential offer
-func (s *Service) generateCredentialOffer(ctx context.Context, credentialType string, credentialConfigID string) (map[string]any, error) {
-	ctx, span := s.tracer.Start(ctx, "httpserver:generateCredentialOffer")
-	defer span.End()
-
-	// Build credential offer parameters
-	// Generate pre-authorized code (fixed-length 32-character string)
-	preAuthCode, err := crypto.GenerateSecureToken(0, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate pre-auth code: %w", err)
-	}
-
-	params := openid4vci.CredentialOfferParameters{
-		CredentialIssuer:           s.cfg.APIGW.CredentialOffers.IssuerURL,
-		CredentialConfigurationIDs: []string{credentialConfigID},
-		Grants: map[string]any{
-			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-				"pre-authorized_code": preAuthCode,
-				"tx_code":             nil, // Optional transaction code
-			},
-		},
-	}
-
-	// Generate credential offer
-	offer, err := params.CredentialOffer()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate credential offer: %w", err)
-	}
-
-	// Convert to map for response
-	offerData := make(map[string]any)
-	offerJSON, err := json.Marshal(offer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal credential offer: %w", err)
-	}
-
-	if err := json.Unmarshal(offerJSON, &offerData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal credential offer: %w", err)
-	}
-
-	return offerData, nil
 }

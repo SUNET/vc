@@ -3,13 +3,18 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/middleware"
 	"github.com/SUNET/vc/internal/verifier/notify"
+	"github.com/SUNET/vc/internal/verifier/staticembed"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -48,13 +53,13 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	rateLimitConfig := middleware.DefaultRateLimitConfig()
 
 	s := &Service{
-		cfg:    cfg,
-		log:    log.New("httpserver"),
-		apiv1:  apiv1,
-		gin:    gin.New(),
-		notify: notify,
-		tracer: tracer,
-		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		cfg:              cfg,
+		log:              log.New("httpserver"),
+		apiv1:            apiv1,
+		gin:              gin.New(),
+		notify:           notify,
+		tracer:           tracer,
+		server:           &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 		sessionsName:     "verifier_user_session",
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
@@ -103,10 +108,12 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		return nil, err
 	}
 
-	// templating functions
-	s.gin.SetFuncMap(template.FuncMap{
+	s.gin.StaticFS("/static", http.FS(staticembed.FS))
+
+	tmpl := template.New("").Funcs(template.FuncMap{
 		"toJSON": func(v any) string {
-			b, _ := json.MarshalIndent(v, "", "  ")
+			cleaned := cleanUnresolvedMarkersForDisplay(v)
+			b, _ := json.MarshalIndent(cleaned, "", "  ")
 			return string(b)
 		},
 		"json": func(v any) (any, error) {
@@ -114,13 +121,13 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			if err != nil {
 				return "", err
 			}
-			// Return as template.JS to prevent escaping in JavaScript context
-			return template.JS(string(jsonBytes)), nil
+			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
+		},
+		"claimsTree": func(credential map[string]any) template.HTML {
+			return template.HTML(renderClaimsTree(credential)) //#nosec G203 -- internally generated HTML
 		},
 	})
-
-	s.gin.Static("/static", "./static")
-	s.gin.LoadHTMLGlob("./static/*.html")
+	s.gin.SetHTMLTemplate(template.Must(tmpl.ParseFS(staticembed.FS, "*.html")))
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -240,4 +247,121 @@ func (s *Service) handleOAuthError(c *gin.Context, err error) {
 		"error":             "server_error",
 		"error_description": err.Error(),
 	})
+}
+
+// jwtMetadataClaims are JWT/SD-JWT infrastructure claims excluded from display.
+var jwtMetadataClaims = map[string]bool{
+	"iss": true, "sub": true, "iat": true, "exp": true, "nbf": true,
+	"jti": true, "cnf": true, "vct": true, "vct#integrity": true,
+	"status": true, "_sd": true, "_sd_alg": true,
+}
+
+// renderClaimsTree renders a credential claims map as HTML table rows with
+// tree-style indentation for nested objects.
+func renderClaimsTree(claims map[string]any) string {
+	var sb strings.Builder
+	keys := sortedKeys(claims)
+	for _, key := range keys {
+		if jwtMetadataClaims[key] {
+			continue
+		}
+		renderNode(&sb, key, claims[key], 0)
+	}
+	return sb.String()
+}
+
+func renderNode(sb *strings.Builder, name string, value any, depth int) {
+	indent := depth * 24 // pixels for indentation
+
+	switch v := value.(type) {
+	case map[string]any:
+		// Group header row
+		fmt.Fprintf(sb,
+			`<tr><td style="padding-left:%dpx;font-weight:600;">%s</td><td></td></tr>`,
+			indent, template.HTMLEscapeString(name),
+		)
+		// Recurse into children
+		keys := sortedKeys(v)
+		for _, childKey := range keys {
+			if jwtMetadataClaims[childKey] {
+				continue
+			}
+			renderNode(sb, childKey, v[childKey], depth+1)
+		}
+	case []any:
+		// Render array elements, handling unresolved SD-JWT markers {"...": hash}
+		parts := make([]string, 0, len(v))
+		for _, elem := range v {
+			if m, ok := elem.(map[string]any); ok {
+				if _, isMarker := m["..."]; isMarker && len(m) == 1 {
+					// Unresolved array element disclosure — wallet didn't include element disclosure.
+					// Skip the marker silently; we'll show whatever was actually disclosed.
+					continue
+				}
+			}
+			parts = append(parts, fmt.Sprintf("%v", elem))
+		}
+		if len(parts) > 0 {
+			fmt.Fprintf(sb,
+				`<tr><td style="padding-left:%dpx;">%s</td><td><code>%s</code></td></tr>`,
+				indent, template.HTMLEscapeString(name), template.HTMLEscapeString(strings.Join(parts, ", ")),
+			)
+		} else {
+			// Array was disclosed but contained only unresolved element markers.
+			// Show the claim name to confirm it was disclosed.
+			fmt.Fprintf(sb,
+				`<tr><td style="padding-left:%dpx;">%s</td><td><code>[]</code> <em>(element details not disclosed by wallet)</em></td></tr>`,
+				indent, template.HTMLEscapeString(name),
+			)
+		}
+	default:
+		valStr := fmt.Sprintf("%v", value)
+		// Render picture as image
+		if name == "picture" {
+			fmt.Fprintf(sb,
+				`<tr><td style="padding-left:%dpx;">%s</td><td><img src="data:image/png;base64,%s" alt="Picture" style="max-width:120px;max-height:160px;border-radius:4px;"></td></tr>`,
+				indent, template.HTMLEscapeString(name), template.HTMLEscapeString(valStr),
+			)
+		} else {
+			fmt.Fprintf(sb,
+				`<tr><td style="padding-left:%dpx;">%s</td><td><code>%s</code></td></tr>`,
+				indent, template.HTMLEscapeString(name), template.HTMLEscapeString(valStr),
+			)
+		}
+	}
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// cleanUnresolvedMarkersForDisplay deep-copies the value, removing SD-JWT array element
+// markers ({"...": hash}) so the JSON output is clean for display purposes.
+func cleanUnresolvedMarkersForDisplay(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(val))
+		for k, child := range val {
+			result[k] = cleanUnresolvedMarkersForDisplay(child)
+		}
+		return result
+	case []any:
+		result := make([]any, 0, len(val))
+		for _, elem := range val {
+			if m, ok := elem.(map[string]any); ok && len(m) == 1 {
+				if _, isMarker := m["..."]; isMarker {
+					continue
+				}
+			}
+			result = append(result, cleanUnresolvedMarkersForDisplay(elem))
+		}
+		return result
+	default:
+		return v
+	}
 }

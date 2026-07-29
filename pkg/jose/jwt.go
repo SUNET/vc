@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -190,7 +191,6 @@ func ParseJWTWithJWKHeader(token string) (jwt.MapClaims, map[string]any, map[str
 			return nil, fmt.Errorf("unsupported signing method: %v", algStr)
 		}
 	})
-
 	if err != nil {
 		return nil, nil, nil, "", err
 	}

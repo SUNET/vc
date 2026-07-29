@@ -259,8 +259,8 @@ func TestCachingTrustEvaluator_BypassCache(t *testing.T) {
 	req := testReqWithOptions("did:web:example.com", KeyTypeJWK, RoleIssuer, &TrustOptions{BypassCache: true})
 
 	// Both calls should hit the evaluator (bypass cache)
-	caching.Evaluate(t.Context(), req)
-	caching.Evaluate(t.Context(), req)
+	caching.Evaluate(t.Context(), req) // #nosec G104
+	caching.Evaluate(t.Context(), req) // #nosec G104
 
 	if callCount != 2 {
 		t.Errorf("expected 2 calls with bypass, got %d", callCount)
@@ -282,8 +282,8 @@ func TestCachingTrustEvaluator_NegativeNotCached(t *testing.T) {
 	req := testReq("did:web:untrusted.com", KeyTypeJWK, RoleIssuer)
 
 	// Negative decisions are not cached by default
-	caching.Evaluate(t.Context(), req)
-	caching.Evaluate(t.Context(), req)
+	caching.Evaluate(t.Context(), req) // #nosec G104
+	caching.Evaluate(t.Context(), req) // #nosec G104
 
 	if callCount != 2 {
 		t.Errorf("expected 2 calls (negative not cached), got %d", callCount)

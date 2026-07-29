@@ -1,4 +1,5 @@
 # go-cryptoutil
+<div align="center">
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sirosfoundation/go-cryptoutil.svg)](https://pkg.go.dev/github.com/sirosfoundation/go-cryptoutil)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sirosfoundation/go-cryptoutil)](https://goreportcard.com/report/github.com/sirosfoundation/go-cryptoutil)
@@ -6,6 +7,8 @@
 [![Build Status](https://github.com/sirosfoundation/go-cryptoutil/actions/workflows/test.yml/badge.svg)](https://github.com/sirosfoundation/go-cryptoutil/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/sirosfoundation/go-cryptoutil)](https://github.com/sirosfoundation/go-cryptoutil)
+
+</div>
 
 Extensible Go crypto utilities for certificate parsing, signature verification,
 ECDSA encoding, algorithm mapping, and key management — with a plugin architecture

@@ -13,7 +13,7 @@ func TestUnwrapVPToken(t *testing.T) {
 		name        string
 		vpTokenPath string
 	}{
-		{
+		{ // #nosec G101
 			name:        "Valid VPToken",
 			vpTokenPath: "vp_token_2.golden",
 		},

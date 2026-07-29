@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vci"
 

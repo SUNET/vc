@@ -2,18 +2,20 @@
 package mdoc
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
-	"encoding/hex"
 	"fmt"
 	"hash"
 	"maps"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // DigestAlgorithm represents the hash algorithm used for digests.
@@ -147,7 +149,7 @@ func (b *MSOBuilder) AddDataElementWithRandom(namespace, elementID string, value
 }
 
 // Build creates the signed MSO and IssuerNameSpaces.
-func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
+func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	if b.signerKey == nil {
 		return nil, nil, fmt.Errorf("signer key is required")
 	}
@@ -163,35 +165,46 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 
-	// Build IssuerNameSpaces and compute digests
-	issuerNameSpaces := make(IssuerNameSpaces)
-	digestIDMapping := make(DigestIDMapping)
-
+	issuerNameSpaces := make(map[string][]cbor.Tag)
+	valueDigests := make(map[string]map[uint][]byte)
 	for namespace, items := range b.namespaces {
-		taggedItems := make([]TaggedCBOR, 0, len(items))
-		valueDigests := make(ValueDigests)
+		currentNSTaggedItems := make([]cbor.Tag, 0, len(items))
+		nsValueDigests := make(map[uint][]byte)
 
 		for _, item := range items {
-			// Encode the MSOIssuerSignedItem
-			encoded, err := encoder.Marshal(item)
+			// Encode the inner map (MSOIssuerSignedItem)
+			innerEncoded, err := encoder.Marshal(item)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to encode item %s: %w", item.ElementID, err)
 			}
 
-			// Wrap in tag 24 (encoded CBOR data item)
-			taggedItems = append(taggedItems, TaggedCBOR{Data: encoded})
+			// Wrap in Tag 24
+			wrapper := cbor.Tag{Number: TagEncodedCBOR, Content: innerEncoded}
+			// Encode the WRAPPER itself
+			wrapperEncoded, err := encoder.Marshal(wrapper)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to encode wrapper: %w", err)
+			}
 
-			// Compute digest of the encoded item
-			digest, err := b.computeDigest(encoded)
+			// Save the wrapper for the IssuerSigned structure
+			currentNSTaggedItems = append(currentNSTaggedItems, wrapper)
+
+			// Compute digest of the ENTIRE wrapperEncoded block
+			digest, err := b.computeDigest(wrapperEncoded)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to compute digest for %s: %w", item.ElementID, err)
 			}
-			valueDigests[item.DigestID] = digest
+			nsValueDigests[item.DigestID] = digest
 		}
 
-		issuerNameSpaces[namespace] = taggedItems
-		digestIDMapping[namespace] = valueDigests
+		// Store results for this namespace
+		issuerNameSpaces[namespace] = currentNSTaggedItems
+		valueDigests[namespace] = nsValueDigests
 	}
+
+	signedTime := time.Now().UTC().Format(time.RFC3339)
+	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
+	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
 	// Get device key bytes
 	deviceKeyBytes, err := b.deviceKey.Bytes()
@@ -199,20 +212,18 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 		return nil, nil, fmt.Errorf("failed to encode device key: %w", err)
 	}
 
-	// Build the MSO structure
-	mso := MobileSecurityObject{
-		Version:         "1.0",
-		DigestAlgorithm: string(b.digestAlgorithm),
-		ValueDigests:    b.convertDigestMapping(digestIDMapping),
-		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+	mso := map[string]any{
+		"version":         "1.0",
+		"digestAlgorithm": string(b.digestAlgorithm),
+		"docType":         b.docType,
+		"valueDigests":    valueDigests,
+		"deviceKeyInfo": map[string]any{
+			"deviceKey": deviceKeyBytes,
 		},
-		DocType: b.docType,
-		ValidityInfo: ValidityInfo{
-			Signed:         time.Now().UTC(),
-			ValidFrom:      b.validFrom.UTC(),
-			ValidUntil:     b.validUntil.UTC(),
-			ExpectedUpdate: nil,
+		"validityInfo": map[string]any{
+			"signed":     cbor.Tag{Number: 0, Content: signedTime},
+			"validFrom":  cbor.Tag{Number: 0, Content: validFromStr},
+			"validUntil": cbor.Tag{Number: 0, Content: validUntilStr},
 		},
 	}
 
@@ -220,6 +231,14 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 	msoBytes, err := encoder.Marshal(mso)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to encode MSO: %w", err)
+	}
+
+	// MSO must also be wrapped in Tag 24 before signing
+	msoTagged := cbor.Tag{Number: TagEncodedCBOR, Content: msoBytes}
+
+	msoTaggedBytes, err := encoder.Marshal(msoTagged)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to encode tagged MSO: %w", err)
 	}
 
 	// Determine algorithm from signer key
@@ -234,7 +253,7 @@ func (b *MSOBuilder) Build() (*COSESign1, IssuerNameSpaces, error) {
 		certDER = append(certDER, cert.Raw)
 	}
 
-	signedMSO, err := Sign1(msoBytes, b.signerKey, algorithm, certDER, nil)
+	signedMSO, err := Sign1(msoTaggedBytes, b.signerKey, algorithm, certDER, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to sign MSO: %w", err)
 	}
@@ -273,65 +292,80 @@ func (b *MSOBuilder) convertDigestMapping(mapping DigestIDMapping) map[string]ma
 
 // VerifyMSO verifies a signed MSO against the issuer certificate.
 func VerifyMSO(signedMSO *COSESign1, issuerCert *x509.Certificate) (*MobileSecurityObject, error) {
-	// Verify the COSE_Sign1 signature
 	if err := Verify1(signedMSO, signedMSO.Payload, issuerCert.PublicKey, nil); err != nil {
 		return nil, fmt.Errorf("MSO signature verification failed: %w", err)
 	}
-
-	// Decode the MSO payload
 	encoder, err := NewCBOREncoder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 	var mso MobileSecurityObject
-	if err := encoder.Unmarshal(signedMSO.Payload, &mso); err != nil {
+	payload := signedMSO.Payload
+	var rawTag cbor.Tag
+	if err := encoder.Unmarshal(payload, &rawTag); err == nil && rawTag.Number == 24 {
+		if content, ok := rawTag.Content.([]byte); ok {
+			payload = content
+		}
+	}
+	if err := encoder.Unmarshal(payload, &mso); err != nil {
 		return nil, fmt.Errorf("failed to decode MSO: %w", err)
 	}
-
 	return &mso, nil
 }
 
-// VerifyDigest verifies that an IssuerSignedItem matches its digest in the MSO.
-func VerifyDigest(mso *MobileSecurityObject, namespace string, item *IssuerSignedItem) error {
-	// Get the expected digest from MSO
+// Change 'item *IssuerSignedItem' to 'anyItem any'
+func VerifyDigest(mso *MobileSecurityObject, namespace string, anyItem any) error {
+	tag, ok := anyItem.(cbor.Tag)
+	if !ok {
+		return fmt.Errorf("expected cbor.Tag, got %T", anyItem)
+	}
+	if tag.Number != TagEncodedCBOR {
+		return fmt.Errorf("expected 24, got %d", tag.Number)
+	}
+	var item IssuerSignedItem
+	contentBytes, ok := tag.Content.([]byte)
+	if !ok {
+		return fmt.Errorf("tag content is not bytes")
+	}
+
+	if err := cbor.Unmarshal(contentBytes, &item); err != nil {
+		return fmt.Errorf("failed to peek into item: %w", err)
+	}
+
 	nsDigests, ok := mso.ValueDigests[namespace]
 	if !ok {
 		return fmt.Errorf("namespace %s not found in MSO", namespace)
 	}
-
 	expectedDigest, ok := nsDigests[item.DigestID]
 	if !ok {
-		return fmt.Errorf("digest ID %d not found in namespace %s", item.DigestID, namespace)
+		return fmt.Errorf("digest ID %d not found in MSO", item.DigestID)
 	}
-
-	// Compute the actual digest
-	encoder, err := NewCBOREncoder()
+	em, err := cbor.CanonicalEncOptions().EncMode()
 	if err != nil {
-		return fmt.Errorf("failed to create CBOR encoder: %w", err)
+		return fmt.Errorf("failed to initialize canonical encoder: %w", err)
 	}
-	encoded, err := encoder.Marshal(item)
+	encodedFullItem, err := em.Marshal(tag)
 	if err != nil {
-		return fmt.Errorf("failed to encode item: %w", err)
+		return fmt.Errorf("failed to marshal tagged item: %w", err)
 	}
 
 	var actualDigest []byte
 	switch DigestAlgorithm(mso.DigestAlgorithm) {
 	case DigestAlgorithmSHA256:
-		h := sha256.Sum256(encoded)
+		h := sha256.Sum256(encodedFullItem)
 		actualDigest = h[:]
 	case DigestAlgorithmSHA384:
-		h := sha512.Sum384(encoded)
+		h := sha512.Sum384(encodedFullItem)
 		actualDigest = h[:]
 	case DigestAlgorithmSHA512:
-		h := sha512.Sum512(encoded)
+		h := sha512.Sum512(encodedFullItem)
 		actualDigest = h[:]
 	default:
 		return fmt.Errorf("unsupported digest algorithm: %s", mso.DigestAlgorithm)
 	}
 
-	// Compare digests
-	if hex.EncodeToString(actualDigest) != hex.EncodeToString(expectedDigest) {
-		return fmt.Errorf("digest mismatch for %s/%s", namespace, item.ElementIdentifier)
+	if !bytes.Equal(actualDigest, expectedDigest) {
+		return fmt.Errorf("digest mismatch for %s (ID %d)", item.ElementIdentifier, item.DigestID)
 	}
 
 	return nil

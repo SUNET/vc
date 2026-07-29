@@ -2,7 +2,6 @@ package logger
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -19,7 +18,6 @@ type Log struct {
 
 // New creates a default logger based on what kind of environment is used.
 func New(name, logPath string, production bool) (*Log, error) {
-
 	var zc zap.Config
 
 	switch production {
@@ -35,7 +33,7 @@ func New(name, logPath string, production bool) (*Log, error) {
 	zc.DisableStacktrace = true
 
 	if logPath != "" {
-		if err := os.MkdirAll(logPath, fs.ModeDir); err != nil {
+		if err := os.MkdirAll(logPath, 0o700); err != nil {
 			return nil, err
 		}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -18,7 +19,7 @@ func TestConsole_SendToDestination(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -37,7 +38,7 @@ func TestConsole_SendToDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestConsole_DestinationParsing(t *testing.T) {
@@ -77,7 +78,7 @@ func TestConsole_MessageDelivery(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -101,7 +102,7 @@ func TestConsole_MessageDelivery(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestConsole_InvalidJSON(t *testing.T) {
@@ -111,7 +112,7 @@ func TestConsole_InvalidJSON(t *testing.T) {
 	cfg := &model.Cfg{
 		Issuer: &model.Issuer{
 			AuditLog: &model.AuditLog{
-				Enable:      true,
+				Enable:       true,
 				Destinations: []string{"console"},
 			},
 		},
@@ -129,5 +130,5 @@ func TestConsole_InvalidJSON(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

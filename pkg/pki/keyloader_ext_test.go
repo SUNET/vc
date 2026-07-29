@@ -37,7 +37,7 @@ func TestKeyLoader_LoadCertificateChain_WithExtensions(t *testing.T) {
 		Bytes: testCert.Raw,
 	})
 
-	err := os.WriteFile(certPath, certPEM, 0600)
+	err := os.WriteFile(certPath, certPEM, 0o600)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -79,7 +79,7 @@ func TestKeyLoader_LoadCertificateChain_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath := filepath.Join(tmpDir, "empty.pem")
 
-	err := os.WriteFile(certPath, []byte(""), 0600)
+	err := os.WriteFile(certPath, []byte(""), 0o600)
 	require.NoError(t, err)
 
 	kl := NewKeyLoader()
@@ -92,7 +92,7 @@ func TestKeyLoader_LoadCertificateChain_NoCerts(t *testing.T) {
 	certPath := filepath.Join(tmpDir, "no-certs.pem")
 
 	// Write a file with no valid PEM blocks
-	err := os.WriteFile(certPath, []byte("not a pem file\n"), 0600)
+	err := os.WriteFile(certPath, []byte("not a pem file\n"), 0o600)
 	require.NoError(t, err)
 
 	kl := NewKeyLoader()

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 829 504" width="829" height="504">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1b4f72"/>
+      <stop offset="100%" style="stop-color:#0e2f44"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#21618c"/>
+      <stop offset="100%" style="stop-color:#1b4f72"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card background -->
+  <rect width="829" height="504" rx="24" ry="24" fill="url(#bg)"/>
+
+  <!-- Header band -->
+  <rect width="829" height="90" rx="24" ry="24" fill="url(#header)"/>
+  <rect y="60" width="829" height="30" fill="url(#header)"/>
+
+  <!-- Mortarboard icon -->
+  <g transform="translate(48, 20)" fill="white" opacity="0.85">
+    <polygon points="20,8 0,18 20,28 40,18"/>
+    <rect x="18" y="18" width="4" height="12"/>
+    <path d="M8,20 Q8,30 20,30 Q32,30 32,20" fill="none" stroke="white" stroke-width="2"/>
+  </g>
+
+  <!-- Title -->
+  <text x="105" y="48" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="bold" letter-spacing="1">EUROPEAN LEARNING MODEL</text>
+  <text x="105" y="75" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="14" opacity="0.75">Europass Digital Credential</text>
+
+  <!-- Student name -->
+  <text x="48" y="155" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.65">Given name</text>
+  <text x="48" y="190" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="bold">{{given_name}}</text>
+
+  <text x="48" y="245" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.65">Family name</text>
+  <text x="48" y="280" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="bold">{{family_name}}</text>
+
+  <!-- Awarding body -->
+  <text x="48" y="350" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" opacity="0.65">Awarding body</text>
+  <text x="48" y="385" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="22">{{awarding_body}}</text>
+
+  <!-- Bottom bar -->
+  <rect y="430" width="829" height="74" rx="0" ry="0" fill="white" opacity="0.06"/>
+  <rect y="480" width="829" height="24" rx="24" ry="24" fill="white" opacity="0.06"/>
+
+  <!-- EU flag stars -->
+  <g transform="translate(730, 460)" fill="#f0c040" opacity="0.5">
+    <circle cx="0" cy="0" r="3"/><circle cx="6" cy="-8" r="3"/><circle cx="15" cy="-11" r="3"/>
+    <circle cx="24" cy="-8" r="3"/><circle cx="30" cy="0" r="3"/><circle cx="24" cy="8" r="3"/>
+    <circle cx="15" cy="11" r="3"/><circle cx="6" cy="8" r="3"/>
+  </g>
+
+  <!-- Decorative rings -->
+  <circle cx="770" cy="350" r="40" fill="none" stroke="white" stroke-width="2" opacity="0.1"/>
+  <circle cx="770" cy="350" r="28" fill="none" stroke="white" stroke-width="1.5" opacity="0.1"/>
+</svg>

@@ -1,4 +1,3 @@
 package metric
 
-type Metric struct {
-}
+type Metric struct{}

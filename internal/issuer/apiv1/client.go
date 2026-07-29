@@ -7,6 +7,10 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"path/filepath"
+
+	"golang.org/x/time/rate"
+
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
@@ -31,21 +35,24 @@ type Client struct {
 	tracer         *trace.Tracer
 	auditLog       *auditlog.Service
 	signer         pki.Signer
-	privateKey     any // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
+	signerChain    []string // Base64-encoded DER x5c certificate chain (optional)
+	privateKey     any      // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
 	jwkProto       *apiv1_issuer.Jwk
 	registryConn   *grpc.ClientConn
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
+	signMetadataRL *rate.Limiter
 }
 
 // New creates a new instance of the public api
 func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Client, error) {
 	c := &Client{
-		cfg:      cfg,
-		log:      log.New("apiv1"),
-		tracer:   tracer,
-		auditLog: auditLog,
-		jwkProto: &apiv1_issuer.Jwk{},
+		cfg:            cfg,
+		log:            log.New("apiv1"),
+		tracer:         tracer,
+		auditLog:       auditLog,
+		jwkProto:       &apiv1_issuer.Jwk{},
+		signMetadataRL: rate.NewLimiter(rate.Limit(cfg.Issuer.SignMetadataRateLimit.RequestsPerSecond), cfg.Issuer.SignMetadataRateLimit.Burst),
 	}
 
 	if err := c.initSigner(ctx); err != nil {
@@ -79,11 +86,12 @@ func (c *Client) initSigner(ctx context.Context) error {
 
 	// Create signer from key material
 	c.signer = pki.NewKeyMaterialSigner(km)
+	c.signerChain = km.Chain
 
 	// Store private key for mDL issuer and VC 2.0 Data Integrity signing
 	c.privateKey = km.PrivateKey
 
-	c.log.Info("Initialized signing key", "algorithm", c.signer.Algorithm(), "keyID", c.signer.KeyID())
+	c.log.Info("Initialized signing key", "algorithm", c.signer.Algorithm(), "keyID", c.signer.KeyID(), "x5c_certs", len(km.Chain))
 
 	if err := c.createJWK(ctx); err != nil {
 		return err
@@ -158,7 +166,7 @@ func (c *Client) initMDocIssuer(ctx context.Context) error {
 
 // loadCertificateChain loads X.509 certificates from a PEM file
 func (c *Client) loadCertificateChain(path string) ([]*x509.Certificate, error) {
-	certPEM, err := os.ReadFile(path)
+	certPEM, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read certificate file: %w", err)
 	}
@@ -184,6 +192,35 @@ func (c *Client) loadCertificateChain(path string) ([]*x509.Certificate, error) 
 	}
 
 	return certs, nil
+}
+
+// GetIACAs returns the IACA certificates from the mDOC certificate chain.
+// IACA certificates are the non-leaf certificates (index 1+) in the chain.
+func (c *Client) GetIACAs(_ context.Context) (*apiv1_issuer.GetIACAsReply, error) {
+	if c.mdocIssuer == nil {
+		return nil, fmt.Errorf("mDOC issuer not configured")
+	}
+
+	chain := c.mdocIssuer.CertificateChain()
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("empty certificate chain")
+	}
+
+	// IACA certs are everything after the DS (leaf) cert.
+	// If only one cert (self-signed), return it as the IACA.
+	startIdx := 1
+	if len(chain) == 1 {
+		startIdx = 0
+	}
+
+	reply := &apiv1_issuer.GetIACAsReply{
+		Certificates: make([][]byte, 0, len(chain)-startIdx),
+	}
+	for i := startIdx; i < len(chain); i++ {
+		reply.Certificates = append(reply.Certificates, chain[i].Raw)
+	}
+
+	return reply, nil
 }
 
 // Close closes all client connections

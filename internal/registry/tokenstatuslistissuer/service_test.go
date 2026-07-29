@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -104,7 +103,7 @@ func (s *testSuite) generateSigningKey() {
 		s.t.Fatalf("Failed to encode private key: %v", err)
 	}
 
-	if err := os.WriteFile(s.keyPath, keyBytes, 0600); err != nil {
+	if err := os.WriteFile(s.keyPath, keyBytes, 0o600); err != nil {
 		s.t.Fatalf("Failed to write key file: %v", err)
 	}
 }
@@ -144,16 +143,11 @@ func generateRSAKeyFile(t *testing.T) string {
 		Bytes: derBytes,
 	}
 
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0600); err != nil {
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0o600); err != nil {
 		t.Fatalf("Failed to write RSA key file: %v", err)
 	}
 
 	return keyPath
-}
-
-// base64Encode helper for encoding
-func base64Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
 }
 
 // initializeConfiguration creates test configuration

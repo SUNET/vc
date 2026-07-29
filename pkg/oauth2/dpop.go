@@ -1,10 +1,15 @@
 package oauth2
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
+
 	"github.com/SUNET/vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -35,7 +40,7 @@ type DPoP struct {
 	// JTI Unique identifier for the DPoP proof JWT. The value MUST be assigned such that there is a negligible probability that the same value will be assigned to any other DPoP proof used in the same context during the time window of validity. Such uniqueness can be accomplished by encoding (base64url or any other suitable encoding) at least 96 bits of pseudorandom data or by using a version 4 Universally Unique Identifier (UUID) string according to [RFC4122]. The jti can be used by the server for replay detection and prevention; see Section 11.1.
 	JTI string `json:"jti" validate:"required"`
 
-	//HTM The value of the HTTP method (Section 9.1 of [RFC9110]) of the request to which the JWT is attached.¶
+	// HTM The value of the HTTP method (Section 9.1 of [RFC9110]) of the request to which the JWT is attached.¶
 	HTM string `json:"htm" validate:"required,oneof=POST GET PUT DELETE PATCH OPTIONS HEAD"`
 
 	// HTU The HTTP target URI (Section 7.1 of [RFC9110]) of the request to which the JWT is attached, without query and fragment parts.¶
@@ -111,8 +116,15 @@ func (d *DPoP) ValidateHTU() error {
 		return ErrMissingHTU
 	}
 
-	// Basic URL validation - HTU should not contain query or fragment
-	// Additional validation could be added here
+	// HTU must not contain query or fragment per RFC 9449 §4.2
+	u, err := url.Parse(d.HTU)
+	if err != nil {
+		return fmt.Errorf("invalid HTU: %w", err)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("HTU must not contain query or fragment")
+	}
+
 	return nil
 }
 
@@ -175,29 +187,6 @@ func (d *DPoP) ValidateWithWindow(maxAge, clockSkew time.Duration) error {
 	return nil
 }
 
-// ExtractJTI quickly extracts the JTI claim from a DPoP JWT without full validation
-// This allows services to check for replay attacks before performing expensive validation
-func ExtractJTI(dPopJWT string) (string, error) {
-	jti, err := jose.ExtractClaim(dPopJWT, "jti")
-	if err != nil {
-		if err.Error() == "claim \"jti\" not found" {
-			return "", ErrMissingJTI
-		}
-		return "", err
-	}
-
-	jtiStr, ok := jti.(string)
-	if !ok {
-		return "", ErrMissingJTI
-	}
-
-	if len(jtiStr) < 12 {
-		return "", ErrInvalidJTI
-	}
-
-	return jtiStr, nil
-}
-
 func ValidateAndParseDPoPJWT(dPopJWT string) (*DPoP, error) {
 	if dPopJWT == "" {
 		return nil, fmt.Errorf("DPoP JWT is empty")
@@ -240,10 +229,11 @@ func ValidateAndParseDPoPJWT(dPopJWT string) (*DPoP, error) {
 }
 
 func (c *DPoP) IsAccessTokenDPoP(token string) bool {
-	// Check if the ATH is set, which indicates that this is a DPoP proof
-	if c.ATH == token {
-		return true
+	// ATH is base64url(SHA-256(ASCII(access_token))) per RFC 9449 §4.2
+	if c.ATH == "" {
+		return false
 	}
-
-	return false
+	h := sha256.Sum256([]byte(token))
+	computed := base64.RawURLEncoding.EncodeToString(h[:])
+	return subtle.ConstantTimeCompare([]byte(c.ATH), []byte(computed)) == 1
 }

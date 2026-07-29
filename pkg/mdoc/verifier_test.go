@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
+	"net/url"
 	"testing"
 	"time"
 
@@ -39,7 +40,31 @@ func createTestTrustEvaluator(trusted bool) trust.TrustEvaluator {
 	return &mockTrustEvaluator{trusted: trusted, reason: "test decision"}
 }
 
-func createTestTrustList(t *testing.T) (trust.TrustEvaluator, *x509.Certificate, *ecdsa.PrivateKey, []*x509.Certificate) {
+// recordingTrustEvaluator is a test TrustEvaluator that records the last
+// EvaluationRequest it received, so tests can assert on how the caller
+// (e.g. Verifier) populated fields like SubjectID.
+type recordingTrustEvaluator struct {
+	trusted bool
+	lastReq *trust.EvaluationRequest
+}
+
+func (m *recordingTrustEvaluator) Evaluate(ctx context.Context, req *trust.EvaluationRequest) (*trustapi.TrustDecision, error) {
+	m.lastReq = req
+	return &trustapi.TrustDecision{
+		Trusted:        m.trusted,
+		Reason:         "test decision",
+		TrustFramework: "test-mock",
+	}, nil
+}
+
+func (m *recordingTrustEvaluator) SupportsKeyType(kt trust.KeyType) bool {
+	return kt == trust.KeyTypeX5C
+}
+
+// createTestTrustListWithDS is like createTestTrustList but allows the caller
+// to customize the DS certificate template (e.g. to add SANs) before it is
+// signed.
+func createTestTrustListWithDS(t *testing.T, mutateDS func(*x509.Certificate)) (*x509.Certificate, *ecdsa.PrivateKey, []*x509.Certificate) {
 	t.Helper()
 
 	// Generate IACA key pair
@@ -95,6 +120,10 @@ func createTestTrustList(t *testing.T) (trust.TrustEvaluator, *x509.Certificate,
 		IsCA:                  false,
 	}
 
+	if mutateDS != nil {
+		mutateDS(dsTemplate)
+	}
+
 	dsCertDER, err := x509.CreateCertificate(rand.Reader, dsTemplate, iacaCert, &dsKey.PublicKey, iacaKey)
 	if err != nil {
 		t.Fatalf("failed to create DS certificate: %v", err)
@@ -105,13 +134,19 @@ func createTestTrustList(t *testing.T) (trust.TrustEvaluator, *x509.Certificate,
 		t.Fatalf("failed to parse DS certificate: %v", err)
 	}
 
-	// Create mock trust evaluator that always trusts
-	trustEvaluator := createTestTrustEvaluator(true)
-
-	return trustEvaluator, dsCert, dsKey, []*x509.Certificate{dsCert, iacaCert}
+	return dsCert, dsKey, []*x509.Certificate{dsCert, iacaCert}
 }
 
-func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain []*x509.Certificate) *DeviceResponse {
+func createTestTrustList(t *testing.T) (trust.TrustEvaluator, *x509.Certificate, *ecdsa.PrivateKey, []*x509.Certificate) {
+	t.Helper()
+
+	trustEvaluator := createTestTrustEvaluator(true)
+	dsCert, dsKey, certChain := createTestTrustListWithDS(t, nil)
+
+	return trustEvaluator, dsCert, dsKey, certChain
+}
+
+func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain []*x509.Certificate) *DeviceResponseMdoc {
 	t.Helper()
 
 	// Create issuer
@@ -160,15 +195,8 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 	if err != nil {
 		t.Fatalf("failed to issue mDL: %v", err)
 	}
-
 	// Build device response using the Document from issued
-	return &DeviceResponse{
-		Version: "1.0",
-		Documents: []Document{
-			*issued.Document,
-		},
-		Status: 0,
-	}
+	return issued.DocumentMdoc
 }
 
 func TestNewVerifier(t *testing.T) {
@@ -177,7 +205,6 @@ func TestNewVerifier(t *testing.T) {
 	verifier, err := NewVerifier(VerifierConfig{
 		TrustEvaluator: trustEvaluator,
 	})
-
 	if err != nil {
 		t.Fatalf("NewVerifier() error = %v", err)
 	}
@@ -235,7 +262,13 @@ func TestVerifier_VerifyDocument(t *testing.T) {
 
 	response := createTestDeviceResponse(t, dsKey, certChain)
 
-	result := verifier.VerifyDocument(&response.Documents[0])
+	if len(response.Documents) == 0 {
+		t.Fatal("expected at least one document in test response")
+	}
+
+	doc := &response.Documents[0]
+
+	result := verifier.VerifyDocument(doc)
 
 	if !result.Valid {
 		t.Errorf("VerifyDocument() Valid = false, errors: %v", result.Errors)
@@ -249,7 +282,6 @@ func TestVerifier_VerifyDocument(t *testing.T) {
 		t.Error("VerifyDocument() IssuerCertificate is nil")
 	}
 
-	// Check that elements were verified
 	if len(result.VerifiedElements) == 0 {
 		t.Error("VerifyDocument() VerifiedElements is empty")
 	}
@@ -298,6 +330,44 @@ func TestVerifier_VerifyDocument_InvalidStatus(t *testing.T) {
 
 	if result.Valid {
 		t.Error("VerifyDeviceResponse() should fail for non-zero status")
+	}
+}
+
+func TestVerifier_VerifyDocument_DocumentErrors(t *testing.T) {
+	trustEvaluator, _, _, _ := createTestTrustList(t)
+
+	verifier, err := NewVerifier(VerifierConfig{
+		TrustEvaluator:      trustEvaluator,
+		SkipRevocationCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	// 1. Manually build a response representing a protocol failure
+	// According to the spec, an error response contains DocumentErrors and drops Documents
+	response := &DeviceResponseMdoc{
+		Version:   "1.0",
+		Documents: nil, // Clear documents to simulate an unpresentable state
+		DocumentErrors: []DocumentError{
+			{
+				DocType: 1, // 1 = Data Not Available / Generation Failure
+			},
+		},
+		Status: 0, // Session status is fine, but the document itself failed
+	}
+
+	// 2. Execute verification
+	result := verifier.VerifyDeviceResponse(response)
+
+	// 3. Assertions
+	if result.Valid {
+		t.Error("VerifyDeviceResponse() should fail when DocumentErrors are present")
+	}
+
+	// Ensure our exact error message is surfaced in the result block
+	if len(result.Errors) == 0 {
+		t.Error("Expected error messages to be appended to result.Errors, but found none")
 	}
 }
 
@@ -621,7 +691,12 @@ func TestVerifier_VerifyIssuerSigned(t *testing.T) {
 	}
 
 	response := createTestDeviceResponse(t, dsKey, certChain)
-	doc := response.Documents[0]
+
+	if len(response.Documents) == 0 {
+		t.Fatal("expected at least one document in response")
+	}
+
+	doc := &response.Documents[0]
 
 	mso, elements, err := verifier.VerifyIssuerSigned(&doc.IssuerSigned, doc.DocType)
 	if err != nil {
@@ -636,17 +711,16 @@ func TestVerifier_VerifyIssuerSigned(t *testing.T) {
 		t.Error("VerifyIssuerSigned() elements is empty")
 	}
 
-	if elements[Namespace]["family_name"] != "Smith" {
-		t.Errorf("VerifyIssuerSigned() family_name = %v, want Smith", elements[Namespace]["family_name"])
+	if val, ok := elements[Namespace]["family_name"]; !ok || val != "Smith" {
+		t.Errorf("VerifyIssuerSigned() family_name = %v, want Smith", val)
 	}
 }
 
 func TestVerifier_WithCustomClock(t *testing.T) {
 	trustEvaluator, _, dsKey, certChain := createTestTrustList(t)
 
-	// Create a verifier with a clock set to the future (after cert expiry)
 	futureClock := func() time.Time {
-		return time.Now().Add(50 * 365 * 24 * time.Hour) // 50 years in the future
+		return time.Now().Add(50 * 365 * 24 * time.Hour)
 	}
 
 	verifier, err := NewVerifier(VerifierConfig{
@@ -665,5 +739,172 @@ func TestVerifier_WithCustomClock(t *testing.T) {
 	// Should fail because certificate is expired
 	if result.Valid {
 		t.Error("VerifyDeviceResponse() should fail with expired certificate")
+	}
+}
+
+func TestVerifier_ConfiguredIssuerURLOverridesCertificateSAN(t *testing.T) {
+	// The DS certificate carries its own URI SAN, but the Verifier is
+	// configured with an explicit IssuerURL. The configured IssuerURL must
+	// win, per the documented priority: configured IssuerURL > certificate
+	// URI SAN > certificate Organization.
+	const certURI = "https://cert-issuer.example.com"
+	const configuredIssuerURL = "https://configured-issuer.example.com"
+
+	dsCert, dsKey, certChain := createTestTrustListWithDS(t, func(tmpl *x509.Certificate) {
+		tmpl.URIs = []*url.URL{{Scheme: "https", Host: "cert-issuer.example.com"}}
+	})
+	_ = dsCert
+
+	recorder := &recordingTrustEvaluator{trusted: true}
+
+	verifier, err := NewVerifier(VerifierConfig{
+		TrustEvaluator:      recorder,
+		IssuerURL:           configuredIssuerURL,
+		SkipRevocationCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	response := createTestDeviceResponse(t, dsKey, certChain)
+
+	result := verifier.VerifyDeviceResponse(response)
+	if !result.Valid {
+		t.Fatalf("VerifyDeviceResponse() Valid = false, errors: %v", result.Errors)
+	}
+
+	if recorder.lastReq == nil {
+		t.Fatal("expected TrustEvaluator.Evaluate to be called")
+	}
+
+	if got := recorder.lastReq.SubjectID; got != configuredIssuerURL {
+		t.Errorf("SubjectID = %q, want configured IssuerURL %q (cert URI SAN was %q)", got, configuredIssuerURL, certURI)
+	}
+}
+
+func TestVerifier_IssuerURLExtractedFromCertificateSANWhenNotConfigured(t *testing.T) {
+	// When no IssuerURL is configured on the Verifier, the issuer identifier
+	// used for trust evaluation must fall back to the DS certificate's URI SAN.
+	const certURI = "https://cert-issuer.example.com"
+
+	dsCert, dsKey, certChain := createTestTrustListWithDS(t, func(tmpl *x509.Certificate) {
+		tmpl.URIs = []*url.URL{{Scheme: "https", Host: "cert-issuer.example.com"}}
+	})
+	_ = dsCert
+
+	recorder := &recordingTrustEvaluator{trusted: true}
+
+	verifier, err := NewVerifier(VerifierConfig{
+		TrustEvaluator:      recorder,
+		SkipRevocationCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	response := createTestDeviceResponse(t, dsKey, certChain)
+
+	result := verifier.VerifyDeviceResponse(response)
+	if !result.Valid {
+		t.Fatalf("VerifyDeviceResponse() Valid = false, errors: %v", result.Errors)
+	}
+
+	if recorder.lastReq == nil {
+		t.Fatal("expected TrustEvaluator.Evaluate to be called")
+	}
+
+	if got := recorder.lastReq.SubjectID; got != certURI {
+		t.Errorf("SubjectID = %q, want issuer ID extracted from certificate URI SAN %q", got, certURI)
+	}
+}
+
+func TestExtractMDocIssuerID(t *testing.T) {
+	tests := []struct {
+		name   string
+		cert   *x509.Certificate
+		expect string
+	}{
+		{
+			name: "https URI SAN used as-is",
+			cert: &x509.Certificate{
+				URIs: []*url.URL{{Scheme: "https", Host: "issuer.example.com"}},
+			},
+			expect: "https://issuer.example.com",
+		},
+		{
+			name: "http URI SAN normalized to https",
+			cert: &x509.Certificate{
+				URIs: []*url.URL{{Scheme: "http", Host: "issuer.example.com", Path: "/vc"}},
+			},
+			expect: "https://issuer.example.com/vc",
+		},
+		{
+			name: "DNS SAN converted to https URL",
+			cert: &x509.Certificate{
+				DNSNames: []string{"issuer.example.com"},
+			},
+			expect: "https://issuer.example.com",
+		},
+		{
+			name: "wildcard DNS SAN is skipped in favor of Organization",
+			cert: &x509.Certificate{
+				DNSNames: []string{"*.example.com"},
+				Subject:  pkix.Name{Organization: []string{"siros-id"}},
+			},
+			expect: "siros-id",
+		},
+		{
+			name: "wildcard DNS SAN is skipped, falling back to Country when no Organization",
+			cert: &x509.Certificate{
+				DNSNames: []string{"*.example.com"},
+				Subject:  pkix.Name{Country: []string{"SE"}},
+			},
+			expect: "SE",
+		},
+		{
+			name: "non-wildcard DNS SAN preferred over Organization",
+			cert: &x509.Certificate{
+				DNSNames: []string{"issuer.example.com"},
+				Subject:  pkix.Name{Organization: []string{"siros-id"}},
+			},
+			expect: "https://issuer.example.com",
+		},
+		{
+			name: "Organization used when no SANs present",
+			cert: &x509.Certificate{
+				Subject: pkix.Name{Organization: []string{"siros-id"}},
+			},
+			expect: "siros-id",
+		},
+		{
+			name: "Country used when no SANs or Organization",
+			cert: &x509.Certificate{
+				Subject: pkix.Name{Country: []string{"SE"}},
+			},
+			expect: "SE",
+		},
+		{
+			name: "CommonName used as last resort before issuer fallback",
+			cert: &x509.Certificate{
+				Subject: pkix.Name{CommonName: "Test Document Signer"},
+			},
+			expect: "Test Document Signer",
+		},
+		{
+			name: "falls back to issuer CommonName when subject has nothing usable",
+			cert: &x509.Certificate{
+				Issuer: pkix.Name{CommonName: "Test IACA Root"},
+			},
+			expect: "Test IACA Root",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractMDocIssuerID(tt.cert)
+			if got != tt.expect {
+				t.Errorf("extractMDocIssuerID() = %q, want %q", got, tt.expect)
+			}
+		})
 	}
 }

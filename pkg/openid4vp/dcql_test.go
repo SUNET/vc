@@ -99,9 +99,9 @@ func TestExample(t *testing.T) {
 							VCTValues: []string{"https://credentials.example.com/identity_credential"},
 						},
 						Claims: []ClaimQuery{
-							{Path: []string{"last_name"}},
-							{Path: []string{"first_name"}},
-							{Path: []string{"address", "street_address"}},
+							{Path: StringPath("last_name")},
+							{Path: StringPath("first_name")},
+							{Path: StringPath("address", "street_address")},
 						},
 					},
 				},
@@ -125,40 +125,40 @@ func TestExample(t *testing.T) {
 							VCTValues: []string{"urn:eudi:pid:1"},
 						},
 						Claims: []ClaimQuery{
-							{Path: []string{"given_name"}},
-							{Path: []string{"birth_given_name"}},
-							{Path: []string{"family_name"}},
-							{Path: []string{"birth_family_name"}},
-							{Path: []string{"birthdate"}},
-							{Path: []string{"place_of_birth", "country"}},
-							{Path: []string{"place_of_birth", "region"}},
-							{Path: []string{"place_of_birth", "locality"}},
-							{Path: []string{"nationalities"}},
-							{Path: []string{"personal_administrative_number"}},
-							{Path: []string{"sex"}},
-							{Path: []string{"address", "formatted"}},
-							{Path: []string{"address", "street_address"}},
-							{Path: []string{"address", "house_number"}},
-							{Path: []string{"address", "postal_code"}},
-							{Path: []string{"address", "locality"}},
-							{Path: []string{"address", "region"}},
-							{Path: []string{"address", "country"}},
-							{Path: []string{"age_equal_or_over", "14"}},
-							{Path: []string{"age_equal_or_over", "16"}},
-							{Path: []string{"age_equal_or_over", "18"}},
-							{Path: []string{"age_equal_or_over", "21"}},
-							{Path: []string{"age_equal_or_over", "65"}},
-							{Path: []string{"age_in_years"}},
-							{Path: []string{"age_birth_year"}},
-							{Path: []string{"email"}},
-							{Path: []string{"phone_number"}},
-							{Path: []string{"issuing_authority"}},
-							{Path: []string{"issuing_country"}},
-							{Path: []string{"issuing_jurisdiction"}},
-							{Path: []string{"date_of_expiry"}},
-							{Path: []string{"date_of_issuance"}},
-							{Path: []string{"document_number"}},
-							{Path: []string{"picture"}},
+							{Path: StringPath("given_name")},
+							{Path: StringPath("birth_given_name")},
+							{Path: StringPath("family_name")},
+							{Path: StringPath("birth_family_name")},
+							{Path: StringPath("birthdate")},
+							{Path: StringPath("place_of_birth", "country")},
+							{Path: StringPath("place_of_birth", "region")},
+							{Path: StringPath("place_of_birth", "locality")},
+							{Path: StringPath("nationalities")},
+							{Path: StringPath("personal_administrative_number")},
+							{Path: StringPath("sex")},
+							{Path: StringPath("address", "formatted")},
+							{Path: StringPath("address", "street_address")},
+							{Path: StringPath("address", "house_number")},
+							{Path: StringPath("address", "postal_code")},
+							{Path: StringPath("address", "locality")},
+							{Path: StringPath("address", "region")},
+							{Path: StringPath("address", "country")},
+							{Path: StringPath("age_equal_or_over", "14")},
+							{Path: StringPath("age_equal_or_over", "16")},
+							{Path: StringPath("age_equal_or_over", "18")},
+							{Path: StringPath("age_equal_or_over", "21")},
+							{Path: StringPath("age_equal_or_over", "65")},
+							{Path: StringPath("age_in_years")},
+							{Path: StringPath("age_birth_year")},
+							{Path: StringPath("email")},
+							{Path: StringPath("phone_number")},
+							{Path: StringPath("issuing_authority")},
+							{Path: StringPath("issuing_country")},
+							{Path: StringPath("issuing_jurisdiction")},
+							{Path: StringPath("date_of_expiry")},
+							{Path: StringPath("date_of_issuance")},
+							{Path: StringPath("document_number")},
+							{Path: StringPath("picture")},
 						},
 					},
 				},
@@ -174,4 +174,51 @@ func TestExample(t *testing.T) {
 			assert.JSONEq(t, string(tt.want), string(got))
 		})
 	}
+}
+
+// TestClaimSetsRoundTrip verifies that claim_sets ([][]string) and claim IDs
+// survive JSON marshal/unmarshal round-trips per OID4VP §6.4.1.
+func TestClaimSetsRoundTrip(t *testing.T) {
+	dcql := &DCQL{
+		Credentials: []CredentialQuery{
+			{
+				ID:     "pid",
+				Format: "dc+sd-jwt",
+				Meta: MetaQuery{
+					VCTValues: []string{"urn:eudi:pid:1"},
+				},
+				Claims: []ClaimQuery{
+					{ID: "name", Path: StringPath("given_name")},
+					{ID: "family", Path: StringPath("family_name")},
+					{ID: "age", Path: StringPath("age_over_18")},
+				},
+				ClaimSet: [][]string{
+					{"name", "family"},
+					{"name", "age"},
+				},
+			},
+		},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(dcql)
+	assert.NoError(t, err)
+
+	// Unmarshal back
+	var decoded DCQL
+	err = json.Unmarshal(data, &decoded)
+	assert.NoError(t, err)
+
+	cred := decoded.Credentials[0]
+	// Verify claim IDs survived
+	assert.Equal(t, "name", cred.Claims[0].ID)
+	assert.Equal(t, "family", cred.Claims[1].ID)
+	assert.Equal(t, "age", cred.Claims[2].ID)
+
+	// Verify claim_sets survived as [][]string
+	assert.Equal(t, [][]string{{"name", "family"}, {"name", "age"}}, cred.ClaimSet)
+
+	// Verify the JSON contains expected structure
+	assert.Contains(t, string(data), `"claim_sets"`)
+	assert.Contains(t, string(data), `"id":"name"`)
 }

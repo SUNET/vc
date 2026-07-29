@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -14,7 +15,7 @@ func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*
 	probes := model.Probes{}
 	probes = append(probes, c.db.Status(ctx))
 
-	status := probes.Check("apigw")
+	reply := probes.Check("apigw")
 
-	return status, nil
+	return reply, nil
 }

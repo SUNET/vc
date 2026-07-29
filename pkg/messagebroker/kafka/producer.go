@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
@@ -47,17 +48,19 @@ func NewSyncProducerClient(ctx context.Context, saramaConfig *sarama.Config, cfg
 }
 
 // CommonProducerConfig returns a new Kafka producer configuration instance with sane defaults for vc.
-func CommonProducerConfig(cfg *model.Cfg) *sarama.Config {
-	//TODO(mk): set cfg from file - is now hardcoded
+func CommonProducerConfig(cfg *model.Cfg) (*sarama.Config, error) {
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Producer.Return.Successes = true
 	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
 	saramaConfig.Producer.Idempotent = true
 	saramaConfig.Net.MaxOpenRequests = 1
 	saramaConfig.Producer.Retry.Max = 3
-	saramaConfig.Net.SASL.Enable = false
-	//TODO(mk): enable and configure security when publishing to Kafka
-	return saramaConfig
+
+	if err := applySecurityConfig(saramaConfig, cfg); err != nil {
+		return nil, err
+	}
+
+	return saramaConfig, nil
 }
 
 // Close close the producer
@@ -73,7 +76,7 @@ func (c *SyncProducerClient) Close(ctx context.Context) error {
 
 // PublishMessage publish a message to a Kafka topic
 func (c *SyncProducerClient) PublishMessage(topic string, key string, json []byte, headers []sarama.RecordHeader) error {
-	//TODO(mk): create header data in this func, ie change func def.
+	// TODO(mk): create header data in this func, ie change func def.
 	message := &sarama.ProducerMessage{
 		Topic:   topic,
 		Key:     sarama.StringEncoder(key),

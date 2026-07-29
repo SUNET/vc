@@ -1,8 +1,10 @@
 package apiv1
 
 import (
+	"fmt"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/cache"
 
 	"github.com/stretchr/testify/assert"
@@ -277,4 +279,86 @@ func createTestDBSessionForPrefs(sessionID string) *cache.AuthorizationContext {
 	}
 
 	return authCtx
+}
+
+func TestFlattenClaimsForDisplay(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  map[string]any
+		expect map[string]any
+	}{
+		{
+			name:   "nil input",
+			input:  nil,
+			expect: nil,
+		},
+		{
+			name: "flat claims unchanged",
+			input: map[string]any{
+				"given_name": "Helen",
+				"birthdate": "1996-01-30",
+			},
+			expect: map[string]any{
+				"given_name": "Helen",
+				"birthdate": "1996-01-30",
+			},
+		},
+		{
+			name: "nested maps flattened",
+			input: map[string]any{
+				"given_name": "Helen",
+				"place_of_birth": map[string]any{
+					"locality": "Stockholm",
+					"country":  "SE",
+				},
+				"address": map[string]any{
+					"street_address": "Tulegatan",
+					"postal_code":    "11353",
+				},
+			},
+			expect: map[string]any{
+				"given_name":             "Helen",
+				"place_of_birth.locality": "Stockholm",
+				"place_of_birth.country":  "SE",
+				"address.street_address":  "Tulegatan",
+				"address.postal_code":     "11353",
+			},
+		},
+		{
+			name: "arrays preserved as-is",
+			input: map[string]any{
+				"nationalities": []any{"SE", "EU"},
+			},
+			expect: map[string]any{
+				"nationalities": []any{"SE", "EU"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := flattenClaimsForDisplay(tt.input)
+			if tt.expect == nil {
+				if result != nil {
+					t.Errorf("expected nil, got %v", result)
+				}
+				return
+			}
+			if len(result) != len(tt.expect) {
+				t.Errorf("expected %d keys, got %d: %v", len(tt.expect), len(result), result)
+				return
+			}
+			for k, v := range tt.expect {
+				got, ok := result[k]
+				if !ok {
+					t.Errorf("missing key %q in result", k)
+					continue
+				}
+				// Compare string representations for simplicity
+				if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", v) {
+					t.Errorf("key %q: expected %v, got %v", k, v, got)
+				}
+			}
+		})
+	}
 }

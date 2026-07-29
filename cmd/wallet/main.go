@@ -64,7 +64,7 @@ func runVCI(args []string) {
 	saveTo := fs.String("save", "", "Save received credential to file (for piping to vp)")
 	verbose := fs.Bool("v", false, "Verbose output (debug logging)")
 
-	fs.Parse(args)
+	fs.Parse(args) // #nosec G104
 
 	log := newLogger(*verbose)
 	ctx := context.Background()
@@ -113,7 +113,7 @@ func runVCI(args []string) {
 	if *saveTo != "" {
 		creds := client.Store().List()
 		if len(creds) > 0 {
-			if err := os.WriteFile(*saveTo, []byte(creds[len(creds)-1].RawCredential), 0600); err != nil {
+			if err := os.WriteFile(*saveTo, []byte(creds[len(creds)-1].RawCredential), 0o600); err != nil {
 				fatal("saving credential: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "credential saved to %s\n", *saveTo)
@@ -132,7 +132,7 @@ func runVP(args []string) {
 	keyPath := fs.String("key-path", "", "Path to PEM private key (default: generate ephemeral EC P-256)")
 	verbose := fs.Bool("v", false, "Verbose output (debug logging)")
 
-	fs.Parse(args)
+	fs.Parse(args) // #nosec G104
 
 	log := newLogger(*verbose)
 	ctx := context.Background()
@@ -217,7 +217,7 @@ func printResult(r *apiv1.ScenarioResult) {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(r)
+	enc.Encode(r) // #nosec G104
 }
 
 func newLogger(verbose bool) *slog.Logger {

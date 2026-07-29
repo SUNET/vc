@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+
 	"github.com/SUNET/vc/internal/registry/db"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
@@ -144,11 +145,9 @@ func (c *Client) TokenStatusListAggregation(ctx context.Context) (*TokenStatusLi
 
 // SaveCredentialSubjectRequest is the request to save credential subject info
 type SaveCredentialSubjectRequest struct {
-	FirstName   string `json:"first_name" validate:"required"`
-	LastName    string `json:"last_name" validate:"required"`
-	DateOfBirth string `json:"date_of_birth" validate:"required"`
-	Section     int64  `json:"section" validate:"gte=0"`
-	Index       int64  `json:"index" validate:"gte=0"`
+	Identifier string `json:"identifier" validate:"required"`
+	Section    int64  `json:"section" validate:"gte=0"`
+	Index      int64  `json:"index" validate:"gte=0"`
 }
 
 // SaveCredentialSubject saves credential subject info linked to a Token Status List entry
@@ -159,11 +158,9 @@ func (c *Client) SaveCredentialSubject(ctx context.Context, req *SaveCredentialS
 	}
 
 	doc := &db.CredentialSubjectDoc{
-		FirstName:   req.FirstName,
-		LastName:    req.LastName,
-		DateOfBirth: req.DateOfBirth,
-		Section:     req.Section,
-		Index:       req.Index,
+		Identifier: req.Identifier,
+		Section:    req.Section,
+		Index:      req.Index,
 	}
 
 	if err := c.credentialSubjects.Add(ctx, doc); err != nil {
@@ -171,6 +168,6 @@ func (c *Client) SaveCredentialSubject(ctx context.Context, req *SaveCredentialS
 		return err
 	}
 
-	c.log.Debug("saved credential subject", "first_name", req.FirstName, "last_name", req.LastName, "section", req.Section, "index", req.Index)
+	c.log.Debug("saved credential subject", "identifier", req.Identifier, "section", req.Section, "index", req.Index)
 	return nil
 }

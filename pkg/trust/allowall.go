@@ -61,5 +61,7 @@ func (e *AllowAllEvaluator) ResolveKey(ctx context.Context, verificationMethod s
 }
 
 // Verify interface compliance
-var _ TrustEvaluator = (*AllowAllEvaluator)(nil)
-var _ KeyResolver = (*AllowAllEvaluator)(nil)
+var (
+	_ TrustEvaluator = (*AllowAllEvaluator)(nil)
+	_ KeyResolver    = (*AllowAllEvaluator)(nil)
+)

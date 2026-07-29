@@ -1,4 +1,4 @@
-.PHONY: all build test test-verbose coverage clean fmt vet lint help bench bench-long perftest perftest-sizes perftest-large indexperf indexperf-large protocolperf protocolperf-quick
+.PHONY: all build test test-verbose coverage clean fmt vet lint help bench bench-long perftest perftest-sizes perftest-large indexperf indexperf-large protocolperf protocolperf-quick setup
 
 # Go parameters
 GOCMD=go
@@ -131,6 +131,10 @@ deps: ## Download dependencies
 verify: ## Verify dependencies
 	@echo "Verifying dependencies..."
 	$(GOMOD) verify
+
+setup: ## Set up development environment with git hooks
+	@echo "Setting up development environment..."
+	@bash scripts/setup-dev.sh
 
 help: ## Display this help screen
 	@grep -h -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

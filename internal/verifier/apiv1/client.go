@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/internal/verifier/notify"
@@ -44,10 +45,11 @@ type Client struct {
 	pkiSignerChain []string
 
 	// Clients and services
-	openid4vp      *openid4vp.Client
-	trustService   *openid4vp.TrustService
-	trustEvaluator trust.TrustEvaluator
-	jwksResolver   *trust.JWKSKeyResolver
+	openid4vp        *openid4vp.Client
+	trustService     *openid4vp.TrustService
+	trustEvaluator   trust.TrustEvaluator
+	jwksResolver     *trust.JWKSKeyResolver
+	jwtTrustVerifier *trust.JWTTrustVerifier
 
 	// Cache
 	cacheService *cache.Service
@@ -89,20 +91,22 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
-	c.oauth2Metadata = c.cfg.Verifier.OAuthServer.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
+	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
-		c.log.Info("Failed to load presentation templates", "error", err)
+		return nil, fmt.Errorf("failed to load presentation request templates: %w", err)
 	}
 
 	// Initialize claims extractor
 	c.claimsExtractor = openid4vp.NewClaimsExtractor()
 
-	// Override Attributes with filtered variant (excludes nested object claims)
-	// since verifier only exposes leaf-level attributes to the UI.
-	for _, credentialInfo := range cfg.Common.CredentialConstructor {
-		credentialInfo.Attributes = credentialInfo.VCTM.AttributesWithoutObjects()
+	// Use full Attributes (including nested object/array claims) so the UI
+	// can render them as a tree and let users select individual sub-fields.
+	for _, credentialInfo := range cfg.Common.CredentialMetadata {
+		if vctm := credentialInfo.GetVCTM(); vctm != nil {
+			credentialInfo.Attributes = vctm.Attributes()
+		}
 	}
 
 	c.trustService = &openid4vp.TrustService{}
@@ -118,6 +122,15 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
 	}
 
+	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator:             c.trustEvaluator,
+		JWKSResolver:               c.jwksResolver,
+		AllowedSignatureAlgorithms: cfg.Verifier.Trust.AllowedSignatureAlgorithms,
+		ParseX5C:                   func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:                   jose.ParseJWKToPublicKey,
+		Log:                        c.log,
+	})
+
 	c.log.Info("Started")
 
 	return c, nil
@@ -126,7 +139,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 // loadPresentationTemplates loads presentation request templates from configured directory
 func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Check if templates directory is configured
-	templatesDir := c.cfg.Verifier.OpenID4VP.GetPresentationRequestsDir()
+	templatesDir := c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationRequestsDir()
 	if templatesDir == "" {
 		c.log.Info("Presentation requests directory not configured, using credential config scope mapping")
 		return nil
@@ -135,8 +148,7 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 	// Load templates from directory
 	config, err := configuration.LoadPresentationRequests(ctx, templatesDir)
 	if err != nil {
-		c.log.Info("Failed to load presentation request templates, falling back to credential config scope mapping", "error", err, "dir", templatesDir)
-		return nil
+		return fmt.Errorf("loading templates from %s: %w", templatesDir, err)
 	}
 
 	// Create presentation builder
@@ -155,19 +167,19 @@ func (c *Client) loadPresentationTemplates(ctx context.Context) error {
 // generateSubjectIdentifier creates a subject identifier for the user
 // This can be either public (same across all RPs) or pairwise (different per RP)
 func (c *Client) generateSubjectIdentifier(walletID string, clientID string) string {
-	subjectType := c.cfg.Verifier.OIDCOP.SubjectType
+	subjectType := c.cfg.Verifier.Outbound.OIDCProvider.SubjectType
 
 	switch subjectType {
 	case "pairwise":
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
 		hash.Write([]byte(clientID))
-		hash.Write([]byte(c.cfg.Verifier.OIDCOP.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	default:
 		hash := sha256.New()
 		hash.Write([]byte(walletID))
-		hash.Write([]byte(c.cfg.Verifier.OIDCOP.SubjectSalt))
+		hash.Write([]byte(c.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt))
 		return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 	}
 }
@@ -195,8 +207,8 @@ func (c *Client) getClientByID(ctx context.Context, clientID string) (*db.Client
 	}
 
 	// If not found in database, check static clients from configuration
-	if c.cfg.Verifier.OIDCOP != nil {
-		for _, staticClient := range c.cfg.Verifier.OIDCOP.StaticClients {
+	if c.cfg.Verifier.Outbound.OIDCProvider != nil {
+		for _, staticClient := range c.cfg.Verifier.Outbound.OIDCProvider.StaticClients {
 			if staticClient.ClientID == clientID {
 				// Determine allowed scopes: empty means all scopes allowed
 				allowedScopes := staticClient.AllowedScopes
@@ -294,13 +306,19 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // All scopes are considered for matching, including standard OIDC scopes like "openid".
 // Scopes that don't have a corresponding credential configuration are silently skipped,
 // making standard OIDC scopes optional - they can match if configured, but are not required.
+//
+// This is the fallback path used when no presentation request templates are configured
+// or when template loading fails (e.g. invalid presentation_requests_dir).
+// It does NOT enumerate individual claims from the VCTM — instead it omits the Claims
+// field, letting the wallet decide what to disclose. To request specific claims,
+// configure presentation request templates with explicit DCQL claim paths.
 func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, error) {
 	var credentials []openid4vp.CredentialQuery
 
 	for _, scope := range scopes {
-		credInfo, ok := c.cfg.Common.CredentialConstructor[scope]
+		credInfo, ok := c.cfg.Common.CredentialMetadata[scope]
 		if !ok {
-			c.log.Debug("Scope has no credential constructor, skipping", "scope", scope)
+			c.log.Debug("Scope has no credential config, skipping", "scope", scope)
 			continue
 		}
 
@@ -316,20 +334,6 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			Meta: openid4vp.MetaQuery{
 				VCTValues: []string{vctID},
 			},
-			Claims: make([]openid4vp.ClaimQuery, 0),
-		}
-
-		// Add claims from VCTM claim paths
-		if credInfo.VCTM != nil {
-			for _, claim := range credInfo.VCTM.Claims {
-				// Skip object claims (nested paths) — only leaf claims
-				if len(claim.Path) != 1 || claim.Path[0] == nil {
-					continue
-				}
-				cred.Claims = append(cred.Claims, openid4vp.ClaimQuery{
-					Path: []string{*claim.Path[0]},
-				})
-			}
 		}
 
 		credentials = append(credentials, cred)
@@ -339,9 +343,15 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 		return nil, fmt.Errorf("no valid credentials found for requested scopes")
 	}
 
-	return &openid4vp.DCQL{
+	dcql := &openid4vp.DCQL{
 		Credentials: credentials,
-	}, nil
+	}
+
+	// Normalize: remove redundant parent paths that are superseded by more
+	// specific child or array-element paths (same logic used in UI queries).
+	c.augmentDCQLFromVCTM(dcql)
+
+	return dcql, nil
 }
 
 // extractAndMapClaims extracts claims from a VP token and maps them to OIDC claims

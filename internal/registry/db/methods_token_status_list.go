@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand/v2"
+	"math/big"
+
 	"github.com/SUNET/vc/pkg/logger"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -14,6 +16,22 @@ import (
 )
 
 const maxRandomLimit int = 3
+
+func cryptoRandIntn(n int) int {
+	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(v.Int64())
+}
+
+func cryptoRandInt64n(n int64) int64 {
+	v, err := rand.Int(rand.Reader, big.NewInt(n))
+	if err != nil {
+		return 0
+	}
+	return v.Int64()
+}
 
 // TokenStatusListColl is the collection for status list
 type TokenStatusListColl struct {
@@ -83,10 +101,10 @@ func (c *TokenStatusListColl) createIndex(ctx context.Context) error {
 
 	indexUniq := mongo.IndexModel{
 		Keys: bson.D{
-			bson.E{Key: "index", Value: 1},
 			bson.E{Key: "section", Value: 1},
+			bson.E{Key: "index", Value: 1},
 		},
-		Options: options.Index().SetName("index_uniq").SetUnique(true),
+		Options: options.Index().SetName("section_index_uniq").SetUnique(true),
 	}
 	indexDecoyLookup := mongo.IndexModel{
 		Keys: bson.D{
@@ -109,6 +127,22 @@ func (c *TokenStatusListColl) CountDocs(ctx context.Context, filter bson.M) (int
 	defer span.End()
 
 	count, err := c.Coll.CountDocuments(ctx, filter)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// CountDocsWithLimit counts documents matching the filter, stopping early once limit is reached.
+// This is much faster than CountDocs when only a threshold check is needed (e.g. "are there more than N?").
+func (c *TokenStatusListColl) CountDocsWithLimit(ctx context.Context, filter bson.M, limit int64) (int64, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:countDocsWithLimit")
+	defer span.End()
+
+	opts := options.Count().SetLimit(limit)
+	count, err := c.Coll.CountDocuments(ctx, filter, opts)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return 0, err
@@ -141,10 +175,10 @@ func (c *TokenStatusListColl) CreateNewSection(ctx context.Context, section int6
 	defer span.End()
 
 	docs := []*TokenStatusListDoc{}
-	for i := int64(0); i < sectionSize; i++ {
+	for i := range sectionSize {
 		docs = append(docs, &TokenStatusListDoc{
 			Index:   i,
-			Status:  uint8(rand.IntN(maxRandomLimit)),
+			Status:  uint8(cryptoRandIntn(maxRandomLimit) & 0xFF),
 			Decoy:   true,
 			Section: int64(section),
 		})
@@ -175,7 +209,7 @@ func (c *TokenStatusListColl) getRandomDecoys(ctx context.Context, section int64
 	seen := make(map[int64]bool, maxAttempts)
 
 	for attempt := 0; len(docs) < want && attempt < maxAttempts; attempt++ {
-		idx := rand.Int64N(sectionSize)
+		idx := cryptoRandInt64n(sectionSize)
 		if seen[idx] {
 			continue
 		}
@@ -211,7 +245,7 @@ func (c *TokenStatusListColl) Add(ctx context.Context, section int64, status uin
 	defer span.End()
 
 	const maxRetries = 3
-	for retry := 0; retry < maxRetries; retry++ {
+	for retry := range maxRetries {
 		decoys, err := c.getRandomDecoys(ctx, section)
 		if err != nil {
 			return 0, err
@@ -220,7 +254,7 @@ func (c *TokenStatusListColl) Add(ctx context.Context, section int64, status uin
 		c.log.Debug("add", "decoys", decoys)
 
 		doc := &TokenStatusListDoc{
-			Index:   decoys[rand.IntN(len(decoys))].Index,
+			Index:   decoys[cryptoRandIntn(len(decoys))].Index,
 			Status:  status,
 			Decoy:   false,
 			Section: section,
@@ -252,7 +286,7 @@ func (c *TokenStatusListColl) Add(ctx context.Context, section int64, status uin
 				}
 				models = append(models, mongo.NewUpdateOneModel().
 					SetFilter(bson.M{"index": decoy.Index, "section": section, "decoy": true}).
-					SetUpdate(bson.M{"$set": bson.M{"status": rand.IntN(maxRandomLimit)}}))
+					SetUpdate(bson.M{"$set": bson.M{"status": cryptoRandIntn(maxRandomLimit)}}))
 			}
 			if _, err = c.Coll.BulkWrite(ctx, models); err != nil {
 				c.log.Error(err, "noise updates failed (real entry already allocated)", "index", doc.Index)
@@ -272,7 +306,9 @@ func (c *TokenStatusListColl) GetAllStatusesForSection(ctx context.Context, sect
 	defer span.End()
 
 	filter := bson.M{"section": section}
-	opts := options.Find().SetSort(bson.D{{Key: "index", Value: 1}})
+	opts := options.Find().
+		SetSort(bson.D{{Key: "index", Value: 1}}).
+		SetProjection(bson.D{{Key: "index", Value: 1}, {Key: "status", Value: 1}})
 
 	cursor, err := c.Coll.Find(ctx, filter, opts)
 	if err != nil {

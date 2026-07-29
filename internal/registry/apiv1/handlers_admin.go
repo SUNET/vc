@@ -5,21 +5,17 @@ import (
 	"fmt"
 )
 
-// SearchPersonRequest is the request for searching credential subjects by person info
+// SearchPersonRequest is the request for searching credential subjects
 type SearchPersonRequest struct {
-	FirstName   string `form:"first_name" validate:"omitempty,max=128,printascii"`
-	LastName    string `form:"last_name" validate:"omitempty,max=128,printascii"`
-	DateOfBirth string `form:"date_of_birth" validate:"omitempty,max=128,printascii"`
+	Identifier string `form:"identifier" validate:"omitempty,max=256,printascii"`
 }
 
-// PersonResult represents a person with their Token Status List info and current status
+// PersonResult represents a credential subject with their Token Status List info and current status
 type PersonResult struct {
-	FirstName   string
-	LastName    string
-	DateOfBirth string
-	Section     int64
-	Index       int64
-	Status      uint8
+	Identifier string
+	Section    int64
+	Index      int64
+	Status     uint8
 }
 
 // SearchPersonReply is the reply for searching credential subjects
@@ -33,7 +29,7 @@ func (c *Client) SearchPerson(ctx context.Context, req *SearchPersonRequest) (*S
 		return nil, fmt.Errorf("credential subjects database not configured")
 	}
 
-	docs, err := c.credentialSubjects.Search(ctx, req.FirstName, req.LastName, req.DateOfBirth)
+	docs, err := c.credentialSubjects.Search(ctx, req.Identifier)
 	if err != nil {
 		c.log.Error(err, "Failed to search credential subjects")
 		return nil, err
@@ -42,11 +38,9 @@ func (c *Client) SearchPerson(ctx context.Context, req *SearchPersonRequest) (*S
 	results := make([]*PersonResult, 0, len(docs))
 	for _, doc := range docs {
 		result := &PersonResult{
-			FirstName:   doc.FirstName,
-			LastName:    doc.LastName,
-			DateOfBirth: doc.DateOfBirth,
-			Section:     doc.Section,
-			Index:       doc.Index,
+			Identifier: doc.Identifier,
+			Section:    doc.Section,
+			Index:      doc.Index,
 		}
 
 		// Fetch current status from Token Status List
@@ -63,15 +57,13 @@ func (c *Client) SearchPerson(ctx context.Context, req *SearchPersonRequest) (*S
 	return &SearchPersonReply{Results: results}, nil
 }
 
-// UpdateStatusRequest is the request for updating a person's credential status
+// UpdateStatusRequest is the request for updating a credential subject's status
 type UpdateStatusRequest struct {
 	Section int64 `form:"section" validate:"gte=0"`
 	Index   int64 `form:"index" validate:"gte=0"`
 	Status  uint8 `form:"status" validate:"gte=0,lte=255"`
-	// Search parameters to preserve after update
-	SearchFirstName   string `form:"search_first_name" validate:"omitempty,max=128,printascii"`
-	SearchLastName    string `form:"search_last_name" validate:"omitempty,max=128,printascii"`
-	SearchDateOfBirth string `form:"search_date_of_birth"`
+	// Search parameter to preserve after update
+	SearchIdentifier string `form:"search_identifier" validate:"omitempty,max=256,printascii"`
 }
 
 // UpdateStatus updates the status of a credential in the Token Status List

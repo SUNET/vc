@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-03-20
+**Generated:** 2026-06-12
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -15,8 +15,6 @@ Complete reference for all configuration parameters in the VC system.
 - [Issuer](#issuer-top-level)
 - [Verifier](#verifier-top-level)
 - [Registry](#registry-top-level)
-- [Mock AS](#mock_as-top-level)
-- [UI](#ui-top-level)
 - [Secrets File Reference](#secrets-file-reference)
 
 ## Environment Variables
@@ -36,18 +34,17 @@ Shared configuration used across all services.
 
 > **Path:** `.common`
 
-| Field                    | Type     | Description                                                                                                                                                                                                                                                                           | Example                  | Default | Required |
-| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
-| `production`             | `bool`   | Production mode                                                                                                                                                                                                                                                                       | -                        | `true`  | No       |
-| `log`                    | `object` | Logging configuration                                                                                                                                                                                                                                                                 | -                        | -       | No       |
-| `mongo`                  | `object` | MongoDB configuration                                                                                                                                                                                                                                                                 | -                        | -       | No       |
-| `tracing`                | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                   | -                        | -       | No       |
-| `kafka`                  | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                    | -                        | -       | No       |
-| `credential_offer_qr`    | `object` | Credential offer QR code settings                                                                                                                                                                                                                                                     | -                        | -       | No       |
-| `secret_file_path`       | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                      | `"/etc/vc/secrets.yaml"` | -       | No       |
-| `ha`                     | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                  | -                        | -       | No       |
-| `branding`               | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                | -                        | -       | No       |
-| `credential_constructor` | `object` | OAuth2 scope values to their constructor configuration, required by apigw, issuer, and verifier Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope The constructor contains the VCT URN and other configuration for issuing that credential type | -                        | -       | No       |
+| Field                 | Type     | Description                                                                                                                                                                                                                                                                             | Example                  | Default | Required |
+| --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
+| `production`          | `bool`   | Production mode                                                                                                                                                                                                                                                                         | -                        | `true`  | No       |
+| `log`                 | `object` | Logging configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
+| `mongo`               | `object` | MongoDB configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
+| `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
+| `kafka`               | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                      | -                        | -       | No       |
+| `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                        | `"/etc/vc/secrets.yaml"` | -       | No       |
+| `ha`                  | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                    | -                        | -       | No       |
+| `branding`            | `object` | Custom branding configuration (logo and favicon paths)                                                                                                                                                                                                                                  | -                        | -       | No       |
+| `credential_metadata` | `object` | OAuth2 scope values to their credential configuration, required by apigw, issuer, and verifier Key: OAuth2 scope (e.g., "pid", "ehic", "diploma") - matches AuthorizationContext.Scope Each entry contains the VCTM reference, format, and other configuration for that credential type | -                        | -       | No       |
 
 ### `log`
 
@@ -83,28 +80,10 @@ Shared configuration used across all services.
 
 > **Path:** `.common.kafka`
 
-| Field     | Type       | Description                    | Example | Default                          | Required |
-| --------- | ---------- | ------------------------------ | ------- | -------------------------------- | -------- |
-| `enable`  | `bool`     | Kafka integration              | -       | `false`                          | No       |
-| `brokers` | `[]string` | List of Kafka broker addresses | -       | `["kafka0:9092", "kafka1:9092"]` | No       |
-
-### `credential_offer_qr`
-
-> **Path:** `.common.credential_offer_qr`
-
-| Field  | Type     | Description                                                         | Example | Default            | Required |
-| ------ | -------- | ------------------------------------------------------------------- | ------- | ------------------ | -------- |
-| `type` | `string` | Credential offer type: "credential_offer" or "credential_offer_uri" | -       | `credential_offer` | No       |
-| `qr`   | `object` | QR code generation settings                                         | -       | -                  | No       |
-
-### `qr`
-
-> **Path:** `.common.credential_offer_qr.qr`
-
-| Field            | Type  | Description                  | Example | Default | Required |
-| ---------------- | ----- | ---------------------------- | ------- | ------- | -------- |
-| `recovery_level` | `int` | Error correction level (0-3) | -       | `2`     | No       |
-| `size`           | `int` | QR code size in pixels       | -       | `256`   | No       |
+| Field     | Type       | Description                    | Example                          | Default | Required |
+| --------- | ---------- | ------------------------------ | -------------------------------- | ------- | -------- |
+| `enable`  | `bool`     | Kafka integration              | -                                | `false` | No       |
+| `brokers` | `[]string` | List of Kafka broker addresses | `["kafka0:9092", "kafka1:9092"]` | -       | Yes      |
 
 ### `ha`
 
@@ -124,19 +103,68 @@ Shared configuration used across all services.
 | `logo_path`    | `string` | File path to a custom logo PNG image; when empty, the built-in SUNET logo is used       | -       | -       | No       |
 | `favicon_path` | `string` | File path to a custom favicon PNG image; when empty, the built-in SUNET favicon is used | -       | -       | No       |
 
-### `credential_constructor` entry
+### `credential_metadata` entry
 
-> **Path:** `.common.credential_constructor.<key>`
+> **Path:** `.common.credential_metadata.<credential scope>`
 
-| Field            | Type       | Description                                                                                                                                                                                                                   | Example       | Default | Required                        |
-| ---------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------- | ------------------------------- |
-| `vctm_file_path` | `string`   | Path to a local VCTM JSON file. When set, apigw will publish the VCTM at /type-metadata/:scope. Mutually exclusive with VCTMUrl (one of the two is required).                                                                 | -             | -       | Yes (if vctm_url not set)       |
-| `vctm_url`       | `string`   | URL where the VCTM is already published externally. When set, the VCTM is fetched from this URL at startup for internal use but NOT re-published by apigw. Mutually exclusive with VCTMFilePath (one of the two is required). | -             | -       | Yes (if vctm_file_path not set) |
-| `format`         | `string`   | Credential format to issue                                                                                                                                                                                                    | `"vc+sd-jwt"` | -       | Yes                             |
-| `auth_method`    | `string`   | Authentication method used to verify the holder's identity. Supported values: basic, saml, oidc, openid4vp                                                                                                                    | -             | -       | Yes                             |
-| `auth_scopes`    | `[]string` | Credential_constructor keys whose VCTs are acceptable for wallet authentication. Required when AuthMethod is "openid4vp".                                                                                                     | -             | -       | No                              |
-| `auth_claims`    | `[]string` | Identity claims to extract from the authentication credential. Required when AuthMethod is "openid4vp".                                                                                                                       | -             | -       | No                              |
-| `attributes`     | `object`   | Claim names to their source fields and transformation rules for credential issuance                                                                                                                                           | -             | -       | Yes                             |
+https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
+
+| Field     | Type    | Description                                                                                                                                            | Example | Default | Required |
+| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `display` | `array` | Display: OPTIONAL. A non-empty array of objects, where each object contains the display properties of the supported Credential for a certain language. | -       | -       | No       |
+| `claims`  | `array` | Claims: OPTIONAL. A non-empty array of claims description objects as defined in Appendix B.2.                                                          | -       | -       | No       |
+
+### `display` entry
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[]`
+
+| Field              | Type     | Description                                                                                                                                                                                                                                                                         | Example | Default | Required |
+| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `name`             | `string` | Name: REQUIRED. String value of a display name for the Credential.                                                                                                                                                                                                                  | -       | -       | Yes      |
+| `locale`           | `string` | Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. Multiple display objects MAY be included for separate languages. There MUST be only one object for each language identifier. | -       | -       | No       |
+| `logo`             | `object` | Logo: OPTIONAL. Object with information about the logo of the Credential                                                                                                                                                                                                            | -       | -       | No       |
+| `description`      | `string` | Description: OPTIONAL. String value of a description of the Credential.                                                                                                                                                                                                             | -       | -       | No       |
+| `background_color` | `string` | BackgroundColor: OPTIONAL. String value of a background color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].                                                                                                             | -       | -       | No       |
+| `background_image` | `object` | BackgroundImage: OPTIONAL. Object with information about the background image of the Credential. At least the following parameter MUST be included:                                                                                                                                 | -       | -       | No       |
+| `text_color`       | `string` | TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].                                                                                                                         | -       | -       | No       |
+
+### `logo`
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[].logo`, `.apigw.issuer_metadata.display[].logo`
+
+| Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `uri`      | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
+| `alt_text` | `string` | AltText: OPTIONAL. String value of the alternative text for the logo image.                                                                                                                                                      | -       | -       | No       |
+
+### `background_image`
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[].background_image`
+
+| Field | Type     | Description                                                                                                                                                                                                                                                     | Example | Default | Required |
+| ----- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `uri` | `string` | URI REQUIRED. String value that contains a URI where the Wallet can obtain the background image of the Credential from the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
+
+### `claims` entry
+
+> **Path:** `.common.credential_metadata.<credential scope>.claims[]`
+
+https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-claims-description-for-issu
+
+| Field       | Type       | Description                                                                                                                    | Example | Default | Required |
+| ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `path`      | `[]string` | Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential. | -       | -       | Yes      |
+| `mandatory` | `bool`     | Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.     | -       | -       | No       |
+| `display`   | `array`    | Display: OPTIONAL. A non-empty array of objects containing display properties for the claim.                                   | -       | -       | No       |
+
+### `display` entry
+
+> **Path:** `.common.credential_metadata.<credential scope>.claims[].display[]`
+
+| Field    | Type     | Description                                                                 | Example | Default | Required |
+| -------- | -------- | --------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `name`   | `string` | Name: OPTIONAL. String value of a display name for the claim.               | -       | -       | No       |
+| `locale` | `string` | Locale: OPTIONAL. String value that identifies the language of this object. | -       | -       | No       |
 
 ## `apigw` (Top-level)
 
@@ -146,22 +174,25 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw`
 
-| Field               | Type     | Description                                               | Example                     | Default | Required |
-| ------------------- | -------- | --------------------------------------------------------- | --------------------------- | ------- | -------- |
-| `api_server`        | `object` | HTTP API server configuration                             | -                           | -       | Yes      |
-| `key_config`        | `object` | Signing key configuration                                 | -                           | -       | Yes      |
-| `credential_offers` | `object` | Credential offer wallet configurations                    | -                           | -       | No       |
-| `oauth_server`      | `object` | OAuth2 server configuration                               | -                           | -       | No       |
-| `issuer_metadata`   | `object` | OpenID4VCI issuer metadata                                | -                           | -       | No       |
-| `public_url`        | `string` | Public URL of this service (must be valid HTTP/HTTPS URL) | `"https://issuer.sunet.se"` | -       | Yes      |
-| `saml`              | `object` | SAML Service Provider configuration                       | -                           | -       | No       |
-| `oidc_rp`           | `object` | OIDC Relying Party configuration                          | -                           | -       | No       |
-| `issuer_client`     | `object` | GRPC client config for issuer                             | -                           | -       | Yes      |
-| `registry_client`   | `object` | GRPC client config for registry                           | -                           | -       | Yes      |
+| Field                     | Type     | Description                                                                                                                                                                                                         | Example                     | Default | Required |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
+| `api_server`              | `object` | HTTP API server configuration                                                                                                                                                                                       | -                           | -       | Yes      |
+| `admin_ui_enable`         | `bool`   | The admin web UI. When false (default), the /ui routes are not registered. This must be explicitly set to true to enable the admin interface.                                                                       | -                           | `false` | No       |
+| `key_config`              | `object` | Signing key configuration                                                                                                                                                                                           | -                           | -       | Yes      |
+| `data_sources`            | `object` | Credential types to their data sources                                                                                                                                                                              | -                           | -       | Yes      |
+| `auth_providers`          | `object` | How users authenticate (SAML, OIDC)                                                                                                                                                                                 | -                           | -       | No       |
+| `remotes`                 | `object` | Named external API connections referenced by DataSources.ExternalAPI                                                                                                                                                | `"ladok"`                   | -       | No       |
+| `delivery`                | `object` | Delivery groups credential delivery to wallets (OpenID4VCI, credential offers)                                                                                                                                      | -                           | -       | Yes      |
+| `issuer_metadata`         | `object` | OpenID4VCI issuer metadata                                                                                                                                                                                          | -                           | -       | No       |
+| `public_url`              | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                                                                                                                                                           | `"https://issuer.sunet.se"` | -       | Yes      |
+| `issuer_client`           | `object` | GRPC client config for issuer                                                                                                                                                                                       | -                           | -       | Yes      |
+| `registry_client`         | `object` | GRPC client config for registry                                                                                                                                                                                     | -                           | -       | Yes      |
+| `identity_mapping_import` | `object` | Automatic import of identity mappings from JSON files at startup. When configured, APIGW reads JSON files and imports them into the identity mappings collection on first startup (skipped if data already exists). | -                           | -       | No       |
+| `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
 
 ### `api_server`
 
-> **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`, `.mock_as.api_server`, `.ui.api_server`
+> **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`
 
 | Field              | Type     | Description                                                                                                                                                      | Example | Default | Required |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -170,10 +201,11 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `tls`              | `object` | TLS                                                                                                                                                              | -       | -       | No       |
 | `api_auth`         | `object` | API Auth                                                                                                                                                         | -       | -       | No       |
 | `cors`             | `object` | CORS                                                                                                                                                             | -       | -       | No       |
+| `trust_proxy_tls`  | `bool`   | The Secure flag on session cookies even when TLS is not enabled on this server. Use this when running behind a TLS-terminating reverse proxy.                    | -       | `false` | No       |
 
 ### `tls`
 
-> **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`, `.mock_as.api_server.tls`, `.ui.api_server.tls`
+> **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`
 
 | Field            | Type     | Description                 | Example | Default | Required |
 | ---------------- | -------- | --------------------------- | ------- | ------- | -------- |
@@ -183,56 +215,66 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 ### `api_auth`
 
-> **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`, `.mock_as.api_server.api_auth`, `.ui.api_server.api_auth`
+> **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`
 
-Exactly one of BasicAuth.Enable or JWT.Enable may be true.
-If neither is enabled, no authentication is applied (open access).
+JWKS and OIDC are mutually exclusive
+If neither is enabled, no authentication is applied (open access)
 
-| Field        | Type     | Description                                                                                                                                                                                      | Example | Default | Required |
-| ------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `basic_auth` | `object` | HTTP Basic authentication configuration. When enabled, requests are allowed or rejected based on username/password only.                                                                         | -       | -       | No       |
-| `jwt`        | `object` | JWT Bearer token authentication configuration. When enabled, requests are validated via JWKS and optionally authorized against SPOCP (S-expression) rules for fine-grained per-endpoint control. | -       | -       | No       |
+When Rules (and/or RulesFile) are configured, each authenticated request is
+checked against a SPOCP engine. A query of the form
 
-### `basic_auth`
-
-> **Path:** `.apigw.api_server.api_auth.basic_auth`, `.issuer.api_server.api_auth.basic_auth`, `.verifier.api_server.api_auth.basic_auth`, `.registry.api_server.api_auth.basic_auth`, `.mock_as.api_server.api_auth.basic_auth`, `.ui.api_server.api_auth.basic_auth`
-
-This is a simple allow/deny mechanism – valid credentials grant full access.
-
-| Field    | Type     | Description                  | Example | Default | Required |
-| -------- | -------- | ---------------------------- | ------- | ------- | -------- |
-| `enable` | `bool`   | HTTP Basic authentication    | -       | `false` | No       |
-| `users`  | `object` | Username to password mapping | -       | -       | No       |
-
-### `jwt`
-
-> **Path:** `.apigw.api_server.api_auth.jwt`, `.issuer.api_server.api_auth.jwt`, `.verifier.api_server.api_auth.jwt`, `.registry.api_server.api_auth.jwt`, `.mock_as.api_server.api_auth.jwt`, `.ui.api_server.api_auth.jwt`
-
-with optional SPOCP-based authorization.
-
-When Rules (and/or RulesFile) are configured, each request is checked against
-the SPOCP engine. A query of the form
-
-(api (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>))
+(vc (service <SERVICE>)(method <HTTP_METHOD>)(path <REQUEST_PATH>)(subject <JWT_SUBJECT>)(authentic_source <SOURCE>)(scope <SCOPE>))
 
 is evaluated; the request is allowed only if a matching rule exists.
+All six parts are required in every rule. Use * as wildcard for fields
+you don't want to restrict.
 The <SERVICE> value is supplied by the calling service at middleware
 registration time. When two services share endpoints, rules for one
 service do not grant access to the other.
-When no rules are configured, any valid JWT grants access.
+When no rules are configured, any valid Bearer JWT grants access.
 
-| Field        | Type       | Description                                                                                                                                      | Example                                                                      | Default | Required         |
-| ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | ------- | ---------------- |
-| `enable`     | `bool`     | JWT Bearer token authentication                                                                                                                  | -                                                                            | `false` | No               |
-| `jwks_url`   | `string`   | URL of the JSON Web Key Set used to validate token signatures.                                                                                   | `"https://auth.example.com/.well-known/jwks.json"`                           | -       | Yes (if enabled) |
-| `issuer`     | `string`   | Expected "iss" claim. Tokens with a different issuer are rejected.                                                                               | -                                                                            | -       | Yes (if enabled) |
-| `audience`   | `string`   | Expected "aud" claim. Tokens that do not contain this audience are rejected.                                                                     | -                                                                            | -       | Yes (if enabled) |
-| `rules`      | `[]string` | SPOCP S-expression authorization rules loaded into an in-process engine. When non-empty the middleware builds a query per request and checks it. | `["(api (service apigw)(method POST)(path /api/v1/upload)(subject alice))"]` | -       | No               |
-| `rules_file` | `string`   | Optional path to a file containing SPOCP rules (one per line). Rules from this file are loaded in addition to the inline Rules list.             | -                                                                            | -       | No               |
+| Field        | Type       | Description                                                                                                                                                                                                                                                                                    | Example                                                                                                          | Default | Required |
+| ------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------- | -------- |
+| `jwks`       | `object`   | Static JWKS Bearer token authentication configuration When enabled, requests are validated against a manually configured JWKS URL                                                                                                                                                              | -                                                                                                                | -       | No       |
+| `oidc`       | `object`   | OIDC Bearer token authentication configuration When enabled, the JWKS endpoint is auto-discovered from the issuer's .well-known/openid-configuration and Bearer JWTs are validated locally The RP fields (client_id, redirect_uri, etc.) also enable the admin UI login flow via OIDC redirect | -                                                                                                                | -       | No       |
+| `rules`      | `[]string` | SPOCP S-expression authorization rules loaded into an in-process engine. All six parts (service, method, path, subject, authentic_source, scope) are mandatory in every rule — use * for wildcards. Rules apply regardless of whether JWKS or OIDC is the active auth method                   | `["(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice)(authentic_source SUNET)(scope eduid))"]` | -       | No       |
+| `rules_file` | `string`   | Optional path to a file containing SPOCP rules (one per line) Rules from this file are loaded in addition to the inline Rules list                                                                                                                                                             | -                                                                                                                | -       | No       |
+
+### `jwks`
+
+> **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`
+
+| Field            | Type     | Description                                                                                                                                          | Example                                            | Default | Required                                    |
+| ---------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ------------------------------------------- |
+| `enable`         | `bool`   | Static JWKS Bearer token authentication                                                                                                              | -                                                  | `false` | No                                          |
+| `jwks_url`       | `string` | URL of the JSON Web Key Set used to validate token signatures. Mutually exclusive with jwks_file_path; exactly one must be set when enable is true   | `"https://auth.example.com/.well-known/jwks.json"` | -       | No (mutually exclusive with jwks_file_path) |
+| `jwks_file_path` | `string` | Local file path to a JWKS JSON file used to validate token signatures. Mutually exclusive with jwks_url; exactly one must be set when enable is true | -                                                  | -       | No (mutually exclusive with jwks_url)       |
+| `issuer`         | `string` | Expected "iss" claim. Tokens with a different issuer are rejected                                                                                    | -                                                  | -       | Yes (if enabled)                            |
+| `audience`       | `string` | Expected "aud" claim. Tokens that do not contain this audience are rejected                                                                          | -                                                  | -       | Yes (if enabled)                            |
+
+### `oidc`
+
+> **Path:** `.apigw.api_server.api_auth.oidc`, `.issuer.api_server.api_auth.oidc`, `.verifier.api_server.api_auth.oidc`, `.registry.api_server.api_auth.oidc`
+
+It serves two purposes:
+- API auth: Bearer JWTs in Authorization headers are validated locally
+against the provider's JWKS (auto-discovered from IssuerURL).
+- Admin UI login: the RP fields (ClientID, RedirectURI, Scopes) enable
+an authorization-code redirect flow so admins log in via the OIDC provider.
+
+| Field           | Type       | Description                                                                                   | Example                                   | Default | Required         |
+| --------------- | ---------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ---------------- |
+| `enable`        | `bool`     | OIDC authentication                                                                           | -                                         | `false` | No               |
+| `issuer_url`    | `string`   | OIDC provider's issuer URL used for discovery and "iss" claim validation.                     | `"https://auth.example.com"`              | -       | Yes (if enabled) |
+| `audience`      | `string`   | Expected "aud" claim. Tokens that do not contain this audience are rejected.                  | -                                         | -       | Yes (if enabled) |
+| `client_id`     | `string`   | OAuth2 client identifier registered with the OIDC provider.                                   | -                                         | -       | Yes (if enabled) |
+| `client_secret` | `string`   | OAuth2 client secret. May be empty for public clients.                                        | -                                         | -       | No               |
+| `redirect_uri`  | `string`   | Callback URL for the admin UI OIDC login flow (e.g. "https://apigw.example.com/ui/callback"). | `"https://apigw.example.com/ui/callback"` | -       | Yes (if enabled) |
+| `scopes`        | `[]string` | OAuth2/OIDC scopes to request (default: ["openid"]).                                          | -                                         | -       | No               |
 
 ### `cors`
 
-> **Path:** `.apigw.api_server.cors`, `.issuer.api_server.cors`, `.verifier.api_server.cors`, `.registry.api_server.cors`, `.mock_as.api_server.cors`, `.ui.api_server.cors`
+> **Path:** `.apigw.api_server.cors`, `.issuer.api_server.cors`, `.verifier.api_server.cors`, `.registry.api_server.cors`
 
 | Field             | Type       | Description                  | Example                                               | Default | Required |
 | ----------------- | ---------- | ---------------------------- | ----------------------------------------------------- | ------- | -------- |
@@ -266,9 +308,243 @@ Supports both file-based and HSM-based keys with explicit control.
 | `key_label`   | `string` | Label of the key to use           | `"my-signing-key"`                  | -       | No       |
 | `key_id`      | `string` | Identifier for the JWT kid header | `"key-1"`                           | -       | No       |
 
+### `data_sources`
+
+> **Path:** `.apigw.data_sources`
+
+Each key under a data source is a credential type.
+
+| Field          | Type     | Description                                                                                                   | Example | Default | Required |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `datastore`    | `object` | Credential types backed by a pre-loaded datastore (e.g. MongoDB)                                              | -       | -       | No       |
+| `assertion`    | `object` | Credential types backed by authentication assertions (SAML attributes or OIDC claims)                         | -       | -       | No       |
+| `external_api` | `object` | Credential types backed by an external API Each credential references a named remote defined in APIGW.Remotes | -       | -       | No       |
+
+### `datastore`
+
+> **Path:** `.apigw.data_sources.datastore`
+
+| Field    | Type     | Description                                                                                                                                                                      | Example | Default | Required |
+| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their datastore configuration                                                                                                                          | -       | -       | No       |
+| `import` | `object` | Automatic data import from JSON files at startup. When configured, APIGW reads JSON files and imports them into the datastore on first startup (skipped if data already exists). | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
+
+| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                                 | Default | Required |
+| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
+| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | -                                       | -       | Yes      |
+| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
+| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                  | -                                       | -       | No       |
+
+### `auth_scopes` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.auth_scopes.<key>`
+
+Each entry represents one acceptable credential type the wallet can present.
+
+| Field         | Type       | Description                                               | Example                                 | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------- | --------------------------------------- | ------- | -------- |
+| `auth_claims` | `[]string` | The identity claims to extract from this credential type. | `[given_name, family_name, birth_date]` | -       | Yes      |
+
+### `import`
+
+> **Path:** `.apigw.data_sources.datastore.import`
+
+| Field        | Type       | Description                                                                                                                                                                       | Example                                                     | Default | Required |
+| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------- | -------- |
+| `file_paths` | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. Import is skipped if the datastore already contains data. | `["./bootstrapping/pid.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
+| `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                      | `["100", "102"]`                                            | -       | No       |
+
+### `assertion`
+
+> **Path:** `.apigw.data_sources.assertion`
+
+| Field    | Type     | Description                                             | Example | Default | Required |
+| -------- | -------- | ------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their assertion configuration | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.assertion.scopes.<credential scope>`
+
+The data comes directly from the SAML attributes or OIDC claims.
+
+| Field           | Type     | Description                                           | Example | Default | Required |
+| --------------- | -------- | ----------------------------------------------------- | ------- | ------- | -------- |
+| `auth_provider` | `string` | Auth provider for this credential type (saml or oidc) | -       | -       | Yes      |
+
+### `external_api`
+
+> **Path:** `.apigw.data_sources.external_api`
+
+| Field    | Type     | Description                                                | Example | Default | Required |
+| -------- | -------- | ---------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their external API configuration | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>`
+
+| Field               | Type     | Description                                       | Example | Default | Required |
+| ------------------- | -------- | ------------------------------------------------- | ------- | ------- | -------- |
+| `remote`            | `string` | Name of a remote defined in Remotes               | -       | -       | Yes      |
+| `auth_provider`     | `string` | Auth provider to identify the user (saml or oidc) | -       | -       | Yes      |
+| `attribute_mapping` | `object` | How to map API response data to credential claims | -       | -       | No       |
+
+### `attribute_mapping` entry
+
+> **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>.attribute_mapping.<attribute>`, `.apigw.auth_providers.saml.attribute_mapping.<attribute>`, `.apigw.auth_providers.oidc.attribute_mapping.<attribute>`
+
+Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
+
+| Field       | Type     | Description                                                                                                                                              | Example                 | Default | Required |
+| ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
+| `claim`     | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
+| `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
+| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3"                                         | -                       | -       | No       |
+| `default`   | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
+| `as_array`  | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
+
+### `auth_providers`
+
+> **Path:** `.apigw.auth_providers`
+
+| Field  | Type     | Description               | Example | Default | Required |
+| ------ | -------- | ------------------------- | ------- | ------- | -------- |
+| `saml` | `object` | The SAML SP auth provider | -       | -       | No       |
+| `oidc` | `object` | The OIDC RP auth provider | -       | -       | No       |
+
+### `saml`
+
+> **Path:** `.apigw.auth_providers.saml`
+
+| Field                        | Type     | Description                                                                                                                                                                                                                                                                                                                                               | Example                                   | Default | Required         |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ---------------- |
+| `enable`                     | `bool`   | SAML support (default: false)                                                                                                                                                                                                                                                                                                                             | -                                         | `false` | No               |
+| `entity_id`                  | `string` | SAML SP entity identifier (typically the metadata URL)                                                                                                                                                                                                                                                                                                    | `"https://issuer.sunet.se/saml/metadata"` | -       | Yes (if enabled) |
+| `metadata_url`               | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)                                                                                                                                                                                                                                                                                | -                                         | -       | No               |
+| `mdq_server`                 | `string` | Base URL for MDQ (Metadata Query Protocol) server (must end with /) Mutually exclusive with StaticIDPMetadata                                                                                                                                                                                                                                             | `"https://md.sunet.se/entities/"`         | -       | No               |
+| `static_idp_metadata`        | `object` | A single static IdP as alternative to MDQ Mutually exclusive with MDQServer                                                                                                                                                                                                                                                                               | -                                         | -       | No               |
+| `certificate_path`           | `string` | Path to X.509 certificate for SAML signing/encryption TODO(pki): Migrate to pki.KeyConfig for consistency with other services and to enable HSM-backed SAML signing keys in the future.                                                                                                                                                                   | -                                         | -       | Yes (if enabled) |
+| `private_key_path`           | `string` | Path to private key for SAML signing/encryption TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.                                                                                                                                                                                                                | -                                         | -       | Yes (if enabled) |
+| `acs_endpoint`               | `string` | Assertion Consumer Service URL where IdP sends SAML responses                                                                                                                                                                                                                                                                                             | `"https://issuer.sunet.se/saml/acs"`      | -       | Yes (if enabled) |
+| `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow (AuthnRequest → Response) may remain active before it expires                                                                                                                                                                                                                               | -                                         | `300`   | No               |
+| `attribute_mapping`          | `object` | AttributeMapping normalizes provider-specific attribute names (e.g. SAML OIDs) to canonical claim names. Applied to ALL attributes in the assertion. Which normalized attributes are used depends on the data source: - assertion: VCTM determines which go into the credential - datastore: auth_claims determines which are used for DB identity lookup | -                                         | -       | Yes (if enabled) |
+| `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No               |
+| `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No               |
+
+### `static_idp_metadata`
+
+> **Path:** `.apigw.auth_providers.saml.static_idp_metadata`
+
+| Field           | Type     | Description                                                                   | Example | Default | Required                                          |
+| --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | ------------------------------------------------- |
+| `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                                               |
+| `metadata_path` | `string` | File path to IdP metadata XML (mutually exclusive with MetadataURL)           | -       | -       | Yes (if metadata_url not set; mutually exclusive) |
+| `metadata_url`  | `string` | HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath) | -       | -       | No                                                |
+
+### `oidc`
+
+> **Path:** `.apigw.auth_providers.oidc`
+
+| Field               | Type       | Description                                                                                                                                                                                                                                                                                                                                                        | Example                                     | Default                          | Required         |
+| ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | -------------------------------- | ---------------- |
+| `enable`            | `bool`     | OIDC RP support (default: false)                                                                                                                                                                                                                                                                                                                                   | -                                           | `false`                          | No               |
+| `registration`      | `object`   | How the client obtains credentials from the OIDC Provider. Exactly one of preconfigured or dynamic must be set: - preconfigured: pre-registered client_id and client_secret - dynamic: RFC 7591 dynamic client registration (credentials obtained at startup)                                                                                                      | -                                           | -                                | Yes (if enabled) |
+| `redirect_uri`      | `string`   | Callback URL where the OIDC Provider sends the authorization response                                                                                                                                                                                                                                                                                              | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled) |
+| `issuer_url`        | `string`   | OIDC Provider's issuer URL for discovery Used for .well-known/openid-configuration discovery                                                                                                                                                                                                                                                                       | `"https://accounts.google.com"`             | -                                | Yes (if enabled) |
+| `scopes`            | `[]string` | OAuth2/OIDC scopes to request (at least one scope is required, e.g. "openid")                                                                                                                                                                                                                                                                                      | -                                           | `["openid", "profile", "email"]` | No               |
+| `session_duration`  | `int`      | Maximum time in seconds an in-flight OIDC authorization flow (state, nonce, PKCE verifier) may remain active before it expires                                                                                                                                                                                                                                     | -                                           | `300`                            | No               |
+| `client_name`       | `string`   | Human-readable name for the OIDC client, shown during dynamic registration or consent                                                                                                                                                                                                                                                                              | -                                           | -                                | No               |
+| `client_uri`        | `string`   | URL to the client's homepage, used for display during consent                                                                                                                                                                                                                                                                                                      | -                                           | -                                | No               |
+| `logo_uri`          | `string`   | URL to the client's logo image, shown during consent screens                                                                                                                                                                                                                                                                                                       | -                                           | -                                | No               |
+| `contacts`          | `[]string` | List of email addresses for responsible parties of this client                                                                                                                                                                                                                                                                                                     | -                                           | -                                | No               |
+| `tos_uri`           | `string`   | URL to the client's Terms of Service document                                                                                                                                                                                                                                                                                                                      | -                                           | -                                | No               |
+| `policy_uri`        | `string`   | URL to the client's Privacy Policy document                                                                                                                                                                                                                                                                                                                        | -                                           | -                                | No               |
+| `attribute_mapping` | `object`   | AttributeMapping normalizes OIDC claim names to canonical claim names. Optional: when omitted, OIDC claims pass through as-is (standard names already match). Which normalized attributes are used depends on the data source: - assertion: VCTM determines which go into the credential - datastore: auth_claims determines which are used for DB identity lookup | -                                           | -                                | No               |
+
+### `registration`
+
+> **Path:** `.apigw.auth_providers.oidc.registration`
+
+Exactly one of Preconfigured or Dynamic must be set.
+
+| Field           | Type     | Description                                                                                                                  | Example | Default | Required                                           |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------------------------------------------------- |
+| `preconfigured` | `object` | Preconfigured uses pre-registered client credentials. Set this when the client is already registered with the OIDC Provider. | -       | -       | Yes (if dynamic not set; mutually exclusive)       |
+| `dynamic`       | `object` | Dynamic uses RFC 7591 dynamic client registration. Set this when the client should register itself at startup.               | -       | -       | Yes (if preconfigured not set; mutually exclusive) |
+
+### `preconfigured`
+
+> **Path:** `.apigw.auth_providers.oidc.registration.preconfigured`
+
+| Field           | Type     | Description                                       | Example | Default | Required         |
+| --------------- | -------- | ------------------------------------------------- | ------- | ------- | ---------------- |
+| `enable`        | `bool`   | Enable activates preconfigured client credentials | -       | -       | No               |
+| `client_id`     | `string` | OIDC client identifier                            | -       | -       | Yes (if enabled) |
+| `client_secret` | `string` | OIDC client secret                                | -       | -       | Yes (if enabled) |
+
+### `dynamic`
+
+> **Path:** `.apigw.auth_providers.oidc.registration.dynamic`
+
+When set, client credentials are obtained automatically at startup and
+persisted in the database.
+
+| Field                  | Type     | Description                                                                    | Example | Default | Required         |
+| ---------------------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | ---------------- |
+| `enable`               | `bool`   | Enable activates dynamic client registration                                   | -       | -       | No               |
+| `initial_access_token` | `string` | Bearer token for registration Required by some OIDC Providers (e.g., Keycloak) | -       | -       | Yes (if enabled) |
+
+### `remotes` entry
+
+> **Path:** `.apigw.remotes.<remote name>`
+
+| Field           | Type       | Description                                           | Example                               | Default | Required |
+| --------------- | ---------- | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
+| `type`          | `object`   | API protocol type                                     | -                                     | -       | Yes      |
+| `base_url`      | `string`   | Base URL of the API endpoint                          | `"https://api.ladok.se/eduapi"`       | -       | Yes      |
+| `token_url`     | `string`   | OAuth 2.0 token endpoint for Client Credentials Grant | `"https://api.ladok.se/oauth2/token"` | -       | Yes      |
+| `client_id`     | `string`   | OAuth 2.0 client identifier                           | -                                     | -       | Yes      |
+| `client_secret` | `string`   | OAuth 2.0 client secret                               | -                                     | -       | Yes      |
+| `scopes`        | `[]string` | OAuth 2.0 scopes to request                           | -                                     | -       | No       |
+| `timeout`       | `duration` | HTTP client timeout                                   | -                                     | `10s`   | No       |
+
+### `delivery`
+
+> **Path:** `.apigw.delivery`
+
+| Field               | Type     | Description                                                        | Example | Default | Required |
+| ------------------- | -------- | ------------------------------------------------------------------ | ------- | ------- | -------- |
+| `openid4vci`        | `object` | The OpenID4VCI Authorization Server for wallet credential issuance | -       | -       | Yes      |
+| `credential_offers` | `object` | Credential offer wallet configurations                             | -       | -       | Yes      |
+
+### `openid4vci`
+
+> **Path:** `.apigw.delivery.openid4vci`
+
+| Field                               | Type     | Description                                                                                                                                                                                                                                                                                | Example                             | Default | Required |
+| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------- | -------- |
+| `token_endpoint`                    | `string` | OAuth2 token endpoint URL                                                                                                                                                                                                                                                                  | `"https://verifier.sunet.se/token"` | -       | Yes      |
+| `clients`                           | `object` | OAuth2 client configurations                                                                                                                                                                                                                                                               | -                                   | -       | Yes      |
+| `allow_unverified_client_assertion` | `bool`   | Accepting client_assertion (private_key_jwt) WITHOUT signature verification. This is INSECURE and only intended for conformance testing environments. When false (default), client_assertion is rejected. TODO(security): Remove this flag once full RFC 7523 verification is implemented. | -                                   | `false` | No       |
+
+### `clients` entry
+
+> **Path:** `.apigw.delivery.openid4vci.clients.<client id>`, `.verifier.inbound.openid4vp.clients.<client id>`
+
+| Field          | Type       | Description                                                                                                                                                                                                     | Example                          | Default  | Required |
+| -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | -------- | -------- |
+| `type`         | `string`   | Client type per RFC 6749 Section 2.1 ("public" or "confidential"). Defaults to "public" since registered clients are wallets (native/web apps) that cannot securely store credentials and rely on PKCE instead. | -                                | `public` | No       |
+| `redirect_uri` | `[]string` | List of allowed redirect URIs for the client. Accepts either a single string or an array of strings in YAML/JSON.                                                                                               | `"https://example.com/callback"` | -        | Yes      |
+| `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client                                                                                                                                                                    | -                                | -        | Yes      |
+
 ### `credential_offers`
 
-> **Path:** `.apigw.credential_offers`
+> **Path:** `.apigw.delivery.credential_offers`
 
 | Field        | Type     | Description                      | Example | Default | Required |
 | ------------ | -------- | -------------------------------- | ------- | ------- | -------- |
@@ -277,31 +553,12 @@ Supports both file-based and HSM-based keys with explicit control.
 
 ### `wallets` entry
 
-> **Path:** `.apigw.credential_offers.wallets.<key>`
+> **Path:** `.apigw.delivery.credential_offers.wallets.<wallet name>`
 
 | Field          | Type     | Description                  | Example                            | Default | Required |
 | -------------- | -------- | ---------------------------- | ---------------------------------- | ------- | -------- |
 | `label`        | `string` | Display label for the wallet | -                                  | -       | Yes      |
 | `redirect_uri` | `string` | Wallet redirect URI          | `"eudi-wallet://credential-offer"` | -       | Yes      |
-
-### `oauth_server`
-
-> **Path:** `.apigw.oauth_server`, `.verifier.oauth_server`
-
-| Field            | Type     | Description                  | Example                             | Default | Required |
-| ---------------- | -------- | ---------------------------- | ----------------------------------- | ------- | -------- |
-| `token_endpoint` | `string` | OAuth2 token endpoint URL    | `"https://verifier.sunet.se/token"` | -       | Yes      |
-| `clients`        | `object` | OAuth2 client configurations | -                                   | -       | Yes      |
-
-### `clients` entry
-
-> **Path:** `.apigw.oauth_server.clients.<key>`, `.verifier.oauth_server.clients.<key>`
-
-| Field          | Type       | Description                                                                                                                                                                                                     | Example                          | Default  | Required |
-| -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | -------- | -------- |
-| `type`         | `string`   | Client type per RFC 6749 Section 2.1 ("public" or "confidential"). Defaults to "public" since registered clients are wallets (native/web apps) that cannot securely store credentials and rely on PKCE instead. | -                                | `public` | No       |
-| `redirect_uri` | `string`   | Allowed redirect URI for the client                                                                                                                                                                             | `"https://example.com/callback"` | -        | Yes      |
-| `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client                                                                                                                                                                    | -                                | -        | Yes      |
 
 ### `issuer_metadata`
 
@@ -318,6 +575,7 @@ Supports both file-based and HSM-based keys with explicit control.
 | `credential_response_encryption`          | `object`   | Response encryption configuration | -       | -       | No       |
 | `batch_credential_issuance`               | `object`   | Batch issuance configuration      | -       | -       | No       |
 | `display`                                 | `array`    | Display metadata                  | -       | -       | No       |
+| `mdoc_iacas_uri`                          | `string`   | URL where IACA certificates are published for mDOC verification. Included in `.well-known/openid-credential-issuer` metadata so verifiers can dynamically discover trust anchors. Set to `<public_url>/iacas` to use the built-in endpoint. | `"https://issuer.example.com/iacas"` | - | No |
 
 ### `credential_response_encryption`
 
@@ -347,122 +605,6 @@ Supports both file-based and HSM-based keys with explicit control.
 | `locale` | `string` | Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. There MUST be only one object for each language identifier. | -       | -       | No       |
 | `logo`   | `object` | Logo: OPTIONAL. Object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:                                                                | -       | -       | No       |
 
-### `logo`
-
-> **Path:** `.apigw.issuer_metadata.display[].logo`
-
-| Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
-| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `uri`      | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
-| `alt_text` | `string` | AltText: OPTIONAL. String value of the alternative text for the logo image.                                                                                                                                                      | -       | -       | No       |
-
-### `saml`
-
-> **Path:** `.apigw.saml`
-
-| Field                        | Type     | Description                                                                                                                                                                                  | Example                                   | Default | Required         |
-| ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ---------------- |
-| `enable`                     | `bool`   | SAML support (default: false)                                                                                                                                                                | -                                         | `false` | No               |
-| `entity_id`                  | `string` | SAML SP entity identifier (typically the metadata URL)                                                                                                                                       | `"https://issuer.sunet.se/saml/metadata"` | -       | Yes (if enabled) |
-| `metadata_url`               | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)                                                                                                                   | -                                         | -       | No               |
-| `mdq_server`                 | `string` | Base URL for MDQ (Metadata Query Protocol) server (must end with /) Mutually exclusive with StaticIDPMetadata                                                                                | `"https://md.sunet.se/entities/"`         | -       | No               |
-| `static_idp_metadata`        | `object` | A single static IdP as alternative to MDQ Mutually exclusive with MDQServer                                                                                                                  | -                                         | -       | No               |
-| `certificate_path`           | `string` | Path to X.509 certificate for SAML signing/encryption TODO(pki): Migrate to pki.KeyConfig for consistency with other services and to enable HSM-backed SAML signing keys in the future.      | -                                         | -       | Yes (if enabled) |
-| `private_key_path`           | `string` | Path to private key for SAML signing/encryption TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.                                                   | -                                         | -       | Yes (if enabled) |
-| `acs_endpoint`               | `string` | Assertion Consumer Service URL where IdP sends SAML responses                                                                                                                                | `"https://issuer.sunet.se/saml/acs"`      | -       | Yes (if enabled) |
-| `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow (AuthnRequest → Response) may remain active before it expires                                                                  | -                                         | `300`   | No               |
-| `credential_mappings`        | `object` | How to map external attributes to credential claims Key: credential type identifier (e.g., "pid", "diploma") Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids | -                                         | -       | Yes (if enabled) |
-| `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                    | -                                         | -       | No               |
-| `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                        | -                                         | -       | No               |
-
-### `static_idp_metadata`
-
-> **Path:** `.apigw.saml.static_idp_metadata`
-
-| Field           | Type     | Description                                                                   | Example | Default | Required                      |
-| --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | ----------------------------- |
-| `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                           |
-| `metadata_path` | `string` | File path to IdP metadata XML (mutually exclusive with MetadataURL)           | -       | -       | Yes (if metadata_url not set) |
-| `metadata_url`  | `string` | HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath) | -       | -       | No                            |
-
-### `credential_mappings` entry
-
-> **Path:** `.apigw.saml.credential_mappings.<key>`, `.apigw.oidc_rp.credential_mappings.<key>`
-
-The credential type identifier (map key) is used in API requests and session state
-
-| Field                  | Type     | Description                                                  | Example                                                              | Default | Required |
-| ---------------------- | -------- | ------------------------------------------------------------ | -------------------------------------------------------------------- | ------- | -------- |
-| `credential_config_id` | `string` | OpenID4VCI credential configuration identifier               | `"urn:eudi:pid:1"`                                                   | -       | Yes      |
-| `attributes`           | `object` | SAML attribute OIDs to claim paths with transformation rules | `"urn:oid:2.5.4.42": {claim: "identity.given_name", required: true}` | -       | Yes      |
-| `default_idp`          | `string` | Optional default IdP entityID for this credential type       | -                                                                    | -       | No       |
-
-### `attributes` entry
-
-> **Path:** `.apigw.saml.credential_mappings.<key>.attributes.<key>`, `.apigw.oidc_rp.credential_mappings.<key>.attributes.<key>`
-
-Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
-
-| Field       | Type     | Description                                                                    | Example                 | Default | Required |
-| ----------- | -------- | ------------------------------------------------------------------------------ | ----------------------- | ------- | -------- |
-| `claim`     | `string` | Target claim name (supports dot-notation for nesting)                          | `"identity.given_name"` | -       | Yes      |
-| `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response | -                       | `false` | No       |
-| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim"   | -                       | -       | No       |
-| `default`   | `string` | Optional default value if attribute is missing                                 | -                       | -       | No       |
-
-### `oidc_rp`
-
-> **Path:** `.apigw.oidc_rp`
-
-| Field                 | Type       | Description                                                                                                                                                                                                                                                   | Example                                     | Default                          | Required         |
-| --------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | ---------------- |
-| `enable`              | `bool`     | OIDC RP support (default: false)                                                                                                                                                                                                                              | -                                           | `false`                          | No               |
-| `registration`        | `object`   | How the client obtains credentials from the OIDC Provider. Exactly one of preconfigured or dynamic must be set: - preconfigured: pre-registered client_id and client_secret - dynamic: RFC 7591 dynamic client registration (credentials obtained at startup) | -                                           | -                                | Yes (if enabled) |
-| `redirect_uri`        | `string`   | Callback URL where the OIDC Provider sends the authorization response                                                                                                                                                                                         | `"https://issuer.sunet.se/oidcrp/callback"` | -                                | Yes (if enabled) |
-| `issuer_url`          | `string`   | OIDC Provider's issuer URL for discovery Used for .well-known/openid-configuration discovery                                                                                                                                                                  | `"https://accounts.google.com"`             | -                                | Yes (if enabled) |
-| `scopes`              | `[]string` | OAuth2/OIDC scopes to request (at least one scope is required, e.g. "openid")                                                                                                                                                                                 | -                                           | `["openid", "profile", "email"]` | No               |
-| `session_duration`    | `int`      | Maximum time in seconds an in-flight OIDC authorization flow (state, nonce, PKCE verifier) may remain active before it expires                                                                                                                                | -                                           | `300`                            | No               |
-| `client_name`         | `string`   | Human-readable name for the OIDC client, shown during dynamic registration or consent                                                                                                                                                                         | -                                           | -                                | No               |
-| `client_uri`          | `string`   | URL to the client's homepage, used for display during consent                                                                                                                                                                                                 | -                                           | -                                | No               |
-| `logo_uri`            | `string`   | URL to the client's logo image, shown during consent screens                                                                                                                                                                                                  | -                                           | -                                | No               |
-| `contacts`            | `[]string` | List of email addresses for responsible parties of this client                                                                                                                                                                                                | -                                           | -                                | No               |
-| `tos_uri`             | `string`   | URL to the client's Terms of Service document                                                                                                                                                                                                                 | -                                           | -                                | No               |
-| `policy_uri`          | `string`   | URL to the client's Privacy Policy document                                                                                                                                                                                                                   | -                                           | -                                | No               |
-| `credential_mappings` | `object`   | How to map OIDC claims to credential claims Key: credential type identifier (e.g., "pid", "diploma") Maps to credential_constructor keys and OpenID4VCI credential_configuration_ids                                                                          | -                                           | -                                | Yes (if enabled) |
-
-### `registration`
-
-> **Path:** `.apigw.oidc_rp.registration`
-
-Exactly one of Preconfigured or Dynamic must be set.
-
-| Field           | Type     | Description                                                                                                                  | Example | Default | Required                       |
-| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------------ |
-| `preconfigured` | `object` | Preconfigured uses pre-registered client credentials. Set this when the client is already registered with the OIDC Provider. | -       | -       | Yes (if dynamic not set)       |
-| `dynamic`       | `object` | Dynamic uses RFC 7591 dynamic client registration. Set this when the client should register itself at startup.               | -       | -       | Yes (if preconfigured not set) |
-
-### `preconfigured`
-
-> **Path:** `.apigw.oidc_rp.registration.preconfigured`
-
-| Field           | Type     | Description                                       | Example | Default | Required         |
-| --------------- | -------- | ------------------------------------------------- | ------- | ------- | ---------------- |
-| `enable`        | `bool`   | Enable activates preconfigured client credentials | -       | -       | No               |
-| `client_id`     | `string` | OIDC client identifier                            | -       | -       | Yes (if enabled) |
-| `client_secret` | `string` | OIDC client secret                                | -       | -       | Yes (if enabled) |
-
-### `dynamic`
-
-> **Path:** `.apigw.oidc_rp.registration.dynamic`
-
-When set, client credentials are obtained automatically at startup and
-persisted in the database.
-
-| Field                  | Type     | Description                                                                    | Example | Default | Required         |
-| ---------------------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | ---------------- |
-| `enable`               | `bool`   | Enable activates dynamic client registration                                   | -       | -       | No               |
-| `initial_access_token` | `string` | Bearer token for registration Required by some OIDC Providers (e.g., Keycloak) | -       | -       | Yes (if enabled) |
-
 ### `issuer_client`
 
 > **Path:** `.apigw.issuer_client`, `.apigw.registry_client`, `.issuer.registry_client`
@@ -476,6 +618,42 @@ persisted in the database.
 | `ca_file_path`   | `string` | CA certificate to verify the server         | -               | -       | No       |
 | `server_name`    | `string` | Server name for TLS verification (optional) | -               | -       | No       |
 
+### `identity_mapping_import`
+
+> **Path:** `.apigw.identity_mapping_import`
+
+| Field        | Type       | Description                                                                                                                                                                                                             | Example                                      | Default | Required |
+| ------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------- | -------- |
+| `file_paths` | `[]string` | JSON files containing identity mappings to import. Each JSON file should contain a map of person IDs to arrays of IdentityMapping objects. Import is skipped if the identity mappings collection already contains data. | `["./bootstrapping/identity_mappings.json"]` | -       | Yes      |
+| `users`      | `[]string` | Users limits which person IDs to import. If empty, all persons are imported.                                                                                                                                            | `["100", "102"]`                             | -       | No       |
+
+### `trust`
+
+> **Path:** `.apigw.trust`, `.verifier.trust`
+
+This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
+
+Trust evaluation operates in one of two modes:
+- When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
+- When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
+
+| Field                          | Type       | Description                                                                                                                                                                                                                                                    | Example                                | Default                  | Required |
+| ------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ | -------- |
+| `pdp_url`                      | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation. When set, operates in "default deny" mode - trust decisions require PDP approval. When empty, operates in "allow all" mode - resolved keys are always considered trusted.         | `"https://trust.sunet.se/pdp"`         | -                        | No       |
+| `local_did_methods`            | `[]string` | Which DID methods can be resolved locally without go-trust. Self-contained methods like "did:key" and "did:jwk" are always resolved locally.                                                                                                                   | -                                      | `["did:key", "did:jwk"]` | No       |
+| `trust_policies`               | `object`   | Per-role trust evaluation policies. The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.                                                                                                                                   | -                                      | -                        | No       |
+| `allowed_signature_algorithms` | `[]string` | AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted. If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA. The "none" algorithm is NEVER allowed regardless of configuration. | `["ES256", "ES384", "ES512", "EdDSA"]` | -                        | No       |
+
+### `trust_policies` entry
+
+> **Path:** `.apigw.trust.trust_policies.<role>`, `.verifier.trust.trust_policies.<role>`
+
+| Field                      | Type       | Description                                                                                                                           | Example                                                           | Default | Required |
+| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
+| `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
+| `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
+| `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
+
 ## `issuer` (Top-level)
 
 Configuration for the Issuer service that signs and issues verifiable credentials.
@@ -484,16 +662,17 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 > **Path:** `.issuer`
 
-| Field             | Type     | Description                            | Example                     | Default | Required |
-| ----------------- | -------- | -------------------------------------- | --------------------------- | ------- | -------- |
-| `api_server`      | `object` | HTTP API server configuration          | -                           | -       | Yes      |
-| `grpc_server`     | `object` | GRPC server configuration              | -                           | -       | Yes      |
-| `key_config`      | `object` | Signing key configuration              | -                           | -       | Yes      |
-| `jwt_attribute`   | `object` | JWT credential attribute configuration | -                           | -       | Yes      |
-| `issuer_url`      | `string` | Issuer identifier URL                  | `"https://issuer.sunet.se"` | -       | Yes      |
-| `registry_client` | `object` | Registry gRPC client config            | -                           | -       | No       |
-| `mdoc`            | `object` | MDL/mdoc configuration                 | -                           | -       | No       |
-| `audit_log`       | `object` | Audit log configuration                | -                           | -       | No       |
+| Field                      | Type     | Description                                                                                                                                                                                                       | Example                     | Default | Required |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
+| `api_server`               | `object` | HTTP API server configuration                                                                                                                                                                                     | -                           | -       | Yes      |
+| `grpc_server`              | `object` | GRPC server configuration                                                                                                                                                                                         | -                           | -       | Yes      |
+| `key_config`               | `object` | Signing key configuration                                                                                                                                                                                         | -                           | -       | Yes      |
+| `jwt_attribute`            | `object` | JWT credential attribute configuration                                                                                                                                                                            | -                           | -       | Yes      |
+| `issuer_url`               | `string` | Issuer identifier URL                                                                                                                                                                                             | `"https://issuer.sunet.se"` | -       | Yes      |
+| `registry_client`          | `object` | Registry gRPC client config                                                                                                                                                                                       | -                           | -       | No       |
+| `mdoc`                     | `object` | MDL/mdoc configuration                                                                                                                                                                                            | -                           | -       | No       |
+| `audit_log`                | `object` | Audit log configuration                                                                                                                                                                                           | -                           | -       | No       |
+| `sign_metadata_rate_limit` | `object` | The rate limiter for the SignMetadata gRPC endpoint. In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults should accommodate the expected cluster size. Default: 2 req/s, burst 20. | -                           | -       | No       |
 
 ### `grpc_server`
 
@@ -515,7 +694,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 | `key_file_path`               | `string` | Server private key                          | -                              | `/pki/grpc_server.key` | Yes (if enabled) |
 | `client_ca_path`              | `string` | CA to verify client certificates (for mTLS) | -                              | `/pki/client_ca.crt`   | Yes (if enabled) |
 | `allowed_client_fingerprints` | `object` | SHA256 fingerprint -> friendly name         | `a1b2c3...: issuer-prod`       | -                      | No               |
-| `allowed_client_dns`          | `object` | Certificate Subject DN -> friendly name     | `CN=apigw,O=SUNET: apigw-prod` | -                      | No               |
+| `allowed_client_dns`          | `object` | Friendly name -> Certificate Subject DN     | `apigw-prod: CN=apigw,O=SUNET` | -                      | No               |
 
 ### `jwt_attribute`
 
@@ -553,6 +732,15 @@ In a later state this should be placed under authentic source in order to issue 
 | `destinations`       | `[]string` | List of log destinations (console/stdout, file path, or HTTP URL)                                                                                                                                                                                           | `["stdout", "/var/log/audit.log", "https://audit.sunet.se/webhook"]` | -       | Yes (if enabled) |
 | `file_sync_interval` | `duration` | Fsync behavior for file destinations. 0 = fsync after every write (strict durability, lower throughput). >0 = periodic batched fsync at the given interval (better throughput, bounded data-loss window). Has no effect on console or webhook destinations. | -                                                                    | `5s`    | No               |
 
+### `sign_metadata_rate_limit`
+
+> **Path:** `.issuer.sign_metadata_rate_limit`
+
+| Field                 | Type      | Description                                                       | Example | Default | Required |
+| --------------------- | --------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
+| `requests_per_second` | `float64` | Sustained rate limit in requests per second. Default: 2           | -       | `2`     | No       |
+| `burst`               | `int`     | Maximum number of requests allowed in a single burst. Default: 20 | -       | `20`    | No       |
+
 ## `verifier` (Top-level)
 
 Configuration for the Verifier service that verifies credentials and acts as an OIDC Provider.
@@ -561,20 +749,20 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 
 > **Path:** `.verifier`
 
-| Field                    | Type     | Description                                                  | Example                       | Default | Required |
-| ------------------------ | -------- | ------------------------------------------------------------ | ----------------------------- | ------- | -------- |
-| `api_server`             | `object` | HTTP API server configuration                                | -                             | -       | Yes      |
-| `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)    | `"https://verifier.sunet.se"` | -       | Yes      |
-| `key_config`             | `object` | Signing key configuration                                    | -                             | -       | Yes      |
-| `oauth_server`           | `object` | OAuth2 server configuration                                  | -                             | -       | Yes      |
-| `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets | -                             | -       | No       |
-| `supported_wallets`      | `object` | Supported wallet configurations                              | -                             | -       | No       |
-| `oidc_op`                | `object` | OIDC Provider configuration                                  | -                             | -       | No       |
-| `openid4vp`              | `object` | OpenID4VP configuration                                      | -                             | -       | No       |
-| `digital_credentials`    | `object` | W3C Digital Credentials API configuration                    | -                             | -       | No       |
-| `authorization_page_css` | `object` | Authorization page styling configuration                     | -                             | -       | No       |
-| `credential_display`     | `object` | Credential display settings                                  | -                             | -       | No       |
-| `trust`                  | `object` | Trust evaluation configuration                               | -                             | -       | No       |
+| Field                    | Type     | Description                                                                                                                                                                                                                                                                             | Example                                                    | Default | Required |
+| ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
+| `api_server`             | `object` | HTTP API server configuration                                                                                                                                                                                                                                                           | -                                                          | -       | Yes      |
+| `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                                                                                                                                                                                                                               | `"https://verifier.sunet.se"`                              | -       | Yes      |
+| `key_config`             | `object` | Signing key configuration                                                                                                                                                                                                                                                               | -                                                          | -       | Yes      |
+| `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets                                                                                                                                                                                                                            | -                                                          | -       | No       |
+| `supported_wallets`      | `object` | Supported wallet configurations                                                                                                                                                                                                                                                         | -                                                          | -       | No       |
+| `inbound`                | `object` | Inbound groups inbound credential verification                                                                                                                                                                                                                                          | -                                                          | -       | No       |
+| `outbound`               | `object` | Outbound groups outbound identity assertion                                                                                                                                                                                                                                             | -                                                          | -       | No       |
+| `digital_credentials`    | `object` | W3C Digital Credentials API configuration                                                                                                                                                                                                                                               | -                                                          | -       | No       |
+| `authorization_page_css` | `object` | Authorization page styling configuration                                                                                                                                                                                                                                                | -                                                          | -       | No       |
+| `credential_display`     | `object` | Credential display settings                                                                                                                                                                                                                                                             | -                                                          | -       | No       |
+| `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -       | No       |
+| `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -       | No       |
 
 ### `preferred_vp_formats`
 
@@ -624,29 +812,67 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 | `issuerauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for IssuerAuth COSE signatures.         | -       | -       | No       |
 | `deviceauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for DeviceAuth COSE signatures or MACs. | -       | -       | No       |
 
-### `oidc_op`
+### `inbound`
 
-> **Path:** `.verifier.oidc_op`
+> **Path:** `.verifier.inbound`
+
+| Field       | Type     | Description                                                | Example | Default | Required |
+| ----------- | -------- | ---------------------------------------------------------- | ------- | ------- | -------- |
+| `openid4vp` | `object` | OpenID4VP configuration for accepting wallet presentations | -       | -       | Yes      |
+
+### `openid4vp`
+
+> **Path:** `.verifier.inbound.openid4vp`
+
+| Field                       | Type     | Description                                            | Example                             | Default | Required |
+| --------------------------- | -------- | ------------------------------------------------------ | ----------------------------------- | ------- | -------- |
+| `presentation_timeout`      | `int`    | Presentation timeout in seconds                        | -                                   | `300`   | No       |
+| `supported_credentials`     | `array`  | Supported credential configurations                    | -                                   | -       | Yes      |
+| `presentation_requests_dir` | `string` | Optional directory with presentation request templates | -                                   | -       | No       |
+| `token_endpoint`            | `string` | OAuth2 token endpoint URL used for VP token exchange   | `"https://verifier.sunet.se/token"` | -       | Yes      |
+| `clients`                   | `object` | OAuth2 client configurations for RP interactions       | -                                   | -       | Yes      |
+
+### `supported_credentials` entry
+
+> **Path:** `.verifier.inbound.openid4vp.supported_credentials[]`
+
+| Field    | Type       | Description                                      | Example            | Default | Required |
+| -------- | ---------- | ------------------------------------------------ | ------------------ | ------- | -------- |
+| `vct`    | `string`   | Verifiable credential type                       | `"urn:eudi:pid:1"` | -       | Yes      |
+| `scopes` | `[]string` | OIDC scopes that grant access to this credential | -                  | -       | Yes      |
+
+### `outbound`
+
+> **Path:** `.verifier.outbound`
+
+| Field           | Type     | Description                                                                   | Example | Default | Required |
+| --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `oidc_provider` | `object` | OIDC Provider configuration for asserting verified identity to downstream RPs | -       | -       | No       |
+
+### `oidc_provider`
+
+> **Path:** `.verifier.outbound.oidc_provider`
 
 This configures how the verifier issues ID tokens and access tokens to relying parties.
 Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
 The signing key is shared from the parent Verifier.KeyConfig.
 
-| Field                    | Type     | Description                                                                                                                                                                        | Example                       | Default | Required |
-| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
-| `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata. This identifies the verifier as an OpenID Provider. Must match the 'iss' claim in all issued ID tokens. | `"https://verifier.sunet.se"` | -       | Yes      |
-| `session_duration`       | `int`    | Session duration in seconds                                                                                                                                                        | -                             | `3600`  | No       |
-| `code_duration`          | `int`    | Authorization code duration in seconds                                                                                                                                             | -                             | `300`   | No       |
-| `access_token_duration`  | `int`    | Access token duration in seconds                                                                                                                                                   | -                             | `3600`  | No       |
-| `id_token_duration`      | `int`    | ID token duration in seconds                                                                                                                                                       | -                             | `3600`  | No       |
-| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                                                                                                                                  | -                             | `86400` | No       |
-| `subject_type`           | `string` | Subject type: "public" or "pairwise"                                                                                                                                               | -                             | -       | Yes      |
-| `subject_salt`           | `string` | Salt for pairwise subject generation                                                                                                                                               | -                             | -       | Yes      |
-| `static_clients`         | `array`  | List of pre-configured OIDC clients These clients are checked in addition to dynamically registered clients                                                                        | -                             | -       | No       |
+| Field                    | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                      | Example                       | Default | Required |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- | ------- | -------- |
+| `issuer`                 | `string` | OIDC Provider identifier that appears in ID tokens and discovery metadata. This identifies the verifier as an OpenID Provider. Must match the 'iss' claim in all issued ID tokens.                                                                                                                                                                                                                                                               | `"https://verifier.sunet.se"` | -       | Yes      |
+| `session_duration`       | `int`    | Session duration in seconds                                                                                                                                                                                                                                                                                                                                                                                                                      | -                             | `3600`  | No       |
+| `code_duration`          | `int`    | Authorization code duration in seconds                                                                                                                                                                                                                                                                                                                                                                                                           | -                             | `300`   | No       |
+| `access_token_duration`  | `int`    | Access token duration in seconds                                                                                                                                                                                                                                                                                                                                                                                                                 | -                             | `3600`  | No       |
+| `id_token_duration`      | `int`    | ID token duration in seconds                                                                                                                                                                                                                                                                                                                                                                                                                     | -                             | `3600`  | No       |
+| `refresh_token_duration` | `int`    | Refresh token duration in seconds                                                                                                                                                                                                                                                                                                                                                                                                                | -                             | `86400` | No       |
+| `subject_type`           | `string` | Subject type: "public" or "pairwise"                                                                                                                                                                                                                                                                                                                                                                                                             | -                             | -       | Yes      |
+| `subject_salt`           | `string` | Salt for pairwise subject generation                                                                                                                                                                                                                                                                                                                                                                                                             | -                             | -       | Yes      |
+| `enable_userinfo`        | `bool`   | Whether the verifier-OP advertises a userinfo_endpoint in its discovery metadata and issues JWT access tokens (RFC 9068 at+jwt). When true (default), the OP advertises userinfo_endpoint in discovery and returns an access token alongside the ID token. The userinfo endpoint is stateless: it validates the JWT signature and returns the embedded claims. When false, only ID tokens are returned — no access_token or userinfo endpoint.   | -                             | `true`  | No       |
+| `static_clients`         | `array`  | List of pre-configured OIDC clients These clients are checked in addition to dynamically registered clients                                                                                                                                                                                                                                                                                                                                      | -                             | -       | No       |
 
 ### `static_clients` entry
 
-> **Path:** `.verifier.oidc_op.static_clients[]`
+> **Path:** `.verifier.outbound.oidc_provider.static_clients[]`
 
 Static clients are configured in YAML and do not require dynamic registration.
 These clients are checked in addition to dynamically registered clients stored in the database.
@@ -661,25 +887,6 @@ These clients are checked in addition to dynamically registered clients stored i
 | `grant_types`                | `[]string` | List of allowed grant types. Supported values: authorization_code, refresh_token Default: ["authorization_code"]                                                                                                      | -       | `["authorization_code"]` | No       |
 | `response_types`             | `[]string` | List of allowed response types. Supported values: code Default: ["code"]                                                                                                                                              | -       | `["code"]`               | No       |
 | `client_name`                | `string`   | Optional human-readable name for the client                                                                                                                                                                           | -       | -                        | No       |
-
-### `openid4vp`
-
-> **Path:** `.verifier.openid4vp`
-
-| Field                       | Type     | Description                                            | Example | Default | Required |
-| --------------------------- | -------- | ------------------------------------------------------ | ------- | ------- | -------- |
-| `presentation_timeout`      | `int`    | Presentation timeout in seconds                        | -       | `300`   | No       |
-| `supported_credentials`     | `array`  | Supported credential configurations                    | -       | -       | Yes      |
-| `presentation_requests_dir` | `string` | Optional directory with presentation request templates | -       | -       | No       |
-
-### `supported_credentials` entry
-
-> **Path:** `.verifier.openid4vp.supported_credentials[]`
-
-| Field    | Type       | Description                                      | Example            | Default | Required |
-| -------- | ---------- | ------------------------------------------------ | ------------------ | ------- | -------- |
-| `vct`    | `string`   | Verifiable credential type                       | `"urn:eudi:pid:1"` | -       | Yes      |
-| `scopes` | `[]string` | OIDC scopes that grant access to this credential | -                  | -       | Yes      |
 
 ### `digital_credentials`
 
@@ -721,32 +928,33 @@ These clients are checked in addition to dynamically registered clients stored i
 | `show_claims`          | `bool` | The parsed claims that will be sent to the RP Recommended for transparency and user consent                                              | -       | `true`  | No       |
 | `allow_edit`           | `bool` | Users to redact certain claims before sending to RP (future feature) Currently not implemented                                           | -       | `false` | No       |
 
-### `trust`
+### `presets` entry
 
-> **Path:** `.verifier.trust`
+> **Path:** `.verifier.presets.<preset label>.<scope>`
 
-This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
+| Field            | Type    | Description                                                     | Example | Default | Required |
+| ---------------- | ------- | --------------------------------------------------------------- | ------- | ------- | -------- |
+| `claims`         | `array` | Specific claims to request. If empty, all VCTM claims are used. | -       | -       | No       |
+| `exclude_claims` | `array` | Claims to exclude from the DCQL query.                          | -       | -       | No       |
+| `validations`    | `array` | Optional rules applied server-side after claims extraction      | -       | -       | No       |
 
-Trust evaluation operates in one of two modes:
-- When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
-- When PDPURL is empty: "allow all" mode - keys are resolved but always considered trusted
+### `claims` entry
 
-| Field                          | Type       | Description                                                                                                                                                                                                                                                    | Example                                | Default                  | Required |
-| ------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ | -------- |
-| `pdp_url`                      | `string`   | URL of the AuthZEN PDP (Policy Decision Point) service for trust evaluation. When set, operates in "default deny" mode - trust decisions require PDP approval. When empty, operates in "allow all" mode - resolved keys are always considered trusted.         | `"https://trust.sunet.se/pdp"`         | -                        | No       |
-| `local_did_methods`            | `[]string` | Which DID methods can be resolved locally without go-trust. Self-contained methods like "did:key" and "did:jwk" are always resolved locally.                                                                                                                   | -                                      | `["did:key", "did:jwk"]` | No       |
-| `trust_policies`               | `object`   | Per-role trust evaluation policies. The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.                                                                                                                                   | -                                      | -                        | No       |
-| `allowed_signature_algorithms` | `[]string` | AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted. If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA. The "none" algorithm is NEVER allowed regardless of configuration. | `["ES256", "ES384", "ES512", "EdDSA"]` | -                        | No       |
+> **Path:** `.verifier.presets.<preset label>.<scope>.claims[]`, `.verifier.presets.<preset label>.<scope>.exclude_claims[]`
 
-### `trust_policies` entry
+| Field  | Type       | Description         | Example                                  | Default | Required |
+| ------ | ---------- | ------------------- | ---------------------------------------- | ------- | -------- |
+| `path` | `[]string` | Claim path segments | `["birthdate"], ["address", "locality"]` | -       | Yes      |
 
-> **Path:** `.verifier.trust.trust_policies.<key>`
+### `validations` entry
 
-| Field                      | Type       | Description                                                                                                                           | Example                                                           | Default | Required |
-| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
-| `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
-| `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
-| `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
+> **Path:** `.verifier.presets.<preset label>.<scope>.validations[]`
+
+| Field   | Type       | Description                                     | Example         | Default | Required |
+| ------- | ---------- | ----------------------------------------------- | --------------- | ------- | -------- |
+| `rule`  | `string`   | Validation rule to apply, e.g., "age_over".     | `"age_over"`    | -       | Yes      |
+| `path`  | `[]string` | Claim path to validate, e.g., ["birthdate"].    | `["birthdate"]` | -       | Yes      |
+| `value` | `object`   | Threshold or expected value for the validation. | `18`            | -       | Yes      |
 
 ## `registry` (Top-level)
 
@@ -785,70 +993,6 @@ Configuration for the Registry service that manages credential status.
 | `username` | `string` | Admin username | -       | `admin` | Yes (if enabled) |
 | `password` | `string` | Admin password | -       | -       | Yes (if enabled) |
 
-## `mock_as` (Top-level)
-
-Configuration for the Mock Authentic Source service used for testing.
-
-### `mock_as`
-
-> **Path:** `.mock_as`
-
-| Field             | Type       | Description                              | Example                   | Default          | Required |
-| ----------------- | ---------- | ---------------------------------------- | ------------------------- | ---------------- | -------- |
-| `api_server`      | `object`   | HTTP API server configuration            | -                         | -                | Yes      |
-| `datastore_url`   | `string`   | Datastore service URL                    | `"http://datastore:8080"` | -                | Yes      |
-| `bootstrap_users` | `[]string` | List of user IDs to bootstrap on startup | -                         | `["100", "102"]` | No       |
-
-## `ui` (Top-level)
-
-Configuration for the User Interface service.
-
-### `ui`
-
-> **Path:** `.ui`
-
-| Field                                   | Type     | Description                           | Example | Default | Required |
-| --------------------------------------- | -------- | ------------------------------------- | ------- | ------- | -------- |
-| `api_server`                            | `object` | HTTP API server configuration         | -       | -       | Yes      |
-| `username`                              | `string` | UI login username                     | -       | `admin` | No       |
-| `password`                              | `string` | UI login password                     | -       | -       | Yes      |
-| `session_inactivity_timeout_in_seconds` | `int`    | Session inactivity timeout in seconds | -       | `1800`  | No       |
-| `services`                              | `object` | Services                              | -       | -       | No       |
-
-### `services`
-
-> **Path:** `.ui.services`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `apigw`    | `object` | APIGW       | -       | -       | No       |
-| `mockas`   | `object` | Mock AS     | -       | -       | No       |
-| `verifier` | `object` | Verifier    | -       | -       | No       |
-
-### `apigw`
-
-> **Path:** `.ui.services.apigw`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `base_url` | `string` | Base URL    | -       | -       | No       |
-
-### `mockas`
-
-> **Path:** `.ui.services.mockas`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `base_url` | `string` | Base URL    | -       | -       | No       |
-
-### `verifier`
-
-> **Path:** `.ui.services.verifier`
-
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `base_url` | `string` | Base URL    | -       | -       | No       |
-
 ## Secrets File Reference
 
 The structure of the separate secrets file.
@@ -857,9 +1001,12 @@ The structure of the separate secrets file.
 
 > **Path:** `(root)`
 
-When Common.SecretFilePath is set, secret values in config.yaml are
-cleared; only non-empty fields from this file are applied.
-Fields omitted or left empty here remain at their zero value.
+When Common.SecretFilePath is set, ApplySecrets merges these values
+into the main config: the Mongo URI is only used when the main config
+has none. For each service section (apigw, registry, verifier) that
+is present in the secrets file, the corresponding secret fields in
+the main config are cleared and replaced by the secrets-file values.
+Sections omitted from the secrets file are left untouched.
 
 | Field      | Type     | Description | Example | Default | Required |
 | ---------- | -------- | ----------- | ------- | ------- | -------- |
@@ -867,7 +1014,6 @@ Fields omitted or left empty here remain at their zero value.
 | `apigw`    | `object` | APIGW       | -       | -       | No       |
 | `registry` | `object` | Registry    | -       | -       | No       |
 | `verifier` | `object` | Verifier    | -       | -       | No       |
-| `ui`       | `object` | UI          | -       | -       | No       |
 
 ### `common`
 
@@ -889,10 +1035,10 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.apigw`
 
-| Field        | Type     | Description | Example | Default | Required |
-| ------------ | -------- | ----------- | ------- | ------- | -------- |
-| `api_server` | `object` | API Server  | -       | -       | No       |
-| `oidc_rp`    | `object` | OIDCRP      | -       | -       | No       |
+| Field            | Type     | Description    | Example | Default | Required |
+| ---------------- | -------- | -------------- | ------- | ------- | -------- |
+| `api_server`     | `object` | API Server     | -       | -       | No       |
+| `auth_providers` | `object` | Auth Providers | -       | -       | No       |
 
 ### `api_server`
 
@@ -906,21 +1052,29 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.apigw.api_server.api_auth`
 
-| Field        | Type     | Description | Example | Default | Required |
-| ------------ | -------- | ----------- | ------- | ------- | -------- |
-| `basic_auth` | `object` | Basic Auth  | -       | -       | No       |
+| Field  | Type     | Description | Example | Default | Required |
+| ------ | -------- | ----------- | ------- | ------- | -------- |
+| `oidc` | `object` | OIDC        | -       | -       | No       |
 
-### `basic_auth`
+### `oidc`
 
-> **Path:** `.apigw.api_server.api_auth.basic_auth`
+> **Path:** `.apigw.api_server.api_auth.oidc`
 
-| Field   | Type     | Description                                          | Example                    | Default | Required |
-| ------- | -------- | ---------------------------------------------------- | -------------------------- | ------- | -------- |
-| `users` | `object` | Usernames to passwords for HTTP Basic Authentication | `<username>: "<password>"` | -       | No       |
+| Field           | Type     | Description                                | Example | Default | Required |
+| --------------- | -------- | ------------------------------------------ | ------- | ------- | -------- |
+| `client_secret` | `string` | OAuth2 client secret for the OIDC provider | -       | -       | No       |
 
-### `oidc_rp`
+### `auth_providers`
 
-> **Path:** `.apigw.oidc_rp`
+> **Path:** `.apigw.auth_providers`
+
+| Field  | Type     | Description | Example | Default | Required |
+| ------ | -------- | ----------- | ------- | ------- | -------- |
+| `oidc` | `object` | OIDC        | -       | -       | No       |
+
+### `oidc`
+
+> **Path:** `.apigw.auth_providers.oidc`
 
 | Field          | Type     | Description  | Example | Default | Required |
 | -------------- | -------- | ------------ | ------- | ------- | -------- |
@@ -928,7 +1082,7 @@ Fields omitted or left empty here remain at their zero value.
 
 ### `registration`
 
-> **Path:** `.apigw.oidc_rp.registration`
+> **Path:** `.apigw.auth_providers.oidc.registration`
 
 | Field           | Type     | Description   | Example | Default | Required |
 | --------------- | -------- | ------------- | ------- | ------- | -------- |
@@ -937,7 +1091,7 @@ Fields omitted or left empty here remain at their zero value.
 
 ### `preconfigured`
 
-> **Path:** `.apigw.oidc_rp.registration.preconfigured`
+> **Path:** `.apigw.auth_providers.oidc.registration.preconfigured`
 
 | Field           | Type     | Description                                         | Example | Default | Required |
 | --------------- | -------- | --------------------------------------------------- | ------- | ------- | -------- |
@@ -945,7 +1099,7 @@ Fields omitted or left empty here remain at their zero value.
 
 ### `dynamic`
 
-> **Path:** `.apigw.oidc_rp.registration.dynamic`
+> **Path:** `.apigw.auth_providers.oidc.registration.dynamic`
 
 | Field                  | Type     | Description                                                     | Example | Default | Required |
 | ---------------------- | -------- | --------------------------------------------------------------- | ------- | ------- | -------- |
@@ -971,26 +1125,26 @@ Fields omitted or left empty here remain at their zero value.
 
 > **Path:** `.verifier`
 
-| Field     | Type     | Description | Example | Default | Required |
-| --------- | -------- | ----------- | ------- | ------- | -------- |
-| `oidc_op` | `object` | OIDCOP      | -       | -       | No       |
+| Field      | Type     | Description | Example | Default | Required |
+| ---------- | -------- | ----------- | ------- | ------- | -------- |
+| `outbound` | `object` | Outbound    | -       | -       | No       |
 
-### `oidc_op`
+### `outbound`
 
-> **Path:** `.verifier.oidc_op`
+> **Path:** `.verifier.outbound`
 
-| Field            | Type     | Description                                                                                                                                                                                                                          | Example                          | Default | Required |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- | ------- | -------- |
-| `subject_salt`   | `string` | Secret value used to derive pairwise subject identifiers for OIDC clients                                                                                                                                                            | -                                | -       | No       |
-| `static_clients` | `object` | Client_id to client_secret for static OIDC clients. Only clients listed here will have their secrets applied; clients not present in this map keep whatever value the main config provides (which will be empty after ClearSecrets). | `<client_id>: "<client_secret>"` | -       | No       |
+| Field           | Type     | Description   | Example | Default | Required |
+| --------------- | -------- | ------------- | ------- | ------- | -------- |
+| `oidc_provider` | `object` | OIDC Provider | -       | -       | No       |
 
-### `ui`
+### `oidc_provider`
 
-> **Path:** `.ui`
+> **Path:** `.verifier.outbound.oidc_provider`
 
-| Field      | Type     | Description       | Example | Default | Required |
-| ---------- | -------- | ----------------- | ------- | ------- | -------- |
-| `password` | `string` | UI login password | -       | -       | No       |
+| Field            | Type     | Description                                                                                                                                                                                                                                      | Example                          | Default | Required |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- | ------- | -------- |
+| `subject_salt`   | `string` | Secret value used to derive pairwise subject identifiers for OIDC clients                                                                                                                                                                        | -                                | -       | No       |
+| `static_clients` | `object` | Client_id to client_secret for static OIDC clients. Only clients listed here will have their secrets applied; clients not present in this map keep whatever value the main config provides (which will be empty after ApplySecrets clears them). | `<client_id>: "<client_secret>"` | -       | No       |
 
 ### Example `secrets.yaml`
 
@@ -1003,25 +1157,24 @@ common:
 apigw:
   api_server:
     api_auth:
-      basic_auth:
-        users:
-          <username>: "<password>"
-  oidc_rp:
-    registration:
-      preconfigured:
+      oidc:
         client_secret: "your-oidc-client-secret"
-      dynamic:
-        initial_access_token: "<secret-value>"
+  auth_providers:
+    oidc:
+      registration:
+        preconfigured:
+          client_secret: "your-oidc-client-secret"
+        dynamic:
+          initial_access_token: "<secret-value>"
 registry:
   admin_gui:
     password: "change-me-in-production"
 verifier:
-  oidc_op:
-    subject_salt: "random-salt-for-pairwise-subjects"
-    static_clients:
-      <client_id>: "<client_secret>"
-ui:
-  password: "change-me-in-production"
+  outbound:
+    oidc_provider:
+      subject_salt: "random-salt-for-pairwise-subjects"
+      static_clients:
+        <client_id>: "<client_secret>"
 ```
 
 

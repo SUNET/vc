@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -40,7 +41,7 @@ func TestFile_SendToDestination(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify file content
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test")
 	assert.Contains(t, string(content), "data")
@@ -48,7 +49,7 @@ func TestFile_SendToDestination(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestFile_FileSyncEveryWrite(t *testing.T) {
@@ -81,13 +82,13 @@ func TestFile_FileSyncEveryWrite(t *testing.T) {
 	// dirty should remain false since sync happened immediately
 	assert.False(t, dest.dirty)
 
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "immediate")
 
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestFile_DeferredSync(t *testing.T) {
@@ -128,13 +129,13 @@ func TestFile_DeferredSync(t *testing.T) {
 	service.mu.Unlock()
 	assert.False(t, isDirty, "periodic sync should have cleared dirty flag")
 
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "deferred")
 
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestFile_DestinationParsing(t *testing.T) {
@@ -223,7 +224,7 @@ func TestFile_WriteToFile_NilFile(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestFile_MultipleWrites(t *testing.T) {
@@ -256,14 +257,14 @@ func TestFile_MultipleWrites(t *testing.T) {
 	}
 
 	// Verify all writes
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "iteration")
 
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }
 
 func TestFile_MessageDelivery(t *testing.T) {
@@ -293,7 +294,7 @@ func TestFile_MessageDelivery(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify file was written
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test_event")
 	assert.Contains(t, string(content), "key")
@@ -337,7 +338,7 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify file has entries
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // #nosec G304
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "concurrent_test")
 	assert.Contains(t, string(content), "iteration")
@@ -345,5 +346,5 @@ func TestFile_ConcurrentWrites(t *testing.T) {
 	// Clean up
 	cancel()
 	time.Sleep(100 * time.Millisecond)
-	service.Close(t.Context())
+	service.Close(t.Context()) // #nosec G104
 }

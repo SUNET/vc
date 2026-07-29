@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"

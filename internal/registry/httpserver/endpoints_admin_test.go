@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/registry/apiv1"
 	"github.com/SUNET/vc/pkg/httphelpers"
@@ -23,9 +24,11 @@ import (
 
 // mockApiv1 implements the Apiv1 interface for testing
 type mockApiv1 struct {
-	searchResult *apiv1.SearchPersonReply
-	searchErr    error
-	updateErr    error
+	searchResult      *apiv1.SearchPersonReply
+	searchErr         error
+	updateErr         error
+	statusListReply   *apiv1.TokenStatusListsResponse
+	statusListErr     error
 }
 
 func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
@@ -33,7 +36,10 @@ func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest)
 }
 
 func (m *mockApiv1) TokenStatusLists(ctx context.Context, req *apiv1.TokenStatusListsRequest) (*apiv1.TokenStatusListsResponse, error) {
-	return nil, nil
+	if m.statusListErr != nil {
+		return nil, m.statusListErr
+	}
+	return m.statusListReply, nil
 }
 
 func (m *mockApiv1) TokenStatusListAggregation(ctx context.Context) (*apiv1.TokenStatusListAggregationResponse, error) {
@@ -249,12 +255,10 @@ func TestEndpointAdminSearch(t *testing.T) {
 			searchResult: &apiv1.SearchPersonReply{
 				Results: []*apiv1.PersonResult{
 					{
-						FirstName:   "John",
-						LastName:    "Doe",
-						DateOfBirth: "1990-01-15",
-						Section:     0,
-						Index:       42,
-						Status:      0,
+						Identifier: "john-doe-1990",
+						Section:    0,
+						Index:      42,
+						Status:     0,
 					},
 				},
 			},
@@ -264,9 +268,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "John")
-		form.Add("last_name", "Doe")
-		form.Add("date_of_birth", "1990-01-15")
+		form.Add("identifier", "john-doe-1990")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -274,8 +276,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 
 		assert.NoError(t, err)
 		html := result.(HTMLResponse)
-		assert.Contains(t, string(html), "John")
-		assert.Contains(t, string(html), "Doe")
+		assert.Contains(t, string(html), "john-doe-1990")
 		assert.Contains(t, string(html), "VALID")
 	})
 
@@ -289,9 +290,7 @@ func TestEndpointAdminSearch(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "Unknown")
-		form.Add("last_name", "Person")
-		form.Add("date_of_birth", "1990-01-01")
+		form.Add("identifier", "unknown-person")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -311,12 +310,10 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 			searchResult: &apiv1.SearchPersonReply{
 				Results: []*apiv1.PersonResult{
 					{
-						FirstName:   "John",
-						LastName:    "Doe",
-						DateOfBirth: "1990-01-15",
-						Section:     0,
-						Index:       42,
-						Status:      1,
+						Identifier: "john-doe-1990",
+						Section:    0,
+						Index:      42,
+						Status:     1,
 					},
 				},
 			},
@@ -326,9 +323,7 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "John")
-		form.Add("last_name", "Doe")
-		form.Add("date_of_birth", "1990-01-15")
+		form.Add("identifier", "john-doe-1990")
 		form.Add("status", "1")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/update-status", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -350,9 +345,7 @@ func TestEndpointAdminUpdateStatus(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		form := url.Values{}
-		form.Add("first_name", "John")
-		form.Add("last_name", "Doe")
-		form.Add("date_of_birth", "1990-01-15")
+		form.Add("identifier", "john-doe-1990")
 		form.Add("status", "1")
 		c.Request = httptest.NewRequest(http.MethodPost, "/admin/update-status", strings.NewReader(form.Encode()))
 		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -438,4 +431,27 @@ func TestStatusValues(t *testing.T) {
 			assert.Equal(t, tt.expected, statusText)
 		})
 	}
+}
+
+func TestEndpointStatusLists_RawToken(t *testing.T) {
+	s := setupTestService(t)
+	rawJWT := []byte("eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake-signature")
+
+	mock := s.apiv1.(*mockApiv1)
+	mock.statusListReply = &apiv1.TokenStatusListsResponse{
+		Token:       rawJWT,
+		ContentType: "application/statuslist+jwt",
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/statuslists/1", nil)
+	c.Params = gin.Params{{Key: "id", Value: "1"}}
+
+	_, err := s.endpointStatusLists(t.Context(), c)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/statuslist+jwt", w.Header().Get("Content-Type"))
+	assert.Equal(t, rawJWT, w.Body.Bytes(), "response body must be the raw token, not a JSON envelope")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -19,7 +20,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+				CredentialMetadata: map[string]*model.CredentialMetadata{
 					"diploma": {
 						VCTMFilePath: "../../../metadata/vctm_diploma.json",
 					},
@@ -44,31 +45,30 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 					"pda1": {
 						VCTMFilePath: "../../../metadata/vctm_pda1.json",
 					},
-					"pid_1_5": {
-						VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json",
-					},
-					"pid_1_8": {
-						VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json",
+					"pid": {
+						VCTMFilePath: "../../../metadata/vctm_pid.json",
 					},
 				},
 			},
 			APIGW: &model.APIGW{
-				CredentialOffers: model.CredentialOffers{
-					Wallets: map[string]model.CredentialOfferWallets{
-						"dc4eu": {
-							Label: "DC4EU Wallet",
-						},
-						"funke": {
-							Label: "Funke Wallet",
-						},
-						"siros_sunet": {
-							Label: "Siros SUNET Wallet",
-						},
-						"sunet_dev": {
-							Label: "SUNET Dev Wallet",
-						},
-						"vanilla": {
-							Label: "Vanilla wwWallet",
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						Wallets: map[string]model.CredentialOfferWallets{
+							"dc4eu": {
+								Label: "DC4EU Wallet",
+							},
+							"funke": {
+								Label: "Funke Wallet",
+							},
+							"siros_sunet": {
+								Label: "Siros SUNET Wallet",
+							},
+							"sunet_dev": {
+								Label: "SUNET Dev Wallet",
+							},
+							"vanilla": {
+								Label: "Vanilla wwWallet",
+							},
 						},
 					},
 				},
@@ -78,7 +78,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 	}
 
 	// Load VCTMs (normally done by configuration.New)
-	for scope, cc := range client.cfg.Common.CredentialConstructor {
+	for scope, cc := range client.cfg.Common.CredentialMetadata {
 		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
@@ -125,13 +125,9 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 				Name:        "DC4EU PDA1 SD-JWT VCTM",
 				Description: "DC4EU Portable Document A1 (PDA1) SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 09), using a single language tag (en-US).",
 			},
-			"pid_1_5": {
-				Name:        "Example ARF 1.5 PID SD-JWT VCTM",
-				Description: "Example PID SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 09), using a single language tag (en-US). Adheres to PID Rulebook ARF 1.5 (urn:eu.europa.ec.eudi:pid:1).",
-			},
-			"pid_1_8": {
-				Name:        "Example ARF 1.8 PID SD-JWT TYPE METADATA",
-				Description: "Example PID SD-JWT Verifiable Credential Type Metadata, based on ietf-oauth-sd-jwt-vc (draft 13), using a single language tag (en-US). Adheres to PID Rulebook ARF 1.8 (urn:eudi:pid:1) and later, as of the time of publication.",
+			"pid": {
+				Name:        "PID SD-JWT VC Type Metadata",
+				Description: "Person Identification Data per EUDI ARF PID Rulebook v1.0 (urn:eudi:pid:1).",
 			},
 		},
 		Wallets: map[string]string{
@@ -156,11 +152,13 @@ func TestCreateCredentialOfferLookupMetadata_EmptyConfig(t *testing.T) {
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{},
+				CredentialMetadata: map[string]*model.CredentialMetadata{},
 			},
 			APIGW: &model.APIGW{
-				CredentialOffers: model.CredentialOffers{
-					Wallets: map[string]model.CredentialOfferWallets{},
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						Wallets: map[string]model.CredentialOfferWallets{},
+					},
 				},
 			},
 		},
@@ -187,7 +185,7 @@ func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+				CredentialMetadata: map[string]*model.CredentialMetadata{
 					"diploma": {
 						VCTMFilePath: "../../../metadata/vctm_diploma.json",
 						// VCTM intentionally NOT loaded
@@ -195,8 +193,10 @@ func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
 				},
 			},
 			APIGW: &model.APIGW{
-				CredentialOffers: model.CredentialOffers{
-					Wallets: map[string]model.CredentialOfferWallets{},
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						Wallets: map[string]model.CredentialOfferWallets{},
+					},
 				},
 			},
 		},
@@ -216,15 +216,17 @@ func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+				CredentialMetadata: map[string]*model.CredentialMetadata{
 					"empty_scope": {
 						// No VCTMFilePath, no VCTM – must still be caught
 					},
 				},
 			},
 			APIGW: &model.APIGW{
-				CredentialOffers: model.CredentialOffers{
-					Wallets: map[string]model.CredentialOfferWallets{},
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						Wallets: map[string]model.CredentialOfferWallets{},
+					},
 				},
 			},
 		},
@@ -240,7 +242,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 	ctx := t.Context()
 
 	// One constructor with a loaded VCTM and one without – should still error.
-	diplomaCC := &model.CredentialConstructor{
+	diplomaCC := &model.CredentialMetadata{
 		VCTMFilePath: "../../../metadata/vctm_diploma.json",
 	}
 	require.NoError(t, diplomaCC.LoadVCTMetadata(context.Background(), "diploma"))
@@ -249,8 +251,8 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
-					"diploma":      diplomaCC,
+				CredentialMetadata: map[string]*model.CredentialMetadata{
+					"diploma": diplomaCC,
 					"broken_scope": {
 						VCTMFilePath: "nonexistent.json",
 						// VCTM not loaded
@@ -258,8 +260,10 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 				},
 			},
 			APIGW: &model.APIGW{
-				CredentialOffers: model.CredentialOffers{
-					Wallets: map[string]model.CredentialOfferWallets{},
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						Wallets: map[string]model.CredentialOfferWallets{},
+					},
 				},
 			},
 		},
@@ -279,7 +283,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 		log: logger.NewSimple("test"),
 		cfg: &model.Cfg{
 			Common: &model.Common{
-				CredentialConstructor: map[string]*model.CredentialConstructor{
+				CredentialMetadata: map[string]*model.CredentialMetadata{
 					"diploma":                {VCTMFilePath: "../../../metadata/vctm_diploma.json"},
 					"ehic":                   {VCTMFilePath: "../../../metadata/vctm_ehic.json"},
 					"elm":                    {VCTMFilePath: "../../../metadata/vctm_elm.json"},
@@ -288,18 +292,19 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 					"openbadge_complete":     {VCTMFilePath: "../../../metadata/vctm_elm.json"},
 					"openbadge_endorsements": {VCTMFilePath: "../../../metadata/vctm_elm.json"},
 					"pda1":                   {VCTMFilePath: "../../../metadata/vctm_pda1.json"},
-					"pid_1_5":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_5.json"},
-					"pid_1_8":                {VCTMFilePath: "../../../metadata/vctm_pid_arf_1_8.json"},
+					"pid":                    {VCTMFilePath: "../../../metadata/vctm_pid.json"},
 				},
 			},
 			APIGW: &model.APIGW{
-				CredentialOffers: model.CredentialOffers{
-					Wallets: map[string]model.CredentialOfferWallets{
-						"dc4eu":       {Label: "DC4EU Wallet"},
-						"funke":       {Label: "Funke Wallet"},
-						"siros_sunet": {Label: "Siros SUNET Wallet"},
-						"sunet_dev":   {Label: "SUNET Dev Wallet"},
-						"vanilla":     {Label: "Vanilla wwWallet"},
+				Delivery: model.APIGWDelivery{
+					CredentialOffers: model.CredentialOffers{
+						Wallets: map[string]model.CredentialOfferWallets{
+							"dc4eu":       {Label: "DC4EU Wallet"},
+							"funke":       {Label: "Funke Wallet"},
+							"siros_sunet": {Label: "Siros SUNET Wallet"},
+							"sunet_dev":   {Label: "SUNET Dev Wallet"},
+							"vanilla":     {Label: "Vanilla wwWallet"},
+						},
 					},
 				},
 			},
@@ -308,7 +313,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 	}
 
 	// Load VCTMs (normally done by configuration.New)
-	for scope, cc := range client.cfg.Common.CredentialConstructor {
+	for scope, cc := range client.cfg.Common.CredentialMetadata {
 		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
 	}
 
@@ -332,7 +337,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 	t.Logf("Generated JSON output:\n%s", string(jsonBytes))
 
 	// Verify structure
-	assert.Len(t, output.Credentials, 10, "Should have 10 credential types")
+	assert.Len(t, output.Credentials, 9, "Should have 9 credential types")
 	assert.Len(t, output.Wallets, 5, "Should have 5 wallets")
 
 	// Spot check a few entries

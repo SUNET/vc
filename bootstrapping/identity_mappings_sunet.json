@@ -1,0 +1,35 @@
+{
+  "100": [
+    {
+      "authentic_source_person_id": "authentic_source_person_id_100",
+      "authentic_source": "SUNET",
+      "attributes": {
+        "birth_date": "1996-01-30",
+        "family_name": "Mirren",
+        "given_name": "Helen"
+      }
+    }
+  ],
+  "101": [
+    {
+      "authentic_source_person_id": "authentic_source_person_id_101",
+      "authentic_source": "SUNET",
+      "attributes": {
+        "birth_date": "1983-08-20",
+        "family_name": "Momoa",
+        "given_name": "Jason"
+      }
+    }
+  ],
+  "102": [
+    {
+      "authentic_source_person_id": "authentic_source_person_id_102",
+      "authentic_source": "SUNET",
+      "attributes": {
+        "birth_date": "1988-09-09",
+        "family_name": "Oldman",
+        "given_name": "Gary"
+      }
+    }
+  ]
+}

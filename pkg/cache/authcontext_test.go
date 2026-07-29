@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
-	"github.com/SUNET/vc/pkg/model"
 
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -397,6 +397,90 @@ func TestForfeitAuthorizationCode_AlreadyUsed(t *testing.T) {
 	assert.True(t, retrieved.Forfeited, "Context should remain marked as forfeited")
 }
 
+func TestRedeemPreAuthorizedCode_MultipleClients(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	doc := &AuthorizationContext{
+		SessionID: "preauth-session",
+		Code:      "preauth-code-123",
+		Scopes:    []string{"openid"},
+		ExpiresAt: time.Now().Add(5 * time.Minute).Unix(),
+	}
+	require.NoError(t, cache.Save(ctx, doc))
+
+	// First client redeems successfully
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-1")
+	require.NoError(t, err)
+	assert.Equal(t, "preauth-session", result.SessionID)
+	assert.Contains(t, result.RedeemedBy, "thumbprint-client-1")
+
+	// Second client also redeems successfully
+	result2, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-2")
+	require.NoError(t, err)
+	assert.Equal(t, "preauth-session", result2.SessionID)
+	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-1")
+	assert.Contains(t, result2.RedeemedBy, "thumbprint-client-2")
+
+	// Same client trying again is rejected
+	result3, err := cache.RedeemPreAuthorizedCode(ctx, "preauth-code-123", "thumbprint-client-1")
+	assert.Error(t, err)
+	assert.Nil(t, result3)
+	assert.Contains(t, err.Error(), "already redeemed by this client")
+}
+
+func TestRedeemPreAuthorizedCode_NotFound(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "nonexistent-code", "thumbprint-1")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestRedeemPreAuthorizedCode_EmptyCode(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "", "thumbprint-1")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "code cannot be empty")
+}
+
+func TestRedeemPreAuthorizedCode_EmptyThumbprint(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryStore(5 * time.Minute)
+
+	result, err := cache.RedeemPreAuthorizedCode(ctx, "some-code", "")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "dpop thumbprint is required")
+}
+
+func TestRedeemPreAuthorizedCode_ForfeitedCode(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	doc := &AuthorizationContext{
+		SessionID: "session-forfeited",
+		Code:      "forfeited-code",
+		Forfeited: false,
+	}
+	err := store.Save(ctx, doc)
+	require.NoError(t, err)
+
+	// Forfeit the code
+	err = store.MarkCodeAsForfeited(ctx, "session-forfeited")
+	require.NoError(t, err)
+
+	// Attempt to redeem a forfeited code
+	result, err := store.RedeemPreAuthorizedCode(ctx, "forfeited-code", "thumbprint-1")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "forfeited")
+}
+
 func TestConsent_Success(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
@@ -555,7 +639,7 @@ func TestSetAuthenticSource_NotFound(t *testing.T) {
 	assert.Equal(t, ErrNoDocuments, err)
 }
 
-func TestAddIdentity_BySessionID(t *testing.T) {
+func TestSetIdentifier_BySessionID(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -565,28 +649,17 @@ func TestAddIdentity_BySessionID(t *testing.T) {
 	require.NoError(t, cache.Save(ctx, doc))
 
 	query := &AuthorizationContext{SessionID: "session-add-identity"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{
-			GivenName:  "John",
-			FamilyName: "Doe",
-		},
-		VCT:             "urn:eudi:pid:1",
-		AuthenticSource: "test-source",
-	}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "john-doe-id")
 	require.NoError(t, err)
 
-	// Verify the identity was added
+	// Verify the identifier was set
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-add-identity"})
 	require.NoError(t, err)
-	assert.Equal(t, "John", retrieved.Identity.GivenName)
-	assert.Equal(t, "Doe", retrieved.Identity.FamilyName)
-	assert.Equal(t, "urn:eudi:pid:1", retrieved.VCT)
-	assert.Equal(t, "test-source", retrieved.AuthenticSource)
+	assert.Equal(t, "john-doe-id", retrieved.Identifier)
 }
 
-func TestAddIdentity_ByRequestURI(t *testing.T) {
+func TestSetIdentifier_BySessionID_WithRequestURI(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
@@ -596,109 +669,54 @@ func TestAddIdentity_ByRequestURI(t *testing.T) {
 	}
 	require.NoError(t, cache.Save(ctx, doc))
 
-	query := &AuthorizationContext{RequestURI: "https://example.com/identity-request"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{
-			GivenName: "Jane",
-		},
-	}
+	query := &AuthorizationContext{SessionID: "session-identity-uri"}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "jane-id")
 	require.NoError(t, err)
 
-	// Verify the identity was added
+	// Verify the identifier was set
 	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-uri"})
 	require.NoError(t, err)
-	assert.Equal(t, "Jane", retrieved.Identity.GivenName)
+	assert.Equal(t, "jane-id", retrieved.Identifier)
 }
 
-func TestAddIdentity_ByEphemeralKeyID(t *testing.T) {
+func TestSetIdentifier_NilQuery(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
-	doc := &AuthorizationContext{
-		SessionID:                "session-identity-key",
-		EphemeralEncryptionKeyID: "ephemeral-key-456",
-	}
-	require.NoError(t, cache.Save(ctx, doc))
-
-	query := &AuthorizationContext{EphemeralEncryptionKeyID: "ephemeral-key-456"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{
-			GivenName: "Bob",
-		},
-	}
-
-	err := cache.AddIdentity(ctx, query, input)
-	require.NoError(t, err)
-
-	// Verify the identity was added
-	retrieved, err := cache.Get(ctx, &AuthorizationContext{SessionID: "session-identity-key"})
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", retrieved.Identity.GivenName)
-}
-
-func TestAddIdentity_NilQuery(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMemoryStore(5 * time.Minute)
-
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Test"},
-	}
-
-	err := cache.AddIdentity(ctx, nil, input)
+	err := cache.SetIdentifier(ctx, nil, "test-id")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "query cannot be nil")
 }
 
-func TestAddIdentity_NilInput(t *testing.T) {
+func TestSetIdentifier_EmptyIdentifier(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "session-123"}
-	err := cache.AddIdentity(ctx, query, nil)
+	err := cache.SetIdentifier(ctx, query, "")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "identity cannot be nil")
+	assert.Contains(t, err.Error(), "identifier cannot be empty")
 }
 
-func TestAddIdentity_NilIdentity(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMemoryStore(5 * time.Minute)
-
-	query := &AuthorizationContext{SessionID: "session-123"}
-	input := &AuthorizationContext{
-		VCT: "urn:eudi:pid:1",
-	}
-
-	err := cache.AddIdentity(ctx, query, input)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "identity cannot be nil")
-}
-
-func TestAddIdentity_NoQueryFields(t *testing.T) {
+func TestSetIdentifier_NoSessionID(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Test"},
-	}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "test-id")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query must have sessionID, requestURI, or ephemeralEncryptionKeyID")
+	assert.Contains(t, err.Error(), "session_id cannot be empty")
 }
 
-func TestAddIdentity_NotFound(t *testing.T) {
+func TestSetIdentifier_NotFound(t *testing.T) {
 	ctx := context.Background()
 	cache := NewMemoryStore(5 * time.Minute)
 
 	query := &AuthorizationContext{SessionID: "non-existent"}
-	input := &AuthorizationContext{
-		Identity: &model.Identity{GivenName: "Test"},
-	}
 
-	err := cache.AddIdentity(ctx, query, input)
+	err := cache.SetIdentifier(ctx, query, "test-id")
 	assert.Error(t, err)
 	assert.Equal(t, ErrNoDocuments, err)
 }
@@ -746,7 +764,6 @@ func TestConcurrentAccess(t *testing.T) {
 	// Concurrent reads
 	done := make(chan bool, 10)
 	for i := range 10 {
-		i := i
 		go func() {
 			defer func() { done <- true }()
 			query := &AuthorizationContext{Code: fmt.Sprintf("code-%d", i)}
@@ -786,4 +803,102 @@ func TestUpdateIndices(t *testing.T) {
 	result, err = cache.Get(ctx, &AuthorizationContext{RequestURI: "https://example.com/updated"})
 	require.NoError(t, err)
 	assert.Equal(t, "session-update", result.SessionID)
+}
+
+func TestSave_ValidationsFieldValidation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	tests := []struct {
+		name        string
+		validations map[string][]openid4vp.ClaimValidation
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid validations pass",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+			},
+			wantErr: false,
+		},
+		{
+			name:        "nil validations pass",
+			validations: nil,
+			wantErr:     false,
+		},
+		{
+			name: "empty rule rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "", Path: []string{"birthdate"}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "rule",
+		},
+		{
+			name: "unknown rule rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "unknown_rule", Path: []string{"birthdate"}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "rule",
+		},
+		{
+			name: "empty path rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "path",
+		},
+		{
+			name: "nil path rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: nil, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "path",
+		},
+		{
+			name: "nil value rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{"birthdate"}, Value: nil}},
+			},
+			wantErr:     true,
+			errContains: "value",
+		},
+		{
+			name: "multiple scopes validated independently",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid":  {{Rule: "age_over", Path: []string{"birthdate"}, Value: 18}},
+				"ehic": {{Rule: "", Path: []string{"x"}, Value: 1}}, // invalid
+			},
+			wantErr:     true,
+			errContains: "rule",
+		},
+		{
+			name: "path element empty string rejected",
+			validations: map[string][]openid4vp.ClaimValidation{
+				"pid": {{Rule: "age_over", Path: []string{""}, Value: 18}},
+			},
+			wantErr:     true,
+			errContains: "path",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := &AuthorizationContext{
+				SessionID:   "session-val-test",
+				Validations: tt.validations,
+			}
+			err := store.Save(ctx, doc)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

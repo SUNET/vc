@@ -129,6 +129,30 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.True(t, result.Forfeited)
 	})
 
+	t.Run("RedeemPreAuthorizedCode", func(t *testing.T) {
+		doc := &AuthorizationContext{
+			SessionID: "contract-preauth-session",
+			Code:      "contract-preauth-code",
+			Scopes:    []string{"openid"},
+		}
+		require.NoError(t, store.Save(ctx, doc))
+
+		// First client redeems
+		result, err := store.RedeemPreAuthorizedCode(ctx, "contract-preauth-code", "tp-1")
+		require.NoError(t, err)
+		assert.Contains(t, result.RedeemedBy, "tp-1")
+
+		// Second client redeems
+		result, err = store.RedeemPreAuthorizedCode(ctx, "contract-preauth-code", "tp-2")
+		require.NoError(t, err)
+		assert.Contains(t, result.RedeemedBy, "tp-1")
+		assert.Contains(t, result.RedeemedBy, "tp-2")
+
+		// Same client rejected
+		_, err = store.RedeemPreAuthorizedCode(ctx, "contract-preauth-code", "tp-1")
+		assert.Error(t, err)
+	})
+
 	t.Run("Delete", func(t *testing.T) {
 		require.NoError(t, store.Delete(ctx, "contract-session-1"))
 

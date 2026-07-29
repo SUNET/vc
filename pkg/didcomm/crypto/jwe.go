@@ -550,7 +550,7 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 	padLen := blockSize - (len(data) % blockSize)
 	padding := make([]byte, padLen)
 	for i := range padding {
-		padding[i] = byte(padLen)
+		padding[i] = byte(padLen & 0xFF)
 	}
 	return append(data, padding...)
 }
@@ -635,16 +635,16 @@ func wrapKeyAES(cek, wrappingKey []byte) ([]byte, error) {
 			block.Encrypt(b, b) //NOSONAR
 
 			// A = MSB(64, B) ^ t where t = (n*j)+i
-			t := uint64(n*j + i)
+			t := uint64(n)*uint64(j) + uint64(i)
 			copy(a, b[:8])
-			a[7] ^= byte(t)
-			a[6] ^= byte(t >> 8)
-			a[5] ^= byte(t >> 16)
-			a[4] ^= byte(t >> 24)
-			a[3] ^= byte(t >> 32)
-			a[2] ^= byte(t >> 40)
-			a[1] ^= byte(t >> 48)
-			a[0] ^= byte(t >> 56)
+			a[7] ^= byte(t & 0xFF)
+			a[6] ^= byte((t >> 8) & 0xFF)
+			a[5] ^= byte((t >> 16) & 0xFF)
+			a[4] ^= byte((t >> 24) & 0xFF)
+			a[3] ^= byte((t >> 32) & 0xFF)
+			a[2] ^= byte((t >> 40) & 0xFF)
+			a[1] ^= byte((t >> 48) & 0xFF)
+			a[0] ^= byte((t >> 56) & 0xFF)
 
 			// R[i] = LSB(64, B)
 			copy(r[i], b[8:])
@@ -1108,15 +1108,15 @@ func unwrapKeyAES(wrappedKey, wrappingKey []byte) ([]byte, error) {
 	for j := 5; j >= 0; j-- {
 		for i := n; i >= 1; i-- {
 			// A ^ t
-			t := uint64(n*j + i)
-			a[7] ^= byte(t)
-			a[6] ^= byte(t >> 8)
-			a[5] ^= byte(t >> 16)
-			a[4] ^= byte(t >> 24)
-			a[3] ^= byte(t >> 32)
-			a[2] ^= byte(t >> 40)
-			a[1] ^= byte(t >> 48)
-			a[0] ^= byte(t >> 56)
+			t := uint64(n)*uint64(j) + uint64(i) //#nosec G115 -- n, j, i are small loop-bounded values
+			a[7] ^= byte(t & 0xFF)
+			a[6] ^= byte((t >> 8) & 0xFF)
+			a[5] ^= byte((t >> 16) & 0xFF)
+			a[4] ^= byte((t >> 24) & 0xFF)
+			a[3] ^= byte((t >> 32) & 0xFF)
+			a[2] ^= byte((t >> 40) & 0xFF)
+			a[1] ^= byte((t >> 48) & 0xFF)
+			a[0] ^= byte((t >> 56) & 0xFF)
 
 			// B = AES^-1(K, (A ^ t) | R[i])
 			b := make([]byte, 16)

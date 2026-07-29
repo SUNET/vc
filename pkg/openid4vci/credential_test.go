@@ -73,7 +73,7 @@ func TestCredentialValidation(t *testing.T) {
 			errContains: "not found in Token Response",
 		},
 		{
-			name: "authorization_details flow without credential_identifier",
+			name: "authorization_details flow with credential_configuration_id only",
 			credentialRequest: &CredentialRequest{
 				CredentialConfigurationID: "vc+ldp",
 			},
@@ -85,7 +85,7 @@ func TestCredentialValidation(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: "credential_identifier is required",
+			errContains: "credential_configuration_id must not be used when authorization_details",
 		},
 		{
 			name: "authorization_details flow with both identifier and configuration_id",
@@ -101,16 +101,16 @@ func TestCredentialValidation(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: "credential_configuration_id must not be present",
+			errContains: "must not both be present",
 		},
 		{
-			name: "scope-based flow without credential_configuration_id",
+			name: "scope-based flow with unknown credential_identifier",
 			credentialRequest: &CredentialRequest{
 				CredentialIdentifier: "some-id",
 			},
 			authorizationDetails: nil,
 			wantErr:              true,
-			errContains:          "credential_configuration_id is required",
+			errContains:          "cannot be resolved",
 		},
 		{
 			name: "scope-based flow with both identifier and configuration_id",
@@ -120,11 +120,11 @@ func TestCredentialValidation(t *testing.T) {
 			},
 			authorizationDetails: nil,
 			wantErr:              true,
-			errContains:          "credential_identifier must not be present",
+			errContains:          "must not both be present",
 		},
 		{
 			name: "credential_identifier matches second authorization_details entry",
-			credentialRequest: &CredentialRequest{
+			credentialRequest: &CredentialRequest{ // #nosec G101
 				CredentialIdentifier: "cred-id-2",
 			},
 			authorizationDetails: []AuthorizationDetailsParameter{
@@ -368,16 +368,17 @@ func TestProofsCount(t *testing.T) {
 
 func TestResolveCredentialFormat(t *testing.T) {
 	tests := []struct {
-		name        string
-		request     *CredentialRequest
-		metadata    *CredentialIssuerMetadataParameters
-		wantFormat  string
-		wantErr     bool
-		errContains string
+		name                 string
+		request              *CredentialRequest
+		metadata             *CredentialIssuerMetadataParameters
+		authorizationDetails []AuthorizationDetailsParameter
+		wantFormat           string
+		wantErr              bool
+		errContains          string
 	}{
 		{
 			name: "resolve by credential_configuration_id",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "pid_config",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
@@ -391,22 +392,29 @@ func TestResolveCredentialFormat(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "resolve by credential_identifier",
-			request: &CredentialRequest{
+			name: "resolve by credential_identifier via authorization_details",
+			request: &CredentialRequest{ // #nosec G101
 				CredentialIdentifier: "ehic_identifier",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
 				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
-					"ehic_identifier": {
+					"ehic_config": {
 						Format: "mso_mdoc",
 					},
+				},
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "ehic_config",
+					CredentialIdentifiers:     []string{"ehic_identifier"},
 				},
 			},
 			wantFormat: "mso_mdoc",
 			wantErr:    false,
 		},
 		{
-			name: "fallback to dc+sd-jwt for unknown credential_identifier",
+			name: "error for unknown credential_identifier",
 			request: &CredentialRequest{
 				CredentialIdentifier: "unknown_identifier",
 			},
@@ -417,12 +425,19 @@ func TestResolveCredentialFormat(t *testing.T) {
 					},
 				},
 			},
-			wantFormat: "dc+sd-jwt",
-			wantErr:    false,
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                      "openid_credential",
+					CredentialConfigurationID: "pid_config",
+					CredentialIdentifiers:     []string{"other_identifier"},
+				},
+			},
+			wantErr:     true,
+			errContains: "could not resolve credential_identifier",
 		},
 		{
 			name: "error when metadata is nil",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "pid_config",
 			},
 			metadata:    nil,
@@ -461,7 +476,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		},
 		{
 			name: "resolve vc+sd-jwt format",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "vc_config",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
@@ -476,7 +491,7 @@ func TestResolveCredentialFormat(t *testing.T) {
 		},
 		{
 			name: "resolve ldp_vc format",
-			request: &CredentialRequest{
+			request: &CredentialRequest{ // #nosec G101
 				CredentialConfigurationID: "ldp_config",
 			},
 			metadata: &CredentialIssuerMetadataParameters{
@@ -489,11 +504,30 @@ func TestResolveCredentialFormat(t *testing.T) {
 			wantFormat: "ldp_vc",
 			wantErr:    false,
 		},
+		{
+			name: "resolve by credential_identifier via format-based authorization_details",
+			request: &CredentialRequest{
+				CredentialIdentifier: "format_based_id",
+			},
+			metadata: &CredentialIssuerMetadataParameters{
+				CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{},
+			},
+			authorizationDetails: []AuthorizationDetailsParameter{
+				{
+					Type:                  "openid_credential",
+					Format:                "vc+sd-jwt",
+					VCT:                   "VerifiablePortableDocumentA1",
+					CredentialIdentifiers: []string{"format_based_id"},
+				},
+			},
+			wantFormat: "vc+sd-jwt",
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			format, err := tt.request.ResolveCredentialFormat(tt.metadata)
+			format, err := tt.request.ResolveCredentialFormatWithAuthDetails(tt.metadata, tt.authorizationDetails)
 
 			if tt.wantErr {
 				assert.Error(t, err)

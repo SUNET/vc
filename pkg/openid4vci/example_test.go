@@ -9,7 +9,7 @@ import (
 )
 
 func ExampleCredentialOfferParameters_Marshal() {
-	offer := &openid4vci.CredentialOfferParameters{
+	offer := &openid4vci.CredentialOfferParameters{ // #nosec G101
 		CredentialIssuer:           "https://issuer.example.com",
 		CredentialConfigurationIDs: []string{"UniversityDegree_LDP_VC"},
 		Grants: map[string]any{
@@ -48,7 +48,7 @@ func ExampleError_Error() {
 
 	fmt.Println(err.Error())
 	// Output:
-	// invalid_proof
+	// invalid_proof: proof JWT is expired
 }
 
 func ExampleStatusCode() {
@@ -84,7 +84,7 @@ func ExampleStatusCode_badRequest() {
 }
 
 func ExampleCredentialOfferParameters_CredentialOffer() {
-	offer := &openid4vci.CredentialOfferParameters{
+	offer := &openid4vci.CredentialOfferParameters{ // #nosec G101
 		CredentialIssuer:           "https://issuer.example.com",
 		CredentialConfigurationIDs: []string{"IdentityCredential"},
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"os"
 	"testing"
+
 	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
@@ -54,7 +55,7 @@ func TestParseSigningKey(t *testing.T) {
 		keyPath := createTestRSAKey(t)
 
 		// Verify the key file has the expected PEM block type
-		keyBytes, err := os.ReadFile(keyPath)
+		keyBytes, err := os.ReadFile(keyPath) // #nosec G304
 		require.NoError(t, err)
 		block, _ := pem.Decode(keyBytes)
 		require.NotNil(t, block)
@@ -71,7 +72,7 @@ func TestParseSigningKey(t *testing.T) {
 		keyPath := createTestRSAKeyPKCS8(t)
 
 		// Verify the key file has the expected PEM block type
-		keyBytes, err := os.ReadFile(keyPath)
+		keyBytes, err := os.ReadFile(keyPath) // #nosec G304
 		require.NoError(t, err)
 		block, _ := pem.Decode(keyBytes)
 		require.NotNil(t, block)

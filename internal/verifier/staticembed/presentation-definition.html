@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifier</title>
+    <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "alpinejs": "/static/alpinejs.esm.min.js",
+            "valibot": "/static/valibot.min.js"
+        }
+    }
+    </script>
+    <script src="/static/presentation-definition.js" type="module"></script>
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+</head>
+<body>
+    <section class="section" x-data="app">
+        <div class="container" style="max-width: 500px;">
+            <h1 class="title has-text-weight-bold is-size-2 is-flex is-justify-content-center is-align-items-center is-gap-2" x-ref="title">
+                <svg width="40" height="40" aria-label="SUNET">
+                    <image href="/static/logo.png" width="40" height="40"></image>
+                </svg>
+                <span>Verifier</span>
+            </h1>
+            <template x-if="error">
+                <div class="notification is-danger">
+                    <p x-text="error"></p>
+                </div>
+            </template>
+            <template x-if="loading">
+                <div class="box container">
+                    <div class="vc-loader">
+                        <span class="loader"></span>
+                    </div>
+                </div>
+            </template>
+            <template x-if="!loading && credentialsList && !credentialAttributes && !presentationDefinition">
+                <div class="box container">
+                    <h2 class="title is-size-6">Preconfigured presentation requests</h2>
+                    <div class="grid">
+                        <template x-for="(prePD, key) in predefinedPresentationDefinitions">
+                        <button class="cell button is-light" @click="handleSelectPredefinedPresentationDefinition(key)" x-text="prePD.label"></button>
+                        </template>
+                    </div>
+                    <hr>
+                    <h2 class="title is-size-6">Create custom presentation requests</h2>
+                    <form x-ref="credentialSelectionForm" @submit.prevent="handleCredentialSelectionForm">
+                        <div class="field block">
+                            <div class="select is-fullwidth">
+                                <select name="credential" required>
+                                    <option disabled selected>Choose type of credential to verify</option>
+                                    <template x-for="[id, credAttrs] in Object.entries(credentialsList)">
+                                        <option :value="id" x-text="credAttrs.vct">
+                                        </option>
+                                    </template> 
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mt-5 is-flex is-justify-content-flex-end is-align-items-center">
+                            <input type="submit" value="Next" class="button is-info">
+                        </div>
+                    </form>
+                </div>
+            </template>
+            <template x-if="!loading && credentialsList && credentialAttributes && !presentationDefinition">
+                <div class="box container">
+                    <form x-ref="attributesSelectionForm" @submit.prevent="handleAttributesSelectionForm">
+                        <div class="field block">
+                            <p class="title is-size-6">Fields</p>
+                            <div class="buttons">
+                                <button class="button is-small is-info is-light" @click.prevent="handleAttributesToggle('all')">Select all</button>
+                                <button class="button is-small is-info is-light" @click.prevent="handleAttributesToggle('none')">Select none</button>
+                            </div>
+                            <div class="vc-attributes-list">
+                                <ul x-ref="fieldsList">
+                                    <template x-for="node of credentialAttributes.claimTree">
+                                        <li>
+                                            <template x-if="node.children.length === 0">
+                                                <label class="checkbox">
+                                                    <input type="checkbox" name="attribute[]" :value="node.label" />
+                                                    <span x-text="node.label"></span>
+                                                </label>
+                                            </template>
+                                            <template x-if="node.children.length > 0">
+                                                <details class="vc-claim-group" open>
+                                                    <summary class="vc-claim-group-summary">
+                                                        <label class="checkbox" @click.stop>
+                                                            <input type="checkbox" 
+                                                                @change="$el.closest('.vc-claim-group').querySelectorAll(':scope > ul input[type=checkbox]').forEach(cb => cb.checked = $el.checked)" />
+                                                            <strong x-text="node.label"></strong>
+                                                        </label>
+                                                    </summary>
+                                                    <ul class="vc-claim-children">
+                                                        <template x-for="child of node.children">
+                                                            <li>
+                                                                <label class="checkbox">
+                                                                    <input type="checkbox" name="attribute[]" :value="child.label" />
+                                                                    <span x-text="child.label"></span>
+                                                                </label>
+                                                            </li>
+                                                        </template>
+                                                    </ul>
+                                                </details>
+                                            </template>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="mt-5 is-flex is-flex-direction-row-reverse is-justify-content-space-between is-align-items-center">
+                            <input type="submit" value="Create request" class="button is-info">
+                            <button class="button is-small is-danger is-outlined" @click.prevent="handleResetCancel">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </template>
+            <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition">
+                <div class="box container">
+                    <div class="block is-flex is-justify-content-center">
+                        <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="" />
+                    </div>
+                    <div class="block">
+                        <pre class="has-border-radius" x-text="presentationDefinition.authorization_request"></pre>
+                    </div>
+                    <div class="block buttons is-centered">
+                        <template x-for="[label, uri] in Object.entries(redirectUris)">
+                            <a :href="uri" class="button" x-text="label" @click="handleWalletClick"></a>
+                        </template>
+                    </div>
+                    <template x-if="dcqlQuery">
+                        <div class="block">
+                            <details class="vc-data-block-details">
+                                <summary>View DCQL Query</summary>
+                                <pre><code x-text="JSON.stringify(dcqlQuery, null, 2)"></code></pre>
+                            </details>
+                        </div>
+                    </template>
+                    <div class="mt-5 is-flex is-justify-content-flex-start is-align-items-center">
+                        <button class="button is-small is-danger is-outlined" @click.prevent="handleResetCancel">Cancel</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </section>
+</body>
+</html>

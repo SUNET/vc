@@ -1,85 +1,95 @@
 package jsonpointer
 
-import (
-	"reflect"
-	"strconv"
-)
+import "slices"
 
-// Path represents a JSON Pointer path as array of string tokens.
-type Path []string
-
-// internalToken represents a single token in a JSON Pointer path with precomputed data.
-// This is used internally for performance optimization, not exposed in the API.
-type internalToken struct {
-	key   string // original key string
-	index int    // precomputed array index, -1 if not a valid array index
+// Pointer is an immutable RFC 6901 JSON Pointer.
+type Pointer struct {
+	tokens []string
 }
 
-// Reference represents a found reference with context.
+// Root returns the root pointer.
+func Root() Pointer {
+	return Pointer{}
+}
+
+// FromTokens builds a pointer from raw, unescaped token strings.
+func FromTokens(tokens ...string) Pointer {
+	return newPointer(tokens)
+}
+
+func newPointer(tokens []string) Pointer {
+	if len(tokens) == 0 {
+		return Root()
+	}
+	return Pointer{tokens: slices.Clone(tokens)}
+}
+
+// String returns the canonical RFC 6901 string form.
+func (p Pointer) String() string {
+	return formatPointer(p.tokens)
+}
+
+// Tokens returns a copy of the pointer tokens.
+func (p Pointer) Tokens() []string {
+	return slices.Clone(p.tokens)
+}
+
+// IsRoot reports whether p points at the root value.
+func (p Pointer) IsRoot() bool {
+	return len(p.tokens) == 0
+}
+
+// Parent returns the parent pointer.
+func (p Pointer) Parent() (Pointer, error) {
+	if p.IsRoot() {
+		return Pointer{}, ErrNoParent
+	}
+	return newPointer(p.tokens[:len(p.tokens)-1]), nil
+}
+
+// Child returns a new pointer with tokens appended.
+func (p Pointer) Child(tokens ...string) Pointer {
+	combined := slices.Concat(p.tokens, tokens)
+	return newPointer(combined)
+}
+
+// Value resolves p against doc and returns the value.
+func (p Pointer) Value(doc any) (any, error) {
+	return resolveValue(doc, p)
+}
+
+// Reference resolves p against doc and returns value plus parent context.
+func (p Pointer) Reference(doc any) (Reference, error) {
+	return resolveReference(doc, p)
+}
+
+// Reference is a resolved value with its parent traversal context.
 type Reference struct {
-	Val any    `json:"val"`
-	Obj any    `json:"obj,omitempty"`
-	Key string `json:"key,omitempty"`
+	value   any
+	parent  any
+	token   string
+	pointer Pointer
 }
 
-// ArrayReference represents a reference to an array element.
-// TypeScript original code:
-//
-//	export interface ArrayReference<T = unknown> {
-//	  readonly val: undefined | T;
-//	  readonly obj: T[];
-//	  readonly key: number;
-//	}
-type ArrayReference[T any] struct {
-	// Use pointer for undefined | T semantics (nil = undefined)
-	Val *T  `json:"val"`
-	Obj []T `json:"obj"`
-	Key int `json:"key"` // Numeric index for array access
+// Value returns the resolved value.
+func (r Reference) Value() any {
+	return r.value
 }
 
-// ObjectReference represents a reference to an object property.
-// TypeScript original code:
-//
-//	export interface ObjectReference<T = unknown> {
-//	  readonly val: T;
-//	  readonly obj: Record<string, T>;
-//	  readonly key: string;
-//	}
-type ObjectReference[T any] struct {
-	Val T            `json:"val"`
-	Obj map[string]T `json:"obj"`
-	Key string       `json:"key"`
-}
-
-// IsArrayReference checks if a Reference points to an array element.
-// TypeScript original code:
-// export const isArrayReference = <T = unknown>(ref: Reference): ref is ArrayReference<T> =>
-//
-//	isArray(ref.obj) && typeof ref.key === 'number';
-func IsArrayReference(ref Reference) bool {
-	if ref.Obj == nil || ref.Key == "" {
-		return false
+// Parent returns the parent container when the reference is not the root.
+func (r Reference) Parent() (any, bool) {
+	if r.pointer.IsRoot() {
+		return nil, false
 	}
-
-	objType := reflect.TypeOf(ref.Obj)
-	if objType.Kind() != reflect.Slice {
-		return false
-	}
-
-	_, err := strconv.Atoi(ref.Key)
-	return err == nil
+	return r.parent, true
 }
 
-// IsObjectReference checks if a Reference points to an object property.
-// TypeScript original code:
-// export const isObjectReference = <T = unknown>(ref: Reference): ref is ObjectReference<T> =>
-//
-//	typeof ref.obj === 'object' && typeof ref.key === 'string';
-func IsObjectReference(ref Reference) bool {
-	if ref.Obj == nil || ref.Key == "" {
-		return false
-	}
+// Token returns the final pointer token used to reach the value.
+func (r Reference) Token() string {
+	return r.token
+}
 
-	objType := reflect.TypeOf(ref.Obj)
-	return objType.Kind() == reflect.Map && objType.Key().Kind() == reflect.String
+// Pointer returns the pointer that produced the reference.
+func (r Reference) Pointer() Pointer {
+	return r.pointer
 }

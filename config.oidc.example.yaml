@@ -2,79 +2,114 @@
 # This file demonstrates how to configure OpenID Connect authentication for
 # credential issuance via the standard OID4VCI pipeline.
 #
-# To issue credentials using OIDC authentication, set auth_method: oidc on
-# the credential_constructor entry and ensure the credential_mappings key
-# under apigw.oidcrp matches the credential_constructor key.
+# OIDC authentication requires two parts:
+#   1. data_sources — which credentials use OIDC and how (assertion, datastore, or external_api)
+#   2. auth_providers.oidc — the OIDC RP configuration
+#
+# attribute_mappings is optional for OIDC. When omitted, passthrough mappings
+# are auto-generated from the VCTM claims. Only specify attribute_mappings when
+# OIDC claim names differ from credential claim names.
 
 common:
-  credential_constructor:
-    # Example: issue PID credentials after OIDC authentication
+  mongo:
+    uri: "mongodb://mongo:27017"
+  production: false
+
+  credential_metadata:
     pid:
-      vctm_file_path: "/metadata/vctm_pid_arf_1_8.json"
-      auth_method: oidc          # <-- triggers OIDC redirect during OID4VCI flow
+      vctm_file_path: "/metadata/vctm_pid.json"
       format: "dc+sd-jwt"
 
-  mongo:
-    uri: "mongodb://mongo:27017/vc"
-
-apigw:
-  public_url: "https://issuer.example.org"
-
+issuer:
+  issuer_url: "http://apigw.vc.docker:8080"
   api_server:
     addr: :8080
-
-  oidcrp:
-    enable: true
-
-    # OIDC Provider issuer URL (for discovery via .well-known/openid-configuration)
-    issuer_url: "https://accounts.google.com"
-
-    # Callback URL where the OP sends the authorization response
-    redirect_uri: "https://issuer.example.org/oidcrp/callback"
-
-    # Client registration – choose preconfigured or dynamic (not both)
-    registration:
-      preconfigured:
-        enable: true
-        client_id: "${OIDC_CLIENT_ID}"
-        client_secret: "${OIDC_CLIENT_SECRET}"
-
-    # Scopes to request (openid is mandatory)
-    scopes:
-      - openid
-      - profile
-      - email
-
-    # Session duration in seconds (default: 300)
-    session_duration: 300
-
-    # Credential mappings – map OIDC claims to credential claims.
-    # The map key MUST match a credential_constructor key above.
-    credential_mappings:
-      pid:
-        credential_config_id: "urn:eudi:pid:arf-1.8:1"
-        attributes:
-          given_name:
-            claim: "given_name"
-            required: true
-          family_name:
-            claim: "family_name"
-            required: true
-          email:
-            claim: "email"
-            required: false
-          sub:
-            claim: "subject_id"
-            required: true
-            transform: "lowercase"
-
-issuer:
-  api_server:
-    addr: :8090
-
+  grpc_server:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
+  jwt_attribute:
+    issuer: https://issuer.sunet.se
+    enable_not_before: true
+    valid_duration: 3600
+    verifiable_credential_type: "https://credential.sunet.se/identity_credential"
+
+apigw:
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  api_server:
+    addr: :8080
+  public_url: "https://issuer.example.org"
+  registry_public_url: "http://registry.vc.docker:8080"
+  issuer_client:
+    addr: issuer.vc.docker:8090
+  registry_client:
+    addr: registry.vc.docker:8090
+
+  # ── Data sources ─────────────────────────────────────────────────
+  # Each credential type goes under one of three data source categories.
+  # All can use the same auth_provider (oidc in this example).
+  data_sources:
+    # Assertion: credential data comes directly from the OIDC userinfo/token claims.
+    # No database or API call needed — the claims ARE the credential data.
+    assertion:
+      scopes:
+        pid:
+          auth_provider: oidc
+
+    # Datastore: credential data is pre-loaded in MongoDB by an authentic source.
+    # OIDC is used only to identify the user; auth_claims specify which OIDC
+    # claims to use for the datastore lookup.
+    datastore:
+      scopes:
+        ehic:
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birthdate"]
+
+    # External API: credential data is fetched from a remote API at issuance time.
+    # OIDC identifies the user; the remote API provides the credential data.
+    external_api:
+      scopes:
+        diploma:
+          auth_provider: oidc
+          remote: ladok
+
+  # ── Auth providers ───────────────────────────────────────────────
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "https://accounts.google.com"
+      redirect_uri: "https://issuer.example.org/oidcrp/callback"
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "${OIDC_CLIENT_ID}"
+          client_secret: "${OIDC_CLIENT_SECRET}"
+
+      # attribute_mapping is optional. When omitted, OIDC claims pass through
+      # as-is (standard claim names already match canonical names).
+      # Only needed when OIDC claim names differ from canonical claim names:
+      #
+      # attribute_mapping:
+      #   sub:                          # OIDC claim name
+      #     claim: "subject_id"         # canonical claim name (if different)
+      #     required: true
+      #     transform: "lowercase"
+
+  # ── Delivery ─────────────────────────────────────────────────────
+  delivery:
+    openid4vci:
+      token_endpoint: "https://issuer.example.org/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
 
 # Common OIDC Providers Reference:
 # ------------------------------------------

@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+
 	"github.com/SUNET/vc/internal/registry/apiv1"
 	"github.com/SUNET/vc/internal/registry/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
@@ -41,7 +42,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 		apiv1:  api,
 		gin:    gin.New(),
 		tracer: tracer,
-		server: &http.Server{}, // Timeouts and other defaults are set by httphelpers.Server.Default
+		server: &http.Server{}, //#nosec G112 -- ReadHeaderTimeout set by httphelpers.Server.Default
 	}
 
 	var err error
@@ -50,7 +51,7 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 		return nil, err
 	}
 
-	s.statusListsRateLimiter = s.httpHelpers.Middleware.NewRateLimiter(rateLimitRequestsPerMinute)
+	s.statusListsRateLimiter = httphelpers.NewRateLimiter(cacheService.RateLimit, rateLimitRequestsPerMinute)
 
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Registry.APIServer)
 	if err != nil {

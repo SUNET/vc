@@ -1,49 +1,14 @@
 {
   "100": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_100",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_100"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_100",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Mirren",
-        "given_name": "Helen",
-        "birth_date": "1996-01-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_100"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -424,54 +389,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "101": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_101",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_101"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_101",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Momoa",
-        "given_name": "Jason",
-        "birth_date": "1983-08-20",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_101"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -852,54 +781,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "102": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_102",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_102"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_102",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Oldman",
-        "given_name": "Gary",
-        "birth_date": "1988-09-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_102"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -1280,54 +1173,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "103": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_103",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_103"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_103",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pacino",
-        "given_name": "Al",
-        "birth_date": "1984-06-11",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_103"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -1708,54 +1565,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "104": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_104",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_104"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_104",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pfeiffer",
-        "given_name": "Michelle",
-        "birth_date": "1992-12-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_104"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -2136,54 +1957,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "105": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_105",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_105"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_105",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Phoenix",
-        "given_name": "Joaquin",
-        "birth_date": "1979-10-16",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_105"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -2564,54 +2349,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "106": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_106",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_106"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_106",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pitt",
-        "given_name": "Brad",
-        "birth_date": "1974-12-07",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_106"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -2992,54 +2741,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "107": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_107",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_107"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_107",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Portman",
-        "given_name": "Natalie",
-        "birth_date": "2005-09-01",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_107"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -3420,54 +3133,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "108": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_108",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_108"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_108",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Pratt",
-        "given_name": "Chris",
-        "birth_date": "1974-01-07",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_108"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -3848,54 +3525,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "109": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_109",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_109"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_109",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Reeves",
-        "given_name": "Keanu",
-        "birth_date": "1985-11-26",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_109"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -4276,54 +3917,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "110": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_110",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_110"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_110",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Reilly",
-        "given_name": "John C.",
-        "birth_date": "2005-11-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_110"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -4704,54 +4309,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "111": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_111",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_111"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_111",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Reynolds",
-        "given_name": "Ryan",
-        "birth_date": "1988-12-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_111"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -5132,54 +4701,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "112": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_112",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_112"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_112",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Robbie",
-        "given_name": "Margot",
-        "birth_date": "1991-02-14",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_112"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -5560,54 +5093,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "113": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_113",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_113"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_113",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Roberts",
-        "given_name": "Julia",
-        "birth_date": "1982-07-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_113"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -5988,54 +5485,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "114": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_114",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_114"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_114",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Rudd",
-        "given_name": "Paul",
-        "birth_date": "2006-03-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_114"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -6416,54 +5877,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "115": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_115",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_115"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_115",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Smith",
-        "given_name": "Will",
-        "birth_date": "1992-03-13",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_115"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -6844,54 +6269,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "116": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_116",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_116"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_116",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Spencer",
-        "given_name": "Octavia",
-        "birth_date": "1997-11-18",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_116"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -7272,54 +6661,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "117": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_117",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_117"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_117",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Stewart",
-        "given_name": "Kristen",
-        "birth_date": "1993-07-17",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_117"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -7700,54 +7053,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "118": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_118",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_118"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_118",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Stone",
-        "given_name": "Emma",
-        "birth_date": "1985-01-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_118"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -8128,54 +7445,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "119": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_119",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_119"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_119",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Streep",
-        "given_name": "Meryl",
-        "birth_date": "2005-07-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_119"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -8556,54 +7837,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "120": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_120",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_120"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_120",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Swinton",
-        "given_name": "Tilda",
-        "birth_date": "1984-04-14",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_120"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -8984,54 +8229,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "121": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_121",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_121"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_121",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Tatum",
-        "given_name": "Channing",
-        "birth_date": "2006-10-22",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_121"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -9412,54 +8621,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "122": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_122",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_122"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_122",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Theron",
-        "given_name": "Charlize",
-        "birth_date": "1988-12-11",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_122"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -9840,54 +9013,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "123": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_123",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_123"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_123",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Vaughn",
-        "given_name": "Vince",
-        "birth_date": "1988-02-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_123"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -10268,54 +9405,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "124": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_124",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_124"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_124",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Vikander",
-        "given_name": "Alicia",
-        "birth_date": "1985-11-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_124"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -10696,54 +9797,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "125": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_125",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_125"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_125",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Waltz",
-        "given_name": "Christoph",
-        "birth_date": "1986-03-23",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_125"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -11124,54 +10189,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "126": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_126",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_126"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_126",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Washington",
-        "given_name": "Denzel",
-        "birth_date": "1981-10-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_126"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -11552,54 +10581,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "127": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_127",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_127"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_127",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Watts",
-        "given_name": "Naomi",
-        "birth_date": "1990-07-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_127"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -11980,54 +10973,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "128": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_128",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_128"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_128",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Williams",
-        "given_name": "Michelle",
-        "birth_date": "1992-03-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_128"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -12408,54 +11365,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "129": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_129",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_129"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_129",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Wilson",
-        "given_name": "Owen",
-        "birth_date": "2007-09-11",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_129"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -12836,54 +11757,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "130": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_130",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_130"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_130",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Winslet",
-        "given_name": "Kate",
-        "birth_date": "1986-06-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_130"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -13264,54 +12149,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "131": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_131",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_131"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_131",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Witherspoon",
-        "given_name": "Reese",
-        "birth_date": "1987-04-02",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_131"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -13692,54 +12541,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "132": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_132",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_132"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_132",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Adams",
-        "given_name": "Amy",
-        "birth_date": "1990-10-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_132"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -14120,54 +12933,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "133": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_133",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_133"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_133",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Affleck",
-        "given_name": "Ben",
-        "birth_date": "1973-07-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_133"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -14548,54 +13325,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "134": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_134",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_134"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_134",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Bancroft",
-        "given_name": "Anne",
-        "birth_date": "1980-12-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_134"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -14976,54 +13717,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "135": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_135",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_135"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_135",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Berry",
-        "given_name": "Halle",
-        "birth_date": "1989-08-25",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_135"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -15404,54 +14109,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "136": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_136",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_136"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_136",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Biel",
-        "given_name": "Jessica",
-        "birth_date": "1988-09-12",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_136"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -15832,54 +14501,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "137": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_137",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_137"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_137",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Blanchett",
-        "given_name": "Cate",
-        "birth_date": "2006-11-08",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_137"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -16260,54 +14893,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "138": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_138",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_138"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_138",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Blunt",
-        "given_name": "Emily",
-        "birth_date": "2000-08-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_138"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -16688,54 +15285,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "139": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_139",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_139"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_139",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Boyega",
-        "given_name": "John",
-        "birth_date": "2005-12-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_139"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -17116,54 +15677,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "140": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_140",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_140"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_140",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Bullock",
-        "given_name": "Sandra",
-        "birth_date": "1984-09-08",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_140"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -17544,54 +16069,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "141": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_141",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_141"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_141",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Cage",
-        "given_name": "Nicolas",
-        "birth_date": "2005-05-13",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_141"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -17972,54 +16461,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "142": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_142",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_142"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_142",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Carell",
-        "given_name": "Steve",
-        "birth_date": "2005-06-04",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_142"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -18400,54 +16853,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "143": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_143",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_143"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_143",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Chastain",
-        "given_name": "Jessica",
-        "birth_date": "1982-10-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_143"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -18828,54 +17245,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "144": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_144",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_144"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_144",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Close",
-        "given_name": "Glenn",
-        "birth_date": "1981-02-05",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_144"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -19256,54 +17637,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "145": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_145",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_145"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_145",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Craig",
-        "given_name": "Daniel",
-        "birth_date": "1988-10-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_145"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -19684,54 +18029,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "146": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_146",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_146"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_146",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Cruz",
-        "given_name": "Penélope",
-        "birth_date": "1994-05-22",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_146"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -20112,54 +18421,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "147": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_147",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_147"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_147",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Cumberbatch",
-        "given_name": "Benedict",
-        "birth_date": "1987-10-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_147"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -20540,54 +18813,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "148": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_148",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_148"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_148",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Damon",
-        "given_name": "Matt",
-        "birth_date": "1971-07-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_148"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -20968,54 +19205,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "149": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_149",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_149"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_149",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Davis",
-        "given_name": "Viola",
-        "birth_date": "2007-04-20",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_149"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -21396,54 +19597,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "70": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_70",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_70"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_70",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "De Niro",
-        "given_name": "Robert",
-        "birth_date": "1982-01-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_70"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -21824,54 +19989,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "71": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_71",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_71"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_71",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Dench",
-        "given_name": "Judi",
-        "birth_date": "1995-09-04",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_71"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -22252,54 +20381,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "72": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_72",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_72"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_72",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Depp",
-        "given_name": "Johnny",
-        "birth_date": "1985-12-03",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_72"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -22680,54 +20773,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "73": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_73",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_73"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_73",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "DiCaprio",
-        "given_name": "Leonardo",
-        "birth_date": "1972-08-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_73"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -23108,54 +21165,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "74": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_74",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_74"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_74",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Downey Jr.",
-        "given_name": "Robert",
-        "birth_date": "1983-05-12",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_74"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -23536,54 +21557,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "75": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_75",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_75"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_75",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Driver",
-        "given_name": "Adam",
-        "birth_date": "1988-09-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_75"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -23964,54 +21949,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "76": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_76",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_76"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_76",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Elba",
-        "given_name": "Idris",
-        "birth_date": "1980-09-02",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_76"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -24392,54 +22341,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "77": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_77",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_77"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_77",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Farrell",
-        "given_name": "Colin",
-        "birth_date": "1977-04-25",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_77"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -24820,54 +22733,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "78": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_78",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_78"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_78",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Fassbender",
-        "given_name": "Michael",
-        "birth_date": "1992-04-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_78"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -25248,54 +23125,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "79": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_79",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_79"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_79",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Foster",
-        "given_name": "Jodie",
-        "birth_date": "1991-10-30",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_79"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -25676,54 +23517,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "80": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_80",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_80"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_80",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Foxx",
-        "given_name": "Jamie",
-        "birth_date": "1977-07-03",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_80"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -26104,54 +23909,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "81": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_81",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_81"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_81",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Freeman",
-        "given_name": "Morgan",
-        "birth_date": "1990-08-24",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_81"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -26532,54 +24301,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "82": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_82",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_82"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_82",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Glover",
-        "given_name": "Donald",
-        "birth_date": "2007-03-17",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_82"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -26960,54 +24693,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "83": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_83",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_83"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_83",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hanks",
-        "given_name": "Tom",
-        "birth_date": "1989-12-04",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_83"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -27388,54 +25085,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "84": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_84",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_84"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_84",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Saldana",
-        "given_name": "Zoe",
-        "birth_date": "1981-11-23",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_84"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -27816,54 +25477,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "85": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_85",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_85"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_85",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hathaway",
-        "given_name": "Anne",
-        "birth_date": "1987-05-06",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_85"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -28244,54 +25869,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "86": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_86",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_86"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_86",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hayek",
-        "given_name": "Salma",
-        "birth_date": "1983-08-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_86"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -28672,54 +26261,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "87": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_87",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_87"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_87",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hemsworth",
-        "given_name": "Chris",
-        "birth_date": "1992-01-19",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_87"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -29100,54 +26653,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "88": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_88",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_88"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_88",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Hopkins",
-        "given_name": "Anthony",
-        "birth_date": "2006-08-16",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_88"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -29528,54 +27045,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "89": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_89",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_89"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_89",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Jackman",
-        "given_name": "Hugh",
-        "birth_date": "1972-06-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_89"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -29956,54 +27437,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "90": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_90",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_90"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_90",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Jackson",
-        "given_name": "Samuel L.",
-        "birth_date": "2007-01-27",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_90"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -30384,54 +27829,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "91": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_91",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_91"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_91",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Johansson",
-        "given_name": "Scarlett",
-        "birth_date": "1980-05-12",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_91"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -30812,54 +28221,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "92": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_92",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_92"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_92",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Johnson",
-        "given_name": "Dakota",
-        "birth_date": "1999-04-21",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_92"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -31240,54 +28613,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "93": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_93",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_93"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_93",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Kidman",
-        "given_name": "Nicole",
-        "birth_date": "1983-03-15",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_93"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -31668,54 +29005,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "94": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_94",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_94"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_94",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Kirby",
-        "given_name": "Vanessa",
-        "birth_date": "1993-06-28",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_94"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -32096,54 +29397,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "95": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_95",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_95"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_95",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Kunis",
-        "given_name": "Mila",
-        "birth_date": "1989-01-01",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_95"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -32524,54 +29789,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "96": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_96",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_96"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_96",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "Lawrence",
-        "given_name": "Jennifer",
-        "birth_date": "2006-02-14",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_96"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -32952,54 +30181,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "97": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_97",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_97"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_97",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "McAdams",
-        "given_name": "Rachel",
-        "birth_date": "1998-06-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_97"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -33380,54 +30573,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "98": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_98",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_98"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_98",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "McConaughey",
-        "given_name": "Matthew",
-        "birth_date": "1977-09-09",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_98"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -33808,54 +30965,18 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   },
   "99": {
     "meta": {
-      "authentic_source": "DIPLOMA:00001",
-      "document_version": "1.0.0",
-      "vct": "urn:eudi:diploma:1",
+      "authentic_source": "Ladok",
       "scope": "diploma",
       "document_id": "document_id_diploma_99",
-      "real_data": false,
-      "collect": {
-        "id": "collect_id_diploma_99"
-      },
-      "revocation": {
-        "reference": {}
-      }
+      "created_at": "0001-01-01T00:00:00Z"
     },
-    "identities": [
-      {
-        "authentic_source_person_id": "authentic_source_person_id_99",
-        "schema": {
-          "name": "DefaultSchema"
-        },
-        "family_name": "McGregor",
-        "given_name": "Ewan",
-        "birth_date": "1991-08-29",
-        "birth_place": "Tulegatan 11",
-        "nationality": [
-          "SE"
-        ],
-        "issuing_authority": "SUNET",
-        "issuing_country": "SE",
-        "expiry_date": "2033-01-01"
-      }
+    "identity_mapping_ids": [
+      "authentic_source_person_id_99"
     ],
-    "document_display": {
-      "version": "1.0.0",
-      "type": "secure",
-      "description_structured": {
-        "en": {
-          "description": "Diploma"
-        },
-        "sv": {
-          "beskrivning": "Diploma"
-        }
-      }
-    },
     "document_data": {
       "@context": [
         "https://www.w3.org/2018/credentials/v1",
@@ -34236,7 +31357,6 @@
         "EuropeanDigitalCredential"
       ],
       "validFrom": "2025-03-25T07:52:38"
-    },
-    "document_data_version": "1.0.0"
+    }
   }
 }

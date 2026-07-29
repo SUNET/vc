@@ -3,10 +3,13 @@ package httpserver
 import (
 	"context"
 	"errors"
+	"html/template"
 	"net/http"
 	"strings"
+
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/codes"
@@ -87,7 +90,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 	templateData := gin.H{
 		"SessionID":        response.SessionID,
 		"QRCodeData":       response.QRCodeData,
-		"DeepLinkURL":      response.DeepLinkURL,
+		"DeepLinkURL":      template.URL(response.DeepLinkURL),
 		"PollURL":          response.PollURL,
 		"WalletLinks":      response.WalletLinks,
 		"PreferredFormats": response.PreferredFormats,
@@ -106,6 +109,10 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 				"Enable":          s.cfg.Verifier.DigitalCredentials.Enable,
 				"AllowQRFallback": model.BoolVal(s.cfg.Verifier.DigitalCredentials.AllowQRFallback, true),
 				"DeepLinkScheme":  s.cfg.Verifier.DigitalCredentials.DeepLinkScheme,
+			},
+			"CredentialDisplay": gin.H{
+				"Enable":              s.cfg.Verifier.CredentialDisplay.Enable,
+				"RequireConfirmation": s.cfg.Verifier.CredentialDisplay.RequireConfirmation,
 			},
 		},
 	}
@@ -179,18 +186,17 @@ func (s *Service) endpointUserInfo(ctx context.Context, c *gin.Context) (any, er
 	request := &apiv1.UserInfoRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
+		s.log.Info("UserInfo binding failed", "error", err)
 		c.Header("WWW-Authenticate", "Bearer")
-		c.AbortWithStatus(http.StatusUnauthorized)
-		return nil, nil
+		return nil, oauth2.NewOAuthError("invalid_request", "missing or invalid Authorization header", http.StatusUnauthorized)
 	}
 
-	// Extract bearer token from Authorization header
+	// Extract bearer token from Authorization header (RFC 7235: scheme is case-insensitive)
 	parts := strings.SplitN(request.Authorization, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 		span.SetStatus(codes.Error, "Invalid Authorization header")
 		c.Header("WWW-Authenticate", "Bearer")
-		c.AbortWithStatus(http.StatusUnauthorized)
-		return nil, nil
+		return nil, oauth2.NewOAuthError("invalid_request", "invalid Authorization header format", http.StatusUnauthorized)
 	}
 	request.AccessToken = parts[1]
 
@@ -199,14 +205,12 @@ func (s *Service) endpointUserInfo(ctx context.Context, c *gin.Context) (any, er
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "UserInfo request failed")
 
-		if err == apiv1.ErrInvalidGrant {
+		if errors.Is(err, apiv1.ErrInvalidGrant) {
 			c.Header("WWW-Authenticate", "Bearer error=\"invalid_token\"")
-			c.AbortWithStatus(http.StatusUnauthorized)
-			return nil, nil
+			return nil, oauth2.NewOAuthError("invalid_token", "access token is invalid or expired", http.StatusUnauthorized)
 		}
 
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return nil, nil
+		return nil, err
 	}
 
 	c.Header("Content-Type", "application/json")

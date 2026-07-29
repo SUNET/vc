@@ -232,7 +232,7 @@ func TestAgent_Send(t *testing.T) {
 		responseBytes, _ := response.MarshalJSON()
 		w.Header().Set("Content-Type", didcomm.MediaTypePlaintext)
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseBytes)
+		w.Write(responseBytes) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -403,7 +403,7 @@ func TestAgent_SendTrustPing(t *testing.T) {
 
 		w.Header().Set("Content-Type", didcomm.MediaTypePlaintext)
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseBytes)
+		w.Write(responseBytes) // #nosec G104
 	}))
 	defer server.Close()
 
@@ -453,7 +453,7 @@ func TestAgent_DiscoverFeatures(t *testing.T) {
 
 		w.Header().Set("Content-Type", didcomm.MediaTypePlaintext)
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseBytes)
+		w.Write(responseBytes) // #nosec G104
 	}))
 	defer server.Close()
 

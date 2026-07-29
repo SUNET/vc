@@ -1,0 +1,80 @@
+name: Release jwt_issuer
+
+on:
+  push:
+    tags:
+      - "jwt-issuer-v*"
+
+jobs:
+  build:
+    name: Build jwt_issuer (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build jwt_issuer
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME#jwt-issuer-}"
+          go build -ldflags "-w -s --extldflags '-static' -X main.version=${VERSION}" \
+            -o jwt_issuer-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./developer_tools/scripts/jwt_issuer/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: jwt_issuer-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: jwt_issuer-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum jwt_issuer-* > checksums-sha256.txt
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#jwt-issuer-}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: "jwt_issuer ${{ steps.version.outputs.version }}"
+          generate_release_notes: false
+          files: |
+            artifacts/jwt_issuer-*
+            artifacts/checksums-sha256.txt

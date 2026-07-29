@@ -38,7 +38,8 @@ type Compiler struct {
 	AssertFormat   bool                                               // Flag to enforce format validation.
 	// PreserveExtra indicates whether to preserve unknown keywords in the schema.
 	// If false (default), unknown keywords are stripped during compilation.
-	PreserveExtra bool
+	PreserveExtra  bool
+	defaultDialect Dialect
 
 	// JSON encoder/decoder configuration
 	jsonEncoder func(v any) ([]byte, error)
@@ -65,6 +66,7 @@ func NewCompiler() *Compiler {
 		Loaders:        make(map[string]func(url string) (io.ReadCloser, error)),
 		defaultFuncs:   make(map[string]DefaultFunc),
 		customFormats:  make(map[string]*FormatDef),
+		defaultDialect: Draft202012,
 
 		// Default to go-json-experiment JSON implementation
 		jsonEncoder: func(v any) ([]byte, error) { return json.Marshal(v) },
@@ -88,7 +90,7 @@ func (c *Compiler) WithDecoderJSON(decoder func(data []byte, v any) error) *Comp
 
 // Compile compiles a JSON schema and caches it. If an URI is provided, it uses that as the key; otherwise, it generates a hash.
 func (c *Compiler) Compile(jsonSchema []byte, uris ...string) (*Schema, error) {
-	schema, err := newSchema(jsonSchema)
+	schema, err := newSchema(jsonSchema, c)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +131,7 @@ func (c *Compiler) Compile(jsonSchema []byte, uris ...string) (*Schema, error) {
 	var schemasToResolve []*Schema
 	if schema.uri != "" {
 		if waitingSchemas, exists := c.unresolvedRefs[schema.uri]; exists {
-			schemasToResolve = make([]*Schema, len(waitingSchemas))
-			copy(schemasToResolve, waitingSchemas)
+			schemasToResolve = slices.Clone(waitingSchemas)
 			delete(c.unresolvedRefs, schema.uri) // Clear the waiting list
 		}
 	}
@@ -151,8 +152,7 @@ func (c *Compiler) Compile(jsonSchema []byte, uris ...string) (*Schema, error) {
 // trackUnresolvedReferences tracks which schemas have unresolved references to which URIs.
 // This method should be called with mutex locked.
 func (c *Compiler) trackUnresolvedReferences(schema *Schema) {
-	unresolvedURIs := schema.UnresolvedReferenceURIs()
-	for _, uri := range unresolvedURIs {
+	for _, uri := range schema.unresolvedReferenceTargetURIs() {
 		if !slices.Contains(c.unresolvedRefs[uri], schema) {
 			c.unresolvedRefs[uri] = append(c.unresolvedRefs[uri], schema)
 		}
@@ -180,7 +180,7 @@ func (c *Compiler) resolveSchemaURL(url string) (*Schema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading schema from %s: %w", url, err)
 	}
-	defer body.Close() //nolint:errcheck
+	defer func() { _ = body.Close() }()
 
 	data, err := io.ReadAll(body)
 	if err != nil {
@@ -232,12 +232,22 @@ func (c *Compiler) SetDefaultBaseURI(baseURI string) *Compiler {
 }
 
 // SetAssertFormat enables or disables format assertion.
+//
+// Disabled by default to match JSON Schema Draft 2020-12 semantics, where
+// "format" is annotation-only. Most applications want assertion: pass true
+// once on the compiler if validation should fail on bad emails, dates, UUIDs,
+// and the like.
 func (c *Compiler) SetAssertFormat(assert bool) *Compiler {
 	c.AssertFormat = assert
 	return c
 }
 
 // SetPreserveExtra sets whether to preserve unknown keywords in the schema.
+//
+// Disabled by default so unknown keywords are stripped during compilation,
+// matching strict spec behavior. Enable when round-tripping schemas through
+// tooling, when extension vocabularies (custom "x-" keywords, OpenAPI
+// extras, internal annotations) must survive on Schema.Extra.
 func (c *Compiler) SetPreserveExtra(preserve bool) *Compiler {
 	c.PreserveExtra = preserve
 	return c
@@ -256,6 +266,11 @@ func (c *Compiler) RegisterMediaType(mediaTypeName string, unmarshalFunc func([]
 }
 
 // RegisterLoader adds a new loader function for a specific URI scheme.
+//
+// "http" and "https" are pre-registered with a 10s timeout client. When
+// schemas come from untrusted sources, replace those loaders or remove them
+// (delete from c.Loaders) so external $ref resolution is gated by your own
+// host, size, and timeout policy.
 func (c *Compiler) RegisterLoader(scheme string, loaderFunc func(url string) (io.ReadCloser, error)) *Compiler {
 	c.Loaders[scheme] = loaderFunc
 	return c
@@ -330,12 +345,16 @@ func (c *Compiler) setupLoaders() {
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, ErrNetworkFetch
+			return nil, fmt.Errorf("%w: %w", ErrNetworkFetch, err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
-			return nil, ErrInvalidStatusCode
+			return nil, fmt.Errorf("%w: %w", ErrInvalidStatusCode, &HTTPStatusError{
+				URL:        url,
+				StatusCode: resp.StatusCode,
+				Status:     resp.Status,
+			})
 		}
 
 		return resp.Body, nil
@@ -349,11 +368,11 @@ func (c *Compiler) setupLoaders() {
 // until all schemas are compiled. This is the most efficient approach when you have
 // many schemas with interdependencies.
 func (c *Compiler) CompileBatch(schemas map[string][]byte) (map[string]*Schema, error) {
-	compiledSchemas := make(map[string]*Schema)
+	compiledSchemas := make(map[string]*Schema, len(schemas))
 
 	// First pass: compile all schemas without resolving references
 	for id, schemaBytes := range schemas {
-		schema, err := newSchema(schemaBytes)
+		schema, err := newSchema(schemaBytes, c)
 		if err != nil {
 			return nil, fmt.Errorf("compiling schema %s: %w", id, err)
 		}

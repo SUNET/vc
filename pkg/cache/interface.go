@@ -38,6 +38,11 @@ type AuthContextStore interface {
 	// ForfeitAuthorizationCode marks an authorization code as used and returns the updated context.
 	ForfeitAuthorizationCode(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
 
+	// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
+	// distinct clients (per DPoP thumbprint). Returns the auth context or an error if
+	// the same client attempts to redeem the code twice.
+	RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error)
+
 	// MarkCodeAsForfeited marks an authorization code as forfeited by session ID.
 	MarkCodeAsForfeited(ctx context.Context, id string) error
 
@@ -50,8 +55,8 @@ type AuthContextStore interface {
 	// SetAuthenticSource sets the authentic source for an authorization context.
 	SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error
 
-	// AddIdentity adds identity information to an authorization context.
-	AddIdentity(ctx context.Context, query *AuthorizationContext, input *AuthorizationContext) error
+	// SetIdentifier sets the resolved identifier on an authorization context.
+	SetIdentifier(ctx context.Context, query *AuthorizationContext, identifier string) error
 }
 
 // Compile-time checks that backends implement the interface.

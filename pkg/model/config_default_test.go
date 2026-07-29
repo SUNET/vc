@@ -40,24 +40,7 @@ func TestKafkaDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, cfg.Enable)
-	assert.Equal(t, []string{"kafka0:9092", "kafka1:9092"}, cfg.Brokers)
-}
-
-func TestCredentialOfferQRConfigDefaults(t *testing.T) {
-	var cfg CredentialOfferQRConfig
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.Equal(t, "credential_offer", cfg.Type)
-}
-
-func TestQRCfgDefaults(t *testing.T) {
-	var cfg QRCfg
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.Equal(t, 2, cfg.RecoveryLevel)
-	assert.Equal(t, 256, cfg.Size)
+	assert.Nil(t, cfg.Brokers)
 }
 
 func TestGRPCServerDefaults(t *testing.T) {
@@ -89,7 +72,7 @@ func TestJWTAttributeDefaults(t *testing.T) {
 }
 
 func TestSAMLConfigDefaults(t *testing.T) {
-	var cfg SAMLConfig
+	var cfg SAMLSP
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
@@ -97,7 +80,7 @@ func TestSAMLConfigDefaults(t *testing.T) {
 }
 
 func TestOIDCRPConfigDefaults(t *testing.T) {
-	var cfg OIDCRPConfig
+	var cfg OIDCRP
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
@@ -160,14 +143,6 @@ func TestAdminGUIDefaults(t *testing.T) {
 	assert.Equal(t, "admin", cfg.Username)
 }
 
-func TestMockASDefaults(t *testing.T) {
-	var cfg MockAS
-	err := defaults.Set(&cfg)
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"100", "102"}, cfg.BootstrapUsers)
-}
-
 func TestTrustConfigDefaults(t *testing.T) {
 	var cfg TrustConfig
 	err := defaults.Set(&cfg)
@@ -185,7 +160,7 @@ func TestTrustPolicyConfigDefaults(t *testing.T) {
 }
 
 func TestOIDCOPConfigDefaults(t *testing.T) {
-	var cfg OIDCOPConfig
+	var cfg OIDCOP
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
@@ -243,8 +218,8 @@ func TestAPIAuthDefaults(t *testing.T) {
 	err := defaults.Set(&cfg)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.BasicAuth.Enable)
-	assert.False(t, cfg.JWT.Enable)
+	assert.False(t, cfg.JWKS.Enable)
+	assert.False(t, cfg.OIDC.Enable)
 }
 
 func TestTokenStatusListsDefaults(t *testing.T) {

@@ -5,30 +5,40 @@ package openid4vci
 // TokenRequest https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-token-request
 type TokenRequest struct {
 	// Header field
-	DPOP string `header:"dpop" validate:"required"`
+	DPOP string `header:"dpop"`
 
-	// Pre-Authorized Code Flow
-	// PreAuthorizedCode The code representing the authorization to obtain Credentials of a certain type. This parameter MUST be present if the grant_type is urn:ietf:params:oauth:grant-type:pre-authorized_code.
-	//PreAuthorizedCode string `json:"pre_authorized_code,omitempty" validate:"required_with=GrantType"`
+	// GrantType REQUIRED. "authorization_code" or "urn:ietf:params:oauth:grant-type:pre-authorized_code".
+	GrantType string `form:"grant_type" json:"grant_type" validate:"required,oneof=authorization_code urn:ietf:params:oauth:grant-type:pre-authorized_code"`
 
-	//// TXCode OPTIONAL. String value containing a Transaction Code. This value MUST be present if a tx_code object was present in the Credential Offer (including if the object was empty). This parameter MUST only be used if the grant_type is urn:ietf:params:oauth:grant-type:pre-authorized_code.
-	//TXCode string `json:"tx_code" validate:"required_unless=GrantType urn:ietf:params:oauth:grant-type:pre-authorized_code"`
+	// Authorization Code Flow fields
 
-	//// Authorization Code Flow
-	// GrantType REQUIRED.  Value MUST be set to "authorization_code".
-	GrantType string `form:"grant_type" json:"grant_type" validate:"required,oneof=authorization_code"`
+	// Code REQUIRED for authorization_code grant. The authorization code received from the authorization server.
+	Code string `form:"code" json:"code" validate:"required_if=GrantType authorization_code,omitempty,max=128,printascii"`
 
-	// Code REQUIRED.  The authorization code received from the authorization server.
-	Code string `form:"code" json:"code" validate:"required,max=128,printascii"`
+	// RedirectURI REQUIRED for authorization_code grant, if the "redirect_uri" parameter was included in the authorization request.
+	RedirectURI string `form:"redirect_uri" json:"redirect_uri"`
 
-	// RedirectURI	REQUIRED, if the "redirect_uri" parameter was included in the authorization request as described in Section 4.1.1, and their values MUST be identical.
-	RedirectURI string `form:"redirect_uri" json:"redirect_uri" validate:"required"`
+	// ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).
+	// When using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's "sub" claim.
+	// OPTIONAL for pre-authorized_code grant.
+	ClientID string `form:"client_id" json:"client_id" validate:"omitempty,max=128,printascii"`
 
-	// ClientID REQUIRED, if the client is not authenticating with the authorization server as described in Section 3.2.1.
-	ClientID string `form:"client_id" json:"client_id" validate:"required"`
-
-	// CodeVerifier OPTIONAL (required for public clients)
+	// CodeVerifier OPTIONAL (required for public clients using authorization_code grant)
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`
+
+	// ClientAssertionType OPTIONAL. The type of client assertion. For private_key_jwt: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer".
+	ClientAssertionType string `form:"client_assertion_type" json:"client_assertion_type" validate:"omitempty,max=256,printascii"`
+
+	// ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt or client_secret_jwt authentication.
+	ClientAssertion string `form:"client_assertion" json:"client_assertion" validate:"omitempty,max=8192,printascii"`
+
+	// Pre-Authorized Code Flow fields
+
+	// PreAuthorizedCode REQUIRED for pre-authorized_code grant. The code representing the authorization to obtain Credentials.
+	PreAuthorizedCode string `form:"pre-authorized_code" json:"pre-authorized_code" validate:"required_if=GrantType urn:ietf:params:oauth:grant-type:pre-authorized_code,omitempty,max=128,printascii"`
+
+	// TXCode OPTIONAL. String value containing a Transaction Code.
+	TXCode string `form:"tx_code" json:"tx_code"`
 }
 
 // TokenResponse https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-successful-token-response
@@ -48,7 +58,7 @@ type TokenResponse struct {
 	// State REQUIRED if the "state" parameter was present in the client authorization request.  The exact value received from the client.
 	State string `json:"state"`
 
-	//CNonce OPTIONAL. String containing a nonce to be used when creating a proof of possession of the key proof (see Section 7.2). When received, the Wallet MUST use this nonce value for its subsequent requests until the Credential Issuer provides a fresh nonce.
+	// CNonce OPTIONAL. String containing a nonce to be used when creating a proof of possession of the key proof (see Section 7.2). When received, the Wallet MUST use this nonce value for its subsequent requests until the Credential Issuer provides a fresh nonce.
 	CNonce string `json:"c_nonce"`
 
 	// CNonceExpiresIn OPTIONAL. Number denoting the lifetime in seconds of the c_nonce.

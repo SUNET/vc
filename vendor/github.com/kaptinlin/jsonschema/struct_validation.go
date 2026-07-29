@@ -28,8 +28,9 @@ package jsonschema
 // - `omitzero` provides strict zero-value checking
 
 import (
+	"fmt"
 	"reflect"
-	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -73,9 +74,7 @@ func parseStructType(structType reflect.Type) *FieldCache {
 		FieldsByName: make(map[string]FieldInfo),
 	}
 
-	for i := range structType.NumField() {
-		field := structType.Field(i)
-
+	for field := range structType.Fields() {
 		// Skip unexported fields
 		if !field.IsExported() {
 			continue
@@ -87,7 +86,7 @@ func parseStructType(structType reflect.Type) *FieldCache {
 		}
 
 		cache.FieldsByName[jsonName] = FieldInfo{
-			Index:     i,
+			Index:     field.Index[0],
 			JSONName:  jsonName,
 			Omitempty: omitempty,
 			Omitzero:  omitzero,
@@ -135,13 +134,8 @@ func isZeroValue(rv reflect.Value) bool {
 
 // shouldOmitField determines if a field should be omitted based on omitempty/omitzero tags
 func shouldOmitField(fieldInfo FieldInfo, fieldValue reflect.Value) bool {
-	if fieldInfo.Omitzero && isZeroValue(fieldValue) {
-		return true
-	}
-	if fieldInfo.Omitempty && isEmptyValue(fieldValue) {
-		return true
-	}
-	return false
+	return fieldInfo.Omitzero && isZeroValue(fieldValue) ||
+		fieldInfo.Omitempty && isEmptyValue(fieldValue)
 }
 
 // isEmptyValue checks if a reflect.Value represents an empty value for omitempty behavior
@@ -162,13 +156,7 @@ func isEmptyValue(rv reflect.Value) bool {
 	case reflect.Interface, reflect.Pointer:
 		return rv.IsNil()
 	case reflect.Struct:
-		// Use IsZero method if available (time.Time, custom types)
-		if rv.CanInterface() {
-			if zeroChecker, ok := rv.Interface().(interface{ IsZero() bool }); ok {
-				return zeroChecker.IsZero()
-			}
-		}
-		return rv.IsZero()
+		return isZeroValue(rv)
 	case reflect.Uintptr, reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func, reflect.UnsafePointer:
 		return false
 	default:
@@ -184,13 +172,7 @@ func isMissingValue(rv reflect.Value) bool {
 	case reflect.Interface, reflect.Pointer:
 		return rv.IsNil()
 	case reflect.Struct:
-		// Use IsZero method if available (time.Time, custom types)
-		if rv.CanInterface() {
-			if zeroChecker, ok := rv.Interface().(interface{ IsZero() bool }); ok {
-				return zeroChecker.IsZero()
-			}
-		}
-		return rv.IsZero()
+		return isZeroValue(rv)
 	case reflect.String:
 		// For required fields, empty string is considered missing
 		return rv.String() == ""
@@ -274,58 +256,39 @@ func evaluateObjectStruct(schema *Schema, structValue reflect.Value, evaluatedPr
 	var results []*EvaluationResult
 	var errors []*EvaluationError
 
-	structType := structValue.Type()
-	fieldCache := getFieldCache(structType)
+	fieldCache := getFieldCache(structValue.Type())
+	appendEvaluation := func(moreResults []*EvaluationResult, err *EvaluationError) {
+		results = append(results, moreResults...)
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
 
-	// Validate properties
 	if schema.Properties != nil {
 		propertiesResults, propertiesErrors := evaluatePropertiesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope)
 		results = append(results, propertiesResults...)
 		errors = append(errors, propertiesErrors...)
 	}
-
-	// Validate patternProperties
 	if schema.PatternProperties != nil {
-		patternResults, patternError := evaluatePatternPropertiesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope)
-		results = append(results, patternResults...)
-		if patternError != nil {
-			errors = append(errors, patternError)
-		}
+		appendEvaluation(evaluatePatternPropertiesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope))
 	}
-
-	// Validate additionalProperties
 	if schema.AdditionalProperties != nil {
-		additionalResults, additionalError := evaluateAdditionalPropertiesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope)
-		results = append(results, additionalResults...)
-		if additionalError != nil {
-			errors = append(errors, additionalError)
-		}
+		appendEvaluation(evaluateAdditionalPropertiesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope))
 	}
-
-	// Validate propertyNames
 	if schema.PropertyNames != nil {
-		propertyNamesResults, propertyNamesError := evaluatePropertyNamesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope)
-		results = append(results, propertyNamesResults...)
-		if propertyNamesError != nil {
-			errors = append(errors, propertyNamesError)
-		}
+		appendEvaluation(evaluatePropertyNamesStruct(schema, structValue, fieldCache, evaluatedProps, dynamicScope))
 	}
 
-	// Validate required fields
 	if len(schema.Required) > 0 {
 		if err := evaluateRequiredStruct(schema, structValue, fieldCache); err != nil {
 			errors = append(errors, err)
 		}
 	}
-
-	// Validate dependentRequired
 	if len(schema.DependentRequired) > 0 {
 		if err := evaluateDependentRequiredStruct(schema, structValue, fieldCache); err != nil {
 			errors = append(errors, err)
 		}
 	}
-
-	// Validate property count constraints
 	if schema.MaxProperties != nil || schema.MinProperties != nil {
 		if err := evaluatePropertyCountStruct(schema, structValue, fieldCache); err != nil {
 			errors = append(errors, err)
@@ -338,7 +301,7 @@ func evaluateObjectStruct(schema *Schema, structValue reflect.Value, evaluatedPr
 // evaluateObjectReflectMap handles validation for reflect map types
 func evaluateObjectReflectMap(schema *Schema, mapValue reflect.Value, evaluatedProps map[string]bool, evaluatedItems map[int]bool, dynamicScope *DynamicScope) ([]*EvaluationResult, []*EvaluationError) {
 	// Convert reflect map to map[string]any and use existing logic
-	object := make(map[string]any)
+	object := make(map[string]any, mapValue.Len())
 
 	for _, key := range mapValue.MapKeys() {
 		if key.Kind() == reflect.String {
@@ -364,7 +327,7 @@ func evaluatePropertiesStruct(schema *Schema, structValue reflect.Value, fieldCa
 		fieldInfo, exists := fieldCache.FieldsByName[propName]
 		if !exists {
 			// Field doesn't exist in struct, only validate as nil if required and no default
-			if isRequired(schema, propName) && !defaultIsSpecified(propSchema) {
+			if slices.Contains(schema.Required, propName) && (propSchema == nil || propSchema.Default == nil) {
 				result, _, _ := propSchema.evaluate(nil, dynamicScope)
 				appendValidationResult(&results, &invalidProperties, propName, result)
 			}
@@ -386,7 +349,6 @@ func evaluatePropertiesStruct(schema *Schema, structValue reflect.Value, fieldCa
 		appendValidationResult(&results, &invalidProperties, propName, result)
 	}
 
-	// Handle errors for invalid properties
 	if len(invalidProperties) > 0 {
 		errors = append(errors, createPropertyValidationError(invalidProperties))
 	}
@@ -447,6 +409,7 @@ func evaluatePropertyCountStruct(schema *Schema, structValue reflect.Value, fiel
 // evaluatePatternPropertiesStruct validates struct properties against pattern properties
 func evaluatePatternPropertiesStruct(schema *Schema, structValue reflect.Value, fieldCache *FieldCache, evaluatedProps map[string]bool, dynamicScope *DynamicScope) ([]*EvaluationResult, *EvaluationError) {
 	var results []*EvaluationResult
+	var invalidProperties []string
 
 	for jsonName, fieldInfo := range fieldCache.FieldsByName {
 		if evaluatedProps[jsonName] {
@@ -459,26 +422,29 @@ func evaluatePatternPropertiesStruct(schema *Schema, structValue reflect.Value, 
 		}
 
 		for pattern, patternSchema := range *schema.PatternProperties {
-			// Use pre-compiled regex from schema; fall back to compile on demand.
 			re, ok := schema.compiledPatterns[pattern]
 			if !ok {
-				var err error
-				if re, err = regexp.Compile(pattern); err != nil {
-					continue // skip invalid pattern
-				}
+				continue
 			}
 			if re.MatchString(jsonName) {
 				evaluatedProps[jsonName] = true
-				value := extractValue(fieldValue)
-
-				// Reuse existing validation logic directly
-				result, _, _ := patternSchema.evaluate(value, dynamicScope)
+				result, _, _ := patternSchema.evaluate(extractValue(fieldValue), dynamicScope)
 				if result != nil {
+					result.SetEvaluationPath(fmt.Sprintf("/patternProperties/%s", jsonName)).
+						SetSchemaLocation(schema.SchemaLocation(fmt.Sprintf("/patternProperties/%s", jsonName))).
+						SetInstanceLocation(fmt.Sprintf("/%s", jsonName))
 					results = append(results, result)
+					if !result.IsValid() {
+						invalidProperties = append(invalidProperties, jsonName)
+					}
 				}
 				break
 			}
 		}
+	}
+
+	if len(invalidProperties) > 0 {
+		return results, createPatternPropertyValidationError(invalidProperties)
 	}
 
 	return results, nil
@@ -489,7 +455,6 @@ func evaluateAdditionalPropertiesStruct(schema *Schema, structValue reflect.Valu
 	var results []*EvaluationResult
 	var invalidProperties []string
 
-	// Check for unevaluated properties
 	for jsonName, fieldInfo := range fieldCache.FieldsByName {
 		if evaluatedProps[jsonName] {
 			continue
@@ -500,22 +465,20 @@ func evaluateAdditionalPropertiesStruct(schema *Schema, structValue reflect.Valu
 			continue
 		}
 
-		// This is an additional property, validate according to additionalProperties
-		if schema.AdditionalProperties != nil {
-			value := extractValue(fieldValue)
-			result, _, _ := schema.AdditionalProperties.evaluate(value, dynamicScope)
-			if result != nil {
-				results = append(results, result)
-				if !result.IsValid() {
-					invalidProperties = append(invalidProperties, jsonName)
-				}
+		value := extractValue(fieldValue)
+		result, _, _ := schema.AdditionalProperties.evaluate(value, dynamicScope)
+		if result != nil {
+			result.SetEvaluationPath(fmt.Sprintf("/additionalProperties/%s", jsonName)).
+				SetSchemaLocation(schema.SchemaLocation(fmt.Sprintf("/additionalProperties/%s", jsonName))).
+				SetInstanceLocation(fmt.Sprintf("/%s", jsonName))
+			results = append(results, result)
+			if !result.IsValid() {
+				invalidProperties = append(invalidProperties, jsonName)
 			}
-			// Mark property as evaluated
-			evaluatedProps[jsonName] = true
 		}
+		evaluatedProps[jsonName] = true
 	}
 
-	// Handle errors for invalid properties
 	if len(invalidProperties) > 0 {
 		return results, createValidationError(
 			"additional_property_mismatch",
@@ -544,9 +507,11 @@ func evaluatePropertyNamesStruct(schema *Schema, structValue reflect.Value, fiel
 			continue
 		}
 
-		// Validate the property name itself
 		result, _, _ := schema.PropertyNames.evaluate(jsonName, dynamicScope)
 		if result != nil {
+			result.SetEvaluationPath(fmt.Sprintf("/propertyNames/%s", jsonName)).
+				SetSchemaLocation(schema.SchemaLocation(fmt.Sprintf("/propertyNames/%s", jsonName))).
+				SetInstanceLocation(fmt.Sprintf("/%s", jsonName))
 			results = append(results, result)
 			if !result.IsValid() {
 				invalidProperties = append(invalidProperties, jsonName)
@@ -554,7 +519,6 @@ func evaluatePropertyNamesStruct(schema *Schema, structValue reflect.Value, fiel
 		}
 	}
 
-	// Handle errors for invalid properties
 	if len(invalidProperties) > 0 {
 		return results, createValidationError(
 			"property_name_mismatch",
@@ -571,39 +535,54 @@ func evaluatePropertyNamesStruct(schema *Schema, structValue reflect.Value, fiel
 // evaluateDependentRequiredStruct validates dependent required properties for structs
 func evaluateDependentRequiredStruct(schema *Schema, structValue reflect.Value, fieldCache *FieldCache) *EvaluationError {
 	for propName, dependentRequired := range schema.DependentRequired {
-		// Check if property exists
 		fieldInfo, exists := fieldCache.FieldsByName[propName]
 		if !exists {
 			continue
 		}
+		if isEmptyValue(structValue.Field(fieldInfo.Index)) {
+			continue
+		}
 
-		fieldValue := structValue.Field(fieldInfo.Index)
-
-		// If property exists and is not empty, check dependent properties
-		if !isEmptyValue(fieldValue) {
-			for _, requiredProp := range dependentRequired {
-				depFieldInfo, depExists := fieldCache.FieldsByName[requiredProp]
-				if !depExists {
-					return NewEvaluationError("dependentRequired", "dependent_required_missing",
-						"Property {property} is required when {dependent_property} is present", map[string]any{
-							"property":           requiredProp,
-							"dependent_property": propName,
-						})
-				}
-
-				depFieldValue := structValue.Field(depFieldInfo.Index)
-				if isMissingValue(depFieldValue) {
-					return NewEvaluationError("dependentRequired", "dependent_required_missing",
-						"Property {property} is required when {dependent_property} is present", map[string]any{
-							"property":           requiredProp,
-							"dependent_property": propName,
-						})
-				}
+		for _, requiredProp := range dependentRequired {
+			depFieldInfo, depExists := fieldCache.FieldsByName[requiredProp]
+			if !depExists {
+				return newDependentRequiredMissingError(requiredProp, propName)
+			}
+			if isMissingValue(structValue.Field(depFieldInfo.Index)) {
+				return newDependentRequiredMissingError(requiredProp, propName)
 			}
 		}
 	}
 
 	return nil
+}
+
+func newDependentRequiredMissingError(requiredProp, propName string) *EvaluationError {
+	return NewEvaluationError("dependentRequired", "dependent_required_missing",
+		"Property {property} is required when {dependent_property} is present", map[string]any{
+			"property":           requiredProp,
+			"dependent_property": propName,
+		})
+}
+
+func createPatternPropertyValidationError(invalidProperties []string) *EvaluationError {
+	quotedProperties := make([]string, len(invalidProperties))
+	for i, prop := range invalidProperties {
+		quotedProperties[i] = "'" + prop + "'"
+	}
+
+	if len(quotedProperties) == 1 {
+		return NewEvaluationError(
+			"properties", "pattern_property_mismatch",
+			"Property {property} does not match the pattern schema",
+			map[string]any{"property": quotedProperties[0]},
+		)
+	}
+	return NewEvaluationError(
+		"properties", "pattern_properties_mismatch",
+		"Properties {properties} do not match their pattern schemas",
+		map[string]any{"properties": strings.Join(quotedProperties, ", ")},
+	)
 }
 
 // createValidationError creates a validation error with proper formatting for single or multiple items
