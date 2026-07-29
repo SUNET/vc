@@ -62,7 +62,10 @@ func createJWTProofWithIat(t *testing.T, privateKey *ecdsa.PrivateKey, aud strin
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
 	token.Header["jwk"] = map[string]any{
-		"kty": "EC", "crv": "P-256", "x": "test-x", "y": "test-y",
+		"kty": "EC",
+		"crv": "P-256",
+		"x":   "test-x",
+		"y":   "test-y",
 	}
 	signedToken, err := token.SignedString(privateKey)
 	require.NoError(t, err)
