@@ -73,11 +73,11 @@ var export = jsontext.Internal.Export(&internal.AllowInternalUse)
 // Functions or methods that operate on *T are only called when encoding
 // a value of type T (by taking its address) or a non-nil value of *T.
 // Marshal ensures that a value is always addressable
-// (by boxing it on the heap if necessary) so that
+// (by copying the value if necessary) so that
 // these functions and methods can be consistently called. For performance,
 // it is recommended that Marshal be passed a non-nil pointer to the value.
 //
-// The input value is encoded as JSON according the following rules:
+// The input value is encoded as JSON according to the following rules:
 //
 //   - If any type-specific functions in a [WithMarshalers] option match
 //     the value type, then those functions are called to encode the value.
@@ -119,6 +119,7 @@ var export = jsontext.Internal.Export(&internal.AllowInternalUse)
 //   - A Go float is encoded as a JSON number.
 //     If [StringifyNumbers] is specified or encoding a JSON object name,
 //     then the JSON number is encoded within a JSON string.
+//     Encoding a NaN or ±Inf results in a [SemanticError].
 //
 //   - A Go map is encoded as a JSON object, where each Go map key and value
 //     is recursively encoded as a name and value pair in the JSON object.
@@ -161,6 +162,7 @@ var export = jsontext.Internal.Export(&internal.AllowInternalUse)
 // JSON cannot represent cyclic data structures and Marshal does not handle them.
 // Passing cyclic structures will result in an error.
 func Marshal(in any, opts ...Options) (out []byte, err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	enc := export.GetBufferedEncoder(opts...)
 	defer export.PutBufferedEncoder(enc)
 	xe := export.Encoder(enc)
@@ -177,6 +179,7 @@ func Marshal(in any, opts ...Options) (out []byte, err error) {
 // It does not terminate the output with a newline.
 // See [Marshal] for details about the conversion of a Go value into JSON.
 func MarshalWrite(out io.Writer, in any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	enc := export.GetStreamingEncoder(out, opts...)
 	defer export.PutStreamingEncoder(enc)
 	xe := export.Encoder(enc)
@@ -195,6 +198,7 @@ func MarshalWrite(out io.Writer, in any, opts ...Options) (err error) {
 //
 // See [Marshal] for details about the conversion of a Go value into JSON.
 func MarshalEncode(out *jsontext.Encoder, in any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	xe := export.Encoder(out)
 	if len(opts) > 0 {
 		optsOriginal := xe.Struct
@@ -264,10 +268,14 @@ func marshalEncode(out *jsontext.Encoder, in any, mo *jsonopts.Struct) (err erro
 // Functions or methods that operate on *T are only called when decoding
 // a value of type T (by taking its address) or a non-nil value of *T.
 // Unmarshal ensures that a value is always addressable
-// (by boxing it on the heap if necessary) so that
+// (by copying the value if necessary) so that
 // these functions and methods can be consistently called.
+// If a value must be shallow copied to call a pointer-receiver
+// [Unmarshaler], [UnmarshalerFrom], or [encoding.TextUnmarshaler] method,
+// then any mutations performed by the method are shallow copied back
+// into the destination value.
 //
-// The input is decoded into the output according the following rules:
+// The input is decoded into the output according to the following rules:
 //
 //   - If any type-specific functions in a [WithUnmarshalers] option match
 //     the value type, then those functions are called to decode the JSON
@@ -321,6 +329,8 @@ func marshalEncode(out *jsontext.Encoder, in any, mo *jsonopts.Struct) (err erro
 //     It must be decoded from a JSON string containing a JSON number
 //     if [StringifyNumbers] is specified or decoding a JSON object name.
 //     It fails if it overflows the representation of the Go float type.
+//     Since JSON lacks a native representation for a NaN or ±Inf,
+//     such values cannot be the result of decoding.
 //
 //   - A Go map is decoded from a JSON object,
 //     where each JSON object name and value pair is recursively decoded
@@ -378,6 +388,7 @@ func marshalEncode(out *jsontext.Encoder, in any, mo *jsonopts.Struct) (err erro
 // For JSON objects, the input object is merged into the destination value
 // where matching object members recursively apply merge semantics.
 func Unmarshal(in []byte, out any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	dec := export.GetBufferedDecoder(in, opts...)
 	defer export.PutBufferedDecoder(dec)
 	xd := export.Decoder(dec)
@@ -395,6 +406,7 @@ func Unmarshal(in []byte, out any, opts ...Options) (err error) {
 // without reporting an error for EOF. The output must be a non-nil pointer.
 // See [Unmarshal] for details about the conversion of JSON into a Go value.
 func UnmarshalRead(in io.Reader, out any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	dec := export.GetStreamingDecoder(in, opts...)
 	defer export.PutStreamingDecoder(dec)
 	xd := export.Decoder(dec)
@@ -416,6 +428,7 @@ func UnmarshalRead(in io.Reader, out any, opts ...Options) (err error) {
 // The output must be a non-nil pointer.
 // See [Unmarshal] for details about the conversion of JSON into a Go value.
 func UnmarshalDecode(in *jsontext.Decoder, out any, opts ...Options) (err error) {
+	opts = mayAppendSupportFormatTag(opts)
 	xd := export.Decoder(in)
 	if len(opts) > 0 {
 		optsOriginal := xd.Struct

@@ -290,6 +290,10 @@ func (u unimplementedApiv1) VCIMetadata(context.Context) (*openid4vci.Credential
 	panic("not implemented")
 }
 
+func (u unimplementedApiv1) GetIACAs(context.Context) (*apiv1.GetIACAsResponse, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) OAuthPar(context.Context, *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	panic("not implemented")
 }
@@ -396,6 +400,10 @@ func (u unimplementedApiv1) AdminLogoutURL(context.Context, string) string {
 
 func (u unimplementedApiv1) ListAuthenticSources(context.Context) ([]string, error) {
 	return nil, nil
+}
+
+func (u unimplementedApiv1) DatastorePreAuthOffer(context.Context, *apiv1.DatastorePreAuthOfferRequest) (*apiv1.DatastorePreAuthOfferReply, error) {
+	panic("not implemented")
 }
 
 func (u unimplementedApiv1) Health(context.Context, *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {

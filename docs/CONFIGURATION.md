@@ -603,6 +603,7 @@ persisted in the database.
 | `credential_response_encryption`          | `object`   | Response encryption configuration | -       | -       | No       |
 | `batch_credential_issuance`               | `object`   | Batch issuance configuration      | -       | -       | No       |
 | `display`                                 | `array`    | Display metadata                  | -       | -       | No       |
+| `mdoc_iacas_uri`                          | `string`   | URL where IACA certificates are published for mDOC verification. Included in `.well-known/openid-credential-issuer` metadata so verifiers can dynamically discover trust anchors. Set to `<public_url>/iacas` to use the built-in endpoint. | `"https://issuer.example.com/iacas"` | - | No |
 
 ### `credential_response_encryption`
 
