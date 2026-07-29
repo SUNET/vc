@@ -5,7 +5,7 @@
 # When overriding, the install-tools/clean-apt-cache steps are redundant but
 # harmless (make targets are idempotent). For a faster local build, use the
 # pre-built image directly as the builder stage via multi-stage FROM.
-ARG GOBUILD_IMAGE=golang:1.26.4
+ARG GOBUILD_IMAGE=golang:1.26.5
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
@@ -23,7 +23,7 @@ ARG SERVICE_NAME
 ARG BUILDTAG
 ARG GO_BUILD_TAGS
 
-ENV GOTOOLCHAIN=auto
+ENV GOTOOLCHAIN=local
 ENV GOFLAGS=-mod=vendor
 ENV GOPROXY=off
 ENV GONOSUMDB=*
@@ -67,11 +67,16 @@ WORKDIR /
 
 RUN apk add --no-cache ca-certificates curl
 
+# Run as non-root user for security hardening
+RUN addgroup -S vcservice && adduser -S vcservice -G vcservice
+
 COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
 COPY --from=builder /go/src/app/docs /docs
 COPY --from=builder /go/src/app/standards /standards
 
 EXPOSE 8080
+
+USER vcservice
 
 HEALTHCHECK --interval=20s --timeout=10s CMD curl -k --connect-timeout 5 https://localhost:8080/health | grep -q STATUS_OK
 

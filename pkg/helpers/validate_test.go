@@ -296,8 +296,10 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid", "eduid"},
-						AuthClaims:   []string{"given_name"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid":   {AuthClaims: []string{"given_name"}},
+							"eduid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 			},
@@ -310,8 +312,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid"},
-						AuthClaims:   []string{"given_name"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 			},
@@ -332,8 +335,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"diploma": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid"},
-						AuthClaims:   []string{"given_name", "family_name"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name", "family_name"}},
+						},
 					},
 				}},
 			},
@@ -341,17 +345,19 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			errorContains: "",
 		},
 		{
-			name: "openid4vp without auth_claims is rejected",
+			name: "openid4vp with empty auth_claims in scope entry is rejected",
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"ehic": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthScopes:   []string{"pid"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{}},
+						},
 					},
 				}},
 			},
 			shouldError:   true,
-			errorContains: "auth_claims_required_for_identity_lookup",
+			errorContains: "auth_claims_required_for_auth_scope",
 		},
 		{
 			name: "openid4vp without auth_scopes is rejected",
@@ -359,12 +365,42 @@ func TestAuthScopesSelfReference(t *testing.T) {
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"ehic": {
 						AuthProvider: model.AuthProviderOpenID4VP,
-						AuthClaims:   []string{"given_name"},
 					},
 				}},
 			},
 			shouldError:   true,
 			errorContains: "auth_scopes_required_for_openid4vp",
+		},
+		{
+			name: "openid4vp with top-level auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
+						AuthClaims: []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_not_allowed_for_openid4vp",
+		},
+		{
+			name: "multiple auth_scopes with different claims passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"ehic": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid":   {AuthClaims: []string{"given_name", "family_name", "birth_date"}},
+							"eduid": {AuthClaims: []string{"given_name", "family_name", "date_of_birth"}},
+						},
+					},
+				}},
+			},
+			shouldError: false,
 		},
 		{
 			name: "saml without auth_claims is rejected",
@@ -385,7 +421,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 					"pid": {
 						AuthProvider: model.AuthProviderSAML,
 						AuthClaims:   []string{"given_name"},
-						AuthScopes:   []string{"pid"},
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
 					},
 				}},
 			},
@@ -474,6 +512,118 @@ func TestImagePNGValidator(t *testing.T) {
 		p := filepath.Join(t.TempDir(), "fake.png")
 		require.NoError(t, os.WriteFile(p, []byte("\xff\xd8\xff\xe0fake-jpeg"), 0o644)) // #nosec G306
 		assert.Error(t, validate.Struct(testStruct{Path: p}))
+	})
+}
+
+func TestSingleProofTypeValidator(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	type Proofs struct {
+		JWT         []string
+		DIVP        []string
+		Attestation string
+	}
+
+	type testStruct struct {
+		Proofs *Proofs `validate:"single_proof_type"`
+	}
+
+	type testStructOmitempty struct {
+		Proofs *Proofs `validate:"omitempty,single_proof_type"`
+	}
+
+	t.Run("only JWT", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT: []string{"jwt1"},
+			},
+		}))
+	})
+	t.Run("only DIVP", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				DIVP: []string{"divp1"},
+			},
+		}))
+	})
+	t.Run("only Attestation", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				Attestation: "attest1",
+			},
+		}))
+	})
+	t.Run("multiple proof types is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:  []string{"jwt1"},
+				DIVP: []string{"divp1"},
+			},
+		})
+		assert.Error(t, err)
+	})
+	t.Run("nil Proofs pointer is valid (omitempty)", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStructOmitempty{
+			Proofs: nil,
+		}))
+	})
+	t.Run("Attestation with empty JWT and DIVP is valid", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{},
+				DIVP:        []string{},
+				Attestation: "attest1",
+			},
+		}))
+	})
+	t.Run("JWT with empty DIVP and Attestation is valid", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{"jwt1"},
+				DIVP:        []string{},
+				Attestation: "",
+			},
+		}))
+	})
+	t.Run("DIVP with empty JWT and Attestation is valid", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{},
+				DIVP:        []string{"divp1"},
+				Attestation: "",
+			},
+		}))
+	})
+	t.Run("Attestation with non-empty JWT is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{"jwt1"},
+				DIVP:        []string{},
+				Attestation: "attest1",
+			},
+		})
+		assert.Error(t, err)
+	})
+	t.Run("DIVP with non-empty Attestation is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{},
+				DIVP:        []string{"divp1"},
+				Attestation: "attest1",
+			},
+		})
+		assert.Error(t, err)
+	})
+	t.Run("JWT with non-empty DIVP is an error", func(t *testing.T) {
+		err := validate.Struct(testStruct{
+			Proofs: &Proofs{
+				JWT:         []string{"jwt1"},
+				DIVP:        []string{"divp1"},
+				Attestation: "",
+			},
+		})
+		assert.Error(t, err)
 	})
 }
 

@@ -78,6 +78,16 @@ func TestLoadSecrets_DirectoryPath(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestLoadSecrets_OverlyPermissiveMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
+	require.NoError(t, os.WriteFile(secretsPath, []byte("---\n"), 0o644))
+
+	_, err := LoadSecrets(secretsPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overly permissive mode")
+}
+
 func TestLoadSecrets_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	secretsPath := filepath.Join(tmpDir, "bad.yaml")

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-06-11
+**Generated:** 2026-07-29
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -80,10 +80,35 @@ Shared configuration used across all services.
 
 > **Path:** `.common.kafka`
 
-| Field     | Type       | Description                    | Example                          | Default | Required |
-| --------- | ---------- | ------------------------------ | -------------------------------- | ------- | -------- |
-| `enable`  | `bool`     | Kafka integration              | -                                | `false` | No       |
-| `brokers` | `[]string` | List of Kafka broker addresses | `["kafka0:9092", "kafka1:9092"]` | -       | Yes      |
+| Field     | Type       | Description                                    | Example                          | Default | Required         |
+| --------- | ---------- | ---------------------------------------------- | -------------------------------- | ------- | ---------------- |
+| `enable`  | `bool`     | Kafka integration                              | -                                | `false` | No               |
+| `brokers` | `[]string` | List of Kafka broker addresses                 | `["kafka0:9092", "kafka1:9092"]` | -       | Yes (if enabled) |
+| `sasl`    | `object`   | SASL authentication for Kafka connections      | -                                | -       | No               |
+| `mtls`    | `object`   | Mutual TLS (mTLS) for Kafka broker connections | -                                | -       | No               |
+
+### `sasl`
+
+> **Path:** `.common.kafka.sasl`
+
+| Field       | Type     | Description                                          | Example | Default         | Required         |
+| ----------- | -------- | ---------------------------------------------------- | ------- | --------------- | ---------------- |
+| `enable`    | `bool`   | Enable activates SASL authentication                 | -       | `false`         | No               |
+| `mechanism` | `string` | SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512) | -       | `SCRAM-SHA-512` | Yes (if enabled) |
+| `username`  | `string` | SASL username                                        | -       | -               | Yes (if enabled) |
+| `password`  | `string` | SASL password                                        | -       | -               | Yes (if enabled) |
+
+### `mtls`
+
+> **Path:** `.common.kafka.mtls`
+
+| Field                  | Type     | Description                                                                                     | Example | Default | Required         |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
+| `enable`               | `bool`   | MTLS for the connection                                                                         | -       | `false` | No               |
+| `ca_cert_path`         | `string` | Path to a CA certificate for verifying the remote peer (optional; uses system roots if empty)   | -       | -       | No               |
+| `cert_file_path`       | `string` | Path to a client certificate for mutual authentication                                          | -       | -       | Yes (if enabled) |
+| `key_file_path`        | `string` | Path to the client private key                                                                  | -       | -       | Yes (if enabled) |
+| `insecure_skip_verify` | `bool`   | InsecureSkipVerify disables certificate verification (TESTING ONLY — never use in production)   | -       | `false` | No               |
 
 ### `ha`
 
@@ -189,6 +214,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `registry_client`         | `object` | GRPC client config for registry                                                                                                                                                                                     | -                           | -       | Yes      |
 | `identity_mapping_import` | `object` | Automatic import of identity mappings from JSON files at startup. When configured, APIGW reads JSON files and imports them into the identity mappings collection on first startup (skipped if data already exists). | -                           | -       | No       |
 | `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
+| `rate_limit`              | `object` | Per-endpoint rate limiting for the APIGW.                                                                                                                                                                           | -                           | -       | No       |
 
 ### `api_server`
 
@@ -207,11 +233,11 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`
 
-| Field            | Type     | Description                 | Example | Default | Required |
-| ---------------- | -------- | --------------------------- | ------- | ------- | -------- |
-| `enable`         | `bool`   | TLS                         | -       | `false` | No       |
-| `cert_file_path` | `string` | Path to the TLS certificate | -       | -       | Yes      |
-| `key_file_path`  | `string` | Path to the TLS private key | -       | -       | Yes      |
+| Field            | Type     | Description                 | Example | Default | Required         |
+| ---------------- | -------- | --------------------------- | ------- | ------- | ---------------- |
+| `enable`         | `bool`   | TLS                         | -       | `false` | No               |
+| `cert_file_path` | `string` | Path to the TLS certificate | -       | -       | Yes (if enabled) |
+| `key_file_path`  | `string` | Path to the TLS private key | -       | -       | Yes (if enabled) |
 
 ### `api_auth`
 
@@ -333,11 +359,21 @@ Each key under a data source is a credential type.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
 
-| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example                                 | Default | Required |
-| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
-| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                               | -                                       | -       | Yes      |
-| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup. These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
-| `auth_scopes`   | `[]string` | Credential keys whose VCTs are acceptable for wallet authentication (for OpenID4VP)                                                                                                                                                                                                                                                                                                                                                                             | `[pid]`                                 | -       | No       |
+| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                                 | Default | Required |
+| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
+| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | -                                       | -       | Yes      |
+| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
+| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                  | -                                       | -       | No       |
+
+### `auth_scopes` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.auth_scopes.<key>`
+
+Each entry represents one acceptable credential type the wallet can present.
+
+| Field         | Type       | Description                                               | Example                                 | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------- | --------------------------------------- | ------- | -------- |
+| `auth_claims` | `[]string` | The identity claims to extract from this credential type. | `[given_name, family_name, birth_date]` | -       | Yes      |
 
 ### `import`
 
@@ -424,6 +460,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow (AuthnRequest → Response) may remain active before it expires                                                                                                                                                                                                                               | -                                         | `300`   | No               |
 | `attribute_mapping`          | `object` | AttributeMapping normalizes provider-specific attribute names (e.g. SAML OIDs) to canonical claim names. Applied to ALL attributes in the assertion. Which normalized attributes are used depends on the data source: - assertion: VCTM determines which go into the credential - datastore: auth_claims determines which are used for DB identity lookup | -                                         | -       | Yes (if enabled) |
 | `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No               |
+| `allow_unsigned_metadata`    | `bool`   | AllowUnsignedMetadata permits MDQ/URL metadata without signature verification. This is INSECURE (MITM → fake IdP) and should only be used in development. When false (default), MDQ and URL metadata sources require MetadataSigningCertPath. Local metadata files are allowed unsigned regardless (with a startup warning).                              | -                                         | `false` | No               |
 | `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No               |
 
 ### `static_idp_metadata`
@@ -531,6 +568,7 @@ persisted in the database.
 | `type`         | `string`   | Client type per RFC 6749 Section 2.1 ("public" or "confidential"). Defaults to "public" since registered clients are wallets (native/web apps) that cannot securely store credentials and rely on PKCE instead. | -                                | `public` | No       |
 | `redirect_uri` | `[]string` | List of allowed redirect URIs for the client. Accepts either a single string or an array of strings in YAML/JSON.                                                                                               | `"https://example.com/callback"` | -        | Yes      |
 | `scopes`       | `[]string` | List of OAuth2 scopes allowed for the client                                                                                                                                                                    | -                                | -        | Yes      |
+| `jwks_uri`     | `string`   | URL to the client's JWKS for verifying client_assertion signatures (RFC 7523). Required for confidential clients using private_key_jwt authentication.                                                          | -                                | -        | No       |
 
 ### `credential_offers`
 
@@ -554,17 +592,18 @@ persisted in the database.
 
 > **Path:** `.apigw.issuer_metadata`
 
-| Field                                     | Type       | Description                       | Example | Default | Required |
-| ----------------------------------------- | ---------- | --------------------------------- | ------- | ------- | -------- |
-| `authorization_servers`                   | `[]string` | The authorization server URLs     | -       | -       | No       |
-| `deferred_credential_endpoint`            | `string`   | Deferred credential endpoint      | -       | -       | No       |
-| `notification_endpoint`                   | `string`   | Notification endpoint             | -       | -       | No       |
-| `cryptographic_binding_methods_supported` | `[]string` | The supported binding methods     | -       | -       | No       |
-| `credential_signing_alg_values_supported` | `[]string` | The supported signing algorithms  | -       | -       | No       |
-| `proof_signing_alg_values_supported`      | `[]string` | The supported proof algorithms    | -       | -       | No       |
-| `credential_response_encryption`          | `object`   | Response encryption configuration | -       | -       | No       |
-| `batch_credential_issuance`               | `object`   | Batch issuance configuration      | -       | -       | No       |
-| `display`                                 | `array`    | Display metadata                  | -       | -       | No       |
+| Field                                     | Type       | Description                                                                                                                                                                                                                          | Example | Default | Required |
+| ----------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `authorization_servers`                   | `[]string` | The authorization server URLs                                                                                                                                                                                                        | -       | -       | No       |
+| `deferred_credential_endpoint`            | `string`   | Deferred credential endpoint                                                                                                                                                                                                         | -       | -       | No       |
+| `notification_endpoint`                   | `string`   | Notification endpoint                                                                                                                                                                                                                | -       | -       | No       |
+| `cryptographic_binding_methods_supported` | `[]string` | The supported binding methods                                                                                                                                                                                                        | -       | -       | No       |
+| `credential_signing_alg_values_supported` | `[]string` | The supported signing algorithms                                                                                                                                                                                                     | -       | -       | No       |
+| `proof_signing_alg_values_supported`      | `[]string` | The supported proof algorithms                                                                                                                                                                                                       | -       | -       | No       |
+| `credential_response_encryption`          | `object`   | Response encryption configuration                                                                                                                                                                                                    | -       | -       | No       |
+| `batch_credential_issuance`               | `object`   | Batch issuance configuration                                                                                                                                                                                                         | -       | -       | No       |
+| `display`                                 | `array`    | Display metadata                                                                                                                                                                                                                     | -       | -       | No       |
+| `mdoc_iacas_uri`                          | `string`   | URL where IACA certificates are published for mDOC verification. When configured, this is included in .well-known/openid-credential-issuer metadata so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials. | -       | -       | No       |
 
 ### `credential_response_encryption`
 
@@ -642,6 +681,16 @@ Trust evaluation operates in one of two modes:
 | `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
 | `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
 | `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
+
+### `rate_limit`
+
+> **Path:** `.apigw.rate_limit`
+
+| Field                            | Type  | Description                                                         | Example | Default | Required |
+| -------------------------------- | ----- | ------------------------------------------------------------------- | ------- | ------- | -------- |
+| `token_requests_per_minute`      | `int` | Maximum token endpoint requests per minute per IP. Default: 20      | -       | `20`    | No       |
+| `credential_requests_per_minute` | `int` | Maximum credential endpoint requests per minute per IP. Default: 30 | -       | `30`    | No       |
+| `datastore_requests_per_minute`  | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60  | -       | `60`    | No       |
 
 ## `issuer` (Top-level)
 

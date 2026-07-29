@@ -57,14 +57,28 @@ type CORS struct {
 	AllowedOrigins []string `yaml:"allowed_origins" validate:"omitempty" default:"[]" doc_example:"[\"https://wallet.sunet.se\", \"https://app.sunet.se\"]"`
 }
 
-// TLS holds the TLS configuration
+// TLS holds server-side TLS configuration (presenting a certificate to clients)
 type TLS struct {
 	// Enable enables TLS
 	Enable bool `yaml:"enable" default:"false"`
 	// CertFilePath is the path to the TLS certificate
-	CertFilePath string `yaml:"cert_file_path" validate:"required"`
+	CertFilePath string `yaml:"cert_file_path" validate:"required_if=Enable true"`
 	// KeyFilePath is the path to the TLS private key
-	KeyFilePath string `yaml:"key_file_path" validate:"required"`
+	KeyFilePath string `yaml:"key_file_path" validate:"required_if=Enable true"`
+}
+
+// MTLS holds mutual TLS configuration for client connections (verifying peer + presenting own cert)
+type MTLS struct {
+	// Enable enables mTLS for the connection
+	Enable bool `yaml:"enable" default:"false"`
+	// CACertPath is the path to a CA certificate for verifying the remote peer (optional; uses system roots if empty)
+	CACertPath string `yaml:"ca_cert_path,omitempty"`
+	// CertFilePath is the path to a client certificate for mutual authentication
+	CertFilePath string `yaml:"cert_file_path" validate:"required_if=Enable true"`
+	// KeyFilePath is the path to the client private key
+	KeyFilePath string `yaml:"key_file_path" validate:"required_if=Enable true"`
+	// InsecureSkipVerify disables certificate verification (TESTING ONLY — never use in production)
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify" default:"false"`
 }
 
 // Mongo holds the MongoDB configuration
@@ -98,7 +112,23 @@ type Kafka struct {
 	// Enable enables Kafka integration
 	Enable bool `yaml:"enable" default:"false"`
 	// Brokers is the list of Kafka broker addresses
-	Brokers []string `yaml:"brokers" validate:"required" doc_example:"[\"kafka0:9092\", \"kafka1:9092\"]"`
+	Brokers []string `yaml:"brokers" validate:"required_if=Enable true" doc_example:"[\"kafka0:9092\", \"kafka1:9092\"]"`
+	// SASL configures SASL authentication for Kafka connections
+	SASL *KafkaSASL `yaml:"sasl,omitempty"`
+	// MTLS configures mutual TLS (mTLS) for Kafka broker connections
+	MTLS MTLS `yaml:"mtls" validate:"omitempty"`
+}
+
+// KafkaSASL holds SASL authentication settings for Kafka
+type KafkaSASL struct {
+	// Enable activates SASL authentication
+	Enable bool `yaml:"enable" default:"false"`
+	// Mechanism is the SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)
+	Mechanism string `yaml:"mechanism" validate:"required_if=Enable true,omitempty,oneof=PLAIN SCRAM-SHA-256 SCRAM-SHA-512" default:"SCRAM-SHA-512"`
+	// Username is the SASL username
+	Username string `yaml:"username" validate:"required_if=Enable true"`
+	// Password is the SASL password
+	Password string `yaml:"password" validate:"required_if=Enable true"`
 }
 
 // Log holds the logging configuration
@@ -117,6 +147,8 @@ type Common struct {
 	Mongo Mongo `yaml:"mongo" validate:"omitempty"`
 	// Tracing is the OpenTelemetry tracing configuration
 	Tracing OTEL `yaml:"tracing" validate:"omitempty"`
+	// Metrics is the OpenTelemetry metrics configuration
+	Metrics OTEL `yaml:"metrics" validate:"omitempty"`
 	// Kafka is the Kafka message broker configuration
 	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
 	// SecretFilePath is the path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.
@@ -231,6 +263,12 @@ type SAMLSP struct {
 	// metadata signatures. When set, all fetched metadata (MDQ and static) must
 	// carry a valid XML signature from this certificate.
 	MetadataSigningCertPath string `yaml:"metadata_signing_cert_path,omitempty"`
+
+	// AllowUnsignedMetadata permits MDQ/URL metadata without signature verification.
+	// This is INSECURE (MITM → fake IdP) and should only be used in development.
+	// When false (default), MDQ and URL metadata sources require MetadataSigningCertPath.
+	// Local metadata files are allowed unsigned regardless (with a startup warning).
+	AllowUnsignedMetadata bool `yaml:"allow_unsigned_metadata" default:"false"`
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
@@ -509,6 +547,13 @@ type Verifier struct {
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://verifier.sunet.se\""`
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
+	// ClientIDScheme determines how the verifier identifies itself to wallets.
+	// Supported values: "x509_san_dns" (default), "did".
+	// When "did", the DID field must be set and /.well-known/did.json is served.
+	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns did"`
+	// DID is the verifier's DID identity (e.g., "did:web:verifier.example.com").
+	// Required when ClientIDScheme is "did".
+	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
@@ -530,6 +575,29 @@ type Verifier struct {
 	// Each preset maps credential_metadata scopes to optional claim overrides.
 	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
 	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
+}
+
+// VerifierClientID returns the client_id value the verifier uses in OID4VP requests.
+// For "x509_san_dns" (default): returns "x509_san_dns:{hostname}".
+// For "did": returns the configured DID value directly.
+func (v *Verifier) VerifierClientID() (string, error) {
+	switch v.ClientIDScheme {
+	case "did":
+		if v.DID == "" {
+			return "", fmt.Errorf("client_id_scheme is \"did\" but no DID is configured")
+		}
+		return v.DID, nil
+	default:
+		// x509_san_dns (default)
+		u, err := url.Parse(v.PublicURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse PublicURL: %w", err)
+		}
+		if u.Host == "" {
+			return "", fmt.Errorf("PublicURL %q has no host component", v.PublicURL)
+		}
+		return "x509_san_dns:" + u.Host, nil
+	}
 }
 
 // TrustConfig holds configuration for key resolution and trust evaluation via go-trust.
@@ -860,6 +928,10 @@ type IssuerMetadata struct {
 	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
 	// Display holds the display metadata
 	Display []openid4vci.MetadataDisplay `yaml:"display" validate:"omitempty"`
+	// MdocIacasURI is the URL where IACA certificates are published for mDOC verification.
+	// When configured, this is included in .well-known/openid-credential-issuer metadata
+	// so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials.
+	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
 }
 
 // CredentialOfferWallets holds wallet redirect configuration
@@ -880,10 +952,8 @@ type CredentialOffers struct {
 
 // OpenID4VPCredentialAuth holds per-credential OpenID4VP authentication requirements
 type OpenID4VPCredentialAuth struct {
-	// AuthScopes lists credential keys whose VCTs are acceptable for wallet authentication
-	AuthScopes []string `yaml:"auth_scopes" validate:"required,min=1"`
-	// AuthClaims lists identity claims to extract from the authentication credential
-	AuthClaims []string `yaml:"auth_claims" validate:"required,min=1"`
+	// AuthScopes maps credential scope keys to per-scope auth config (claims to extract)
+	AuthScopes map[string]AuthScopeEntry
 }
 
 // APIGWDelivery groups credential delivery configuration (wallets, offers).
@@ -934,6 +1004,18 @@ type APIGW struct {
 	// Trust holds the trust evaluation configuration for OpenID4VP credential validation.
 	// When configured, credentials presented via VP are validated against a PDP.
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// RateLimit configures per-endpoint rate limiting for the APIGW.
+	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
+}
+
+// APIGWRateLimit holds per-endpoint rate limit settings for the APIGW.
+type APIGWRateLimit struct {
+	// TokenRequestsPerMinute is the maximum token endpoint requests per minute per IP. Default: 20
+	TokenRequestsPerMinute int `yaml:"token_requests_per_minute" default:"20"`
+	// CredentialRequestsPerMinute is the maximum credential endpoint requests per minute per IP. Default: 30
+	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
+	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
+	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -999,7 +1081,6 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 		if cred.AuthProvider == AuthProviderOpenID4VP {
 			return &OpenID4VPCredentialAuth{
 				AuthScopes: cred.AuthScopes,
-				AuthClaims: cred.AuthClaims,
 			}
 		}
 	}
@@ -1383,6 +1464,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,
+		MdocIacasURI:                         cfg.MdocIacasURI,
 	}
 
 	metadata := metadataConfig.GenerateIssuerMetadata(ctx)

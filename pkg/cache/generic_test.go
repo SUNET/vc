@@ -78,6 +78,62 @@ func runGenericCacheContractTests[V comparable](t *testing.T, c Cache[V], val1, 
 		fresh := c.Len()
 		assert.GreaterOrEqual(t, fresh, 0)
 	})
+
+	t.Run("SetNX_New", func(t *testing.T) {
+		ok, err := c.SetNX(ctx, "nx-new", val1)
+		require.NoError(t, err)
+		assert.True(t, ok, "SetNX on a new key should succeed")
+		got, found := c.Get(ctx, "nx-new")
+		require.True(t, found)
+		assert.Equal(t, val1, got)
+	})
+
+	t.Run("SetNX_Existing", func(t *testing.T) {
+		c.Set(ctx, "nx-exist", val1)
+		ok, err := c.SetNX(ctx, "nx-exist", val2)
+		require.NoError(t, err)
+		assert.False(t, ok, "SetNX on existing key should return false")
+		got, found := c.Get(ctx, "nx-exist")
+		require.True(t, found)
+		assert.Equal(t, val1, got, "value should not be overwritten")
+	})
+
+	t.Run("SetNXWithTTL_New", func(t *testing.T) {
+		ok, err := c.SetNXWithTTL(ctx, "nxttl-new", val1, 1*time.Hour)
+		require.NoError(t, err)
+		assert.True(t, ok, "SetNXWithTTL on a new key should succeed")
+		got, found := c.Get(ctx, "nxttl-new")
+		require.True(t, found)
+		assert.Equal(t, val1, got)
+	})
+
+	t.Run("SetNXWithTTL_Existing", func(t *testing.T) {
+		c.Set(ctx, "nxttl-exist", val1)
+		ok, err := c.SetNXWithTTL(ctx, "nxttl-exist", val2, 1*time.Hour)
+		require.NoError(t, err)
+		assert.False(t, ok, "SetNXWithTTL on existing key should return false")
+		got, found := c.Get(ctx, "nxttl-exist")
+		require.True(t, found)
+		assert.Equal(t, val1, got, "value should not be overwritten")
+	})
+
+	t.Run("SetNXWithTTL_ZeroTTL_FallsBackToDefault", func(t *testing.T) {
+		ok, err := c.SetNXWithTTL(ctx, "nxttl-zero", val1, 0)
+		require.NoError(t, err)
+		assert.True(t, ok, "SetNXWithTTL with zero TTL should succeed on new key")
+		got, found := c.Get(ctx, "nxttl-zero")
+		require.True(t, found)
+		assert.Equal(t, val1, got)
+	})
+
+	t.Run("SetNXWithTTL_NegativeTTL_FallsBackToDefault", func(t *testing.T) {
+		ok, err := c.SetNXWithTTL(ctx, "nxttl-neg", val1, -5*time.Second)
+		require.NoError(t, err)
+		assert.True(t, ok, "SetNXWithTTL with negative TTL should succeed on new key")
+		got, found := c.Get(ctx, "nxttl-neg")
+		require.True(t, found)
+		assert.Equal(t, val1, got)
+	})
 }
 
 // --- MemoryCache type-specific tests ---
@@ -144,6 +200,45 @@ func TestMemoryCache_TTLExpiration(t *testing.T) {
 
 	_, ok := c.Get(ctx, "expire-me")
 	assert.False(t, ok, "expected item to expire")
+}
+
+func TestMemoryCache_SetNXWithTTL_Expiration(t *testing.T) {
+	ctx := context.Background()
+	c := NewMemoryCache[string](5 * time.Minute)
+
+	// Store with a short custom TTL.
+	ok, err := c.SetNXWithTTL(ctx, "nx-expire", "val", 50*time.Millisecond)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// Value should be readable immediately.
+	got, found := c.Get(ctx, "nx-expire")
+	require.True(t, found)
+	assert.Equal(t, "val", got)
+
+	// After the custom TTL elapses, the value should be gone.
+	time.Sleep(150 * time.Millisecond)
+	_, found = c.Get(ctx, "nx-expire")
+	assert.False(t, found, "expected item to expire after custom TTL")
+}
+
+func TestMemoryCache_SetNXWithTTL_ZeroTTL_UsesDefault(t *testing.T) {
+	ctx := context.Background()
+	// Default TTL = 50ms. Zero TTL should fall back to default, not infinite.
+	c := NewMemoryCache[string](50 * time.Millisecond)
+
+	ok, err := c.SetNXWithTTL(ctx, "nx-zero-ttl", "val", 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// Value should be readable immediately.
+	_, found := c.Get(ctx, "nx-zero-ttl")
+	require.True(t, found)
+
+	// After default TTL elapses, value should expire.
+	time.Sleep(150 * time.Millisecond)
+	_, found = c.Get(ctx, "nx-zero-ttl")
+	assert.False(t, found, "zero TTL should fall back to default TTL, not infinite")
 }
 
 func TestMemoryCache_Stop(t *testing.T) {
@@ -337,4 +432,58 @@ func TestMongoCache_SetWithTTL_SameAsDefault(t *testing.T) {
 	// No shift; created_at should be ~now.
 	assert.InDelta(t, 0, age, float64(5*time.Second),
 		"created_at should be approximately now when TTL equals default")
+}
+
+func TestMongoCache_SetNXWithTTL_CreatedAtShift(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	// Collection TTL = 10 minutes.
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_nxttl_shift", 10*time.Minute, nil)
+	require.NoError(t, err)
+
+	// SetNXWithTTL with 3-minute TTL should shift created_at 7 minutes into the past.
+	ok, err := c.SetNXWithTTL(ctx, "nx-shift", "val", 3*time.Minute)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	coll := client.Database("test_generic").Collection("cache_nxttl_shift")
+	var doc bson.M
+	err = coll.FindOne(ctx, bson.M{"_id": "nx-shift"}).Decode(&doc)
+	require.NoError(t, err)
+
+	createdAt := doc["created_at"].(bson.DateTime).Time()
+	age := time.Since(createdAt)
+	assert.InDelta(t, 7*time.Minute, age, float64(5*time.Second),
+		"created_at should be shifted ~7 minutes into the past for 3-minute TTL")
+
+	// Value should still be readable.
+	got, found := c.Get(ctx, "nx-shift")
+	require.True(t, found)
+	assert.Equal(t, "val", got)
+}
+
+func TestMongoCache_SetNXWithTTL_ZeroTTL_NoShift(t *testing.T) {
+	client, cleanup := startMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewMongoCache[string](ctx, client, "test_generic", "cache_nxttl_zero", 10*time.Minute, nil)
+	require.NoError(t, err)
+
+	// Zero TTL should fall back to SetNX (default TTL), meaning created_at ~now.
+	ok, err := c.SetNXWithTTL(ctx, "nx-zero", "val", 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	coll := client.Database("test_generic").Collection("cache_nxttl_zero")
+	var doc bson.M
+	err = coll.FindOne(ctx, bson.M{"_id": "nx-zero"}).Decode(&doc)
+	require.NoError(t, err)
+
+	createdAt := doc["created_at"].(bson.DateTime).Time()
+	age := time.Since(createdAt)
+	assert.InDelta(t, 0, age, float64(5*time.Second),
+		"zero TTL should fall back to default (created_at ~now)")
 }

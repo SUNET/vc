@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lithammer/shortuuid/v4"
-	ginratelimit "github.com/ljahier/gin-ratelimit"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"
@@ -373,23 +373,50 @@ func deduplicatePairs(pairs []resourcePair) []resourcePair {
 	return out
 }
 
-// RateLimiter implements a token bucket rate limiter using gin-ratelimit
+// RateLimiter implements a fixed-window rate limiter backed by a RateLimitCounter.
+// The counter provides atomic increment, so concurrent requests within the same
+// instance (or across HA instances when backed by MongoDB) are correctly counted.
 type RateLimiter struct {
-	tokenBucket *ginratelimit.TokenBucket
+	counter           cache.RateLimitCounter
+	requestsPerMinute int64
+	window            time.Duration
 }
 
-// NewRateLimiter creates a new rate limiter using token bucket algorithm.
-// requestsPerMinute: maximum requests allowed per minute per IP
-func (m *middlewareHandler) NewRateLimiter(requestsPerMinute int) *RateLimiter {
-	tb := ginratelimit.NewTokenBucket(requestsPerMinute, 1*time.Minute)
+// NewRateLimiter creates a rate limiter that uses the provided counter for
+// atomic per-IP request counting. Keys are namespaced by route path automatically.
+func NewRateLimiter(counter cache.RateLimitCounter, requestsPerMinute int) *RateLimiter {
 	return &RateLimiter{
-		tokenBucket: tb,
+		counter:           counter,
+		requestsPerMinute: int64(requestsPerMinute),
+		window:            1 * time.Minute,
 	}
 }
 
-// Middleware returns a Gin middleware handler that enforces rate limiting by IP
+// Middleware returns a Gin middleware handler that enforces rate limiting by client IP.
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
-	return ginratelimit.RateLimitByIP(rl.tokenBucket)
+	return func(c *gin.Context) {
+		key := c.FullPath() + ":" + c.ClientIP()
+
+		count, err := rl.counter.IncrementWithTTL(c.Request.Context(), key, rl.window)
+		if err != nil {
+			// Backend failure — fail closed.
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error":             "service_unavailable",
+				"error_description": "Rate limiter unavailable. Please try again later.",
+			})
+			return
+		}
+
+		if count > rl.requestsPerMinute {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":             "rate_limit_exceeded",
+				"error_description": "Too many requests. Please try again later.",
+			})
+			return
+		}
+
+		c.Next()
+	}
 }
 
 // CSRFProtection returns middleware that enforces CSRF token validation on
@@ -476,6 +503,39 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 				return
 			}
 		}
+		c.Next()
+	}
+}
+
+// MaxBodySize returns middleware that limits the size of request bodies.
+// Requests exceeding maxBytes receive a 413 Payload Too Large response.
+func (m *middlewareHandler) MaxBodySize(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
+		c.Next()
+	}
+}
+
+// SecurityHeaders returns middleware that sets standard security headers on all responses.
+// When tlsEnabled is true, HSTS (Strict-Transport-Security) is also set.
+func (m *middlewareHandler) SecurityHeaders(tlsEnabled bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		if tlsEnabled {
+			// max-age=63072000 = 2 years; includeSubDomains applies to all subdomains
+			c.Header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
+		c.Next()
+	}
+}
+
+// AdminCSP returns middleware that sets a restrictive Content-Security-Policy for admin UI pages.
+func (m *middlewareHandler) AdminCSP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")
 		c.Next()
 	}
 }

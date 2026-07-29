@@ -2318,10 +2318,10 @@ func TestProcessDirectPost(t *testing.T) {
 				if tt.expectShowCredentials {
 					// Should redirect to display page
 					assert.Contains(t, resp.RedirectURI, "/verification/display/")
-				} else if authCtx.RedirectURI != "" {
-					// Should have authorization code in redirect
-					assert.Contains(t, resp.RedirectURI, "code=")
-					assert.Contains(t, resp.RedirectURI, "state=")
+				} else {
+					// Direct post must NOT return redirect_uri; the browser
+					// picks up the redirect via the poll endpoint instead.
+					assert.Empty(t, resp.RedirectURI)
 				}
 			}
 		})
@@ -2863,7 +2863,7 @@ func TestBuildOpenID4VPAuthzRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, _, err := buildOpenID4VPAuthzRequest(tt.publicURL, tt.sessionID)
+			result, _, err := buildOpenID4VPAuthzRequest(tt.publicURL, tt.sessionID, "x509_san_dns:verifier.example.com")
 			if tt.wantErr {
 				require.Error(t, err)
 				return

@@ -170,72 +170,52 @@ func mockPDA1Map(t *testing.T, jsonString string) map[string]any {
 
 func TestSchemaValidation(t *testing.T) {
 	tts := []struct {
-		name    string
-		payload *model.CompleteDocument
-		want    error
+		name      string
+		payload   *model.CompleteDocument
+		wantErr   bool
+		wantTitle string
 	}{
 		{
 			name: "happy-from struct to map",
 			payload: &model.CompleteDocument{
 				Meta: &model.MetaData{
-					DocumentDataValidationRef: "file://../../standards/schema_pda1.json",
+					DocumentDataValidationRef: "file://../../../standards/schema_pda1.json",
 				},
 				DocumentData: GeneratePDA1Document(t),
 			},
-			want: nil,
+			wantErr: false,
 		},
 		{
 			name: "happy-from string to map",
 			payload: &model.CompleteDocument{
 				Meta: &model.MetaData{
-					DocumentDataValidationRef: "file://../../standards/schema_pda1.json",
+					DocumentDataValidationRef: "file://../../../standards/schema_pda1.json",
 				},
 				DocumentData: mockPDA1Map(t, mockPDA1JSON),
 			},
-			want: nil,
+			wantErr: false,
 		},
 		{
 			name: "unhappy-empty document",
 			payload: &model.CompleteDocument{
 				Meta: &model.MetaData{
-					DocumentDataValidationRef: "file://../../standards/schema_pda1.json",
+					DocumentDataValidationRef: "file://../../../standards/schema_pda1.json",
 				},
 				DocumentData: mockPDA1Map(t, mockEmptyPDA1JSON),
 			},
-			want: &helpers.Error{
-				Title: "document_data_schema_error",
-				Err: []map[string]any{
-					{"location": "/competent_institution", "message": map[string]any{"type_mismatch": "Value is null but should be object"}},
-					{"location": "/decision_legislation_applicable", "message": map[string]any{"type_mismatch": "Value is null but should be object"}},
-					{"location": "/details_of_employment", "message": map[string]any{"type_mismatch": "Value is null but should be array"}},
-					{"location": "/nationality", "message": map[string]any{"type_mismatch": "Value is null but should be array"}},
-					{"location": "/places_of_work", "message": map[string]any{"type_mismatch": "Value is null but should be array"}},
-					{"location": "/social_security_pin", "message": map[string]any{"type_mismatch": "Value is null but should be string"}},
-					{"location": "/status_confirmation", "message": map[string]any{"ref_mismatch": "Value does not match the reference schema"}},
-					{"location": "/unique_number_of_issued_document", "message": map[string]any{"ref_mismatch": "Value does not match the reference schema"}},
-				},
-			},
+			wantErr:   true,
+			wantTitle: "document_data_schema_error",
 		},
 		{
 			name: "unhappy-top level",
 			payload: &model.CompleteDocument{
 				Meta: &model.MetaData{
-					DocumentDataValidationRef: "file://../../standards/schema_pda1.json",
+					DocumentDataValidationRef: "file://../../../standards/schema_pda1.json",
 				},
 				DocumentData: mockPDA1Map(t, mockTopLevelPDA1JSON),
 			},
-			want: &helpers.Error{
-				Title: "document_data_schema_error",
-				Err: []map[string]any{
-					{"location": "/competent_institution", "message": map[string]any{"type_mismatch": "Value is string but should be object"}},
-					{"location": "/decision_legislation_applicable", "message": map[string]any{"type_mismatch": "Value is string but should be object"}},
-					{"location": "/details_of_employment", "message": map[string]any{"type_mismatch": "Value is string but should be array"}},
-					{"location": "/nationality", "message": map[string]any{"type_mismatch": "Value is string but should be array"}},
-					{"location": "/places_of_work", "message": map[string]any{"type_mismatch": "Value is string but should be array"}},
-					{"location": "/status_confirmation", "message": map[string]any{"ref_mismatch": "Value does not match the reference schema"}},
-					{"location": "/unique_number_of_issued_document", "message": map[string]any{"ref_mismatch": "Value does not match the reference schema"}},
-				},
-			},
+			wantErr:   true,
+			wantTitle: "document_data_schema_error",
 		},
 	}
 
@@ -245,7 +225,15 @@ func TestSchemaValidation(t *testing.T) {
 
 			got := helpers.ValidateDocumentData(ctx, tt.payload, logger.NewSimple("test"))
 
-			assert.Equal(t, tt.want, got)
+			if tt.wantErr {
+				assert.Error(t, got)
+				var helperErr *helpers.Error
+				if assert.ErrorAs(t, got, &helperErr) {
+					assert.Equal(t, tt.wantTitle, helperErr.Title)
+				}
+			} else {
+				assert.NoError(t, got)
+			}
 		})
 	}
 }

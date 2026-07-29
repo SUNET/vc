@@ -89,9 +89,12 @@ func (t *TxnOffsetCommitRequest) decode(pd packetDecoder, version int16) (err er
 	if err != nil {
 		return err
 	}
+	if n < 0 {
+		return errInvalidArrayLength
+	}
 
 	t.Topics = make(map[string][]*PartitionOffsetMetadata)
-	for i := 0; i < n; i++ {
+	for range n {
 		topic, err := pd.getString()
 		if err != nil {
 			return err
@@ -101,10 +104,13 @@ func (t *TxnOffsetCommitRequest) decode(pd packetDecoder, version int16) (err er
 		if err != nil {
 			return err
 		}
+		if m < 0 {
+			return errInvalidArrayLength
+		}
 
 		t.Topics[topic] = make([]*PartitionOffsetMetadata, m)
 
-		for j := 0; j < m; j++ {
+		for j := range m {
 			partitionOffsetMetadata := new(PartitionOffsetMetadata)
 			if err := partitionOffsetMetadata.decode(pd, version); err != nil {
 				return err
