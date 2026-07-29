@@ -354,8 +354,8 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		"credential_type", session.CredentialType,
 		"offer_id", credentialOffer.ID)
 
-	if c.vci != nil {
-		c.vci.OffersCreated.Add(ctx, 1, metric.WithAttributes(
+	if c.vciMetrics != nil {
+		c.vciMetrics.OffersCreated.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("grant_type", "pre-authorized_code"),
 			attribute.String("credential_config_id", session.CredentialType),
 			attribute.String("source", "oidc_rp"),

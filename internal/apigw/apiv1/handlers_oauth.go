@@ -504,10 +504,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 
 	c.log.Debug("OAuthToken complete")
 
-	if c.vci != nil {
+	if c.vciMetrics != nil {
 		grantTypeAttr := metric.WithAttributes(attribute.String("grant_type", req.GrantType))
-		c.vci.TokensIssued.Add(ctx, 1, grantTypeAttr)
-		c.vci.TokenLatency.Record(ctx, time.Since(start).Seconds(), grantTypeAttr)
+		c.vciMetrics.TokensIssued.Add(ctx, 1, grantTypeAttr)
+		c.vciMetrics.TokenLatency.Record(ctx, time.Since(start).Seconds(), grantTypeAttr)
 	}
 
 	return reply, nil

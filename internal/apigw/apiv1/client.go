@@ -34,11 +34,11 @@ import (
 
 // Client holds the public api object
 type Client struct {
-	cfg    *model.Cfg
-	db     *db.Service
-	log    *logger.Log
-	tracer *trace.Tracer
-	vci    *metric.VCI
+	cfg        *model.Cfg
+	db         *db.Service
+	log        *logger.Log
+	tracer     *trace.Tracer
+	vciMetrics *metric.VCI
 
 	// database collections
 	credentialOfferStore db.CredentialOfferStore
@@ -74,7 +74,12 @@ type Client struct {
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, vciMetrics *metric.VCI, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+	vciMetrics, err := metric.NewVCI(meter.Meter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VCI metrics: %w", err)
+	}
+
 	c := &Client{
 		cfg:                           cfg,
 		db:                            db,
@@ -83,12 +88,10 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		identityMappingStore:          db.IdentityMappingsColl,
 		log:                           log.New("apiv1"),
 		tracer:                        tracer,
-		vci:                           vciMetrics,
+		vciMetrics:                    vciMetrics,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
 		cacheService:                  cacheService,
 	}
-
-	var err error
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)
 	// Unsigned metadata will be signed on-demand in the handler for freshness

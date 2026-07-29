@@ -64,10 +64,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	vpMetrics, err := metric.NewVP(meter.Meter)
-	if err != nil {
-		panic(err)
-	}
 
 	dbService, err := db.New(ctx, cfg, tracer, log)
 	services["dbService"] = dbService
@@ -86,7 +82,7 @@ func main() {
 		panic(err)
 	}
 
-	apiv1, err := apiv1.New(ctx, dbService, notifyService, cacheService, cfg, tracer, vpMetrics, log)
+	apiv1, err := apiv1.New(ctx, dbService, notifyService, cacheService, cfg, tracer, meter, log)
 	if err != nil {
 		panic(err)
 	}

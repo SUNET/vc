@@ -74,8 +74,8 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	// Cache the request object
 	c.cacheService.RequestObject.SetWithTTL(ctx, sessionID, requestObject, 5*time.Minute)
 
-	if c.vp != nil {
-		c.vp.RequestsCreated.Add(ctx, 1)
+	if c.vpMetrics != nil {
+		c.vpMetrics.RequestsCreated.Add(ctx, 1)
 	}
 
 	return signedJWT, nil
@@ -123,8 +123,8 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session with error status")
 		}
-		if c.vp != nil {
-			c.vp.VerificationsFailed.Add(ctx, 1, metric.WithAttributes(
+		if c.vpMetrics != nil {
+			c.vpMetrics.VerificationsFailed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_class", "claims_extraction"),
 			))
 		}
@@ -150,9 +150,9 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		return ErrServerError
 	}
 
-	if c.vp != nil {
-		c.vp.PresentationsReceived.Add(ctx, 1)
-		c.vp.VerificationLatency.Record(ctx, time.Since(start).Seconds())
+	if c.vpMetrics != nil {
+		c.vpMetrics.PresentationsReceived.Add(ctx, 1)
+		c.vpMetrics.VerificationLatency.Record(ctx, time.Since(start).Seconds())
 	}
 
 	return nil

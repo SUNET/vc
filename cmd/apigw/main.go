@@ -61,10 +61,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	vciMetrics, err := metric.NewVCI(meter.Meter)
-	if err != nil {
-		panic(err)
-	}
 
 	dbService, err := db.New(ctx, cfg, tracer, log)
 	services["dbService"] = dbService
@@ -101,7 +97,7 @@ func main() {
 		mainLog.Info("EventPublisher disabled in config")
 	}
 
-	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, vciMetrics, cfg, log)
+	apiv1Client, err := apiv1.New(ctx, dbService, cacheService, tracer, meter, cfg, log)
 	if err != nil {
 		panic(err)
 	}

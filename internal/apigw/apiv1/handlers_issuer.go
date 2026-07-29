@@ -433,25 +433,25 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	formatAttr := metric.WithAttributes(attribute.String("format", format))
 	if err != nil {
-		if c.vci != nil {
-			c.vci.CredentialsFailed.Add(ctx, 1, metric.WithAttributes(
+		if c.vciMetrics != nil {
+			c.vciMetrics.CredentialsFailed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("format", format),
 				attribute.String("error_class", "issuance_error"),
 			))
-			c.vci.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
+			c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 		}
 		return nil, err
 	}
-	if c.vci != nil {
+	if c.vciMetrics != nil {
 		configID := req.CredentialConfigurationID
 		if configID == "" {
 			configID = req.CredentialIdentifier
 		}
-		c.vci.CredentialsIssued.Add(ctx, 1, metric.WithAttributes(
+		c.vciMetrics.CredentialsIssued.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("format", format),
 			attribute.String("credential_config_id", configID),
 		))
-		c.vci.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
+		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 	return resp, nil
 }
@@ -665,8 +665,8 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
-	if c.vci != nil {
-		c.vci.DeferredCredentials.Add(ctx, 1, metric.WithAttributes(
+	if c.vciMetrics != nil {
+		c.vciMetrics.DeferredCredentials.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("status", "pending"),
 		))
 	}
@@ -693,12 +693,12 @@ func (c *Client) VCICredentialOfferURI(ctx context.Context, req *openid4vci.Cred
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-notification-endpoint
 func (c *Client) VCINotification(ctx context.Context, req *openid4vci.NotificationRequest) error {
 	c.log.Debug("notification", "req", req)
-	if c.vci != nil {
+	if c.vciMetrics != nil {
 		event := req.Event
 		if event == "" {
 			event = "unknown"
 		}
-		c.vci.Notifications.Add(ctx, 1, metric.WithAttributes(
+		c.vciMetrics.Notifications.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("event", event),
 		))
 	}
