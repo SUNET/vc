@@ -330,6 +330,22 @@ func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSes
 	return authReq, nil
 }
 
+// reservedOIDCParams are authorization request parameters that CustomParams
+// must not be allowed to set, since oauth2.AuthCodeOption values are applied
+// by key (last write wins) - letting an operator-configured custom param
+// collide with one of these would silently override state/nonce/PKCE
+// guarantees set earlier in BuildAuthorizationURL.
+var reservedOIDCParams = map[string]bool{
+	"response_type":         true,
+	"client_id":             true,
+	"redirect_uri":          true,
+	"scope":                 true,
+	"state":                 true,
+	"nonce":                 true,
+	"code_challenge":        true,
+	"code_challenge_method": true,
+}
+
 // resolveOIDCRequestParams resolves template variables in OIDC request params
 // and returns oauth2.AuthCodeOption values to append to the authorization URL.
 func resolveOIDCRequestParams(params *model.OIDCRequestParams, dynamicParams map[string]string) ([]oauth2.AuthCodeOption, error) {
@@ -352,6 +368,9 @@ func resolveOIDCRequestParams(params *model.OIDCRequestParams, dynamicParams map
 	}
 
 	for key, value := range params.CustomParams {
+		if reservedOIDCParams[key] {
+			return nil, fmt.Errorf("custom_params key %q is reserved and cannot override a core authorization request parameter", key)
+		}
 		resolvedValue, err := resolveTemplate(value, dynamicParams)
 		if err != nil {
 			return nil, fmt.Errorf("custom param %q template: %w", key, err)
