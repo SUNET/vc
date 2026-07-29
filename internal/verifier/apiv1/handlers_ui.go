@@ -74,6 +74,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			info.VCT = v
 		} else if vctm := constructor.GetVCTM(); vctm != nil {
 			info.VCT = vctm.VCT
+		} else if mddl := constructor.GetMDDL(); mddl != nil {
+			// mso_mdoc scopes have no VCTM/VCTURL — the doctype is the
+			// closest equivalent identifier.
+			info.VCT = mddl.DocType
 		}
 		reply.Credentials[scope] = info
 	}

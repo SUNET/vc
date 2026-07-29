@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -115,6 +116,48 @@ func TestUIMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUIMetadata_MsoMdocScope verifies that mso_mdoc scopes (which have no
+// VCTM) still surface a usable VCT (the doctype) and non-empty Attributes,
+// derived from the loaded MDDL schema rather than being left empty.
+func TestUIMetadata_MsoMdocScope(t *testing.T) {
+	ctx := t.Context()
+
+	schema := &mdoc.MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.18013.5.1.mDL",
+		Claims: map[string]mdoc.NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name": {Mandatory: true, ValueType: "tstr"},
+			},
+		},
+	}
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"mdl": {
+					Format:     "mso_mdoc",
+					MDDL:       schema,
+					Attributes: schema.Attributes(),
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	info, ok := reply.Credentials["mdl"]
+	require.True(t, ok, "mdl scope should be present")
+	assert.Equal(t, "org.iso.18013.5.1.mDL", info.VCT, "VCT should fall back to the MDDL doctype")
+	assert.NotEmpty(t, info.Attributes, "Attributes should be derived from the MDDL schema, not left empty")
 }
 
 // TestUIMetadataPresetValidationsPerScope verifies that validations are attached

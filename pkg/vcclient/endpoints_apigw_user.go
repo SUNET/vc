@@ -2,6 +2,7 @@ package vcclient
 
 import (
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -18,6 +19,8 @@ type UserLookupRequest struct {
 	ResponseCode string        `json:"-"`
 	RequestURI   string        `json:"-" validate:"omitempty,max=128,printascii"`
 	VCTM         *sdjwtvc.VCTM `json:"-"`
+	// MDDL is set instead of VCTM for mso_mdoc scopes, which have no VCTM.
+	MDDL *mdoc.MDDLSchema `json:"-"`
 }
 
 // SVGTemplateReply holds SVG template data.

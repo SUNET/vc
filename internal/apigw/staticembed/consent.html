@@ -120,10 +120,10 @@
                                                 <tbody>
                                                     <template x-for="row of flattenClaims(credential.claims)">
                                                         <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
-                                                            <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top' : 'p-2 text-sm text-left align-top')"
+                                                            <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold break-words min-w-0' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top break-words min-w-0' : 'p-2 text-sm text-left align-top break-words min-w-0')"
                                                                 x-text="row.label"
                                                                 :colspan="row.isHeader ? 2 : 1"></th>
-                                                            <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top" x-html="renderClaimValue(row.value)"></td>
+                                                            <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top break-words min-w-0" x-html="renderClaimValue(row.value)"></td>
                                                         </tr>
                                                     </template>
                                                 </tbody>

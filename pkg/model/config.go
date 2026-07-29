@@ -2,6 +2,8 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -1148,15 +1151,30 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
-	// Mutually exclusive with VCTMUrl (one of the two is required).
-	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without=VCTMUrl"`
+	// Used for every format except mso_mdoc (mutually exclusive with VCTMUrl).
+	VCTMFilePath string `yaml:"vctm_file_path" json:"-"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
-	// Mutually exclusive with VCTMFilePath (one of the two is required).
-	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without=VCTMFilePath,omitempty,url"`
+	// Used for every format except mso_mdoc (mutually exclusive with VCTMFilePath).
+	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"omitempty,url"`
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
+
+	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
+	// as produced by registry-cli's mddl format generator. The mso_mdoc
+	// analogue of VCTMFilePath — mutually exclusive with MDDLUrl.
+	MDDLFilePath string `yaml:"mddl_file_path" json:"-"`
+	// MDDLUrl is the URL where the MDDL schema is already published
+	// externally. The mso_mdoc analogue of VCTMUrl.
+	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"omitempty,url"`
+
+	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
+
+	// MDDLRaw holds the raw JSON bytes of the MDDL document, passed inline
+	// to the issuer at issuance time (mirrors VCTMRaw/VCTM for sd-jwt).
+	MDDLRaw []byte `yaml:"-" json:"-"`
+
 	// Format is the credential format to issue
 	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
@@ -1166,7 +1184,7 @@ type CredentialMetadata struct {
 	// via /type-metadata/:scope. Only populated for local VCTMs (VCTMFilePath).
 	VCTMRaw []byte `yaml:"-" json:"-"`
 
-	// Integrity is the SRI hash of the VCTM document (e.g. "sha256-...").
+	// Integrity is the SRI hash of the VCTM or MDDL document (e.g. "sha256-...").
 	// Computed once in LoadVCTMetadata and used for vct#integrity in issued credentials.
 	Integrity string `yaml:"-" json:"-"`
 
@@ -1174,12 +1192,26 @@ type CredentialMetadata struct {
 	// Set by ResolveVCTUrls for both local and external VCTMs.
 	VCTURL string `yaml:"-" json:"-"`
 
-	// mu guards VCTM, VCTMRaw, Integrity, and Attributes during background refresh.
+	// mu guards VCTM, VCTMRaw, MDDL, MDDLRaw, Integrity, and Attributes during background refresh.
 	mu sync.RWMutex `yaml:"-" json:"-"`
 }
 
-// The scope parameter is used only for error messages.
+// LoadVCTMetadata loads this scope's credential schema — a VCTM for every
+// format except mso_mdoc, which instead loads an MDDL schema (registry-cli's
+// mso_mdoc analogue of VCTM). The scope parameter is used only for error
+// messages.
 func (c *CredentialMetadata) LoadVCTMetadata(ctx context.Context, scope string) error {
+	if c.Format == "mso_mdoc" {
+		return c.loadMDDLSchema(ctx, scope)
+	}
+	return c.loadVCTM(ctx, scope)
+}
+
+func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
+	if c.VCTMFilePath == "" && c.VCTMUrl == "" {
+		return fmt.Errorf("scope %s: vctm_file_path or vctm_url is required for format %q", scope, c.Format)
+	}
+
 	var (
 		rawBytes []byte
 		err      error
@@ -1237,6 +1269,64 @@ func (c *CredentialMetadata) LoadVCTMetadata(ctx context.Context, scope string) 
 	return nil
 }
 
+func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) error {
+	if c.MDDLFilePath == "" && c.MDDLUrl == "" {
+		return fmt.Errorf("scope %s: mddl_file_path or mddl_url is required for format %q", scope, c.Format)
+	}
+
+	var rawBytes []byte
+
+	switch {
+	case c.MDDLFilePath != "":
+		data, err := os.ReadFile(c.MDDLFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to read MDDL file %s for scope %s: %w", c.MDDLFilePath, scope, err)
+		}
+		rawBytes = data
+
+	case c.MDDLUrl != "":
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.MDDLUrl, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request for MDDL URL %s for scope %s: %w", c.MDDLUrl, scope, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch MDDL from %s for scope %s: %w", c.MDDLUrl, scope, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("MDDL URL %s returned status %d for scope %s", c.MDDLUrl, resp.StatusCode, scope)
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read MDDL response from %s for scope %s: %w", c.MDDLUrl, scope, err)
+		}
+		rawBytes = data
+	}
+
+	schema, err := mdoc.LoadMDDLSchema(rawBytes)
+	if err != nil {
+		return fmt.Errorf("failed to load MDDL schema for scope %s: %w", scope, err)
+	}
+
+	h := sha256.Sum256(rawBytes)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.MDDL = schema
+	c.Integrity = "sha256-" + base64.StdEncoding.EncodeToString(h[:])
+	c.Attributes = schema.Attributes()
+
+	// Unlike VCTMRaw (only needed to serve /type-metadata/:scope for local
+	// VCTMs), MDDLRaw is always required: APIGW sends it inline in every
+	// MakeMDocRequest and the issuer validates it as required, regardless of
+	// whether the schema came from a local file or mddl_url. Keep it
+	// unconditionally so mddl_url-configured scopes can actually issue.
+	c.MDDLRaw = rawBytes
+
+	return nil
+}
+
 // GetVCTM returns the cached VCTM under a read lock so it is safe to call
 // concurrently with the background refresh loop.
 func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
@@ -1266,17 +1356,38 @@ func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
 	return c.Attributes
 }
 
-// GetIntegrity returns the SRI integrity hash of the VCTM under a read lock.
+// GetIntegrity returns the SRI integrity hash of the VCTM or MDDL document
+// under a read lock.
 func (c *CredentialMetadata) GetIntegrity() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Integrity
 }
 
+// GetMDDL returns the cached MDDL schema under a read lock so it is safe to
+// call concurrently with the background refresh loop.
+func (c *CredentialMetadata) GetMDDL() *mdoc.MDDLSchema {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.MDDL
+}
+
+// GetMDDLRaw returns the raw MDDL JSON bytes under a read lock.
+func (c *CredentialMetadata) GetMDDLRaw() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.MDDLRaw
+}
+
 // IsLocalVCTM returns true when the VCTM is loaded from a local file
 // (i.e. apigw should publish it at /type-metadata/:scope).
 func (c *CredentialMetadata) IsLocalVCTM() bool {
 	return c.VCTMFilePath != ""
+}
+
+// IsLocalMDDL returns true when the MDDL schema is loaded from a local file.
+func (c *CredentialMetadata) IsLocalMDDL() bool {
+	return c.MDDLFilePath != ""
 }
 
 // ResolveVCTUrls computes the URL-based VCT for each credential metadata entry
@@ -1324,6 +1435,44 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	return nil
 }
 
+// applyCommonCredentialConfig sets the fields of CredentialConfigurationsSupported
+// that are identical across every credential format (binding methods, signing
+// algorithms, proof types), so format-specific branches in Generate only need
+// to fill in Format/Scope/Doctype-or-VCT/CredentialMetadata.
+func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.CredentialConfigurationsSupported) {
+	// Set cryptographic binding methods
+	if len(cfg.CryptographicBindingMethodsSupported) > 0 {
+		credConfig.CryptographicBindingMethodsSupported = cfg.CryptographicBindingMethodsSupported
+	} else {
+		credConfig.CryptographicBindingMethodsSupported = []string{"jwk"}
+	}
+
+	// Set credential signing algorithms from configuration
+	// These must be explicitly configured to match the Issuer service's capabilities
+	if len(cfg.CredentialSigningAlgValuesSupported) > 0 {
+		credConfig.CredentialSigningAlgValuesSupported = make([]any, len(cfg.CredentialSigningAlgValuesSupported))
+		for i, alg := range cfg.CredentialSigningAlgValuesSupported {
+			credConfig.CredentialSigningAlgValuesSupported[i] = alg
+		}
+	} else {
+		// Default to common algorithms if not configured
+		credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
+	}
+
+	// Set proof types supported from configuration
+	// These must be explicitly configured to match what the Issuer service accepts
+	proofAlgs := cfg.ProofSigningAlgValuesSupported
+	if len(proofAlgs) == 0 {
+		// Default to common algorithms if not configured
+		proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
+	}
+	credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
+		"jwt": {
+			ProofSigningAlgValuesSupported: proofAlgs,
+		},
+	}
+}
+
 // Generate generates issuer metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
 func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentials map[string]*CredentialMetadata) (*openid4vci.CredentialIssuerMetadataParameters, error) {
@@ -1333,14 +1482,62 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		if constructor == nil {
 			continue
 		}
-		vctm := constructor.GetVCTM()
-		if vctm == nil {
-			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
-		}
-
 		credConfig := openid4vci.CredentialConfigurationsSupported{
 			Format: constructor.Format,
 			Scope:  scope,
+		}
+
+		if constructor.Format == "mso_mdoc" {
+			// mso_mdoc scopes are driven entirely by their MDDL schema, not
+			// a VCTM — doctype and claims come straight from it.
+			mddl := constructor.GetMDDL()
+			if mddl == nil {
+				return nil, fmt.Errorf("credential constructor for scope %q has no MDDL schema loaded (check mddl_file_path)", scope)
+			}
+
+			// Appendix A.2: doctype is format-specific for mso_mdoc
+			credConfig.Doctype = mddl.DocType
+
+			credMetadata := &openid4vci.CredentialMetadata{}
+			if len(mddl.Display) > 0 {
+				credMetadata.Display = make([]openid4vci.CredentialMetadataDisplay, len(mddl.Display))
+				for i, d := range mddl.Display {
+					display := openid4vci.CredentialMetadataDisplay{
+						Name:            d.Name,
+						Locale:          d.Locale,
+						Description:     d.Description,
+						BackgroundColor: d.BackgroundColor,
+						TextColor:       d.TextColor,
+					}
+					if d.Logo != nil && d.Logo.URI != "" {
+						display.Logo = &openid4vci.MetadataLogo{
+							URI:     d.Logo.URI,
+							AltText: d.Logo.AltText,
+						}
+					}
+					credMetadata.Display[i] = display
+				}
+			}
+			for namespace, elements := range mddl.Claims {
+				for elementID, meta := range elements {
+					credMetadata.Claims = append(credMetadata.Claims, openid4vci.ClaimDescription{
+						Path:      []string{namespace, elementID},
+						Mandatory: meta.Mandatory,
+					})
+				}
+			}
+			if len(credMetadata.Display) > 0 || len(credMetadata.Claims) > 0 {
+				credConfig.CredentialMetadata = credMetadata
+			}
+
+			cfg.applyCommonCredentialConfig(&credConfig)
+			credentialConfigs[scope] = credConfig
+			continue
+		}
+
+		vctm := constructor.GetVCTM()
+		if vctm == nil {
+			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
 		// Set format-specific parameters per OID4VCI 1.0 Appendix A
@@ -1349,9 +1546,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
 			credConfig.VCT = resolvedVCT
-		case "mso_mdoc":
-			// Appendix A.2: doctype is format-specific for mso_mdoc
-			credConfig.Doctype = resolvedVCT // VCT serves as doctype for mdoc
 		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
 			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
@@ -1473,38 +1667,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			credConfig.CredentialMetadata = credMetadata
 		}
 
-		// Set cryptographic binding methods
-		if len(cfg.CryptographicBindingMethodsSupported) > 0 {
-			credConfig.CryptographicBindingMethodsSupported = cfg.CryptographicBindingMethodsSupported
-		} else {
-			credConfig.CryptographicBindingMethodsSupported = []string{"jwk"}
-		}
-
-		// Set credential signing algorithms from configuration
-		// These must be explicitly configured to match the Issuer service's capabilities
-		if len(cfg.CredentialSigningAlgValuesSupported) > 0 {
-			credConfig.CredentialSigningAlgValuesSupported = make([]any, len(cfg.CredentialSigningAlgValuesSupported))
-			for i, alg := range cfg.CredentialSigningAlgValuesSupported {
-				credConfig.CredentialSigningAlgValuesSupported[i] = alg
-			}
-		} else {
-			// Default to common algorithms if not configured
-			credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
-		}
-
-		// Set proof types supported from configuration
-		// These must be explicitly configured to match what the Issuer service accepts
-		proofAlgs := cfg.ProofSigningAlgValuesSupported
-		if len(proofAlgs) == 0 {
-			// Default to common algorithms if not configured
-			proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
-		}
-		credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
-			"jwt": {
-				ProofSigningAlgValuesSupported: proofAlgs,
-			},
-		}
-
+		cfg.applyCommonCredentialConfig(&credConfig)
 		credentialConfigs[scope] = credConfig
 	}
 

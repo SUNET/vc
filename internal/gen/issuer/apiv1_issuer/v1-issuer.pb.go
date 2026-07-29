@@ -318,14 +318,14 @@ func (x *MakeSDJWTReply) GetTokenStatusListIndex() int64 {
 	return 0
 }
 
-// MakeMDocRequest is the request for creating an mDL document (ISO 18013-5)
+// MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
 type MakeMDocRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	Scope           string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`                                              // Credential scope (e.g., "pid", "ehic")
-	DocType         string                 `protobuf:"bytes,2,opt,name=doc_type,json=docType,proto3" json:"doc_type,omitempty"`                           // Document type (e.g., "org.iso.18013.5.1.mDL")
-	DocumentData    []byte                 `protobuf:"bytes,3,opt,name=document_data,json=documentData,proto3" json:"document_data,omitempty"`            // JSON encoded mDL data
+	Scope           string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`                                              // Credential scope (e.g., "pid_mdoc", "mdl")
+	DocumentData    []byte                 `protobuf:"bytes,3,opt,name=document_data,json=documentData,proto3" json:"document_data,omitempty"`            // JSON encoded mdoc data
 	DevicePublicKey []byte                 `protobuf:"bytes,4,opt,name=device_public_key,json=devicePublicKey,proto3" json:"device_public_key,omitempty"` // CBOR encoded COSE_Key for holder's device
 	DeviceKeyFormat string                 `protobuf:"bytes,5,opt,name=device_key_format,json=deviceKeyFormat,proto3" json:"device_key_format,omitempty"` // Format: "cose", "jwk", or "x509" (default: "cose")
+	Mddl            []byte                 `protobuf:"bytes,6,opt,name=mddl,proto3" json:"mddl,omitempty"`                                                // Raw MDDL (mso_mdoc) schema JSON bytes (provided by APIGW, avoids issuer fetching URL)
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -367,13 +367,6 @@ func (x *MakeMDocRequest) GetScope() string {
 	return ""
 }
 
-func (x *MakeMDocRequest) GetDocType() string {
-	if x != nil {
-		return x.DocType
-	}
-	return ""
-}
-
 func (x *MakeMDocRequest) GetDocumentData() []byte {
 	if x != nil {
 		return x.DocumentData
@@ -393,6 +386,13 @@ func (x *MakeMDocRequest) GetDeviceKeyFormat() string {
 		return x.DeviceKeyFormat
 	}
 	return ""
+}
+
+func (x *MakeMDocRequest) GetMddl() []byte {
+	if x != nil {
+		return x.Mddl
+	}
+	return nil
 }
 
 // MakeMDocReply contains the issued mDL credential
@@ -973,13 +973,13 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x0eMakeSDJWTReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
-	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\"\xbf\x01\n" +
+	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\"\xbe\x01\n" +
 	"\x0fMakeMDocRequest\x12\x14\n" +
-	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\x19\n" +
-	"\bdoc_type\x18\x02 \x01(\tR\adocType\x12#\n" +
+	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x03 \x01(\fR\fdocumentData\x12*\n" +
 	"\x11device_public_key\x18\x04 \x01(\fR\x0fdevicePublicKey\x12*\n" +
-	"\x11device_key_format\x18\x05 \x01(\tR\x0fdeviceKeyFormat\"\xbf\x01\n" +
+	"\x11device_key_format\x18\x05 \x01(\tR\x0fdeviceKeyFormat\x12\x12\n" +
+	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\xbf\x01\n" +
 	"\rMakeMDocReply\x12\x12\n" +
 	"\x04mdoc\x18\x01 \x01(\fR\x04mdoc\x12.\n" +
 	"\x13status_list_section\x18\x02 \x01(\x03R\x11statusListSection\x12*\n" +

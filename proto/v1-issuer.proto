@@ -50,13 +50,14 @@ message MakeSDJWTReply {
    int64 token_status_list_index = 3;   // Token Status List index
 }
 
-// MakeMDocRequest is the request for creating an mDL document (ISO 18013-5)
+// MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
 message MakeMDocRequest {
-    string scope = 1;            // Credential scope (e.g., "pid", "ehic")
-    string doc_type = 2;         // Document type (e.g., "org.iso.18013.5.1.mDL")
-    bytes document_data = 3;     // JSON encoded mDL data
+    string scope = 1;            // Credential scope (e.g., "pid_mdoc", "mdl")
+    reserved 2;                  // was: string doc_type (removed – doctype now comes from mddl)
+    bytes document_data = 3;     // JSON encoded mdoc data
     bytes device_public_key = 4; // CBOR encoded COSE_Key for holder's device
     string device_key_format = 5; // Format: "cose", "jwk", or "x509" (default: "cose")
+    bytes mddl = 6;               // Raw MDDL (mso_mdoc) schema JSON bytes (provided by APIGW, avoids issuer fetching URL)
 }
 
 // MakeMDocReply contains the issued mDL credential

@@ -1,0 +1,10 @@
+{
+  "format": "mso_mdoc",
+  "doctype": "eu.europa.ec.eudi.pid.1",
+  "claims": {
+    "eu.europa.ec.eudi.pid.1": {
+      "family_name": { "mandatory": true, "value_type": "tstr" },
+      "given_name": { "mandatory": true, "value_type": "tstr" }
+    }
+  }
+}

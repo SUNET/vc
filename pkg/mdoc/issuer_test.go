@@ -7,6 +7,9 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/json"
+	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -44,13 +47,6 @@ func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[
 	return values
 }
 
-// boolPtr returns a pointer to a bool value.
-//
-//go:fix inline
-func boolPtr(b bool) *bool {
-	return new(b)
-}
-
 func createTestIssuerConfig(t *testing.T) IssuerConfig {
 	t.Helper()
 
@@ -85,20 +81,96 @@ func createTestIssuerConfig(t *testing.T) IssuerConfig {
 	}
 }
 
-func createTestMDoc() *MDoc {
-	return &MDoc{
-		FamilyName:           "Andersson",
-		GivenName:            "Erik",
-		BirthDate:            "1990-03-15",
-		IssueDate:            "2024-01-01",
-		ExpiryDate:           "2034-01-01",
-		IssuingCountry:       "SE",
-		IssuingAuthority:     "Transportstyrelsen",
-		DocumentNumber:       "SE1234567",
-		Portrait:             []byte{0xFF, 0xD8, 0xFF}, // JPEG header
-		DrivingPrivileges:    []DrivingPrivilege{{VehicleCategoryCode: "B"}},
-		UNDistinguishingSign: "S",
+// testMDLSchema returns an MDDL schema shaped like an ISO 18013-5 mDL,
+// including a mandatory driving_privileges array-of-records claim.
+func testMDLSchema() *MDDLSchema {
+	return &MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.18013.5.1.mDL",
+		Claims: map[string]NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name":            {Mandatory: true, ValueType: "tstr"},
+				"given_name":             {Mandatory: true, ValueType: "tstr"},
+				"birth_date":             {Mandatory: true, ValueType: "full-date"},
+				"issue_date":             {Mandatory: true, ValueType: "full-date"},
+				"expiry_date":            {Mandatory: true, ValueType: "full-date"},
+				"issuing_country":        {Mandatory: true, ValueType: "tstr"},
+				"issuing_authority":      {Mandatory: true, ValueType: "tstr"},
+				"document_number":        {Mandatory: true, ValueType: "tstr"},
+				"portrait":               {Mandatory: true, ValueType: "bstr"},
+				"driving_privileges":     {Mandatory: true, ValueType: "array"},
+				"nationalities":          {ValueType: "array"},
+				"height":                 {ValueType: "uint"},
+				"age_over_18":            {ValueType: "bool"},
+				"age_over_21":            {ValueType: "bool"},
+				"age_over_65":            {ValueType: "bool"},
+				"un_distinguishing_sign": {ValueType: "tstr"},
+				"portrait_capture_date":  {ValueType: "tdate"},
+				"pseudonym_seed":         {ValueType: "bstr"},
+			},
+		},
 	}
+}
+
+// testMDLDocumentData returns raw JSON document data satisfying every
+// mandatory claim in testMDLSchema, plus a few optional ones.
+func testMDLDocumentData(t *testing.T) []byte {
+	t.Helper()
+	data := map[string]any{
+		"family_name":       "Andersson",
+		"given_name":        "Erik",
+		"birth_date":        "1990-03-15",
+		"issue_date":        "2024-01-01",
+		"expiry_date":       "2034-01-01",
+		"issuing_country":   "SE",
+		"issuing_authority": "Transportstyrelsen",
+		"document_number":   "SE1234567",
+		"portrait":          base64.StdEncoding.EncodeToString([]byte{0xFF, 0xD8, 0xFF}),
+		"driving_privileges": []map[string]any{
+			{"vehicle_category_code": "B"},
+		},
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
+	}
+	return raw
+}
+
+// testPIDSchema returns an MDDL schema for a completely different doctype
+// with none of mDL's fields, to demonstrate that Issue() has no
+// doctype-specific branching: the same code path issues both.
+func testPIDSchema() *MDDLSchema {
+	return &MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "eu.europa.ec.eudi.pid.1",
+		Claims: map[string]NamespaceClaims{
+			"eu.europa.ec.eudi.pid.1": {
+				"family_name":       {Mandatory: true, ValueType: "tstr"},
+				"given_name":        {Mandatory: true, ValueType: "tstr"},
+				"birth_date":        {Mandatory: true, ValueType: "full-date"},
+				"issuing_country":   {Mandatory: true, ValueType: "tstr"},
+				"issuing_authority": {Mandatory: true, ValueType: "tstr"},
+				"nationalities":     {ValueType: "array"},
+			},
+		},
+	}
+}
+
+func testPIDDocumentData(t *testing.T) []byte {
+	t.Helper()
+	data := map[string]any{
+		"family_name":       "Andersson",
+		"given_name":        "Erik",
+		"birth_date":        "1990-03-15",
+		"issuing_country":   "SE",
+		"issuing_authority": "Skatteverket",
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
+	}
+	return raw
 }
 
 func TestNewIssuer(t *testing.T) {
@@ -159,16 +231,15 @@ func TestIssuer_Issue(t *testing.T) {
 		t.Fatalf("NewIssuer() error = %v", err)
 	}
 
-	mdoc := createTestMDoc()
 	deviceKey, err := GenerateDeviceKeyPair(elliptic.P256())
 	if err != nil {
 		t.Fatalf("GenerateDeviceKeyPair() error = %v", err)
 	}
 
 	req := &IssuanceRequest{
-		MDoc:            mdoc,
+		DocumentData:    testMDLDocumentData(t),
 		DevicePublicKey: &deviceKey.PublicKey,
-		DocType:         "org.iso.18013.5.1.mDL",
+		Schema:          testMDLSchema(),
 	}
 
 	issued, err := issuer.Issue(req)
@@ -192,15 +263,15 @@ func TestIssuer_Issue(t *testing.T) {
 		t.Error("ValidUntil is zero")
 	}
 
-	// createTestMDoc() doesn't set AgeOver, so age_over_18 must not appear -
-	// it must never be forced to true regardless of the holder's actual age
-	// (see the conditional AgeOver handling in addOptionalElements).
+	// testMDLDocumentData() doesn't set age_over_18, so it must not appear -
+	// addElements only adds a claim when the document data actually supplies
+	// it, never a hardcoded/forced value.
 	if len(issued.DocumentMdoc.Documents) != 1 {
 		t.Fatalf("Documents = %d, want 1", len(issued.DocumentMdoc.Documents))
 	}
-	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], NamespaceMDL)
+	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], Namespace)
 	if _, ok := values["age_over_18"]; ok {
-		t.Error("age_over_18 should not be disclosed when AgeOver is unset")
+		t.Error("age_over_18 should not be disclosed when not present in document data")
 	}
 }
 
@@ -218,8 +289,25 @@ func TestIssuer_Issue_AgeOverReflectsActualValue(t *testing.T) {
 	config := createTestIssuerConfig(t)
 	issuer, _ := NewIssuer(config)
 
-	mdoc := createTestMDoc()
-	mdoc.AgeOver = &AgeOver{Over18: new(false)}
+	data := map[string]any{
+		"family_name":       "Andersson",
+		"given_name":        "Erik",
+		"birth_date":        "1990-03-15",
+		"issue_date":        "2024-01-01",
+		"expiry_date":       "2034-01-01",
+		"issuing_country":   "SE",
+		"issuing_authority": "Transportstyrelsen",
+		"document_number":   "SE1234567",
+		"portrait":          base64.StdEncoding.EncodeToString([]byte{0xFF, 0xD8, 0xFF}),
+		"driving_privileges": []map[string]any{
+			{"vehicle_category_code": "B"},
+		},
+		"age_over_18": false,
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
+	}
 
 	deviceKey, err := GenerateDeviceKeyPair(elliptic.P256())
 	if err != nil {
@@ -227,9 +315,9 @@ func TestIssuer_Issue_AgeOverReflectsActualValue(t *testing.T) {
 	}
 
 	req := &IssuanceRequest{
-		MDoc:            mdoc,
+		DocumentData:    raw,
 		DevicePublicKey: &deviceKey.PublicKey,
-		DocType:         "org.iso.18013.5.1.mDL",
+		Schema:          testMDLSchema(),
 	}
 
 	issued, err := issuer.Issue(req)
@@ -237,13 +325,13 @@ func TestIssuer_Issue_AgeOverReflectsActualValue(t *testing.T) {
 		t.Fatalf("Issue() error = %v", err)
 	}
 
-	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], NamespaceMDL)
+	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], Namespace)
 	v, ok := values["age_over_18"]
 	if !ok {
-		t.Fatal("age_over_18 should be disclosed when AgeOver.Over18 is explicitly set")
+		t.Fatal("age_over_18 should be disclosed when present in document data")
 	}
 	if v != false {
-		t.Errorf("age_over_18 = %v, want false (matching the explicitly set AgeOver.Over18)", v)
+		t.Errorf("age_over_18 = %v, want false (matching the supplied document data, not forced true)", v)
 	}
 }
 
@@ -251,11 +339,10 @@ func TestIssuer_Issue_MissingDeviceKey(t *testing.T) {
 	config := createTestIssuerConfig(t)
 	issuer, _ := NewIssuer(config)
 
-	mdoc := createTestMDoc()
 	req := &IssuanceRequest{
-		MDoc:            mdoc,
+		DocumentData:    testMDLDocumentData(t),
 		DevicePublicKey: nil,
-		DocType:         "org.iso.18013.5.1.mDL",
+		Schema:          testMDLSchema(),
 	}
 
 	_, err := issuer.Issue(req)
@@ -264,20 +351,92 @@ func TestIssuer_Issue_MissingDeviceKey(t *testing.T) {
 	}
 }
 
-func TestIssuer_Issue_MissingMDoc(t *testing.T) {
+func TestIssuer_Issue_MissingDocumentData(t *testing.T) {
 	config := createTestIssuerConfig(t)
 	issuer, _ := NewIssuer(config)
 
 	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
 	req := &IssuanceRequest{
-		MDoc:            nil,
+		DocumentData:    nil,
 		DevicePublicKey: &deviceKey.PublicKey,
-		DocType:         "org.iso.18013.5.1.mDL",
+		Schema:          testMDLSchema(),
 	}
 
 	_, err := issuer.Issue(req)
 	if err == nil {
-		t.Error("Issue() should fail without MDoc")
+		t.Error("Issue() should fail without document data")
+	}
+}
+
+func TestIssuer_Issue_MissingSchema(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
+	req := &IssuanceRequest{
+		DocumentData:    testMDLDocumentData(t),
+		DevicePublicKey: &deviceKey.PublicKey,
+		Schema:          nil,
+	}
+
+	_, err := issuer.Issue(req)
+	if err == nil {
+		t.Error("Issue() should fail without a schema")
+	}
+}
+
+func TestIssuer_Issue_MissingMandatoryClaim(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
+	doc, _ := json.Marshal(map[string]any{
+		"given_name": "Erik", // "family_name" and other mandatory claims omitted
+	})
+	req := &IssuanceRequest{
+		DocumentData:    doc,
+		DevicePublicKey: &deviceKey.PublicKey,
+		Schema:          testMDLSchema(),
+	}
+
+	_, err := issuer.Issue(req)
+	if err == nil {
+		t.Fatal("Issue() should fail when a mandatory claim is missing")
+	}
+}
+
+func TestIssuer_Issue_PIDAndMDLSameCodePath(t *testing.T) {
+	// PID and mDL share nothing but the generic addElements() pass over
+	// whatever the schema declares — this exercises both doctypes through
+	// Issue() to demonstrate there is no per-doctype branching left.
+	config := createTestIssuerConfig(t)
+	issuer, _ := NewIssuer(config)
+
+	for _, tc := range []struct {
+		name string
+		doc  []byte
+		schm *MDDLSchema
+	}{
+		{"mDL", testMDLDocumentData(t), testMDLSchema()},
+		{"PID", testPIDDocumentData(t), testPIDSchema()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
+			issued, err := issuer.Issue(&IssuanceRequest{
+				DocumentData:    tc.doc,
+				DevicePublicKey: &deviceKey.PublicKey,
+				Schema:          tc.schm,
+			})
+			if err != nil {
+				t.Fatalf("Issue() error = %v", err)
+			}
+			if len(issued.DocumentMdoc.Documents) != 1 {
+				t.Fatalf("Documents = %d, want 1", len(issued.DocumentMdoc.Documents))
+			}
+			if issued.DocumentMdoc.Documents[0].DocType != tc.schm.DocType {
+				t.Errorf("DocType = %q, want %q", issued.DocumentMdoc.Documents[0].DocType, tc.schm.DocType)
+			}
+		})
 	}
 }
 
@@ -290,8 +449,8 @@ func TestIssuer_IssueBatch(t *testing.T) {
 
 	batch := BatchIssuanceRequest{
 		Requests: []IssuanceRequest{
-			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey1.PublicKey, DocType: "org.iso.18013.5.1.mDL"},
-			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey2.PublicKey, DocType: "org.iso.18013.5.1.mDL"},
+			{DocumentData: testMDLDocumentData(t), DevicePublicKey: &deviceKey1.PublicKey, Schema: testMDLSchema()},
+			{DocumentData: testMDLDocumentData(t), DevicePublicKey: &deviceKey2.PublicKey, Schema: testMDLSchema()},
 		},
 	}
 
@@ -313,8 +472,8 @@ func TestIssuer_IssueBatch_PartialFailure(t *testing.T) {
 
 	batch := BatchIssuanceRequest{
 		Requests: []IssuanceRequest{
-			{MDoc: createTestMDoc(), DevicePublicKey: &deviceKey.PublicKey, DocType: "org.iso.18013.5.1.mDL"},
-			{MDoc: createTestMDoc(), DevicePublicKey: nil, DocType: "org.iso.18013.5.1.mDL"}, // Will fail
+			{DocumentData: testMDLDocumentData(t), DevicePublicKey: &deviceKey.PublicKey, Schema: testMDLSchema()},
+			{DocumentData: testMDLDocumentData(t), DevicePublicKey: nil, Schema: testMDLSchema()}, // Will fail
 		},
 	}
 
@@ -411,21 +570,23 @@ func TestIssuer_OptionalElements(t *testing.T) {
 	config := createTestIssuerConfig(t)
 	issuer, _ := NewIssuer(config)
 
-	mdoc := createTestMDoc()
-	// Add optional elements with proper pointer types
-	nationality := "SE"
-	residentCity := "Stockholm"
-	residentState := "Stockholms län"
-	mdoc.Nationality = &nationality
-	mdoc.ResidentCity = &residentCity
-	mdoc.ResidentState = &residentState
-	mdoc.AgeOver = &AgeOver{Over18: new(true), Over21: new(true)}
+	var data map[string]any
+	if err := json.Unmarshal(testMDLDocumentData(t), &data); err != nil {
+		t.Fatalf("unmarshal test document data: %v", err)
+	}
+	data["nationalities"] = []string{"SE"}
+	data["height"] = 180
+	data["age_over_18"] = true
+	doc, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
+	}
 
 	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
 	req := &IssuanceRequest{
-		MDoc:            mdoc,
+		DocumentData:    doc,
 		DevicePublicKey: &deviceKey.PublicKey,
-		DocType:         "org.iso.18013.5.1.mDL",
+		Schema:          testMDLSchema(),
 	}
 
 	issued, err := issuer.Issue(req)
@@ -442,37 +603,37 @@ func TestIssuer_DrivingPrivileges(t *testing.T) {
 	config := createTestIssuerConfig(t)
 	issuer, _ := NewIssuer(config)
 
-	mdoc := createTestMDoc()
-
-	// Define string pointers for optional fields
-	bIssue := "2020-01-01"
-	bExpiry := "2030-01-01"
-	aIssue := "2021-01-01"
-	aExpiry := "2031-01-01"
-	sign := "="
-	value := "automatic"
-
-	mdoc.DrivingPrivileges = []DrivingPrivilege{
+	var data map[string]any
+	if err := json.Unmarshal(testMDLDocumentData(t), &data); err != nil {
+		t.Fatalf("unmarshal test document data: %v", err)
+	}
+	// driving_privileges is a mandatory "array" claim — it passes through
+	// to CBOR unchanged, including nested structured records like "codes".
+	data["driving_privileges"] = []map[string]any{
 		{
-			VehicleCategoryCode: "B",
-			IssueDate:           &bIssue,
-			ExpiryDate:          &bExpiry,
+			"vehicle_category_code": "B",
+			"issue_date":            "2020-01-01",
+			"expiry_date":           "2030-01-01",
 		},
 		{
-			VehicleCategoryCode: "A",
-			IssueDate:           &aIssue,
-			ExpiryDate:          &aExpiry,
-			Codes: []DrivingPrivilegeCode{
-				{Code: "78", Sign: &sign, Value: &value},
+			"vehicle_category_code": "A",
+			"issue_date":            "2021-01-01",
+			"expiry_date":           "2031-01-01",
+			"codes": []map[string]any{
+				{"code": "78", "sign": "=", "value": "automatic"},
 			},
 		},
+	}
+	doc, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
 	}
 
 	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
 	req := &IssuanceRequest{
-		MDoc:            mdoc,
+		DocumentData:    doc,
 		DevicePublicKey: &deviceKey.PublicKey,
-		DocType:         "org.iso.18013.5.1.mDL",
+		Schema:          testMDLSchema(),
 	}
 
 	issued, err := issuer.Issue(req)
@@ -482,6 +643,119 @@ func TestIssuer_DrivingPrivileges(t *testing.T) {
 
 	if issued == nil {
 		t.Fatal("Issue() returned nil")
+	}
+}
+
+func TestConvertElementValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		valueType string
+		raw       any
+		wantErr   bool
+		check     func(t *testing.T, got any)
+	}{
+		{"full-date", "full-date", "2024-01-01", false, func(t *testing.T, got any) {
+			if got != FullDate("2024-01-01") {
+				t.Errorf("got %#v, want FullDate", got)
+			}
+		}},
+		{"full-date wrong type", "full-date", 123.0, true, nil},
+		{"tdate", "tdate", "2024-01-01T00:00:00Z", false, func(t *testing.T, got any) {
+			if got != TDate("2024-01-01T00:00:00Z") {
+				t.Errorf("got %#v, want TDate", got)
+			}
+		}},
+		{"bstr base64 string", "bstr", base64.StdEncoding.EncodeToString([]byte{1, 2, 3}), false, func(t *testing.T, got any) {
+			b, ok := got.([]byte)
+			if !ok || string(b) != string([]byte{1, 2, 3}) {
+				t.Errorf("got %#v, want []byte{1,2,3}", got)
+			}
+		}},
+		{"bstr invalid base64", "bstr", "not-base64!!", true, nil},
+		{"uint", "uint", 42.0, false, func(t *testing.T, got any) {
+			if got != uint64(42) {
+				t.Errorf("got %#v, want uint64(42)", got)
+			}
+		}},
+		{"int", "int", -5.0, false, func(t *testing.T, got any) {
+			if got != int64(-5) {
+				t.Errorf("got %#v, want int64(-5)", got)
+			}
+		}},
+		{"passthrough tstr", "tstr", "hello", false, func(t *testing.T, got any) {
+			if got != "hello" {
+				t.Errorf("got %#v, want %q", got, "hello")
+			}
+		}},
+		{"passthrough array", "array", []any{"a", "b"}, false, func(t *testing.T, got any) {
+			arr, ok := got.([]any)
+			if !ok || len(arr) != 2 {
+				t.Errorf("got %#v, want a 2-element slice", got)
+			}
+		}},
+		{"int rejects fractional value", "int", 5.5, true, nil},
+		{"uint rejects fractional value", "uint", 5.5, true, nil},
+		{"uint rejects negative value", "uint", -1.0, true, nil},
+		{"int rejects out-of-range value", "int", math.MaxFloat64, true, nil},
+		{"uint rejects out-of-range value", "uint", math.MaxFloat64, true, nil},
+		{"int accepts large exact integer", "int", 9007199254740992.0, false, func(t *testing.T, got any) {
+			if got != int64(9007199254740992) {
+				t.Errorf("got %#v, want int64(9007199254740992)", got)
+			}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := convertElementValue(tt.valueType, tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, got)
+			}
+		})
+	}
+}
+
+func TestIssuer_InjectPseudonymSeed(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	config.PseudonymSeed = true
+	issuer, _ := NewIssuer(config)
+
+	schema := testMDLSchema() // declares "pseudonym_seed" as an optional bstr claim
+	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
+	req := &IssuanceRequest{
+		DocumentData:    testMDLDocumentData(t),
+		DevicePublicKey: &deviceKey.PublicKey,
+		Schema:          schema,
+	}
+
+	issued, err := issuer.Issue(req)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	if issued == nil {
+		t.Fatal("Issue() returned nil")
+	}
+
+	// A schema that does NOT declare pseudonym_seed must not error even
+	// though the issuer has the feature enabled — it's driven by the
+	// schema, not by namespace/doctype.
+	noSeedSchema := testPIDSchema()
+	deviceKey2, _ := GenerateDeviceKeyPair(elliptic.P256())
+	if _, err := issuer.Issue(&IssuanceRequest{
+		DocumentData:    testPIDDocumentData(t),
+		DevicePublicKey: &deviceKey2.PublicKey,
+		Schema:          noSeedSchema,
+	}); err != nil {
+		t.Fatalf("Issue() without pseudonym_seed claim should succeed, got error = %v", err)
 	}
 }
 
