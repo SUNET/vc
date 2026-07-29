@@ -47,9 +47,9 @@ type Client struct {
 // New creates a new instance of the public api
 func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Client, error) {
 	c := &Client{
-		cfg:      cfg,
-		log:      log.New("apiv1"),
-		tracer:   tracer,
+		cfg:            cfg,
+		log:            log.New("apiv1"),
+		tracer:         tracer,
 		auditLog:       auditLog,
 		jwkProto:       &apiv1_issuer.Jwk{},
 		signMetadataRL: rate.NewLimiter(rate.Limit(cfg.Issuer.SignMetadataRateLimit.RequestsPerSecond), cfg.Issuer.SignMetadataRateLimit.Burst),

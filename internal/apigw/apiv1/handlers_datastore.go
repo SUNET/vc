@@ -576,9 +576,9 @@ type DatastorePreAuthOfferReply struct {
 //	@Tags			vc-platform
 //	@Accept			json
 //	@Produce		json
-//	@Success		200	{object}	DatastorePreAuthOfferReply	"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse		"Bad Request"
-//	@Failure		404	{object}	helpers.ErrorResponse		"Document not found"
+//	@Success		200	{object}	DatastorePreAuthOfferReply		"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
+//	@Failure		404	{object}	helpers.ErrorResponse			"Document not found"
 //	@Param			req	body		DatastorePreAuthOfferRequest	true	" "
 //	@Router			/api/v1/datastore/preauth_offer [post]
 func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAuthOfferRequest) (*DatastorePreAuthOfferReply, error) {
@@ -617,12 +617,12 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	// (not credential_configuration_id) in the credential request. Most wallets
 	// use credential_configuration_id for pre-auth flows, so we keep it simple.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:  preAuthCode,
-		Code:       preAuthCode,
-		Status:     "code_issued",
-		CreatedAt:  time.Now(),
-		ExpiresAt:  time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:     []string{req.Scope},
+		SessionID:    preAuthCode,
+		Code:         preAuthCode,
+		Status:       "code_issued",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:       []string{req.Scope},
 		Nonce:        nonce,
 		DataSource:   string(model.DataSourceDatastore),
 		AuthProvider: model.AuthProviderDatastore,

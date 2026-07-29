@@ -419,18 +419,18 @@ func credentialToDisclosers(claims map[string]any) []sdjwtvc.Discloser {
 // jwtMetadataClaims contains claim names that are JWT/SD-JWT infrastructure
 // and should not be displayed as credential attributes.
 var jwtMetadataClaims = map[string]bool{
-	"iss":            true,
-	"sub":            true,
-	"iat":            true,
-	"exp":            true,
-	"nbf":            true,
-	"jti":            true,
-	"cnf":            true,
-	"vct":            true,
-	"vct#integrity":  true,
-	"status":         true,
-	"_sd":            true,
-	"_sd_alg":        true,
+	"iss":           true,
+	"sub":           true,
+	"iat":           true,
+	"exp":           true,
+	"nbf":           true,
+	"jti":           true,
+	"cnf":           true,
+	"vct":           true,
+	"vct#integrity": true,
+	"status":        true,
+	"_sd":           true,
+	"_sd_alg":       true,
 }
 
 func flattenCredentialClaims(result *[]sdjwtvc.Discloser, prefix string, m map[string]any) {
