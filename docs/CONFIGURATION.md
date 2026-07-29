@@ -673,6 +673,7 @@ Trust evaluation operates in one of two modes:
 | `local_did_methods`            | `[]string` | Which DID methods can be resolved locally without go-trust. Self-contained methods like "did:key" and "did:jwk" are always resolved locally.                                                                                                                   | -                                      | `["did:key", "did:jwk"]` | No       |
 | `trust_policies`               | `object`   | Per-role trust evaluation policies. The key is the role (e.g., "issuer", "verifier") and the value contains policy settings.                                                                                                                                   | -                                      | -                        | No       |
 | `allowed_signature_algorithms` | `[]string` | AllowedSignatureAlgorithms restricts which JWT signature algorithms are accepted. If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA. The "none" algorithm is NEVER allowed regardless of configuration. | `["ES256", "ES384", "ES512", "EdDSA"]` | -                        | No       |
+| `wallet_attestation`           | `object`   | Wallet attestation-based client authentication. This is a trust-evaluation mechanism (delegates to the PDP above), so it lives here rather than under delivery.openid4vci.                                                                                     | -                                      | -                        | No       |
 
 ### `trust_policies` entry
 
@@ -683,6 +684,35 @@ Trust evaluation operates in one of two modes:
 | `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
 | `trust_anchors`            | `[]string` | Trusted root entities for this role. Format depends on the trust framework (e.g., DID for did:web, federation entity for OpenID Fed). | -                                                                 | -       | No       |
 | `require_revocation_check` | `bool`     | RequireRevocationCheck enforces revocation status checking for this role. Default: false                                              | -                                                                 | `false` | No       |
+
+### `wallet_attestation`
+
+> **Path:** `.apigw.trust.wallet_attestation`, `.verifier.trust.wallet_attestation`
+
+| Field     | Type     | Description                                                                                                                                                                                                                                                                                                                          | Example | Default | Required |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `enabled` | `bool`   | Wallet attestation-based authentication. When true and PDPURL is configured, wallets can authenticate using a provider-signed attestation JWT instead of pre-registration in Clients. The PDP validates the wallet provider against configured trust lists/federation. PKCE remains mandatory as the primary code-binding mechanism. | -       | `false` | No       |
+| `policy`  | `object` | SPOCP-based authorization for wallet attestation. When configured, after the PDP validates the wallet provider, the SPOCP engine checks whether the attestation tier (attestation_source) is authorized for the requested scope. When empty, all trusted wallets are authorized (default open).                                      | -       | -       | No       |
+
+### `policy`
+
+> **Path:** `.apigw.trust.wallet_attestation.policy`, `.verifier.trust.wallet_attestation.policy`
+
+Each rule is an S-expression of the form:
+
+(wallet (attestation_source <tier>)(scope <scope>)(issuer <provider>))
+
+Use * as wildcard. When no rules are configured, any trusted wallet is authorized.
+Example rules:
+
+(wallet (attestation_source ios_app_attest)(scope pid)(issuer *))       — allow iOS Tier 4+ for PID
+(wallet (attestation_source android_play_integrity)(scope pid)(issuer *)) — allow Android Tier 4+ for PID
+(wallet (attestation_source *)(scope ehic)(issuer *))                   — allow any tier for EHIC
+
+| Field        | Type       | Description                                                       | Example | Default | Required |
+| ------------ | ---------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
+| `rules`      | `[]string` | Inline SPOCP rules.                                               | -       | -       | No       |
+| `rules_file` | `string`   | Path to a file containing SPOCP rules (one per line, # comments). | -       | -       | No       |
 
 ### `federation`
 

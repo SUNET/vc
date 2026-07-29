@@ -628,6 +628,27 @@ type TrustConfig struct {
 	// If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA.
 	// The "none" algorithm is NEVER allowed regardless of configuration.
 	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms,omitempty" doc_example:"[\"ES256\", \"ES384\", \"ES512\", \"EdDSA\"]"`
+
+	// WalletAttestation configures wallet attestation-based client authentication.
+	// This is a trust-evaluation mechanism (delegates to the PDP above), so it
+	// lives here rather than under delivery.openid4vci.
+	WalletAttestation WalletAttestationConfig `yaml:"wallet_attestation,omitempty"`
+}
+
+// WalletAttestationConfig configures wallet attestation-based client authentication.
+type WalletAttestationConfig struct {
+	// Enabled enables wallet attestation-based authentication.
+	// When true and PDPURL is configured, wallets can authenticate using
+	// a provider-signed attestation JWT instead of pre-registration in Clients.
+	// The PDP validates the wallet provider against configured trust lists/federation.
+	// PKCE remains mandatory as the primary code-binding mechanism.
+	Enabled bool `yaml:"enabled" default:"false"`
+
+	// Policy configures SPOCP-based authorization for wallet attestation.
+	// When configured, after the PDP validates the wallet provider, the SPOCP engine
+	// checks whether the attestation tier (attestation_source) is authorized for the
+	// requested scope. When empty, all trusted wallets are authorized (default open).
+	Policy WalletAttestationPolicy `yaml:"policy,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -1058,6 +1079,24 @@ type OAuthServer struct {
 	// testing environments. When false (default), client_assertion is rejected.
 	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
 	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
+}
+
+// WalletAttestationPolicy configures SPOCP-based tier authorization for wallet attestation.
+// Each rule is an S-expression of the form:
+//
+//	(wallet (attestation_source <tier>)(scope <scope>)(issuer <provider>))
+//
+// Use * as wildcard. When no rules are configured, any trusted wallet is authorized.
+// Example rules:
+//
+//	(wallet (attestation_source ios_app_attest)(scope pid)(issuer *))       — allow iOS Tier 4+ for PID
+//	(wallet (attestation_source android_play_integrity)(scope pid)(issuer *)) — allow Android Tier 4+ for PID
+//	(wallet (attestation_source *)(scope ehic)(issuer *))                   — allow any tier for EHIC
+type WalletAttestationPolicy struct {
+	// Rules are inline SPOCP rules.
+	Rules []string `yaml:"rules,omitempty"`
+	// RulesFile is a path to a file containing SPOCP rules (one per line, # comments).
+	RulesFile string `yaml:"rules_file,omitempty"`
 }
 
 // Cfg is the main configuration structure for this application

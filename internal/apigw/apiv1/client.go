@@ -67,7 +67,9 @@ type Client struct {
 	adminOIDC *lazyOIDCProvider
 
 	// Trust evaluation
-	jwtTrustVerifier *trust.JWTTrustVerifier
+	jwtTrustVerifier           *trust.JWTTrustVerifier
+	walletAttestationEvaluator *trust.WalletAttestationEvaluator
+	walletAttestationPolicy    *trust.WalletAttestationPolicyEngine
 
 	// openidFederationService is nil when OpenID Federation is not enabled.
 	// Built once here rather than per-request, since constructing a signer
@@ -167,6 +169,26 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		ParseJWK:                   jose.ParseJWKToPublicKey,
 		Log:                        c.log,
 	})
+
+	// Wallet attestation: enabled when trust.wallet_attestation.enabled + pdp_url are set
+	if cfg.APIGW.Trust.WalletAttestation.Enabled && pdpURL != "" {
+		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator)
+
+		// Build SPOCP policy engine for tier-based scope authorization (nil = default open)
+		policy := cfg.APIGW.Trust.WalletAttestation.Policy
+		policyEngine, err := trust.BuildWalletAttestationPolicyEngine(policy.Rules, policy.RulesFile)
+		if err != nil {
+			return nil, fmt.Errorf("wallet attestation policy: %w", err)
+		}
+		c.walletAttestationPolicy = policyEngine
+
+		if policyEngine != nil {
+			c.log.Info("Wallet attestation enabled (PDP + SPOCP policy)",
+				"rules", policyEngine.RuleCount())
+		} else {
+			c.log.Info("Wallet attestation enabled (PDP trust, no scope restrictions)")
+		}
+	}
 
 	c.log.Info("Started")
 
