@@ -935,20 +935,28 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 	// Update the session with new tokens atomically. RotateRefreshToken uses a
 	// compare-and-swap on the old refresh token value, so a concurrent request
 	// using the same token will fail with ErrNoDocuments (→ invalid_grant).
+	// Work on a copy to avoid mutating the shared pointer from MemoryStore's cache,
+	// which would corrupt the compare-and-swap check.
 	oldRefreshToken := authContext.RefreshToken
-	authContext.Token = &cache.Token{
+	rotated := *authContext
+	rotated.Token = &cache.Token{
 		AccessToken:    newAccessToken,
 		ExpiresAt:      time.Now().Add(3600 * time.Second).Unix(),
 		DPoPThumbprint: dpop.Thumbprint,
 	}
-	authContext.RefreshToken = newRefreshToken
-	authContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
-	authContext.Nonce = newNonce
+	rotated.RefreshToken = newRefreshToken
+	rotated.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
+	rotated.Nonce = newNonce
 
-	if err := c.cacheService.AuthContext.RotateRefreshToken(ctx, oldRefreshToken, authContext); err != nil {
-		c.log.Error(err, "failed to rotate refresh token (concurrent use or expired)")
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"refresh token has already been used", 400)
+	if err := c.cacheService.AuthContext.RotateRefreshToken(ctx, oldRefreshToken, &rotated); err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			c.log.Error(nil, "refresh token already consumed (concurrent use)", "session_id", authContext.SessionID)
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"refresh token has already been used", 400)
+		}
+		c.log.Error(err, "failed to rotate refresh token")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error during token rotation", 500, err)
 	}
 
 	reply := &openid4vci.TokenResponse{
