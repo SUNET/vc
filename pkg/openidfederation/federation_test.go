@@ -318,6 +318,45 @@ func TestBuildEntityConfigurationSignedJWT(t *testing.T) {
 	}
 }
 
+// TestBuildEntityConfiguration_OmitsMetadataWhenNilAndNoOrgInfo guards
+// against BuildEntityConfiguration unconditionally cloning the caller's nil
+// metadata. EntityMetadata.Clone() returns a non-nil empty struct on a nil
+// receiver, so a naive "always clone" would force "metadata": {} into the
+// JWT even when the caller passed nil and no org/logo injection is
+// configured, defeating the metadata field's omitempty.
+func TestBuildEntityConfiguration_OmitsMetadataWhenNilAndNoOrgInfo(t *testing.T) {
+	keyPath, certPath := writeTestKeyAndCert(t)
+
+	cfg := &Config{
+		Enabled:  true,
+		EntityID: "https://issuer.example.com",
+		TTL:      3600,
+	}
+
+	keyCfg := &pki.KeyConfig{PrivateKeyPath: keyPath, ChainPath: certPath}
+	signer := pki.NewSignerConfig(keyCfg)
+	svc := New(cfg, signer, "https://issuer.example.com")
+
+	signed, err := svc.BuildEntityConfiguration(nil)
+	if err != nil {
+		t.Fatalf("BuildEntityConfiguration failed: %v", err)
+	}
+
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(signed, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("ParseUnverified failed: %v", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatal("unexpected claims type")
+	}
+
+	if _, present := claims["metadata"]; present {
+		t.Errorf("metadata = %v, want omitted (no caller metadata, no org/logo configured)", claims["metadata"])
+	}
+}
+
 // TestBuildEntityConfigurationDoesNotMutateInput guards against
 // BuildEntityConfiguration mutating the caller-supplied *EntityMetadata (or
 // the maps it holds) when it injects federation_entity fields. A caller

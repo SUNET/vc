@@ -113,16 +113,23 @@ func (s *Service) BuildEntityConfiguration(metadata *EntityMetadata) (string, er
 	// caller-owned *EntityMetadata in place -- callers may reuse the same
 	// instance across requests, and a "Build" function mutating its input
 	// would be a surprising and hard-to-diagnose side effect.
-	metadata = metadata.Clone()
-	if s.config.OrganizationName != "" || s.config.LogoURI != "" {
-		if metadata.FederationEntity == nil {
-			metadata.FederationEntity = make(map[string]any)
-		}
-		if s.config.OrganizationName != "" {
-			metadata.FederationEntity["organization_name"] = s.config.OrganizationName
-		}
-		if s.config.LogoURI != "" {
-			metadata.FederationEntity["logo_uri"] = s.config.LogoURI
+	//
+	// Only clone when there's something to put in the result: Clone() on a
+	// nil receiver returns a non-nil empty struct, so cloning unconditionally
+	// would force "metadata": {} into the JWT even when the caller passed
+	// nil and no org/logo injection is configured, defeating omitempty.
+	if metadata != nil || s.config.OrganizationName != "" || s.config.LogoURI != "" {
+		metadata = metadata.Clone()
+		if s.config.OrganizationName != "" || s.config.LogoURI != "" {
+			if metadata.FederationEntity == nil {
+				metadata.FederationEntity = make(map[string]any)
+			}
+			if s.config.OrganizationName != "" {
+				metadata.FederationEntity["organization_name"] = s.config.OrganizationName
+			}
+			if s.config.LogoURI != "" {
+				metadata.FederationEntity["logo_uri"] = s.config.LogoURI
+			}
 		}
 	}
 

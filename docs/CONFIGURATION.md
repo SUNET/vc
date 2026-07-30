@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-07-29
+**Generated:** 2026-07-30
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -718,6 +718,24 @@ Example rules:
 
 > **Path:** `.apigw.federation`, `.verifier.federation`
 
+| Field               | Type       | Description                                                                        | Example | Default | Required |
+| ------------------- | ---------- | ---------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`           | `bool`     | The federation entity configuration endpoint.                                      | -       | `false` | No       |
+| `entity_id`         | `string`   | Entity identifier (defaults to PublicURL if empty).                                | -       | -       | No       |
+| `authority_hints`   | `[]string` | Superior authority entity identifiers.                                             | -       | -       | No       |
+| `organization_name` | `string`   | Human-readable organization name.                                                  | -       | -       | No       |
+| `logo_uri`          | `string`   | Organization logo URL.                                                             | -       | -       | No       |
+| `trust_marks`       | `array`    | TrustMarks contains pre-issued trust mark JWTs.                                    | -       | -       | No       |
+| `ttl`               | `int64`    | Validity period of the entity configuration in seconds. Default: 86400 (24 hours). | -       | `86400` | No       |
+
+### `trust_marks` entry
+
+> **Path:** `.apigw.federation.trust_marks[]`, `.verifier.federation.trust_marks[]`
+
+| Field | Type     | Description            | Example | Default | Required |
+| ----- | -------- | ---------------------- | ------- | ------- | -------- |
+| `id`  | `string` | Trust mark identifier. | -       | -       | Yes      |
+| `jwt` | `string` | Trust mark JWT string. | -       | -       | Yes      |
 
 ### `rate_limit`
 
