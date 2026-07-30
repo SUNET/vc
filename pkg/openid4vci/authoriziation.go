@@ -47,6 +47,16 @@ type PARRequest struct {
 	UserHint     string `json:"user_hint" form:"user_hint"`
 	IssuingState string `json:"issuing_state" form:"issuing_state"`
 
+	// DynamicParams holds key-value parameters bound directly from the PAR
+	// caller's request body. Despite the name, these are NOT verified to
+	// originate from any authentic source business system -- nothing here
+	// authenticates the caller's claim about where the values came from.
+	// They are used only for template substitution in the outgoing OIDC
+	// request parameters (resolveOIDCRequestParams); issuance policy
+	// evaluation is deliberately gated on OP-asserted claims instead (see
+	// handlers_oidcrp.go), precisely because these values are unverified.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" form:"dynamic_params" validate:"omitempty,dive,keys,safe_key,endkeys,max=1024,printascii"`
+
 	// Client authentication via wallet attestation.
 	// Supports two mechanisms per draft-ietf-oauth-attestation-based-client-auth-04:
 	//  1. HTTP headers: OAuth-Client-Attestation + OAuth-Client-Attestation-PoP (§3.1)
@@ -56,11 +66,6 @@ type PARRequest struct {
 	ClientAttestationPoP string `json:"-" form:"-" header:"OAuth-Client-Attestation-PoP"`
 	ClientAssertion      string `json:"client_assertion" form:"client_assertion" validate:"omitempty,max=8192,printascii"`
 	ClientAssertionType  string `json:"client_assertion_type" form:"client_assertion_type" validate:"omitempty,max=256,printascii"`
-
-	// DynamicParams holds key-value parameters from the authentic source business system.
-	// These are used for template substitution in OIDC request parameters and for
-	// issuance policy evaluation.
-	DynamicParams map[string]string `json:"dynamic_params,omitempty" form:"dynamic_params"`
 }
 
 type ParResponse struct {
