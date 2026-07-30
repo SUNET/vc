@@ -1,8 +1,12 @@
 package openid4vp
 
 import (
+	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"hash"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
@@ -125,4 +129,42 @@ func (t *TransactionData) Base64Encode() (string, error) {
 	}
 
 	return encoded, nil
+}
+
+// HashTransactionData computes the base64url-encoded hash of each TransactionData
+// entry's base64url-encoded JSON representation. The returned hashes are ordered
+// to match the input slice and are intended for inclusion as
+// "transaction_data_hashes" in the KB-JWT per OpenID4VP §8.4.
+// hashAlg must be one of "sha-256", "sha-384", or "sha-512".
+func HashTransactionData(txData []TransactionData, hashAlg string) (hashes []string, err error) {
+	h, err := newHash(hashAlg)
+	if err != nil {
+		return nil, err
+	}
+
+	hashes = make([]string, 0, len(txData))
+	for i := range txData {
+		encoded, err := txData[i].Base64Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encoding transaction_data[%d]: %w", i, err)
+		}
+		h.Reset()
+		h.Write([]byte(encoded))
+		hashes = append(hashes, base64.RawURLEncoding.EncodeToString(h.Sum(nil)))
+	}
+	return hashes, nil
+}
+
+// newHash returns a hash.Hash for the given algorithm name.
+func newHash(alg string) (hash.Hash, error) {
+	switch alg {
+	case "sha-256":
+		return sha256.New(), nil
+	case "sha-384":
+		return sha512.New384(), nil
+	case "sha-512":
+		return sha512.New(), nil
+	default:
+		return nil, fmt.Errorf("unsupported hash algorithm: %s", alg)
+	}
 }

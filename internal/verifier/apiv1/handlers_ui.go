@@ -283,7 +283,6 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		Scope:            "",
 		DCQLQuery:        req.DCQLQuery,
 		RequestURIMethod: "",
-		TransactionData:  []openid4vp.TransactionData{},
 		VerifierInfo:     []openid4vp.VerifierInfo{},
 	}
 

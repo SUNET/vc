@@ -94,7 +94,7 @@ func TestCreateRequestObject(t *testing.T) {
 				}
 			}
 
-			signedJWT, err := client.CreateRequestObject(ctx, tt.sessionID, tt.dcqlQuery, tt.nonce)
+			signedJWT, err := client.CreateRequestObject(ctx, tt.sessionID, tt.dcqlQuery, tt.nonce, nil)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -154,7 +154,7 @@ func TestGetRequestObject(t *testing.T) {
 				key, err := rsa.GenerateKey(rand.Reader, 2048)
 				require.NoError(t, err)
 				require.NoError(t, client.SetSigningKeyForTesting(key))
-				_, err = client.CreateRequestObject(ctx, tt.sessionID, createTestDCQLForVP(t), "test-nonce")
+				_, err = client.CreateRequestObject(ctx, tt.sessionID, createTestDCQLForVP(t), "test-nonce", nil)
 				require.NoError(t, err)
 			}
 

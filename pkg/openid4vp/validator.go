@@ -31,6 +31,10 @@ type VPTokenValidator struct {
 
 	// DCQLQuery is the original DCQL query from the request
 	DCQLQuery *DCQL
+
+	// TransactionData from the Authorization Request. When non-empty, the
+	// validator checks that the KB-JWT contains matching transaction_data_hashes.
+	TransactionData []TransactionData
 }
 
 // Validate validates the VP Token according to OpenID4VP spec Section 8.6
@@ -66,21 +70,28 @@ func (v *VPTokenValidator) Validate(vpToken string) error {
 		}
 	}
 
-	// 6. Verify signature if requested
+	// 6. Verify transaction data hashes (Section 8.4)
+	if len(v.TransactionData) > 0 {
+		if err := v.validateTransactionData(parsed); err != nil {
+			return fmt.Errorf("transaction data validation failed: %w", err)
+		}
+	}
+
+	// 7. Verify signature if requested
 	if v.ValidateFormat {
 		if err := v.validateFormat(vpToken); err != nil {
 			return fmt.Errorf("format validation failed: %w", err)
 		}
 	}
 
-	// 7. Check revocation status if requested
+	// 8. Check revocation status if requested
 	if v.CheckRevocation {
 		if err := v.checkRevocation(parsed); err != nil {
 			return fmt.Errorf("revocation check failed: %w", err)
 		}
 	}
 
-	// 8. Validate against DCQL query if provided
+	// 9. Validate against DCQL query if provided
 	if v.DCQLQuery != nil {
 		if err := v.validateAgainstDCQL(parsed); err != nil {
 			return fmt.Errorf("DCQL validation failed: %w", err)
@@ -164,6 +175,69 @@ func (v *VPTokenValidator) validateAudience(parsed *sdjwtvc.ParsedCredential) er
 
 	if aud != v.ClientID {
 		return fmt.Errorf("audience mismatch: expected %s, got %s", v.ClientID, aud)
+	}
+
+	return nil
+}
+
+// validateTransactionData verifies that the KB-JWT contains transaction_data_hashes
+// that match the TransactionData from the authorization request per OpenID4VP §8.4.
+func (v *VPTokenValidator) validateTransactionData(parsed *sdjwtvc.ParsedCredential) error {
+	if len(parsed.KeyBinding) == 0 {
+		return fmt.Errorf("no key binding found for transaction data validation")
+	}
+
+	kbJWT := strings.Join(parsed.KeyBinding, ".")
+	kbClaims, err := parseKeyBindingJWT(kbJWT)
+	if err != nil {
+		return fmt.Errorf("failed to parse key binding JWT: %w", err)
+	}
+
+	// Extract transaction_data_hashes_alg
+	hashAlg, ok := kbClaims["transaction_data_hashes_alg"].(string)
+	if !ok || hashAlg == "" {
+		return &ErrorResponse{
+			ErrorCode:        ErrorInvalidTransactionData,
+			ErrorDescription: "transaction_data_hashes_alg missing from KB-JWT",
+		}
+	}
+
+	// Extract transaction_data_hashes array
+	hashesRaw, ok := kbClaims["transaction_data_hashes"].([]any)
+	if !ok || len(hashesRaw) == 0 {
+		return &ErrorResponse{
+			ErrorCode:        ErrorInvalidTransactionData,
+			ErrorDescription: "transaction_data_hashes missing from KB-JWT",
+		}
+	}
+
+	if len(hashesRaw) != len(v.TransactionData) {
+		return &ErrorResponse{
+			ErrorCode:        ErrorInvalidTransactionData,
+			ErrorDescription: fmt.Sprintf("transaction_data_hashes count mismatch: expected %d, got %d", len(v.TransactionData), len(hashesRaw)),
+		}
+	}
+
+	// Re-compute expected hashes from the original transaction data
+	expectedHashes, err := HashTransactionData(v.TransactionData, hashAlg)
+	if err != nil {
+		return fmt.Errorf("computing expected transaction data hashes: %w", err)
+	}
+
+	for i, raw := range hashesRaw {
+		got, ok := raw.(string)
+		if !ok {
+			return &ErrorResponse{
+				ErrorCode:        ErrorInvalidTransactionData,
+				ErrorDescription: fmt.Sprintf("transaction_data_hashes[%d] is not a string", i),
+			}
+		}
+		if got != expectedHashes[i] {
+			return &ErrorResponse{
+				ErrorCode:        ErrorInvalidTransactionData,
+				ErrorDescription: fmt.Sprintf("transaction_data_hashes[%d] mismatch", i),
+			}
+		}
 	}
 
 	return nil

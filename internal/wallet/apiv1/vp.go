@@ -145,7 +145,11 @@ func (c *Client) runVPScenario(ctx context.Context, vp *config.VPScenario, resul
 		result.Steps = append(result.Steps, step)
 		return fmt.Errorf("building VP token: %w", err)
 	}
-	step.Detail = fmt.Sprintf("vp_token_length=%d", len(vpToken))
+	txDetail := ""
+	if len(requestObject.TransactionData) > 0 {
+		txDetail = fmt.Sprintf(" transaction_data_count=%d", len(requestObject.TransactionData))
+	}
+	step.Detail = fmt.Sprintf("vp_token_length=%d%s", len(vpToken), txDetail)
 	result.Steps = append(result.Steps, step)
 
 	// Step 4 Send response (direct_post or redirect)
@@ -302,7 +306,7 @@ func (c *Client) buildVPToken(ctx context.Context, credentials []string, ro *ope
 
 		// For SD-JWT VCs, append a key binding JWT
 		if strings.Contains(rawCred, "~") {
-			kbJWT, err := c.createKeyBindingJWT(ctx, ro.Nonce, ro.ClientID, rawCred)
+			kbJWT, err := c.createKeyBindingJWT(ctx, ro.Nonce, ro.ClientID, rawCred, ro.TransactionData)
 			if err != nil {
 				return "", fmt.Errorf("creating key binding JWT: %w", err)
 			}
@@ -331,7 +335,10 @@ func (c *Client) buildVPToken(ctx context.Context, credentials []string, ro *ope
 }
 
 // createKeyBindingJWT creates a key binding JWT for SD-JWT presentation
-func (c *Client) createKeyBindingJWT(ctx context.Context, nonce, audience, sdJWT string) (string, error) {
+func (c *Client) createKeyBindingJWT(ctx context.Context, nonce, audience, sdJWT string, transactionData []openid4vp.TransactionData) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	signingMethod, alg := jose.GetSigningMethodFromKey(c.signingKey)
 	_ = alg
 
@@ -340,6 +347,18 @@ func (c *Client) createKeyBindingJWT(ctx context.Context, nonce, audience, sdJWT
 		"aud":     audience,
 		"iat":     time.Now().Unix(),
 		"sd_hash": computeSDHash(sdJWT),
+	}
+
+	// Include transaction_data_hashes when transaction data is present per OpenID4VP §8.4
+	if len(transactionData) > 0 {
+		const hashAlg = "sha-256"
+		hashes, err := openid4vp.HashTransactionData(transactionData, hashAlg)
+		if err != nil {
+			return "", fmt.Errorf("hashing transaction data: %w", err)
+		}
+		body["transaction_data_hashes"] = hashes
+		body["transaction_data_hashes_alg"] = hashAlg
+		c.log.Info("Including transaction_data_hashes in KB-JWT", "count", len(hashes))
 	}
 
 	token := jwtv5.NewWithClaims(signingMethod, body)
