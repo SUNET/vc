@@ -1233,7 +1233,7 @@ type CredentialMetadata struct {
 	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// DisclosurePolicy configures the embedded disclosure policy for this credential type.
 	// Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs).
-	// When omitted, no policy is published (equivalent to policy_type "none").
+	// When omitted, the metadata publishes policy_type "none" (no restrictions).
 	DisclosurePolicy *openid4vci.EmbeddedDisclosurePolicy `yaml:"disclosure_policy,omitempty" json:"-" validate:"omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
