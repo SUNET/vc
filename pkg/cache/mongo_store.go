@@ -65,6 +65,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetSparse(true),
 		},
 		{
+			Keys:    bson.D{{Key: "refresh_token", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			// TTL index: MongoDB automatically deletes documents after the TTL expires.
 			// Uses the created_at field as the reference timestamp.
 			Keys:    bson.D{{Key: "created_at", Value: 1}},

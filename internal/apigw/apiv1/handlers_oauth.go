@@ -610,7 +610,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			DataSource:           authorizationContext.DataSource,
 			Token:                tokenDoc,
 			RefreshToken:         refreshToken,
-			RefreshTokenExpiresAt: time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix(),
+		}
+		if refreshToken != "" {
+			childSession.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
 		}
 		if err := c.cacheService.AuthContext.Save(ctx, childSession); err != nil {
 			c.log.Error(err, "failed to save child session for pre-auth client")
@@ -623,7 +625,9 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		// writes the token and a subsequent Update() overwrites it with nil.
 		authorizationContext.Token = tokenDoc
 		authorizationContext.RefreshToken = refreshToken
-		authorizationContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
+		if refreshToken != "" {
+			authorizationContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
+		}
 		if len(responseDetails) > 0 {
 			authorizationContext.AuthorizationDetails = responseDetails
 		}
