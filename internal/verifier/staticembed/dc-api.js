@@ -21,6 +21,13 @@ const OID4VP_ALL_PROTOCOLS = [
 function isOID4VPProtocol(value) {
   return OID4VP_ALL_PROTOCOLS.includes(value);
 }
+const OID4VCI_PROTOCOLS = {
+  /** OpenID4VCI 1.0 */
+  V1: "openid4vci-v1"
+};
+function isOID4VCIProtocol(value) {
+  return value === OID4VCI_PROTOCOLS.V1;
+}
 
 // src/detect.ts
 function isDCAPIAvailable() {
@@ -71,6 +78,69 @@ function normalizeCredential(credential, fallbackProtocol) {
   };
 }
 
+// src/authorization-request.ts
+async function buildRequestData(protocol, authorizationRequestUri, options) {
+  const fetchImpl = options?.fetchFn ?? fetch;
+  const url = new URL(authorizationRequestUri);
+  const params = url.searchParams;
+  const inlineRequest = params.get("request");
+  const requestUri = params.get("request_uri");
+  if (protocol === OID4VP_PROTOCOLS.SIGNED || protocol === OID4VP_PROTOCOLS.MULTISIGNED) {
+    const jwt = inlineRequest ?? (requestUri ? await _fetchJwt(requestUri, fetchImpl) : null);
+    if (!jwt) {
+      throw new Error(
+        `Cannot build ${protocol} request data: authorization request has neither 'request' nor 'request_uri'`
+      );
+    }
+    return { request: jwt };
+  }
+  if (inlineRequest) {
+    return _decodeJwtPayload(inlineRequest);
+  }
+  if (requestUri) {
+    const jwt = await _fetchJwt(requestUri, fetchImpl);
+    return _decodeJwtPayload(jwt);
+  }
+  const data = {};
+  for (const [key, value] of params.entries()) {
+    if (key === "client_id") continue;
+    try {
+      data[key] = JSON.parse(value);
+    } catch {
+      data[key] = value;
+    }
+  }
+  return data;
+}
+async function _fetchJwt(requestUri, fetchImpl) {
+  const res = await fetchImpl(requestUri);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch request_uri ${requestUri}: HTTP ${res.status}`);
+  }
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed === "string") return parsed;
+  } catch {
+  }
+  return text;
+}
+function _decodeJwtPayload(jwt) {
+  const parts = jwt.split(".");
+  if (parts.length < 2) {
+    throw new Error("Not a valid JWT: expected at least 2 dot-separated parts");
+  }
+  let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) base64 += "=";
+  return JSON.parse(atob(base64));
+}
+async function requestCredentialFromAuthorizationRequestURI(authorizationRequestUri, options) {
+  const protocol = getBestProtocol(options?.protocolPreference);
+  if (!protocol) return null;
+  const data = await buildRequestData(protocol, authorizationRequestUri, { fetchFn: options?.fetchFn });
+  return requestCredential(protocol, data, options);
+}
+
 // src/errors.ts
 const ERROR_MESSAGES = {
   NotAllowedError: "You denied the credential request or no wallet is available.",
@@ -98,15 +168,19 @@ function isProtocolUnsupported(error) {
 }
 export {
   ERROR_MESSAGES,
+  OID4VCI_PROTOCOLS,
   OID4VP_ALL_PROTOCOLS,
   OID4VP_PROTOCOLS,
   OID4VP_SPEC_PROTOCOLS,
+  buildRequestData,
   getBestProtocol,
   getUserFriendlyErrorMessage,
   isDCAPIAvailable,
+  isOID4VCIProtocol,
   isOID4VPProtocol,
   isProtocolAllowed,
   isProtocolUnsupported,
   isUserCancel,
-  requestCredential
+  requestCredential,
+  requestCredentialFromAuthorizationRequestURI
 };
