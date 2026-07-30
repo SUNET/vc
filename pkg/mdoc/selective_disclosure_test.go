@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -54,31 +56,29 @@ func createTestIssuerSigned(t *testing.T) *IssuerSignedMdoc {
 	}
 
 	// Create mDL data
-	mdoc := &MDoc{
-		FamilyName:           "Smith",
-		GivenName:            "John",
-		BirthDate:            "1990-01-15",
-		IssueDate:            "2024-01-01",
-		ExpiryDate:           "2034-01-01",
-		IssuingCountry:       "SE",
-		IssuingAuthority:     "Transportstyrelsen",
-		DocumentNumber:       "TEST123",
-		Portrait:             []byte("fake-portrait-data"),
-		DrivingPrivileges:    []DrivingPrivilege{{VehicleCategoryCode: "B"}},
-		UNDistinguishingSign: "S",
-	}
-
-	// Add age attestations
-	ageOver18 := true
-	ageOver21 := true
-	mdoc.AgeOver = &AgeOver{
-		Over18: &ageOver18,
-		Over21: &ageOver21,
+	docData, err := json.Marshal(map[string]any{
+		"family_name":            "Smith",
+		"given_name":             "John",
+		"birth_date":             "1990-01-15",
+		"issue_date":             "2024-01-01",
+		"expiry_date":            "2034-01-01",
+		"issuing_country":        "SE",
+		"issuing_authority":      "Transportstyrelsen",
+		"document_number":        "TEST123",
+		"portrait":               base64.StdEncoding.EncodeToString([]byte("fake-portrait-data")),
+		"driving_privileges":     []map[string]any{{"vehicle_category_code": "B"}},
+		"un_distinguishing_sign": "S",
+		"age_over_18":            true,
+		"age_over_21":            true,
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal document data: %v", err)
 	}
 
 	issuedDoc, err := issuer.Issue(&IssuanceRequest{
 		DevicePublicKey: &deviceKey.PublicKey,
-		MDoc:            mdoc,
+		DocumentData:    docData,
+		Schema:          testMDLSchema(),
 	})
 	if err != nil {
 		t.Fatalf("failed to issue: %v", err)

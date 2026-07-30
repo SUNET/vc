@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -89,6 +90,14 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	return reply, nil
 }
 
+// ErrScopeIsMDoc is returned by GetVCTMFromScope when the scope is an
+// mso_mdoc credential, which has no VCTM by design. Callers that treat this
+// as an expected, non-error condition (e.g. to fall back to
+// GetMDDLFromScope) should check for it with errors.Is; callers for whom a
+// missing VCTM is itself an error (e.g. no SVG-template concept exists for
+// mso_mdoc) can surface it directly.
+var ErrScopeIsMDoc = errors.New("scope is an mso_mdoc credential (no VCTM)")
+
 type GetVCTMFromScopeRequest struct {
 	Scope string `validate:"required"`
 }
@@ -102,10 +111,33 @@ func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequ
 
 	vctm := credMeta.GetVCTM()
 	if vctm == nil {
+		if credMeta.GetMDDL() != nil {
+			return nil, ErrScopeIsMDoc
+		}
 		return nil, fmt.Errorf("VCTM not loaded for scope: %s", req.Scope)
 	}
 
 	return vctm, nil
+}
+
+type GetMDDLFromScopeRequest struct {
+	Scope string `validate:"required"`
+}
+
+// GetMDDLFromScope returns the MDDL schema for a scope, or (nil, nil) when
+// the scope is sd-jwt/VCTM-based instead - mirrors GetVCTMFromScope.
+func (c *Client) GetMDDLFromScope(ctx context.Context, req *GetMDDLFromScopeRequest) (*mdoc.MDDLSchema, error) {
+	credMeta, ok := c.cfg.Common.CredentialMetadata[req.Scope]
+	if !ok {
+		return nil, errors.New("scope is not valid credential")
+	}
+
+	mddl := credMeta.GetMDDL()
+	if mddl == nil && credMeta.GetVCTM() == nil {
+		return nil, fmt.Errorf("MDDL not loaded for scope: %s", req.Scope)
+	}
+
+	return mddl, nil
 }
 
 // TypeMetadataRequest holds the request for serving locally-published VCTM.
@@ -118,6 +150,14 @@ func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (js
 	constructor := c.cfg.GetCredentialMetadata(req.Scope)
 	if constructor == nil {
 		return nil, errors.New("unknown scope: " + req.Scope)
+	}
+
+	if constructor.IsLocalMDDL() {
+		raw := constructor.GetMDDLRaw()
+		if raw == nil {
+			return nil, errors.New("MDDL not loaded for scope: " + req.Scope)
+		}
+		return json.RawMessage(raw), nil
 	}
 
 	if !constructor.IsLocalVCTM() {

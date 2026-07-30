@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/json"
 	"math/big"
 	"net/url"
 	"strings"
@@ -161,25 +163,24 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 	}
 
 	// Create test mDL
-	mdoc := &MDoc{
-		FamilyName:           "Smith",
-		GivenName:            "John",
-		BirthDate:            "1990-03-15",
-		IssueDate:            "2024-01-15",
-		ExpiryDate:           "2034-01-15",
-		IssuingCountry:       "SE",
-		IssuingAuthority:     "Transportstyrelsen",
-		DocumentNumber:       "DL123456789",
-		Portrait:             []byte{0xFF, 0xD8, 0xFF, 0xE0},
-		UNDistinguishingSign: "SE",
-		DrivingPrivileges: []DrivingPrivilege{
-			{VehicleCategoryCode: "B"},
-		},
-		AgeOver: &AgeOver{
-			Over18: new(true),
-			Over21: new(true),
-			Over65: new(false),
-		},
+	doc, err := json.Marshal(map[string]any{
+		"family_name":            "Smith",
+		"given_name":             "John",
+		"birth_date":             "1990-03-15",
+		"issue_date":             "2024-01-15",
+		"expiry_date":            "2034-01-15",
+		"issuing_country":        "SE",
+		"issuing_authority":      "Transportstyrelsen",
+		"document_number":        "DL123456789",
+		"portrait":               base64.StdEncoding.EncodeToString([]byte{0xFF, 0xD8, 0xFF, 0xE0}),
+		"un_distinguishing_sign": "SE",
+		"driving_privileges":     []map[string]any{{"vehicle_category_code": "B"}},
+		"age_over_18":            true,
+		"age_over_21":            true,
+		"age_over_65":            false,
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal document data: %v", err)
 	}
 
 	// Generate device key
@@ -190,8 +191,9 @@ func createTestDeviceResponse(t *testing.T, dsKey *ecdsa.PrivateKey, certChain [
 
 	// Issue the mDL
 	issued, err := issuer.Issue(&IssuanceRequest{
-		MDoc:            mdoc,
+		DocumentData:    doc,
 		DevicePublicKey: &deviceKey.PublicKey,
+		Schema:          testMDLSchema(),
 	})
 	if err != nil {
 		t.Fatalf("failed to issue mDL: %v", err)

@@ -1,0 +1,67 @@
+{
+  "format": "mso_mdoc",
+  "doctype": "org.iso.18013.5.1.mDL",
+  "display": [
+    {
+      "locale": "en-US",
+      "name": "mDL",
+      "description": "Mobile Driving Licence (ISO/IEC 18013-5)",
+      "background_color": "#1a365d",
+      "text_color": "#ffffff"
+    }
+  ],
+  "claims": {
+    "org.iso.18013.5.1": {
+      "family_name": { "mandatory": true, "value_type": "tstr" },
+      "given_name": { "mandatory": true, "value_type": "tstr" },
+      "birth_date": { "mandatory": true, "value_type": "full-date" },
+      "issue_date": { "mandatory": true, "value_type": "full-date" },
+      "expiry_date": { "mandatory": true, "value_type": "full-date" },
+      "issuing_country": { "mandatory": true, "value_type": "tstr" },
+      "issuing_authority": { "mandatory": true, "value_type": "tstr" },
+      "document_number": { "mandatory": true, "value_type": "tstr" },
+      "portrait": { "mandatory": true, "value_type": "bstr" },
+      "un_distinguishing_sign": { "mandatory": true, "value_type": "tstr" },
+      "driving_privileges": {
+        "mandatory": true,
+        "value_type": "array",
+        "elements": {
+          "vehicle_category_code": { "mandatory": true, "value_type": "tstr" },
+          "issue_date": { "value_type": "full-date" },
+          "expiry_date": { "value_type": "full-date" },
+          "codes": {
+            "value_type": "array",
+            "elements": {
+              "code": { "mandatory": true, "value_type": "tstr" },
+              "sign": { "value_type": "tstr" },
+              "value": { "value_type": "tstr" }
+            }
+          }
+        }
+      },
+
+      "administrative_number": { "value_type": "tstr" },
+      "sex": { "value_type": "uint" },
+      "height": { "value_type": "uint" },
+      "weight": { "value_type": "uint" },
+      "eye_colour": { "value_type": "tstr" },
+      "hair_colour": { "value_type": "tstr" },
+      "birth_place": { "value_type": "tstr" },
+      "resident_address": { "value_type": "tstr" },
+      "portrait_capture_date": { "value_type": "tdate" },
+      "age_in_years": { "value_type": "uint" },
+      "age_birth_year": { "value_type": "uint" },
+      "age_over_18": { "value_type": "bool" },
+      "issuing_jurisdiction": { "value_type": "tstr" },
+      "nationalities": { "value_type": "array" },
+      "resident_city": { "value_type": "tstr" },
+      "resident_state": { "value_type": "tstr" },
+      "resident_postal_code": { "value_type": "tstr" },
+      "resident_country": { "value_type": "tstr" },
+      "family_name_national_character": { "value_type": "tstr" },
+      "given_name_national_character": { "value_type": "tstr" },
+      "signature_usual_mark": { "value_type": "bstr" },
+      "pseudonym_seed": { "value_type": "bstr" }
+    }
+  }
+}

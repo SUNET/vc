@@ -148,12 +148,18 @@ func (c *Client) initMDocIssuer(ctx context.Context) error {
 		return fmt.Errorf("mDL requires ECDSA signing key, got %T", c.privateKey)
 	}
 
+	pseudonymSeed := false
+	if c.cfg.Issuer.PseudonymSeed != nil {
+		pseudonymSeed = *c.cfg.Issuer.PseudonymSeed
+	}
+
 	// Create the mDL issuer
 	issuer, err := mdoc.NewIssuer(mdoc.IssuerConfig{
 		SignerKey:        signerKey,
 		CertificateChain: certChain,
 		DefaultValidity:  mdocCfg.DefaultValidity,
 		DigestAlgorithm:  mdoc.DigestAlgorithm(mdocCfg.DigestAlgorithm),
+		PseudonymSeed:    pseudonymSeed,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create mDL issuer: %w", err)

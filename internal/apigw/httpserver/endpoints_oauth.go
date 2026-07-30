@@ -399,6 +399,15 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 	}
 
 	vctm, err := s.apiv1.GetVCTMFromScope(ctx, getVCTMFromScopeRequest)
+	if errors.Is(err, apiv1.ErrScopeIsMDoc) {
+		// mso_mdoc scopes have no VCTM and no SVG-template concept at all -
+		// see MDDLSchema.
+		err := fmt.Errorf("scope has no SVG templates (mso_mdoc credential): %w", err)
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Debug(err.Error(), "scope", scope)
+		c.AbortWithStatus(http.StatusBadRequest)
+		return nil, err
+	}
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "getting VCTM failed")

@@ -270,16 +270,29 @@ func (c *Client) CreateCredentialOfferLookupMetadata(ctx context.Context) error 
 	credentialTypes := map[string]CredentialOfferTypeData{}
 
 	for scope, credential := range c.cfg.Common.CredentialMetadata {
-		vctm := credential.GetVCTM()
-		if vctm == nil {
-			c.log.Warn("credential constructor has nil VCTM; failing CreateCredentialOfferLookupMetadata", "scope", scope)
-			return fmt.Errorf("credential constructor for scope %q has no VCTM configured", scope)
+		if vctm := credential.GetVCTM(); vctm != nil {
+			credentialTypes[scope] = CredentialOfferTypeData{
+				Name:        vctm.Name,
+				Description: vctm.Description,
+			}
+			continue
 		}
 
-		credentialTypes[scope] = CredentialOfferTypeData{
-			Name:        vctm.Name,
-			Description: vctm.Description,
+		if mddl := credential.GetMDDL(); mddl != nil {
+			var name, description string
+			if len(mddl.Display) > 0 {
+				name = mddl.Display[0].Name
+				description = mddl.Display[0].Description
+			}
+			credentialTypes[scope] = CredentialOfferTypeData{
+				Name:        name,
+				Description: description,
+			}
+			continue
 		}
+
+		c.log.Warn("credential constructor has neither VCTM nor MDDL; failing CreateCredentialOfferLookupMetadata", "scope", scope)
+		return fmt.Errorf("credential constructor for scope %q has no VCTM or MDDL configured", scope)
 	}
 
 	wallets := map[string]string{}

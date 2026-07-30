@@ -59,7 +59,6 @@ func TestMDoc_OptionalFields(t *testing.T) {
 	residentState := "Massachusetts"
 	residentPostalCode := "75236"
 	residentCountry := "SE"
-	nationality := "SE"
 	jurisdiction := "SE-C"
 	adminNumber := "ADM-123456"
 	familyNameNat := "Smith"
@@ -91,7 +90,7 @@ func TestMDoc_OptionalFields(t *testing.T) {
 		ResidentState:               &residentState,
 		ResidentPostalCode:          &residentPostalCode,
 		ResidentCountry:             &residentCountry,
-		Nationality:                 &nationality,
+		Nationalities:               []string{"SE"},
 		IssuingJurisdiction:         &jurisdiction,
 		AdministrativeNumber:        &adminNumber,
 		FamilyNameNationalCharacter: &familyNameNat,

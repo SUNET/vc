@@ -82,6 +82,10 @@ type ResponseParameters struct {
 
 // BuildCredential unwraps the VPToken from the ResponseParameters
 func (r *ResponseParameters) BuildCredential() (map[string]any, error) {
+	if isMDocFormatToken(r.VPToken) {
+		return extractMDocClaimsFromToken(r.VPToken)
+	}
+
 	parsed, err := sdjwtvc.Token(r.VPToken).Parse()
 	if err != nil {
 		return nil, err

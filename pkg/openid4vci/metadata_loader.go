@@ -21,6 +21,7 @@ type MetadataConfig struct {
 	CredentialResponseEncryption         *MetadataCredentialResponseEncryption
 	BatchCredentialIssuance              *BatchCredentialIssuance
 	Display                              []MetadataDisplay
+	Claims                               []ClaimDescription
 	CredentialConfigurationsSupported    map[string]CredentialConfigurationsSupported
 	MdocIacasURI                         string
 }
@@ -68,6 +69,11 @@ func (cfg *MetadataConfig) GenerateIssuerMetadata(ctx context.Context) *Credenti
 	// Set display information if provided
 	if len(cfg.Display) > 0 {
 		metadata.Display = cfg.Display
+	}
+
+	// Set claims if provided
+	if len(cfg.Claims) > 0 {
+		metadata.Claims = cfg.Claims
 	}
 
 	// Set mdoc IACA endpoint if provided

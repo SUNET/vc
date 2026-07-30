@@ -11,7 +11,12 @@ common:
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
-
+    pid_mdoc:
+      mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
+      format: "mso_mdoc"
+    mdl:
+      mddl_file_path: "/metadata/mdl.mdoc.json"
+      format: "mso_mdoc"
 issuer:
   issuer_url: "https://apigw.vc.docker:8080"
   api_server:
@@ -32,7 +37,7 @@ issuer:
     enable_not_before: true
     valid_duration: 3600
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
-
+  pseudonym_seed: true
 verifier:
   api_server:
     addr: :8080
@@ -167,6 +172,8 @@ apigw:
           - "bootstrapping/elm.json"
           - "bootstrapping/pda1.json"
           - "bootstrapping/pid.json"
+          - "bootstrapping/mdl.json"
+          - "bootstrapping/pid_mdoc.json"
         users:
           - "100"
           - "102"
@@ -179,6 +186,10 @@ apigw:
           auth_scopes:
             pid:
               auth_claims: ["given_name", "family_name", "birth_date"]
+        pid_mdoc:
+          auth_provider: oidc
+        mdl:
+          auth_provider: oidc
   auth_providers:
     oidc:
       enable: true
@@ -201,6 +212,8 @@ apigw:
           scopes:
             - "pid"
             - "ehic"
+            - "pid_mdoc"
+            - "mdl"
     credential_offers:
       issuer_url: "https://apigw.vc.docker:8080"
       wallets:

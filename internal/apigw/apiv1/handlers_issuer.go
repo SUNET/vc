@@ -540,8 +540,17 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	return credentials, nil
 }
 
-// issueMDoc issues mDL/mDoc credentials (ISO 18013-5), one per JWK.
+// issueMDoc issues mDL/mDoc credentials (ISO 18013-5), one per JWK. The MDDL
+// schema (doctype, namespaces, claim shape) is passed inline from the
+// scope's credential metadata, so the issuer never needs a doctype-specific
+// Go struct - adding a new mdoc document type requires only a new MDDL
+// schema, never a Go change (mirrors issueSDJWT's VCTM-driven approach).
 func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
+	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
+	if credentialMetadata == nil {
+		return nil, fmt.Errorf("unsupported scope: %s", scope)
+	}
+
 	replies := make([]*apiv1_issuer.MakeMDocReply, 0, len(jwks))
 
 	for _, jwk := range jwks {
@@ -553,10 +562,10 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 		reply, err := c.issuerClient.MakeMDoc(ctx, &apiv1_issuer.MakeMDocRequest{
 			Scope:           scope,
-			DocType:         mdoc.DocType, // org.iso.18013.5.1.mDL
 			DocumentData:    documentData,
 			DevicePublicKey: deviceKeyBytes,
 			DeviceKeyFormat: "cose",
+			Mddl:            credentialMetadata.GetMDDLRaw(),
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeMDoc")
@@ -572,8 +581,12 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 	credentials := make([]openid4vci.Credential, len(replies))
 	for i, reply := range replies {
-		// For mDoc, the credential is CBOR bytes - encode as base64 for JSON response
-		credentials[i] = openid4vci.Credential{Credential: base64.StdEncoding.EncodeToString(reply.Mdoc)}
+		// For mDoc, the credential is CBOR bytes - encode as base64url (no
+		// padding), matching wallet-common's fromBase64Url decoding
+		// convention for mso_mdoc credential responses. Standard base64
+		// (with "+"/"/" and "=" padding) is not URL-safe and isn't what
+		// wallet clients expect here.
+		credentials[i] = openid4vci.Credential{Credential: base64.RawURLEncoding.EncodeToString(reply.Mdoc)}
 	}
 
 	entries := make([]statusEntry, len(replies))

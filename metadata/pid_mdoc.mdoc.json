@@ -1,0 +1,52 @@
+{
+  "format": "mso_mdoc",
+  "doctype": "eu.europa.ec.eudi.pid.1",
+  "display": [
+    {
+      "locale": "en-US",
+      "name": "PID",
+      "description": "Person Identification Data (mdoc)",
+      "background_color": "#003399",
+      "text_color": "#ffffff"
+    }
+  ],
+  "claims": {
+    "eu.europa.ec.eudi.pid.1": {
+      "family_name": { "mandatory": true, "value_type": "tstr" },
+      "given_name": { "mandatory": true, "value_type": "tstr" },
+      "birth_date": { "mandatory": true, "value_type": "full-date" },
+      "issuance_date": { "mandatory": true, "value_type": "full-date" },
+      "expiry_date": { "mandatory": true, "value_type": "full-date" },
+      "issuing_country": { "mandatory": true, "value_type": "tstr" },
+      "issuing_authority": { "mandatory": true, "value_type": "tstr" },
+
+      "document_number": { "value_type": "tstr" },
+      "administrative_number": { "value_type": "tstr" },
+      "issuing_jurisdiction": { "value_type": "tstr" },
+      "portrait": { "value_type": "bstr" },
+      "portrait_capture_date": { "value_type": "tdate" },
+      "family_name_birth": { "value_type": "tstr" },
+      "given_name_birth": { "value_type": "tstr" },
+      "birth_place": { "value_type": "tstr" },
+      "birth_country": { "value_type": "tstr" },
+      "birth_state": { "value_type": "tstr" },
+      "birth_city": { "value_type": "tstr" },
+      "resident_address": { "value_type": "tstr" },
+      "resident_country": { "value_type": "tstr" },
+      "resident_state": { "value_type": "tstr" },
+      "resident_city": { "value_type": "tstr" },
+      "resident_postal_code": { "value_type": "tstr" },
+      "resident_street": { "value_type": "tstr" },
+      "resident_house_number": { "value_type": "tstr" },
+      "sex": { "value_type": "uint" },
+      "nationalities": { "value_type": "array" },
+      "age_in_years": { "value_type": "uint" },
+      "age_birth_year": { "value_type": "uint" },
+      "age_over_18": { "value_type": "bool" },
+      "email_address": { "value_type": "tstr" },
+      "mobile_phone_number": { "value_type": "tstr" },
+      "trust_anchor": { "value_type": "tstr" },
+      "pseudonym_seed": { "value_type": "bstr" }
+    }
+  }
+}

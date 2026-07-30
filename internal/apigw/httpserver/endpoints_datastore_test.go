@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -347,6 +348,10 @@ func (u unimplementedApiv1) UICreateCredentialOffer(context.Context, *apiv1.UICr
 }
 
 func (u unimplementedApiv1) GetVCTMFromScope(context.Context, *apiv1.GetVCTMFromScopeRequest) (*sdjwtvc.VCTM, error) {
+	panic("not implemented")
+}
+
+func (u unimplementedApiv1) GetMDDLFromScope(context.Context, *apiv1.GetMDDLFromScopeRequest) (*mdoc.MDDLSchema, error) {
 	panic("not implemented")
 }
 

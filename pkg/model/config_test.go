@@ -10,6 +10,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -170,7 +172,7 @@ func TestCredentialMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()
 
-			err := tt.constructor.LoadVCTMetadata(ctx, tt.scope)
+			err := tt.constructor.LoadCredentialSchema(ctx, tt.scope)
 			assert.NoError(t, err)
 
 			// Verify VCTM was loaded
@@ -187,6 +189,49 @@ func TestCredentialMetadata(t *testing.T) {
 			assert.NotNil(t, tt.constructor.VCTMRaw, "VCTMRaw should be kept for local files")
 		})
 	}
+}
+
+func TestCredentialMetadata_MDDL(t *testing.T) {
+	mddlBytes, err := os.ReadFile("./testdata/mddl_pid.json")
+	require.NoError(t, err)
+
+	t.Run("local file keeps MDDLRaw", func(t *testing.T) {
+		c := &CredentialMetadata{
+			Format:       "mso_mdoc",
+			MDDLFilePath: "./testdata/mddl_pid.json",
+		}
+		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc")
+		require.NoError(t, err)
+		assert.NotNil(t, c.MDDL, "MDDL schema should be loaded")
+		assert.Equal(t, "eu.europa.ec.eudi.pid.1", c.MDDL.DocType)
+		assert.Contains(t, c.Integrity, "sha256-")
+		// APIGW always sends MDDLRaw inline to the issuer, which validates it
+		// as required regardless of whether the schema came from a local
+		// file or a URL — so it must be populated here too.
+		assert.NotEmpty(t, c.GetMDDLRaw(), "MDDLRaw should be kept for local MDDL schemas")
+	})
+
+	t.Run("remote URL also keeps MDDLRaw", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(mddlBytes)
+		}))
+		defer srv.Close()
+
+		c := &CredentialMetadata{
+			Format:  "mso_mdoc",
+			MDDLUrl: srv.URL,
+		}
+		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc")
+		require.NoError(t, err)
+		assert.NotNil(t, c.MDDL, "MDDL schema should be loaded")
+		// This is the regression this test guards against: previously
+		// MDDLRaw was only kept when IsLocalMDDL() was true, so an
+		// mddl_url-configured scope would silently fail issuance because
+		// the (required) inline MDDL bytes sent to the issuer were empty.
+		assert.NotEmpty(t, c.GetMDDLRaw(), "MDDLRaw should also be kept for mddl_url-loaded schemas")
+		assert.False(t, c.IsLocalMDDL())
+	})
 }
 
 func TestLookupCredentialSources(t *testing.T) {
@@ -441,7 +486,7 @@ func TestLoadFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			err := tt.constructor.LoadVCTMetadata(ctx, "test_scope")
+			err := tt.constructor.LoadCredentialSchema(ctx, "test_scope")
 
 			if tt.wantErr {
 				assert.Error(t, err)

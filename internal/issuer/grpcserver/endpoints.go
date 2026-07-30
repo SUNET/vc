@@ -40,14 +40,14 @@ func (s *Service) JWKS(ctx context.Context, in *apiv1_issuer.Empty) (*apiv1_issu
 	}, nil
 }
 
-// MakeMDoc creates an mDL credential per ISO 18013-5
+// MakeMDoc creates an mdoc credential per ISO 18013-5
 func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest) (*apiv1_issuer.MakeMDocReply, error) {
 	reply, err := s.apiv1.MakeMDoc(ctx, &apiv1.CreateMDocRequest{
 		Scope:           in.Scope,
-		DocType:         in.DocType,
 		DocumentData:    in.DocumentData,
 		DevicePublicKey: in.DevicePublicKey,
 		DeviceKeyFormat: in.DeviceKeyFormat,
+		MDDL:            in.Mddl,
 	})
 	if err != nil {
 		return nil, err

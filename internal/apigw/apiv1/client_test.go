@@ -79,7 +79,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 
 	// Load VCTMs (normally done by configuration.New)
 	for scope, cc := range client.cfg.Common.CredentialMetadata {
-		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
+		require.NoError(t, cc.LoadCredentialSchema(context.Background(), scope))
 	}
 
 	// Execute the function
@@ -205,7 +205,7 @@ func TestCreateCredentialOfferLookupMetadata_MissingVCTM(t *testing.T) {
 
 	err := client.CreateCredentialOfferLookupMetadata(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `credential constructor for scope "diploma" has no VCTM configured`)
+	assert.Contains(t, err.Error(), `credential constructor for scope "diploma" has no VCTM or MDDL configured`)
 }
 
 func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
@@ -235,7 +235,7 @@ func TestCreateCredentialOfferLookupMetadata_NilVCTMNoFilePath(t *testing.T) {
 
 	err := client.CreateCredentialOfferLookupMetadata(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `credential constructor for scope "empty_scope" has no VCTM configured`)
+	assert.Contains(t, err.Error(), `credential constructor for scope "empty_scope" has no VCTM or MDDL configured`)
 }
 
 func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) {
@@ -245,7 +245,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 	diplomaCC := &model.CredentialMetadata{
 		VCTMFilePath: "../../../metadata/vctm_diploma.json",
 	}
-	require.NoError(t, diplomaCC.LoadVCTMetadata(context.Background(), "diploma"))
+	require.NoError(t, diplomaCC.LoadCredentialSchema(context.Background(), "diploma"))
 
 	client := &Client{
 		log: logger.NewSimple("test"),
@@ -272,7 +272,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 
 	err := client.CreateCredentialOfferLookupMetadata(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "has no VCTM configured")
+	assert.Contains(t, err.Error(), "has no VCTM or MDDL configured")
 }
 
 func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
@@ -314,7 +314,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 
 	// Load VCTMs (normally done by configuration.New)
 	for scope, cc := range client.cfg.Common.CredentialMetadata {
-		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
+		require.NoError(t, cc.LoadCredentialSchema(context.Background(), scope))
 	}
 
 	// Execute the function

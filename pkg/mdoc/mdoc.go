@@ -95,8 +95,8 @@ type MDoc struct {
 	// IssuingJurisdiction is the country subdivision code (ISO 3166-2) of the issuing jurisdiction.
 	IssuingJurisdiction *string `json:"issuing_jurisdiction,omitempty" cbor:"issuing_jurisdiction,omitempty" validate:"omitempty"`
 
-	// Nationality is the nationality of the mDL holder (ISO 3166-1 alpha-2).
-	Nationality *string `json:"nationality,omitempty" cbor:"nationality,omitempty" validate:"omitempty,len=2"`
+	// Nationalities lists the mDL holder's nationalities (ISO 3166-1 alpha-2 codes).
+	Nationalities []string `json:"nationalities,omitempty" cbor:"nationalities,omitempty" validate:"omitempty,dive,len=2"`
 
 	// ResidentCity is the city where the mDL holder lives.
 	// Maximum 150 characters, Latin1 encoding.
@@ -130,6 +130,10 @@ type MDoc struct {
 
 	// SignatureUsualMark is an image of the signature or usual mark of the mDL holder.
 	SignatureUsualMark []byte `json:"signature_usual_mark,omitempty" cbor:"signature_usual_mark,omitempty"`
+
+	// PseudonymSeed is a fixed-length seed value used to derive holder-specific
+	// pseudonyms for pseudonymous authentication schemes.
+	PseudonymSeed []byte `json:"pseudonym_seed,omitempty" cbor:"pseudonym_seed,omitempty" validate:"omitempty,len=32"`
 }
 
 // DrivingPrivilege represents a single driving privilege category.
