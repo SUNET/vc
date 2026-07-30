@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -419,7 +420,7 @@ type Issuer struct {
 	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
 	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
-	//PseudonymSeed is a boolean, If true the issuer attaches random seed as the pseuodnym_seed claim
+	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 }
 
@@ -1518,11 +1519,23 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 					credMetadata.Display[i] = display
 				}
 			}
-			for namespace, elements := range mddl.Claims {
-				for elementID, meta := range elements {
+			namespaces := make([]string, 0, len(mddl.Claims))
+			for namespace := range mddl.Claims {
+				namespaces = append(namespaces, namespace)
+			}
+			sort.Strings(namespaces)
+			for _, namespace := range namespaces {
+				elements := mddl.Claims[namespace]
+				elementIDs := make([]string, 0, len(elements))
+				for elementID := range elements {
+					elementIDs = append(elementIDs, elementID)
+				}
+				sort.Strings(elementIDs)
+				for _, elementID := range elementIDs {
+					ns, el := namespace, elementID
 					credMetadata.Claims = append(credMetadata.Claims, openid4vci.ClaimDescription{
-						Path:      []string{namespace, elementID},
-						Mandatory: meta.Mandatory,
+						Path:      []*string{&ns, &el},
+						Mandatory: elements[elementID].Mandatory,
 					})
 				}
 			}
@@ -1633,15 +1646,11 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		if len(vctm.Claims) > 0 {
 			credMetadata.Claims = make([]openid4vci.ClaimDescription, len(vctm.Claims))
 			for i, vctmClaim := range vctm.Claims {
-				path := make([]string, 0, len(vctmClaim.Path))
-				for _, p := range vctmClaim.Path {
-					if p == nil {
-						continue
-					}
-					path = append(path, *p)
-				}
+				// vctmClaim.Path may contain nil entries denoting an array-element
+				// wildcard (e.g. ["nationalities", null]); preserve them as-is so
+				// the emitted claims path pointer keeps the same semantics.
 				claim := openid4vci.ClaimDescription{
-					Path:      path,
+					Path:      vctmClaim.Path,
 					Mandatory: vctmClaim.Mandatory,
 					SVGID:     vctmClaim.SVGID,
 				}

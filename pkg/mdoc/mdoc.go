@@ -96,7 +96,7 @@ type MDoc struct {
 	IssuingJurisdiction *string `json:"issuing_jurisdiction,omitempty" cbor:"issuing_jurisdiction,omitempty" validate:"omitempty"`
 
 	// nationalities is the nationalities of the mDL holder (ISO 3166-1 alpha-2).
-	Nationalities []string `json:"nationality,omitempty" cbor:"nationalities,omitempty" validate:"omitempty,len=2"`
+	Nationalities []string `json:"nationalities,omitempty" cbor:"nationalities,omitempty" validate:"omitempty,dive,len=2"`
 
 	// ResidentCity is the city where the mDL holder lives.
 	// Maximum 150 characters, Latin1 encoding.

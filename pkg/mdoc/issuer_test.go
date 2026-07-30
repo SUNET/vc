@@ -707,7 +707,7 @@ func TestConvertElementValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := convertElementValue(tt.valueType, tt.raw)
+			got, err := convertElementValue(ClaimMetadata{ValueType: tt.valueType}, tt.raw)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got none")
@@ -721,6 +721,73 @@ func TestConvertElementValue(t *testing.T) {
 				tt.check(t, got)
 			}
 		})
+	}
+}
+
+// TestConvertElementValue_NestedArraySchema verifies that an "array"
+// value_type with a declared Elements schema (e.g. mDL's driving_privileges,
+// which nests full-date issue_date/expiry_date fields and a further nested
+// "codes" array) recursively converts each item's fields instead of passing
+// the raw JSON values through unchanged.
+func TestConvertElementValue_NestedArraySchema(t *testing.T) {
+	meta := ClaimMetadata{
+		ValueType: "array",
+		Elements: map[string]ClaimMetadata{
+			"vehicle_category_code": {Mandatory: true, ValueType: "tstr"},
+			"issue_date":            {ValueType: "full-date"},
+			"expiry_date":           {ValueType: "full-date"},
+			"codes": {
+				ValueType: "array",
+				Elements: map[string]ClaimMetadata{
+					"code":  {Mandatory: true, ValueType: "tstr"},
+					"sign":  {ValueType: "tstr"},
+					"value": {ValueType: "tstr"},
+				},
+			},
+		},
+	}
+
+	raw := []any{
+		map[string]any{
+			"vehicle_category_code": "B",
+			"issue_date":            "2024-01-01",
+			"expiry_date":           "2034-01-01",
+			"codes": []any{
+				map[string]any{"code": "78"},
+			},
+		},
+	}
+
+	got, err := convertElementValue(meta, raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	arr, ok := got.([]any)
+	if !ok || len(arr) != 1 {
+		t.Fatalf("got %#v, want a 1-element slice", got)
+	}
+	item, ok := arr[0].(map[string]any)
+	if !ok {
+		t.Fatalf("array item is %T, want map[string]any", arr[0])
+	}
+	if item["vehicle_category_code"] != "B" {
+		t.Errorf("vehicle_category_code = %#v, want %q (tstr passthrough)", item["vehicle_category_code"], "B")
+	}
+	if item["issue_date"] != FullDate("2024-01-01") {
+		t.Errorf("issue_date = %#v, want FullDate(\"2024-01-01\")", item["issue_date"])
+	}
+	if item["expiry_date"] != FullDate("2034-01-01") {
+		t.Errorf("expiry_date = %#v, want FullDate(\"2034-01-01\")", item["expiry_date"])
+	}
+
+	codes, ok := item["codes"].([]any)
+	if !ok || len(codes) != 1 {
+		t.Fatalf("codes = %#v, want a 1-element slice", item["codes"])
+	}
+	code, ok := codes[0].(map[string]any)
+	if !ok || code["code"] != "78" {
+		t.Fatalf("codes[0] = %#v, want map with code=\"78\"", codes[0])
 	}
 }
 

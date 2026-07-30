@@ -27,7 +27,7 @@ type Issuer struct {
 	defaultValidity time.Duration
 	// Digest algorithm to use
 	digestAlgorithm DigestAlgorithm
-	//Deault false pseudonym seed
+	// pseudonymSeed enables attaching a random seed as the pseudonym_seed claim. Default: false.
 	pseudonymSeed bool
 }
 
@@ -290,7 +290,7 @@ func (i *Issuer) addElements(builder *MSOBuilder, schema *MDDLSchema, doc map[st
 				continue
 			}
 
-			value, err := convertElementValue(meta.ValueType, raw)
+			value, err := convertElementValue(meta, raw)
 			if err != nil {
 				return fmt.Errorf("convert claim %q: %w", elementID, err)
 			}
@@ -305,12 +305,44 @@ func (i *Issuer) addElements(builder *MSOBuilder, schema *MDDLSchema, doc map[st
 // convertElementValue converts a JSON-decoded value into the Go
 // representation fxamacker/cbor needs to encode it per ISO 18013-5: full-date
 // and tdate values are tagged strings, bstr values are raw bytes (accepted as
-// base64 in the source JSON). Every other value_type — including structured
-// "array"/"map" claims such as driving_privileges — passes through
-// unchanged, since CBOR encoding already recurses through nested Go
-// maps/slices correctly.
-func convertElementValue(valueType string, raw any) (any, error) {
-	switch valueType {
+// base64 in the source JSON). "array"/"map" claims recurse into meta.Elements
+// so nested fields (e.g. driving_privileges[].issue_date declared as
+// full-date) get the same conversion applied. Any value_type without
+// declared Elements, and any other value_type (tstr, bool, ...), passes
+// through unchanged.
+func convertElementValue(meta ClaimMetadata, raw any) (any, error) {
+	switch meta.ValueType {
+	case "array":
+		if len(meta.Elements) == 0 {
+			return raw, nil
+		}
+		arr, ok := raw.([]any)
+		if !ok {
+			return nil, fmt.Errorf("expected array, got %T", raw)
+		}
+		result := make([]any, len(arr))
+		for idx, item := range arr {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				result[idx] = item
+				continue
+			}
+			converted, err := convertMapFields(meta.Elements, itemMap)
+			if err != nil {
+				return nil, fmt.Errorf("array item %d: %w", idx, err)
+			}
+			result[idx] = converted
+		}
+		return result, nil
+	case "map":
+		if len(meta.Elements) == 0 {
+			return raw, nil
+		}
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("expected map, got %T", raw)
+		}
+		return convertMapFields(meta.Elements, m)
 	case "full-date":
 		s, ok := raw.(string)
 		if !ok {
@@ -355,9 +387,31 @@ func convertElementValue(valueType string, raw any) (any, error) {
 		}
 		return uint64(f), nil
 	default:
-		// "tstr", "bool", "array", "map", and any unrecognized type pass through as-is.
+		// "tstr", "bool", schema-less "array"/"map", and any unrecognized
+		// type pass through as-is — CBOR encoding recurses through nested
+		// Go maps/slices correctly on its own.
 		return raw, nil
 	}
+}
+
+// convertMapFields converts each field of m per its declared schema in
+// elementsSchema, recursing through convertElementValue. Fields with no
+// matching schema entry pass through unchanged.
+func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any) (map[string]any, error) {
+	result := make(map[string]any, len(m))
+	for key, val := range m {
+		fieldMeta, ok := elementsSchema[key]
+		if !ok {
+			result[key] = val
+			continue
+		}
+		converted, err := convertElementValue(fieldMeta, val)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", key, err)
+		}
+		result[key] = converted
+	}
+	return result, nil
 }
 
 // injectPseudonymSeed generates a fresh 32-byte pseudonym seed when the

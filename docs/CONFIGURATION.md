@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-07-29
+**Generated:** 2026-07-30
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -40,6 +40,7 @@ Shared configuration used across all services.
 | `log`                 | `object` | Logging configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
 | `mongo`               | `object` | MongoDB configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
 | `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
+| `metrics`             | `object` | OpenTelemetry metrics configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `kafka`               | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                      | -                        | -       | No       |
 | `secret_file_path`    | `string` | Path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.                                                                                                                        | `"/etc/vc/secrets.yaml"` | -       | No       |
 | `ha`                  | `object` | High-availability mode. When Enable is true, caches use MongoDB (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.                                                                                                                                    | -                        | -       | No       |
@@ -68,7 +69,7 @@ Shared configuration used across all services.
 
 ### `tracing`
 
-> **Path:** `.common.tracing`
+> **Path:** `.common.tracing`, `.common.metrics`
 
 | Field     | Type     | Description                            | Example         | Default | Required         |
 | --------- | -------- | -------------------------------------- | --------------- | ------- | ---------------- |
@@ -147,15 +148,16 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 | ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `name`             | `string` | Name: REQUIRED. String value of a display name for the Credential.                                                                                                                                                                                                                  | -       | -       | Yes      |
 | `locale`           | `string` | Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. Multiple display objects MAY be included for separate languages. There MUST be only one object for each language identifier. | -       | -       | No       |
-| `logo`             | `object` | Logo: OPTIONAL. Object with information about the logo of the Credential                                                                                                                                                                                                            | -       | -       | No       |
 | `description`      | `string` | Description: OPTIONAL. String value of a description of the Credential.                                                                                                                                                                                                             | -       | -       | No       |
 | `background_color` | `string` | BackgroundColor: OPTIONAL. String value of a background color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].                                                                                                             | -       | -       | No       |
+| `logo`             | `object` | Logo: OPTIONAL. Object with information about the logo of the Credential                                                                                                                                                                                                            | -       | -       | No       |
 | `background_image` | `object` | BackgroundImage: OPTIONAL. Object with information about the background image of the Credential. At least the following parameter MUST be included:                                                                                                                                 | -       | -       | No       |
 | `text_color`       | `string` | TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].                                                                                                                         | -       | -       | No       |
+| `rendering`        | `object` | Rendering: OPTIONAL                                                                                                                                                                                                                                                                 | -       | -       | No       |
 
 ### `logo`
 
-> **Path:** `.common.credential_metadata.<credential scope>.display[].logo`, `.apigw.issuer_metadata.display[].logo`
+> **Path:** `.common.credential_metadata.<credential scope>.display[].logo`, `.common.credential_metadata.<credential scope>.display[].rendering.simple.logo`, `.apigw.issuer_metadata.display[].logo`
 
 | Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -170,26 +172,65 @@ https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-c
 | ----- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `uri` | `string` | URI REQUIRED. String value that contains a URI where the Wallet can obtain the background image of the Credential from the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
 
+### `rendering`
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering`
+
+as defined in ISO/IEC 18013-5 and referenced by OpenID4VCI mdoc rendering extensions.
+
+| Field           | Type     | Description                                                                                      | Example | Default | Required |
+| --------------- | -------- | ------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `simple`        | `object` | Simple: OPTIONAL. Object containing simple rendering information, such as a logo.                | -       | -       | No       |
+| `svg_templates` | `array`  | SvgTemplates: OPTIONAL. A non-empty array of SVG template objects used to render the Credential. | -       | -       | No       |
+
+### `simple`
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering.simple`
+
+| Field  | Type     | Description                                                                         | Example | Default | Required |
+| ------ | -------- | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `logo` | `object` | Logo: OPTIONAL. Object with information about the logo to use for simple rendering. | -       | -       | No       |
+
+### `svg_templates` entry
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering.svg_templates[]`
+
+| Field           | Type     | Description                                                                                                                                                      | Example | Default | Required |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `uri`           | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the SVG template.                                                                    | -       | -       | Yes      |
+| `uri_integrity` | `string` | URIIntegrity: OPTIONAL. Subresource integrity hash (e.g. "sha256-...") of the SVG template, allowing the Wallet to verify the integrity of the fetched resource. | -       | -       | No       |
+| `properties`    | `object` | Properties: OPTIONAL. Object describing the rendering properties this template is suited for, such as orientation, color scheme, and contrast.                   | -       | -       | No       |
+
+### `properties`
+
+> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering.svg_templates[].properties`
+
+| Field          | Type     | Description                                                          | Example | Default | Required |
+| -------------- | -------- | -------------------------------------------------------------------- | ------- | ------- | -------- |
+| `orientation`  | `string` | Orientation: OPTIONAL. String value, e.g. "portrait" or "landscape". | -       | -       | No       |
+| `color_scheme` | `string` | ColorScheme: OPTIONAL. String value, e.g. "light" or "dark".         | -       | -       | No       |
+| `contrast`     | `string` | Contrast: OPTIONAL. String value, e.g. "normal" or "high".           | -       | -       | No       |
+
 ### `claims` entry
 
 > **Path:** `.common.credential_metadata.<credential scope>.claims[]`
 
-https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-claims-description-for-issu
-
-| Field       | Type       | Description                                                                                                                    | Example | Default | Required |
-| ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `path`      | `[]string` | Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential. | -       | -       | Yes      |
-| `mandatory` | `bool`     | Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.     | -       | -       | No       |
-| `display`   | `array`    | Display: OPTIONAL. A non-empty array of objects containing display properties for the claim.                                   | -       | -       | No       |
+| Field       | Type     | Description                                                                                                                                                                                                                                                                                           | Example | Default | Required |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `path`      | `array`  | Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential. A nil entry denotes a wildcard over an array's elements (e.g. ["nationalities", null]), matching the claims path pointer semantics used by presentation/DCQL and VCTM. | -       | -       | Yes      |
+| `svg_id`    | `string` | SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.                                                                                                                                                                                                   | -       | -       | No       |
+| `mandatory` | `bool`   | Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.                                                                                                                                                                            | -       | -       | No       |
+| `display`   | `array`  | Display: OPTIONAL. A non-empty array of objects containing display properties for the claim.                                                                                                                                                                                                          | -       | -       | No       |
 
 ### `display` entry
 
 > **Path:** `.common.credential_metadata.<credential scope>.claims[].display[]`
 
-| Field    | Type     | Description                                                                 | Example | Default | Required |
-| -------- | -------- | --------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `name`   | `string` | Name: OPTIONAL. String value of a display name for the claim.               | -       | -       | No       |
-| `locale` | `string` | Locale: OPTIONAL. String value that identifies the language of this object. | -       | -       | No       |
+| Field    | Type     | Description                                                                                                                                     | Example | Default | Required |
+| -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `name`   | `string` | Name: OPTIONAL. String value of a display name for the claim.                                                                                   | -       | -       | No       |
+| `label`  | `string` | Label: OPTIONAL. Same as Name — included for compatibility with consumers (e.g. wallet-common's dataUriResolver) that expect a "label" field.   | -       | -       | No       |
+| `locale` | `string` | Locale: OPTIONAL. String value that identifies the language of this object.                                                                     | -       | -       | No       |
 
 ## `apigw` (Top-level)
 
@@ -711,6 +752,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 | `mdoc`                     | `object` | MDL/mdoc configuration                                                                                                                                                                                            | -                           | -       | No       |
 | `audit_log`                | `object` | Audit log configuration                                                                                                                                                                                           | -                           | -       | No       |
 | `sign_metadata_rate_limit` | `object` | The rate limiter for the SignMetadata gRPC endpoint. In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults should accommodate the expected cluster size. Default: 2 req/s, burst 20. | -                           | -       | No       |
+| `pseudonym_seed`           | `bool`   | PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.                                                                                                                        | -                           | -       | No       |
 
 ### `grpc_server`
 
@@ -787,20 +829,22 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 
 > **Path:** `.verifier`
 
-| Field                    | Type     | Description                                                                                                                                                                                                                                                                             | Example                                                    | Default | Required |
-| ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
-| `api_server`             | `object` | HTTP API server configuration                                                                                                                                                                                                                                                           | -                                                          | -       | Yes      |
-| `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                                                                                                                                                                                                                               | `"https://verifier.sunet.se"`                              | -       | Yes      |
-| `key_config`             | `object` | Signing key configuration                                                                                                                                                                                                                                                               | -                                                          | -       | Yes      |
-| `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets                                                                                                                                                                                                                            | -                                                          | -       | No       |
-| `supported_wallets`      | `object` | Supported wallet configurations                                                                                                                                                                                                                                                         | -                                                          | -       | No       |
-| `inbound`                | `object` | Inbound groups inbound credential verification                                                                                                                                                                                                                                          | -                                                          | -       | No       |
-| `outbound`               | `object` | Outbound groups outbound identity assertion                                                                                                                                                                                                                                             | -                                                          | -       | No       |
-| `digital_credentials`    | `object` | W3C Digital Credentials API configuration                                                                                                                                                                                                                                               | -                                                          | -       | No       |
-| `authorization_page_css` | `object` | Authorization page styling configuration                                                                                                                                                                                                                                                | -                                                          | -       | No       |
-| `credential_display`     | `object` | Credential display settings                                                                                                                                                                                                                                                             | -                                                          | -       | No       |
-| `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -       | No       |
-| `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -       | No       |
+| Field                    | Type     | Description                                                                                                                                                                                                                                                                             | Example                                                    | Default        | Required |
+| ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------- | -------- |
+| `api_server`             | `object` | HTTP API server configuration                                                                                                                                                                                                                                                           | -                                                          | -              | Yes      |
+| `public_url`             | `string` | Public URL of this service (must be valid HTTP/HTTPS URL)                                                                                                                                                                                                                               | `"https://verifier.sunet.se"`                              | -              | Yes      |
+| `key_config`             | `object` | Signing key configuration                                                                                                                                                                                                                                                               | -                                                          | -              | Yes      |
+| `client_id_scheme`       | `string` | ClientIDScheme determines how the verifier identifies itself to wallets. Supported values: "x509_san_dns" (default), "did". When "did", the DID field must be set and /.well-known/did.json is served.                                                                                  | -                                                          | `x509_san_dns` | No       |
+| `did`                    | `string` | Verifier's DID identity (e.g., "did:web:verifier.example.com"). Required when ClientIDScheme is "did".                                                                                                                                                                                  | -                                                          | -              | No       |
+| `preferred_vp_formats`   | `object` | Informational VP formats and algorithms supported by wallets                                                                                                                                                                                                                            | -                                                          | -              | No       |
+| `supported_wallets`      | `object` | Supported wallet configurations                                                                                                                                                                                                                                                         | -                                                          | -              | No       |
+| `inbound`                | `object` | Inbound groups inbound credential verification                                                                                                                                                                                                                                          | -                                                          | -              | No       |
+| `outbound`               | `object` | Outbound groups outbound identity assertion                                                                                                                                                                                                                                             | -                                                          | -              | No       |
+| `digital_credentials`    | `object` | W3C Digital Credentials API configuration                                                                                                                                                                                                                                               | -                                                          | -              | No       |
+| `authorization_page_css` | `object` | Authorization page styling configuration                                                                                                                                                                                                                                                | -                                                          | -              | No       |
+| `credential_display`     | `object` | Credential display settings                                                                                                                                                                                                                                                             | -                                                          | -              | No       |
+| `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -              | No       |
+| `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -              | No       |
 
 ### `preferred_vp_formats`
 

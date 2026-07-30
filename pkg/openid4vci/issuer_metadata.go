@@ -199,7 +199,9 @@ type CredentialMetadata struct {
 // ClaimDescription describes a claim within a Credential for display purposes.
 type ClaimDescription struct {
 	// Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential.
-	Path []string `json:"path" yaml:"path" validate:"required"`
+	// A nil entry denotes a wildcard over an array's elements (e.g. ["nationalities", null]),
+	// matching the claims path pointer semantics used by presentation/DCQL and VCTM.
+	Path []*string `json:"path" yaml:"path" validate:"required"`
 
 	// SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.
 	SVGID string `json:"svg_id,omitempty" yaml:"svg_id,omitempty"`
@@ -273,16 +275,16 @@ type CredentialMetadataDisplay struct {
 	// Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. Multiple display objects MAY be included for separate languages. There MUST be only one object for each language identifier.
 	Locale string `json:"locale,omitempty" yaml:"locale,omitempty" validate:"bcp47_language_tag"`
 
-	// Logo: OPTIONAL. Object with information about the logo of the Credential
-
 	// Description: OPTIONAL. String value of a description of the Credential.
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 
 	// BackgroundColor: OPTIONAL. String value of a background color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].
 	BackgroundColor string `json:"background_color,omitempty" yaml:"background_color,omitempty"`
 
+	// Logo: OPTIONAL. Object with information about the logo of the Credential
+	Logo *MetadataLogo `json:"logo,omitempty" yaml:"logo,omitempty"`
+
 	// BackgroundImage: OPTIONAL. Object with information about the background image of the Credential. At least the following parameter MUST be included:
-	Logo            *MetadataLogo            `json:"logo,omitempty" yaml:"logo,omitempty"`
 	BackgroundImage *MetadataBackgroundImage `json:"background_image,omitempty" yaml:"background_image,omitempty"`
 	// TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].
 	TextColor string `json:"text_color,omitempty" yaml:"text_color,omitempty"`
