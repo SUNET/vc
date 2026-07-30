@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -219,6 +220,12 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
 	start := time.Now()
 	c.log.Debug("OAuthToken", "grant_type", req.GrantType)
+
+	// Handle refresh_token grant type separately — it has a different flow
+	// that doesn't involve authorization codes.
+	if req.GrantType == "refresh_token" {
+		return c.handleRefreshTokenGrant(ctx, start, req)
+	}
 
 	isPreAuthFlow := req.GrantType == "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
@@ -524,6 +531,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		CNonceExpiresIn: 3600,
 	}
 
+	// Issue a refresh token if the grant type is configured and DPoP is present.
+	// Refresh tokens are device-bound (ARF 3.0 §6.6.6.2.2) and require a DPoP
+	// thumbprint for sender-constraining. Without DPoP (e.g. pre-auth flow without
+	// DPoP), no refresh token is issued to avoid creating bearer refresh tokens.
+	var refreshToken string
+	if slices.Contains(c.cfg.APIGW.Delivery.OpenID4VCI.GrantTypes, "refresh_token") && dpopThumbprint != "" {
+		refreshToken, err = crypto.GenerateSecureToken(0, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+		}
+		reply.RefreshToken = refreshToken
+		reply.RefreshTokenExpiresIn = c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration
+	}
+
 	// Store the c_nonce in the nonce cache so proof verification can find it.
 	// For pre-auth flow, this is deferred to child session creation below
 	// (each client gets its own nonce).
@@ -576,7 +597,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		reply.CNonce = childNonce
 
 		childSession := &cache.AuthorizationContext{
-			SessionID:            childSessionID,
+			SessionID:             childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
 			Status:               cache.SessionStatusTokenIssued,
 			CreatedAt:            time.Now(),
@@ -588,6 +609,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			Identifier:           authorizationContext.Identifier,
 			DataSource:           authorizationContext.DataSource,
 			Token:                tokenDoc,
+			RefreshToken:         refreshToken,
+		}
+		if refreshToken != "" {
+			childSession.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
 		}
 		if err := c.cacheService.AuthContext.Save(ctx, childSession); err != nil {
 			c.log.Error(err, "failed to save child session for pre-auth client")
@@ -599,6 +624,10 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		// Using Update() instead of AddToken() avoids a race where AddToken
 		// writes the token and a subsequent Update() overwrites it with nil.
 		authorizationContext.Token = tokenDoc
+		authorizationContext.RefreshToken = refreshToken
+		if refreshToken != "" {
+			authorizationContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
+		}
 		if len(responseDetails) > 0 {
 			authorizationContext.AuthorizationDetails = responseDetails
 		}
@@ -810,3 +839,154 @@ func (c *Client) OAuthAuthorizationConsentCallback(ctx context.Context, req *Oau
 
 	return reply, nil
 }
+
+// handleRefreshTokenGrant handles the refresh_token grant type per RFC 6749 §6.
+// It validates the refresh token, verifies DPoP binding, rotates the refresh token,
+// and issues a new access token so the Wallet can request fresh credentials.
+func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, req *openid4vci.TokenRequest) (*openid4vci.TokenResponse, error) {
+	c.log.Debug("handleRefreshTokenGrant")
+
+	if req.RefreshToken == "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"refresh_token parameter is required for refresh_token grant", 400)
+	}
+
+	if !slices.Contains(c.cfg.APIGW.Delivery.OpenID4VCI.GrantTypes, "refresh_token") {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeUnsupportedGrantType,
+			"refresh_token grant is not enabled", 400)
+	}
+
+	// Validate DPoP proof
+	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
+	if err != nil {
+		c.log.Error(err, "failed to validate DPoP JWT for refresh")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof,
+			err.Error(), 400, err)
+	}
+
+	// Validate HTU matches token endpoint
+	if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htu: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU), 400)
+	}
+
+	// Validate HTM is POST (token endpoint only accepts POST)
+	if dpop.HTM != "POST" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
+	}
+
+	unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+	if err != nil {
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error checking DPoP proof", 500, err)
+	}
+	if !unique {
+		return nil, oauth2.OAuthErrJTIReplay
+	}
+
+	// Look up the session by refresh token
+	authContext, err := c.cacheService.AuthContext.GetByRefreshToken(ctx, req.RefreshToken)
+	if err != nil {
+		c.log.Error(err, "invalid or expired refresh token")
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"invalid or expired refresh token", 400)
+	}
+
+	// Verify refresh token has not expired
+	if authContext.RefreshTokenExpiresAt > 0 && time.Now().Unix() > authContext.RefreshTokenExpiresAt {
+		c.log.Error(nil, "refresh token expired", "expires_at", authContext.RefreshTokenExpiresAt)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"refresh token has expired", 400)
+	}
+
+	// Verify DPoP key binding: refresh tokens are sender-constrained and must be
+	// bound to the DPoP key used at initial token issuance (ARF 3.0 §6.6.6.2.2).
+	// If the stored session is missing the DPoP binding, the refresh token was
+	// issued without sender-constraining and must be rejected.
+	if authContext.Token == nil || authContext.Token.DPoPThumbprint == "" {
+		c.log.Error(nil, "refresh token has no DPoP binding", "session_id", authContext.SessionID)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"refresh token is not bound to a DPoP key", 400)
+	}
+	if dpop.Thumbprint != authContext.Token.DPoPThumbprint {
+		c.log.Error(nil, "DPoP key mismatch on refresh",
+			"expected", authContext.Token.DPoPThumbprint,
+			"got", dpop.Thumbprint)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"DPoP key does not match the key used at initial token issuance", 400)
+	}
+
+	// Generate new access token
+	newAccessToken, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	// Rotate refresh token (one-time use per RFC 6749 §6 recommendation)
+	newRefreshToken, err := crypto.GenerateSecureToken(0, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	// Generate new c_nonce for proof-of-possession in subsequent credential requests
+	newNonce, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate c_nonce: %w", err)
+	}
+
+	// Store the new nonce
+	if c.cacheService.VCINonce != nil {
+		c.cacheService.VCINonce.Set(ctx, newNonce, true)
+	}
+
+	// Update the session with new tokens atomically. RotateRefreshToken uses a
+	// compare-and-swap on the old refresh token value, so a concurrent request
+	// using the same token will fail with ErrNoDocuments (→ invalid_grant).
+	// Work on a copy to avoid mutating the shared pointer from MemoryStore's cache,
+	// which would corrupt the compare-and-swap check.
+	oldRefreshToken := authContext.RefreshToken
+	rotated := *authContext
+	rotated.Token = &cache.Token{
+		AccessToken:    newAccessToken,
+		ExpiresAt:      time.Now().Add(3600 * time.Second).Unix(),
+		DPoPThumbprint: dpop.Thumbprint,
+	}
+	rotated.RefreshToken = newRefreshToken
+	rotated.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
+	rotated.Nonce = newNonce
+
+	if err := c.cacheService.AuthContext.RotateRefreshToken(ctx, oldRefreshToken, &rotated); err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			c.log.Error(nil, "refresh token already consumed (concurrent use)", "session_id", authContext.SessionID)
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"refresh token has already been used", 400)
+		}
+		c.log.Error(err, "failed to rotate refresh token")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error during token rotation", 500, err)
+	}
+
+	reply := &openid4vci.TokenResponse{
+		AccessToken:           newAccessToken,
+		TokenType:             "DPoP",
+		ExpiresIn:             3600,
+		Scope:                 authContext.Scopes[0],
+		CNonce:                newNonce,
+		CNonceExpiresIn:       3600,
+		RefreshToken:          newRefreshToken,
+		RefreshTokenExpiresIn: c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration,
+		AuthorizationDetails:  authContext.AuthorizationDetails,
+	}
+
+	if c.vciMetrics != nil {
+		grantTypeAttr := metric.WithAttributes(attribute.String("grant_type", "refresh_token"))
+		c.vciMetrics.TokensIssued.Add(ctx, 1, grantTypeAttr)
+		c.vciMetrics.TokenLatency.Record(ctx, time.Since(start).Seconds(), grantTypeAttr)
+	}
+
+	c.log.Debug("refresh token grant complete", "session_id", authContext.SessionID)
+	return reply, nil
+}
+
+

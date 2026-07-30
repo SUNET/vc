@@ -91,6 +91,9 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.AccessToken)] = doc.SessionID
 	}
+	if doc.RefreshToken != "" {
+		c.indices[fmt.Sprintf("refresh_token:%s", doc.RefreshToken)] = doc.SessionID
+	}
 
 	return nil
 }
@@ -340,6 +343,74 @@ func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) e
 	return nil
 }
 
+// GetByRefreshToken retrieves an authorization context by refresh token.
+func (c *MemoryStore) GetByRefreshToken(ctx context.Context, refreshToken string) (*AuthorizationContext, error) {
+	if refreshToken == "" {
+		return nil, errors.New("refresh_token cannot be empty")
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	indexKey := fmt.Sprintf("refresh_token:%s", refreshToken)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	return item.Value(), nil
+}
+
+// RotateRefreshToken atomically replaces oldToken with the fields in updated,
+// but only if the document still holds oldToken.
+func (c *MemoryStore) RotateRefreshToken(ctx context.Context, oldToken string, updated *AuthorizationContext) error {
+	if oldToken == "" {
+		return errors.New("old refresh token cannot be empty")
+	}
+	if updated == nil || updated.SessionID == "" {
+		return errors.New("updated document with session_id is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("refresh_token:%s", oldToken)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return ErrNoDocuments
+	}
+
+	// Enforce that the caller's document belongs to the same session.
+	if updated.SessionID != sessionID {
+		return fmt.Errorf("session_id mismatch: index resolves to %q but updated document has %q", sessionID, updated.SessionID)
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	// Verify the document still holds the old refresh token (compare-and-swap).
+	doc := item.Value()
+	if doc.RefreshToken != oldToken {
+		return ErrNoDocuments
+	}
+
+	// Remove stale indices before overwriting.
+	c.deleteIndices(doc)
+
+	// Persist the updated document and rebuild indices under the resolved sessionID.
+	c.cache.Set(sessionID, updated, ttlcache.DefaultTTL)
+	c.updateIndices(updated)
+
+	return nil
+}
+
 // SetAuthenticSource sets the authentic source for an authorization context
 func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error {
 	if authenticSource == "" {
@@ -421,6 +492,9 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	}
 	if doc.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.AccessToken)] = doc.SessionID
+	}
+	if doc.RefreshToken != "" {
+		c.indices[fmt.Sprintf("refresh_token:%s", doc.RefreshToken)] = doc.SessionID
 	}
 }
 
@@ -510,10 +584,14 @@ func (c *MemoryStore) Update(ctx context.Context, doc *AuthorizationContext) err
 		return ErrNoDocuments
 	}
 
+	// Remove stale indices from the old document before overwriting.
+	// This prevents rotated tokens (e.g. refresh_token) from remaining resolvable.
+	c.deleteIndices(item.Value())
+
 	// Update in cache
 	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
 
-	// Update secondary indices
+	// Rebuild secondary indices from the new document
 	c.updateIndices(doc)
 
 	return nil
@@ -567,6 +645,9 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	}
 	if doc.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.AccessToken))
+	}
+	if doc.RefreshToken != "" {
+		delete(c.indices, fmt.Sprintf("refresh_token:%s", doc.RefreshToken))
 	}
 }
 

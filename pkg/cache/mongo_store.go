@@ -65,6 +65,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetSparse(true),
 		},
 		{
+			Keys:    bson.D{{Key: "refresh_token", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			// TTL index: MongoDB automatically deletes documents after the TTL expires.
 			// Uses the created_at field as the reference timestamp.
 			Keys:    bson.D{{Key: "created_at", Value: 1}},
@@ -399,6 +403,53 @@ func (s *MongoStore) AddToken(ctx context.Context, code string, token *Token) er
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add token: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
+}
+
+// GetByRefreshToken retrieves an authorization context by refresh token.
+func (s *MongoStore) GetByRefreshToken(ctx context.Context, refreshToken string) (*AuthorizationContext, error) {
+	if refreshToken == "" {
+		return nil, errors.New("refresh_token cannot be empty")
+	}
+
+	var doc AuthorizationContext
+	err := s.coll.FindOne(ctx, bson.M{"refresh_token": refreshToken}).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to get auth context by refresh token: %w", err)
+	}
+
+	return &doc, nil
+}
+
+// RotateRefreshToken atomically replaces oldToken with the fields in updated,
+// but only if the document still holds oldToken. Uses a filter on both
+// session_id and refresh_token so a concurrent rotation deterministically fails.
+func (s *MongoStore) RotateRefreshToken(ctx context.Context, oldToken string, updated *AuthorizationContext) error {
+	if oldToken == "" {
+		return errors.New("old refresh token cannot be empty")
+	}
+	if updated == nil || updated.SessionID == "" {
+		return errors.New("updated document with session_id is required")
+	}
+
+	result, err := s.coll.ReplaceOne(
+		ctx,
+		bson.M{
+			"session_id":    updated.SessionID,
+			"refresh_token": oldToken,
+		},
+		updated,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to rotate refresh token: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNoDocuments
