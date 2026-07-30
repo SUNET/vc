@@ -239,3 +239,12 @@ func TestOTELDefaults(t *testing.T) {
 
 	assert.Equal(t, int64(10), cfg.Timeout)
 }
+
+func TestOAuthServerDefaults(t *testing.T) {
+	var cfg OAuthServer
+	err := defaults.Set(&cfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"authorization_code", "urn:ietf:params:oauth:grant-type:pre-authorized_code"}, cfg.GrantTypes)
+	assert.Equal(t, 86400, cfg.RefreshTokenDuration)
+}

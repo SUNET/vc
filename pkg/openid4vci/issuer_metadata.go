@@ -178,6 +178,32 @@ type CredentialConfigurationsSupported struct {
 
 	// Cryptosuite: OPTIONAL. For ldp_vc and vc+ld+json formats, identifies the cryptographic suite used for Data Integrity Proofs.
 	Cryptosuite string `json:"cryptosuite,omitempty" yaml:"cryptosuite,omitempty"`
+
+	// DisclosurePolicy: OPTIONAL. Embedded disclosure policy per CIR 2024/2979 Annex III and ETSI TS 119 472-3.
+	// Specifies conditions a Relying Party must meet to receive this attestation.
+	// Distributed via Credential Issuer metadata (ARF 3.0 §6.6.2.8, Discussion Paper Topic D §3.1 Option A).
+	DisclosurePolicy *EmbeddedDisclosurePolicy `json:"disclosure_policy,omitempty" yaml:"disclosure_policy,omitempty"`
+}
+
+// EmbeddedDisclosurePolicy defines rules indicating the conditions a wallet-relying party
+// must meet to access an electronic attestation of attributes.
+// Per CIR 2024/2979 Annex III, three common policy types are defined.
+type EmbeddedDisclosurePolicy struct {
+	// PolicyType identifies the disclosure policy type. One of:
+	//   - "none": no policy applies (default)
+	//   - "authorized_relying_parties": only RPs in the allowlist may receive this attestation
+	//   - "specific_root_of_trust": only RPs with access certificates from specific roots may receive this attestation
+	PolicyType string `json:"policy_type" yaml:"policy_type" default:"none" validate:"required,oneof=none authorized_relying_parties specific_root_of_trust"`
+
+	// AuthorizedRelyingParties is a list of EU-wide unique Relying Party identifiers
+	// (as found in the Wallet-Relying Party Registration Certificate).
+	// Required when PolicyType is "authorized_relying_parties".
+	AuthorizedRelyingParties []string `json:"authorized_relying_parties,omitempty" yaml:"authorized_relying_parties,omitempty" validate:"required_if=PolicyType authorized_relying_parties,dive,required"`
+
+	// TrustedRoots is a list of root or intermediate certificate SHA-256 fingerprints
+	// (hex-encoded, 64 characters) from which the RP's access certificate must be derived.
+	// Required when PolicyType is "specific_root_of_trust".
+	TrustedRoots []string `json:"trusted_roots,omitempty" yaml:"trusted_roots,omitempty" validate:"required_if=PolicyType specific_root_of_trust,dive,required,len=64,hexadecimal"`
 }
 
 // ProofsTypesSupported Object that describes specifics of the key proof(s) that the Credential Issuer supports.
