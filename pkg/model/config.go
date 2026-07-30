@@ -1601,6 +1601,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			}
 
 			credConfig.DisclosurePolicy = constructor.DisclosurePolicy
+			if credConfig.DisclosurePolicy == nil {
+				credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
+			}
 			cfg.applyCommonCredentialConfig(&credConfig)
 			credentialConfigs[scope] = credConfig
 			continue
@@ -1735,6 +1738,9 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		}
 
 		credConfig.DisclosurePolicy = constructor.DisclosurePolicy
+		if credConfig.DisclosurePolicy == nil {
+			credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
+		}
 		cfg.applyCommonCredentialConfig(&credConfig)
 		credentialConfigs[scope] = credConfig
 	}

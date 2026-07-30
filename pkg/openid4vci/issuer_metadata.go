@@ -198,12 +198,12 @@ type EmbeddedDisclosurePolicy struct {
 	// AuthorizedRelyingParties is a list of EU-wide unique Relying Party identifiers
 	// (as found in the Wallet-Relying Party Registration Certificate).
 	// Required when PolicyType is "authorized_relying_parties".
-	AuthorizedRelyingParties []string `json:"authorized_relying_parties,omitempty" yaml:"authorized_relying_parties,omitempty" validate:"required_if=PolicyType authorized_relying_parties"`
+	AuthorizedRelyingParties []string `json:"authorized_relying_parties,omitempty" yaml:"authorized_relying_parties,omitempty" validate:"required_if=PolicyType authorized_relying_parties,dive,required"`
 
 	// TrustedRoots is a list of root or intermediate certificate SHA-256 fingerprints
-	// (hex-encoded) from which the RP's access certificate must be derived.
+	// (hex-encoded, 64 characters) from which the RP's access certificate must be derived.
 	// Required when PolicyType is "specific_root_of_trust".
-	TrustedRoots []string `json:"trusted_roots,omitempty" yaml:"trusted_roots,omitempty" validate:"required_if=PolicyType specific_root_of_trust"`
+	TrustedRoots []string `json:"trusted_roots,omitempty" yaml:"trusted_roots,omitempty" validate:"required_if=PolicyType specific_root_of_trust,dive,required,len=64,hexadecimal"`
 }
 
 // ProofsTypesSupported Object that describes specifics of the key proof(s) that the Credential Issuer supports.

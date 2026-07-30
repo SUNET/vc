@@ -421,3 +421,86 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	assert.Equal(t, "vc+sd-jwt", diplomaConfig.Format) // default
 	assert.Equal(t, baseURL+"/type-metadata/diploma", diplomaConfig.VCT)
 }
+
+func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	tests := []struct {
+		name           string
+		policy         *openid4vci.EmbeddedDisclosurePolicy
+		expectPolicy   bool
+		expectType     string
+		expectRPs      []string
+		expectRoots    []string
+	}{
+		{
+			name:         "no policy configured defaults to none",
+			policy:       nil,
+			expectPolicy: true,
+			expectType:   "none",
+		},
+		{
+			name: "none policy",
+			policy: &openid4vci.EmbeddedDisclosurePolicy{
+				PolicyType: "none",
+			},
+			expectPolicy: true,
+			expectType:   "none",
+		},
+		{
+			name: "authorized_relying_parties policy",
+			policy: &openid4vci.EmbeddedDisclosurePolicy{
+				PolicyType:               "authorized_relying_parties",
+				AuthorizedRelyingParties: []string{"RP-ID-123", "RP-ID-456"},
+			},
+			expectPolicy: true,
+			expectType:   "authorized_relying_parties",
+			expectRPs:    []string{"RP-ID-123", "RP-ID-456"},
+		},
+		{
+			name: "specific_root_of_trust policy",
+			policy: &openid4vci.EmbeddedDisclosurePolicy{
+				PolicyType:   "specific_root_of_trust",
+				TrustedRoots: []string{"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"},
+			},
+			expectPolicy: true,
+			expectType:   "specific_root_of_trust",
+			expectRoots:  []string{"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			credMeta := map[string]*CredentialMetadata{
+				"test_cred": {
+					VCTM:             &sdjwtvc.VCTM{VCT: baseURL + "/type-metadata/test_cred"},
+					VCTURL:           baseURL + "/type-metadata/test_cred",
+					Format:           "dc+sd-jwt",
+					DisclosurePolicy: tt.policy,
+				},
+			}
+
+			ctx := context.Background()
+			metadata, err := cfg.Generate(ctx, baseURL, credMeta)
+			require.NoError(t, err)
+
+			credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
+
+			if !tt.expectPolicy {
+				assert.Nil(t, credConfig.DisclosurePolicy)
+				return
+			}
+
+			require.NotNil(t, credConfig.DisclosurePolicy)
+			assert.Equal(t, tt.expectType, credConfig.DisclosurePolicy.PolicyType)
+
+			if tt.expectRPs != nil {
+				assert.Equal(t, tt.expectRPs, credConfig.DisclosurePolicy.AuthorizedRelyingParties)
+			}
+			if tt.expectRoots != nil {
+				assert.Equal(t, tt.expectRoots, credConfig.DisclosurePolicy.TrustedRoots)
+			}
+		})
+	}
+}

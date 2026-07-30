@@ -8,6 +8,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/pki"
 
+	"github.com/creasty/defaults"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -548,6 +549,54 @@ func TestCredentialConfigurationsSupported_StructureCompliance(t *testing.T) {
 				assert.NotEmpty(t, config.ProofTypesSupported,
 					"proof_types_supported should be present when cryptographic binding is used")
 			}
+		})
+	}
+}
+
+func TestEmbeddedDisclosurePolicyDefaults(t *testing.T) {
+	var cfg EmbeddedDisclosurePolicy
+	err := defaults.Set(&cfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, "none", cfg.PolicyType)
+	assert.Nil(t, cfg.AuthorizedRelyingParties)
+	assert.Nil(t, cfg.TrustedRoots)
+}
+
+func TestEmbeddedDisclosurePolicySerialization(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy EmbeddedDisclosurePolicy
+		expect string
+	}{
+		{
+			name:   "none policy omits lists",
+			policy: EmbeddedDisclosurePolicy{PolicyType: "none"},
+			expect: `{"policy_type":"none"}`,
+		},
+		{
+			name: "authorized_relying_parties includes RP list",
+			policy: EmbeddedDisclosurePolicy{
+				PolicyType:               "authorized_relying_parties",
+				AuthorizedRelyingParties: []string{"RP-1", "RP-2"},
+			},
+			expect: `{"policy_type":"authorized_relying_parties","authorized_relying_parties":["RP-1","RP-2"]}`,
+		},
+		{
+			name: "specific_root_of_trust includes roots",
+			policy: EmbeddedDisclosurePolicy{
+				PolicyType:   "specific_root_of_trust",
+				TrustedRoots: []string{"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"},
+			},
+			expect: `{"policy_type":"specific_root_of_trust","trusted_roots":["a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.policy)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.expect, string(data))
 		})
 	}
 }
