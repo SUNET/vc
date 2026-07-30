@@ -416,7 +416,10 @@ func (s *MongoStore) GetByRefreshToken(ctx context.Context, refreshToken string)
 	var doc AuthorizationContext
 	err := s.coll.FindOne(ctx, bson.M{"refresh_token": refreshToken}).Decode(&doc)
 	if err != nil {
-		return nil, ErrNoDocuments
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to get auth context by refresh token: %w", err)
 	}
 
 	return &doc, nil

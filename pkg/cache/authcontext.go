@@ -536,10 +536,14 @@ func (c *MemoryStore) Update(ctx context.Context, doc *AuthorizationContext) err
 		return ErrNoDocuments
 	}
 
+	// Remove stale indices from the old document before overwriting.
+	// This prevents rotated tokens (e.g. refresh_token) from remaining resolvable.
+	c.deleteIndices(item.Value())
+
 	// Update in cache
 	c.cache.Set(doc.SessionID, doc, ttlcache.DefaultTTL)
 
-	// Update secondary indices
+	// Rebuild secondary indices from the new document
 	c.updateIndices(doc)
 
 	return nil
@@ -593,6 +597,9 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	}
 	if doc.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.AccessToken))
+	}
+	if doc.RefreshToken != "" {
+		delete(c.indices, fmt.Sprintf("refresh_token:%s", doc.RefreshToken))
 	}
 }
 

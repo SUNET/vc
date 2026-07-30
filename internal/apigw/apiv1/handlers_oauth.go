@@ -532,13 +532,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	}
 
 	// Issue a refresh token if the grant type is configured.
+	// Deferred to per-flow branches below so that:
+	// - pre-auth flow: refresh token is stored on the child session (not shared parent)
+	// - auth_code flow: refresh token is stored on the parent (which is then Updated)
+	var refreshToken string
 	if slices.Contains(c.cfg.APIGW.Delivery.OpenID4VCI.GrantTypes, "refresh_token") {
-		refreshToken, rtErr := crypto.GenerateSecureToken(0, 64)
-		if rtErr != nil {
-			return nil, fmt.Errorf("failed to generate refresh token: %w", rtErr)
+		refreshToken, err = crypto.GenerateSecureToken(0, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 		}
-		authorizationContext.RefreshToken = refreshToken
-		authorizationContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
 		reply.RefreshToken = refreshToken
 		reply.RefreshTokenExpiresIn = c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration
 	}
@@ -595,7 +597,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		reply.CNonce = childNonce
 
 		childSession := &cache.AuthorizationContext{
-			SessionID:            childSessionID,
+			SessionID:             childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
 			Status:               cache.SessionStatusTokenIssued,
 			CreatedAt:            time.Now(),
@@ -607,6 +609,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			Identifier:           authorizationContext.Identifier,
 			DataSource:           authorizationContext.DataSource,
 			Token:                tokenDoc,
+			RefreshToken:         refreshToken,
+			RefreshTokenExpiresAt: time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix(),
 		}
 		if err := c.cacheService.AuthContext.Save(ctx, childSession); err != nil {
 			c.log.Error(err, "failed to save child session for pre-auth client")
@@ -618,6 +622,8 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		// Using Update() instead of AddToken() avoids a race where AddToken
 		// writes the token and a subsequent Update() overwrites it with nil.
 		authorizationContext.Token = tokenDoc
+		authorizationContext.RefreshToken = refreshToken
+		authorizationContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
 		if len(responseDetails) > 0 {
 			authorizationContext.AuthorizationDetails = responseDetails
 		}
@@ -850,7 +856,20 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 	dpop, err := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
 	if err != nil {
 		c.log.Error(err, "failed to validate DPoP JWT for refresh")
-		return nil, err
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof,
+			err.Error(), 400, err)
+	}
+
+	// Validate HTU matches token endpoint
+	if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htu: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU), 400)
+	}
+
+	// Validate HTM is POST (token endpoint only accepts POST)
+	if dpop.HTM != "POST" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
 	}
 
 	unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
