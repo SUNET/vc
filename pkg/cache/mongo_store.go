@@ -425,6 +425,35 @@ func (s *MongoStore) GetByRefreshToken(ctx context.Context, refreshToken string)
 	return &doc, nil
 }
 
+// RotateRefreshToken atomically replaces oldToken with the fields in updated,
+// but only if the document still holds oldToken. Uses a filter on both
+// session_id and refresh_token so a concurrent rotation deterministically fails.
+func (s *MongoStore) RotateRefreshToken(ctx context.Context, oldToken string, updated *AuthorizationContext) error {
+	if oldToken == "" {
+		return errors.New("old refresh token cannot be empty")
+	}
+	if updated == nil || updated.SessionID == "" {
+		return errors.New("updated document with session_id is required")
+	}
+
+	result, err := s.coll.ReplaceOne(
+		ctx,
+		bson.M{
+			"session_id":    updated.SessionID,
+			"refresh_token": oldToken,
+		},
+		updated,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to rotate refresh token: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
+}
+
 // SetAuthenticSource sets the authentic source for an authorization context.
 func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error {
 	if authenticSource == "" {

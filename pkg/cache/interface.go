@@ -55,6 +55,11 @@ type AuthContextStore interface {
 	// GetByRefreshToken retrieves an authorization context by refresh token.
 	GetByRefreshToken(ctx context.Context, refreshToken string) (*AuthorizationContext, error)
 
+	// RotateRefreshToken atomically replaces oldToken with the fields in updated,
+	// but only if the document still holds oldToken. Returns ErrNoDocuments if the
+	// old token was already consumed by a concurrent request, enforcing one-time use.
+	RotateRefreshToken(ctx context.Context, oldToken string, updated *AuthorizationContext) error
+
 	// SetAuthenticSource sets the authentic source for an authorization context.
 	SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error
 

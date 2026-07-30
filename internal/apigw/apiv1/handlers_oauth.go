@@ -531,12 +531,12 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		CNonceExpiresIn: 3600,
 	}
 
-	// Issue a refresh token if the grant type is configured.
-	// Deferred to per-flow branches below so that:
-	// - pre-auth flow: refresh token is stored on the child session (not shared parent)
-	// - auth_code flow: refresh token is stored on the parent (which is then Updated)
+	// Issue a refresh token if the grant type is configured and DPoP is present.
+	// Refresh tokens are device-bound (ARF 3.0 §6.6.6.2.2) and require a DPoP
+	// thumbprint for sender-constraining. Without DPoP (e.g. pre-auth flow without
+	// DPoP), no refresh token is issued to avoid creating bearer refresh tokens.
 	var refreshToken string
-	if slices.Contains(c.cfg.APIGW.Delivery.OpenID4VCI.GrantTypes, "refresh_token") {
+	if slices.Contains(c.cfg.APIGW.Delivery.OpenID4VCI.GrantTypes, "refresh_token") && dpopThumbprint != "" {
 		refreshToken, err = crypto.GenerateSecureToken(0, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate refresh token: %w", err)
@@ -932,7 +932,10 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 		c.cacheService.VCINonce.Set(ctx, newNonce, true)
 	}
 
-	// Update the session with new tokens
+	// Update the session with new tokens atomically. RotateRefreshToken uses a
+	// compare-and-swap on the old refresh token value, so a concurrent request
+	// using the same token will fail with ErrNoDocuments (→ invalid_grant).
+	oldRefreshToken := authContext.RefreshToken
 	authContext.Token = &cache.Token{
 		AccessToken:    newAccessToken,
 		ExpiresAt:      time.Now().Add(3600 * time.Second).Unix(),
@@ -942,9 +945,10 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 	authContext.RefreshTokenExpiresAt = time.Now().Add(time.Duration(c.cfg.APIGW.Delivery.OpenID4VCI.RefreshTokenDuration) * time.Second).Unix()
 	authContext.Nonce = newNonce
 
-	if err := c.cacheService.AuthContext.Update(ctx, authContext); err != nil {
-		c.log.Error(err, "failed to update session on refresh")
-		return nil, err
+	if err := c.cacheService.AuthContext.RotateRefreshToken(ctx, oldRefreshToken, authContext); err != nil {
+		c.log.Error(err, "failed to rotate refresh token (concurrent use or expired)")
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"refresh token has already been used", 400)
 	}
 
 	reply := &openid4vci.TokenResponse{
