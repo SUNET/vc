@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
@@ -576,6 +577,9 @@ type Verifier struct {
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// OpenIDFederation holds the OpenID Federation entity configuration.
+	// When enabled, serves /.well-known/openid-federation as a self-signed JWT.
+	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// Presets holds predefined verification request presets shown in the UI.
 	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
 	// Each preset maps credential_metadata scopes to optional claim overrides.
@@ -630,6 +634,27 @@ type TrustConfig struct {
 	// If empty, defaults to a secure set: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA.
 	// The "none" algorithm is NEVER allowed regardless of configuration.
 	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms,omitempty" doc_example:"[\"ES256\", \"ES384\", \"ES512\", \"EdDSA\"]"`
+
+	// WalletAttestation configures wallet attestation-based client authentication.
+	// This is a trust-evaluation mechanism (delegates to the PDP above), so it
+	// lives here rather than under delivery.openid4vci.
+	WalletAttestation WalletAttestationConfig `yaml:"wallet_attestation,omitempty"`
+}
+
+// WalletAttestationConfig configures wallet attestation-based client authentication.
+type WalletAttestationConfig struct {
+	// Enabled enables wallet attestation-based authentication.
+	// When true and PDPURL is configured, wallets can authenticate using
+	// a provider-signed attestation JWT instead of pre-registration in Clients.
+	// The PDP validates the wallet provider against configured trust lists/federation.
+	// PKCE remains mandatory as the primary code-binding mechanism.
+	Enabled bool `yaml:"enabled" default:"false"`
+
+	// Policy configures SPOCP-based authorization for wallet attestation.
+	// When configured, after the PDP validates the wallet provider, the SPOCP engine
+	// checks whether the attestation tier (attestation_source) is authorized for the
+	// requested scope. When empty, all trusted wallets are authorized (default open).
+	Policy WalletAttestationPolicy `yaml:"policy,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
@@ -1010,6 +1035,9 @@ type APIGW struct {
 	// Trust holds the trust evaluation configuration for OpenID4VP credential validation.
 	// When configured, credentials presented via VP are validated against a PDP.
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// OpenIDFederation holds the OpenID Federation entity configuration.
+	// When enabled, serves /.well-known/openid-federation as a self-signed JWT.
+	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// RateLimit configures per-endpoint rate limiting for the APIGW.
 	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
 }
@@ -1057,6 +1085,24 @@ type OAuthServer struct {
 	// testing environments. When false (default), client_assertion is rejected.
 	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
 	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
+}
+
+// WalletAttestationPolicy configures SPOCP-based tier authorization for wallet attestation.
+// Each rule is an S-expression of the form:
+//
+//	(wallet (attestation_source <tier>)(scope <scope>)(issuer <provider>))
+//
+// Use * as wildcard. When no rules are configured, any trusted wallet is authorized.
+// Example rules:
+//
+//	(wallet (attestation_source ios_app_attest)(scope pid)(issuer *))       — allow iOS Tier 4+ for PID
+//	(wallet (attestation_source android_play_integrity)(scope pid)(issuer *)) — allow Android Tier 4+ for PID
+//	(wallet (attestation_source *)(scope ehic)(issuer *))                   — allow any tier for EHIC
+type WalletAttestationPolicy struct {
+	// Rules are inline SPOCP rules.
+	Rules []string `yaml:"rules,omitempty"`
+	// RulesFile is a path to a file containing SPOCP rules (one per line, # comments).
+	RulesFile string `yaml:"rules_file,omitempty"`
 }
 
 // Cfg is the main configuration structure for this application

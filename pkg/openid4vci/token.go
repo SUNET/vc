@@ -32,6 +32,10 @@ type TokenRequest struct {
 	// ClientAssertion OPTIONAL. The client assertion JWT for private_key_jwt or client_secret_jwt authentication.
 	ClientAssertion string `form:"client_assertion" json:"client_assertion" validate:"omitempty,max=8192,printascii"`
 
+	// Client attestation via HTTP headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1).
+	ClientAttestation    string `json:"-" form:"-" header:"OAuth-Client-Attestation"`
+	ClientAttestationPoP string `json:"-" form:"-" header:"OAuth-Client-Attestation-PoP"`
+
 	// Pre-Authorized Code Flow fields
 
 	// PreAuthorizedCode REQUIRED for pre-authorized_code grant. The code representing the authorization to obtain Credentials.

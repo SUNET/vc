@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/trust"
@@ -66,7 +67,15 @@ type Client struct {
 	adminOIDC *lazyOIDCProvider
 
 	// Trust evaluation
-	jwtTrustVerifier *trust.JWTTrustVerifier
+	jwtTrustVerifier           *trust.JWTTrustVerifier
+	walletAttestationEvaluator *trust.WalletAttestationEvaluator
+	walletAttestationPolicy    *trust.WalletAttestationPolicyEngine
+
+	// openidFederationService is nil when OpenID Federation is not enabled.
+	// Built once here rather than per-request, since constructing a signer
+	// forces key material to be (re)loaded every time (expensive, especially
+	// with PKCS#11/HSM).
+	openidFederationService *openidfederation.Service
 
 	// issuerReachable tracks whether the issuer gRPC was reachable on the last refresh.
 	// Used to log state transitions (down→up, up→down) at Info level.
@@ -107,6 +116,11 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)
 	if err != nil {
 		c.log.Info("PKI signing key not loaded", "error", err)
+	}
+
+	if fedCfg := cfg.APIGW.OpenIDFederation; fedCfg != nil && fedCfg.Enabled {
+		fedSigner := pki.NewSignerConfig(cfg.APIGW.KeyConfig)
+		c.openidFederationService = openidfederation.New(fedCfg, fedSigner, cfg.APIGW.PublicURL)
 	}
 
 	// Initialize gRPC client for issuer service
@@ -155,6 +169,26 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		ParseJWK:                   jose.ParseJWKToPublicKey,
 		Log:                        c.log,
 	})
+
+	// Wallet attestation: enabled when trust.wallet_attestation.enabled + pdp_url are set
+	if cfg.APIGW.Trust.WalletAttestation.Enabled && pdpURL != "" {
+		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator)
+
+		// Build SPOCP policy engine for tier-based scope authorization (nil = default open)
+		policy := cfg.APIGW.Trust.WalletAttestation.Policy
+		policyEngine, err := trust.BuildWalletAttestationPolicyEngine(policy.Rules, policy.RulesFile)
+		if err != nil {
+			return nil, fmt.Errorf("wallet attestation policy: %w", err)
+		}
+		c.walletAttestationPolicy = policyEngine
+
+		if policyEngine != nil {
+			c.log.Info("Wallet attestation enabled (PDP + SPOCP policy)",
+				"rules", policyEngine.RuleCount())
+		} else {
+			c.log.Info("Wallet attestation enabled (PDP trust, no scope restrictions)")
+		}
+	}
 
 	c.log.Info("Started")
 
