@@ -791,6 +791,31 @@ func TestConvertElementValue_NestedArraySchema(t *testing.T) {
 	}
 }
 
+// TestConvertElementValue_NestedArraySchema_MissingMandatoryField verifies
+// that a mandatory nested field (e.g. driving_privileges.elements.vehicle_category_code)
+// missing from an array item is rejected, rather than silently issuing an
+// mdoc that violates the schema.
+func TestConvertElementValue_NestedArraySchema_MissingMandatoryField(t *testing.T) {
+	meta := ClaimMetadata{
+		ValueType: "array",
+		Elements: map[string]ClaimMetadata{
+			"vehicle_category_code": {Mandatory: true, ValueType: "tstr"},
+			"issue_date":            {ValueType: "full-date"},
+		},
+	}
+
+	raw := []any{
+		map[string]any{
+			"issue_date": "2024-01-01",
+		},
+	}
+
+	_, err := convertElementValue(meta, raw)
+	if err == nil {
+		t.Fatal("expected an error for missing mandatory nested field, got none")
+	}
+}
+
 func TestIssuer_InjectPseudonymSeed(t *testing.T) {
 	config := createTestIssuerConfig(t)
 	config.PseudonymSeed = true

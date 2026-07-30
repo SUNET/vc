@@ -95,7 +95,7 @@ type MDoc struct {
 	// IssuingJurisdiction is the country subdivision code (ISO 3166-2) of the issuing jurisdiction.
 	IssuingJurisdiction *string `json:"issuing_jurisdiction,omitempty" cbor:"issuing_jurisdiction,omitempty" validate:"omitempty"`
 
-	// nationalities is the nationalities of the mDL holder (ISO 3166-1 alpha-2).
+	// Nationalities lists the mDL holder's nationalities (ISO 3166-1 alpha-2 codes).
 	Nationalities []string `json:"nationalities,omitempty" cbor:"nationalities,omitempty" validate:"omitempty,dive,len=2"`
 
 	// ResidentCity is the city where the mDL holder lives.

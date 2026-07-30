@@ -395,14 +395,17 @@ func convertElementValue(meta ClaimMetadata, raw any) (any, error) {
 }
 
 // convertMapFields converts each field of m per its declared schema in
-// elementsSchema, recursing through convertElementValue. Fields with no
-// matching schema entry pass through unchanged.
+// elementsSchema, recursing through convertElementValue, and enforces that
+// mandatory schema fields (e.g. driving_privileges.elements.vehicle_category_code)
+// are present. Fields with no matching schema entry pass through unchanged.
 func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any) (map[string]any, error) {
 	result := make(map[string]any, len(m))
-	for key, val := range m {
-		fieldMeta, ok := elementsSchema[key]
-		if !ok {
-			result[key] = val
+	for key, fieldMeta := range elementsSchema {
+		val, present := m[key]
+		if !present || val == nil {
+			if fieldMeta.Mandatory {
+				return nil, fmt.Errorf("missing mandatory field %q", key)
+			}
 			continue
 		}
 		converted, err := convertElementValue(fieldMeta, val)
@@ -410,6 +413,11 @@ func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any)
 			return nil, fmt.Errorf("field %q: %w", key, err)
 		}
 		result[key] = converted
+	}
+	for key, val := range m {
+		if _, declared := elementsSchema[key]; !declared {
+			result[key] = val
+		}
 	}
 	return result, nil
 }

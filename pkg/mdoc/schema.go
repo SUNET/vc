@@ -103,9 +103,10 @@ func (s *MDDLSchema) Presentation(data map[string]any) map[string]any {
 		return nil
 	}
 
-	labels := s.Attributes()[defaultLocale]
+	attributes := s.Attributes()
+	labels := attributes[defaultLocale]
 	if labels == nil {
-		for _, m := range s.Attributes() {
+		for _, m := range attributes {
 			labels = m
 			break
 		}

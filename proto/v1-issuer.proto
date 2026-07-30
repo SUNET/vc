@@ -60,7 +60,7 @@ message MakeMDocRequest {
     bytes mddl = 6;               // Raw MDDL (mso_mdoc) schema JSON bytes (provided by APIGW, avoids issuer fetching URL)
 }
 
-// MakeMDocReply contains the issued mDL credential
+// MakeMDocReply contains the issued mdoc credential (any doctype, e.g. mDL or PID)
 message MakeMDocReply {
     bytes mdoc = 1;              // CBOR encoded mDoc Document
     int64 status_list_section = 2; // Token Status List section (if revocation enabled)

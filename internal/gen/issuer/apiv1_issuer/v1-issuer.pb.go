@@ -395,7 +395,7 @@ func (x *MakeMDocRequest) GetMddl() []byte {
 	return nil
 }
 
-// MakeMDocReply contains the issued mDL credential
+// MakeMDocReply contains the issued mdoc credential (any doctype, e.g. mDL or PID)
 type MakeMDocReply struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Mdoc              []byte                 `protobuf:"bytes,1,opt,name=mdoc,proto3" json:"mdoc,omitempty"`                                                       // CBOR encoded mDoc Document
