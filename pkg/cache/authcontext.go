@@ -91,6 +91,9 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.AccessToken)] = doc.SessionID
 	}
+	if doc.RefreshToken != "" {
+		c.indices[fmt.Sprintf("refresh_token:%s", doc.RefreshToken)] = doc.SessionID
+	}
 
 	return nil
 }
