@@ -54,14 +54,14 @@ func (s *Service) endpointUserLookup(ctx context.Context, c *gin.Context) (any, 
 	}
 
 	vctm, err := s.apiv1.GetVCTMFromScope(ctx, &apiv1.GetVCTMFromScopeRequest{Scope: scope})
-	if err != nil {
+	if err != nil && !errors.Is(err, apiv1.ErrScopeIsMDoc) {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "endpointUserLookup: error getting VCTM from scope")
 		return nil, err
 	}
 
 	var mddl *mdoc.MDDLSchema
-	if vctm == nil {
+	if errors.Is(err, apiv1.ErrScopeIsMDoc) {
 		mddl, err = s.apiv1.GetMDDLFromScope(ctx, &apiv1.GetMDDLFromScopeRequest{Scope: scope})
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())

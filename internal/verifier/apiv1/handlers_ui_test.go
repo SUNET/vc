@@ -316,7 +316,7 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 		Common: &model.Common{
 			CredentialMetadata: map[string]*model.CredentialMetadata{
 				"pid": {
-					Format: openid4vp.FormatSDJWTVC, // already normalized by LoadVCTMetadata
+					Format: openid4vp.FormatSDJWTVC, // already normalized by LoadCredentialSchema
 					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
 			},

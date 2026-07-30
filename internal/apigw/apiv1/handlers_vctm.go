@@ -90,6 +90,14 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	return reply, nil
 }
 
+// ErrScopeIsMDoc is returned by GetVCTMFromScope when the scope is an
+// mso_mdoc credential, which has no VCTM by design. Callers that treat this
+// as an expected, non-error condition (e.g. to fall back to
+// GetMDDLFromScope) should check for it with errors.Is; callers for whom a
+// missing VCTM is itself an error (e.g. no SVG-template concept exists for
+// mso_mdoc) can surface it directly.
+var ErrScopeIsMDoc = errors.New("scope is an mso_mdoc credential (no VCTM)")
+
 type GetVCTMFromScopeRequest struct {
 	Scope string `validate:"required"`
 }
@@ -104,10 +112,7 @@ func (c *Client) GetVCTMFromScope(ctx context.Context, req *GetVCTMFromScopeRequ
 	vctm := credMeta.GetVCTM()
 	if vctm == nil {
 		if credMeta.GetMDDL() != nil {
-			// mso_mdoc scopes have no VCTM by design - a nil, nil result lets
-			// callers (e.g. UserLookup) skip VCTM-based rendering instead of
-			// treating this as an error.
-			return nil, nil
+			return nil, ErrScopeIsMDoc
 		}
 		return nil, fmt.Errorf("VCTM not loaded for scope: %s", req.Scope)
 	}

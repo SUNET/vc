@@ -79,7 +79,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 
 	// Load VCTMs (normally done by configuration.New)
 	for scope, cc := range client.cfg.Common.CredentialMetadata {
-		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
+		require.NoError(t, cc.LoadCredentialSchema(context.Background(), scope))
 	}
 
 	// Execute the function
@@ -245,7 +245,7 @@ func TestCreateCredentialOfferLookupMetadata_MixedValidAndNilVCTM(t *testing.T) 
 	diplomaCC := &model.CredentialMetadata{
 		VCTMFilePath: "../../../metadata/vctm_diploma.json",
 	}
-	require.NoError(t, diplomaCC.LoadVCTMetadata(context.Background(), "diploma"))
+	require.NoError(t, diplomaCC.LoadCredentialSchema(context.Background(), "diploma"))
 
 	client := &Client{
 		log: logger.NewSimple("test"),
@@ -314,7 +314,7 @@ func TestCreateCredentialOfferLookupMetadata_JSONOutput(t *testing.T) {
 
 	// Load VCTMs (normally done by configuration.New)
 	for scope, cc := range client.cfg.Common.CredentialMetadata {
-		require.NoError(t, cc.LoadVCTMetadata(context.Background(), scope))
+		require.NoError(t, cc.LoadCredentialSchema(context.Background(), scope))
 	}
 
 	// Execute the function

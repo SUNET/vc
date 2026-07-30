@@ -95,7 +95,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			if constructor == nil {
 				continue
 			}
-			if err := constructor.LoadVCTMetadata(ctx, scope); err != nil {
+			if err := constructor.LoadCredentialSchema(ctx, scope); err != nil {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
 		}

@@ -1153,22 +1153,23 @@ type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Used for every format except mso_mdoc (mutually exclusive with VCTMUrl).
-	VCTMFilePath string `yaml:"vctm_file_path" json:"-"`
+	// At least one of VCTMFilePath, VCTMUrl, MDDLFilePath, MDDLUrl is required.
+	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
 	// Used for every format except mso_mdoc (mutually exclusive with VCTMFilePath).
-	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"omitempty,url"`
+	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl,omitempty,url"`
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 
 	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
 	// as produced by registry-cli's mddl format generator. The mso_mdoc
 	// analogue of VCTMFilePath — mutually exclusive with MDDLUrl.
-	MDDLFilePath string `yaml:"mddl_file_path" json:"-"`
+	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl"`
 	// MDDLUrl is the URL where the MDDL schema is already published
 	// externally. The mso_mdoc analogue of VCTMUrl.
-	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"omitempty,url"`
+	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath,omitempty,url"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
@@ -1186,7 +1187,7 @@ type CredentialMetadata struct {
 	VCTMRaw []byte `yaml:"-" json:"-"`
 
 	// Integrity is the SRI hash of the VCTM or MDDL document (e.g. "sha256-...").
-	// Computed once in LoadVCTMetadata and used for vct#integrity in issued credentials.
+	// Computed once in LoadCredentialSchema and used for vct#integrity in issued credentials.
 	Integrity string `yaml:"-" json:"-"`
 
 	// VCTURL is the published URL where the VCTM is served.
@@ -1197,11 +1198,11 @@ type CredentialMetadata struct {
 	mu sync.RWMutex `yaml:"-" json:"-"`
 }
 
-// LoadVCTMetadata loads this scope's credential schema — a VCTM for every
+// LoadCredentialSchema loads this scope's credential schema — a VCTM for every
 // format except mso_mdoc, which instead loads an MDDL schema (registry-cli's
 // mso_mdoc analogue of VCTM). The scope parameter is used only for error
 // messages.
-func (c *CredentialMetadata) LoadVCTMetadata(ctx context.Context, scope string) error {
+func (c *CredentialMetadata) LoadCredentialSchema(ctx context.Context, scope string) error {
 	if c.Format == "mso_mdoc" {
 		return c.loadMDDLSchema(ctx, scope)
 	}

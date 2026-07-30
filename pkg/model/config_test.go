@@ -172,7 +172,7 @@ func TestCredentialMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()
 
-			err := tt.constructor.LoadVCTMetadata(ctx, tt.scope)
+			err := tt.constructor.LoadCredentialSchema(ctx, tt.scope)
 			assert.NoError(t, err)
 
 			// Verify VCTM was loaded
@@ -200,7 +200,7 @@ func TestCredentialMetadata_MDDL(t *testing.T) {
 			Format:       "mso_mdoc",
 			MDDLFilePath: "./testdata/mddl_pid.json",
 		}
-		err := c.LoadVCTMetadata(context.TODO(), "pid_mdoc")
+		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc")
 		require.NoError(t, err)
 		assert.NotNil(t, c.MDDL, "MDDL schema should be loaded")
 		assert.Equal(t, "eu.europa.ec.eudi.pid.1", c.MDDL.DocType)
@@ -222,7 +222,7 @@ func TestCredentialMetadata_MDDL(t *testing.T) {
 			Format:  "mso_mdoc",
 			MDDLUrl: srv.URL,
 		}
-		err := c.LoadVCTMetadata(context.TODO(), "pid_mdoc")
+		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc")
 		require.NoError(t, err)
 		assert.NotNil(t, c.MDDL, "MDDL schema should be loaded")
 		// This is the regression this test guards against: previously
@@ -486,7 +486,7 @@ func TestLoadFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			err := tt.constructor.LoadVCTMetadata(ctx, "test_scope")
+			err := tt.constructor.LoadCredentialSchema(ctx, "test_scope")
 
 			if tt.wantErr {
 				assert.Error(t, err)
