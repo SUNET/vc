@@ -896,17 +896,21 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 			"refresh token has expired", 400)
 	}
 
-	// Verify DPoP key binding: the refresh token is bound to the DPoP key used
-	// at initial token issuance. This prevents stolen refresh tokens from being
-	// used by a different device (ARF 3.0 §6.6.6.2.2: device-bound refresh tokens).
-	if authContext.Token != nil && authContext.Token.DPoPThumbprint != "" {
-		if dpop.Thumbprint != authContext.Token.DPoPThumbprint {
-			c.log.Error(nil, "DPoP key mismatch on refresh",
-				"expected", authContext.Token.DPoPThumbprint,
-				"got", dpop.Thumbprint)
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-				"DPoP key does not match the key used at initial token issuance", 400)
-		}
+	// Verify DPoP key binding: refresh tokens are sender-constrained and must be
+	// bound to the DPoP key used at initial token issuance (ARF 3.0 §6.6.6.2.2).
+	// If the stored session is missing the DPoP binding, the refresh token was
+	// issued without sender-constraining and must be rejected.
+	if authContext.Token == nil || authContext.Token.DPoPThumbprint == "" {
+		c.log.Error(nil, "refresh token has no DPoP binding", "session_id", authContext.SessionID)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"refresh token is not bound to a DPoP key", 400)
+	}
+	if dpop.Thumbprint != authContext.Token.DPoPThumbprint {
+		c.log.Error(nil, "DPoP key mismatch on refresh",
+			"expected", authContext.Token.DPoPThumbprint,
+			"got", dpop.Thumbprint)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"DPoP key does not match the key used at initial token issuance", 400)
 	}
 
 	// Generate new access token

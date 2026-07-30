@@ -385,6 +385,11 @@ func (c *MemoryStore) RotateRefreshToken(ctx context.Context, oldToken string, u
 		return ErrNoDocuments
 	}
 
+	// Enforce that the caller's document belongs to the same session.
+	if updated.SessionID != sessionID {
+		return fmt.Errorf("session_id mismatch: index resolves to %q but updated document has %q", sessionID, updated.SessionID)
+	}
+
 	item := c.cache.Get(sessionID)
 	if item == nil {
 		return ErrNoDocuments
@@ -399,8 +404,8 @@ func (c *MemoryStore) RotateRefreshToken(ctx context.Context, oldToken string, u
 	// Remove stale indices before overwriting.
 	c.deleteIndices(doc)
 
-	// Persist the updated document and rebuild indices.
-	c.cache.Set(updated.SessionID, updated, ttlcache.DefaultTTL)
+	// Persist the updated document and rebuild indices under the resolved sessionID.
+	c.cache.Set(sessionID, updated, ttlcache.DefaultTTL)
 	c.updateIndices(updated)
 
 	return nil
