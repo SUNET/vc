@@ -52,6 +52,9 @@ type AuthContextStore interface {
 	// AddToken adds a token to an authorization context identified by code.
 	AddToken(ctx context.Context, code string, token *Token) error
 
+	// GetByRefreshToken retrieves an authorization context by refresh token.
+	GetByRefreshToken(ctx context.Context, refreshToken string) (*AuthorizationContext, error)
+
 	// SetAuthenticSource sets the authentic source for an authorization context.
 	SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error
 

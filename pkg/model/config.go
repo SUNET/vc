@@ -1072,6 +1072,12 @@ type OAuthServer struct {
 	// testing environments. When false (default), client_assertion is rejected.
 	// TODO(security): Remove this flag once full RFC 7523 verification is implemented.
 	AllowUnverifiedClientAssertion bool `yaml:"allow_unverified_client_assertion" default:"false"`
+	// GrantTypes is the list of grant types this issuer supports.
+	// Supported values: authorization_code, urn:ietf:params:oauth:grant-type:pre-authorized_code, refresh_token
+	GrantTypes []string `yaml:"grant_types,omitempty" default:"[\"authorization_code\", \"urn:ietf:params:oauth:grant-type:pre-authorized_code\"]" validate:"omitempty,dive,oneof=authorization_code urn:ietf:params:oauth:grant-type:pre-authorized_code refresh_token"`
+	// RefreshTokenDuration is the refresh token duration in seconds.
+	// Only applicable when grant_types includes "refresh_token".
+	RefreshTokenDuration int `yaml:"refresh_token_duration,omitempty" default:"86400"`
 }
 
 // WalletAttestationPolicy configures SPOCP-based tier authorization for wallet attestation.
@@ -1517,6 +1523,7 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) 
 	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
 		IssuerURL:     issuerURL,
 		TokenEndpoint: cfg.TokenEndpoint,
+		GrantTypes:    cfg.GrantTypes,
 	})
 
 	return metadata

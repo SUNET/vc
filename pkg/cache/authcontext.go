@@ -340,6 +340,29 @@ func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) e
 	return nil
 }
 
+// GetByRefreshToken retrieves an authorization context by refresh token.
+func (c *MemoryStore) GetByRefreshToken(ctx context.Context, refreshToken string) (*AuthorizationContext, error) {
+	if refreshToken == "" {
+		return nil, errors.New("refresh_token cannot be empty")
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	indexKey := fmt.Sprintf("refresh_token:%s", refreshToken)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	return item.Value(), nil
+}
+
 // SetAuthenticSource sets the authentic source for an authorization context
 func (c *MemoryStore) SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error {
 	if authenticSource == "" {
@@ -421,6 +444,9 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	}
 	if doc.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.AccessToken)] = doc.SessionID
+	}
+	if doc.RefreshToken != "" {
+		c.indices[fmt.Sprintf("refresh_token:%s", doc.RefreshToken)] = doc.SessionID
 	}
 }
 

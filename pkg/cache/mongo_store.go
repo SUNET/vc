@@ -407,6 +407,21 @@ func (s *MongoStore) AddToken(ctx context.Context, code string, token *Token) er
 	return nil
 }
 
+// GetByRefreshToken retrieves an authorization context by refresh token.
+func (s *MongoStore) GetByRefreshToken(ctx context.Context, refreshToken string) (*AuthorizationContext, error) {
+	if refreshToken == "" {
+		return nil, errors.New("refresh_token cannot be empty")
+	}
+
+	var doc AuthorizationContext
+	err := s.coll.FindOne(ctx, bson.M{"refresh_token": refreshToken}).Decode(&doc)
+	if err != nil {
+		return nil, ErrNoDocuments
+	}
+
+	return &doc, nil
+}
+
 // SetAuthenticSource sets the authentic source for an authorization context.
 func (s *MongoStore) SetAuthenticSource(ctx context.Context, query *AuthorizationContext, authenticSource string) error {
 	if authenticSource == "" {
