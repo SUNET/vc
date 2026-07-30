@@ -326,6 +326,10 @@ func (u unimplementedApiv1) SDJWTVCIssuerMetadata(context.Context) (*apiv1.SDJWT
 	panic("not implemented")
 }
 
+func (u unimplementedApiv1) OpenIDFederationEntityConfig(context.Context) (*apiv1.OpenIDFederationEntityConfigReply, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) VerificationRequestObject(context.Context, *apiv1.VerificationRequestObjectRequest) (string, error) {
 	panic("not implemented")
 }

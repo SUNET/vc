@@ -61,6 +61,7 @@ type Apiv1 interface {
 	OAuthMetadata(ctx context.Context) (*oauth2.AuthorizationServerMetadata, error)
 	JWKS(ctx context.Context) (*apiv1.JWKSResponse, error)
 	SDJWTVCIssuerMetadata(ctx context.Context) (*apiv1.SDJWTVCIssuerMetadataResponse, error)
+	OpenIDFederationEntityConfig(ctx context.Context) (*apiv1.OpenIDFederationEntityConfigReply, error)
 
 	// verification endpoints
 	VerificationRequestObject(ctx context.Context, req *apiv1.VerificationRequestObjectRequest) (string, error)

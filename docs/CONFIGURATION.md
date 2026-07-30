@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-07-29
+**Generated:** 2026-07-30
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -215,6 +215,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `registry_client`         | `object` | GRPC client config for registry                                                                                                                                                                                     | -                           | -       | Yes      |
 | `identity_mapping_import` | `object` | Automatic import of identity mappings from JSON files at startup. When configured, APIGW reads JSON files and imports them into the identity mappings collection on first startup (skipped if data already exists). | -                           | -       | No       |
 | `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
+| `federation`              | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                   | -                           | -       | No       |
 | `rate_limit`              | `object` | Per-endpoint rate limiting for the APIGW.                                                                                                                                                                           | -                           | -       | No       |
 
 ### `api_server`
@@ -713,6 +714,29 @@ Example rules:
 | `rules`      | `[]string` | Inline SPOCP rules.                                               | -       | -       | No       |
 | `rules_file` | `string`   | Path to a file containing SPOCP rules (one per line, # comments). | -       | -       | No       |
 
+### `federation`
+
+> **Path:** `.apigw.federation`, `.verifier.federation`
+
+| Field               | Type       | Description                                                                        | Example | Default | Required |
+| ------------------- | ---------- | ---------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`           | `bool`     | The federation entity configuration endpoint.                                      | -       | `false` | No       |
+| `entity_id`         | `string`   | Entity identifier (defaults to PublicURL if empty).                                | -       | -       | No       |
+| `authority_hints`   | `[]string` | Superior authority entity identifiers.                                             | -       | -       | No       |
+| `organization_name` | `string`   | Human-readable organization name.                                                  | -       | -       | No       |
+| `logo_uri`          | `string`   | Organization logo URL.                                                             | -       | -       | No       |
+| `trust_marks`       | `array`    | TrustMarks contains pre-issued trust mark JWTs.                                    | -       | -       | No       |
+| `ttl`               | `int64`    | Validity period of the entity configuration in seconds. Default: 86400 (24 hours). | -       | `86400` | No       |
+
+### `trust_marks` entry
+
+> **Path:** `.apigw.federation.trust_marks[]`, `.verifier.federation.trust_marks[]`
+
+| Field | Type     | Description            | Example | Default | Required |
+| ----- | -------- | ---------------------- | ------- | ------- | -------- |
+| `id`  | `string` | Trust mark identifier. | -       | -       | Yes      |
+| `jwt` | `string` | Trust mark JWT string. | -       | -       | Yes      |
+
 ### `rate_limit`
 
 > **Path:** `.apigw.rate_limit`
@@ -833,6 +857,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | `authorization_page_css` | `object` | Authorization page styling configuration                                                                                                                                                                                                                                                | -                                                          | -              | No       |
 | `credential_display`     | `object` | Credential display settings                                                                                                                                                                                                                                                             | -                                                          | -              | No       |
 | `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -              | No       |
+| `federation`             | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                                                                                       | -                                                          | -              | No       |
 | `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -              | No       |
 
 ### `preferred_vp_formats`

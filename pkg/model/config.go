@@ -14,6 +14,7 @@ import (
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
@@ -570,6 +571,9 @@ type Verifier struct {
 	CredentialDisplay CredentialDisplayConfig `yaml:"credential_display,omitempty"`
 	// Trust holds the trust evaluation configuration
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// OpenIDFederation holds the OpenID Federation entity configuration.
+	// When enabled, serves /.well-known/openid-federation as a self-signed JWT.
+	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// Presets holds predefined verification request presets shown in the UI.
 	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
 	// Each preset maps credential_metadata scopes to optional claim overrides.
@@ -1025,6 +1029,9 @@ type APIGW struct {
 	// Trust holds the trust evaluation configuration for OpenID4VP credential validation.
 	// When configured, credentials presented via VP are validated against a PDP.
 	Trust TrustConfig `yaml:"trust,omitempty"`
+	// OpenIDFederation holds the OpenID Federation entity configuration.
+	// When enabled, serves /.well-known/openid-federation as a self-signed JWT.
+	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// RateLimit configures per-endpoint rate limiting for the APIGW.
 	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
 }

@@ -1230,6 +1230,7 @@ func main() {
 		filepath.Join(root, "pkg/oauth2"),
 		filepath.Join(root, "pkg/openid4vp"),
 		filepath.Join(root, "pkg/openid4vci"),
+		filepath.Join(root, "pkg/openidfederation"),
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); os.IsNotExist(err) {
