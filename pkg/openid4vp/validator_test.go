@@ -516,7 +516,7 @@ func encodeTxData(t *testing.T, txData []TransactionData) []string {
 	raw := make([]string, 0, len(txData))
 	for i := range txData {
 		encoded, err := txData[i].Base64Encode()
-		require.NoError(t, err, "encoding transaction_data[%d]", i)
+		require.NoErrorf(t, err, "encoding transaction_data[%d]", i)
 		raw = append(raw, encoded)
 	}
 	return raw

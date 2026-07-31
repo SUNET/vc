@@ -290,8 +290,10 @@ func TestCreateKeyBindingJWT_WithTransactionDataHashes(t *testing.T) {
 
 	t.Run("includes_transaction_data_hashes", func(t *testing.T) {
 		hashes := []string{"hash_aaa", "hash_bbb"}
+		// Use sha-512 for tx hashes while sd_hash uses sha-256 (alg) — they're independent
+		txHashAlg := "sha-512"
 		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
-			WithTransactionDataHashes(hashes, "sha-256"))
+			WithTransactionDataHashes(hashes, txHashAlg))
 		if err != nil {
 			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
 		}
@@ -313,8 +315,11 @@ func TestCreateKeyBindingJWT_WithTransactionDataHashes(t *testing.T) {
 		if !ok {
 			t.Fatal("transaction_data_hashes_alg missing or wrong type")
 		}
-		if algClaim != alg {
-			t.Errorf("expected alg %s, got %s", alg, algClaim)
+		if algClaim != txHashAlg {
+			t.Errorf("expected transaction_data_hashes_alg %s, got %s", txHashAlg, algClaim)
+		}
+		if algClaim == alg {
+			t.Error("transaction_data_hashes_alg should differ from sd_hash alg in this test")
 		}
 	})
 
