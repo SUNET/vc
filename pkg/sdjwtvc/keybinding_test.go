@@ -276,3 +276,104 @@ func extractPayload(t *testing.T, jwt string) map[string]any {
 
 	return payload
 }
+
+func TestCreateKeyBindingJWT_WithTransactionDataHashes(t *testing.T) {
+	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate holder key: %v", err)
+	}
+
+	sdJWT := "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lzc3VlciJ9.signature~disclosure1~"
+	nonce := "test-nonce-123"
+	audience := "https://verifier.example.com"
+	alg := "sha-256"
+
+	t.Run("includes_transaction_data_hashes", func(t *testing.T) {
+		hashes := []string{"hash_aaa", "hash_bbb"}
+		// Use sha-512 for tx hashes while sd_hash uses sha-256 (alg) — they're independent
+		txHashAlg := "sha-512"
+		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
+			WithTransactionDataHashes(hashes, txHashAlg))
+		if err != nil {
+			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
+		}
+
+		payload := extractPayload(t, kbJWT)
+
+		rawHashes, ok := payload["transaction_data_hashes"].([]any)
+		if !ok {
+			t.Fatal("transaction_data_hashes missing or wrong type")
+		}
+		if len(rawHashes) != 2 {
+			t.Fatalf("expected 2 hashes, got %d", len(rawHashes))
+		}
+		if rawHashes[0] != "hash_aaa" || rawHashes[1] != "hash_bbb" {
+			t.Errorf("unexpected hashes: %v", rawHashes)
+		}
+
+		algClaim, ok := payload["transaction_data_hashes_alg"].(string)
+		if !ok {
+			t.Fatal("transaction_data_hashes_alg missing or wrong type")
+		}
+		if algClaim != txHashAlg {
+			t.Errorf("expected transaction_data_hashes_alg %s, got %s", txHashAlg, algClaim)
+		}
+		if algClaim == alg {
+			t.Error("transaction_data_hashes_alg should differ from sd_hash alg in this test")
+		}
+	})
+
+	t.Run("omits_claims_when_no_option", func(t *testing.T) {
+		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg)
+		if err != nil {
+			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
+		}
+
+		payload := extractPayload(t, kbJWT)
+
+		if _, ok := payload["transaction_data_hashes"]; ok {
+			t.Error("transaction_data_hashes should be absent when no option is provided")
+		}
+		if _, ok := payload["transaction_data_hashes_alg"]; ok {
+			t.Error("transaction_data_hashes_alg should be absent when no option is provided")
+		}
+	})
+
+	t.Run("omits_claims_when_empty_hashes", func(t *testing.T) {
+		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
+			WithTransactionDataHashes([]string{}, "sha-256"))
+		if err != nil {
+			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
+		}
+
+		payload := extractPayload(t, kbJWT)
+
+		if _, ok := payload["transaction_data_hashes"]; ok {
+			t.Error("transaction_data_hashes should be absent for empty slice")
+		}
+	})
+
+	t.Run("preserves_standard_claims", func(t *testing.T) {
+		hashes := []string{"hash_one"}
+		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
+			WithTransactionDataHashes(hashes, "sha-256"))
+		if err != nil {
+			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
+		}
+
+		payload := extractPayload(t, kbJWT)
+
+		if payload["nonce"] != nonce {
+			t.Errorf("expected nonce %s, got %v", nonce, payload["nonce"])
+		}
+		if payload["aud"] != audience {
+			t.Errorf("expected aud %s, got %v", audience, payload["aud"])
+		}
+		if _, ok := payload["sd_hash"].(string); !ok {
+			t.Error("sd_hash missing")
+		}
+		if _, ok := payload["iat"].(float64); !ok {
+			t.Error("iat missing")
+		}
+	})
+}

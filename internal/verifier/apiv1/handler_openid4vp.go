@@ -14,7 +14,7 @@ import (
 )
 
 // CreateRequestObject creates and signs an OpenID4VP request object
-func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcqlQuery *openid4vp.DCQL, nonce string) (string, error) {
+func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcqlQuery *openid4vp.DCQL, nonce string, transactionData []openid4vp.TransactionData) (string, error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:create_request_object")
 	defer span.End()
 
@@ -42,17 +42,28 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		return "", fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
 
+	// Encode transaction data structs into base64url strings for the wire format
+	var encodedTxData []string
+	for i, td := range transactionData {
+		encoded, err := td.Base64Encode()
+		if err != nil {
+			return "", fmt.Errorf("encoding transaction_data[%d]: %w", i, err)
+		}
+		encodedTxData = append(encodedTxData, encoded)
+	}
+
 	requestObject := &openid4vp.RequestObject{
-		ISS:          c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
-		AUD:          "https://self-issued.me/v2",
-		IAT:          time.Now().Unix(),
-		ResponseType: "vp_token",
-		ClientID:     clientID,
-		Nonce:        nonce,
-		ResponseMode: responseMode,
-		ResponseURI:  responseURI,
-		State:        sessionID,
-		DCQLQuery:    dcqlQuery,
+		ISS:             c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
+		AUD:             "https://self-issued.me/v2",
+		IAT:             time.Now().Unix(),
+		ResponseType:    "vp_token",
+		ClientID:        clientID,
+		Nonce:           nonce,
+		ResponseMode:    responseMode,
+		ResponseURI:     responseURI,
+		State:           sessionID,
+		DCQLQuery:       dcqlQuery,
+		TransactionData: encodedTxData,
 	}
 
 	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled

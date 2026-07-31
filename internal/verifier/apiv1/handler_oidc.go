@@ -624,7 +624,7 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 	}
 
 	// Create and sign request object using DCQL from session
-	signedJWT, err := c.CreateRequestObject(ctx, session.SessionID, session.DCQLQuery, nonce)
+	signedJWT, err := c.CreateRequestObject(ctx, session.SessionID, session.DCQLQuery, nonce, nil)
 	if err != nil {
 		c.log.Error(err, "Failed to create request object")
 		return nil, ErrServerError

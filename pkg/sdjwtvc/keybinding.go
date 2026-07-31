@@ -23,21 +23,17 @@ type KeyBindingJWT struct {
 	SDHash   string `json:"sd_hash,omitempty"` // REQUIRED: hash of SD-JWT
 }
 
-// CreateKeyBindingJWT creates a Key Binding JWT for an SD-JWT
-// Per section 4.3: binds the SD-JWT to the Holder's key
+// CreateKeyBindingJWT creates a Key Binding JWT for an SD-JWT.
+// Per section 4.3: binds the SD-JWT to the Holder's key.
+//
 // Parameters:
-// - sdJWT: the SD-JWT string (without KB-JWT)
-// - nonce: freshness value from Verifier
-// - audience: identifier of the Verifier
-// - holderPrivateKey: Holder's private key for signing
-// - hashAlg: hash algorithm to use (must match _sd_alg from SD-JWT)
-func CreateKeyBindingJWT(
-	sdJWT string,
-	nonce string,
-	audience string,
-	holderPrivateKey any,
-	hashAlg string,
-) (string, error) {
+//   - sdJWT: the SD-JWT string (without KB-JWT)
+//   - nonce: freshness value from Verifier
+//   - audience: identifier of the Verifier
+//   - holderPrivateKey: Holder's private key for signing
+//   - hashAlg: hash algorithm to use (must match _sd_alg from SD-JWT)
+//   - opts: optional parameters (e.g. [WithTransactionDataHashes])
+func CreateKeyBindingJWT(sdJWT, nonce, audience string, holderPrivateKey any, hashAlg string, opts ...KeyBindingOption) (string, error) {
 	// Calculate sd_hash over the SD-JWT
 	// Per section 4.3.1: hash over Issuer-signed JWT and Disclosures
 	hashMethod, err := getHashFromAlgorithm(hashAlg)
@@ -57,6 +53,22 @@ func CreateKeyBindingJWT(
 		"aud":     audience,
 		"iat":     now,
 		"sd_hash": sdHash,
+	}
+
+	// Apply optional parameters (e.g. transaction data hashes)
+	var kbOpts keyBindingOptions
+	for _, o := range opts {
+		o(&kbOpts)
+	}
+	if len(kbOpts.transactionDataHashes) > 0 {
+		switch kbOpts.transactionDataHashesAlg {
+		case "sha-256", "sha-384", "sha-512":
+			// valid
+		default:
+			return "", fmt.Errorf("invalid transaction_data_hashes_alg: %q", kbOpts.transactionDataHashesAlg)
+		}
+		claims["transaction_data_hashes"] = kbOpts.transactionDataHashes
+		claims["transaction_data_hashes_alg"] = kbOpts.transactionDataHashesAlg
 	}
 
 	// Determine signing method from private key
@@ -125,4 +137,21 @@ func CombineWithKeyBinding(sdJWT string, kbJWT string) string {
 		sdJWT = sdJWT[:len(sdJWT)-1]
 	}
 	return sdJWT + "~" + kbJWT
+}
+
+// keyBindingOptions holds optional parameters for KB-JWT creation.
+type keyBindingOptions struct {
+	transactionDataHashes    []string
+	transactionDataHashesAlg string
+}
+
+// KeyBindingOption configures optional KB-JWT parameters.
+type KeyBindingOption func(*keyBindingOptions)
+
+// WithTransactionDataHashes adds transaction_data_hashes and transaction_data_hashes_alg claims to the KB-JWT per OpenID4VP §8.4. hashAlg identifies the algorithm used (independent of _sd_alg). Each hash must be the base64url-encoded digest of the corresponding TransactionData entry.
+func WithTransactionDataHashes(hashes []string, hashAlg string) KeyBindingOption {
+	return func(o *keyBindingOptions) {
+		o.transactionDataHashes = hashes
+		o.transactionDataHashesAlg = hashAlg
+	}
 }

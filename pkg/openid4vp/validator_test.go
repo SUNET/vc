@@ -465,3 +465,196 @@ func TestVPTokenValidator_EmptyDCQLQuery(t *testing.T) {
 	err := validator.Validate(vpToken)
 	assert.NoError(t, err)
 }
+
+// createTestVPTokenWithTxHashes creates a test VP token whose KB-JWT includes
+// transaction_data_hashes and transaction_data_hashes_alg claims.
+func createTestVPTokenWithTxHashes(t *testing.T, nonce, aud string, hashes []string, hashAlg string) string {
+	t.Helper()
+
+	header := map[string]any{"alg": "ES256", "typ": "vc+sd-jwt"}
+	headerJSON, _ := json.Marshal(header)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+
+	payload := map[string]any{
+		"iss": "https://issuer.example.com",
+		"iat": 1234567890,
+		"exp": 9999999999,
+		"vct": "https://example.com/TestCredential",
+		"cnf": map[string]any{"jwk": map[string]any{"kty": "EC", "crv": "P-256", "x": "test", "y": "test"}},
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	signature := base64.RawURLEncoding.EncodeToString([]byte("fake-signature"))
+	sdJWT := headerB64 + "." + payloadB64 + "." + signature
+
+	kbHeader := map[string]any{"alg": "ES256", "typ": "kb+jwt"}
+	kbHeaderJSON, _ := json.Marshal(kbHeader)
+	kbHeaderB64 := base64.RawURLEncoding.EncodeToString(kbHeaderJSON)
+
+	kbPayload := map[string]any{
+		"nonce": nonce,
+		"aud":   aud,
+		"iat":   1234567890,
+	}
+	if len(hashes) > 0 {
+		kbPayload["transaction_data_hashes"] = hashes
+		kbPayload["transaction_data_hashes_alg"] = hashAlg
+	}
+	kbPayloadJSON, _ := json.Marshal(kbPayload)
+	kbPayloadB64 := base64.RawURLEncoding.EncodeToString(kbPayloadJSON)
+
+	kbSignature := base64.RawURLEncoding.EncodeToString([]byte("fake-kb-signature"))
+	kbJWT := kbHeaderB64 + "." + kbPayloadB64 + "." + kbSignature
+
+	return sdJWT + "~" + kbJWT
+}
+
+// encodeTxData encodes TransactionData structs into raw base64url strings for tests.
+func encodeTxData(t *testing.T, txData []TransactionData) []string {
+	t.Helper()
+	raw := make([]string, 0, len(txData))
+	for i := range txData {
+		encoded, err := txData[i].Base64Encode()
+		require.NoErrorf(t, err, "encoding transaction_data[%d]", i)
+		raw = append(raw, encoded)
+	}
+	return raw
+}
+
+func TestVPTokenValidator_TransactionData_Valid(t *testing.T) {
+	nonce := "test-nonce-123"
+	clientID := "https://verifier.example.com"
+
+	raw := encodeTxData(t, []TransactionData{
+		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
+	})
+	hashes, err := HashTransactionData(raw, "sha-256")
+	require.NoError(t, err)
+
+	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, hashes, "sha-256")
+
+	validator := &VPTokenValidator{
+		Nonce:           nonce,
+		ClientID:        clientID,
+		TransactionData: raw,
+	}
+
+	err = validator.Validate(vpToken)
+	assert.NoError(t, err)
+}
+
+func TestVPTokenValidator_TransactionData_Missing(t *testing.T) {
+	nonce := "test-nonce-123"
+	clientID := "https://verifier.example.com"
+
+	raw := encodeTxData(t, []TransactionData{
+		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
+	})
+
+	// KB-JWT has no transaction_data_hashes
+	vpToken := createTestVPToken(t, nonce, clientID, true)
+
+	validator := &VPTokenValidator{
+		Nonce:           nonce,
+		ClientID:        clientID,
+		TransactionData: raw,
+	}
+
+	err := validator.Validate(vpToken)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "transaction_data_hashes")
+}
+
+func TestVPTokenValidator_TransactionData_Mismatch(t *testing.T) {
+	nonce := "test-nonce-123"
+	clientID := "https://verifier.example.com"
+
+	raw := encodeTxData(t, []TransactionData{
+		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
+	})
+
+	// Create a VP with wrong hashes (hashed from different transaction data)
+	wrongRaw := encodeTxData(t, []TransactionData{
+		{Type: "document_signing", CredentialIDS: []string{"eudi_pid"}},
+	})
+	wrongHashes, err := HashTransactionData(wrongRaw, "sha-256")
+	require.NoError(t, err)
+
+	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, wrongHashes, "sha-256")
+
+	validator := &VPTokenValidator{
+		Nonce:           nonce,
+		ClientID:        clientID,
+		TransactionData: raw,
+	}
+
+	err = validator.Validate(vpToken)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mismatch")
+}
+
+func TestVPTokenValidator_TransactionData_CountMismatch(t *testing.T) {
+	nonce := "test-nonce-123"
+	clientID := "https://verifier.example.com"
+
+	raw := encodeTxData(t, []TransactionData{
+		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
+		{Type: "sca", CredentialIDS: []string{"eudi_pid"}},
+	})
+	// Only hash the first one — count mismatch
+	hashes, err := HashTransactionData(raw[:1], "sha-256")
+	require.NoError(t, err)
+
+	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, hashes, "sha-256")
+
+	validator := &VPTokenValidator{
+		Nonce:           nonce,
+		ClientID:        clientID,
+		TransactionData: raw,
+	}
+
+	err = validator.Validate(vpToken)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "count mismatch")
+}
+
+func TestVPTokenValidator_TransactionData_NoTxDataSkipsValidation(t *testing.T) {
+	nonce := "test-nonce-123"
+	clientID := "https://verifier.example.com"
+
+	// No transaction data in request — validation should pass even without hashes in KB-JWT
+	vpToken := createTestVPToken(t, nonce, clientID, true)
+
+	validator := &VPTokenValidator{
+		Nonce:    nonce,
+		ClientID: clientID,
+	}
+
+	err := validator.Validate(vpToken)
+	assert.NoError(t, err)
+}
+
+func TestVPTokenValidator_TransactionData_MultipleEntries(t *testing.T) {
+	nonce := "test-nonce-123"
+	clientID := "https://verifier.example.com"
+
+	raw := encodeTxData(t, []TransactionData{
+		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
+		{Type: "document_signing", CredentialIDS: []string{"eudi_pid", "diploma"}},
+	})
+	hashes, err := HashTransactionData(raw, "sha-256")
+	require.NoError(t, err)
+	require.Len(t, hashes, 2)
+
+	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, hashes, "sha-256")
+
+	validator := &VPTokenValidator{
+		Nonce:           nonce,
+		ClientID:        clientID,
+		TransactionData: raw,
+	}
+
+	err = validator.Validate(vpToken)
+	assert.NoError(t, err)
+}
