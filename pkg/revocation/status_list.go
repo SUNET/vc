@@ -2,6 +2,7 @@ package revocation
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"fmt"
 	"io"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -173,11 +176,63 @@ func (c *StatusListChecker) parseStatusListToken(data []byte, contentType string
 }
 
 func (c *StatusListChecker) parseCWTStatusList(data []byte) ([]uint8, error) {
-	claims, err := tokenstatuslist.ParseCWT(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse CWT status list: %w", err)
+	// Decode COSE_Sign1 (CBOR Tag 18)
+	var coseTag cbor.Tag
+	if err := cbor.Unmarshal(data, &coseTag); err != nil {
+		return nil, fmt.Errorf("failed to decode COSE_Sign1: %w", err)
+	}
+	if coseTag.Number != 18 {
+		return nil, fmt.Errorf("invalid COSE tag: expected 18 (COSE_Sign1), got %d", coseTag.Number)
 	}
 
+	components, ok := coseTag.Content.([]any)
+	if !ok || len(components) != 4 {
+		return nil, fmt.Errorf("invalid COSE_Sign1 structure")
+	}
+
+	protectedBytes, _ := components[0].([]byte)
+	unprotected, _ := components[1].(map[any]any)
+	payloadBytes, _ := components[2].([]byte)
+	signature, _ := components[3].([]byte)
+
+	sign1 := &mdoc.COSESign1{
+		Protected:   protectedBytes,
+		Unprotected: unprotected,
+		Payload:     payloadBytes,
+		Signature:   signature,
+	}
+
+	// Extract key ID from protected headers
+	var headers map[int64]any
+	if err := cbor.Unmarshal(protectedBytes, &headers); err != nil {
+		return nil, fmt.Errorf("failed to decode CWT protected headers: %w", err)
+	}
+	kid, _ := headers[mdoc.HeaderKeyID].(string)
+	if kidBytes, ok := headers[mdoc.HeaderKeyID].([]byte); ok {
+		kid = string(kidBytes)
+	}
+
+	// Decode CWT claims to extract issuer
+	var claims map[int]any
+	if err := cbor.Unmarshal(payloadBytes, &claims); err != nil {
+		return nil, fmt.Errorf("failed to decode CWT claims: %w", err)
+	}
+	issuer, _ := claims[1].(string) // CWT claim 1 = iss
+
+	// Resolve signing key and verify signature
+	key, err := c.keyResolver.ResolveKey(context.Background(), issuer, kid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve CWT signing key: %w", err)
+	}
+	pubKey, ok := key.(crypto.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("resolved key is not a crypto.PublicKey: %T", key)
+	}
+	if err := mdoc.Verify1(sign1, nil, pubKey, nil); err != nil {
+		return nil, fmt.Errorf("CWT signature verification failed: %w", err)
+	}
+
+	// Extract status list from verified claims
 	statusListRaw, ok := claims[65534]
 	if !ok {
 		return nil, errors.New("status_list claim not found in CWT")

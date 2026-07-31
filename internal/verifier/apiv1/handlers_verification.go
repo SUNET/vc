@@ -305,6 +305,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			for _, cc := range scopeCredentials[scope] {
 				result, err := c.revocationRegistry.Validate(ctx, cc.Credential)
 				if err != nil {
+					// Transient error (network, malformed token) — fail_open controls behavior
 					if c.cfg.Verifier.Revocation.FailOpen {
 						c.log.Info("Revocation check failed (fail-open: allowing)", "scope", scope, "err", err)
 					} else {
@@ -312,11 +313,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 						return nil, fmt.Errorf("revocation check failed for scope %s: %w", scope, err)
 					}
 				} else if result != nil && result.Status != revocation.StatusValid {
-					c.log.Info("Credential revocation status", "scope", scope, "status", result.Status.String(), "uri", result.URI, "index", result.Index)
-					if !c.cfg.Verifier.Revocation.FailOpen {
-						return nil, fmt.Errorf("credential for scope %s has been %s", scope, result.Status.String())
-					}
-					c.log.Info("Accepting revoked/suspended credential (fail-open mode)", "scope", scope, "status", result.Status.String())
+					// Authoritative revocation/suspension — always reject regardless of fail_open
+					c.log.Error(nil, "credential has been revoked or suspended", "scope", scope, "status", result.Status.String(), "uri", result.URI, "index", result.Index)
+					return nil, fmt.Errorf("credential for scope %s has been %s", scope, result.Status.String())
 				}
 			}
 		}

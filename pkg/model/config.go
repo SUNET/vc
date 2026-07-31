@@ -602,6 +602,7 @@ type RevocationConfig struct {
 	// FailOpen determines behavior when the status list is unreachable or unparseable:
 	//   - true: log warning and allow the credential through (fail-open)
 	//   - false: reject the credential (fail-closed)
+	// Note: explicitly revoked/suspended credentials are always rejected regardless of this setting.
 	FailOpen bool `yaml:"fail_open" json:"fail_open" default:"true"`
 	// SkipScopes lists credential scopes exempt from revocation checking
 	// (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).
