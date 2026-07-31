@@ -51,9 +51,12 @@ func ParseAdvancedSExp(input string) (sexp.Element, error) {
 	return elem, nil
 }
 
-// LoadRulesFromFile reads human-readable SPOCP rules (one per line) from a file
-// and adds them to the engine using ParseAdvancedSExp.
-func LoadRulesFromFile(engine *spocp.AdaptiveEngine, path string) error {
+// LoadRulesFromFile reads human-readable SPOCP rules (one per line) from a
+// file and adds them to the engine using ParseAdvancedSExp. If validate is
+// non-nil, each parsed rule is passed to it (with a source string
+// identifying the file and line number) before being added; a returned
+// error aborts loading.
+func LoadRulesFromFile(engine *spocp.AdaptiveEngine, path string, validate func(elem sexp.Element, source string) error) error {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return err
@@ -71,6 +74,11 @@ func LoadRulesFromFile(engine *spocp.AdaptiveEngine, path string) error {
 		elem, err := ParseAdvancedSExp(line)
 		if err != nil {
 			return fmt.Errorf("line %d: %w", lineNum, err)
+		}
+		if validate != nil {
+			if err := validate(elem, fmt.Sprintf("%s line %d", path, lineNum)); err != nil {
+				return err
+			}
 		}
 		engine.AddRuleElement(elem)
 	}

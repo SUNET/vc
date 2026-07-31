@@ -17,7 +17,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
-	spocp "github.com/sirosfoundation/go-spocp"
 	"github.com/sirosfoundation/go-spocp/pkg/compare"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
 	"github.com/sirosfoundation/go-spocp/pkg/starform"
@@ -323,99 +322,25 @@ func (p *oidcKeySetProvider) GetKeySet(ctx context.Context) (jwk.Set, error) {
 	return p.set, nil
 }
 
-// SafeEngine wraps a SPOCP AdaptiveEngine with a sync.RWMutex so that
-// concurrent request handlers can safely call QueryElement while still
-// allowing future rule hot-reloading under a write lock.
-type SafeEngine struct {
-	mu     sync.RWMutex
-	engine *spocp.AdaptiveEngine
-}
+// SafeEngine is the endpoint-access SPOCP engine type. It is an alias for
+// spocputil.Engine -- the same engine type pkg/issuance uses for
+// credential-issuance policy rules -- so both rule sets are built,
+// validated, and queried through one shared implementation instead of each
+// package maintaining its own copy. Kept as a named alias (rather than
+// updating every call site to spocputil.Engine) since *SafeEngine is
+// threaded through handler signatures across internal/apigw and
+// internal/verifier.
+type SafeEngine = spocputil.Engine
 
-// QueryElement checks if the query is authorized (read-locked).
-func (s *SafeEngine) QueryElement(q sexp.Element) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.engine.QueryElement(q)
-}
-
-// RuleCount returns the number of loaded rules (read-locked).
-func (s *SafeEngine) RuleCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.engine.RuleCount()
-}
-
-// requiredRuleParts lists the tagged sub-lists that every SPOCP rule must contain.
-// All six parts are mandatory — use * as wildcard for fields you don't want to restrict.
-var requiredRuleParts = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
-
-// validateRuleElement checks that a parsed SPOCP rule element is a list with
-// tag "vc" containing exactly the 6 required sub-lists in positional order
-// (service, method, path, subject, authentic_source, scope), each with exactly
-// one value. SPOCP matching is positional, so wrong order, duplicates, extra
-// parts, or multi-valued parts would silently never match.
-func validateRuleElement(elem sexp.Element, source string) error {
-	list, ok := elem.(*sexp.List)
-	if !ok {
-		return fmt.Errorf("%s: rule must be a list, got %T", source, elem)
-	}
-	if list.Tag != "vc" {
-		return fmt.Errorf("%s: rule must have tag \"vc\", got %q", source, list.Tag)
-	}
-
-	if len(list.Elements) != len(requiredRuleParts) {
-		return fmt.Errorf("%s: rule must have exactly %d parts, got %d",
-			source, len(requiredRuleParts), len(list.Elements))
-	}
-
-	for i, req := range requiredRuleParts {
-		child := list.Elements[i]
-		cl, ok := child.(*sexp.List)
-		if !ok {
-			return fmt.Errorf("%s: part %d must be a list, got %T", source, i+1, child)
-		}
-		if cl.Tag != req {
-			return fmt.Errorf("%s: part %d must be (%s ...), got (%s ...)",
-				source, i+1, req, cl.Tag)
-		}
-		if len(cl.Elements) != 1 {
-			return fmt.Errorf("%s: part (%s) must have exactly 1 value, got %d (use * as wildcard)",
-				source, req, len(cl.Elements))
-		}
-	}
-	return nil
-}
+// apiAuthRuleDimensions lists the tagged sub-lists that every SPOCP endpoint
+// rule must contain, in positional order. All six parts are mandatory — use
+// * as wildcard for fields you don't want to restrict.
+var apiAuthRuleDimensions = []string{"service", "method", "path", "subject", "authentic_source", "scope"}
 
 // BuildSPOCPEngine creates a SPOCP engine from the APIAuth rules.
 // Returns nil when no rules are configured (authentication-only mode).
 func BuildSPOCPEngine(cfg model.APIAuth) (*SafeEngine, error) {
-	hasInline := len(cfg.Rules) > 0
-	hasFile := cfg.RulesFile != ""
-
-	if !hasInline && !hasFile {
-		return nil, nil
-	}
-
-	engine := spocp.New()
-
-	for i, r := range cfg.Rules {
-		elem, err := spocputil.ParseAdvancedSExp(r)
-		if err != nil {
-			return nil, fmt.Errorf("invalid inline SPOCP rule #%d: %w", i+1, err)
-		}
-		if err := validateRuleElement(elem, fmt.Sprintf("inline rule #%d", i+1)); err != nil {
-			return nil, err
-		}
-		engine.AddRuleElement(elem)
-	}
-
-	if hasFile {
-		if err := spocputil.LoadRulesFromFile(engine, cfg.RulesFile); err != nil {
-			return nil, fmt.Errorf("failed to load SPOCP rules from %s: %w", cfg.RulesFile, err)
-		}
-	}
-
-	return &SafeEngine{engine: engine}, nil
+	return spocputil.BuildEngine("vc", apiAuthRuleDimensions, true, "SPOCP", cfg.Rules, cfg.RulesFile)
 }
 
 // extractSPOCPSubject returns the identity to use as the SPOCP subject
@@ -439,14 +364,14 @@ func extractSPOCPSubject(token jwt.Token) string {
 // The service dimension ensures that rules written for one service do not
 // accidentally grant access to another service sharing the same endpoints.
 func BuildSPOCPQuery(service, method, path, subject, authenticSource, scope string) sexp.Element {
-	return sexp.NewList("vc",
-		sexp.NewList("service", sexp.NewAtom(service)),
-		sexp.NewList("method", sexp.NewAtom(method)),
-		sexp.NewList("path", sexp.NewAtom(path)),
-		sexp.NewList("subject", sexp.NewAtom(subject)),
-		sexp.NewList("authentic_source", sexp.NewAtom(authenticSource)),
-		sexp.NewList("scope", sexp.NewAtom(scope)),
-	)
+	return spocputil.BuildTaggedQuery("vc", apiAuthRuleDimensions, map[string]string{
+		"service":          service,
+		"method":           method,
+		"path":             path,
+		"subject":          subject,
+		"authentic_source": authenticSource,
+		"scope":            scope,
+	})
 }
 
 // ResourcePair represents an allowed (authentic_source, scope) combination.
@@ -466,9 +391,7 @@ func ResolveAllowedResources(engine *SafeEngine, subject string) []ResourcePair 
 
 	subjectQuery := sexp.NewList("subject", sexp.NewAtom(subject))
 
-	engine.mu.RLock()
-	defer engine.mu.RUnlock()
-	rules := engine.engine.ExportRules()
+	rules := engine.ExportRules()
 
 	var pairs []ResourcePair
 	for _, rule := range rules {
