@@ -306,10 +306,16 @@ type OIDCRequestParams struct {
 type IssuancePolicy struct {
 	// Rules are inline SPOCP S-expression rules (human-readable advanced form).
 	// Example: "(credential (scope org_credential)(acr (* prefix urn:example:loa))(org_id))"
+	// When QueryTemplate is set, each rule is validated at load time against
+	// the "credential" tag and the ("scope", <QueryTemplate dimensions>)
+	// shape -- a rule with the wrong number/order of dimensions fails
+	// startup instead of silently never matching at evaluation time. A
+	// dimension may be omitted (e.g. "(org_id)") to mean "any value".
 	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(credential (scope my_cred)(acr urn:example:loa3)(email_verified true))\"]"`
 
 	// RulesFile is an optional path to a file containing SPOCP rules (one per line).
-	// Rules from this file are loaded in addition to the inline Rules list.
+	// Rules from this file are loaded in addition to the inline Rules list,
+	// and validated the same way when QueryTemplate is set.
 	RulesFile string `yaml:"rules_file,omitempty"`
 
 	// QueryTemplate defines how to build the SPOCP query from OIDC claims.
