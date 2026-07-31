@@ -14,9 +14,9 @@ import (
 func TestCombinedBindingVerifier_SingleCredential(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -31,9 +31,9 @@ func TestCombinedBindingVerifier_SingleCredential(t *testing.T) {
 func TestCombinedBindingVerifier_EmptyCredentials(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -45,9 +45,9 @@ func TestCombinedBindingVerifier_EmptyCredentials(t *testing.T) {
 func TestCombinedBindingVerifier_KeyBinding_SameKey(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -73,9 +73,9 @@ func TestCombinedBindingVerifier_KeyBinding_SameKey(t *testing.T) {
 func TestCombinedBindingVerifier_KeyBinding_DifferentKeys(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -97,9 +97,9 @@ func TestCombinedBindingVerifier_KeyBinding_DifferentKeys(t *testing.T) {
 func TestCombinedBindingVerifier_KeyBinding_DifferentKeys_WarnMode(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementWarn,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementWarn,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -253,9 +253,9 @@ func TestCombinedBindingVerifier_NestedAttributePath(t *testing.T) {
 func TestCombinedBindingVerifier_KeyAndAttributeBinding(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 			BindingAttributes: []BindingAttributeConfig{
 				{Paths: []string{"sub"}},
 			},
@@ -277,9 +277,9 @@ func TestCombinedBindingVerifier_KeyAndAttributeBinding(t *testing.T) {
 func TestCombinedBindingVerifier_InsufficientKeyMaterial(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 			BindingAttributes: []BindingAttributeConfig{
 				{Paths: []string{"sub"}},
 			},
@@ -304,9 +304,9 @@ func TestCombinedBindingVerifier_InsufficientKeyMaterial(t *testing.T) {
 func TestCombinedBindingVerifier_ThreeCredentials_SameKey(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: BindingEnforcementEnforce,
-			KeyBinding:  KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -320,6 +320,96 @@ func TestCombinedBindingVerifier_ThreeCredentials_SameKey(t *testing.T) {
 	require.NotNil(t, result)
 	assert.True(t, result.Bound)
 	assert.Equal(t, BindingConfidenceHigh, result.HighestConfidence)
+}
+
+func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
+	// Cred 1 and 2 share the same holder key (same wallet/WSCD).
+	// Cred 3 has a different key but shares attribute "sub" with cred 1.
+	// Key-based binding should FAIL (not all keys match).
+	// Attribute-based binding should also FAIL (cred 3 has different sub from cred 2,
+	// or in this case all share the same sub, but key mismatch dominates).
+	t.Run("key_mismatch_attribute_match", func(t *testing.T) {
+		v := &CombinedBindingVerifier{
+			Config: CombinedPresentationConfig{
+				Enabled:          true,
+				Enforcement:      BindingEnforcementEnforce,
+				KeyBindingEnabled: true,
+				BindingAttributes: []BindingAttributeConfig{
+					{Paths: []string{"sub", "family_name"}},
+				},
+			},
+		}
+
+		result, err := v.Verify([]VerifiedCredentialBinding{
+			{Scope: "pid", HolderKeyThumbprint: "tp-wallet-A", Claims: map[string]any{"sub": "user1", "family_name": "Lindqvist"}},
+			{Scope: "diploma", HolderKeyThumbprint: "tp-wallet-A", Claims: map[string]any{"sub": "user1", "family_name": "Lindqvist"}},
+			{Scope: "ehic", HolderKeyThumbprint: "tp-wallet-B", Claims: map[string]any{"sub": "user1", "family_name": "Lindqvist"}},
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		// Key binding fails (different keys), so enforcement rejects
+		assert.False(t, result.Bound)
+		assert.Error(t, result.Err())
+		assert.Contains(t, result.Err().Error(), "holder key mismatch")
+		// Attribute binding still succeeds on its own
+		assert.Equal(t, BindingConfidenceMedium, result.HighestConfidence)
+	})
+
+	t.Run("key_mismatch_attribute_match_warn_mode", func(t *testing.T) {
+		v := &CombinedBindingVerifier{
+			Config: CombinedPresentationConfig{
+				Enabled:          true,
+				Enforcement:      BindingEnforcementWarn,
+				KeyBindingEnabled: true,
+				BindingAttributes: []BindingAttributeConfig{
+					{Paths: []string{"sub"}},
+				},
+			},
+		}
+
+		result, err := v.Verify([]VerifiedCredentialBinding{
+			{Scope: "pid", HolderKeyThumbprint: "tp-wallet-A", Claims: map[string]any{"sub": "user1"}},
+			{Scope: "diploma", HolderKeyThumbprint: "tp-wallet-A", Claims: map[string]any{"sub": "user1"}},
+			{Scope: "ehic", HolderKeyThumbprint: "tp-wallet-B", Claims: map[string]any{"sub": "user1"}},
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		// Warn mode: bound=true despite key mismatch
+		assert.True(t, result.Bound)
+		assert.False(t, result.Valid()) // has errors
+		assert.Error(t, result.Err())
+		// Attribute binding gives medium confidence
+		assert.Equal(t, BindingConfidenceMedium, result.HighestConfidence)
+	})
+
+	t.Run("partial_key_missing_attribute_mismatch", func(t *testing.T) {
+		// Cred 1+2 share key, cred 3 has no key and different sub
+		v := &CombinedBindingVerifier{
+			Config: CombinedPresentationConfig{
+				Enabled:          true,
+				Enforcement:      BindingEnforcementEnforce,
+				KeyBindingEnabled: true,
+				BindingAttributes: []BindingAttributeConfig{
+					{Paths: []string{"sub"}},
+				},
+			},
+		}
+
+		result, err := v.Verify([]VerifiedCredentialBinding{
+			{Scope: "pid", HolderKeyThumbprint: "tp-wallet-A", Claims: map[string]any{"sub": "user1"}},
+			{Scope: "diploma", HolderKeyThumbprint: "tp-wallet-A", Claims: map[string]any{"sub": "user1"}},
+			{Scope: "ehic", HolderKeyThumbprint: "", Claims: map[string]any{"sub": "user2"}},
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		// Both methods fail: key has insufficient material, attribute has mismatch
+		assert.False(t, result.Bound)
+		assert.False(t, result.Valid())
+		assert.Error(t, result.Err())
+	})
 }
 
 func TestExtractHolderKeyThumbprint(t *testing.T) {

@@ -108,23 +108,16 @@ type CombinedPresentationConfig struct {
 	Enforcement BindingEnforcement `yaml:"enforcement" json:"enforcement" validate:"omitempty,oneof=enforce warn disabled" default:"warn"`
 	// BindingAttributes configures attribute-based binding checks.
 	BindingAttributes []BindingAttributeConfig `yaml:"binding_attributes,omitempty" json:"binding_attributes,omitempty" validate:"omitempty,dive"`
-	// KeyBinding configures key-based binding checks.
-	KeyBinding KeyBindingConfig `yaml:"key_binding" json:"key_binding"`
+	// KeyBindingEnabled activates key-based binding (cnf.jwk / device key comparison).
+	// Cross-format comparison (SD-JWT cnf.jwk vs mDoc device key) is always
+	// supported since both are converted to RFC 7638 JWK thumbprints.
+	KeyBindingEnabled bool `yaml:"key_binding_enabled" json:"key_binding_enabled"`
 }
 
 // BindingAttributeConfig defines a set of attribute paths to compare across credentials.
 type BindingAttributeConfig struct {
 	// Paths lists claim paths that must ALL match across credentials (AND semantics).
 	Paths []string `yaml:"paths" json:"paths" validate:"required,min=1,dive,required" doc_example:"[\"family_name\", \"birth_date\", \"place_of_birth.locality\"]"`
-}
-
-// KeyBindingConfig configures key-based binding verification.
-type KeyBindingConfig struct {
-	// Enabled activates key-based binding (cnf.jwk / device key comparison).
-	Enabled bool `yaml:"enabled" json:"enabled"`
-	// CrossFormat enables comparing keys across credential formats
-	// (e.g., SD-JWT cnf.jwk vs mDoc device key).
-	CrossFormat bool `yaml:"cross_format" json:"cross_format"`
 }
 
 // CombinedBindingVerifier verifies that multiple credentials in a combined
@@ -154,7 +147,7 @@ func (v *CombinedBindingVerifier) Verify(credentials []VerifiedCredentialBinding
 	result.Bound = true
 
 	// Key-based binding
-	if v.Config.KeyBinding.Enabled {
+	if v.Config.KeyBindingEnabled {
 		keyResult := v.verifyKeyBinding(credentials)
 		result.Results = append(result.Results, keyResult)
 		if keyResult.Confidence == BindingConfidenceHigh {
@@ -181,7 +174,7 @@ func (v *CombinedBindingVerifier) Verify(credentials []VerifiedCredentialBinding
 	// and at least one higher-confidence method was configured but couldn't establish binding,
 	// mark as unbound.
 	if v.Config.Enforcement == BindingEnforcementEnforce {
-		higherMethodConfigured := v.Config.KeyBinding.Enabled || len(v.Config.BindingAttributes) > 0
+		higherMethodConfigured := v.Config.KeyBindingEnabled || len(v.Config.BindingAttributes) > 0
 		if higherMethodConfigured && result.HighestConfidence == BindingConfidenceLow {
 			result.Bound = false
 		}
@@ -199,7 +192,7 @@ func (v *CombinedBindingVerifier) verifyKeyBinding(credentials []VerifiedCredent
 		}
 	}
 
-	if len(thumbprints) < 2 {
+	if len(thumbprints) != len(credentials) {
 		return BindingResult{
 			Method:     BindingMethodKey,
 			Confidence: BindingConfidenceNone,
@@ -238,18 +231,18 @@ func (v *CombinedBindingVerifier) verifyAttributeBinding(credentials []VerifiedC
 			values := make([]any, 0, len(credentials))
 			for _, cred := range credentials {
 				val := resolveSimplePath(cred.Claims, path)
-				if val != nil {
-					values = append(values, val)
+				if val == nil {
+					// Every credential must contain the attribute for it to be comparable
+					allMatch = false
+					break
 				}
+				values = append(values, val)
 			}
-
-			// Need at least 2 values to compare
-			if len(values) < 2 {
-				allMatch = false
+			if !allMatch {
 				break
 			}
 
-			// Check all values are equal
+			// All credentials have the value — check they are equal
 			firstStr := fmt.Sprintf("%v", values[0])
 			for i := 1; i < len(values); i++ {
 				if fmt.Sprintf("%v", values[i]) != firstStr {

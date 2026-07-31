@@ -81,18 +81,22 @@ type TableRow struct {
 // ---- Type registry ----
 
 type TypeRegistry struct {
-	types        map[string]*StructDef
-	mapAliases   map[string]string // named map type -> map value type name
-	sliceAliases map[string]string // named slice type -> element type name (e.g. "RedirectURIs" -> "string")
-	fset         *token.FileSet
+	types         map[string]*StructDef
+	mapAliases    map[string]string   // named map type -> map value type name
+	sliceAliases  map[string]string   // named slice type -> element type name (e.g. "RedirectURIs" -> "string")
+	scalarAliases map[string]string   // named scalar type -> underlying type (e.g. "BindingEnforcement" -> "string")
+	enumValues    map[string][]string // named type -> ordered list of const values (e.g. "BindingEnforcement" -> ["enforce", "warn", "disabled"])
+	fset          *token.FileSet
 }
 
 func NewTypeRegistry() *TypeRegistry {
 	return &TypeRegistry{
-		types:        make(map[string]*StructDef),
-		mapAliases:   make(map[string]string),
-		sliceAliases: make(map[string]string),
-		fset:         token.NewFileSet(),
+		types:         make(map[string]*StructDef),
+		mapAliases:    make(map[string]string),
+		sliceAliases:  make(map[string]string),
+		scalarAliases: make(map[string]string),
+		enumValues:    make(map[string][]string),
+		fset:          token.NewFileSet(),
 	}
 }
 
@@ -106,6 +110,7 @@ func (r *TypeRegistry) ParseDir(dir string) error {
 	for pkgName, pkg := range pkgs {
 		for _, file := range pkg.Files {
 			r.extractStructs(file, pkgName)
+			r.extractEnumConsts(file)
 		}
 	}
 	return nil
@@ -164,6 +169,46 @@ func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 				elemName := typeExprStr(at.Elt)
 				r.sliceAliases[ts.Name.Name] = elemName
 				r.sliceAliases[pkgName+"."+ts.Name.Name] = elemName
+			}
+
+			// Handle named scalar types (e.g., type BindingEnforcement string)
+			if ident, ok := ts.Type.(*ast.Ident); ok {
+				if ident.Name == "string" {
+					r.scalarAliases[ts.Name.Name] = "string"
+					r.scalarAliases[pkgName+"."+ts.Name.Name] = "string"
+				}
+			}
+		}
+	}
+}
+
+// extractEnumConsts extracts typed string constants for enum display.
+// For example: const BindingEnforcementEnforce BindingEnforcement = "enforce"
+func (r *TypeRegistry) extractEnumConsts(file *ast.File) {
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || vs.Type == nil {
+				continue
+			}
+			typeName := typeExprStr(vs.Type)
+			// Only collect if this is a known string scalar alias
+			if _, isStringAlias := r.scalarAliases[typeName]; !isStringAlias {
+				continue
+			}
+			// Extract the string literal value
+			for _, val := range vs.Values {
+				lit, ok := val.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				// Unquote the string literal
+				s := strings.Trim(lit.Value, "\"")
+				r.enumValues[typeName] = append(r.enumValues[typeName], s)
 			}
 		}
 	}
@@ -332,6 +377,13 @@ func (r *TypeRegistry) displayType(expr ast.Expr) string {
 					return "`[]int`"
 				}
 				return "`array`"
+			}
+			// Resolve named scalar aliases (e.g. BindingEnforcement -> string)
+			if underlying, ok := r.scalarAliases[t.Name]; ok {
+				if vals, hasEnum := r.enumValues[t.Name]; hasEnum && len(vals) > 0 {
+					return "`" + underlying + "` (" + strings.Join(vals, `\|`) + ")"
+				}
+				return "`" + underlying + "`"
 			}
 			return "`object`"
 		}

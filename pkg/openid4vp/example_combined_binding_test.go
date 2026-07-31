@@ -26,12 +26,9 @@ func Example_combinedPresentation_universityAdmission() {
 	//   3. Enforce binding — reject if not established
 	verifier := &openid4vp.CombinedBindingVerifier{
 		Config: openid4vp.CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: openid4vp.BindingEnforcementEnforce,
-			KeyBinding: openid4vp.KeyBindingConfig{
-				Enabled:     true,
-				CrossFormat: true, // allow comparing SD-JWT cnf with mDoc device key
-			},
+			Enabled:          true,
+			Enforcement:      openid4vp.BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 			BindingAttributes: []openid4vp.BindingAttributeConfig{
 				{Paths: []string{"family_name", "birth_date"}}, // compound: both must match
 			},
@@ -103,9 +100,9 @@ func Example_combinedPresentation_universityAdmission() {
 func Example_combinedPresentation_differentHolderKeys() {
 	verifier := &openid4vp.CombinedBindingVerifier{
 		Config: openid4vp.CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: openid4vp.BindingEnforcementEnforce,
-			KeyBinding:  openid4vp.KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      openid4vp.BindingEnforcementEnforce,
+			KeyBindingEnabled: true,
 		},
 	}
 
@@ -143,9 +140,9 @@ func Example_combinedPresentation_differentHolderKeys() {
 func Example_combinedPresentation_warnMode() {
 	verifier := &openid4vp.CombinedBindingVerifier{
 		Config: openid4vp.CombinedPresentationConfig{
-			Enabled:     true,
-			Enforcement: openid4vp.BindingEnforcementWarn,
-			KeyBinding:  openid4vp.KeyBindingConfig{Enabled: true},
+			Enabled:          true,
+			Enforcement:      openid4vp.BindingEnforcementWarn,
+			KeyBindingEnabled: true,
 			BindingAttributes: []openid4vp.BindingAttributeConfig{
 				{Paths: []string{"sub"}},
 			},

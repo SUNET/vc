@@ -572,15 +572,15 @@ persisted in the database.
 
 > **Path:** `.apigw.remotes.<remote name>`
 
-| Field           | Type       | Description                                           | Example                               | Default | Required |
-| --------------- | ---------- | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
-| `type`          | `object`   | API protocol type                                     | -                                     | -       | Yes      |
-| `base_url`      | `string`   | Base URL of the API endpoint                          | `"https://api.ladok.se/eduapi"`       | -       | Yes      |
-| `token_url`     | `string`   | OAuth 2.0 token endpoint for Client Credentials Grant | `"https://api.ladok.se/oauth2/token"` | -       | Yes      |
-| `client_id`     | `string`   | OAuth 2.0 client identifier                           | -                                     | -       | Yes      |
-| `client_secret` | `string`   | OAuth 2.0 client secret                               | -                                     | -       | Yes      |
-| `scopes`        | `[]string` | OAuth 2.0 scopes to request                           | -                                     | -       | No       |
-| `timeout`       | `duration` | HTTP client timeout                                   | -                                     | `10s`   | No       |
+| Field           | Type                     | Description                                           | Example                               | Default | Required |
+| --------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
+| `type`          | `string` (eduapi\|ooapi) | API protocol type                                     | -                                     | -       | Yes      |
+| `base_url`      | `string`                 | Base URL of the API endpoint                          | `"https://api.ladok.se/eduapi"`       | -       | Yes      |
+| `token_url`     | `string`                 | OAuth 2.0 token endpoint for Client Credentials Grant | `"https://api.ladok.se/oauth2/token"` | -       | Yes      |
+| `client_id`     | `string`                 | OAuth 2.0 client identifier                           | -                                     | -       | Yes      |
+| `client_secret` | `string`                 | OAuth 2.0 client secret                               | -                                     | -       | Yes      |
+| `scopes`        | `[]string`               | OAuth 2.0 scopes to request                           | -                                     | -       | No       |
+| `timeout`       | `duration`               | HTTP client timeout                                   | -                                     | `10s`   | No       |
 
 ### `delivery`
 
@@ -1100,12 +1100,12 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.combined_presentation`
 
-| Field                | Type     | Description                                                                                                                                                                                                                                                                 | Example | Default | Required |
-| -------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `enabled`            | `bool`   | Enabled activates combined presentation binding verification.                                                                                                                                                                                                               | -       | -       | No       |
-| `enforcement`        | `object` | Enforcement determines how binding verification results are handled: - "enforce": reject the presentation if binding cannot be established - "warn": log a warning but allow the presentation through (per ARF 3.0 ACP_08) - "disabled": skip binding verification entirely | -       | `warn`  | No       |
-| `binding_attributes` | `array`  | Attribute-based binding checks.                                                                                                                                                                                                                                             | -       | -       | No       |
-| `key_binding`        | `object` | Key-based binding checks.                                                                                                                                                                                                                                                   | -       | -       | No       |
+| Field                | Type                               | Description                                                                                                                                                                                                                                                                 | Example | Default | Required |
+| -------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`            | `bool`                             | Enabled activates combined presentation binding verification.                                                                                                                                                                                                               | -       | -       | No       |
+| `enforcement`        | `string` (enforce\|warn\|disabled) | Enforcement determines how binding verification results are handled: - "enforce": reject the presentation if binding cannot be established - "warn": log a warning but allow the presentation through (per ARF 3.0 ACP_08) - "disabled": skip binding verification entirely | -       | `warn`  | No       |
+| `binding_attributes` | `array`                            | Attribute-based binding checks.                                                                                                                                                                                                                                             | -       | -       | No       |
+| `key_binding`        | `object`                           | Key-based binding checks.                                                                                                                                                                                                                                                   | -       | -       | No       |
 
 ### `binding_attributes` entry
 
@@ -1119,10 +1119,9 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.combined_presentation.key_binding`
 
-| Field          | Type   | Description                                                                         | Example | Default | Required |
-| -------------- | ------ | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `enabled`      | `bool` | Enabled activates key-based binding (cnf.jwk / device key comparison).              | -       | -       | No       |
-| `cross_format` | `bool` | Comparing keys across credential formats (e.g., SD-JWT cnf.jwk vs mDoc device key). | -       | -       | No       |
+| Field     | Type   | Description                                                                                                                                                                                                  | Example | Default | Required |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `enabled` | `bool` | Enabled activates key-based binding (cnf.jwk / device key comparison). Cross-format comparison (SD-JWT cnf.jwk vs mDoc device key) is always supported since both are converted to RFC 7638 JWK thumbprints. | -       | -       | No       |
 
 ## `registry` (Top-level)
 

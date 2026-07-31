@@ -297,7 +297,11 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		bindingCredentials := make([]openid4vp.VerifiedCredentialBinding, 0, len(authCtx.Scopes))
 		for _, scope := range authCtx.Scopes {
 			for _, cc := range scopeCredentials[scope] {
-				tp, _ := openid4vp.ExtractHolderKeyThumbprint(cc.Credential)
+				tp, err := openid4vp.ExtractHolderKeyThumbprint(cc.Credential)
+				if err != nil {
+					c.log.Error(err, "failed to extract holder key thumbprint", "scope", scope)
+					return nil, fmt.Errorf("failed to extract holder key for scope %s: %w", scope, err)
+				}
 				bindingCredentials = append(bindingCredentials, openid4vp.VerifiedCredentialBinding{
 					Scope:               scope,
 					HolderKeyThumbprint: tp,
@@ -319,13 +323,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				"confidence", bindingResult.HighestConfidence,
 				"results", bindingResult.Results,
 			)
-			if !bindingResult.Bound {
+			if !bindingResult.Valid() {
 				switch c.cfg.Verifier.CombinedPresentation.Enforcement {
 				case openid4vp.BindingEnforcementEnforce:
 					c.log.Error(bindingResult.Err(), "combined presentation binding verification failed")
 					return nil, fmt.Errorf("combined presentation binding verification failed: credentials not bound to same holder")
 				case openid4vp.BindingEnforcementWarn:
-					c.log.Info("combined presentation binding not established (warn mode)", "confidence", bindingResult.HighestConfidence, "err", bindingResult.Err())
+					c.log.Info("combined presentation binding issues detected (warn mode)", "confidence", bindingResult.HighestConfidence, "err", bindingResult.Err())
 				}
 			}
 		}
