@@ -160,9 +160,15 @@ func (c *StatusListChecker) fetchStatusList(ctx context.Context, uri string) ([]
 		return nil, fmt.Errorf("status list request failed with status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response body to 10 MB to prevent memory exhaustion from
+	// a malicious or misconfigured status list endpoint.
+	const maxStatusListSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxStatusListSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if int64(len(body)) > maxStatusListSize {
+		return nil, fmt.Errorf("status list response exceeds maximum size (%d bytes)", maxStatusListSize)
 	}
 
 	contentType := resp.Header.Get("Content-Type")
