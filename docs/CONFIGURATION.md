@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-07-30
+**Generated:** 2026-07-31
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -595,11 +595,13 @@ persisted in the database.
 
 > **Path:** `.apigw.delivery.openid4vci`
 
-| Field                               | Type     | Description                                                                                                                                                                                                                                                                                | Example                             | Default | Required |
-| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------- | -------- |
-| `token_endpoint`                    | `string` | OAuth2 token endpoint URL                                                                                                                                                                                                                                                                  | `"https://verifier.sunet.se/token"` | -       | Yes      |
-| `clients`                           | `object` | OAuth2 client configurations                                                                                                                                                                                                                                                               | -                                   | -       | Yes      |
-| `allow_unverified_client_assertion` | `bool`   | Accepting client_assertion (private_key_jwt) WITHOUT signature verification. This is INSECURE and only intended for conformance testing environments. When false (default), client_assertion is rejected. TODO(security): Remove this flag once full RFC 7523 verification is implemented. | -                                   | `false` | No       |
+| Field                               | Type       | Description                                                                                                                                                                                                                                                                                | Example                             | Default                                                                          | Required |
+| ----------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------------------------------------------------------- | -------- |
+| `token_endpoint`                    | `string`   | OAuth2 token endpoint URL                                                                                                                                                                                                                                                                  | `"https://verifier.sunet.se/token"` | -                                                                                | Yes      |
+| `clients`                           | `object`   | OAuth2 client configurations                                                                                                                                                                                                                                                               | -                                   | -                                                                                | Yes      |
+| `allow_unverified_client_assertion` | `bool`     | Accepting client_assertion (private_key_jwt) WITHOUT signature verification. This is INSECURE and only intended for conformance testing environments. When false (default), client_assertion is rejected. TODO(security): Remove this flag once full RFC 7523 verification is implemented. | -                                   | `false`                                                                          | No       |
+| `grant_types`                       | `[]string` | List of grant types this issuer supports. Supported values: authorization_code, urn:ietf:params:oauth:grant-type:pre-authorized_code, refresh_token                                                                                                                                        | -                                   | `["authorization_code", "urn:ietf:params:oauth:grant-type:pre-authorized_code"]` | No       |
+| `refresh_token_duration`            | `int`      | Refresh token duration in seconds. Only applicable when grant_types includes "refresh_token".                                                                                                                                                                                              | -                                   | `86400`                                                                          | No       |
 
 ### `clients` entry
 
@@ -900,6 +902,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | `trust`                  | `object` | Trust evaluation configuration                                                                                                                                                                                                                                                          | -                                                          | -              | No       |
 | `federation`             | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                                                                                       | -                                                          | -              | No       |
 | `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -              | No       |
+| `combined_presentation`  | `object` | Combined presentation verification (ARF 3.0 §6.6.3.10). When multiple credentials are presented, this verifies they belong to the same holder.                                                                                                                                          | -                                                          | -              | No       |
 
 ### `preferred_vp_formats`
 
@@ -1092,6 +1095,34 @@ These clients are checked in addition to dynamically registered clients stored i
 | `rule`  | `string`   | Validation rule to apply, e.g., "age_over".     | `"age_over"`    | -       | Yes      |
 | `path`  | `[]string` | Claim path to validate, e.g., ["birthdate"].    | `["birthdate"]` | -       | Yes      |
 | `value` | `object`   | Threshold or expected value for the validation. | `18`            | -       | Yes      |
+
+### `combined_presentation`
+
+> **Path:** `.verifier.combined_presentation`
+
+| Field                | Type     | Description                                                                                                                                                                                                                                                                 | Example | Default | Required |
+| -------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`            | `bool`   | Enabled activates combined presentation binding verification.                                                                                                                                                                                                               | -       | -       | No       |
+| `enforcement`        | `object` | Enforcement determines how binding verification results are handled: - "enforce": reject the presentation if binding cannot be established - "warn": log a warning but allow the presentation through (per ARF 3.0 ACP_08) - "disabled": skip binding verification entirely | -       | `warn`  | No       |
+| `binding_attributes` | `array`  | Attribute-based binding checks.                                                                                                                                                                                                                                             | -       | -       | No       |
+| `key_binding`        | `object` | Key-based binding checks.                                                                                                                                                                                                                                                   | -       | -       | No       |
+
+### `binding_attributes` entry
+
+> **Path:** `.verifier.combined_presentation.binding_attributes[]`
+
+| Field   | Type       | Description                                                         | Example                                                    | Default | Required |
+| ------- | ---------- | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
+| `paths` | `[]string` | Claim paths that must ALL match across credentials (AND semantics). | `["family_name", "birth_date", "place_of_birth.locality"]` | -       | Yes      |
+
+### `key_binding`
+
+> **Path:** `.verifier.combined_presentation.key_binding`
+
+| Field          | Type   | Description                                                                         | Example | Default | Required |
+| -------------- | ------ | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`      | `bool` | Enabled activates key-based binding (cnf.jwk / device key comparison).              | -       | -       | No       |
+| `cross_format` | `bool` | Comparing keys across credential formats (e.g., SD-JWT cnf.jwk vs mDoc device key). | -       | -       | No       |
 
 ## `registry` (Top-level)
 
