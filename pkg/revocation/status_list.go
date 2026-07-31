@@ -140,6 +140,14 @@ func (c *StatusListChecker) fetchStatusList(ctx context.Context, uri string) ([]
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Reject non-HTTP(S) schemes to reduce SSRF surface
+	switch req.URL.Scheme {
+	case "http", "https":
+		// allowed
+	default:
+		return nil, fmt.Errorf("unsupported status list URI scheme: %q", req.URL.Scheme)
+	}
+
 	req.Header.Set("Accept", fmt.Sprintf("%s, %s", tokenstatuslist.MediaTypeJWT, tokenstatuslist.MediaTypeCWT))
 
 	resp, err := c.httpClient.Do(req)
@@ -296,7 +304,12 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte)
 		return c.keyResolver.ResolveKey(ctx, issuer, kid)
 	}
 
-	token, err := jwt.Parse(tokenString, keyFunc)
+	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{
+		"ES256", "ES384", "ES512",
+		"RS256", "RS384", "RS512",
+		"PS256", "PS384", "PS512",
+		"EdDSA",
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify JWT: %w", err)
 	}
