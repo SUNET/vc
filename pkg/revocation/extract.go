@@ -33,6 +33,9 @@ func ExtractStatusListReference(claims map[string]any) *Reference {
 	var index int64
 	switch idx := statusList["idx"].(type) {
 	case float64:
+		if idx != float64(int64(idx)) {
+			return nil // Non-integer index
+		}
 		index = int64(idx)
 	case int64:
 		index = idx

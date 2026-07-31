@@ -158,24 +158,24 @@ func (c *StatusListChecker) fetchStatusList(ctx context.Context, uri string) ([]
 	}
 
 	contentType := resp.Header.Get("Content-Type")
-	return c.parseStatusListToken(body, contentType)
+	return c.parseStatusListToken(ctx, body, contentType)
 }
 
-func (c *StatusListChecker) parseStatusListToken(data []byte, contentType string) ([]uint8, error) {
+func (c *StatusListChecker) parseStatusListToken(ctx context.Context, data []byte, contentType string) ([]uint8, error) {
 	switch contentType {
 	case tokenstatuslist.MediaTypeCWT:
-		return c.parseCWTStatusList(data)
+		return c.parseCWTStatusList(ctx, data)
 	case tokenstatuslist.MediaTypeJWT:
-		return c.parseJWTStatusList(data)
+		return c.parseJWTStatusList(ctx, data)
 	default:
 		if len(data) > 0 && data[0] == 0xD2 {
-			return c.parseCWTStatusList(data)
+			return c.parseCWTStatusList(ctx, data)
 		}
-		return c.parseJWTStatusList(data)
+		return c.parseJWTStatusList(ctx, data)
 	}
 }
 
-func (c *StatusListChecker) parseCWTStatusList(data []byte) ([]uint8, error) {
+func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte) ([]uint8, error) {
 	// Decode COSE_Sign1 (CBOR Tag 18)
 	var coseTag cbor.Tag
 	if err := cbor.Unmarshal(data, &coseTag); err != nil {
@@ -220,7 +220,7 @@ func (c *StatusListChecker) parseCWTStatusList(data []byte) ([]uint8, error) {
 	issuer, _ := claims[1].(string) // CWT claim 1 = iss
 
 	// Resolve signing key and verify signature
-	key, err := c.keyResolver.ResolveKey(context.Background(), issuer, kid)
+	key, err := c.keyResolver.ResolveKey(ctx, issuer, kid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve CWT signing key: %w", err)
 	}
@@ -278,7 +278,7 @@ func (c *StatusListChecker) parseCWTStatusList(data []byte) ([]uint8, error) {
 	return tokenstatuslist.DecompressStatuses(lstBytes)
 }
 
-func (c *StatusListChecker) parseJWTStatusList(data []byte) ([]uint8, error) {
+func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte) ([]uint8, error) {
 	tokenString := string(data)
 
 	if c.keyResolver == nil {
@@ -293,7 +293,7 @@ func (c *StatusListChecker) parseJWTStatusList(data []byte) ([]uint8, error) {
 		if issuer == "" {
 			return nil, errors.New("status list token missing iss claim")
 		}
-		return c.keyResolver.ResolveKey(context.Background(), issuer, kid)
+		return c.keyResolver.ResolveKey(ctx, issuer, kid)
 	}
 
 	token, err := jwt.Parse(tokenString, keyFunc)

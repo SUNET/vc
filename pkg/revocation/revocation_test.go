@@ -85,7 +85,8 @@ func TestRegistry_Validate(t *testing.T) {
 
 	t.Run("no status claim returns nil", func(t *testing.T) {
 		statusCache := cache.NewMemoryCache[[]uint8](5 * time.Minute)
-		checker, _ := NewStatusListChecker(WithCache(statusCache))
+		checker, err := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(allowAllKeyResolver{}))
+		require.NoError(t, err)
 		r := NewRegistry(checker)
 		result, err := r.Validate(t.Context(), map[string]any{"iss": "x"})
 		assert.NoError(t, err)
