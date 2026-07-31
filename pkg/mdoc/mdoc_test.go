@@ -217,7 +217,7 @@ func TestDrivingPrivilege_AllCategories(t *testing.T) {
 }
 
 func TestDeviceKeyInfo(t *testing.T) {
-	deviceKey := []byte{0xA1, 0x01, 0x02} // Sample COSE_Key
+	deviceKey := COSEKey{Kty: 2, Crv: CurveP256, X: []byte{0x01, 0x02, 0x03}, Y: []byte{0x04, 0x05, 0x06}}
 
 	info := DeviceKeyInfo{
 		DeviceKey: deviceKey,
@@ -232,8 +232,8 @@ func TestDeviceKeyInfo(t *testing.T) {
 		},
 	}
 
-	if len(info.DeviceKey) != 3 {
-		t.Errorf("DeviceKey length = %d, want 3", len(info.DeviceKey))
+	if len(info.DeviceKey.X) != 3 {
+		t.Errorf("DeviceKey.X length = %d, want 3", len(info.DeviceKey.X))
 	}
 	if len(info.KeyAuthorizations.NameSpaces) != 1 {
 		t.Errorf("NameSpaces length = %d, want 1", len(info.KeyAuthorizations.NameSpaces))
@@ -277,7 +277,7 @@ func TestMobileSecurityObject(t *testing.T) {
 			},
 		},
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: []byte{0xA1, 0x01, 0x02},
+			DeviceKey: COSEKey{Kty: 2, Crv: CurveP256, X: []byte{0xA1, 0x01, 0x02}},
 		},
 		DocType: DocType,
 		ValidityInfo: ValidityInfo{

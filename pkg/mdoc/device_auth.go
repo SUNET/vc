@@ -352,22 +352,11 @@ func ExtractDeviceKeyFromMSO(mso *MobileSecurityObject) (crypto.PublicKey, error
 		return nil, errors.New("MSO is nil")
 	}
 
-	if len(mso.DeviceKeyInfo.DeviceKey) == 0 {
+	if len(mso.DeviceKeyInfo.DeviceKey.X) == 0 {
 		return nil, errors.New("device key not present in MSO")
 	}
 
-	encoder, err := NewCBOREncoder()
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse the COSE_Key
-	var coseKey COSEKey
-	if err := encoder.Unmarshal(mso.DeviceKeyInfo.DeviceKey, &coseKey); err != nil {
-		return nil, fmt.Errorf("failed to parse device COSE key: %w", err)
-	}
-
-	return coseKey.ToPublicKey()
+	return mso.DeviceKeyInfo.DeviceKey.ToPublicKey()
 }
 
 // VerifyDeviceAuth verifies device authentication as part of document verification.

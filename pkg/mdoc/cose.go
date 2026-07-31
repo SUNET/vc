@@ -275,6 +275,18 @@ func NewCOSEHeaders() *COSEHeaders {
 }
 
 // Sign creates a COSE_Sign1 signature.
+//
+// x5chain (when present) goes in the UNPROTECTED header, not protected - per
+// RFC 9360 and the ISO 18013-5 mdoc convention followed by real-world
+// verifiers (e.g. Google's isomdoc), the protected header for an mdoc
+// issuerAuth/deviceAuth COSE_Sign1 contains only the algorithm (label 1);
+// the certificate chain isn't itself integrity-critical (trust comes from
+// the signature verifying against the chain's leaf key, not from the
+// chain's placement) and strict verifiers reject a protected header with
+// any additional element. Putting it in protected was a real, confirmed bug
+// (caught by Google's public https://digital-credentials.dev/ demo, which
+// rejected our issued mdocs with "issuerAuth COSE_Sign1 protected contains
+// too many elements").
 func Sign1(
 	payload []byte,
 	signer crypto.Signer,
@@ -282,12 +294,22 @@ func Sign1(
 	x5chain [][]byte,
 	externalAAD []byte,
 ) (*COSESign1, error) {
+	// A nil Go []byte and an empty (len-0, non-nil) one both mean "no AAD",
+	// but cbor.Marshal encodes them differently - nil as CBOR null (0xf6),
+	// empty as an empty byte string (0x40, i.e. h''). Sig_structure's
+	// external_aad element MUST be h'' per RFC 8152/9052 - a verifier
+	// reconstructing it as an empty byte string (as every real one does,
+	// including Google's isomdoc, which is what caught this) computes
+	// different bytes-to-be-signed than what a nil-produced signature was
+	// actually computed over, so the signature fails to verify even though
+	// nothing else about it is wrong. Normalizing here means no caller has
+	// to remember this footgun.
+	if externalAAD == nil {
+		externalAAD = []byte{}
+	}
+
 	headers := NewCOSEHeaders()
 	headers.Protected[HeaderAlgorithm] = algorithm
-
-	if len(x5chain) > 0 {
-		headers.Protected[HeaderX5Chain] = x5chain
-	}
 
 	protectedBytes, err := cbor.Marshal(headers.Protected)
 	if err != nil {
@@ -313,9 +335,14 @@ func Sign1(
 		return nil, fmt.Errorf("signing failed: %w", err)
 	}
 
+	unprotected := make(map[any]any)
+	if len(x5chain) > 0 {
+		unprotected[HeaderX5Chain] = x5chain
+	}
+
 	sign1 := &COSESign1{
 		Protected:   protectedBytes,
-		Unprotected: make(map[any]any),
+		Unprotected: unprotected,
 		Payload:     payload,
 		Signature:   signature,
 	}
@@ -409,6 +436,11 @@ func parseASN1Signature(data []byte) (*big.Int, *big.Int, error) {
 
 // Verify1 verifies a COSE_Sign1 signature.
 func Verify1(sign1 *COSESign1, payload []byte, pubKey crypto.PublicKey, externalAAD []byte) error {
+	// Must match Sign1's own nil-vs-empty normalization - see its doc comment.
+	if externalAAD == nil {
+		externalAAD = []byte{}
+	}
+
 	var headers map[int64]any
 	if err := cbor.Unmarshal(sign1.Protected, &headers); err != nil {
 		return fmt.Errorf("failed to decode protected headers: %w", err)
@@ -670,20 +702,49 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 	return nil
 }
 
+// lookupUnprotectedHeader looks up a COSE header label in an already-decoded
+// unprotected-header map. cbor.Unmarshal into an `any`-typed map decodes a
+// CBOR positive integer key as uint64 (not int64), so a plain `m[label]`
+// lookup with an int64 label constant would silently never match - this
+// checks both representations (plus plain int, for maps built directly in
+// Go code rather than decoded from CBOR).
+func lookupUnprotectedHeader(m map[any]any, label int64) (any, bool) {
+	if v, ok := m[label]; ok {
+		return v, true
+	}
+	if v, ok := m[uint64(label)]; ok {
+		return v, true
+	}
+	if v, ok := m[int(label)]; ok {
+		return v, true
+	}
+	return nil, false
+}
+
 // GetCertificateChainFromSign1 extracts the x5chain from a COSE_Sign1.
 // If ext is provided, certificates are parsed using extension-aware parsing
 // (e.g. to support brainpool curves).
+//
+// Checks the unprotected header first (the correct location per RFC 9360 -
+// see Sign1's doc comment) and falls back to protected for compatibility
+// with mdocs issued before that fix.
 func GetCertificateChainFromSign1(sign1 *COSESign1, ext ...*cryptoutil.Extensions) ([]*x509.Certificate, error) {
-	var headers map[int64]any
-	if err := cbor.Unmarshal(sign1.Protected, &headers); err != nil {
-		return nil, fmt.Errorf("failed to decode protected headers: %w", err)
+	x5chainRaw, ok := lookupUnprotectedHeader(sign1.Unprotected, HeaderX5Chain)
+	if !ok {
+		x5chainRaw, ok = lookupUnprotectedHeader(sign1.Unprotected, HeaderX5ChainAlt)
 	}
 
-	x5chainRaw, ok := headers[HeaderX5Chain]
 	if !ok {
-		x5chainRaw, ok = headers[HeaderX5ChainAlt]
+		var headers map[int64]any
+		if err := cbor.Unmarshal(sign1.Protected, &headers); err != nil {
+			return nil, fmt.Errorf("failed to decode protected headers: %w", err)
+		}
+		x5chainRaw, ok = headers[HeaderX5Chain]
 		if !ok {
-			return nil, fmt.Errorf("no x5chain in headers")
+			x5chainRaw, ok = headers[HeaderX5ChainAlt]
+			if !ok {
+				return nil, fmt.Errorf("no x5chain in headers")
+			}
 		}
 	}
 
@@ -692,8 +753,12 @@ func GetCertificateChainFromSign1(sign1 *COSESign1, ext ...*cryptoutil.Extension
 	case []byte:
 		// Single certificate
 		certBytes = [][]byte{v}
+	case [][]byte:
+		// Array of certificates, built directly in Go (not yet round-tripped
+		// through CBOR encode/decode - see Sign1).
+		certBytes = v
 	case []any:
-		// Array of certificates
+		// Array of certificates, as decoded generically from CBOR.
 		for _, c := range v {
 			b, ok := c.([]byte)
 			if !ok {

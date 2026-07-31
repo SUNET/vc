@@ -473,18 +473,13 @@ func TestExtractDeviceKeyFromMSO(t *testing.T) {
 		t.Fatalf("failed to create COSE key: %v", err)
 	}
 
-	keyBytes, err := coseKey.Bytes()
-	if err != nil {
-		t.Fatalf("failed to encode COSE key: %v", err)
-	}
-
 	// Create MSO with device key
 	mso := &MobileSecurityObject{
 		Version:         "1.0",
 		DigestAlgorithm: "SHA-256",
 		DocType:         DocType,
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: keyBytes,
+			DeviceKey: *coseKey,
 		},
 	}
 
@@ -642,7 +637,6 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create device COSE key: %v", err)
 	}
-	deviceKeyBytes, _ := deviceCOSEKey.Bytes()
 
 	// Create MSO
 	mso := &MobileSecurityObject{
@@ -650,7 +644,7 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 		DigestAlgorithm: "SHA-256",
 		DocType:         DocType,
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+			DeviceKey: *deviceCOSEKey,
 		},
 		ValidityInfo: ValidityInfo{
 			Signed:         time.Now(),
@@ -717,11 +711,10 @@ func TestVerifier_VerifyDeviceAuth_NoDeviceAuth(t *testing.T) {
 	// Create minimal MSO
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	deviceCOSEKey, _ := NewCOSEKeyFromECDSA(&deviceKey.PublicKey)
-	deviceKeyBytes, _ := deviceCOSEKey.Bytes()
 
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+			DeviceKey: *deviceCOSEKey,
 		},
 	}
 
@@ -748,11 +741,10 @@ func TestVerifier_VerifyDeviceAuth_WrongKey(t *testing.T) {
 
 	// Create MSO with WRONG key (not the one used to sign)
 	wrongCOSEKey, _ := NewCOSEKeyFromECDSA(&wrongKey.PublicKey)
-	wrongKeyBytes, _ := wrongCOSEKey.Bytes()
 
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: wrongKeyBytes,
+			DeviceKey: *wrongCOSEKey,
 		},
 	}
 
@@ -807,11 +799,10 @@ func TestVerifier_VerifyDeviceAuth_MACRequiresSessionKey(t *testing.T) {
 	// Create MSO
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	deviceCOSEKey, _ := NewCOSEKeyFromECDSA(&deviceKey.PublicKey)
-	deviceKeyBytes, _ := deviceCOSEKey.Bytes()
 
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+			DeviceKey: *deviceCOSEKey,
 		},
 	}
 
@@ -963,10 +954,11 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 		nil,
 	)
 
-	// Create MSO with invalid device key bytes
+	// Create MSO with an absent device key (zero-value COSEKey - no X
+	// coordinate) - ExtractDeviceKeyFromMSO's "not present" check catches this.
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: []byte{0x01, 0x02, 0x03}, // Invalid CBOR
+			DeviceKey: COSEKey{},
 		},
 	}
 
