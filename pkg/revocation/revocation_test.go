@@ -2,7 +2,9 @@ package revocation
 
 import (
 	"context"
-	"encoding/base64"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,15 +18,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// allowAllKeyResolver is a test helper that accepts unsigned tokens (alg: none).
-type allowAllKeyResolver struct{}
-
-func (allowAllKeyResolver) ResolveKey(_ context.Context, _, _ string) (any, error) {
-	return jwt.UnsafeAllowNoneSignatureType, nil
+// testKeyResolver returns a fixed key for any issuer/kid lookup.
+type testKeyResolver struct {
+	key any
 }
 
-func base64RawURL(data []byte) string {
-	return base64.RawURLEncoding.EncodeToString(data)
+func (r testKeyResolver) ResolveKey(_ context.Context, _, _ string) (any, error) {
+	return r.key, nil
 }
 
 func TestExtractStatusListReference(t *testing.T) {
@@ -85,7 +85,7 @@ func TestRegistry_Validate(t *testing.T) {
 
 	t.Run("no status claim returns nil", func(t *testing.T) {
 		statusCache := cache.NewMemoryCache[[]uint8](5 * time.Minute)
-		checker, err := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(allowAllKeyResolver{}))
+		checker, err := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(testKeyResolver{}))
 		require.NoError(t, err)
 		r := NewRegistry(checker)
 		result, err := r.Validate(t.Context(), map[string]any{"iss": "x"})
@@ -98,18 +98,25 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	// Create a test status list with entry 0=valid, 1=revoked, 2=suspended
 	statuses := []uint8{tokenstatuslist.StatusValid, tokenstatuslist.StatusInvalid, tokenstatuslist.StatusSuspended}
 
-	// Compress and encode to create a raw JWT payload (no signature verification in this test)
 	encoded, err := tokenstatuslist.CompressAndEncode(statuses)
 	require.NoError(t, err)
 
-	// Build a minimal unsigned JWT (header.payload.signature) for testing
-	payload := `{"iss":"https://registry.test","status_list":{"lst":"` + encoded + `"}}`
-	fakeJWT := base64RawURL([]byte(`{"alg":"none"}`)) + "." + base64RawURL([]byte(payload)) + "."
+	// Generate an EC key pair for signing the status list token
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	// Create a properly signed JWT status list token
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"iss":         "https://registry.test",
+		"status_list": map[string]any{"lst": encoded},
+	})
+	signedJWT, err := token.SignedString(privateKey)
+	require.NoError(t, err)
 
 	// Serve the status list token
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
-		_, _ = w.Write([]byte(fakeJWT))
+		_, _ = w.Write([]byte(signedJWT))
 	}))
 	defer server.Close()
 
@@ -117,9 +124,7 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	checker, err := NewStatusListChecker(
 		WithCache(statusCache),
 		WithHTTPClient(server.Client()),
-		// In production, the key resolver verifies the issuer's signature.
-		// For testing, we use an allow-all resolver.
-		WithKeyResolver(allowAllKeyResolver{}),
+		WithKeyResolver(testKeyResolver{key: &privateKey.PublicKey}),
 	)
 	require.NoError(t, err)
 
@@ -159,7 +164,7 @@ func TestStatusListChecker_Unreachable(t *testing.T) {
 	checker, err := NewStatusListChecker(
 		WithCache(statusCache),
 		WithHTTPClient(&http.Client{Timeout: 1 * time.Second}),
-		WithKeyResolver(allowAllKeyResolver{}),
+		WithKeyResolver(testKeyResolver{}),
 	)
 	require.NoError(t, err)
 
@@ -170,7 +175,7 @@ func TestStatusListChecker_Unreachable(t *testing.T) {
 
 func TestStatusListChecker_Supports(t *testing.T) {
 	statusCache := cache.NewMemoryCache[[]uint8](5 * time.Minute)
-	checker, _ := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(allowAllKeyResolver{}))
+	checker, _ := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(testKeyResolver{}))
 
 	assert.True(t, checker.Supports(SchemeStatusList))
 	assert.False(t, checker.Supports(Scheme("ocsp")))
