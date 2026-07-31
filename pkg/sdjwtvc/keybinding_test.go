@@ -291,7 +291,7 @@ func TestCreateKeyBindingJWT_WithTransactionDataHashes(t *testing.T) {
 	t.Run("includes_transaction_data_hashes", func(t *testing.T) {
 		hashes := []string{"hash_aaa", "hash_bbb"}
 		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
-			WithTransactionDataHashes(hashes))
+			WithTransactionDataHashes(hashes, "sha-256"))
 		if err != nil {
 			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestCreateKeyBindingJWT_WithTransactionDataHashes(t *testing.T) {
 
 	t.Run("omits_claims_when_empty_hashes", func(t *testing.T) {
 		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
-			WithTransactionDataHashes([]string{}))
+			WithTransactionDataHashes([]string{}, "sha-256"))
 		if err != nil {
 			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
 		}
@@ -351,7 +351,7 @@ func TestCreateKeyBindingJWT_WithTransactionDataHashes(t *testing.T) {
 	t.Run("preserves_standard_claims", func(t *testing.T) {
 		hashes := []string{"hash_one"}
 		kbJWT, err := CreateKeyBindingJWT(sdJWT, nonce, audience, holderPrivateKey, alg,
-			WithTransactionDataHashes(hashes))
+			WithTransactionDataHashes(hashes, "sha-256"))
 		if err != nil {
 			t.Fatalf("CreateKeyBindingJWT failed: %v", err)
 		}

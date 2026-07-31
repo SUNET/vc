@@ -62,7 +62,7 @@ func CreateKeyBindingJWT(sdJWT, nonce, audience string, holderPrivateKey any, ha
 	}
 	if len(kbOpts.transactionDataHashes) > 0 {
 		claims["transaction_data_hashes"] = kbOpts.transactionDataHashes
-		claims["transaction_data_hashes_alg"] = hashAlg
+		claims["transaction_data_hashes_alg"] = kbOpts.transactionDataHashesAlg
 	}
 
 	// Determine signing method from private key
@@ -135,7 +135,8 @@ func CombineWithKeyBinding(sdJWT string, kbJWT string) string {
 
 // keyBindingOptions holds optional parameters for KB-JWT creation.
 type keyBindingOptions struct {
-	transactionDataHashes []string
+	transactionDataHashes    []string
+	transactionDataHashesAlg string
 }
 
 // KeyBindingOption configures optional KB-JWT parameters.
@@ -143,10 +144,13 @@ type KeyBindingOption func(*keyBindingOptions)
 
 // WithTransactionDataHashes adds transaction_data_hashes and
 // transaction_data_hashes_alg claims to the KB-JWT per OpenID4VP §8.4.
+// hashAlg identifies the algorithm used to compute the hashes (e.g. "sha-256");
+// it is independent of the SD-JWT's _sd_alg.
 // Each hash must be the base64url-encoded digest of the corresponding
 // base64url-encoded TransactionData entry from the authorization request.
-func WithTransactionDataHashes(hashes []string) KeyBindingOption {
+func WithTransactionDataHashes(hashes []string, hashAlg string) KeyBindingOption {
 	return func(o *keyBindingOptions) {
 		o.transactionDataHashes = hashes
+		o.transactionDataHashesAlg = hashAlg
 	}
 }
