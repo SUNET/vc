@@ -306,7 +306,7 @@ func (c *Client) buildVPToken(ctx context.Context, credentials []string, ro *ope
 
 		// For SD-JWT VCs, append a key binding JWT
 		if strings.Contains(rawCred, "~") {
-			kbJWT, err := c.createKeyBindingJWT(ctx, ro.Nonce, ro.ClientID, rawCred, ro.TransactionData)
+			kbJWT, err := c.createKeyBindingJWT(ro.Nonce, ro.ClientID, rawCred, ro.TransactionData)
 			if err != nil {
 				return "", fmt.Errorf("creating key binding JWT: %w", err)
 			}
@@ -335,10 +335,7 @@ func (c *Client) buildVPToken(ctx context.Context, credentials []string, ro *ope
 }
 
 // createKeyBindingJWT creates a key binding JWT for SD-JWT presentation
-func (c *Client) createKeyBindingJWT(ctx context.Context, nonce, audience, sdJWT string, transactionData []openid4vp.TransactionData) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
+func (c *Client) createKeyBindingJWT(nonce, audience, sdJWT string, transactionData []openid4vp.TransactionData) (string, error) {
 	signingMethod, alg := jose.GetSigningMethodFromKey(c.signingKey)
 	_ = alg
 

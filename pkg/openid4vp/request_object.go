@@ -149,7 +149,9 @@ func HashTransactionData(txData []TransactionData, hashAlg string) (hashes []str
 			return nil, fmt.Errorf("encoding transaction_data[%d]: %w", i, err)
 		}
 		h.Reset()
-		h.Write([]byte(encoded))
+		if _, err := h.Write([]byte(encoded)); err != nil {
+			return nil, fmt.Errorf("hashing transaction_data[%d]: %w", i, err)
+		}
 		hashes = append(hashes, base64.RawURLEncoding.EncodeToString(h.Sum(nil)))
 	}
 	return hashes, nil

@@ -221,7 +221,10 @@ func (v *VPTokenValidator) validateTransactionData(parsed *sdjwtvc.ParsedCredent
 	// Re-compute expected hashes from the original transaction data
 	expectedHashes, err := HashTransactionData(v.TransactionData, hashAlg)
 	if err != nil {
-		return fmt.Errorf("computing expected transaction data hashes: %w", err)
+		return &ErrorResponse{
+			ErrorCode:        ErrorInvalidTransactionData,
+			ErrorDescription: fmt.Sprintf("unsupported transaction_data_hashes_alg %q: %v", hashAlg, err),
+		}
 	}
 
 	for i, raw := range hashesRaw {
