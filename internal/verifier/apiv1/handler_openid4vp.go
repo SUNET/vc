@@ -42,6 +42,16 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		return "", fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
 
+	// Encode transaction data structs into base64url strings for the wire format
+	var encodedTxData []string
+	for i, td := range transactionData {
+		encoded, err := td.Base64Encode()
+		if err != nil {
+			return "", fmt.Errorf("encoding transaction_data[%d]: %w", i, err)
+		}
+		encodedTxData = append(encodedTxData, encoded)
+	}
+
 	requestObject := &openid4vp.RequestObject{
 		ISS:             c.cfg.Verifier.Outbound.OIDCProvider.Issuer,
 		AUD:             "https://self-issued.me/v2",
@@ -53,7 +63,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		ResponseURI:     responseURI,
 		State:           sessionID,
 		DCQLQuery:       dcqlQuery,
-		TransactionData: transactionData,
+		TransactionData: encodedTxData,
 	}
 
 	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled

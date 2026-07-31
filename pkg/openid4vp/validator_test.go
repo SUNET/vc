@@ -510,14 +510,26 @@ func createTestVPTokenWithTxHashes(t *testing.T, nonce, aud string, hashes []str
 	return sdJWT + "~" + kbJWT
 }
 
+// encodeTxData encodes TransactionData structs into raw base64url strings for tests.
+func encodeTxData(t *testing.T, txData []TransactionData) []string {
+	t.Helper()
+	raw := make([]string, 0, len(txData))
+	for i := range txData {
+		encoded, err := txData[i].Base64Encode()
+		require.NoError(t, err, "encoding transaction_data[%d]", i)
+		raw = append(raw, encoded)
+	}
+	return raw
+}
+
 func TestVPTokenValidator_TransactionData_Valid(t *testing.T) {
 	nonce := "test-nonce-123"
 	clientID := "https://verifier.example.com"
 
-	txData := []TransactionData{
+	raw := encodeTxData(t, []TransactionData{
 		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
-	}
-	hashes, err := HashTransactionData(txData, "sha-256")
+	})
+	hashes, err := HashTransactionData(raw, "sha-256")
 	require.NoError(t, err)
 
 	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, hashes, "sha-256")
@@ -525,7 +537,7 @@ func TestVPTokenValidator_TransactionData_Valid(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		TransactionData: txData,
+		TransactionData: raw,
 	}
 
 	err = validator.Validate(vpToken)
@@ -536,9 +548,9 @@ func TestVPTokenValidator_TransactionData_Missing(t *testing.T) {
 	nonce := "test-nonce-123"
 	clientID := "https://verifier.example.com"
 
-	txData := []TransactionData{
+	raw := encodeTxData(t, []TransactionData{
 		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
-	}
+	})
 
 	// KB-JWT has no transaction_data_hashes
 	vpToken := createTestVPToken(t, nonce, clientID, true)
@@ -546,7 +558,7 @@ func TestVPTokenValidator_TransactionData_Missing(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		TransactionData: txData,
+		TransactionData: raw,
 	}
 
 	err := validator.Validate(vpToken)
@@ -558,15 +570,15 @@ func TestVPTokenValidator_TransactionData_Mismatch(t *testing.T) {
 	nonce := "test-nonce-123"
 	clientID := "https://verifier.example.com"
 
-	txData := []TransactionData{
+	raw := encodeTxData(t, []TransactionData{
 		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
-	}
+	})
 
 	// Create a VP with wrong hashes (hashed from different transaction data)
-	wrongTxData := []TransactionData{
+	wrongRaw := encodeTxData(t, []TransactionData{
 		{Type: "document_signing", CredentialIDS: []string{"eudi_pid"}},
-	}
-	wrongHashes, err := HashTransactionData(wrongTxData, "sha-256")
+	})
+	wrongHashes, err := HashTransactionData(wrongRaw, "sha-256")
 	require.NoError(t, err)
 
 	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, wrongHashes, "sha-256")
@@ -574,7 +586,7 @@ func TestVPTokenValidator_TransactionData_Mismatch(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		TransactionData: txData,
+		TransactionData: raw,
 	}
 
 	err = validator.Validate(vpToken)
@@ -586,13 +598,12 @@ func TestVPTokenValidator_TransactionData_CountMismatch(t *testing.T) {
 	nonce := "test-nonce-123"
 	clientID := "https://verifier.example.com"
 
-	txData := []TransactionData{
+	raw := encodeTxData(t, []TransactionData{
 		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
 		{Type: "sca", CredentialIDS: []string{"eudi_pid"}},
-	}
+	})
 	// Only hash the first one — count mismatch
-	singleTxData := []TransactionData{txData[0]}
-	hashes, err := HashTransactionData(singleTxData, "sha-256")
+	hashes, err := HashTransactionData(raw[:1], "sha-256")
 	require.NoError(t, err)
 
 	vpToken := createTestVPTokenWithTxHashes(t, nonce, clientID, hashes, "sha-256")
@@ -600,7 +611,7 @@ func TestVPTokenValidator_TransactionData_CountMismatch(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		TransactionData: txData,
+		TransactionData: raw,
 	}
 
 	err = validator.Validate(vpToken)
@@ -618,7 +629,6 @@ func TestVPTokenValidator_TransactionData_NoTxDataSkipsValidation(t *testing.T) 
 	validator := &VPTokenValidator{
 		Nonce:    nonce,
 		ClientID: clientID,
-		// TransactionData is nil/empty — step 6 is skipped
 	}
 
 	err := validator.Validate(vpToken)
@@ -629,11 +639,11 @@ func TestVPTokenValidator_TransactionData_MultipleEntries(t *testing.T) {
 	nonce := "test-nonce-123"
 	clientID := "https://verifier.example.com"
 
-	txData := []TransactionData{
+	raw := encodeTxData(t, []TransactionData{
 		{Type: "payment", CredentialIDS: []string{"eudi_pid"}},
 		{Type: "document_signing", CredentialIDS: []string{"eudi_pid", "diploma"}},
-	}
-	hashes, err := HashTransactionData(txData, "sha-256")
+	})
+	hashes, err := HashTransactionData(raw, "sha-256")
 	require.NoError(t, err)
 	require.Len(t, hashes, 2)
 
@@ -642,7 +652,7 @@ func TestVPTokenValidator_TransactionData_MultipleEntries(t *testing.T) {
 	validator := &VPTokenValidator{
 		Nonce:           nonce,
 		ClientID:        clientID,
-		TransactionData: txData,
+		TransactionData: raw,
 	}
 
 	err = validator.Validate(vpToken)

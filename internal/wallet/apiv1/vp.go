@@ -335,7 +335,7 @@ func (c *Client) buildVPToken(ctx context.Context, credentials []string, ro *ope
 }
 
 // createKeyBindingJWT creates a key binding JWT for SD-JWT presentation
-func (c *Client) createKeyBindingJWT(nonce, audience, sdJWT string, transactionData []openid4vp.TransactionData) (string, error) {
+func (c *Client) createKeyBindingJWT(nonce, audience, sdJWT string, transactionData []string) (string, error) {
 	signingMethod, alg := jose.GetSigningMethodFromKey(c.signingKey)
 	_ = alg
 

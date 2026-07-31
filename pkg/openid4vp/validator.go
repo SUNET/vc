@@ -32,9 +32,8 @@ type VPTokenValidator struct {
 	// DCQLQuery is the original DCQL query from the request
 	DCQLQuery *DCQL
 
-	// TransactionData from the Authorization Request. When non-empty, the
-	// validator checks that the KB-JWT contains matching transaction_data_hashes.
-	TransactionData []TransactionData
+	// TransactionData from the Authorization Request (raw base64url strings). When non-empty, the validator checks that the KB-JWT contains matching transaction_data_hashes.
+	TransactionData []string
 }
 
 // Validate validates the VP Token according to OpenID4VP spec Section 8.6
@@ -211,10 +210,12 @@ func (v *VPTokenValidator) validateTransactionData(parsed *sdjwtvc.ParsedCredent
 		}
 	}
 
-	if len(hashesRaw) != len(v.TransactionData) {
+	expectedCount := len(v.TransactionData)
+
+	if len(hashesRaw) != expectedCount {
 		return &ErrorResponse{
 			ErrorCode:        ErrorInvalidTransactionData,
-			ErrorDescription: fmt.Sprintf("transaction_data_hashes count mismatch: expected %d, got %d", len(v.TransactionData), len(hashesRaw)),
+			ErrorDescription: fmt.Sprintf("transaction_data_hashes count mismatch: expected %d, got %d", expectedCount, len(hashesRaw)),
 		}
 	}
 

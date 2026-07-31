@@ -52,8 +52,8 @@ type RequestObject struct {
 	// RequestURIMethod: OPTIONAL. A string determining the HTTP method to be used when the request_uri parameter is included in the same request. Two case-sensitive valid values are defined in this specification: get and post. If request_uri_method value is get, the Wallet MUST send the request to retrieve the Request Object using the HTTP GET method, i.e., as defined in [RFC9101]. If request_uri_method value is post, a supporting Wallet MUST send the request using the HTTP POST method as detailed in Section 5.10. If the request_uri_method parameter is not present, the Wallet MUST process the request_uri parameter as defined in [RFC9101]. Wallets not supporting the post method will send a GET request to the Request URI (default behavior as defined in [RFC9101]). request_uri_method parameter MUST NOT be present if a request_uri parameter is not present. If the Verifier set the request_uri_method parameter value to post and there is no other means to convey its capabilities to the Wallet, it SHOULD add the client_metadata parameter to the Authorization Request. This enables the Wallet to assess the Verifier's capabilities, allowing it to transmit only the relevant capabilities through the wallet_metadata parameter in the Request URI POST request.
 	RequestURIMethod string `json:"request_uri_method,omitempty" bson:"request_uri_method,omitempty" validate:"omitempty,oneof=get post"`
 
-	// TransactionData OPTIONAL. Non-empty array of strings, where each string is a base64url-encoded JSON object that contains a typed parameter set with details about the transaction that the Verifier is requesting the End-User to authorize. See Section 8.4 for details. The Wallet MUST return an error if a request contains even one unrecognized transaction data type or transaction data not conforming to the respective type definition
-	TransactionData []TransactionData `json:"transaction_data,omitempty" bson:"transaction_data,omitempty" validate:"omitempty,dive,required"`
+	// TransactionData OPTIONAL. Array of base64url-encoded JSON objects with transaction details the Verifier requests the End-User to authorize (§8.4).
+	TransactionData []string `json:"transaction_data,omitempty" bson:"transaction_data,omitempty" validate:"omitempty,dive,required"`
 
 	// VerifierInfo OPTIONAL. A non-empty array of attestations about the Verifier relevant to the Credential Request. These attestations MAY include Verifier metadata, policies, trust status, or authorizations. Attestations are intended to support authorization decisions, inform Wallet policy enforcement, or enrich the End-User consent dialog.
 	VerifierInfo []VerifierInfo `json:"verifier_info,omitempty" bson:"verifier_info,omitempty" validate:"omitempty,dive,required"`
@@ -109,10 +109,10 @@ type JWK struct {
 }
 
 type TransactionData struct {
-	// Type REQUIRED. String that identifies the type of transaction data. This value determines parameters that can be included in the transaction_data object. The specific values are out of scope for this specification. It is RECOMMENDED to use collision-resistant names for type values.
+	// Type REQUIRED. Collision-resistant identifier for the transaction data type.
 	Type string `json:"type,omitempty" bson:"type,omitempty" validate:"required"`
 
-	// CredentialIDS REQUIRED. Non-empty array of strings each referencing a Credential requested by the Verifier that can be used to authorize this transaction. The string matches the id field in the DCQL Credential Query. If there is more than one element in the array, the Wallet MUST use only one of the referenced Credentials for transaction authorization.
+	// CredentialIDS REQUIRED. Credential query IDs that can authorize this transaction.
 	CredentialIDS []string `json:"credential_ids,omitempty" bson:"credential_ids,omitempty" validate:"required,dive,required"`
 }
 
@@ -131,25 +131,17 @@ func (t *TransactionData) Base64Encode() (string, error) {
 	return encoded, nil
 }
 
-// HashTransactionData computes the base64url-encoded hash of each TransactionData
-// entry's base64url-encoded JSON representation. The returned hashes are ordered
-// to match the input slice and are intended for inclusion as
-// "transaction_data_hashes" in the KB-JWT per OpenID4VP §8.4.
-// hashAlg must be one of "sha-256", "sha-384", or "sha-512".
-func HashTransactionData(txData []TransactionData, hashAlg string) (hashes []string, err error) {
+// HashTransactionData computes base64url-encoded hashes of raw transaction data strings per OpenID4VP §8.4.
+func HashTransactionData(txData []string, hashAlg string) ([]string, error) {
 	h, err := newHash(hashAlg)
 	if err != nil {
 		return nil, err
 	}
 
-	hashes = make([]string, 0, len(txData))
-	for i := range txData {
-		encoded, err := txData[i].Base64Encode()
-		if err != nil {
-			return nil, fmt.Errorf("encoding transaction_data[%d]: %w", i, err)
-		}
+	hashes := make([]string, 0, len(txData))
+	for i, entry := range txData {
 		h.Reset()
-		if _, err := h.Write([]byte(encoded)); err != nil {
+		if _, err := h.Write([]byte(entry)); err != nil {
 			return nil, fmt.Errorf("hashing transaction_data[%d]: %w", i, err)
 		}
 		hashes = append(hashes, base64.RawURLEncoding.EncodeToString(h.Sum(nil)))
