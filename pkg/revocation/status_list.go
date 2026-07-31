@@ -2,13 +2,10 @@ package revocation
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -22,8 +19,7 @@ import (
 type StatusListChecker struct {
 	httpClient  *http.Client
 	cache       cache.Cache[[]uint8]
-	cacheExpiry time.Duration
-	keyFunc     jwt.Keyfunc
+	keyResolver KeyResolver
 }
 
 // StatusListCheckerOption configures a StatusListChecker.
@@ -36,24 +32,19 @@ func WithHTTPClient(client *http.Client) StatusListCheckerOption {
 	}
 }
 
-// WithCacheExpiry sets the cache expiry duration.
-func WithCacheExpiry(expiry time.Duration) StatusListCheckerOption {
-	return func(c *StatusListChecker) {
-		c.cacheExpiry = expiry
-	}
-}
-
 // WithCache sets an external cache implementation.
+// The cache's TTL (set at creation time) controls how long status lists are cached.
 func WithCache(ch cache.Cache[[]uint8]) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.cache = ch
 	}
 }
 
-// WithKeyFunc sets the key function for JWT signature verification.
-func WithKeyFunc(keyFunc jwt.Keyfunc) StatusListCheckerOption {
+// WithKeyResolver sets the key resolver for verifying status list token signatures.
+// The checker uses this internally to build format-specific verification (e.g., jwt.Keyfunc).
+func WithKeyResolver(kr KeyResolver) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
-		c.keyFunc = keyFunc
+		c.keyResolver = kr
 	}
 }
 
@@ -64,7 +55,6 @@ func NewStatusListChecker(opts ...StatusListCheckerOption) (*StatusListChecker, 
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		cacheExpiry: 5 * time.Minute,
 	}
 
 	for _, opt := range opts {
@@ -73,6 +63,9 @@ func NewStatusListChecker(opts ...StatusListCheckerOption) (*StatusListChecker, 
 
 	if c.cache == nil {
 		return nil, errors.New("cache is required: use WithCache")
+	}
+	if c.keyResolver == nil {
+		return nil, errors.New("key resolver is required: use WithKeyResolver")
 	}
 
 	return c, nil
@@ -233,54 +226,45 @@ func (c *StatusListChecker) parseCWTStatusList(data []byte) ([]uint8, error) {
 func (c *StatusListChecker) parseJWTStatusList(data []byte) ([]uint8, error) {
 	tokenString := string(data)
 
-	if c.keyFunc != nil {
-		token, err := jwt.Parse(tokenString, c.keyFunc)
-		if err != nil {
-			return nil, fmt.Errorf("failed to verify JWT: %w", err)
-		}
-		if !token.Valid {
-			return nil, errors.New("invalid JWT token")
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			return nil, errors.New("failed to extract JWT claims")
-		}
-
-		statusListClaim, ok := claims["status_list"].(map[string]any)
-		if !ok {
-			return nil, errors.New("status_list claim not found or invalid")
-		}
-
-		lst, ok := statusListClaim["lst"].(string)
-		if !ok {
-			return nil, errors.New("lst not found in status_list claim")
-		}
-
-		return tokenstatuslist.DecodeAndDecompress(lst)
+	if c.keyResolver == nil {
+		return nil, errors.New("status list JWT signature verification required but no key resolver configured")
 	}
 
-	// Parse without signature verification (extract claims only)
-	parts := strings.SplitN(tokenString, ".", 3)
-	if len(parts) != 3 {
-		return nil, errors.New("invalid JWT format")
+	// Build a jwt.Keyfunc that delegates to the generic KeyResolver
+	keyFunc := func(token *jwt.Token) (any, error) {
+		claims, _ := token.Claims.(jwt.MapClaims)
+		issuer, _ := claims["iss"].(string)
+		kid, _ := token.Header["kid"].(string)
+		if issuer == "" {
+			return nil, errors.New("status list token missing iss claim")
+		}
+		return c.keyResolver.ResolveKey(context.Background(), issuer, kid)
 	}
 
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	token, err := jwt.Parse(tokenString, keyFunc)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode JWT payload: %w", err)
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+	if !token.Valid {
+		return nil, errors.New("invalid JWT token")
 	}
 
-	var claims struct {
-		StatusList struct {
-			Lst string `json:"lst"`
-		} `json:"status_list"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, fmt.Errorf("failed to parse JWT claims: %w", err)
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("failed to extract JWT claims")
 	}
 
-	return tokenstatuslist.DecodeAndDecompress(claims.StatusList.Lst)
+	statusListClaim, ok := claims["status_list"].(map[string]any)
+	if !ok {
+		return nil, errors.New("status_list claim not found or invalid")
+	}
+
+	lst, ok := statusListClaim["lst"].(string)
+	if !ok {
+		return nil, errors.New("lst not found in status_list claim")
+	}
+
+	return tokenstatuslist.DecodeAndDecompress(lst)
 }
 
 func mapStatusCode(code uint8) Status {

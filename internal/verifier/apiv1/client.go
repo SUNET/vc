@@ -150,8 +150,8 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL)
 		statusListChecker, err := revocation.NewStatusListChecker(
 			revocation.WithCache(statusCache),
-			revocation.WithCacheExpiry(cacheTTL),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
+			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create status list checker: %w", err)
@@ -447,4 +447,14 @@ func parseScopes(scopeStr string) []string {
 		return []string{}
 	}
 	return strings.Split(scopeStr, " ")
+}
+
+// jwksKeyResolverAdapter adapts trust.JWKSKeyResolver to revocation.KeyResolver.
+type jwksKeyResolverAdapter struct {
+	resolver *trust.JWKSKeyResolver
+}
+
+func (a jwksKeyResolverAdapter) ResolveKey(ctx context.Context, issuer string, keyID string) (any, error) {
+	key, _, err := a.resolver.ResolveKeyByKID(ctx, issuer, keyID)
+	return key, err
 }

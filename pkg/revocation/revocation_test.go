@@ -1,6 +1,7 @@
 package revocation
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +11,17 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// allowAllKeyResolver is a test helper that accepts unsigned tokens (alg: none).
+type allowAllKeyResolver struct{}
+
+func (allowAllKeyResolver) ResolveKey(_ context.Context, _, _ string) (any, error) {
+	return jwt.UnsafeAllowNoneSignatureType, nil
+}
 
 func base64RawURL(data []byte) string {
 	return base64.RawURLEncoding.EncodeToString(data)
@@ -92,9 +101,8 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	encoded, err := tokenstatuslist.CompressAndEncode(statuses)
 	require.NoError(t, err)
 
-	// Build a minimal unsigned JWT (header.payload.signature) for testing without keys
-	// The checker without a keyFunc parses payload directly
-	payload := `{"status_list":{"lst":"` + encoded + `"}}`
+	// Build a minimal unsigned JWT (header.payload.signature) for testing
+	payload := `{"iss":"https://registry.test","status_list":{"lst":"` + encoded + `"}}`
 	fakeJWT := base64RawURL([]byte(`{"alg":"none"}`)) + "." + base64RawURL([]byte(payload)) + "."
 
 	// Serve the status list token
@@ -108,6 +116,9 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	checker, err := NewStatusListChecker(
 		WithCache(statusCache),
 		WithHTTPClient(server.Client()),
+		// In production, the key resolver verifies the issuer's signature.
+		// For testing, we use an allow-all resolver.
+		WithKeyResolver(allowAllKeyResolver{}),
 	)
 	require.NoError(t, err)
 
@@ -147,6 +158,7 @@ func TestStatusListChecker_Unreachable(t *testing.T) {
 	checker, err := NewStatusListChecker(
 		WithCache(statusCache),
 		WithHTTPClient(&http.Client{Timeout: 1 * time.Second}),
+		WithKeyResolver(allowAllKeyResolver{}),
 	)
 	require.NoError(t, err)
 
@@ -157,7 +169,7 @@ func TestStatusListChecker_Unreachable(t *testing.T) {
 
 func TestStatusListChecker_Supports(t *testing.T) {
 	statusCache := cache.NewMemoryCache[[]uint8](5 * time.Minute)
-	checker, _ := NewStatusListChecker(WithCache(statusCache))
+	checker, _ := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(allowAllKeyResolver{}))
 
 	assert.True(t, checker.Supports(SchemeStatusList))
 	assert.False(t, checker.Supports(Scheme("ocsp")))

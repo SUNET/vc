@@ -83,3 +83,10 @@ type Checker interface {
 	// Returns nil if the claims don't contain revocation info for this mechanism.
 	Extract(claims map[string]any) *Reference
 }
+
+// KeyResolver resolves public keys for verifying signed revocation tokens.
+// Each checker implementation uses this to verify the authenticity of
+// fetched revocation data (e.g., status list JWT signatures).
+type KeyResolver interface {
+	ResolveKey(ctx context.Context, issuer string, keyID string) (any, error)
+}
