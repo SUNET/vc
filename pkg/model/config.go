@@ -585,6 +585,9 @@ type Verifier struct {
 	// Each preset maps credential_metadata scopes to optional claim overrides.
 	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
 	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
+	// CombinedPresentation configures combined presentation verification (ARF 3.0 §6.6.3.10).
+	// When multiple credentials are presented, this verifies they belong to the same holder.
+	CombinedPresentation *openid4vp.CombinedPresentationConfig `yaml:"combined_presentation,omitempty"`
 }
 
 // VerifierClientID returns the client_id value the verifier uses in OID4VP requests.

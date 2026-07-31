@@ -292,6 +292,49 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		}
 	}
 
+	// Combined presentation binding verification (ARF 3.0 §6.6.3.10)
+	if len(authCtx.Scopes) > 1 && c.cfg.Verifier.CombinedPresentation != nil && c.cfg.Verifier.CombinedPresentation.Enabled {
+		bindingCredentials := make([]openid4vp.VerifiedCredentialBinding, 0, len(authCtx.Scopes))
+		for _, scope := range authCtx.Scopes {
+			for _, cc := range scopeCredentials[scope] {
+				tp, err := openid4vp.ExtractHolderKeyThumbprint(cc.Credential)
+				if err != nil {
+					c.log.Error(err, "failed to extract holder key thumbprint", "scope", scope)
+					return nil, fmt.Errorf("failed to extract holder key for scope %s: %w", scope, err)
+				}
+				bindingCredentials = append(bindingCredentials, openid4vp.VerifiedCredentialBinding{
+					Scope:               scope,
+					HolderKeyThumbprint: tp,
+					Claims:              cc.Credential,
+				})
+			}
+		}
+
+		verifier := &openid4vp.CombinedBindingVerifier{Config: *c.cfg.Verifier.CombinedPresentation}
+		bindingResult, err := verifier.Verify(bindingCredentials)
+		if err != nil {
+			c.log.Error(err, "combined presentation binding verification error")
+			return nil, fmt.Errorf("combined presentation binding verification failed: %w", err)
+		}
+		if bindingResult != nil {
+			c.log.Debug("Combined presentation binding result",
+				"bound", bindingResult.Bound,
+				"valid", bindingResult.Valid(),
+				"confidence", bindingResult.HighestConfidence,
+				"results", bindingResult.Results,
+			)
+			if !bindingResult.Valid() {
+				switch c.cfg.Verifier.CombinedPresentation.Enforcement {
+				case openid4vp.BindingEnforcementEnforce:
+					c.log.Error(bindingResult.Err(), "combined presentation binding verification failed")
+					return nil, fmt.Errorf("combined presentation binding verification failed: credentials not bound to same holder")
+				case openid4vp.BindingEnforcementWarn:
+					c.log.Info("combined presentation binding issues detected (warn mode)", "confidence", bindingResult.HighestConfidence, "err", bindingResult.Err())
+				}
+			}
+		}
+	}
+
 	// Flatten per-scope credentials into ordered slice for caching
 	credentialCaches := make([]sdjwtvc.CredentialCache, 0, len(authCtx.Scopes))
 	for _, scope := range authCtx.Scopes {
