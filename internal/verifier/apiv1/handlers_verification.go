@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/revocation"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/google/uuid"
@@ -287,6 +289,34 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				if err := openid4vp.ValidateClaims(cc.Credential, scopeValidations); err != nil {
 					c.log.Error(err, "claim validation failed", "scope", scope)
 					return nil, fmt.Errorf("claim validation failed for scope %s: %w", scope, err)
+				}
+			}
+		}
+	}
+
+	// Revocation status verification (ARF 3.0 §6.6.3.7)
+	if c.revocationRegistry != nil && c.cfg.Verifier.Revocation != nil && c.cfg.Verifier.Revocation.Enabled {
+		skipScopes := c.cfg.Verifier.Revocation.SkipScopes
+		for _, scope := range authCtx.Scopes {
+			if slices.Contains(skipScopes, scope) {
+				c.log.Debug("Skipping revocation check for exempt scope", "scope", scope)
+				continue
+			}
+			for _, cc := range scopeCredentials[scope] {
+				result, err := c.revocationRegistry.Validate(ctx, cc.Credential)
+				if err != nil {
+					if c.cfg.Verifier.Revocation.FailOpen {
+						c.log.Info("Revocation check failed (fail-open: allowing)", "scope", scope, "err", err)
+					} else {
+						c.log.Error(err, "revocation check failed", "scope", scope)
+						return nil, fmt.Errorf("revocation check failed for scope %s: %w", scope, err)
+					}
+				} else if result != nil && result.Status != revocation.StatusValid {
+					c.log.Info("Credential revocation status", "scope", scope, "status", result.Status.String(), "uri", result.URI, "index", result.Index)
+					if !c.cfg.Verifier.Revocation.FailOpen {
+						return nil, fmt.Errorf("credential for scope %s has been %s", scope, result.Status.String())
+					}
+					c.log.Info("Accepting revoked/suspended credential (fail-open mode)", "scope", scope, "status", result.Status.String())
 				}
 			}
 		}
