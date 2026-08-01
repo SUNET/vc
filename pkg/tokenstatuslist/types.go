@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/base64"
+	"fmt"
+	"io"
 	"time"
 )
 
@@ -185,7 +187,12 @@ func CompressAndEncode(statuses []uint8) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(compressed), nil
 }
 
+// maxDecompressedSize is the maximum allowed decompressed status list size (50 MB).
+// This prevents zip-bomb attacks where a small compressed payload expands to exhaust memory.
+const maxDecompressedSize = 50 << 20
+
 // DecompressStatuses decompresses a zlib-compressed status byte array.
+// The decompressed output is limited to maxDecompressedSize to prevent zip-bomb attacks.
 func DecompressStatuses(compressed []byte) ([]uint8, error) {
 	r, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {
@@ -193,12 +200,16 @@ func DecompressStatuses(compressed []byte) ([]uint8, error) {
 	}
 	defer r.Close()
 
-	var b bytes.Buffer
-	if _, err := b.ReadFrom(r); err != nil {
+	limited := io.LimitReader(r, maxDecompressedSize+1)
+	b, err := io.ReadAll(limited)
+	if err != nil {
 		return nil, err
 	}
+	if int64(len(b)) > maxDecompressedSize {
+		return nil, fmt.Errorf("decompressed status list exceeds maximum size (%d bytes)", maxDecompressedSize)
+	}
 
-	return b.Bytes(), nil
+	return b, nil
 }
 
 // DecodeAndDecompress decodes a base64url string and decompresses it.
