@@ -29,6 +29,7 @@ export {
     isUserCancel,
     isProtocolUnsupported,
     ERROR_MESSAGES,
+    requestCredentialFromAuthorizationRequestURI,
 } from '@sirosfoundation/dc-api';
 
 import {

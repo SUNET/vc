@@ -2,9 +2,9 @@ import Alpine from "alpinejs";
 import * as v from "valibot";
 import {
     configure as configureDCAPI,
-    requestCredential,
     isNativeDCAPIAvailable,
     getBestSupportedProtocol,
+    requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
@@ -84,7 +84,11 @@ const credentialsList = v.record(
 /** @typedef {v.InferOutput<typeof metadataResponseSchema>} MetadataResponse */
 const metadataResponseSchema = v.object({
     credentials: credentialsList,
-    supported_wallets: v.record(v.string(), v.string()),
+    // v.optional() only substitutes its default for an ABSENT key, not an
+    // explicit null - Go's zero-value nil map marshals to JSON null (see
+    // UIMetadata's SupportedWallets fix), so this needs v.nullish() to
+    // actually tolerate that, not v.optional().
+    supported_wallets: v.nullish(v.record(v.string(), v.string()), {}),
     dc_api_enabled: v.optional(v.boolean(), false),
     presets: v.optional(v.record(v.string(), v.object({
         label: v.string(),
@@ -110,9 +114,13 @@ const metadataResponseSchema = v.object({
 const dcqlQueryCredentialSchema = v.object({
     id: v.string(),
     format: v.optional(v.string(), "dc+sd-jwt"),
+    // vct_values (dc+sd-jwt/jwt_vc_json) and doctype_value (mso_mdoc) are
+    // both optional here, not either/or required - which meta property
+    // applies depends on the credential's format (OpenID4VP 1.0 6.4.1).
     meta: v.intersect([
         v.object({
-            vct_values: v.array(v.string()),
+            vct_values: v.optional(v.array(v.string())),
+            doctype_value: v.optional(v.string()),
         }),
         v.record(v.string(), v.union([v.string(), v.array(v.string())])),
     ]),
@@ -419,13 +427,20 @@ Alpine.data("app", () => ({
             claims.push({ path });
         }
 
+        // mso_mdoc credentials have no vct - the DCQL equivalent constraint
+        // is doctype_value (OpenID4VP 1.0 6.4.1), not vct_values. Sending
+        // vct_values for an mdoc credential matches nothing on the wallet
+        // side (no mdoc credential has a vct), so the request always comes
+        // back empty.
+        const meta = this.credentialAttributes.format === "mso_mdoc"
+            ? { doctype_value: this.credentialAttributes.vct }
+            : { vct_values: [this.credentialAttributes.vct] };
+
         /** @satisfies {DCQLQueryCredential} */
         const credential = {
             id: this.credentialAttributes.id,
             format: this.credentialAttributes.format,
-            meta: {
-                vct_values: [this.credentialAttributes.vct]
-            },
+            meta,
             claims,
         };
 
@@ -490,6 +505,14 @@ Alpine.data("app", () => ({
 
     /**
      * Attempt credential request via native DC API.
+     *
+     * The authorization_request URI is the same openid4vp://...?client_id=...
+     * &request_uri=... deep link used for QR/redirect - NOT itself a valid DC
+     * API `request` value for any protocol. requestCredentialFromAuthorizationRequestURI
+     * (from @sirosfoundation/dc-api) resolves it into whatever shape the
+     * detected protocol actually needs (fetching request_uri for the JWT when
+     * required) before calling navigator.credentials.get().
+     *
      * @returns {Promise<boolean>} true if handled, false to fall through
      */
     async _tryNativeDCAPI() {
@@ -500,10 +523,11 @@ Alpine.data("app", () => ({
             const abortController = new AbortController();
             this._dcAbort = abortController;
 
-            const result = await requestCredential(
+            const result = await requestCredentialFromAuthorizationRequestURI(
                 this.presentationDefinition.authorization_request,
                 { signal: abortController.signal },
             );
+            if (!result) return false;
 
             if (result.data?.redirect_uri) {
                 globalThis.location.href = result.data.redirect_uri;
