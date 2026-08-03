@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-07-31
+**Generated:** 2026-08-03
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -1120,12 +1120,12 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.revocation`
 
-| Field         | Type       | Description                                                                                                                                                                                    | Example | Default | Required |
-| ------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `enabled`     | `bool`     | Enabled activates revocation status checking for presented credentials.                                                                                                                        | -       | -       | No       |
-| `cache_ttl`   | `int`      | Duration in seconds to cache fetched status list tokens.                                                                                                                                       | -       | `300`   | No       |
-| `fail_open`   | `bool`     | FailOpen determines behavior when the status list is unreachable or unparseable: - true: log warning and allow the credential through (fail-open) - false: reject the credential (fail-closed) | -       | `true`  | No       |
-| `skip_scopes` | `[]string` | Credential scopes exempt from revocation checking (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).                                                                       | -       | -       | No       |
+| Field         | Type       | Description                                                                                                                                                                                                                                                                                   | Example | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`     | `bool`     | Enabled activates revocation status checking for presented credentials.                                                                                                                                                                                                                       | -       | -       | No       |
+| `cache_ttl`   | `int`      | Duration in seconds to cache fetched status list tokens.                                                                                                                                                                                                                                      | -       | `300`   | No       |
+| `fail_open`   | `bool`     | FailOpen determines behavior when the status list is unreachable or unparseable: - true: log warning and allow the credential through (fail-open) - false: reject the credential (fail-closed) Note: explicitly revoked/suspended credentials are always rejected regardless of this setting. | -       | `true`  | No       |
+| `skip_scopes` | `[]string` | Credential scopes exempt from revocation checking (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).                                                                                                                                                                      | -       | -       | No       |
 
 ## `registry` (Top-level)
 

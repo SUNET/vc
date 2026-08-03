@@ -182,8 +182,12 @@ type AgeOver struct {
 
 // DeviceKeyInfo contains information about the device key used for mdoc authentication.
 type DeviceKeyInfo struct {
-	// DeviceKey is the public key of the device (COSE_Key format).
-	DeviceKey []byte `json:"deviceKey" cbor:"deviceKey" validate:"required"`
+	// DeviceKey is the public key of the device, embedded directly as a
+	// COSE_Key structure (a CBOR map) per ISO 18013-5 - not pre-serialized
+	// to bytes and wrapped in a byte string (a real bug caught by Google's
+	// https://digital-credentials.dev/ demo; see the deviceKeyInfo comment
+	// inside MSOBuilder.Build in mso.go for the full explanation).
+	DeviceKey COSEKey `json:"deviceKey" cbor:"deviceKey" validate:"required"`
 
 	// KeyAuthorizations contains authorized namespaces and data elements.
 	KeyAuthorizations *KeyAuthorizations `json:"keyAuthorizations,omitempty" cbor:"keyAuthorizations,omitempty"`

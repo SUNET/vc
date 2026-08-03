@@ -473,18 +473,13 @@ func TestExtractDeviceKeyFromMSO(t *testing.T) {
 		t.Fatalf("failed to create COSE key: %v", err)
 	}
 
-	keyBytes, err := coseKey.Bytes()
-	if err != nil {
-		t.Fatalf("failed to encode COSE key: %v", err)
-	}
-
 	// Create MSO with device key
 	mso := &MobileSecurityObject{
 		Version:         "1.0",
 		DigestAlgorithm: "SHA-256",
 		DocType:         DocType,
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: keyBytes,
+			DeviceKey: *coseKey,
 		},
 	}
 
@@ -521,6 +516,30 @@ func TestExtractDeviceKeyFromMSO_NoDeviceKey(t *testing.T) {
 	_, err := ExtractDeviceKeyFromMSO(mso)
 	if err == nil {
 		t.Error("ExtractDeviceKeyFromMSO() should fail with no device key")
+	}
+}
+
+// TestExtractDeviceKeyFromMSO_EC2MissingY guards against a partially-present
+// EC2 device key (X set, Y empty) slipping through as "present". Without the
+// Kty-aware check, toECDSAPublicKey would happily produce a public key with
+// Y=0 (big.Int.SetBytes(nil) == 0), and the caller wouldn't see a clear
+// "key missing" error until signature verification failed downstream for an
+// unrelated-looking reason.
+func TestExtractDeviceKeyFromMSO_EC2MissingY(t *testing.T) {
+	mso := &MobileSecurityObject{
+		Version: "1.0",
+		DeviceKeyInfo: DeviceKeyInfo{
+			DeviceKey: COSEKey{
+				Kty: KeyTypeEC2,
+				Crv: CurveP256,
+				X:   []byte{0x01, 0x02, 0x03},
+			},
+		},
+	}
+
+	_, err := ExtractDeviceKeyFromMSO(mso)
+	if err == nil {
+		t.Error("ExtractDeviceKeyFromMSO() should fail when EC2 key is missing Y")
 	}
 }
 
@@ -642,7 +661,6 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create device COSE key: %v", err)
 	}
-	deviceKeyBytes, _ := deviceCOSEKey.Bytes()
 
 	// Create MSO
 	mso := &MobileSecurityObject{
@@ -650,7 +668,7 @@ func TestVerifier_VerifyDeviceAuth_Signature(t *testing.T) {
 		DigestAlgorithm: "SHA-256",
 		DocType:         DocType,
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+			DeviceKey: *deviceCOSEKey,
 		},
 		ValidityInfo: ValidityInfo{
 			Signed:         time.Now(),
@@ -717,11 +735,10 @@ func TestVerifier_VerifyDeviceAuth_NoDeviceAuth(t *testing.T) {
 	// Create minimal MSO
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	deviceCOSEKey, _ := NewCOSEKeyFromECDSA(&deviceKey.PublicKey)
-	deviceKeyBytes, _ := deviceCOSEKey.Bytes()
 
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+			DeviceKey: *deviceCOSEKey,
 		},
 	}
 
@@ -748,11 +765,10 @@ func TestVerifier_VerifyDeviceAuth_WrongKey(t *testing.T) {
 
 	// Create MSO with WRONG key (not the one used to sign)
 	wrongCOSEKey, _ := NewCOSEKeyFromECDSA(&wrongKey.PublicKey)
-	wrongKeyBytes, _ := wrongCOSEKey.Bytes()
 
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: wrongKeyBytes,
+			DeviceKey: *wrongCOSEKey,
 		},
 	}
 
@@ -807,11 +823,10 @@ func TestVerifier_VerifyDeviceAuth_MACRequiresSessionKey(t *testing.T) {
 	// Create MSO
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	deviceCOSEKey, _ := NewCOSEKeyFromECDSA(&deviceKey.PublicKey)
-	deviceKeyBytes, _ := deviceCOSEKey.Bytes()
 
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: deviceKeyBytes,
+			DeviceKey: *deviceCOSEKey,
 		},
 	}
 
@@ -963,10 +978,11 @@ func TestVerifier_VerifyDeviceAuth_InvalidDeviceKey(t *testing.T) {
 		nil,
 	)
 
-	// Create MSO with invalid device key bytes
+	// Create MSO with an absent device key (zero-value COSEKey - no X
+	// coordinate) - ExtractDeviceKeyFromMSO's "not present" check catches this.
 	mso := &MobileSecurityObject{
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: []byte{0x01, 0x02, 0x03}, // Invalid CBOR
+			DeviceKey: COSEKey{},
 		},
 	}
 

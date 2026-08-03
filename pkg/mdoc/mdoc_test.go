@@ -1,9 +1,6 @@
 package mdoc
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"testing"
 	"time"
 
@@ -219,25 +216,8 @@ func TestDrivingPrivilege_AllCategories(t *testing.T) {
 	}
 }
 
-func testDeviceKeyBytes(t *testing.T) []byte {
-	t.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey() error = %v", err)
-	}
-	coseKey, err := NewCOSEKeyFromECDSA(&priv.PublicKey)
-	if err != nil {
-		t.Fatalf("NewCOSEKeyFromECDSA() error = %v", err)
-	}
-	keyBytes, err := coseKey.Bytes()
-	if err != nil {
-		t.Fatalf("Bytes() error = %v", err)
-	}
-	return keyBytes
-}
-
 func TestDeviceKeyInfo(t *testing.T) {
-	deviceKey := testDeviceKeyBytes(t)
+	deviceKey := COSEKey{Kty: 2, Crv: CurveP256, X: []byte{0x01, 0x02, 0x03}, Y: []byte{0x04, 0x05, 0x06}}
 
 	info := DeviceKeyInfo{
 		DeviceKey: deviceKey,
@@ -252,8 +232,8 @@ func TestDeviceKeyInfo(t *testing.T) {
 		},
 	}
 
-	if len(info.DeviceKey) != len(deviceKey) {
-		t.Errorf("DeviceKey length = %d, want %d", len(info.DeviceKey), len(deviceKey))
+	if len(info.DeviceKey.X) != 3 {
+		t.Errorf("DeviceKey.X length = %d, want 3", len(info.DeviceKey.X))
 	}
 	if len(info.KeyAuthorizations.NameSpaces) != 1 {
 		t.Errorf("NameSpaces length = %d, want 1", len(info.KeyAuthorizations.NameSpaces))
@@ -297,7 +277,7 @@ func TestMobileSecurityObject(t *testing.T) {
 			},
 		},
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: testDeviceKeyBytes(t),
+			DeviceKey: COSEKey{Kty: 2, Crv: CurveP256, X: []byte{0xA1, 0x01, 0x02}, Y: []byte{0xB2, 0x03, 0x04}},
 		},
 		DocType: DocType,
 		ValidityInfo: ValidityInfo{

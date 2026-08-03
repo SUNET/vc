@@ -352,22 +352,19 @@ func ExtractDeviceKeyFromMSO(mso *MobileSecurityObject) (crypto.PublicKey, error
 		return nil, errors.New("MSO is nil")
 	}
 
-	if len(mso.DeviceKeyInfo.DeviceKey) == 0 {
+	key := mso.DeviceKeyInfo.DeviceKey
+	if len(key.X) == 0 {
 		return nil, errors.New("device key not present in MSO")
 	}
-
-	encoder, err := NewCBOREncoder()
-	if err != nil {
-		return nil, err
+	// EC2 keys require both coordinates. Without this check, a missing Y
+	// silently produces an ECDSA public key with Y=0 (big.Int.SetBytes(nil)
+	// == 0) instead of a clear error, and any failure surfaces later as a
+	// confusing signature-verification error instead of "key missing".
+	if key.Kty == KeyTypeEC2 && len(key.Y) == 0 {
+		return nil, errors.New("device key not present in MSO: EC2 key missing Y coordinate")
 	}
 
-	// Parse the COSE_Key
-	var coseKey COSEKey
-	if err := encoder.Unmarshal(mso.DeviceKeyInfo.DeviceKey, &coseKey); err != nil {
-		return nil, fmt.Errorf("failed to parse device COSE key: %w", err)
-	}
-
-	return coseKey.ToPublicKey()
+	return key.ToPublicKey()
 }
 
 // VerifyDeviceAuth verifies device authentication as part of document verification.

@@ -206,19 +206,22 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
 	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
-	// Get device key bytes
-	deviceKeyBytes, err := b.deviceKey.Bytes()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to encode device key: %w", err)
-	}
-
 	mso := map[string]any{
 		"version":         "1.0",
 		"digestAlgorithm": string(b.digestAlgorithm),
 		"docType":         b.docType,
 		"valueDigests":    valueDigests,
+		// DeviceKeyInfo.deviceKey is the COSE_Key structure embedded
+		// directly (a CBOR map, per ISO 18013-5), not pre-serialized to
+		// bytes and wrapped in a byte string - b.deviceKey's own `cbor:"..."`
+		// struct tags (see COSEKey) produce the correct map encoding when
+		// this whole mso value is marshaled below. The previous
+		// double-encoding was a real bug caught by Google's own
+		// https://digital-credentials.dev/ demo, which rejected our issued
+		// mdocs with "'bytes' object has no attribute 'get'" trying to read
+		// deviceKey as a dict.
 		"deviceKeyInfo": map[string]any{
-			"deviceKey": deviceKeyBytes,
+			"deviceKey": b.deviceKey,
 		},
 		"validityInfo": map[string]any{
 			"signed":     cbor.Tag{Number: 0, Content: signedTime},
