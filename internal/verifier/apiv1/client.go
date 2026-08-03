@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/internal/verifier/notify"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/logger"
@@ -23,6 +24,7 @@ import (
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/revocation"
 	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -52,6 +54,7 @@ type Client struct {
 	trustEvaluator   trust.TrustEvaluator
 	jwksResolver     *trust.JWKSKeyResolver
 	jwtTrustVerifier *trust.JWTTrustVerifier
+	revocationRegistry *revocation.Registry
 
 	// Cache
 	cacheService *cache.Service
@@ -138,6 +141,26 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		ParseJWK:                   jose.ParseJWKToPublicKey,
 		Log:                        c.log,
 	})
+
+	// Initialize revocation checker registry (ARF 3.0 §6.6.3.7)
+	// The registry is extensible: pass additional Checker implementations to NewRegistry
+	// to support future revocation mechanisms (e.g., OCSP, W3C Bitstring Status List).
+	if cfg.Verifier.Revocation != nil && cfg.Verifier.Revocation.Enabled {
+		cacheTTL := time.Duration(cfg.Verifier.Revocation.CacheTTL) * time.Second
+		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL)
+		statusListChecker, err := revocation.NewStatusListChecker(
+			revocation.WithCache(statusCache),
+			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
+			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create status list checker: %w", err)
+		}
+		// Register checkers. To add a future mechanism (e.g., OCSP),
+		// pass it alongside statusListChecker — each checker provides its own Extract().
+		c.revocationRegistry = revocation.NewRegistry(statusListChecker)
+		c.log.Info("Revocation checker initialized", "cache_ttl", cacheTTL, "fail_open", cfg.Verifier.Revocation.FailOpen)
+	}
 
 	c.log.Info("Started")
 
@@ -424,4 +447,14 @@ func parseScopes(scopeStr string) []string {
 		return []string{}
 	}
 	return strings.Split(scopeStr, " ")
+}
+
+// jwksKeyResolverAdapter adapts trust.JWKSKeyResolver to revocation.KeyResolver.
+type jwksKeyResolverAdapter struct {
+	resolver *trust.JWKSKeyResolver
+}
+
+func (a jwksKeyResolverAdapter) ResolveKey(ctx context.Context, issuer string, keyID string) (any, error) {
+	key, _, err := a.resolver.ResolveKeyByKID(ctx, issuer, keyID)
+	return key, err
 }

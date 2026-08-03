@@ -588,6 +588,25 @@ type Verifier struct {
 	// CombinedPresentation configures combined presentation verification (ARF 3.0 §6.6.3.10).
 	// When multiple credentials are presented, this verifies they belong to the same holder.
 	CombinedPresentation *openid4vp.CombinedPresentationConfig `yaml:"combined_presentation,omitempty"`
+	// Revocation configures credential revocation checking at presentation time (ARF 3.0 §6.6.3.7).
+	// When enabled, the Verifier checks Token Status List references in presented credentials.
+	Revocation *RevocationConfig `yaml:"revocation,omitempty"`
+}
+
+// RevocationConfig configures credential revocation verification at presentation time.
+type RevocationConfig struct {
+	// Enabled activates revocation status checking for presented credentials.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// CacheTTL is the duration in seconds to cache fetched status list tokens.
+	CacheTTL int `yaml:"cache_ttl" json:"cache_ttl" default:"300"`
+	// FailOpen determines behavior when the status list is unreachable or unparseable:
+	//   - true: log warning and allow the credential through (fail-open)
+	//   - false: reject the credential (fail-closed)
+	// Note: explicitly revoked/suspended credentials are always rejected regardless of this setting.
+	FailOpen bool `yaml:"fail_open" json:"fail_open" default:"true"`
+	// SkipScopes lists credential scopes exempt from revocation checking
+	// (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).
+	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
 }
 
 // VerifierClientID returns the client_id value the verifier uses in OID4VP requests.
