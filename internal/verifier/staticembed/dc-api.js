@@ -79,14 +79,21 @@ function normalizeCredential(credential, fallbackProtocol) {
 }
 
 // src/authorization-request.ts
+// PATCHED (not upstream @sirosfoundation/dc-api v0.5.0): options.signal was
+// accepted by requestCredentialFromAuthorizationRequestURI but dropped
+// before reaching the request_uri fetch, so an AbortController passed by
+// the caller couldn't cancel a slow/hung request_uri fetch. Threaded
+// `signal` through buildRequestData/_fetchJwt below. File an upstream fix
+// too so the next dc-api bump doesn't reintroduce this.
 async function buildRequestData(protocol, authorizationRequestUri, options) {
   const fetchImpl = options?.fetchFn ?? fetch;
+  const signal = options?.signal;
   const url = new URL(authorizationRequestUri);
   const params = url.searchParams;
   const inlineRequest = params.get("request");
   const requestUri = params.get("request_uri");
   if (protocol === OID4VP_PROTOCOLS.SIGNED || protocol === OID4VP_PROTOCOLS.MULTISIGNED) {
-    const jwt = inlineRequest ?? (requestUri ? await _fetchJwt(requestUri, fetchImpl) : null);
+    const jwt = inlineRequest ?? (requestUri ? await _fetchJwt(requestUri, fetchImpl, signal) : null);
     if (!jwt) {
       throw new Error(
         `Cannot build ${protocol} request data: authorization request has neither 'request' nor 'request_uri'`
@@ -98,7 +105,7 @@ async function buildRequestData(protocol, authorizationRequestUri, options) {
     return _decodeJwtPayload(inlineRequest);
   }
   if (requestUri) {
-    const jwt = await _fetchJwt(requestUri, fetchImpl);
+    const jwt = await _fetchJwt(requestUri, fetchImpl, signal);
     return _decodeJwtPayload(jwt);
   }
   const data = {};
@@ -112,8 +119,8 @@ async function buildRequestData(protocol, authorizationRequestUri, options) {
   }
   return data;
 }
-async function _fetchJwt(requestUri, fetchImpl) {
-  const res = await fetchImpl(requestUri);
+async function _fetchJwt(requestUri, fetchImpl, signal) {
+  const res = await fetchImpl(requestUri, signal ? { signal } : void 0);
   if (!res.ok) {
     throw new Error(`Failed to fetch request_uri ${requestUri}: HTTP ${res.status}`);
   }
@@ -137,7 +144,7 @@ function _decodeJwtPayload(jwt) {
 async function requestCredentialFromAuthorizationRequestURI(authorizationRequestUri, options) {
   const protocol = getBestProtocol(options?.protocolPreference);
   if (!protocol) return null;
-  const data = await buildRequestData(protocol, authorizationRequestUri, { fetchFn: options?.fetchFn });
+  const data = await buildRequestData(protocol, authorizationRequestUri, { fetchFn: options?.fetchFn, signal: options?.signal });
   return requestCredential(protocol, data, options);
 }
 
