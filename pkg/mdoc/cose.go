@@ -586,6 +586,13 @@ func Mac0(
 	algorithm int64,
 	externalAAD []byte,
 ) (*COSEMac0, error) {
+	// Must match Sign1's own nil-vs-empty normalization - see its doc
+	// comment. MAC_structure's external_aad element has the same h'' vs.
+	// CBOR-null requirement as Sig_structure's.
+	if externalAAD == nil {
+		externalAAD = []byte{}
+	}
+
 	headers := map[int64]any{
 		HeaderAlgorithm: algorithm,
 	}
@@ -653,6 +660,11 @@ func computeMAC(data, key []byte, algorithm int64) ([]byte, error) {
 
 // VerifyCOSEMac0 verifies a COSE_Mac0 message.
 func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
+	// Must match Mac0's own nil-vs-empty normalization - see its comment.
+	if externalAAD == nil {
+		externalAAD = []byte{}
+	}
+
 	var headers map[int64]any
 	if err := cbor.Unmarshal(mac0.Protected, &headers); err != nil {
 		return fmt.Errorf("failed to decode protected headers: %w", err)

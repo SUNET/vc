@@ -519,6 +519,30 @@ func TestExtractDeviceKeyFromMSO_NoDeviceKey(t *testing.T) {
 	}
 }
 
+// TestExtractDeviceKeyFromMSO_EC2MissingY guards against a partially-present
+// EC2 device key (X set, Y empty) slipping through as "present". Without the
+// Kty-aware check, toECDSAPublicKey would happily produce a public key with
+// Y=0 (big.Int.SetBytes(nil) == 0), and the caller wouldn't see a clear
+// "key missing" error until signature verification failed downstream for an
+// unrelated-looking reason.
+func TestExtractDeviceKeyFromMSO_EC2MissingY(t *testing.T) {
+	mso := &MobileSecurityObject{
+		Version: "1.0",
+		DeviceKeyInfo: DeviceKeyInfo{
+			DeviceKey: COSEKey{
+				Kty: KeyTypeEC2,
+				Crv: CurveP256,
+				X:   []byte{0x01, 0x02, 0x03},
+			},
+		},
+	}
+
+	_, err := ExtractDeviceKeyFromMSO(mso)
+	if err == nil {
+		t.Error("ExtractDeviceKeyFromMSO() should fail when EC2 key is missing Y")
+	}
+}
+
 func TestDeriveDeviceAuthenticationKey(t *testing.T) {
 	// Create session encryption
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
