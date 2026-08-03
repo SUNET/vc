@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-07-31
+**Generated:** 2026-08-03
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -903,6 +903,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | `federation`             | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                                                                                       | -                                                          | -              | No       |
 | `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label (e.g., "PID", "PID + EHIC"). Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -              | No       |
 | `combined_presentation`  | `object` | Combined presentation verification (ARF 3.0 §6.6.3.10). When multiple credentials are presented, this verifies they belong to the same holder.                                                                                                                                          | -                                                          | -              | No       |
+| `revocation`             | `object` | Credential revocation checking at presentation time (ARF 3.0 §6.6.3.7). When enabled, the Verifier checks Token Status List references in presented credentials.                                                                                                                        | -                                                          | -              | No       |
 
 ### `preferred_vp_formats`
 
@@ -1100,12 +1101,12 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.combined_presentation`
 
-| Field                | Type                               | Description                                                                                                                                                                                                                                                                 | Example | Default | Required |
-| -------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `enabled`            | `bool`                             | Enabled activates combined presentation binding verification.                                                                                                                                                                                                               | -       | -       | No       |
-| `enforcement`        | `string` (enforce\|warn\|disabled) | Enforcement determines how binding verification results are handled: - "enforce": reject the presentation if binding cannot be established - "warn": log a warning but allow the presentation through (per ARF 3.0 ACP_08) - "disabled": skip binding verification entirely | -       | `warn`  | No       |
-| `binding_attributes` | `array`                            | Attribute-based binding checks.                                                                                                                                                                                                                                             | -       | -       | No       |
-| `key_binding`        | `object`                           | Key-based binding checks.                                                                                                                                                                                                                                                   | -       | -       | No       |
+| Field                 | Type                               | Description                                                                                                                                                                                                                                                                 | Example | Default | Required |
+| --------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`             | `bool`                             | Enabled activates combined presentation binding verification.                                                                                                                                                                                                               | -       | -       | No       |
+| `enforcement`         | `string` (enforce\|warn\|disabled) | Enforcement determines how binding verification results are handled: - "enforce": reject the presentation if binding cannot be established - "warn": log a warning but allow the presentation through (per ARF 3.0 ACP_08) - "disabled": skip binding verification entirely | -       | `warn`  | No       |
+| `binding_attributes`  | `array`                            | Attribute-based binding checks.                                                                                                                                                                                                                                             | -       | -       | No       |
+| `key_binding_enabled` | `bool`                             | KeyBindingEnabled activates key-based binding (cnf.jwk / device key comparison). Cross-format comparison (SD-JWT cnf.jwk vs mDoc device key) is always supported since both are converted to RFC 7638 JWK thumbprints.                                                      | -       | -       | No       |
 
 ### `binding_attributes` entry
 
@@ -1115,13 +1116,16 @@ These clients are checked in addition to dynamically registered clients stored i
 | ------- | ---------- | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
 | `paths` | `[]string` | Claim paths that must ALL match across credentials (AND semantics). | `["family_name", "birth_date", "place_of_birth.locality"]` | -       | Yes      |
 
-### `key_binding`
+### `revocation`
 
-> **Path:** `.verifier.combined_presentation.key_binding`
+> **Path:** `.verifier.revocation`
 
-| Field     | Type   | Description                                                                                                                                                                                                  | Example | Default | Required |
-| --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `enabled` | `bool` | Enabled activates key-based binding (cnf.jwk / device key comparison). Cross-format comparison (SD-JWT cnf.jwk vs mDoc device key) is always supported since both are converted to RFC 7638 JWK thumbprints. | -       | -       | No       |
+| Field         | Type       | Description                                                                                                                                                                                                                                                                                   | Example | Default | Required |
+| ------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled`     | `bool`     | Enabled activates revocation status checking for presented credentials.                                                                                                                                                                                                                       | -       | -       | No       |
+| `cache_ttl`   | `int`      | Duration in seconds to cache fetched status list tokens.                                                                                                                                                                                                                                      | -       | `300`   | No       |
+| `fail_open`   | `bool`     | FailOpen determines behavior when the status list is unreachable or unparseable: - true: log warning and allow the credential through (fail-open) - false: reject the credential (fail-closed) Note: explicitly revoked/suspended credentials are always rejected regardless of this setting. | -       | `true`  | No       |
+| `skip_scopes` | `[]string` | Credential scopes exempt from revocation checking (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).                                                                                                                                                                      | -       | -       | No       |
 
 ## `registry` (Top-level)
 

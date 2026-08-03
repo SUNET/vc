@@ -277,7 +277,7 @@ func TestMobileSecurityObject(t *testing.T) {
 			},
 		},
 		DeviceKeyInfo: DeviceKeyInfo{
-			DeviceKey: COSEKey{Kty: 2, Crv: CurveP256, X: []byte{0xA1, 0x01, 0x02}},
+			DeviceKey: COSEKey{Kty: 2, Crv: CurveP256, X: []byte{0xA1, 0x01, 0x02}, Y: []byte{0xB2, 0x03, 0x04}},
 		},
 		DocType: DocType,
 		ValidityInfo: ValidityInfo{
