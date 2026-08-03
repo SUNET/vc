@@ -242,8 +242,20 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte)
 	if !ok {
 		return nil, fmt.Errorf("resolved key is not a crypto.PublicKey: %T", key)
 	}
-	if err := mdoc.Verify1(sign1, nil, pubKey, nil); err != nil {
-		return nil, fmt.Errorf("CWT signature verification failed: %w", err)
+	// Guard against panics from key/algorithm type mismatches in Verify1,
+	// since the token is untrusted input and could specify an algorithm
+	// incompatible with the resolved key type.
+	var verifyErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				verifyErr = fmt.Errorf("CWT signature verification panic (key/alg mismatch): %v", r)
+			}
+		}()
+		verifyErr = mdoc.Verify1(sign1, nil, pubKey, nil)
+	}()
+	if verifyErr != nil {
+		return nil, fmt.Errorf("CWT signature verification failed: %w", verifyErr)
 	}
 
 	// Extract status list from verified claims
