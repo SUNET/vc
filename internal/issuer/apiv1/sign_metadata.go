@@ -23,6 +23,22 @@ const (
 	MetadataTypeVCIIssuer = "vci-issuer"
 	// MetadataTypeOAuth2 identifies OAuth 2.0 Authorization Server Metadata (RFC 8414).
 	MetadataTypeOAuth2 = "oauth2-authorization-server"
+
+	// maxMetadataJSONBytes bounds the size of the metadata_json payload accepted
+	// by SignMetadata. This is an application-level guard, separate from gRPC's
+	// own transport-level message-size limit (grpc-go defaults to 4 MiB and
+	// neither the issuer's gRPC server nor the apigw client override it), so
+	// that an oversized payload gets a clear, specific InvalidArgument error
+	// here instead of a generic gRPC transport failure.
+	//
+	// A real deployment's Credential Issuer Metadata grows with the number of
+	// configured VCTM/MDDL scopes (each contributing a CredentialConfigurationsSupported
+	// entry with multi-language Display/ClaimDescription/ClaimDisplayProperties
+	// per claim, see pkg/openid4vci/issuer_metadata.go), so a handful of
+	// configured scopes can comfortably exceed a few hundred KB. 2 MiB leaves
+	// generous headroom for that while staying well under gRPC's 4 MiB default,
+	// so this check - not gRPC's - is the one that actually fires.
+	maxMetadataJSONBytes = 2 * 1024 * 1024
 )
 
 // signableMetadata is implemented by metadata structs that can be
@@ -50,7 +66,7 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 	if len(req.GetMetadataJson()) == 0 {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "metadata_json is required")
 	}
-	if len(req.GetMetadataJson()) > 64*1024 {
+	if len(req.GetMetadataJson()) > maxMetadataJSONBytes {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "metadata_json is too large")
 	}
 	if req.GetIss() != c.cfg.Issuer.IssuerURL {

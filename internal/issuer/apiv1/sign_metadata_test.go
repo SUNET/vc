@@ -89,8 +89,15 @@ func metadataJSON(t *testing.T, m map[string]any) []byte {
 }
 
 func TestSignMetadata_Validation(t *testing.T) {
-	// Build an oversized payload once for reuse.
-	oversized := make([]byte, 64*1024+1)
+	// Build boundary payloads once for reuse: one exactly at the limit (junk,
+	// invalid JSON, so it must clear the size check but fail at JSON parsing),
+	// and one exactly one byte over (must be rejected for size before parsing
+	// is ever attempted).
+	atLimit := make([]byte, maxMetadataJSONBytes)
+	for i := range atLimit {
+		atLimit[i] = 'x'
+	}
+	oversized := make([]byte, maxMetadataJSONBytes+1)
 	for i := range oversized {
 		oversized[i] = 'x'
 	}
@@ -111,6 +118,20 @@ func TestSignMetadata_Validation(t *testing.T) {
 			},
 			wantCode:   codes.InvalidArgument,
 			wantSubstr: "metadata_json is required",
+		},
+		{
+			// Exactly at maxMetadataJSONBytes must pass the size check (i.e. not
+			// be rejected as "too large"). It's not valid JSON, so it's expected
+			// to fail one stage later, at parsing - which proves the size gate
+			// itself let it through.
+			name:         "metadata_json exactly at size limit is not rejected for size",
+			metadataJSON: func(t *testing.T) []byte { return atLimit },
+			req: &apiv1_issuer.SignMetadataRequest{
+				MetadataType: MetadataTypeVCIIssuer,
+				Iss:          testIssuerURL,
+			},
+			wantCode:   codes.InvalidArgument,
+			wantSubstr: "failed to parse metadata",
 		},
 		{
 			name:         "oversized metadata_json",
