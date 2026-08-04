@@ -56,7 +56,7 @@ BUILD_CONFIGS           := \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
-	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
+	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting rfc \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
@@ -773,12 +773,15 @@ vscode: test-env ## Set up VS Code development environment
 	sudo apt-get update && sudo apt-get install -y \
 		protobuf-compiler \
 		netcat-openbsd \
-		plantuml
+		plantuml \
+		python3-pip
 	$(info Installing yq)
 	sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\
     sudo chmod +x /usr/local/bin/yq
 	$(info Installing act for local GitHub Actions testing)
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
+	$(info Installing xml2rfc)
+	sudo pip3 install --break-system-packages xml2rfc
 	$(info Installing go packages)
 	go install github.com/swaggo/swag/cmd/swag@latest && \
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
@@ -788,6 +791,22 @@ vscode: test-env ## Set up VS Code development environment
 	go install golang.org/x/vuln/cmd/govulncheck@latest && \
 	go install honnef.co/go/tools/cmd/staticcheck@latest && \
 	go install mvdan.cc/gofumpt@latest
+
+# ==============================================================================
+# RFC (xml2rfc)
+# ==============================================================================
+
+RFC_SRCS := $(wildcard *.rfc.xml)
+RFC_TXT  := $(RFC_SRCS:.rfc.xml=.txt)
+RFC_HTML := $(RFC_SRCS:.rfc.xml=.html)
+
+rfc: $(RFC_TXT) $(RFC_HTML) ## Build RFC documents from *.rfc.xml sources
+
+%.txt: %.rfc.xml
+	xml2rfc --text -o $@ $<
+
+%.html: %.rfc.xml
+	xml2rfc --html -o $@ $<
 
 # ==============================================================================
 # Formatting

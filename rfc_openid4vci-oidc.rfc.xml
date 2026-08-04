@@ -1,0 +1,660 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rfc xmlns:xi="http://www.w3.org/2001/XInclude"
+     ipr="trust200902"
+     docName="draft-svensson-openid4vp-oidc-bridge-00"
+     category="info"
+     submissionType="independent"
+     version="3">
+
+  <front>
+    <title abbrev="OpenID4VP to OIDC Bridge">OpenID4VP to OIDC Claims Bridge</title>
+
+    <seriesInfo name="Internet-Draft" value="draft-svensson-openid4vp-oidc-bridge-00"/>
+
+    <author initials="M." surname="Svensson" fullname="Magnus Svensson">
+      <organization>SUNET</organization>
+      <address>
+        <email>masv@sunet.se</email>
+      </address>
+    </author>
+
+    <author initials="L." surname="Johansson" fullname="Leif Johansson">
+      <organization>Siros Foundation</organization>
+      <address>
+        <email>leifj@siros.org</email>
+      </address>
+    </author>
+
+    <author initials="J." surname="Rangsmo" fullname="Joel Rangsmo">
+      <organization>Siros Foundation</organization>
+      <address>
+        <email>joel@siros.org</email>
+      </address>
+    </author>
+
+    <date year="2026" month="August" day="4"/>
+
+    <abstract>
+      <t>This document defines a mechanism for bridging OpenID for
+      Verifiable Presentations (OpenID4VP) to OpenID Connect (OIDC).
+      It specifies how a verifier that collects credentials from a
+      wallet via OpenID4VP can expose those credential claims to
+      Relying Parties as standard OIDC claims, enabling existing OIDC
+      deployments to consume digital credentials without implementing
+      OpenID4VP directly.</t>
+    </abstract>
+  </front>
+
+  <middle>
+    <section anchor="introduction">
+      <name>Introduction</name>
+      <t>OpenID for Verifiable Presentations (OpenID4VP) enables wallets
+      to present digital credentials to verifiers. However, many existing
+      services rely on OpenID Connect (OIDC) for authentication and
+      attribute retrieval, and implementing OpenID4VP represents a
+      significant barrier for these Relying Parties.</t>
+
+      <t>This document specifies how a verifier, acting as an OIDC
+      OpenID Provider (OP), can bridge the gap by collecting credentials
+      from a wallet via OpenID4VP and then exposing the resulting claims
+      in standard OIDC ID Tokens and UserInfo responses. The Relying
+      Party interacts with a normal OIDC flow and receives credential
+      data in the "openid4vp_data" claim without needing any knowledge
+      of the underlying OpenID4VP protocol.</t>
+    </section>
+
+    <section anchor="architecture">
+      <name>Architecture Overview</name>
+      <t>The following diagram illustrates the high-level interaction
+      between the participants:</t>
+
+      <artwork type="ascii-art"><![CDATA[
++--------+                  +------------------+              +--------+
+|        |  1. OIDC AuthN   |   OP / Verifier  |  2. OpenID4VP|        |
+|   RP   | ---------------> |     (Bridge)     | ------------>| Wallet |
+|        |                  |                  | <------------|        |
+|        |                  |                  |  3. VP Token |        |
+|        |                  |                  |              +--------+
+|        |                  |  4. Verify &     |
+|        |  5. ID Token +   |     extract      |
+|        |  openid4vp_data  |     claims       |
+|        | <--------------- |                  |
++--------+                  +------------------+
+
+  Trust in credential issuers is established out of band
+  (pre-configured issuer keys, trust frameworks, status lists).
+
+Flow:
+  1. RP sends OIDC Authentication Request to OP (with credential
+     type scopes).
+  2. OP initiates OpenID4VP request to user's wallet.
+  3. Wallet presents VP Token with disclosed credentials.
+  4. OP verifies credentials (signature, expiry, revocation status)
+     and extracts claims.
+  5. OP returns ID Token / UserInfo containing openid4vp_data to RP.
+]]></artwork>
+    </section>
+
+    <section anchor="terminology">
+      <name>Terminology</name>
+      <t>The key words "<bcp14>MUST</bcp14>", "<bcp14>MUST NOT</bcp14>",
+      "<bcp14>REQUIRED</bcp14>", "<bcp14>SHALL</bcp14>",
+      "<bcp14>SHALL NOT</bcp14>", "<bcp14>SHOULD</bcp14>",
+      "<bcp14>SHOULD NOT</bcp14>", "<bcp14>RECOMMENDED</bcp14>",
+      "<bcp14>MAY</bcp14>", and "<bcp14>OPTIONAL</bcp14>" in this
+      document are to be interpreted as described in
+      <xref target="RFC2119"/>.</t>
+    </section>
+
+    <section anchor="op-requirements">
+      <name>OP (Verifier/Bridge) Requirements</name>
+
+      <section anchor="format">
+        <name>The openid4vp_data Claim</name>
+        <t>The following is a non-normative example of an OIDC ID Token
+        containing the "openid4vp_data" claim with two presented
+        credentials:</t>
+
+        <sourcecode type="json"><![CDATA[
+{
+  "iss": "https://issuer.example.org",
+  "sub": "user@example.org",
+  "iat": 1722772800,
+  "exp": 1722859200,
+  "openid4vp_data": {
+    "credentials": {
+      "ehic": {
+        "format": "vc+sd-jwt",
+        "vct": "https://credentials.example.org/ehic",
+        "claims": {
+          "name": "John Doe",
+          "dob": "1990-01-01",
+          "ehic_number": "1234567890"
+        }
+      },
+      "pda1": {
+        "format": "vc+sd-jwt",
+        "vct": "https://credentials.example.org/pda1",
+        "claims": {
+          "name": "John Doe",
+          "dob": "1990-01-01",
+          "pda1_number": "0987654321"
+        }
+      }
+    }
+  }
+}
+]]></sourcecode>
+
+        <section anchor="openid4vp-data-object">
+          <name>The openid4vp_data Object</name>
+          <t>The "openid4vp_data" claim is a top-level JSON object included
+          in the OIDC ID Token or UserInfo response. It contains credential
+          data obtained via an OpenID4VP presentation flow, re-packaged for
+          consumption by OIDC Relying Parties.</t>
+
+          <t>The object <bcp14>MUST</bcp14> contain the following member:</t>
+
+          <dl newline="true">
+          <dt>credentials</dt>
+          <dd>A JSON object where each key is a scope value
+          corresponding to the requested credential type and each
+            value is a Credential Entry object as defined in
+            <xref target="credential-entry"/>. There <bcp14>MUST</bcp14>
+            be at least one entry. Keys <bcp14>MUST</bcp14> be unique
+            within the object.</dd>
+          </dl>
+
+          <t>Additional members <bcp14>MAY</bcp14> be present. Implementations
+          that do not recognise additional members <bcp14>MUST</bcp14> ignore
+          them.</t>
+        </section>
+
+        <section anchor="credential-entry">
+          <name>Credential Entry Object</name>
+          <t>Each Credential Entry object represents a single credential
+          presented during the OpenID4VP flow. It <bcp14>MUST</bcp14>
+          contain the following member:</t>
+
+          <dl newline="true">
+            <dt>claims</dt>
+            <dd>A JSON object containing the disclosed claims from the
+            credential. Each key is a claim name and each value is the
+            claim value. Claim names are determined by the credential
+            type and <bcp14>MUST</bcp14> be strings. Claim values
+            <bcp14>MAY</bcp14> be any valid JSON type.</dd>
+          </dl>
+
+          <t>A Credential Entry object <bcp14>MAY</bcp14> contain the
+          following additional members:</t>
+
+          <dl newline="true">
+            <dt>format</dt>
+            <dd>A string indicating the original credential format
+            (e.g., "vc+sd-jwt", "mso_mdoc"). If omitted, the format
+            is unspecified.</dd>
+
+            <dt>vct</dt>
+            <dd>A string containing the Verifiable Credential Type
+            identifier, as defined in the credential's metadata.</dd>
+          </dl>
+
+          <t>Additional members <bcp14>MAY</bcp14> be present.
+          Implementations that do not recognise additional members
+          <bcp14>MUST</bcp14> ignore them.</t>
+        </section>
+      </section>
+
+      <section anchor="op-discovery">
+        <name>Discovery</name>
+        <t>An OP that supports this bridge mechanism <bcp14>MUST</bcp14>
+        include "openid4vp_data" in the "claims_supported" list in its
+        OpenID Connect Discovery metadata document.</t>
+
+        <t>The OP <bcp14>SHOULD</bcp14> also advertise the credential
+        types it can collect by listing the corresponding scopes in
+        the "scopes_supported" discovery metadata field (e.g.,
+        "ehic", "pda1").</t>
+
+        <t>The OP <bcp14>MAY</bcp14> additionally include a
+        "openid4vp_credentials_supported" member in its discovery
+        metadata. The value is a JSON array of objects, each containing
+        at minimum a "scope" string and a "vct" string, providing
+        RPs with a machine-readable mapping between scopes and
+        credential types.</t>
+      </section>
+
+      <section anchor="op-authn-flow">
+        <name>Authentication Flow</name>
+        <t>When the OP receives an OIDC Authentication Request that
+        includes a request for "openid4vp_data" claims (via the "claims"
+        parameter or a registered scope), it <bcp14>MUST</bcp14>:</t>
+
+        <ol>
+          <li>Initiate an OpenID4VP presentation request to the user's
+          wallet for the requested credential types.</li>
+          <li>Verify the presented credentials according to the
+          applicable trust framework.</li>
+          <li>Extract the disclosed claims from each verified
+          credential.</li>
+          <li>Construct the "openid4vp_data" object as defined in
+          <xref target="openid4vp-data-object"/>.</li>
+          <li>Include the "openid4vp_data" claim in the ID Token,
+          the UserInfo response, or both, depending on the OP's
+          policy and the size considerations described in
+          <xref target="claim-size-limits"/>.</li>
+        </ol>
+      </section>
+
+      <section anchor="op-credential-mapping">
+        <name>Credential Mapping</name>
+        <t>The OP <bcp14>MUST</bcp14> use the scope value as the key
+        within the "credentials" object. For example, if the RP
+        requested scope "ehic", the resulting entry
+        <bcp14>MUST</bcp14> be keyed as "ehic". This ensures a
+        predictable, stable mapping between the RP's request and
+        the response.</t>
+
+        <t>The OP <bcp14>MUST NOT</bcp14> include claims that were
+        not disclosed by the wallet. The OP <bcp14>MUST NOT</bcp14>
+        modify claim values during the mapping.</t>
+      </section>
+    </section>
+
+    <section anchor="rp-requirements">
+      <name>RP (Relying Party) Requirements</name>
+
+      <section anchor="rp-requesting">
+        <name>Requesting Credential Claims</name>
+        <t>An RP that wishes to receive credential data via this
+        bridge <bcp14>MUST</bcp14> include the appropriate credential
+        type scopes in the OIDC Authentication Request. Each scope
+        corresponds to a credential type (e.g., "ehic", "pda1").
+        The presence of any credential type scope signals to the OP
+        that the "openid4vp_data" claim is requested.</t>
+
+        <t>The requested scopes directly correlate to the keys in
+        the "credentials" object returned by the OP. For example,
+        if the RP requests scopes "ehic" and "pda1", the OP will
+        return an "openid4vp_data" claim with corresponding "ehic"
+        and "pda1" entries in the "credentials" object.</t>
+
+        <t>The RP <bcp14>MAY</bcp14> additionally use the "claims"
+        request parameter to specify which individual claims within
+        a credential type are desired, enabling selective
+        disclosure.</t>
+
+        <t>The following is a non-normative example of a claims
+        request:</t>
+
+        <sourcecode type="json"><![CDATA[
+{
+  "id_token": {
+    "openid4vp_data": {
+      "essential": true,
+      "credentials": {
+        "ehic": {
+          "claims": ["name", "dob", "ehic_number"]
+        }
+      }
+    }
+  }
+}
+]]></sourcecode>
+      </section>
+
+      <section anchor="rp-consuming">
+        <name>Consuming Credential Claims</name>
+        <t>The "openid4vp_data" claim structure is defined in
+        <xref target="format"/>. The RP <bcp14>MUST</bcp14> parse
+        the claim according to that definition. Specifically, the RP
+        <bcp14>MUST</bcp14>:</t>
+
+        <ol>
+          <li>Check for the presence of the "openid4vp_data" claim.
+          If the claim was requested as essential and is absent, the
+          RP <bcp14>SHOULD</bcp14> treat the authentication as
+          failed.</li>
+          <li>Parse the "credentials" object and extract the entries
+          relevant to its use case.</li>
+          <li>Validate that the expected claims are present in each
+          Credential Entry's "claims" object.</li>
+        </ol>
+
+        <t>The RP <bcp14>MUST NOT</bcp14> assume that all requested
+        scopes will be present in the response; the user may have
+        declined to present certain credentials. The RP
+        <bcp14>MUST</bcp14> ignore unrecognised credential keys and
+        unrecognised members within Credential Entry objects.</t>
+      </section>
+
+      <section anchor="rp-trust">
+        <name>Trust Model</name>
+        <t>The RP places trust in the OP to have correctly verified
+        the presented credentials. The RP does not interact with the
+        wallet or credential issuer directly. The trust relationship
+        between the RP and the OP is established through standard OIDC
+        mechanisms (client registration, token validation, TLS).</t>
+      </section>
+    </section>
+
+    <section anchor="security-considerations">
+      <name>Limitations and Considerations</name>
+
+      <section anchor="claim-size-limits">
+        <name>Claim Set Size Limits</name>
+        <t>OIDC ID Tokens are typically passed as JWTs in HTTP headers
+        or URL fragments, which impose practical size limits. Browser
+        URL length limits are commonly around 2048 bytes, and many HTTP
+        servers reject headers exceeding 8192 bytes. When multiple
+        credentials with many disclosed claims are included in the
+        "openid4vp_data" object, the resulting token may exceed these
+        limits.</t>
+
+        <t>Implementations <bcp14>SHOULD</bcp14> consider the following
+        mitigations:</t>
+
+        <ul>
+          <li>Return credential claims via the UserInfo endpoint rather
+          than embedding them directly in the ID Token.</li>
+          <li>Limit the number of disclosed claims to those requested
+          by the Relying Party via the OIDC "claims" parameter.</li>
+          <li>Use token introspection or reference tokens where
+          supported by the deployment.</li>
+        </ul>
+      </section>
+
+      <section anchor="error-handling">
+        <name>Error Handling</name>
+        <t>The OP <bcp14>MUST</bcp14> handle the following failure
+        scenarios gracefully:</t>
+
+        <dl newline="true">
+          <dt>Wallet rejection</dt>
+          <dd>The user declines to present credentials. The OP
+          <bcp14>MAY</bcp14> either omit the "openid4vp_data" claim
+          entirely or return an OIDC error response
+          (e.g., "access_denied") depending on whether the credential
+          presentation was essential to the authentication.</dd>
+
+          <dt>Wallet timeout</dt>
+          <dd>The wallet does not respond within a reasonable time.
+          The OP <bcp14>SHOULD</bcp14> treat this as equivalent to a
+          rejection.</dd>
+
+          <dt>Invalid credentials</dt>
+          <dd>The wallet presents credentials that fail verification
+          (expired, revoked, untrusted issuer). The OP
+          <bcp14>MUST NOT</bcp14> include unverified credential claims
+          in the "openid4vp_data" object. The OP <bcp14>MAY</bcp14>
+          proceed without those credentials or fail the
+          authentication.</dd>
+
+          <dt>Partial presentation</dt>
+          <dd>The wallet presents only a subset of the requested
+          credentials. The OP <bcp14>MUST</bcp14> include only the
+          successfully verified credentials and <bcp14>MUST NOT</bcp14>
+          fabricate entries for missing credentials.</dd>
+        </dl>
+      </section>
+
+      <section anchor="scope-mapping">
+        <name>Scope Mapping</name>
+        <t>An OP <bcp14>MAY</bcp14> define custom OIDC scopes that map
+        to specific credential presentation requests. For example, the
+        scope "ehic" might trigger a request for an EHIC credential
+        with a predefined set of claims.</t>
+
+        <t>When using scope-based mapping, the OP <bcp14>SHOULD</bcp14>
+        document the mapping between scopes and credential types in its
+        discovery metadata or out-of-band documentation. The OP
+        <bcp14>MUST</bcp14> ensure that the scope semantics are stable
+        and do not change unexpectedly for registered RPs.</t>
+      </section>
+
+      <section anchor="scope-of-spec">
+        <name>Scope of This Specification</name>
+        <t>This specification defines the data format of the
+        "openid4vp_data" claim, the mechanism for requesting and
+        returning credential claims via OIDC, and the responsibilities
+        of the OP and RP in that exchange. The following aspects are
+        explicitly out of scope:</t>
+
+        <ul>
+          <li><strong>Credential validation policy.</strong> This
+          specification does not define which issuers to trust, which
+          revocation mechanisms to check, or what trust frameworks to
+          apply. These decisions are deployment-specific and determined
+          by the OP operator.</li>
+          <li><strong>Business logic and authorization decisions.</strong>
+          How the RP interprets the received claims — for example,
+          whether an EHIC credential grants access to a healthcare
+          service, or whether a PDA1 is sufficient for a given
+          transaction — is entirely the RP's responsibility and outside
+          this specification.</li>
+          <li><strong>Credential issuance.</strong> This specification
+          deals only with presentation of existing credentials, not with
+          the issuance of new credentials (which is covered by
+          OpenID4VCI).</li>
+          <li><strong>Wallet implementation.</strong> The interaction
+          between the OP and the wallet follows the OpenID4VP protocol.
+          This specification does not impose additional requirements on
+          wallet implementations.</li>
+          <li><strong>User consent and identity matching.</strong> How
+          the OP associates a credential presentation with an OIDC
+          subject identifier, and how user consent is obtained, are
+          implementation details left to the OP.</li>
+        </ul>
+
+        <t>In summary, this specification provides the plumbing for
+        transporting verified credential claims through OIDC. Everything
+        above that layer — trust decisions, access control, and business
+        rules — is the domain of the deploying parties.</t>
+      </section>
+    </section>
+
+    <section anchor="security">
+      <name>Security Considerations</name>
+
+      <section anchor="sec-replay">
+        <name>Credential Replay</name>
+        <t>The OP <bcp14>MUST</bcp14> ensure that credential
+        presentations are bound to the current authentication session.
+        The OP <bcp14>SHOULD</bcp14> use nonces in the OpenID4VP
+        request to prevent replay of previously captured VP Tokens.</t>
+
+        <t>The RP <bcp14>MUST</bcp14> validate standard JWT claims
+        ("iat", "exp", "nonce") in the ID Token to ensure freshness
+        of the "openid4vp_data" claim.</t>
+      </section>
+
+      <section anchor="sec-token-leakage">
+        <name>Token Leakage</name>
+        <t>ID Tokens containing "openid4vp_data" may carry sensitive
+        personal data (e.g., national ID numbers, health information).
+        Implementations <bcp14>MUST</bcp14> use TLS for all token
+        transmissions. The OP <bcp14>SHOULD</bcp14> prefer delivering
+        credential claims via the UserInfo endpoint (which uses a
+        back-channel request) rather than embedding them in the ID Token
+        (which may be exposed in browser history or logs).</t>
+      </section>
+
+      <section anchor="sec-claim-injection">
+        <name>Claim Injection</name>
+        <t>The OP <bcp14>MUST NOT</bcp14> allow external parties to
+        inject or modify claims within the "openid4vp_data" object.
+        The OP <bcp14>MUST</bcp14> populate this claim exclusively
+        from verified credential presentations. The ID Token
+        <bcp14>MUST</bcp14> be signed by the OP to protect integrity.</t>
+      </section>
+
+      <section anchor="sec-privacy">
+        <name>Privacy Considerations</name>
+        <t>The bridge architecture introduces the OP as a party that
+        observes all credential claims presented by the user. This
+        creates a correlation point. Deployments <bcp14>SHOULD</bcp14>
+        consider the following:</t>
+
+        <ul>
+          <li>The OP <bcp14>SHOULD</bcp14> request only the minimum
+          claims necessary to satisfy the RP's request (selective
+          disclosure).</li>
+          <li>The OP <bcp14>SHOULD NOT</bcp14> log or persist
+          credential claims beyond what is necessary for the
+          authentication session.</li>
+          <li>RPs <bcp14>SHOULD</bcp14> be aware that repeated
+          presentations of the same credential claims across sessions
+          may enable correlation by the OP.</li>
+          <li>Where possible, deployments <bcp14>SHOULD</bcp14> use
+          pairwise subject identifiers to limit cross-RP
+          correlation.</li>
+        </ul>
+      </section>
+    </section>
+
+    <section anchor="iana">
+      <name>IANA Considerations</name>
+
+      <section anchor="iana-claim-reg">
+        <name>JSON Web Token Claims Registration</name>
+        <t>This specification requests registration of the following
+        claim in the IANA "JSON Web Token Claims" registry:</t>
+
+        <dl newline="true">
+          <dt>Claim Name</dt>
+          <dd>openid4vp_data</dd>
+
+          <dt>Claim Description</dt>
+          <dd>Digital credential claims obtained via an OpenID4VP
+          presentation, structured for consumption by OIDC Relying
+          Parties.</dd>
+
+          <dt>Change Controller</dt>
+          <dd>IETF</dd>
+
+          <dt>Specification Document(s)</dt>
+          <dd>Section 3.1 of this document</dd>
+        </dl>
+      </section>
+
+      <section anchor="iana-discovery-reg">
+        <name>OpenID Connect Discovery Metadata Registration</name>
+        <t>This specification requests registration of the following
+        metadata parameter:</t>
+
+        <dl newline="true">
+          <dt>Metadata Name</dt>
+          <dd>openid4vp_credentials_supported</dd>
+
+          <dt>Metadata Description</dt>
+          <dd>A JSON array describing the credential types the OP can
+          collect via OpenID4VP and expose as OIDC claims.</dd>
+
+          <dt>Change Controller</dt>
+          <dd>IETF</dd>
+
+          <dt>Specification Document(s)</dt>
+          <dd>Section 4.1 of this document</dd>
+        </dl>
+      </section>
+    </section>
+  </middle>
+
+  <back>
+    <references>
+      <name>References</name>
+
+      <references>
+        <name>Normative References</name>
+
+        <reference anchor="RFC2119" target="https://www.rfc-editor.org/info/rfc2119">
+          <front>
+            <title>Key words for use in RFCs to Indicate Requirement Levels</title>
+            <author initials="S." surname="Bradner" fullname="S. Bradner"/>
+            <date year="1997" month="March"/>
+          </front>
+          <seriesInfo name="BCP" value="14"/>
+          <seriesInfo name="RFC" value="2119"/>
+        </reference>
+
+        <reference anchor="OpenID.Core" target="https://openid.net/specs/openid-connect-core-1_0.html">
+          <front>
+            <title>OpenID Connect Core 1.0</title>
+            <author initials="N." surname="Sakimura" fullname="Nat Sakimura"/>
+            <author initials="J." surname="Bradley" fullname="John Bradley"/>
+            <author initials="M." surname="Jones" fullname="Michael Jones"/>
+            <author initials="B." surname="de Medeiros" fullname="Breno de Medeiros"/>
+            <author initials="C." surname="Mortimore" fullname="Chuck Mortimore"/>
+            <date year="2014" month="November"/>
+          </front>
+        </reference>
+
+        <reference anchor="OpenID.Discovery" target="https://openid.net/specs/openid-connect-discovery-1_0.html">
+          <front>
+            <title>OpenID Connect Discovery 1.0</title>
+            <author initials="N." surname="Sakimura" fullname="Nat Sakimura"/>
+            <author initials="J." surname="Bradley" fullname="John Bradley"/>
+            <author initials="M." surname="Jones" fullname="Michael Jones"/>
+            <author initials="E." surname="Jay" fullname="Edmund Jay"/>
+            <date year="2014" month="November"/>
+          </front>
+        </reference>
+
+        <reference anchor="OpenID4VP" target="https://openid.net/specs/openid-4-verifiable-presentations-1_0.html">
+          <front>
+            <title>OpenID for Verifiable Presentations (OpenID4VP) 1.0</title>
+            <author initials="O." surname="Terbu" fullname="Oliver Terbu"/>
+            <author initials="T." surname="Lodderstedt" fullname="Torsten Lodderstedt"/>
+            <author initials="K." surname="Yasuda" fullname="Kristina Yasuda"/>
+            <author initials="T." surname="Looker" fullname="Tobias Looker"/>
+            <date year="2024"/>
+          </front>
+        </reference>
+
+        <reference anchor="RFC8259" target="https://www.rfc-editor.org/info/rfc8259">
+          <front>
+            <title>The JavaScript Object Notation (JSON) Data Interchange Format</title>
+            <author initials="T." surname="Bray" fullname="T. Bray"/>
+            <date year="2017" month="December"/>
+          </front>
+          <seriesInfo name="STD" value="90"/>
+          <seriesInfo name="RFC" value="8259"/>
+        </reference>
+      </references>
+
+      <references>
+        <name>Informative References</name>
+
+        <reference anchor="RFC7519" target="https://www.rfc-editor.org/info/rfc7519">
+          <front>
+            <title>JSON Web Token (JWT)</title>
+            <author initials="M." surname="Jones" fullname="Michael Jones"/>
+            <author initials="J." surname="Bradley" fullname="John Bradley"/>
+            <author initials="N." surname="Sakimura" fullname="Nat Sakimura"/>
+            <date year="2015" month="May"/>
+          </front>
+          <seriesInfo name="RFC" value="7519"/>
+        </reference>
+
+        <reference anchor="SD-JWT.VC" target="https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-05.html">
+          <front>
+            <title>SD-JWT-based Verifiable Credentials (SD-JWT VC)</title>
+            <author initials="O." surname="Terbu" fullname="Oliver Terbu"/>
+            <author initials="D." surname="Fett" fullname="Daniel Fett"/>
+            <date year="2024"/>
+          </front>
+        </reference>
+
+        <reference anchor="ISO.18013-5" target="https://www.iso.org/standard/69084.html">
+          <front>
+            <title>Personal identification — ISO-compliant driving licence — Part 5: Mobile driving licence (mDL) application</title>
+            <author>
+              <organization>ISO/IEC</organization>
+            </author>
+            <date year="2021"/>
+          </front>
+        </reference>
+      </references>
+    </references>
+  </back>
+</rfc>
