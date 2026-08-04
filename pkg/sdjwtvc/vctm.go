@@ -9,7 +9,9 @@ package sdjwtvc
 type VCTM struct {
 	// VCT is the verifiable credential type identifier (REQUIRED per section 6.2).
 	// Must match the vct claim value in the SD-JWT VC.
-	VCT string `json:"vct" bson:"vct" validate:"required"`
+	// For locally-served VCTMs, this is auto-populated by ResolveVCTUrls from the
+	// serving URL if not present in the source file.
+	VCT string `json:"vct" bson:"vct"`
 
 	// Name is a human-readable name for developers (OPTIONAL per section 6.2).
 	Name string `json:"name,omitempty" bson:"name,omitempty"`

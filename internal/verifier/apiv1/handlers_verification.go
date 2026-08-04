@@ -130,7 +130,6 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	q.Set("response_code", responseCode)
 	u.RawQuery = q.Encode()
 	redirectURI := u.String()
-	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})
 
 	// Process all VP tokens for the requested scopes
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
@@ -374,6 +373,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
+
+	// Notify AFTER credentials are cached so the browser can fetch them
+	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})
 
 	reply := &VerificationDirectPostResponse{}
 

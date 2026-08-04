@@ -61,6 +61,7 @@ BUILD_CONFIGS           := \
 	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
 	test-wallet-stack-vci test-wallet-stack-vp test-wallet-stack-e2e test-wallet-stack-security \
+	test-cross-device test-cross-device-quick \
 	test-didcomm test-didcomm-interop test-didcomm-all \
 	test-workflows test-workflows-run \
 	w3c-test create-w3c-test-suite run-w3c-test \
@@ -100,6 +101,10 @@ help: ## Show this help message
 	$(info   make oidc-conformance-test-oidc  - Test OIDC OP)
 	$(info   make oidc-conformance-status     - Show results)
 	$(info   make oidc-conformance-clean      - Cleanup)
+	$(info )
+	$(info Cross-Device Flow Tests:)
+	$(info   make test-cross-device           - Full cross-device flow (VCI→browser→QR→wallet→SSE→token))
+	$(info   make test-cross-device-quick     - QR rendering smoke test only)
 	$(info )
 	$(info Environment Variables:)
 	$(info   VERSION               - Docker image version (default: latest))
@@ -242,6 +247,23 @@ test-wallet-stack-e2e: ## Run wallet stack end-to-end test (VCI then VP)
 test-wallet-stack-security: ## Run wallet stack security/negative tests (DPoP, PKCE, replay)
 	$(info Testing wallet stack security — DPoP, PKCE, replay)
 	go test -v -count=1 -timeout 180s -run 'TestStack_VCI_(PAR_|Token_|Credential_)' ./internal/wallet/integration/...
+
+# ==============================================================================
+# Cross-Device Flow Tests (requires: docker compose up + chromium + bin/vc_wallet)
+# ==============================================================================
+
+test-cross-device: ## Run full cross-device flow test (VCI→browser→QR→wallet→SSE→token)
+	$(info Testing cross-device flow — requires: docker compose up, chromium, bin/vc_wallet)
+	@command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 || command -v google-chrome >/dev/null 2>&1 || \
+		{ echo "Error: chromium/google-chrome not found on PATH"; exit 1; }
+	@test -x bin/vc_wallet || { echo "Error: bin/vc_wallet not found — run 'make build-wallet' first"; exit 1; }
+	go test -v -count=1 -tags integration_cross_device -timeout 120s ./internal/verifier/integration/...
+
+test-cross-device-quick: ## Run QR smoke test only (no wallet binary needed)
+	$(info Testing cross-device QR rendering — requires: docker compose up, chromium)
+	@command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 || command -v google-chrome >/dev/null 2>&1 || \
+		{ echo "Error: chromium/google-chrome not found on PATH"; exit 1; }
+	go test -v -count=1 -tags integration_cross_device -timeout 60s -run 'TestCrossDevice_QRCodeRenders' ./internal/verifier/integration/...
 
 # ==============================================================================
 # Code Quality & Security

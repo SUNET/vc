@@ -666,6 +666,9 @@ func (c *MemoryStore) MarkCodeAsForfeited(ctx context.Context, id string) error 
 	}
 
 	doc := item.Value()
+	if doc.Forfeited {
+		return errors.New("authorization code already forfeited")
+	}
 	doc.Forfeited = true
 
 	// Update the primary cache entry

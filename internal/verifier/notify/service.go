@@ -29,6 +29,9 @@ func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error)
 }
 
 func (s *Service) Notify(id string) broadcast.Broadcaster {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	b, ok := s.CH[id]
 	if !ok {
 		b = broadcast.NewBroadcaster(10)
@@ -38,29 +41,29 @@ func (s *Service) Notify(id string) broadcast.Broadcaster {
 }
 
 func (s *Service) OpenListener(id string) chan any {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	listener := make(chan any)
 	s.Notify(id).Register(listener)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.listenerCount[id]++
+
 	s.log.Debug("OpenListener", "id", id, "count", s.listenerCount[id])
 	return listener
 }
 
 func (s *Service) CloseListener(id string, listener chan any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.Notify(id).Unregister(listener)
 	close(listener)
-	s.listenerCount[id]--
-	s.log.Debug("CloseListener", "id", id, "count", s.listenerCount[id])
 
-	// Clean up if no more listeners
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listenerCount[id]--
 	if s.listenerCount[id] <= 0 {
 		delete(s.listenerCount, id)
 	}
+
+	s.log.Debug("CloseListener", "id", id, "count", s.listenerCount[id])
 }
 
 func (s *Service) Submit(id string, msg any) {

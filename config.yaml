@@ -188,8 +188,10 @@ apigw:
               auth_claims: ["given_name", "family_name", "birth_date"]
         pid_mdoc:
           auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birth_date"]
         mdl:
           auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birth_date"]
   auth_providers:
     oidc:
       enable: true
