@@ -129,6 +129,27 @@ func (r *TypeRegistry) Lookup(name string) *StructDef {
 	return nil
 }
 
+// LookupInPkg resolves a type name preferring the given package.
+// This avoids collisions when different packages define structs with the same name.
+func (r *TypeRegistry) LookupInPkg(name, pkgName string) *StructDef {
+	// Try package-qualified name first to avoid cross-package collisions
+	if pkgName != "" {
+		if def, ok := r.types[pkgName+"."+name]; ok {
+			return def
+		}
+	}
+	if def, ok := r.types[name]; ok {
+		return def
+	}
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		simple := name[idx+1:]
+		if def, ok := r.types[simple]; ok {
+			return def
+		}
+	}
+	return nil
+}
+
 func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
@@ -227,6 +248,25 @@ func (r *TypeRegistry) LookupMapValueType(name string) *StructDef {
 		return nil
 	}
 	return r.Lookup(valName)
+}
+
+// LookupMapValueTypeInPkg is like LookupMapValueType but prefers the given package.
+func (r *TypeRegistry) LookupMapValueTypeInPkg(name, pkgName string) *StructDef {
+	valName, ok := r.mapAliases[name]
+	if !ok {
+		if pkgName != "" {
+			valName, ok = r.mapAliases[pkgName+"."+name]
+		}
+	}
+	if !ok {
+		if idx := strings.LastIndex(name, "."); idx >= 0 {
+			valName, ok = r.mapAliases[name[idx+1:]]
+		}
+	}
+	if !ok {
+		return nil
+	}
+	return r.LookupInPkg(valName, pkgName)
 }
 
 func (r *TypeRegistry) parseFields(st *ast.StructType, def *StructDef, pkgName string) {
@@ -725,7 +765,7 @@ func buildDocument(reg *TypeRegistry) []*DocSection {
 		if field.Tag.YAMLName == "" || field.Tag.YAMLName == "-" {
 			continue
 		}
-		sec := buildTopLevel(reg, field)
+		sec := buildTopLevel(reg, field, cfg.PkgName)
 		if sec != nil {
 			sections = append(sections, sec)
 		}
@@ -822,13 +862,13 @@ func secretPlaceholder(yamlName string) string {
 	return "\"<secret-value>\""
 }
 
-func buildTopLevel(reg *TypeRegistry, field *FieldDef) *DocSection {
+func buildTopLevel(reg *TypeRegistry, field *FieldDef, pkgName string) *DocSection {
 	yamlKey := field.Tag.YAMLName
 
 	var def *StructDef
 	typeName := resolveTypeName(field.TypeExpr)
 	if typeName != "" {
-		def = reg.Lookup(typeName)
+		def = reg.LookupInPkg(typeName, pkgName)
 	}
 	if def == nil && field.InlineDef != nil {
 		def = field.InlineDef
@@ -840,7 +880,7 @@ func buildTopLevel(reg *TypeRegistry, field *FieldDef) *DocSection {
 		isMap = true
 		valName := resolveTypeName(mt.Value)
 		if valName != "" {
-			mapValDef = reg.Lookup(valName)
+			mapValDef = reg.LookupInPkg(valName, pkgName)
 		}
 	}
 
@@ -932,7 +972,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 		// Named struct type
 		typeName := resolveTypeName(f.TypeExpr)
 		if typeName != "" {
-			if childDef := reg.Lookup(typeName); childDef != nil {
+			if childDef := reg.LookupInPkg(typeName, def.PkgName); childDef != nil {
 				if !documented[childDef.Name] {
 					documented[childDef.Name] = true
 					sub := buildStructSubSection(reg, childDef, childPath)
@@ -950,7 +990,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 
 		// Named map type alias (e.g., type Clients map[string]*Client)
 		if !expanded && typeName != "" {
-			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
+			if valDef := reg.LookupMapValueTypeInPkg(typeName, def.PkgName); valDef != nil {
 				keyPH := mapKeyPlaceholder(f.Tag)
 				if !documented[valDef.Name] {
 					documented[valDef.Name] = true
@@ -980,11 +1020,11 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 			if mt, ok := asMapType(f.TypeExpr); ok {
 				valName := resolveTypeName(mt.Value)
 				if valName != "" {
-					valDef := reg.Lookup(valName)
+					valDef := reg.LookupInPkg(valName, def.PkgName)
 					keyPH := mapKeyPlaceholder(f.Tag)
 					// If the map value is itself a named map alias, resolve one level deeper
 					if valDef == nil {
-						if innerDef := reg.LookupMapValueType(valName); innerDef != nil {
+						if innerDef := reg.LookupMapValueTypeInPkg(valName, def.PkgName); innerDef != nil {
 							valDef = innerDef
 							innerKey := "<key>"
 							if f.Tag.DocValueKey != "" {
@@ -1014,7 +1054,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 			if at, ok := f.TypeExpr.(*ast.ArrayType); ok {
 				elemName := resolveTypeName(at.Elt)
 				if elemName != "" {
-					if elemDef := reg.Lookup(elemName); elemDef != nil {
+					if elemDef := reg.LookupInPkg(elemName, def.PkgName); elemDef != nil {
 						if !documented[elemDef.Name] {
 							documented[elemDef.Name] = true
 							sub := buildStructSubSection(reg, elemDef, childPath+"[]")

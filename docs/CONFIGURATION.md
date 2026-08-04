@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-08-03
+**Generated:** 2026-08-04
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -133,104 +133,28 @@ Shared configuration used across all services.
 
 > **Path:** `.common.credential_metadata.<credential scope>`
 
-https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
+| Field               | Type     | Description                                                                                                                                                                                                                                        | Example       | Default     | Required |
+| ------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------- | -------- |
+| `vctm_file_path`    | `string` | Path to a local VCTM JSON file. When set, apigw will publish the VCTM at /type-metadata/:scope. Used for every format except mso_mdoc (mutually exclusive with VCTMUrl). At least one of VCTMFilePath, VCTMUrl, MDDLFilePath, MDDLUrl is required. | -             | -           | No       |
+| `vctm_url`          | `string` | URL where the VCTM is already published externally. When set, the VCTM is fetched from this URL at startup for internal use but NOT re-published by apigw. Used for every format except mso_mdoc (mutually exclusive with VCTMFilePath).           | -             | -           | No       |
+| `mddl_file_path`    | `string` | Path to a local MDDL (mso_mdoc) schema JSON file, as produced by registry-cli's mddl format generator. The mso_mdoc analogue of VCTMFilePath — mutually exclusive with MDDLUrl.                                                                    | -             | -           | No       |
+| `mddl_url`          | `string` | URL where the MDDL schema is already published externally. The mso_mdoc analogue of VCTMUrl.                                                                                                                                                       | -             | -           | No       |
+| `format`            | `string` | Credential format to issue                                                                                                                                                                                                                         | `"dc+sd-jwt"` | `dc+sd-jwt` | No       |
+| `disclosure_policy` | `object` | The embedded disclosure policy for this credential type. Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs). When omitted, the metadata publishes policy_type "none" (no restrictions).            | -             | -           | No       |
+| `attributes`        | `object` | Claim names to their source fields and transformation rules for credential issuance                                                                                                                                                                | -             | -           | Yes      |
 
-| Field     | Type    | Description                                                                                                                                            | Example | Default | Required |
-| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `display` | `array` | Display: OPTIONAL. A non-empty array of objects, where each object contains the display properties of the supported Credential for a certain language. | -       | -       | No       |
-| `claims`  | `array` | Claims: OPTIONAL. A non-empty array of claims description objects as defined in Appendix B.2.                                                          | -       | -       | No       |
+### `disclosure_policy`
 
-### `display` entry
+> **Path:** `.common.credential_metadata.<credential scope>.disclosure_policy`
 
-> **Path:** `.common.credential_metadata.<credential scope>.display[]`
+must meet to access an electronic attestation of attributes.
+Per CIR 2024/2979 Annex III, three common policy types are defined.
 
-| Field              | Type     | Description                                                                                                                                                                                                                                                                         | Example | Default | Required |
-| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `name`             | `string` | Name: REQUIRED. String value of a display name for the Credential.                                                                                                                                                                                                                  | -       | -       | Yes      |
-| `locale`           | `string` | Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. Multiple display objects MAY be included for separate languages. There MUST be only one object for each language identifier. | -       | -       | No       |
-| `description`      | `string` | Description: OPTIONAL. String value of a description of the Credential.                                                                                                                                                                                                             | -       | -       | No       |
-| `background_color` | `string` | BackgroundColor: OPTIONAL. String value of a background color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].                                                                                                             | -       | -       | No       |
-| `logo`             | `object` | Logo: OPTIONAL. Object with information about the logo of the Credential                                                                                                                                                                                                            | -       | -       | No       |
-| `background_image` | `object` | BackgroundImage: OPTIONAL. Object with information about the background image of the Credential. At least the following parameter MUST be included:                                                                                                                                 | -       | -       | No       |
-| `text_color`       | `string` | TextColor: OPTIONAL. String value of a text color of the Credential represented as numerical color values defined in CSS Color Module Level 37 [CSS-Color].                                                                                                                         | -       | -       | No       |
-| `rendering`        | `object` | Rendering: OPTIONAL                                                                                                                                                                                                                                                                 | -       | -       | No       |
-
-### `logo`
-
-> **Path:** `.common.credential_metadata.<credential scope>.display[].logo`, `.common.credential_metadata.<credential scope>.display[].rendering.simple.logo`, `.apigw.issuer_metadata.display[].logo`
-
-| Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
-| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `uri`      | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
-| `alt_text` | `string` | AltText: OPTIONAL. String value of the alternative text for the logo image.                                                                                                                                                      | -       | -       | No       |
-
-### `background_image`
-
-> **Path:** `.common.credential_metadata.<credential scope>.display[].background_image`
-
-| Field | Type     | Description                                                                                                                                                                                                                                                     | Example | Default | Required |
-| ----- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `uri` | `string` | URI REQUIRED. String value that contains a URI where the Wallet can obtain the background image of the Credential from the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
-
-### `rendering`
-
-> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering`
-
-as defined in ISO/IEC 18013-5 and referenced by OpenID4VCI mdoc rendering extensions.
-
-| Field           | Type     | Description                                                                                      | Example | Default | Required |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `simple`        | `object` | Simple: OPTIONAL. Object containing simple rendering information, such as a logo.                | -       | -       | No       |
-| `svg_templates` | `array`  | SvgTemplates: OPTIONAL. A non-empty array of SVG template objects used to render the Credential. | -       | -       | No       |
-
-### `simple`
-
-> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering.simple`
-
-| Field  | Type     | Description                                                                         | Example | Default | Required |
-| ------ | -------- | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `logo` | `object` | Logo: OPTIONAL. Object with information about the logo to use for simple rendering. | -       | -       | No       |
-
-### `svg_templates` entry
-
-> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering.svg_templates[]`
-
-| Field           | Type     | Description                                                                                                                                                      | Example | Default | Required |
-| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `uri`           | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the SVG template.                                                                    | -       | -       | Yes      |
-| `uri_integrity` | `string` | URIIntegrity: OPTIONAL. Subresource integrity hash (e.g. "sha256-...") of the SVG template, allowing the Wallet to verify the integrity of the fetched resource. | -       | -       | No       |
-| `properties`    | `object` | Properties: OPTIONAL. Object describing the rendering properties this template is suited for, such as orientation, color scheme, and contrast.                   | -       | -       | No       |
-
-### `properties`
-
-> **Path:** `.common.credential_metadata.<credential scope>.display[].rendering.svg_templates[].properties`
-
-| Field          | Type     | Description                                                          | Example | Default | Required |
-| -------------- | -------- | -------------------------------------------------------------------- | ------- | ------- | -------- |
-| `orientation`  | `string` | Orientation: OPTIONAL. String value, e.g. "portrait" or "landscape". | -       | -       | No       |
-| `color_scheme` | `string` | ColorScheme: OPTIONAL. String value, e.g. "light" or "dark".         | -       | -       | No       |
-| `contrast`     | `string` | Contrast: OPTIONAL. String value, e.g. "normal" or "high".           | -       | -       | No       |
-
-### `claims` entry
-
-> **Path:** `.common.credential_metadata.<credential scope>.claims[]`
-
-| Field       | Type     | Description                                                                                                                                                                                                                                                                                           | Example | Default | Required |
-| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `path`      | `array`  | Path: REQUIRED. A non-empty array representing a claims path pointer that specifies the path to a claim within the credential. A nil entry denotes a wildcard over an array's elements (e.g. ["nationalities", null]), matching the claims path pointer semantics used by presentation/DCQL and VCTM. | -       | -       | Yes      |
-| `svg_id`    | `string` | SVGID: OPTIONAL. A string linking the claim to a specific element ID in an SVG background template.                                                                                                                                                                                                   | -       | -       | No       |
-| `mandatory` | `bool`   | Mandatory: OPTIONAL. Boolean which, when set to true, indicates that the Credential Issuer will always include this claim.                                                                                                                                                                            | -       | -       | No       |
-| `display`   | `array`  | Display: OPTIONAL. A non-empty array of objects containing display properties for the claim.                                                                                                                                                                                                          | -       | -       | No       |
-
-### `display` entry
-
-> **Path:** `.common.credential_metadata.<credential scope>.claims[].display[]`
-
-| Field    | Type     | Description                                                                                                                                     | Example | Default | Required |
-| -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `name`   | `string` | Name: OPTIONAL. String value of a display name for the claim.                                                                                   | -       | -       | No       |
-| `label`  | `string` | Label: OPTIONAL. Same as Name — included for compatibility with consumers (e.g. wallet-common's dataUriResolver) that expect a "label" field.   | -       | -       | No       |
-| `locale` | `string` | Locale: OPTIONAL. String value that identifies the language of this object.                                                                     | -       | -       | No       |
+| Field                        | Type       | Description                                                                                                                                                                                                                                                                                           | Example | Default | Required |
+| ---------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `policy_type`                | `string`   | PolicyType identifies the disclosure policy type. One of: - "none": no policy applies (default) - "authorized_relying_parties": only RPs in the allowlist may receive this attestation - "specific_root_of_trust": only RPs with access certificates from specific roots may receive this attestation | -       | `none`  | No       |
+| `authorized_relying_parties` | `[]string` | List of EU-wide unique Relying Party identifiers (as found in the Wallet-Relying Party Registration Certificate). Required when PolicyType is "authorized_relying_parties".                                                                                                                           | -       | -       | Yes      |
+| `trusted_roots`              | `[]string` | List of root or intermediate certificate SHA-256 fingerprints (hex-encoded, 64 characters) from which the RP's access certificate must be derived. Required when PolicyType is "specific_root_of_trust".                                                                                              | -       | -       | Yes      |
 
 ## `apigw` (Top-level)
 
@@ -676,6 +600,15 @@ persisted in the database.
 | `name`   | `string` | Name: OPTIONAL. String value of a display name for the Credential Issuer.                                                                                                                                          | -       | -       | No       |
 | `locale` | `string` | Locale: OPTIONAL. String value that identifies the language of this object represented as a language tag taken from values defined in BCP47 [RFC5646]. There MUST be only one object for each language identifier. | -       | -       | No       |
 | `logo`   | `object` | Logo: OPTIONAL. Object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:                                                                | -       | -       | No       |
+
+### `logo`
+
+> **Path:** `.apigw.issuer_metadata.display[].logo`
+
+| Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `uri`      | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
+| `alt_text` | `string` | AltText: OPTIONAL. String value of the alternative text for the logo image.                                                                                                                                                      | -       | -       | No       |
 
 ### `issuer_client`
 
