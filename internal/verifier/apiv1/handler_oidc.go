@@ -308,6 +308,12 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 		return nil, ErrInvalidGrant
 	}
 
+	// Atomically mark code as forfeited — prevents double redemption (TOCTOU)
+	if err := c.cacheService.AuthContext.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
+		c.log.Info("Authorization code already used or not found", "session_id", authCtx.SessionID, "error", err)
+		return nil, ErrInvalidGrant
+	}
+
 	// Authenticate client (includes static clients from config)
 	client, err := c.authenticateClient(ctx, req.ClientID, req.ClientSecret)
 	if err != nil {
@@ -338,13 +344,6 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 			return nil, ErrInvalidGrant
 		}
 	}
-
-	// Mark code as forfeited
-	if err := c.cacheService.AuthContext.MarkCodeAsForfeited(ctx, authCtx.SessionID); err != nil {
-		c.log.Error(err, "Failed to forfeit code")
-		return nil, ErrServerError
-	}
-	authCtx.Forfeited = true
 
 	// Generate ID token
 	idToken, err := c.generateIDToken(ctx, authCtx, client)

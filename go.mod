@@ -8,6 +8,8 @@ require (
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.7.0
 	github.com/biter777/countries v1.7.5
+	github.com/chromedp/cdproto v0.0.0-20260719223732-95f6af754cfe
+	github.com/chromedp/chromedp v0.16.0
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/creasty/defaults v1.8.0
 	github.com/crewjam/saml v0.5.1
@@ -86,6 +88,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -116,6 +119,9 @@ require (
 	github.com/go-openapi/swag/yamlutils v0.28.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect

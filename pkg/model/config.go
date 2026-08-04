@@ -1499,6 +1499,25 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
+
+		// Auto-populate VCTM.VCT from the resolved URL if the source file
+		// did not include a vct field. This ensures the served VCTM document
+		// and issued credentials reference the canonical dereferenceable URL.
+		if constructor.VCTM.VCT == "" {
+			constructor.VCTM.VCT = vctURL
+		}
+
+		// Re-serialize VCTMRaw so the served document includes the vct field.
+		if constructor.IsLocalVCTM() && constructor.VCTMRaw != nil {
+			var doc map[string]json.RawMessage
+			if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
+				vctJSON, _ := json.Marshal(constructor.VCTM.VCT)
+				doc["vct"] = vctJSON
+				if updated, err := json.Marshal(doc); err == nil {
+					constructor.VCTMRaw = updated
+				}
+			}
+		}
 		constructor.mu.Unlock()
 	}
 

@@ -293,14 +293,19 @@ func (s *MongoStore) MarkCodeAsForfeited(ctx context.Context, id string) error {
 
 	result, err := s.coll.UpdateOne(
 		ctx,
-		bson.M{"session_id": id},
+		bson.M{"session_id": id, "forfeited": bson.M{"$ne": true}},
 		bson.M{"$set": bson.M{"forfeited": true}},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to mark code as forfeited: %w", err)
 	}
 	if result.MatchedCount == 0 {
-		return ErrNoDocuments
+		// Distinguish "not found" from "already forfeited"
+		count, countErr := s.coll.CountDocuments(ctx, bson.M{"session_id": id})
+		if countErr != nil || count == 0 {
+			return ErrNoDocuments
+		}
+		return errors.New("authorization code already forfeited")
 	}
 
 	return nil

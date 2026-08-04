@@ -72,8 +72,8 @@ type AuthorizationContext struct {
 
 	// Token fields
 	Token       *Token `json:"token,omitempty" bson:"token,omitempty"`
-	AccessToken string `json:"access_token,omitempty" bson:"access_token,omitempty" validate:"omitempty,max=4096,printascii"`
-	IDToken     string `json:"id_token,omitempty" bson:"id_token,omitempty" validate:"omitempty,max=8192,printascii"`
+	AccessToken string `json:"access_token,omitempty" bson:"access_token,omitempty" validate:"omitempty,max=16384,printascii"`
+	IDToken     string `json:"id_token,omitempty" bson:"id_token,omitempty" validate:"omitempty,max=32768,printascii"`
 
 	// Issuer-specific fields (credential issuance)
 	AuthorizationDetails []openid4vci.AuthorizationDetailsParameter `json:"authorization_details,omitempty" bson:"authorization_details,omitempty"`

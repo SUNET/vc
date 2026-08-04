@@ -520,6 +520,59 @@ func TestCredentialMetadata_MissingVCTURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "VCTURL is empty")
 }
 
+func TestResolveVCTUrls_AutoPopulatesVCT(t *testing.T) {
+	// When a local VCTM file has no "vct" field, ResolveVCTUrls should
+	// auto-populate VCTM.VCT from the serving URL and update VCTMRaw.
+	rawBytes := []byte(`{"name":"test","claims":[]}`)
+	cfg := &Cfg{
+		Common: &Common{
+			CredentialMetadata: map[string]*CredentialMetadata{
+				"ehic": {
+					VCTMFilePath: "/dummy/vctm_ehic.json",
+					Format:       "dc+sd-jwt",
+					VCTM:         &sdjwtvc.VCTM{Name: "test"},
+					VCTMRaw:      rawBytes,
+				},
+			},
+		},
+	}
+
+	err := cfg.ResolveVCTUrls("https://apigw.example.com")
+	require.NoError(t, err)
+
+	meta := cfg.Common.CredentialMetadata["ehic"]
+	assert.Equal(t, "https://apigw.example.com/type-metadata/ehic", meta.VCTM.VCT,
+		"VCT should be auto-populated from the serving URL")
+	assert.Equal(t, "https://apigw.example.com/type-metadata/ehic", meta.VCTURL)
+	assert.Contains(t, string(meta.VCTMRaw), `"vct"`,
+		"VCTMRaw should contain the injected vct field")
+}
+
+func TestResolveVCTUrls_PreservesExplicitVCT(t *testing.T) {
+	// When a VCTM file already has a "vct" field, ResolveVCTUrls should
+	// not overwrite it.
+	cfg := &Cfg{
+		Common: &Common{
+			CredentialMetadata: map[string]*CredentialMetadata{
+				"pid": {
+					VCTMFilePath: "/dummy/vctm_pid.json",
+					Format:       "dc+sd-jwt",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+					VCTMRaw:      []byte(`{"vct":"urn:eudi:pid:1","name":"PID"}`),
+				},
+			},
+		},
+	}
+
+	err := cfg.ResolveVCTUrls("https://apigw.example.com")
+	require.NoError(t, err)
+
+	meta := cfg.Common.CredentialMetadata["pid"]
+	assert.Equal(t, "urn:eudi:pid:1", meta.VCTM.VCT,
+		"Explicit VCT from file should be preserved")
+	assert.Equal(t, "https://apigw.example.com/type-metadata/pid", meta.VCTURL)
+}
+
 func TestIssuerMetadataLoadAndSign(t *testing.T) {
 	tests := []struct {
 		name     string
