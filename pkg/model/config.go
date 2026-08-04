@@ -1226,23 +1226,23 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
-	// Used for every format except mso_mdoc (mutually exclusive with VCTMUrl).
-	// At least one of VCTMFilePath, VCTMUrl, MDDLFilePath, MDDLUrl is required.
+	// Used for every format except mso_mdoc (mutually exclusive with vctm_url).
+	// At least one of vctm_file_path, vctm_url, mddl_file_path, mddl_url is required.
 	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
-	// Used for every format except mso_mdoc (mutually exclusive with VCTMFilePath).
+	// Used for every format except mso_mdoc (mutually exclusive with vctm_file_path).
 	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl,omitempty,url"`
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 
 	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
 	// as produced by registry-cli's mddl format generator. The mso_mdoc
-	// analogue of VCTMFilePath — mutually exclusive with MDDLUrl.
+	// analogue of vctm_file_path — mutually exclusive with mddl_url.
 	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl"`
 	// MDDLUrl is the URL where the MDDL schema is already published
-	// externally. The mso_mdoc analogue of VCTMUrl.
+	// externally. The mso_mdoc analogue of vctm_url.
 	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath,omitempty,url"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`

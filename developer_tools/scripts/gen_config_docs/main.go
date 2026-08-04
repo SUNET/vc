@@ -460,35 +460,72 @@ func determineRequired(tag TagInfo) string {
 		return "No"
 	}
 
-	if strings.Contains(v, "required_if=Enable true") {
-		// Check for excluded_with to annotate mutual exclusivity
-		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
-		if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
-			return fmt.Sprintf("Yes (if enabled; mutually exclusive with %s)", camelToSnake(m[1]))
-		}
-		return "Yes (if enabled)"
-	}
-	re := regexp.MustCompile(`required_without=(\w+)`)
-	if m := re.FindStringSubmatch(v); len(m) > 1 {
-		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
-		if m2 := reExcluded.FindStringSubmatch(v); len(m2) > 1 {
-			return fmt.Sprintf("Yes (if %s not set; mutually exclusive)", camelToSnake(m[1]))
-		}
-		return fmt.Sprintf("Yes (if %s not set)", camelToSnake(m[1]))
-	}
+	// Split validation rules on comma, stopping at "dive" (everything after
+	// dive applies to collection elements, not the field itself).
+	var rules []string
 	for r := range strings.SplitSeq(v, ",") {
 		r = strings.TrimSpace(r)
+		if r == "dive" {
+			break
+		}
+		rules = append(rules, r)
+	}
+
+	reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+
+	for _, r := range rules {
+		// required_if=Field value [Field2 value2 ...]
+		if after, ok := strings.CutPrefix(r, "required_if="); ok {
+			parts := strings.Fields(after)
+			var conditions []string
+			for i := 0; i+1 < len(parts); i += 2 {
+				field := camelToSnake(parts[i])
+				val := parts[i+1]
+				if field == "enable" && val == "true" {
+					conditions = append(conditions, "enabled")
+				} else {
+					conditions = append(conditions, fmt.Sprintf("%s is \"%s\"", field, val))
+				}
+			}
+			cond := strings.Join(conditions, " and ")
+			if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+				return fmt.Sprintf("Yes (if %s; mutually exclusive with %s)", cond, camelToSnake(m[1]))
+			}
+			return fmt.Sprintf("Yes (if %s)", cond)
+		}
+
+		// required_without_all=Field1 Field2 ...
+		if after, ok := strings.CutPrefix(r, "required_without_all="); ok {
+			parts := strings.Fields(after)
+			names := make([]string, len(parts))
+			for i, p := range parts {
+				names[i] = camelToSnake(p)
+			}
+			return fmt.Sprintf("Yes (if none of %s set)", strings.Join(names, ", "))
+		}
+
+		// required_without=Field
+		if after, ok := strings.CutPrefix(r, "required_without="); ok {
+			parts := strings.Fields(after)
+			if len(parts) > 0 {
+				field := camelToSnake(parts[0])
+				if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+					return fmt.Sprintf("Yes (if %s not set; mutually exclusive)", field)
+				}
+				return fmt.Sprintf("Yes (if %s not set)", field)
+			}
+		}
+
+		// bare required
 		if r == "required" {
-			// If a default value is provided, the field is not required from
-			// the end-user's perspective since the default will be used.
 			if tag.Default != "" {
 				return "No"
 			}
 			return "Yes"
 		}
 	}
+
 	// Standalone excluded_with without a required_* tag
-	reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
 	if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
 		return fmt.Sprintf("No (mutually exclusive with %s)", camelToSnake(m[1]))
 	}
