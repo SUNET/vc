@@ -252,11 +252,13 @@ func (r *TypeRegistry) LookupMapValueType(name string) *StructDef {
 
 // LookupMapValueTypeInPkg is like LookupMapValueType but prefers the given package.
 func (r *TypeRegistry) LookupMapValueTypeInPkg(name, pkgName string) *StructDef {
-	valName, ok := r.mapAliases[name]
+	var valName string
+	var ok bool
+	if pkgName != "" {
+		valName, ok = r.mapAliases[pkgName+"."+name]
+	}
 	if !ok {
-		if pkgName != "" {
-			valName, ok = r.mapAliases[pkgName+"."+name]
-		}
+		valName, ok = r.mapAliases[name]
 	}
 	if !ok {
 		if idx := strings.LastIndex(name, "."); idx >= 0 {

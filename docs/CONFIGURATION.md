@@ -147,7 +147,6 @@ Shared configuration used across all services.
 
 > **Path:** `.common.credential_metadata.<credential scope>.disclosure_policy`
 
-must meet to access an electronic attestation of attributes.
 Per CIR 2024/2979 Annex III, three common policy types are defined.
 
 | Field                        | Type       | Description                                                                                                                                                                                                                                                                                           | Example | Default | Required |

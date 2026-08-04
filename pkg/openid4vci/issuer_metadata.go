@@ -185,8 +185,7 @@ type CredentialConfigurationsSupported struct {
 	DisclosurePolicy *EmbeddedDisclosurePolicy `json:"disclosure_policy,omitempty" yaml:"disclosure_policy,omitempty"`
 }
 
-// EmbeddedDisclosurePolicy defines rules indicating the conditions a wallet-relying party
-// must meet to access an electronic attestation of attributes.
+// EmbeddedDisclosurePolicy defines rules indicating the conditions a wallet-relying party must meet to access an electronic attestation of attributes.
 // Per CIR 2024/2979 Annex III, three common policy types are defined.
 type EmbeddedDisclosurePolicy struct {
 	// PolicyType identifies the disclosure policy type. One of:
