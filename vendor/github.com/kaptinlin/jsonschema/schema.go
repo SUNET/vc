@@ -515,52 +515,46 @@ func (s *Schema) MarshalJSON() ([]byte, error) {
 	type Alias Schema
 	alias := (*Alias)(s)
 
-	// Marshal to a map to handle const field manually with deterministic ordering
-	data, err := json.Marshal(alias, json.Deterministic(true))
+	// Preserve raw values while merging const and extension keywords so numeric
+	// tokens are not decoded through float64.
+	data, err := marshalJSON(alias, json.Deterministic(true))
 	if err != nil {
 		return nil, err
 	}
 
-	var result map[string]any
+	var result map[string]jsontext.Value
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
 
-	// Handle the const field manually
 	if s.Const != nil {
-		result["const"] = s.Const.Value
+		value, err := marshalJSON(s.Const.Value)
+		if err != nil {
+			return nil, err
+		}
+		result["const"] = value
 	}
 
-	maps.Copy(result, s.Extra)
+	for name, extra := range s.Extra {
+		value, err := marshalJSON(extra)
+		if err != nil {
+			return nil, err
+		}
+		result[name] = value
+	}
 
 	// Use deterministic marshaling to ensure consistent key ordering
 	// Note: Required and DependentRequired arrays maintain their order from generation/parsing
 	return json.Marshal(result, json.Deterministic(true))
 }
 
-// MarshalJSONTo implements json.MarshalerTo for JSON v2 with proper option support
-func (s *Schema) MarshalJSONTo(enc *jsontext.Encoder, opts json.Options) error {
-	// Ensure deterministic ordering is always enabled
-	opts = json.JoinOptions(opts, json.Deterministic(true))
-
-	if s.Boolean != nil {
-		return json.MarshalEncode(enc, s.Boolean, opts)
-	}
-
-	// Use the existing MarshalJSON method which already handles the const field properly
-	// and then ensure the result is marshaled with the provided options
+// MarshalJSONTo implements json.MarshalerTo.
+func (s *Schema) MarshalJSONTo(enc *jsontext.Encoder) error {
 	data, err := s.MarshalJSON()
 	if err != nil {
 		return err
 	}
-
-	// Parse and re-marshal with deterministic options
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return err
-	}
-
-	return json.MarshalEncode(enc, result, opts)
+	return enc.WriteValue(data)
 }
 
 // UnmarshalJSON handles unmarshaling JSON data into the Schema type.
@@ -592,7 +586,7 @@ func (s *Schema) UnmarshalJSON(data []byte) error {
 		Alias: (*Alias)(s),
 	}
 
-	if err := json.Unmarshal(data, &aux); err != nil {
+	if err := unmarshalJSON(data, &aux); err != nil {
 		return err
 	}
 	if err := decodeExclusiveBound("exclusiveMinimum", aux.ExclusiveMinimum, &s.ExclusiveMinimum, &s.legacyExclusiveMinimum); err != nil {
@@ -601,7 +595,6 @@ func (s *Schema) UnmarshalJSON(data []byte) error {
 	if err := decodeExclusiveBound("exclusiveMaximum", aux.ExclusiveMaximum, &s.ExclusiveMaximum, &s.legacyExclusiveMaximum); err != nil {
 		return err
 	}
-
 	// "items" polymorphism (legacy tuple form vs 2020-12 list form). When items
 	// is an array, the sibling "additionalItems" (legacy) validates the rest;
 	// consume it from Rest so it is not later treated as an extension keyword.
@@ -662,16 +655,13 @@ func (sm SchemaMap) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m, json.Deterministic(true))
 }
 
-// MarshalJSONTo implements json.MarshalerTo for JSON v2 with proper option support
-func (sm *SchemaMap) MarshalJSONTo(enc *jsontext.Encoder, opts json.Options) error {
-	// Ensure deterministic ordering is always enabled
-	opts = json.JoinOptions(opts, json.Deterministic(true))
-
+// MarshalJSONTo implements json.MarshalerTo.
+func (sm *SchemaMap) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if sm == nil {
-		return json.MarshalEncode(enc, nil, opts)
+		return json.MarshalEncode(enc, nil, json.Deterministic(true))
 	}
 	m := maps.Clone(map[string]*Schema(*sm))
-	return json.MarshalEncode(enc, m, opts)
+	return json.MarshalEncode(enc, m, json.Deterministic(true))
 }
 
 // UnmarshalJSON ensures that JSON objects are correctly parsed into SchemaMap,
@@ -733,7 +723,7 @@ func (cv *ConstValue) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	return json.Unmarshal(data, &cv.Value)
+	return unmarshalJSON(data, &cv.Value)
 }
 
 // MarshalJSON handles marshaling the ConstValue type back to JSON.
@@ -741,7 +731,7 @@ func (cv ConstValue) MarshalJSON() ([]byte, error) {
 	if cv.Value == nil {
 		return []byte("null"), nil
 	}
-	return json.Marshal(cv.Value)
+	return marshalJSON(cv.Value)
 }
 
 // SetCompiler sets a custom Compiler for the Schema and returns the Schema itself to support method chaining
