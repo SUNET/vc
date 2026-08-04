@@ -29,7 +29,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/iancoleman/strcase v0.3.0
 	github.com/jellydator/ttlcache/v3 v3.4.1
-	github.com/kaptinlin/jsonschema v0.9.3
+	github.com/kaptinlin/jsonschema v0.9.6
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/lithammer/shortuuid/v4 v4.2.0
