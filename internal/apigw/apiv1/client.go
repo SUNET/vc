@@ -170,9 +170,18 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		Log:                        c.log,
 	})
 
-	// Wallet attestation: enabled when trust.wallet_attestation.enabled + pdp_url are set
+	// Wallet attestation: enabled when apigw.trust.wallet_attestation.enabled + pdp_url are set
 	if cfg.APIGW.Trust.WalletAttestation.Enabled && pdpURL != "" {
-		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator, c.jwtTrustVerifier)
+		waMode := cfg.APIGW.Trust.WalletAttestation.Mode
+		switch waMode {
+		case "", trust.WIAModeETSI, trust.WIAModeIETF:
+			// valid (empty = accept either format)
+		default:
+			c.log.Warn("apigw.trust.wallet_attestation.mode is not \"etsi\" or \"ietf\" - ignoring, accepting either WIA format",
+				"configured_mode", waMode)
+			waMode = ""
+		}
+		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator, c.jwtTrustVerifier, waMode)
 
 		// Build SPOCP policy engine for tier-based scope authorization (nil = default open)
 		policy := cfg.APIGW.Trust.WalletAttestation.Policy
@@ -182,11 +191,15 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		}
 		c.walletAttestationPolicy = policyEngine
 
+		modeLabel := waMode
+		if modeLabel == "" {
+			modeLabel = "auto (either)"
+		}
 		if policyEngine != nil {
 			c.log.Info("Wallet attestation enabled (PDP + SPOCP policy)",
-				"rules", policyEngine.RuleCount())
+				"rules", policyEngine.RuleCount(), "mode", modeLabel)
 		} else {
-			c.log.Info("Wallet attestation enabled (PDP trust, no scope restrictions)")
+			c.log.Info("Wallet attestation enabled (PDP trust, no scope restrictions)", "mode", modeLabel)
 		}
 	}
 

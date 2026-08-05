@@ -33,6 +33,14 @@ type WalletAttestationResult struct {
 	TrustFramework string
 }
 
+// WIA trust-model modes — see WalletAttestationEvaluator.Mode. Mirrors
+// go-wallet-backend's WIAConfig.Mode terminology so operators configure both
+// sides of an interop pair consistently.
+const (
+	WIAModeETSI = "etsi"
+	WIAModeIETF = "ietf"
+)
+
 // WalletAttestationEvaluator evaluates wallet attestation JWTs by verifying
 // the WIA's own signature locally and then delegating the trust DECISION
 // (only) to the go-trust AuthZEN PDP - the PDP evaluates whether an
@@ -45,6 +53,9 @@ type WalletAttestationResult struct {
 //   - IETF draft-ietf-oauth-attestation-based-client-auth: iss claim present
 //   - EC TS03 §2.2.1 (EUDI): no iss, identity from x5c certificate chain in header
 //
+// Mode optionally pins which of the two a deployment accepts (see the Mode
+// field); when unset, both remain accepted as determined by the WIA itself.
+//
 // PKCE (mandatory for public clients) is the sole code-binding mechanism.
 type WalletAttestationEvaluator struct {
 	TrustEvaluator TrustEvaluator
@@ -53,11 +64,22 @@ type WalletAttestationEvaluator struct {
 	// (JWTTrustVerifier.extractJWTKeyMaterial's existing resolution
 	// strategies, reused as-is here rather than reimplemented).
 	Verifier *JWTTrustVerifier
+	// Mode restricts which WIA trust model is accepted: WIAModeETSI
+	// (x5c-based, matching EC TS03 v1.5.2 / ETSI TS 119 472-3 — identity
+	// verified against the Trusted List for Wallet Providers), WIAModeIETF
+	// (iss/JWKS-based, the plain IETF draft format with no ARF/ETSI
+	// counterpart), or "" to accept either (the pre-Mode default: whichever
+	// format the WIA itself uses). Enforced in Evaluate before any signature
+	// verification is attempted, so a mismatched WIA is rejected cheaply and
+	// never reaches the PDP with the "wrong" trust model's data.
+	Mode string
 }
 
-// NewWalletAttestationEvaluator creates a new evaluator.
-func NewWalletAttestationEvaluator(evaluator TrustEvaluator, verifier *JWTTrustVerifier) *WalletAttestationEvaluator {
-	return &WalletAttestationEvaluator{TrustEvaluator: evaluator, Verifier: verifier}
+// NewWalletAttestationEvaluator creates a new evaluator. mode is one of
+// WIAModeETSI, WIAModeIETF, or "" to accept either format — see
+// WalletAttestationEvaluator.Mode.
+func NewWalletAttestationEvaluator(evaluator TrustEvaluator, verifier *JWTTrustVerifier, mode string) *WalletAttestationEvaluator {
+	return &WalletAttestationEvaluator{TrustEvaluator: evaluator, Verifier: verifier, Mode: mode}
 }
 
 // Evaluate verifies a wallet attestation JWT's signature, then evaluates
@@ -77,6 +99,24 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 	identity, err := parseAttestationIdentity(attestation)
 	if err != nil {
 		return nil, err
+	}
+
+	// Enforce the configured trust model, if pinned, before any signature
+	// verification: reject a mismatched WIA cheaply, and never let it reach
+	// the PDP call below with the "wrong" model's KeyType/Key data.
+	switch e.Mode {
+	case WIAModeETSI:
+		if !identity.hasX5C {
+			return nil, errors.New("wallet attestation rejected: this deployment requires the etsi (x5c) trust model, but the WIA has no x5c header")
+		}
+	case WIAModeIETF:
+		if identity.hasX5C {
+			return nil, errors.New("wallet attestation rejected: this deployment requires the ietf (iss/JWKS) trust model, but the WIA has an x5c header")
+		}
+	case "":
+		// accept either format, as determined by the WIA itself
+	default:
+		return nil, fmt.Errorf("wallet attestation rejected: invalid trust model mode %q (must be %q, %q, or empty)", e.Mode, WIAModeETSI, WIAModeIETF)
 	}
 
 	// Verify the WIA's own signature and resolve its actual signing key
@@ -346,37 +386,41 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 
 	// Check for x5c in JWT header
 	if x5cRaw, ok := token.Header["x5c"]; ok {
-		if x5cArr, ok := x5cRaw.([]interface{}); ok && len(x5cArr) > 0 {
-			result.hasX5C = true
-			for _, cert := range x5cArr {
-				if s, ok := cert.(string); ok {
-					result.x5cChain = append(result.x5cChain, s)
-				}
-			}
-
-			// Fail closed: x5c header present but no valid cert strings extracted.
-			// This prevents falling back to self-asserted iss with a malformed x5c.
-			if len(result.x5cChain) == 0 {
-				return nil, errors.New("x5c header present but contains no valid certificate strings")
-			}
-
-			// When x5c is present, identity MUST come from the certificate.
-			// The x5c chain is the cryptographic proof; iss is self-asserted
-			// and must not override the cert-derived identity.
-			if len(result.x5cChain) > 0 {
-				certIdentity, err := issuerFromX5CLeaf(result.x5cChain[0])
-				if err != nil {
-					return nil, fmt.Errorf("failed to extract issuer from x5c: %w", err)
-				}
-				// If iss is present, validate consistency (not strict equality —
-				// iss is typically a URL like "https://host" while cert SAN is
-				// a bare hostname "host")
-				if issClaim != "" && !issMatchesCertIdentity(issClaim, certIdentity) {
-					return nil, fmt.Errorf("iss claim %q does not match x5c certificate identity %q", issClaim, certIdentity)
-				}
-				result.issuer = certIdentity
+		// Fail closed: an x5c header that isn't a non-empty array is malformed.
+		// Treating it as "no x5c" here would let it silently masquerade as an
+		// IETF/iss-only WIA, slipping past WIAModeIETF's "reject any x5c
+		// header" enforcement in Evaluate.
+		x5cArr, isArr := x5cRaw.([]interface{})
+		if !isArr || len(x5cArr) == 0 {
+			return nil, errors.New("x5c header present but malformed (not a non-empty array)")
+		}
+		result.hasX5C = true
+		for _, cert := range x5cArr {
+			if s, ok := cert.(string); ok {
+				result.x5cChain = append(result.x5cChain, s)
 			}
 		}
+
+		// Fail closed: x5c header present but no valid cert strings extracted.
+		// This prevents falling back to self-asserted iss with a malformed x5c.
+		if len(result.x5cChain) == 0 {
+			return nil, errors.New("x5c header present but contains no valid certificate strings")
+		}
+
+		// When x5c is present, identity MUST come from the certificate.
+		// The x5c chain is the cryptographic proof; iss is self-asserted
+		// and must not override the cert-derived identity.
+		certIdentity, err := issuerFromX5CLeaf(result.x5cChain[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract issuer from x5c: %w", err)
+		}
+		// If iss is present, validate consistency (not strict equality —
+		// iss is typically a URL like "https://host" while cert SAN is
+		// a bare hostname "host")
+		if issClaim != "" && !issMatchesCertIdentity(issClaim, certIdentity) {
+			return nil, fmt.Errorf("iss claim %q does not match x5c certificate identity %q", issClaim, certIdentity)
+		}
+		result.issuer = certIdentity
 	}
 
 	// No x5c: use iss claim (IETF draft format — PDP validates via JWKS)

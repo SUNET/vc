@@ -267,6 +267,24 @@ func signTestWIAWithX5C(t *testing.T, dnsSAN, iss, sub string) string {
 	return signed
 }
 
+// signTestWIAWithEmptyX5C creates a signed ES256 WIA with a malformed x5c
+// header: the key is present but its value is an empty array, rather than
+// being absent entirely. This must not be treated as "no x5c" (see
+// parseAttestationIdentity's fail-closed handling).
+func signTestWIAWithEmptyX5C(t *testing.T, iss, sub string) string {
+	t.Helper()
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": iss, "sub": sub})
+	token.Header["typ"] = "oauth-client-attestation+jwt"
+	token.Header["x5c"] = []any{}
+
+	signed, err := token.SignedString(signingKey)
+	require.NoError(t, err)
+	return signed
+}
+
 // capturingEvaluator is a TrustEvaluator that records the last EvaluationRequest
 // it received, so tests can assert exactly what was sent to the PDP.
 type capturingEvaluator struct {
@@ -292,7 +310,7 @@ func TestWalletAttestationEvaluator_Evaluate_SignatureVerified(t *testing.T) {
 	wia := signTestWIAWithJWK(t, signingKey, "https://wallet-provider.example.com", "instance-jkt-123", "backend_attested")
 
 	evaluator := &capturingEvaluator{trustDecision: true}
-	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator))
+	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "")
 
 	result, err := we.Evaluate(context.Background(), wia)
 	require.NoError(t, err)
@@ -327,7 +345,7 @@ func TestWalletAttestationEvaluator_Evaluate_X5CIssuerFormatMismatchAllowed(t *t
 	wia := signTestWIAWithX5C(t, "wallet-provider.example.com", "https://wallet-provider.example.com", "instance-jkt-123")
 
 	evaluator := &capturingEvaluator{trustDecision: true}
-	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator))
+	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "")
 
 	result, err := we.Evaluate(context.Background(), wia)
 	require.NoError(t, err)
@@ -336,6 +354,91 @@ func TestWalletAttestationEvaluator_Evaluate_X5CIssuerFormatMismatchAllowed(t *t
 
 	require.NotNil(t, evaluator.lastRequest)
 	assert.Equal(t, KeyTypeX5C, evaluator.lastRequest.KeyType)
+}
+
+// TestWalletAttestationEvaluator_Evaluate_ModeEnforcement covers Mode
+// pinning: a deployment configured for one WIA trust model must reject the
+// other before ever reaching the PDP (evaluator.lastRequest must stay nil).
+func TestWalletAttestationEvaluator_Evaluate_ModeEnforcement(t *testing.T) {
+	x5cWIA := signTestWIAWithX5C(t, "wallet-provider.example.com", "https://wallet-provider.example.com", "instance-jkt-123")
+
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	ietfWIA := signTestWIAWithJWK(t, signingKey, "https://wallet-provider.example.com", "instance-jkt-123", "backend_attested")
+
+	t.Run("etsi mode rejects an iss/JWK-only WIA", func(t *testing.T) {
+		evaluator := &capturingEvaluator{trustDecision: true}
+		we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), WIAModeETSI)
+
+		_, err := we.Evaluate(context.Background(), ietfWIA)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires the etsi")
+		assert.Nil(t, evaluator.lastRequest, "PDP must never be called for a mode-mismatched WIA")
+	})
+
+	t.Run("etsi mode accepts an x5c WIA", func(t *testing.T) {
+		evaluator := &capturingEvaluator{trustDecision: true}
+		we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), WIAModeETSI)
+
+		_, err := we.Evaluate(context.Background(), x5cWIA)
+		require.NoError(t, err)
+		require.NotNil(t, evaluator.lastRequest)
+	})
+
+	t.Run("ietf mode rejects an x5c WIA", func(t *testing.T) {
+		evaluator := &capturingEvaluator{trustDecision: true}
+		we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), WIAModeIETF)
+
+		_, err := we.Evaluate(context.Background(), x5cWIA)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires the ietf")
+		assert.Nil(t, evaluator.lastRequest, "PDP must never be called for a mode-mismatched WIA")
+	})
+
+	t.Run("ietf mode accepts an iss/JWK-only WIA", func(t *testing.T) {
+		evaluator := &capturingEvaluator{trustDecision: true}
+		we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), WIAModeIETF)
+
+		_, err := we.Evaluate(context.Background(), ietfWIA)
+		require.NoError(t, err)
+		require.NotNil(t, evaluator.lastRequest)
+	})
+
+	t.Run("empty mode accepts either format", func(t *testing.T) {
+		for _, wia := range []string{x5cWIA, ietfWIA} {
+			evaluator := &capturingEvaluator{trustDecision: true}
+			we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "")
+
+			_, err := we.Evaluate(context.Background(), wia)
+			require.NoError(t, err)
+			require.NotNil(t, evaluator.lastRequest)
+		}
+	})
+
+	t.Run("empty-array x5c header is rejected, not silently treated as no-x5c", func(t *testing.T) {
+		malformedWIA := signTestWIAWithEmptyX5C(t, "https://wallet-provider.example.com", "instance-jkt-123")
+		for _, mode := range []string{"", WIAModeETSI, WIAModeIETF} {
+			evaluator := &capturingEvaluator{trustDecision: true}
+			we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), mode)
+
+			_, err := we.Evaluate(context.Background(), malformedWIA)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "malformed")
+			assert.Nil(t, evaluator.lastRequest, "PDP must never be called for a malformed x5c header")
+		}
+	})
+
+	t.Run("invalid mode rejects both formats", func(t *testing.T) {
+		for _, wia := range []string{x5cWIA, ietfWIA} {
+			evaluator := &capturingEvaluator{trustDecision: true}
+			we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "bogus")
+
+			_, err := we.Evaluate(context.Background(), wia)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid trust model mode")
+			assert.Nil(t, evaluator.lastRequest, "PDP must never be called for an invalid mode")
+		}
+	})
 }
 
 func TestWalletAttestationEvaluator_Evaluate_RejectsSignatureMismatch(t *testing.T) {
@@ -366,7 +469,7 @@ func TestWalletAttestationEvaluator_Evaluate_RejectsSignatureMismatch(t *testing
 	forged := wiaParts[0] + "." + wiaParts[1] + "." + decoyParts[2]
 
 	evaluator := &capturingEvaluator{trustDecision: true}
-	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator))
+	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "")
 
 	_, err = we.Evaluate(context.Background(), forged)
 	require.Error(t, err)
@@ -380,7 +483,7 @@ func TestWalletAttestationEvaluator_Evaluate_UntrustedWalletProvider(t *testing.
 	wia := signTestWIAWithJWK(t, signingKey, "https://wallet-provider.example.com", "instance-jkt-123", "backend_attested")
 
 	evaluator := &capturingEvaluator{trustDecision: false, trustReason: "not in trust list"}
-	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator))
+	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "")
 
 	_, err = we.Evaluate(context.Background(), wia)
 	require.Error(t, err)

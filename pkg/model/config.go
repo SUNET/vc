@@ -671,6 +671,33 @@ type WalletAttestationConfig struct {
 	// checks whether the attestation tier (attestation_source) is authorized for the
 	// requested scope. When empty, all trusted wallets are authorized (default open).
 	Policy WalletAttestationPolicy `yaml:"policy,omitempty"`
+
+	// Mode restricts which WIA trust model this deployment accepts, matching
+	// the same "etsi"/"ietf" terminology used by go-wallet-backend's
+	// WIAConfig.Mode:
+	//
+	//   - "etsi": require x5c (EC TS03 v1.5.2 / ETSI TS 119 472-3 model,
+	//     identity verified against the Trusted List for Wallet Providers).
+	//     A WIA without x5c is rejected before signature verification.
+	//   - "ietf": require iss + no x5c (the plain IETF
+	//     draft-ietf-oauth-attestation-based-client-auth format, resolved via
+	//     JWKS discovery — no ARF/ETSI counterpart). A WIA with x5c is
+	//     rejected before signature verification.
+	//   - "" (default): accept either format, as determined by whether the
+	//     WIA carries an x5c header or an iss claim — preserves pre-Mode
+	//     behavior for deployments that haven't opted into pinning one trust
+	//     model.
+	//
+	// Any other value is treated the same as "" (a warning is logged, not a
+	// startup failure — this package has no config.Validate() convention to
+	// hard-fail against).
+	//
+	// Pinning this matters beyond documentation: without it, an operator
+	// expecting only ARF-conformant ("etsi") wallets would still silently
+	// accept an iss/JWKS-based ("ietf") WIA from a misconfigured or
+	// malicious wallet, trusting a JWKS discovery chain instead of the
+	// Trusted List for Wallet Providers PKI anchor.
+	Mode string `yaml:"mode,omitempty"`
 }
 
 // TrustPolicyConfig defines trust policy settings for a specific role.
