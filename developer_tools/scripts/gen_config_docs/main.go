@@ -516,6 +516,27 @@ func determineRequired(tag TagInfo) string {
 			}
 		}
 
+		// required_with=Field
+		if after, ok := strings.CutPrefix(r, "required_with="); ok {
+			parts := strings.Fields(after)
+			if len(parts) > 0 {
+				field := camelToSnake(parts[0])
+				return fmt.Sprintf("Yes (if %s set)", field)
+			}
+		}
+
+		// required_unless=Field value [Field2 value2 ...]
+		if after, ok := strings.CutPrefix(r, "required_unless="); ok {
+			parts := strings.Fields(after)
+			var conditions []string
+			for i := 0; i+1 < len(parts); i += 2 {
+				field := camelToSnake(parts[i])
+				val := parts[i+1]
+				conditions = append(conditions, fmt.Sprintf("%s is \"%s\"", field, val))
+			}
+			return fmt.Sprintf("Yes (unless %s)", strings.Join(conditions, " or "))
+		}
+
 		// bare required
 		if r == "required" {
 			if tag.Default != "" {
