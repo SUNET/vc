@@ -51,13 +51,6 @@ type JWKSResolverConfig struct {
 //  2. .well-known/openid-credential-issuer → authorization_servers → AS metadata → jwks_uri
 //  3. .well-known/openid-configuration → jwks_uri (OIDC Discovery)
 //  4. .well-known/oauth-authorization-server → jwks_uri (RFC 8414)
-//  5. .well-known/jwks.json → inline keys (bare JWKS, no metadata wrapper)
-//
-// Step 5 covers issuers (e.g. wallet providers issuing client attestations
-// per draft-ietf-oauth-attestation-based-client-auth, which leaves key
-// resolution out of scope) that publish their keys directly without any of
-// the metadata documents above. Trust for this step rests on TLS control of
-// the issuer's own host, same as jwks_uri in the other steps.
 //
 // Resolved JWKS are cached per issuer URL. Keys are matched by kid.
 type JWKSKeyResolver struct {
@@ -198,7 +191,6 @@ func (r *JWKSKeyResolver) getOrFetchJWKS(ctx context.Context, issuerURL string) 
 //  2. .well-known/openid-credential-issuer → authorization_servers → OAuth AS metadata → jwks_uri
 //  3. .well-known/openid-configuration → jwks_uri (OIDC Discovery)
 //  4. .well-known/oauth-authorization-server → jwks_uri (RFC 8414)
-//  5. .well-known/jwks.json (bare JWKS, no metadata wrapper)
 func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string) (*cachedJWKS, error) {
 	baseURL := strings.TrimRight(issuerURL, "/")
 	var joinedErr error
@@ -230,13 +222,6 @@ func (r *JWKSKeyResolver) fetchIssuerJWKS(ctx context.Context, issuerURL string)
 		return r.parseRawKeys(rawKeys)
 	}
 	joinedErr = errors.Join(joinedErr, fmt.Errorf("oauth-authorization-server: %w", err))
-
-	// 5. Try .well-known/jwks.json directly (bare JWKS, no metadata wrapper)
-	rawKeys, err = r.fetchJWKSKeys(ctx, buildWellKnownURL(baseURL, "jwks.json"))
-	if err == nil {
-		return r.parseRawKeys(rawKeys)
-	}
-	joinedErr = errors.Join(joinedErr, fmt.Errorf("jwks.json: %w", err))
 
 	return nil, fmt.Errorf("failed to discover JWKS for issuer %s: %w", issuerURL, joinedErr)
 }

@@ -366,38 +366,6 @@ func TestJWKSKeyResolverFallbackRFC8414(t *testing.T) {
 	assert.Equal(t, "rfc8414-key-1", jwkMap["kid"])
 }
 
-func TestJWKSKeyResolverFallbackBareJWKS(t *testing.T) {
-	// No jwt-vc-issuer, no openid-credential-issuer, no openid-configuration,
-	// no oauth-authorization-server; falls back to a bare .well-known/jwks.json
-	// with no metadata wrapper (e.g. a wallet provider issuing client
-	// attestations per draft-ietf-oauth-attestation-based-client-auth, which
-	// leaves key resolution out of scope).
-	testKey := generateTestKey(t)
-	jwksData := newTestJWKS("wallet-provider")
-
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/.well-known/jwks.json":
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(jwksData) // #nosec G104 //nolint:errcheck
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	resolver := NewJWKSKeyResolver(JWKSResolverConfig{
-		HTTPClient:          server.Client(),
-		ParseJWKToPublicKey: mockParseJWK(testKey),
-	})
-	defer resolver.Stop()
-
-	pubKey, jwkMap, err := resolver.ResolveKeyByKID(context.Background(), server.URL, "wallet-provider")
-	require.NoError(t, err)
-	assert.Equal(t, testKey, pubKey)
-	assert.Equal(t, "wallet-provider", jwkMap["kid"])
-}
-
 func TestJWKSKeyResolverFallbackCredentialIssuerWithExplicitAS(t *testing.T) {
 	// openid-credential-issuer specifies a separate authorization_servers URL
 	testKey := generateTestKey(t)
